@@ -1,0 +1,133 @@
+# BC-OPENAPI 开放凭证上下文
+
+## 修订记录
+
+| 日期 | 版本 | 修订人 | 说明 |
+|------|------|--------|------|
+| 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+
+> 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
+
+---
+
+## 1. 定位
+
+两类凭证：
+
+| 凭证 | 绑定 | 用途 |
+|------|------|------|
+| `ApiKey` | `userId` | 让 SDK/脚本以用户身份调用被开放的统一业务 API。 |
+| `OrderToken` | `orderNo` | 订单服务 Bearer Token，只能读取绑定订单的邮件/验证码。 |
+
+重要决策：SDK 不需要后端另做一套接口。API Key 通过鉴权中间件调用同一批 `/v1/**` 业务 API；OpenAPI 文档标记哪些操作允许 API Key。
+
+---
+
+## 2. 实体
+
+| 实体 | 字段 |
+|------|------|
+| `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`rateLimit`、`concurrency`、`expireAt`、`lastUsedAt` |
+| `OrderToken` | `tokenId`、`tokenPrefix`、`plain`、`orderNo`、`enabled`、`expireAt`、`disabledAt`、`disabledReason` |
+| `ApiLog` | `principalType`、`principalId`、`path`、`method`、`idempotencyKey`、`httpStatus`、`durationMs`、`requestId` |
+
+API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普通列表、普通日志、错误响应、导出文件禁敏。
+
+---
+
+## 3. 鉴权中间件
+
+统一业务 API 支持多主体：
+
+| 主体 | Header/Cookie | 说明 |
+|------|---------------|------|
+| Session | HttpOnly Cookie | 控制台用户。 |
+| API Key | `Authorization: Bearer ak_...` 或 `X-API-Key` | SDK/脚本，以 `userId` 身份调用允许开放的接口。 |
+| OrderToken | `Authorization: Bearer st_...` | 只能访问绑定 `orderNo` 的服务结果接口。 |
+
+中间件职责：
+
+```text
+识别凭证
+校验用户启用/凭证启用/过期
+校验该接口是否允许该 principalType
+限流和并发占用
+注入 Principal 到上下文
+请求结束释放并发占用
+写 ApiLog
+```
+
+---
+
+## 4. 不变式
+
+| 编号 | 规则 |
+|------|------|
+| INV-O1 | API Key 只能代表所属用户，不授予管理员特权。 |
+| INV-O2 | API Key 能调用哪些接口由 OpenAPI 标记和中间件控制，不能默认开放全部接口。 |
+| INV-O3 | API Key 下单必须带幂等键，同 Key + 同幂等键不产生第二个订单。 |
+| INV-O4 | OrderToken 只能访问绑定 `orderNo` 的邮件/验证码/服务凭证详情。 |
+| INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
+| INV-O6 | 购买邮箱正常服务长期有效，Token 不因质保到期自动过期。 |
+| INV-O7 | API Key 和 Token 明文不得进入普通日志和错误响应。 |
+| INV-O8 | 限流或并发超限必须在进入业务域前拒绝。 |
+
+---
+
+## 5. Port
+
+| Port | 方向 | 职责 |
+|------|------|------|
+| `OrderTokenPort` | 入站自 BC-TRADE | 签发、禁用、重置订单服务凭证。 |
+| `AuthPort` | 入站自 HTTP 中间件 | 校验 API Key 或 OrderToken。 |
+| `ReadPort` | 出站到 BC-MAILMATCH | 服务凭证读取订单邮件/验证码。 |
+
+---
+
+## 6. API 设计
+
+凭证管理接口：
+
+| 方法 | URI | 说明 |
+|------|-----|------|
+| `POST` | `/v1/apikeys` | 创建 API Key，必须幂等，返回明文。 |
+| `GET` | `/v1/apikeys` | 当前用户 API Key 列表，不返回明文。 |
+| `GET` | `/v1/apikeys/{keyId}` | 授权详情，返回明文。 |
+| `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、过期时间。 |
+| `GET` | `/v1/orders/{orderNo}/token` | 查看订单服务凭证详情，授权时返回明文。 |
+| `POST` | `/v1/orders/{orderNo}/token/reset` | 重置服务凭证，必须幂等，返回新明文。 |
+
+后台：
+
+| 方法 | URI | 说明 |
+|------|-----|------|
+| `GET` | `/v1/admin/apikeys` | 管理员查询 API Key。 |
+| `GET` | `/v1/admin/apikeys/{keyId}` | 授权详情，返回明文。 |
+| `PATCH` | `/v1/admin/apikeys/{keyId}` | 调整启停、限流、并发、过期时间。 |
+| `GET` | `/v1/admin/tokens` | 服务凭证查询。 |
+| `GET` | `/v1/admin/tokens/{tokenId}` | 授权详情，返回明文。 |
+| `PATCH` | `/v1/admin/tokens/{tokenId}` | 禁用。 |
+| `POST` | `/v1/admin/orders/{orderNo}/token/reset` | 管理员重置订单服务凭证。 |
+| `GET` | `/v1/admin/logs/api` | API 请求日志查询。 |
+
+SDK 可调用接口示例：
+
+| 方法 | URI | 说明 |
+|------|-----|------|
+| `POST` | `/v1/orders` | API Key 下单。 |
+| `GET` | `/v1/orders` | API Key 查询自己的订单。 |
+| `GET` | `/v1/orders/{orderNo}` | API Key 查询自己的订单详情。 |
+| `GET` | `/v1/orders/{orderNo}/messages` | API Key 或 OrderToken 读取邮件。 |
+| `GET` | `/v1/orders/{orderNo}/code` | API Key 或 OrderToken 读取验证码。 |
+
+---
+
+## 7. ADR
+
+| ADR | 决策 | 理由 |
+|-----|------|------|
+| ADR-OAPI-1 | SDK 复用统一业务 API | 避免 `/open` 和控制台接口重复开发。 |
+| ADR-OAPI-2 | API Key 是用户自动化身份 | 业务规则仍由对应业务域判断。 |
+| ADR-OAPI-3 | OrderToken 绑定 `orderNo` | 持有者只能读取该订单服务结果。 |
+| ADR-OAPI-4 | 凭据原值保存 | 授权接口需要重复展示明文。 |
+| ADR-OAPI-5 | 限流/并发在中间件完成 | 业务域只处理已通过入口保护的命令。 |
