@@ -94,7 +94,7 @@ ORM 使用规则：
 前端项目只有一个：
 
 ```text
-web/console
+web
 ```
 
 禁止拆成：

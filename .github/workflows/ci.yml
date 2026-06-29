@@ -1,0 +1,243 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: remail
+          MYSQL_USER: remail
+          MYSQL_PASSWORD: remail
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 3306:3306
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: remail
+          MINIO_ROOT_PASSWORD: remail_secret
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 9000:9000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Verify OpenAPI generated code
+        run: |
+          go generate ./api
+          git diff --exit-code -- api/openapi.gen.go
+
+      - name: Build frontend for embed
+        working-directory: web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+          mkdir -p ../cmd/server/webdist
+          cp -r dist/* ../cmd/server/webdist/
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -v -count=1
+        env:
+          MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
+          REDIS_ADDR: "127.0.0.1:6379"
+          MINIO_ENDPOINT: "127.0.0.1:9000"
+          MINIO_ACCESS_KEY: "remail"
+          MINIO_SECRET_KEY: "remail_secret"
+          MINIO_USE_SSL: "false"
+          MINIO_BUCKET: "remail"
+          SESSION_SECRET: "ci-test-secret"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        run: corepack enable && pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  smoke:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: remail
+          MYSQL_USER: remail
+          MYSQL_PASSWORD: remail
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 3306:3306
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: remail
+          MINIO_ROOT_PASSWORD: remail_secret
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 9000:9000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build frontend for embed
+        working-directory: web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+          mkdir -p ../cmd/server/webdist
+          cp -r dist/* ../cmd/server/webdist/
+
+      - name: Build server binary
+        run: go build -o /tmp/remail-server ./cmd/server
+
+      - name: Start server in background
+        run: |
+          /tmp/remail-server &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          # Wait for server to be ready (up to 30 seconds)
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+        env:
+          MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
+          REDIS_ADDR: "127.0.0.1:6379"
+          MINIO_ENDPOINT: "127.0.0.1:9000"
+          MINIO_ACCESS_KEY: "remail"
+          MINIO_SECRET_KEY: "remail_secret"
+          MINIO_USE_SSL: "false"
+          MINIO_BUCKET: "remail"
+          SESSION_SECRET: "ci-smoke-secret"
+          LOG_LEVEL: "error"
+
+      - name: Verify /healthz returns 200
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz)
+          BODY=$(curl -sf http://localhost:8080/healthz)
+          echo "GET /healthz -> $HTTP_CODE $BODY"
+          test "$HTTP_CODE" = "200"
+          echo "$BODY" | grep -q '"ok"'
+
+      - name: Verify /readyz returns 200 (all deps healthy)
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/readyz)
+          BODY=$(curl -sf http://localhost:8080/readyz)
+          echo "GET /readyz -> $HTTP_CODE $BODY"
+          test "$HTTP_CODE" = "200"
+          echo "$BODY" | grep -q '"ok"'
+
+      - name: Verify goose migration table exists
+        run: |
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT version_id, is_applied FROM goose_db_version ORDER BY version_id DESC LIMIT 1;"
+          VERSIONS=$(mysql -h 127.0.0.1 -u remail -premail remail -N -e \
+            "SELECT COUNT(*) FROM goose_db_version WHERE is_applied = 1;")
+          echo "Applied migrations: $VERSIONS"
+          test "$VERSIONS" -ge 1
+
+      - name: Shutdown server
+        if: always()
+        run: kill $SERVER_PID 2>/dev/null || true
+
+  docker:
+    needs: [smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t remail:ci .

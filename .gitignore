@@ -1,0 +1,26 @@
+# Go
+/tmp/
+cmd/server/server
+cmd/server/webdist/
+*.exe
+*.test
+*.out
+
+# Node / frontend
+node_modules/
+web/dist/
+web/.rsbuild/
+web/coverage/
+
+# Env
+.env
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

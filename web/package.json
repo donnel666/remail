@@ -1,0 +1,34 @@
+{
+  "name": "remail-console",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "packageManager": "pnpm@10.25.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "core-js"
+    ]
+  },
+  "scripts": {
+    "dev": "rsbuild dev",
+    "build": "rsbuild build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@tanstack/react-router": "^1.114.0",
+    "@tanstack/react-query": "^5.67.0",
+    "zustand": "^5.0.0",
+    "lucide-react": "^0.488.0"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "^1.3.0",
+    "@rsbuild/plugin-react": "^1.1.0",
+    "typescript": "^5.8.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.0",
+    "@tailwindcss/postcss": "^4.1.0"
+  }
+}

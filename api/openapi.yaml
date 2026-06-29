@@ -1,0 +1,102 @@
+openapi: "3.0.3"
+info:
+  title: ReMail API
+  description: |
+    ReMail 邮箱交易平台 — 统一业务 API。
+    控制台和 SDK 共用同一接口，由鉴权中间件决定调用者能力。
+  version: "0.1.0"
+  contact:
+    name: ReMail Team
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      description: Returns OK if the process is alive. Does not check dependencies.
+      tags:
+        - System
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe
+      description: |
+        Returns OK only if all external dependencies (MySQL, Redis, MinIO) are reachable.
+        Returns 503 if any dependency is unhealthy.
+      tags:
+        - System
+      responses:
+        "200":
+          description: All dependencies healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyzResponse"
+        "503":
+          description: One or more dependencies unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyzResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: "ok"
+      additionalProperties: false
+
+    ReadyzResponse:
+      type: object
+      required:
+        - status
+        - dependencies
+      properties:
+        status:
+          type: string
+          example: "ok"
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+            example: "healthy"
+      additionalProperties: false
+
+    Error:
+      type: object
+      required:
+        - message
+        - requestId
+      properties:
+        message:
+          type: string
+          description: Safe business error message for the user
+          example: "Account or password is incorrect."
+        requestId:
+          type: string
+          description: Correlation ID for troubleshooting
+          example: "req_a1b2c3d4"
+        fields:
+          type: object
+          description: Field-level validation errors (optional)
+          additionalProperties:
+            type: string
+            example: "Email format is invalid."
+      additionalProperties: false

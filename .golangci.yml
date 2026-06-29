@@ -1,0 +1,16 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+  disable:
+    - typecheck
+
+run:
+  timeout: 5m
+  tests: true

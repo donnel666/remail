@@ -1,0 +1,116 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/donnel666/remail/api"
+	"github.com/donnel666/remail/internal/platform"
+)
+
+//go:embed webdist
+var frontendFS embed.FS
+
+func main() {
+	// Load configuration
+	cfg, err := platform.Load()
+	if err != nil {
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	// Set up logging
+	platform.SetupLogger(cfg.Log)
+	slog.Info("starting remail server", "addr", cfg.Server.Addr)
+
+	// Initialize platform clients
+	ctx := context.Background()
+	p, cleanup, err := platform.New(ctx, cfg)
+	if err != nil {
+		slog.Error("failed to initialize platform", "error", err)
+		os.Exit(1)
+	}
+	defer cleanup()
+
+	// Resolve migrations directory:
+	//   1. MIGRATIONS_DIR env var (Docker sets this)
+	//   2. <exe-dir>/migrations (flat deploy layout)
+	//   3. ./migrations (local dev CWD)
+	migrationsDir := os.Getenv("MIGRATIONS_DIR")
+	if migrationsDir == "" {
+		migrationsDir = filepath.Join(execDir(), "migrations")
+		if _, err := os.Stat(migrationsDir); err != nil {
+			migrationsDir = "migrations"
+		}
+	}
+	if err := platform.RunMigrations(p.SQLDB, migrationsDir); err != nil {
+		slog.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	// Get embedded frontend filesystem (subdirectory)
+	var feFS fs.FS
+	if sub, err := fs.Sub(frontendFS, "webdist"); err == nil {
+		// Check if the embedded FS has actual content (not just placeholder)
+		if _, err := fs.Stat(sub, "index.html"); err == nil {
+			feFS = sub
+			slog.Info("serving embedded frontend")
+		} else {
+			slog.Info("no embedded frontend found (use Rsbuild dev server)")
+		}
+	}
+
+	// Set up Gin router
+	router := api.SetupRouter(p, feFS)
+
+	// Create HTTP server
+	srv := &http.Server{
+		Addr:         cfg.Server.Addr,
+		Handler:      router,
+		ReadTimeout:  cfg.Server.Timeout,
+		WriteTimeout: cfg.Server.Timeout,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		slog.Info("server listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for interrupt signal for graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	slog.Info("shutting down server", "signal", sig.String())
+
+	// Give outstanding requests up to 30 seconds to complete
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server forced to shutdown", "error", err)
+	}
+
+	slog.Info("server exited")
+}
+
+// execDir returns the directory of the running executable.
+func execDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return filepath.Dir(exe)
+}

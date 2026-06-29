@@ -205,7 +205,7 @@ internal/openapi
 internal/aftersale
 api/openapi.yaml
 migrations
-web/console
+web
 ```
 
 每个业务模块：
