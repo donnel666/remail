@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -51,18 +52,29 @@ func newMySQLTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 
 	dsn := fmt.Sprintf("remail:remail@tcp(%s:%s)/remail_test?charset=utf8mb4&parseTime=True&loc=Local", host, port.Port())
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
-	require.NoError(t, err)
+	var db *gorm.DB
+	var sqlDB *sql.DB
+	var lastErr error
+	require.Eventually(t, func() bool {
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
 
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
+		db, lastErr = gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
+		if lastErr != nil {
+			return false
+		}
+
+		sqlDB, lastErr = db.DB()
+		if lastErr != nil {
+			return false
+		}
+		lastErr = sqlDB.PingContext(ctx)
+		return lastErr == nil
+	}, 30*time.Second, 500*time.Millisecond, "mysql did not become ready: %v", lastErr)
 	t.Cleanup(func() {
 		require.NoError(t, sqlDB.Close())
 	})
-
-	require.Eventually(t, func() bool {
-		return sqlDB.PingContext(ctx) == nil
-	}, 30*time.Second, 500*time.Millisecond)
 
 	require.NoError(t, platform.RunMigrations(sqlDB, migrationsDir(t)))
 	return db
