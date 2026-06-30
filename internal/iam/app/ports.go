@@ -106,11 +106,6 @@ type EmailCodeStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// EmailCodeSender sends verification codes through the configured delivery path.
-type EmailCodeSender interface {
-	SendEmailCode(ctx context.Context, email, code string) error
-}
-
 // Hasher defines the password hashing contract.
 // Implemented by the infra layer (bcrypt).
 type Hasher interface {

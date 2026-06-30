@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/donnel666/remail/internal/iam/domain"
+	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,20 +42,20 @@ func (s *emailCodeStoreStub) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-type emailCodeSenderStub struct {
+type mailDeliveryStub struct {
 	mu    sync.Mutex
 	calls int
 	err   error
 }
 
-func (s *emailCodeSenderStub) SendEmailCode(_ context.Context, _, _ string) error {
+func (s *mailDeliveryStub) Send(_ context.Context, _ maildomain.OutboundMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
 	return s.err
 }
 
-func (s *emailCodeSenderStub) callCount() int {
+func (s *mailDeliveryStub) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
@@ -63,7 +63,7 @@ func (s *emailCodeSenderStub) callCount() int {
 
 func TestEmailCodeUseCaseSendDoesNotResendExistingCode(t *testing.T) {
 	store := newEmailCodeStoreStub()
-	sender := &emailCodeSenderStub{}
+	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender, nil)
 
 	require.NoError(t, uc.Send(context.Background(), "User@Test.COM"))
@@ -74,12 +74,12 @@ func TestEmailCodeUseCaseSendDoesNotResendExistingCode(t *testing.T) {
 
 func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 	store := newEmailCodeStoreStub()
-	sender := &emailCodeSenderStub{err: domain.ErrMailServiceUnavailable}
+	sender := &mailDeliveryStub{err: maildomain.ErrDeliveryUnavailable}
 	uc := NewEmailCodeUseCase(store, sender, nil)
 
 	err := uc.Send(context.Background(), "user@test.com")
 	require.Error(t, err)
-	require.True(t, errors.Is(err, domain.ErrMailServiceUnavailable))
+	require.True(t, errors.Is(err, maildomain.ErrDeliveryUnavailable))
 
 	code, getErr := store.Get(context.Background(), emailCodeKey("user@test.com"))
 	require.NoError(t, getErr)

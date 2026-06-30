@@ -9,7 +9,8 @@ import (
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
-	iaminfra "github.com/donnel666/remail/internal/iam/infra"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
 )
@@ -34,13 +35,14 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
-		emailCodeSender := iaminfra.NewEmailCodeSender(iaminfra.EmailCodeSenderConfig{
+		smtpDelivery := mailinfra.NewSMTPDelivery(mailinfra.SMTPConfig{
 			Addr:     p.SMTP.Addr,
 			Username: p.SMTP.Username,
 			Password: p.SMTP.Password,
 			From:     p.SMTP.From,
 		})
-		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, emailCodeSender)
+		mailDelivery := mailapp.NewDeliveryService(mailinfra.NewOutboundMailStore(p.Redis), smtpDelivery)
+		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailDelivery)
 		if err != nil {
 			return nil, err
 		}

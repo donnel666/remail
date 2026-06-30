@@ -8,6 +8,7 @@ import (
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/iam/infra"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -37,9 +38,9 @@ type IAMModule struct {
 }
 
 // NewIAMModule wires up all IAM dependencies.
-func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, emailCodeSender app.EmailCodeSender) (*IAMModule, error) {
-	if emailCodeSender == nil {
-		return nil, errors.New("email code sender is required")
+func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.DeliveryPort) (*IAMModule, error) {
+	if mailDelivery == nil {
+		return nil, errors.New("mail delivery is required")
 	}
 
 	hasher := infra.NewHasher()
@@ -53,7 +54,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, emailCodeSender app.Em
 		return nil, err
 	}
 
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, emailCodeSender, captchaStore)
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery, captchaStore)
 
 	return &IAMModule{
 		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),

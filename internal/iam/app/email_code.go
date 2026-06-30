@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 )
 
 const (
@@ -14,14 +16,14 @@ const (
 
 // EmailCodeUseCase handles email verification code creation and delivery.
 type EmailCodeUseCase struct {
-	store   EmailCodeStore
-	sender  EmailCodeSender
-	captcha CaptchaStore
+	store    EmailCodeStore
+	delivery mailapp.DeliveryPort
+	captcha  CaptchaStore
 }
 
 // NewEmailCodeUseCase creates an EmailCodeUseCase.
-func NewEmailCodeUseCase(store EmailCodeStore, sender EmailCodeSender, captcha CaptchaStore) *EmailCodeUseCase {
-	return &EmailCodeUseCase{store: store, sender: sender, captcha: captcha}
+func NewEmailCodeUseCase(store EmailCodeStore, delivery mailapp.DeliveryPort, captcha CaptchaStore) *EmailCodeUseCase {
+	return &EmailCodeUseCase{store: store, delivery: delivery, captcha: captcha}
 }
 
 // VerifyCaptcha validates the image captcha attached to an email-code request.
@@ -54,7 +56,8 @@ func (uc *EmailCodeUseCase) Send(ctx context.Context, email string) error {
 		return nil
 	}
 
-	if err := uc.sender.SendEmailCode(ctx, normalized, storedCode); err != nil {
+	message := mailapp.VerificationCodeMessage(normalized, storedCode)
+	if err := uc.delivery.Send(ctx, message); err != nil {
 		if deleteErr := uc.store.Delete(ctx, key); deleteErr != nil {
 			return fmt.Errorf("send email code: %w; cleanup email code: %v", err, deleteErr)
 		}

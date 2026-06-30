@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/donnel666/remail/api/middleware"
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
+	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/gin-gonic/gin"
 )
 
@@ -563,7 +565,8 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Invalid role level.",
 			"requestId": rid,
 		})
-	case errors.Is(err, domain.ErrMailServiceUnavailable):
+	case errors.Is(err, maildomain.ErrDeliveryUnavailable):
+		slog.Warn("mail delivery unavailable", "request_id", rid, "error", err.Error())
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"message":   "Mail service is temporarily unavailable.",
 			"requestId": rid,
@@ -594,6 +597,7 @@ func writeError(c *gin.Context, err error) {
 			"requestId": rid,
 		})
 	default:
+		slog.Error("iam request failed", "request_id", rid, "error", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message":   "An unexpected error occurred.",
 			"requestId": rid,

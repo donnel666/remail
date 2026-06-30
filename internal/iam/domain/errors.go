@@ -16,7 +16,6 @@ var (
 	ErrInvalidPassword            = errors.New("invalid password")
 	ErrUserNotFound               = errors.New("user not found")
 	ErrInvalidRoleLevel           = errors.New("invalid role level")
-	ErrMailServiceUnavailable     = errors.New("mail service is temporarily unavailable")
 	ErrVerificationCodeIncorrect  = errors.New("verification code is incorrect or expired")
 	ErrInviteAlreadyExists        = errors.New("invite already exists")
 	ErrInviteNotFound             = errors.New("invite not found")

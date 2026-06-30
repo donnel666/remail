@@ -15,6 +15,7 @@ import (
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/iam/infra"
+	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -416,9 +417,9 @@ func (s *mockEmailCodeStore) codeCount() int {
 	return len(s.codes)
 }
 
-type mockEmailCodeSender struct{}
+type mockMailDelivery struct{}
 
-func (s mockEmailCodeSender) SendEmailCode(_ context.Context, _, _ string) error {
+func (s mockMailDelivery) Send(_ context.Context, _ maildomain.OutboundMessage) error {
 	return nil
 }
 
@@ -430,7 +431,7 @@ func newTestHandler() *IAMHandler {
 	captchaStore := newMockCaptchaStore()
 	emailCodeStore := newMockEmailCodeStore()
 	hasher := infra.NewHasher()
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockEmailCodeSender{}, captchaStore)
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockMailDelivery{}, captchaStore)
 
 	mod := &IAMModule{
 		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
