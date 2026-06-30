@@ -49,7 +49,7 @@ type mockOperationLogPort struct {
 	logs []*governancedomain.OperationLog
 }
 
-func (p *mockOperationLogPort) Create(ctx context.Context, log *governancedomain.OperationLog) error {
+func (p *mockOperationLogPort) Create(_ context.Context, log *governancedomain.OperationLog) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	cp := *log
@@ -57,7 +57,7 @@ func (p *mockOperationLogPort) Create(ctx context.Context, log *governancedomain
 	return nil
 }
 
-func (r *mockUserRepo) Create(ctx context.Context, user *domain.User) error {
+func (r *mockUserRepo) Create(_ context.Context, user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if existingID, ok := r.byID[user.Email]; ok {
@@ -72,11 +72,11 @@ func (r *mockUserRepo) Create(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
-func (r *mockUserRepo) CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error {
+func (r *mockUserRepo) CreateWithInvite(ctx context.Context, user *domain.User, _ string) error {
 	return r.Create(ctx, user)
 }
 
-func (r *mockUserRepo) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
+func (r *mockUserRepo) FindByEmail(_ context.Context, email string) (*domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if id, ok := r.byID[email]; ok {
@@ -88,7 +88,7 @@ func (r *mockUserRepo) FindByEmail(ctx context.Context, email string) (*domain.U
 	return nil, nil
 }
 
-func (r *mockUserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
+func (r *mockUserRepo) FindByID(_ context.Context, id uint) (*domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if u, ok := r.users[id]; ok {
@@ -98,7 +98,7 @@ func (r *mockUserRepo) FindByID(ctx context.Context, id uint) (*domain.User, err
 	return nil, nil
 }
 
-func (r *mockUserRepo) Update(ctx context.Context, user *domain.User) error {
+func (r *mockUserRepo) Update(_ context.Context, user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.users[user.ID]; ok {
@@ -123,7 +123,7 @@ func (r *mockUserRepo) CreateFirstUser(ctx context.Context, user *domain.User) e
 	return r.Create(ctx, user)
 }
 
-func (r *mockUserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, error) {
+func (r *mockUserRepo) List(_ context.Context, offset, limit int) ([]domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []domain.User
@@ -140,13 +140,13 @@ func (r *mockUserRepo) List(ctx context.Context, offset, limit int) ([]domain.Us
 	return result[offset:end], nil
 }
 
-func (r *mockUserRepo) Count(ctx context.Context) (int64, error) {
+func (r *mockUserRepo) Count(_ context.Context) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return int64(len(r.users)), nil
 }
 
-func (r *mockUserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, error) {
+func (r *mockUserRepo) FindByIDs(_ context.Context, ids []uint) ([]domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []domain.User
@@ -158,7 +158,7 @@ func (r *mockUserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User
 	return result, nil
 }
 
-func (r *mockUserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain.Invite, error) {
+func (r *mockUserRepo) ListInvites(_ context.Context, offset, limit int) ([]domain.Invite, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []domain.Invite
@@ -175,13 +175,13 @@ func (r *mockUserRepo) ListInvites(ctx context.Context, offset, limit int) ([]do
 	return result[offset:end], nil
 }
 
-func (r *mockUserRepo) CountInvites(ctx context.Context) (int64, error) {
+func (r *mockUserRepo) CountInvites(_ context.Context) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return int64(len(r.invites)), nil
 }
 
-func (r *mockUserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error {
+func (r *mockUserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, _ uint, log *governancedomain.OperationLog) error {
 	r.mu.Lock()
 	if _, exists := r.invites[invite.Code]; exists {
 		r.mu.Unlock()
@@ -201,7 +201,7 @@ func (r *mockUserRepo) UpdateInviteWithOperationLog(ctx context.Context, invite 
 	return r.operationLogs.Create(ctx, log)
 }
 
-func (r *mockUserRepo) FindInviteByCode(ctx context.Context, code string) (*domain.Invite, error) {
+func (r *mockUserRepo) FindInviteByCode(_ context.Context, code string) (*domain.Invite, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	invite, ok := r.invites[code]
@@ -212,21 +212,21 @@ func (r *mockUserRepo) FindInviteByCode(ctx context.Context, code string) (*doma
 	return &cp, nil
 }
 
-func (r *mockUserRepo) ListUserPermissionPolicies(ctx context.Context, userID uint) ([]domain.PermissionPolicy, error) {
+func (r *mockUserRepo) ListUserPermissionPolicies(_ context.Context, userID uint) ([]domain.PermissionPolicy, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	policies := append([]domain.PermissionPolicy(nil), r.policies[userID]...)
 	return policies, nil
 }
 
-func (r *mockUserRepo) ReplaceUserPermissionPolicies(ctx context.Context, userID uint, policies []domain.PermissionPolicy) error {
+func (r *mockUserRepo) ReplaceUserPermissionPolicies(_ context.Context, userID uint, policies []domain.PermissionPolicy) error {
 	r.mu.Lock()
 	r.policies[userID] = append([]domain.PermissionPolicy(nil), policies...)
 	r.mu.Unlock()
 	return nil
 }
 
-func (r *mockUserRepo) Reload(ctx context.Context) error {
+func (r *mockUserRepo) Reload(_ context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reloads++
@@ -269,7 +269,7 @@ func newMockSessionStore() *mockSessionStore {
 	}
 }
 
-func (s *mockSessionStore) Create(ctx context.Context, session *domain.Session, ttlSeconds int) error {
+func (s *mockSessionStore) Create(_ context.Context, session *domain.Session, _ int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *session
@@ -278,7 +278,7 @@ func (s *mockSessionStore) Create(ctx context.Context, session *domain.Session, 
 	return nil
 }
 
-func (s *mockSessionStore) Get(ctx context.Context, sessionID string) (*domain.Session, error) {
+func (s *mockSessionStore) Get(_ context.Context, sessionID string) (*domain.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sess, ok := s.sessions[sessionID]; ok {
@@ -288,7 +288,7 @@ func (s *mockSessionStore) Get(ctx context.Context, sessionID string) (*domain.S
 	return nil, nil
 }
 
-func (s *mockSessionStore) Delete(ctx context.Context, sessionID string) error {
+func (s *mockSessionStore) Delete(_ context.Context, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sess, ok := s.sessions[sessionID]; ok {
@@ -306,7 +306,7 @@ func (s *mockSessionStore) Delete(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-func (s *mockSessionStore) DeleteByUserID(ctx context.Context, userID uint) error {
+func (s *mockSessionStore) DeleteByUserID(_ context.Context, userID uint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.deleteByUserIDErr != nil {
@@ -332,14 +332,14 @@ func newMockCaptchaStore() *mockCaptchaStore {
 	}
 }
 
-func (c *mockCaptchaStore) Create(ctx context.Context, captchaID, answer string, ttlSeconds int) error {
+func (c *mockCaptchaStore) Create(_ context.Context, captchaID, answer string, _ int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.captchas[captchaID] = answer
 	return nil
 }
 
-func (c *mockCaptchaStore) Get(ctx context.Context, captchaID string) (string, error) {
+func (c *mockCaptchaStore) Get(_ context.Context, captchaID string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if answer, ok := c.captchas[captchaID]; ok {
@@ -348,7 +348,7 @@ func (c *mockCaptchaStore) Get(ctx context.Context, captchaID string) (string, e
 	return "", nil
 }
 
-func (c *mockCaptchaStore) Delete(ctx context.Context, captchaID string) error {
+func (c *mockCaptchaStore) Delete(_ context.Context, captchaID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.captchas, captchaID)
@@ -357,11 +357,11 @@ func (c *mockCaptchaStore) Delete(ctx context.Context, captchaID string) error {
 
 type allowPermissionChecker struct{}
 
-func (c allowPermissionChecker) Check(ctx context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error) {
+func (c allowPermissionChecker) Check(_ context.Context, _ uint, _ domain.RoleLevel, _, _ string) (bool, error) {
 	return true, nil
 }
 
-func (c allowPermissionChecker) Reload(ctx context.Context) error {
+func (c allowPermissionChecker) Reload(_ context.Context) error {
 	return nil
 }
 
@@ -375,7 +375,7 @@ func newMockEmailCodeStore() *mockEmailCodeStore {
 	return &mockEmailCodeStore{codes: make(map[string]string)}
 }
 
-func (s *mockEmailCodeStore) CreateIfAbsent(ctx context.Context, key, code string, ttlSeconds int) (string, bool, error) {
+func (s *mockEmailCodeStore) CreateIfAbsent(_ context.Context, key, code string, _ int) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.codes[key]; ok {
@@ -385,13 +385,13 @@ func (s *mockEmailCodeStore) CreateIfAbsent(ctx context.Context, key, code strin
 	return code, false, nil
 }
 
-func (s *mockEmailCodeStore) Get(ctx context.Context, key string) (string, error) {
+func (s *mockEmailCodeStore) Get(_ context.Context, key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.codes[key], nil
 }
 
-func (s *mockEmailCodeStore) Delete(ctx context.Context, key string) error {
+func (s *mockEmailCodeStore) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.deleteErr != nil {
@@ -412,7 +412,7 @@ func (s *mockEmailCodeStore) firstCode() string {
 
 type mockEmailCodeSender struct{}
 
-func (s mockEmailCodeSender) SendEmailCode(ctx context.Context, email, code string) error {
+func (s mockEmailCodeSender) SendEmailCode(_ context.Context, _, _ string) error {
 	return nil
 }
 
@@ -456,10 +456,11 @@ func setupTestRouterWithHandler(h *IAMHandler) *gin.Engine {
 }
 
 // Helper: pre-seed a captcha with a known answer and return its ID.
-func seedCaptcha(h *IAMHandler, answer string) string {
+func seedCaptcha(t *testing.T, h *IAMHandler, answer string) string {
+	t.Helper()
 	ctx := context.Background()
 	id := "test-captcha-" + answer
-	h.module.CaptchaStore.Create(ctx, id, answer, 300)
+	require.NoError(t, h.module.CaptchaStore.Create(ctx, id, answer, 300))
 	return id
 }
 
@@ -622,7 +623,7 @@ func TestPostLogin_WrongPassword(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	// Pre-seed a captcha
-	captchaID := seedCaptcha(h, "4321")
+	captchaID := seedCaptcha(t, h, "4321")
 
 	// Login with wrong password (correct captcha)
 	loginBody := `{"email":"admin@test.com","password":"wrong","captchaId":"` + captchaID + `","captchaAnswer":"4321"}`
@@ -648,7 +649,7 @@ func TestPostLogin_WrongCaptcha(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	// Pre-seed a captcha with answer "1234", but submit "wrong"
-	captchaID := seedCaptcha(h, "1234")
+	captchaID := seedCaptcha(t, h, "1234")
 	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"wrong"}`
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
@@ -672,7 +673,7 @@ func TestPostLogin_Success(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	// Pre-seed a known captcha
-	captchaID := seedCaptcha(h, "1234")
+	captchaID := seedCaptcha(t, h, "1234")
 
 	// Login with correct password and known captcha
 	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`

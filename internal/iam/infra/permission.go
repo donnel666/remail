@@ -55,7 +55,7 @@ func NewPermissionService(db *gorm.DB) (*PermissionService, error) {
 }
 
 // Check returns whether a user has the requested resource/action permission.
-func (s *PermissionService) Check(ctx context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error) {
+func (s *PermissionService) Check(_ context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error) {
 	userSub := fmt.Sprintf("user:%d", userID)
 	roleSub := "role:" + roleLevel.Name()
 	allowed, err := s.enforcer.Enforce(userSub, roleSub, resource, action)
@@ -66,7 +66,7 @@ func (s *PermissionService) Check(ctx context.Context, userID uint, roleLevel do
 }
 
 // Reload refreshes policies from storage.
-func (s *PermissionService) Reload(ctx context.Context) error {
+func (s *PermissionService) Reload(_ context.Context) error {
 	if err := s.enforcer.LoadPolicy(); err != nil {
 		return fmt.Errorf("casbin reload policy: %w", err)
 	}

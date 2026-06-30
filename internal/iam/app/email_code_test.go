@@ -19,7 +19,7 @@ func newEmailCodeStoreStub() *emailCodeStoreStub {
 	return &emailCodeStoreStub{codes: make(map[string]string)}
 }
 
-func (s *emailCodeStoreStub) CreateIfAbsent(ctx context.Context, key, code string, ttlSeconds int) (string, bool, error) {
+func (s *emailCodeStoreStub) CreateIfAbsent(_ context.Context, key, code string, _ int) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.codes[key]; ok {
@@ -29,13 +29,13 @@ func (s *emailCodeStoreStub) CreateIfAbsent(ctx context.Context, key, code strin
 	return code, false, nil
 }
 
-func (s *emailCodeStoreStub) Get(ctx context.Context, key string) (string, error) {
+func (s *emailCodeStoreStub) Get(_ context.Context, key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.codes[key], nil
 }
 
-func (s *emailCodeStoreStub) Delete(ctx context.Context, key string) error {
+func (s *emailCodeStoreStub) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.codes, key)
@@ -48,7 +48,7 @@ type emailCodeSenderStub struct {
 	err   error
 }
 
-func (s *emailCodeSenderStub) SendEmailCode(ctx context.Context, email, code string) error {
+func (s *emailCodeSenderStub) SendEmailCode(_ context.Context, _, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++

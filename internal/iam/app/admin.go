@@ -86,7 +86,7 @@ func (uc *AdminUseCase) ListUsers(ctx context.Context, offset, limit int) (*User
 	}, nil
 }
 
-func (uc *AdminUseCase) ListPermissions(ctx context.Context) []domain.PermissionCatalogItem {
+func (uc *AdminUseCase) ListPermissions(_ context.Context) []domain.PermissionCatalogItem {
 	return permissionCatalog
 }
 

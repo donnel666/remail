@@ -15,8 +15,8 @@ const (
 )
 
 // IsAtLeast returns true if the role level is at least the given minimum.
-func (r RoleLevel) IsAtLeast(min RoleLevel) bool {
-	return r >= min
+func (r RoleLevel) IsAtLeast(minimum RoleLevel) bool {
+	return r >= minimum
 }
 
 // Name returns the stable role name used by API responses and permission policy.

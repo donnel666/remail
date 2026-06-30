@@ -120,9 +120,9 @@ jobs:
           SESSION_SECRET: "ci-test-secret"
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
 
   frontend:
     runs-on: ubuntu-latest
