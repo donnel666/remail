@@ -3,8 +3,8 @@ import { Button, type ButtonProps } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const HEADER_ACTION_BUTTON_CLASS = cn(
-  "hidden h-8 w-8 rounded-full bg-surface-sunken p-1.5 font-semibold text-foreground/80 shadow-none",
-  "hover:bg-surface-hover hover:text-foreground focus-visible:ring-0 md:inline-flex",
+  "!h-8 !w-8 !rounded-full !bg-surface-sunken !p-1.5 font-semibold text-foreground/80 shadow-none",
+  "hover:!bg-surface-hover hover:text-foreground focus-visible:ring-0 dark:!bg-surface-sunken dark:hover:!bg-surface-hover",
   "[&_svg]:!size-[18px]"
 );
 

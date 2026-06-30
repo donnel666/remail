@@ -23,7 +23,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <AppHeader />
-      <div className="mx-auto flex w-full max-w-full flex-1 pt-16">
+      <div className="mx-auto flex w-full max-w-full flex-1">
         {hasSidebar && <Sidebar />}
         <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>

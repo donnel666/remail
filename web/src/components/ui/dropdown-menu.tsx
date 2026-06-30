@@ -2,44 +2,119 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 interface DropdownMenuContextValue {
+  closeOnOutsideClick: boolean;
   open: boolean;
+  openOnHover: boolean;
   onOpenChange: (v: boolean) => void;
 }
 
 const DropdownMenuContext = React.createContext<DropdownMenuContextValue>({
+  closeOnOutsideClick: true,
   open: false,
+  openOnHover: false,
   onOpenChange: () => {},
 });
+
+const DROPDOWN_OPEN_EVENT = "remail-dropdown-open";
 
 export function DropdownMenu({
   children,
   open: controlledOpen,
   onOpenChange,
+  openOnHover = false,
+  hoverCloseDelay = 120,
+  closeOnOutsideClick,
   modal: _modal,
 }: {
   children: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
+  openOnHover?: boolean;
+  hoverCloseDelay?: number;
+  closeOnOutsideClick?: boolean;
   modal?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = React.useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
+  const menuId = React.useId();
+  const closeTimerRef = React.useRef<number | null>(null);
+  const shouldCloseOnOutsideClick = closeOnOutsideClick ?? !openOnHover;
+
+  const clearCloseTimer = React.useCallback(() => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const setMenuOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (nextOpen) {
+        window.dispatchEvent(
+          new CustomEvent(DROPDOWN_OPEN_EVENT, { detail: menuId })
+        );
+      }
+      setOpen(nextOpen);
+    },
+    [menuId, setOpen]
+  );
+
+  const handleMouseEnter = React.useCallback(() => {
+    if (!openOnHover) return;
+    clearCloseTimer();
+    setMenuOpen(true);
+  }, [clearCloseTimer, openOnHover, setMenuOpen]);
+
+  const handleMouseLeave = React.useCallback(() => {
+    if (!openOnHover) return;
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      setMenuOpen(false);
+      closeTimerRef.current = null;
+    }, hoverCloseDelay);
+  }, [clearCloseTimer, hoverCloseDelay, openOnHover, setMenuOpen]);
 
   React.useEffect(() => {
     if (!open) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") setMenuOpen(false);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, setOpen]);
+  }, [open, setMenuOpen]);
+
+  React.useEffect(() => clearCloseTimer, [clearCloseTimer]);
+
+  React.useEffect(() => {
+    const handleDropdownOpen = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      if (event.detail !== menuId) setOpen(false);
+    };
+
+    window.addEventListener(DROPDOWN_OPEN_EVENT, handleDropdownOpen);
+    return () => {
+      window.removeEventListener(DROPDOWN_OPEN_EVENT, handleDropdownOpen);
+    };
+  }, [menuId, setOpen]);
 
   return (
-    <DropdownMenuContext.Provider value={{ open, onOpenChange: setOpen }}>
-      <div className="relative inline-block text-left">{children}</div>
+    <DropdownMenuContext.Provider
+      value={{
+        closeOnOutsideClick: shouldCloseOnOutsideClick,
+        open,
+        openOnHover,
+        onOpenChange: setMenuOpen,
+      }}
+    >
+      <div
+        className="relative inline-block text-left"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {children}
+      </div>
     </DropdownMenuContext.Provider>
   );
 }
@@ -53,10 +128,11 @@ export function DropdownMenuTrigger({
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   render?: React.ReactElement;
 }) {
-  const { open, onOpenChange } = React.useContext(DropdownMenuContext);
+  const { open, openOnHover, onOpenChange } = React.useContext(DropdownMenuContext);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (openOnHover && open) return;
     onOpenChange(!open);
   };
 
@@ -102,23 +178,14 @@ export function DropdownMenuContent({
   align?: "start" | "end";
   sideOffset?: number;
 }) {
-  const { open, onOpenChange } = React.useContext(DropdownMenuContext);
-  const [mounted, setMounted] = React.useState(open);
+  const { closeOnOutsideClick, open, onOpenChange } = React.useContext(DropdownMenuContext);
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
 
-  React.useEffect(() => {
-    if (open) setMounted(true);
-    else {
-      const timer = setTimeout(() => setMounted(false), 150);
-      return () => clearTimeout(timer);
-    }
-  }, [open]);
-
-  if (!mounted && !open) return null;
+  if (!open) return null;
 
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={close} />
+      {closeOnOutsideClick ? <div className="fixed inset-0 z-40" onClick={close} /> : null}
       <div
         className={cn(
           "absolute z-50 min-w-[8rem] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md",
@@ -162,6 +229,7 @@ export function DropdownMenuItem({
       className: cn(
         "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         variant === "destructive" && "text-destructive focus:text-destructive",
+        className,
         (render.props as any).className
       ),
     }, children);

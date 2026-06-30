@@ -1,4 +1,4 @@
-import { Check, Languages } from "lucide-react";
+import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { HeaderActionButton } from "@/components/header-action-button";
 import {
@@ -18,7 +18,7 @@ export function LanguageMenu() {
   const currentLanguage = normalizeInterfaceLanguage(i18n.language);
 
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} openOnHover>
       <DropdownMenuTrigger
         render={<HeaderActionButton aria-label={t("Change language")} />}
       >
@@ -40,13 +40,6 @@ export function LanguageMenu() {
               )}
             >
               {language.label}
-              <Check
-                size={14}
-                className={cn(
-                  "ml-auto",
-                  currentLanguage !== language.code && "hidden"
-                )}
-              />
             </DropdownMenuItem>
           ))}
         </div>

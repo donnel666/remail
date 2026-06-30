@@ -39,7 +39,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = SIDEBAR_NAV_GROUPS.flatMap(
 );
 
 export const ROUTES_WITH_SIDEBAR = SIDEBAR_NAV_ITEMS.map((item) => item.path);
-export const CHROMELESS_ROUTES = ["/login"];
+export const CHROMELESS_ROUTES: string[] = [];
 
 export const TOP_NAV_ITEMS: TopNavItem[] = [
   { path: "/", labelKey: "Home" },

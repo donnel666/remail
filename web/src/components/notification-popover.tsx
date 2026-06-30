@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Bell, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -96,13 +97,8 @@ export function NotificationPopover() {
     };
   }, [closeDialog, open]);
 
-  return (
-    <>
-      <HeaderActionButton aria-label={t("System announcements")} onClick={openDialog}>
-        <Bell className="size-4" />
-      </HeaderActionButton>
-
-      {open ? (
+  const dialog = open
+    ? createPortal(
         <div className="fixed inset-0 z-[1000]">
           <div
             aria-hidden="true"
@@ -193,8 +189,17 @@ export function NotificationPopover() {
               </Button>
             </footer>
           </section>
-        </div>
-      ) : null}
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <>
+      <HeaderActionButton aria-label={t("System announcements")} onClick={openDialog}>
+        <Bell className="size-4" />
+      </HeaderActionButton>
+      {dialog}
     </>
   );
 }

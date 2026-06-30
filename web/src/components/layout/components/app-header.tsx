@@ -1,16 +1,18 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/auth-provider";
 import { LanguageMenu } from "@/components/language-menu";
 import { NotificationPopover } from "@/components/notification-popover";
 import { ThemeSwitch } from "@/components/theme-switch";
+import { UserMenu } from "@/components/user-menu";
 import { TOP_NAV_ITEMS } from "../config/navigation";
 import type { TopNavItem } from "../types";
 import { HeaderLogo } from "./header-logo";
 
 export function AppHeader() {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
   const routerState = useRouterState();
   const pathname = routerState.location.pathname;
 
@@ -22,7 +24,7 @@ export function AppHeader() {
   };
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 h-16 bg-transparent">
+    <header className="sticky inset-x-0 top-0 z-50 h-16 bg-white/75 text-foreground backdrop-blur-lg transition-colors duration-300 dark:bg-zinc-900/75">
       <nav className="flex h-full w-full items-center px-2 lg:pl-0 lg:pr-2">
         <Link
           to="/"
@@ -42,8 +44,8 @@ export function AppHeader() {
               key={item.path}
               to={item.path}
               className={cn(
-                "flex-shrink-0 rounded-md p-2 text-base font-semibold leading-[21px] text-foreground transition-colors duration-200 hover:text-brand",
-                isActive(item) && "font-semibold"
+                "flex shrink-0 items-center gap-1 rounded-md p-2 text-base font-bold leading-[21px] text-foreground transition-all duration-200 ease-in-out hover:text-brand",
+                isActive(item) && "font-bold"
               )}
             >
               {t(item.labelKey)}
@@ -51,22 +53,39 @@ export function AppHeader() {
           ))}
         </div>
 
-        <div className="ml-2 flex shrink-0 items-center gap-3">
+        <div className="ml-2 flex shrink-0 items-center gap-2 md:gap-3">
           <NotificationPopover />
           <ThemeSwitch />
           <LanguageMenu />
-          <Button
-            size="sm"
-            className={cn(
-              "h-8 w-12 rounded-full bg-surface-sunken px-0 text-sm font-semibold text-foreground shadow-none",
-              "hover:bg-brand-subtle hover:text-brand"
-            )}
-            render={<Link to="/login" />}
-          >
-            {t("Login")}
-          </Button>
+          {currentUser ? <UserMenu /> : <AuthLinks />}
         </div>
       </nav>
     </header>
+  );
+}
+
+function AuthLinks() {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex h-8 items-center">
+      <Link
+        to="/login"
+        className={cn(
+          "flex h-8 items-center justify-center rounded-full bg-surface-sunken px-1.5 text-xs font-semibold text-foreground/80 transition-colors hover:bg-surface-hover",
+          "md:rounded-l-full md:rounded-r-none"
+        )}
+      >
+        <span className="p-1.5">{t("Login")}</span>
+      </Link>
+      <div className="hidden md:block">
+        <Link
+          to="/register"
+          className="flex h-8 items-center justify-center rounded-l-none rounded-r-full bg-brand px-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-hover"
+        >
+          <span className="p-1.5">{t("Register")}</span>
+        </Link>
+      </div>
+    </div>
   );
 }

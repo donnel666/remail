@@ -7,6 +7,7 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { ThemeProvider } from "./context/theme-provider";
+import { AuthProvider } from "./context/auth-provider";
 import AppShell from "./components/layout/AppShell";
 
 const Home = lazy(() => import("./pages/Home"));
@@ -15,6 +16,7 @@ const Projects = lazy(() => import("./pages/Projects"));
 const ApiDocs = lazy(() => import("./pages/ApiDocs"));
 const Qna = lazy(() => import("./pages/Qna"));
 const Login = lazy(() => import("./pages/Login"));
+const Register = lazy(() => import("./pages/Register"));
 const Financial = lazy(() => import("./pages/Financial"));
 const Orders = lazy(() => import("./pages/Orders"));
 const MyEmails = lazy(() => import("./pages/MyEmails"));
@@ -34,11 +36,13 @@ function Loading() {
 const rootRoute = createRootRoute({
   component: () => (
     <ThemeProvider>
-      <AppShell>
-        <Suspense fallback={<Loading />}>
-          <Outlet />
-        </Suspense>
-      </AppShell>
+      <AuthProvider>
+        <AppShell>
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
+        </AppShell>
+      </AuthProvider>
     </ThemeProvider>
   ),
 });
@@ -46,6 +50,7 @@ const rootRoute = createRootRoute({
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Home }),
   createRoute({ getParentRoute: () => rootRoute, path: "/login", component: Login }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/register", component: Register }),
   createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/qna", component: Qna }),
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: Dashboard }),

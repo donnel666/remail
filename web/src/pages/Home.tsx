@@ -29,7 +29,7 @@ const endpoint = "/v1/orders";
 const examplePayload = '{"orderKind":"code","projectId":1,"selectedEmailType":"outlook"}';
 const curlRaw = `curl -X POST ${endpoint} -H "Authorization: Bearer <YOUR_KEY>" -d '${examplePayload}'`;
 const titleBrandGradient =
-  "bg-gradient-to-r from-[#3a2b24] via-[#8f4634] to-[#f4513b] bg-clip-text text-transparent dark:from-[#ffb36b] dark:via-[#ff7a4d] dark:to-[#ff5a82]";
+  "bg-gradient-to-r from-[#8a4a34] via-[#c6533c] to-[#f4513b] bg-clip-text text-transparent dark:from-[#ffd0a3] dark:via-[#ff8a5c] dark:to-[#ff5a82]";
 const titleHotGradient =
   "bg-gradient-to-r from-[#ff7a1a] via-[#ff5a3d] to-[#ff3d73] bg-clip-text text-transparent";
 
@@ -106,10 +106,18 @@ export default function Home() {
           </div>
 
           <h1 className="text-[2.25rem] font-bold leading-[1.16] tracking-tight text-foreground sm:text-5xl sm:leading-[1.1] lg:text-[3.25rem]">
-            <span className={titleBrandGradient}>
-              Remail
+            <span className="relative inline-block">
+              <span className="relative z-[1]">
+                <span className={titleBrandGradient}>Remail</span>
+                <span>{t("Remail title suffix")}</span>
+              </span>
+              <span
+                className="shine-text absolute inset-0 z-[2]"
+                aria-hidden="true"
+              >
+                Remail{t("Remail title suffix")}
+              </span>
             </span>
-            <span>{t("Remail title suffix")}</span>
             <br />
             <span>{t("Remail title second prefix")}</span>
             <span className={titleHotGradient}>
