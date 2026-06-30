@@ -1,5 +1,4 @@
 -- +goose Up
--- +goose StatementBegin
 
 CREATE TABLE users (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -118,10 +117,7 @@ CREATE TABLE operation_logs (
     INDEX idx_operation_logs_request_id (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- +goose StatementEnd
-
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE IF EXISTS operation_logs;
 DROP TABLE IF EXISTS casbin_rule;
 DROP TABLE IF EXISTS user_login_devices;
@@ -130,4 +126,3 @@ DROP TABLE IF EXISTS invite_uses;
 DROP TABLE IF EXISTS invites;
 DROP TABLE IF EXISTS system_guard;
 DROP TABLE IF EXISTS users;
--- +goose StatementEnd

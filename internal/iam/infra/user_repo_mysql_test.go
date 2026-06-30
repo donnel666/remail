@@ -50,7 +50,7 @@ func newMySQLTestDB(t *testing.T) *gorm.DB {
 	port, err := container.MappedPort(ctx, "3306/tcp")
 	require.NoError(t, err)
 
-	dsn := fmt.Sprintf("remail:remail@tcp(%s:%s)/remail_test?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", host, port.Port())
+	dsn := fmt.Sprintf("remail:remail@tcp(%s:%s)/remail_test?charset=utf8mb4&parseTime=True&loc=Local", host, port.Port())
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)
 
