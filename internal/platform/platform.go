@@ -26,7 +26,7 @@ type Platform struct {
 	SMTP          SMTPConfig
 	SessionMaxAge int
 	SessionSecure bool
-	PprofAddr     string
+	Diagnostics   DiagnosticsConfig
 }
 
 // New initializes all external service clients and returns the Platform.
@@ -34,7 +34,7 @@ type Platform struct {
 func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p := &Platform{}
 
-	db, sqlDB, err := initMySQL(ctx, cfg.MySQL)
+	db, sqlDB, err := initMySQL(ctx, cfg.MySQL, cfg.Diagnostics.SlowSQLThreshold)
 	if err != nil {
 		return nil, nil, fmt.Errorf("mysql init: %w", err)
 	}
@@ -69,14 +69,14 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 
 	p.SessionMaxAge = cfg.Session.MaxAge
 	p.SessionSecure = cfg.Session.Secure
-	p.PprofAddr = cfg.Diagnostics.PprofAddr
+	p.Diagnostics = cfg.Diagnostics
 
 	return p, cleanup, nil
 }
 
-func initMySQL(ctx context.Context, cfg MySQLConfig) (*gorm.DB, *sql.DB, error) {
+func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Duration) (*gorm.DB, *sql.DB, error) {
 	gormCfg := &gorm.Config{
-		Logger:         gormlogger.Default.LogMode(gormlogger.Warn),
+		Logger:         NewGormLogger(slowSQLThreshold).LogMode(gormlogger.Warn),
 		TranslateError: true, // Map MySQL errors (e.g. 1062 duplicate) to gorm sentinels
 	}
 

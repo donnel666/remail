@@ -40,7 +40,10 @@ func main() {
 	}
 	defer cleanup()
 
-	pprofSrv := startPprofServer(p.PprofAddr)
+	runtimeDiagnosticsCtx, stopRuntimeDiagnostics := context.WithCancel(context.Background())
+	defer stopRuntimeDiagnostics()
+	pprofSrv := startPprofServer(p.Diagnostics)
+	startPprofCPUMonitor(runtimeDiagnosticsCtx, p.Diagnostics)
 
 	// Resolve migrations directory:
 	//   1. cfg.Migrations.Dir (MIGRATIONS_DIR, Docker sets this)
@@ -108,6 +111,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 	}
+	stopRuntimeDiagnostics()
 	shutdownPprofServer(shutdownCtx, pprofSrv)
 
 	slog.Info("server exited")

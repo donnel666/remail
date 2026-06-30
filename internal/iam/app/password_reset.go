@@ -21,8 +21,12 @@ func NewPasswordResetUseCase(repo UserRepository, hasher Hasher, sessions Sessio
 	return &PasswordResetUseCase{repo: repo, hasher: hasher, sessions: sessions, codeStore: codeStore, emailCode: emailCode}
 }
 
-func (uc *PasswordResetUseCase) Request(ctx context.Context, email string) error {
-	normalized := strings.ToLower(strings.TrimSpace(email))
+func (uc *PasswordResetUseCase) Request(ctx context.Context, email, captchaID, captchaAnswer string) error {
+	if err := uc.emailCode.VerifyCaptcha(ctx, captchaID, captchaAnswer); err != nil {
+		return err
+	}
+
+	normalized := normalizeEmail(email)
 	user, err := uc.repo.FindByEmail(ctx, normalized)
 	if err != nil {
 		return fmt.Errorf("password reset find user: %w", err)
@@ -34,7 +38,7 @@ func (uc *PasswordResetUseCase) Request(ctx context.Context, email string) error
 }
 
 func (uc *PasswordResetUseCase) Reset(ctx context.Context, email, code, newPassword string) error {
-	normalized := strings.ToLower(strings.TrimSpace(email))
+	normalized := normalizeEmail(email)
 	storedCode, err := uc.codeStore.Get(ctx, emailCodeKey(normalized))
 	if err != nil {
 		return fmt.Errorf("password reset get code: %w", err)

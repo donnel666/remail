@@ -81,9 +81,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - user
                 properties:
                   user:
                     $ref: "#/components/schemas/UserResponse"
+                additionalProperties: false
         "409":
           description: Activation already completed
           content:
@@ -133,6 +136,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Captcha incorrect or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "503":
           description: Mail service is temporarily unavailable
           content:
@@ -160,9 +169,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - user
                 properties:
                   user:
                     $ref: "#/components/schemas/UserResponse"
+                additionalProperties: false
         "409":
           description: Email already exists
           content:
@@ -170,7 +182,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Captcha incorrect or validation error
+          description: Verification code incorrect or validation error
           content:
             application/json:
               schema:
@@ -202,7 +214,7 @@ paths:
             Set-Cookie:
               schema:
                 type: string
-                description: sid HttpOnly cookie
+                description: sid HttpOnly cookie and csrf_token SameSite cookie
           content:
             application/json:
               schema:
@@ -228,11 +240,19 @@ paths:
         - IAM
       security:
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
       responses:
         "204":
           description: Logged out successfully
         "401":
           description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -254,9 +274,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - user
                 properties:
                   user:
                     $ref: "#/components/schemas/UserResponse"
+                additionalProperties: false
         "401":
           description: Authentication required
           content:
@@ -274,6 +297,8 @@ paths:
         - IAM
       security:
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody:
         required: true
         content:
@@ -301,6 +326,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/password/reset/request:
     post:
@@ -319,6 +350,12 @@ paths:
           description: Password reset request accepted
         "400":
           description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Captcha incorrect or expired
           content:
             application/json:
               schema:
@@ -413,6 +450,7 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - name: userId
           in: path
           required: true
@@ -431,9 +469,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - user
                 properties:
                   user:
                     $ref: "#/components/schemas/UserResponse"
+                additionalProperties: false
         "400":
           description: Invalid request body or user ID
           content:
@@ -474,6 +515,7 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - name: userId
           in: path
           required: true
@@ -588,6 +630,7 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - name: userId
           in: path
           required: true
@@ -684,6 +727,8 @@ paths:
         - Admin
       security:
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody:
         required: true
         content:
@@ -697,9 +742,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - invite
                 properties:
                   invite:
                     $ref: "#/components/schemas/InviteResponse"
+                additionalProperties: false
         "400":
           description: Invalid request body
           content:
@@ -740,6 +788,7 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - name: code
           in: path
           required: true
@@ -758,9 +807,12 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - invite
                 properties:
                   invite:
                     $ref: "#/components/schemas/InviteResponse"
+                additionalProperties: false
         "400":
           description: Invalid request body
           content:
@@ -793,6 +845,15 @@ paths:
                 $ref: "#/components/schemas/Error"
 
 components:
+  parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+      description: CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+
   securitySchemes:
     cookieAuth:
       type: apiKey
@@ -896,8 +957,7 @@ components:
       required:
         - email
         - password
-        - captchaId
-        - captchaAnswer
+        - code
       properties:
         email:
           type: string
@@ -908,9 +968,7 @@ components:
         nickname:
           type: string
           maxLength: 100
-        captchaId:
-          type: string
-        captchaAnswer:
+        code:
           type: string
         inviteCode:
           type: string
@@ -921,10 +979,16 @@ components:
       type: object
       required:
         - email
+        - captchaId
+        - captchaAnswer
       properties:
         email:
           type: string
           format: email
+        captchaId:
+          type: string
+        captchaAnswer:
+          type: string
       additionalProperties: false
 
     LoginRequest:
@@ -972,10 +1036,16 @@ components:
       type: object
       required:
         - email
+        - captchaId
+        - captchaAnswer
       properties:
         email:
           type: string
           format: email
+        captchaId:
+          type: string
+        captchaAnswer:
+          type: string
       additionalProperties: false
 
     PasswordResetRequest:

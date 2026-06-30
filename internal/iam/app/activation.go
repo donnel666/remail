@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/donnel666/remail/internal/iam/domain"
 )
@@ -43,9 +44,9 @@ func (uc *ActivationUseCase) Activate(ctx context.Context, email, password, nick
 	}
 
 	user := &domain.User{
-		Email:        email,
+		Email:        normalizeEmail(email),
 		PasswordHash: hash,
-		Nickname:     nickname,
+		Nickname:     strings.TrimSpace(nickname),
 		Enabled:      true,
 		RoleLevel:    domain.RoleSuperAdmin,
 		TokenVersion: 0,

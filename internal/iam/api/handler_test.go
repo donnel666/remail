@@ -410,6 +410,12 @@ func (s *mockEmailCodeStore) firstCode() string {
 	return ""
 }
 
+func (s *mockEmailCodeStore) codeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.codes)
+}
+
 type mockEmailCodeSender struct{}
 
 func (s mockEmailCodeSender) SendEmailCode(_ context.Context, _, _ string) error {
@@ -424,11 +430,11 @@ func newTestHandler() *IAMHandler {
 	captchaStore := newMockCaptchaStore()
 	emailCodeStore := newMockEmailCodeStore()
 	hasher := infra.NewHasher()
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockEmailCodeSender{})
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockEmailCodeSender{}, captchaStore)
 
 	mod := &IAMModule{
 		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
-		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, captchaStore),
+		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
 		LoginUseCase:          app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
 		SessionUseCase:        app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase: app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
@@ -464,6 +470,26 @@ func seedCaptcha(t *testing.T, h *IAMHandler, answer string) string {
 	return id
 }
 
+func requestEmailCode(t *testing.T, h *IAMHandler, r *gin.Engine, email, captchaAnswer string) string {
+	t.Helper()
+	captchaID := seedCaptcha(t, h, captchaAnswer)
+	body := fmt.Sprintf(
+		`{"email":%q,"captchaId":%q,"captchaAnswer":%q}`,
+		email,
+		captchaID,
+		captchaAnswer,
+	)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code)
+
+	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
+	require.NotEmpty(t, code)
+	return code
+}
+
 func testRepo(h *IAMHandler) *mockUserRepo {
 	return h.module.UserRepo.(*mockUserRepo)
 }
@@ -480,6 +506,13 @@ func seedAdminSession(t *testing.T, h *IAMHandler, sessionID string) *domain.Use
 		TokenVersion: admin.TokenVersion,
 	}, 3600))
 	return admin
+}
+
+func addAuthenticatedRequest(req *http.Request, sessionID string) {
+	const csrfToken = "test-csrf-token"
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: sessionID})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: csrfToken})
+	req.Header.Set(middleware.CSRFHeaderName, csrfToken)
 }
 
 func seedUser(t *testing.T, h *IAMHandler, email string) *domain.User {
@@ -567,7 +600,8 @@ func TestPostEmailCode_ReturnsNoContent(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	body := `{"email":"user@test.com"}`
+	captchaID := seedCaptcha(t, h, "1234")
+	body := `{"email":"user@test.com","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -579,19 +613,89 @@ func TestPostEmailCode_ReturnsNoContent(t *testing.T) {
 
 // --- Registration Tests ---
 
-func TestPostRegister_RequiresCaptcha(t *testing.T) {
+func TestPostRegister_RequiresEmailCode(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	// Without captcha: should fail validation
-	body := `{"email":"user@test.com","password":"User123!","captchaId":"","captchaAnswer":""}`
+	body := `{"email":"user@test.com","password":"User123!"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	// Missing captcha should return 400 (required binding validation)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPostRegister_WithEmailCodeCreatesUserAndConsumesCode(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	code := requestEmailCode(t, h, r, "User@Test.COM", "1234")
+	body := fmt.Sprintf(
+		`{"email":%q,"password":"User123!","nickname":" User ","code":%q}`,
+		"USER@Test.COM",
+		code,
+	)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Contains(t, w.Body.String(), `"email":"user@test.com"`)
+	require.Equal(t, 0, h.module.EmailCodeStore.(*mockEmailCodeStore).codeCount())
+
+	user, err := testRepo(h).FindByEmail(context.Background(), "user@test.com")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	require.Equal(t, "User", user.Nickname)
+}
+
+func TestPostRegister_WrongEmailCodeReturnsVerificationError(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	_ = requestEmailCode(t, h, r, "user@test.com", "1234")
+	body := `{"email":"user@test.com","password":"User123!","code":"000000"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	require.Contains(t, w.Body.String(), "Verification code is incorrect or expired")
+}
+
+func TestPostRegister_ExistingEmailWithWrongEmailCodeReturnsVerificationError(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	body := `{"email":"user@test.com","password":"User123!","code":"000000"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	require.Contains(t, w.Body.String(), "Verification code is incorrect or expired")
+	require.NotContains(t, w.Body.String(), "Email already exists")
+}
+
+func TestPostRegister_ExistingEmailWithValidEmailCodeReturnsConflict(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	code := requestEmailCode(t, h, r, "user@test.com", "1234")
+	body := fmt.Sprintf(`{"email":"user@test.com","password":"User123!","code":%q}`, code)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.Contains(t, w.Body.String(), "Email already exists")
 }
 
 // --- Login Tests ---
@@ -660,6 +764,28 @@ func TestPostLogin_WrongCaptcha(t *testing.T) {
 	assert.Contains(t, w2.Body.String(), "Captcha is incorrect or expired")
 }
 
+func TestPostLogin_NormalizesEmail(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	body := `{"email":"Admin@Test.COM","password":"Admin123!"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/activation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	captchaID := seedCaptcha(t, h, "1234")
+	loginBody := `{"email":"ADMIN@TEST.COM","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+
+	require.Equal(t, http.StatusOK, w2.Code)
+	require.Contains(t, w2.Body.String(), `"email":"admin@test.com"`)
+}
+
 func TestPostLogin_Success(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
@@ -684,18 +810,26 @@ func TestPostLogin_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w2.Code)
 
-	// Check HttpOnly cookie
+	// Check auth cookies
 	cookies := w2.Result().Cookies()
 	foundSid := false
+	foundCSRF := false
 	for _, c := range cookies {
-		if c.Name == "sid" {
+		if c.Name == middleware.SessionCookieName {
 			foundSid = true
 			assert.True(t, c.HttpOnly, "sid cookie must be HttpOnly")
 			assert.True(t, c.MaxAge > 0, "sid cookie must have MaxAge > 0")
-			break
+			assert.Equal(t, http.SameSiteLaxMode, c.SameSite)
+		}
+		if c.Name == middleware.CSRFCookieName {
+			foundCSRF = true
+			assert.False(t, c.HttpOnly, "csrf cookie must be readable by the frontend")
+			assert.True(t, c.MaxAge > 0, "csrf cookie must have MaxAge > 0")
+			assert.Equal(t, http.SameSiteLaxMode, c.SameSite)
 		}
 	}
 	assert.True(t, foundSid, "sid cookie should be set")
+	assert.True(t, foundCSRF, "csrf cookie should be set")
 }
 
 // --- Auth Middleware Tests ---
@@ -756,7 +890,7 @@ func TestPatchAdminUserWritesOperationLog(t *testing.T) {
 	req, _ := http.NewRequest("PATCH", fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{"enabled":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-admin-update")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -788,7 +922,7 @@ func TestPatchAdminUserNoopWritesOperationLog(t *testing.T) {
 	req, _ := http.NewRequest("PATCH", fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-admin-noop")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -812,7 +946,7 @@ func TestPatchAdminUserSameValuesWritesUnchangedOperationLog(t *testing.T) {
 	req, _ := http.NewRequest("PATCH", fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{"enabled":true,"roleLevel":10}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-admin-same-values")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -848,7 +982,7 @@ func TestPostAdminRevokeSessionsWritesOperationLog(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/users/%d/sessions/revoke", target.ID), nil)
 	req.Header.Set("X-Request-ID", "req-revoke")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
@@ -878,7 +1012,7 @@ func TestPutAdminUserPermissionsWritesOperationLogAndReloads(t *testing.T) {
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-permissions")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
@@ -908,7 +1042,7 @@ func TestPutAdminUserPermissionsRejectsWildcardAction(t *testing.T) {
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-permissions-wildcard")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
@@ -938,7 +1072,7 @@ func TestPutAdminUserPermissionsRestoresPoliciesWhenReloadFails(t *testing.T) {
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-permissions-reload-fail")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -967,7 +1101,7 @@ func TestPostAdminInviteWritesSuccessAndDuplicateFailureLogs(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/v1/admin/invites", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-invite-create")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -984,7 +1118,7 @@ func TestPostAdminInviteWritesSuccessAndDuplicateFailureLogs(t *testing.T) {
 	req, _ = http.NewRequest("POST", "/v1/admin/invites", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-invite-duplicate")
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -1010,19 +1144,36 @@ func TestChangePassword_Unauthenticated(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+func TestChangePassword_RequiresCSRF(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+
+	body := `{"oldPassword":"Admin123!","newPassword":"NewPass123!"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/v1/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "admin-session"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "Permission denied")
+}
+
 func TestPostPasswordResetIgnoresCleanupFailuresAfterPasswordUpdate(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 	user := seedUser(t, h, "user@test.com")
 
-	require.NoError(t, h.module.PasswordResetUseCase.Request(context.Background(), user.Email))
+	captchaID := seedCaptcha(t, h, "1234")
+	require.NoError(t, h.module.PasswordResetUseCase.Request(context.Background(), "USER@Test.COM", captchaID, "1234"))
 	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
 	require.NotEmpty(t, code)
 
 	h.module.EmailCodeStore.(*mockEmailCodeStore).deleteErr = errors.New("redis email code delete failed")
 	h.module.SessionStore.(*mockSessionStore).deleteByUserIDErr = errors.New("redis session cleanup failed")
 
-	body := fmt.Sprintf(`{"email":"%s","code":"%s","newPassword":"NewPass123!"}`, user.Email, code)
+	body := fmt.Sprintf(`{"email":"%s","code":"%s","newPassword":"NewPass123!"}`, "USER@Test.COM", code)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1043,7 +1194,7 @@ func TestPostRegister_InvalidEmail(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	body := `{"email":"not-an-email","password":"Pass123!","captchaId":"c1","captchaAnswer":"1234"}`
+	body := `{"email":"not-an-email","password":"Pass123!","code":"123456"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

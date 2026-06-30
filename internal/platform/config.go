@@ -77,7 +77,13 @@ type LogConfig struct {
 
 // DiagnosticsConfig holds opt-in runtime diagnostics settings.
 type DiagnosticsConfig struct {
-	PprofAddr string
+	PprofAddr               string
+	SlowRequestThreshold    time.Duration
+	SlowSQLThreshold        time.Duration
+	PprofCPUThreshold       float64
+	PprofCPUProfileDir      string
+	PprofCPUProfileDuration time.Duration
+	PprofCPUCheckInterval   time.Duration
 }
 
 // Load reads configuration from environment variables.
@@ -125,7 +131,13 @@ func Load() (*Config, error) {
 			Format: getEnv("LOG_FORMAT", "json"),
 		},
 		Diagnostics: DiagnosticsConfig{
-			PprofAddr: getEnv("PPROF_ADDR", ""),
+			PprofAddr:               getEnv("PPROF_ADDR", ""),
+			SlowRequestThreshold:    getDuration("SLOW_REQUEST_THRESHOLD", time.Second),
+			SlowSQLThreshold:        getDuration("SLOW_SQL_THRESHOLD", 200*time.Millisecond),
+			PprofCPUThreshold:       getFloat("PPROF_CPU_THRESHOLD", 80),
+			PprofCPUProfileDir:      getEnv("PPROF_CPU_PROFILE_DIR", "pprof"),
+			PprofCPUProfileDuration: getDuration("PPROF_CPU_PROFILE_DURATION", 10*time.Second),
+			PprofCPUCheckInterval:   getDuration("PPROF_CPU_CHECK_INTERVAL", 30*time.Second),
 		},
 	}
 
@@ -172,6 +184,15 @@ func getBool(key string, fallback bool) bool {
 	if v := os.Getenv(key); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
+		}
+	}
+	return fallback
+}
+
+func getFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

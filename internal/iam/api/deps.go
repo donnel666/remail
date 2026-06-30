@@ -53,11 +53,11 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, emailCodeSender app.Em
 		return nil, err
 	}
 
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, emailCodeSender)
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, emailCodeSender, captchaStore)
 
 	return &IAMModule{
 		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
-		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, captchaStore),
+		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
 		LoginUseCase:          app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
 		SessionUseCase:        app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase: app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),

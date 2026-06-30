@@ -5,7 +5,8 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
-| 2026-06-30 | V1.1 | Codex | 补充 P1 性能诊断 pprof 入口；不改变业务 API、OpenAPI 和部署策略。 |
+| 2026-06-30 | V1.1 | Codex | 补充 P1 性能诊断 pprof 入口、慢请求/慢 SQL 日志和自动 CPU profile；不改变业务 API。 |
+| 2026-06-30 | V1.2 | Codex | 补充前端 OpenAPI TypeScript client 生成细则；不改变 OpenAPI 单源策略。 |
 
 > 目标：快速迭代、控制复杂度、保持业务边界清楚。
 >
@@ -52,7 +53,7 @@ minio                MinIO
 | 对象存储 | `minio-go` | 私有上传、附件、导入文件、失败文件。 |
 | 配置 | 环境变量 + 本地 `.env` | 不引入配置中心。 |
 | 日志 | 标准库 `slog` | JSON 结构化日志，带 requestId。 |
-| API 文档/生成 | OpenAPI + `oapi-codegen` | 生成服务端类型、前端 client 和 SDK 契约。 |
+| API 文档/生成 | OpenAPI + `oapi-codegen` + `openapi-typescript`/`openapi-fetch` | `oapi-codegen` 生成 Go 服务端类型；`openapi-typescript` 生成前端 schema，`openapi-fetch` 做薄封装；同一份 OpenAPI 仍是前端 client 和 SDK 契约源。 |
 | 参数校验 | Gin binding + validator | DTO 校验集中处理。 |
 | 授权策略 | Casbin v2 | 参考 `new-api`，承接角色基线权限和用户级覆盖；数据归属仍由业务代码判断。 |
 | 密码哈希 | bcrypt 或 argon2id | 用户密码使用标准慢哈希。 |
@@ -64,7 +65,10 @@ minio                MinIO
 
 | 能力 | 选型 | 规则 |
 |------|------|------|
-| 性能诊断 | 标准库 `net/http/pprof` | 通过独立本地诊断 HTTP server 暴露 `/debug/pprof/`；`PPROF_ADDR` 为空时关闭，启用时建议绑定 `127.0.0.1:6060`。该入口不进入 OpenAPI，不作为业务 API 契约。 |
+| 性能诊断 | 标准库 `net/http/pprof` | 通过独立本地诊断 HTTP server 暴露 `/debug/pprof/`；`PPROF_ADDR` 为空时关闭。裸进程建议绑定 `127.0.0.1:6060`，Docker 内建议绑定 `:6060` 并只映射到宿主机 `127.0.0.1`。该入口不进入 OpenAPI，不作为业务 API 契约。 |
+| 慢请求日志 | Gin middleware + `slog` | 参考 `new-api` 的运行日志可见性，所有非健康检查/静态资源请求输出 method/path/status/latency/requestId；超过 `SLOW_REQUEST_THRESHOLD` 输出 `slow http request` warning。日志不得写请求体、Cookie、密码、Token。 |
+| 慢 SQL 日志 | GORM logger + `slog` | 超过 `SLOW_SQL_THRESHOLD` 输出 `slow sql` warning，并携带 requestId、耗时、行数和参数化 SQL；SQL 日志必须开启参数过滤，避免把密码、Token、验证码等参数写入日志。 |
+| 自动 CPU profile | `runtime/pprof` + CPU monitor | `PPROF_ADDR` 开启时启动 CPU 使用率监视；超过 `PPROF_CPU_THRESHOLD` 自动采样 `PPROF_CPU_PROFILE_DURATION` 并写入 `PPROF_CPU_PROFILE_DIR`，触发和文件路径必须出现在 `docker logs`。 |
 
 ORM 使用规则：
 
@@ -97,6 +101,15 @@ ORM 使用规则：
 | 图表 | Recharts | 运营图表够用。 |
 | API client | OpenAPI 生成 | 不手写重复 DTO 和请求函数。 |
 | E2E | Playwright | 登录、下单、后台操作主线验证。 |
+
+前端 API client 补充设计：
+
+| 项 | 规则 |
+|----|------|
+| 契约源 | `api/openapi.yaml` 是唯一源；前端不得手写与 OpenAPI 重复的请求/响应 DTO。 |
+| 类型生成 | 使用 `openapi-typescript` 生成 `web/src/lib/openapi/schema.ts`，该文件只由生成命令更新。 |
+| 请求封装 | 使用 `openapi-fetch` 基于生成的 `paths` 发起请求；业务模块只允许保留很薄的 wrapper，用于 baseUrl、cookie credentials、CSRF header 和错误归一化。 |
+| CI 校验 | OpenAPI 变更后必须重新生成 Go/TS 产物，并用 diff 检查生成物是否同步。 |
 
 前端项目只有一个：
 

@@ -49,6 +49,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+      - "127.0.0.1:6060:6060"
     environment:
       SERVER_ADDR: ":8080"
       MYSQL_DSN: "remail:remail@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
@@ -60,6 +61,13 @@ services:
       MINIO_BUCKET: "remail"
       SESSION_SECRET: "dev-secret-do-not-use-in-production"
       MIGRATIONS_DIR: "/app/migrations"
+      SLOW_REQUEST_THRESHOLD: "1s"
+      SLOW_SQL_THRESHOLD: "200ms"
+      PPROF_ADDR: ":6060"
+      PPROF_CPU_THRESHOLD: "80"
+      PPROF_CPU_PROFILE_DIR: "pprof"
+      PPROF_CPU_PROFILE_DURATION: "10s"
+      PPROF_CPU_CHECK_INTERVAL: "30s"
     depends_on:
       mysql:
         condition: service_healthy

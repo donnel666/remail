@@ -63,6 +63,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	auth := rg.Group("")
 	auth.Use(middleware.LoadSession(fetcher))
 	auth.Use(middleware.AuthRequired())
+	auth.Use(middleware.CSRFRequired())
 	{
 		auth.GET("/me", h.GetMe)
 		auth.DELETE("/sessions/current", h.DeleteSession)
@@ -73,6 +74,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	admin := rg.Group("/admin")
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
+	admin.Use(middleware.CSRFRequired())
 	admin.Use(middleware.AdminRequired(domain.RoleAdmin))
 	{
 		admin.GET("/users", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUsers)

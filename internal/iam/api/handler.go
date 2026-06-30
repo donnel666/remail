@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -87,7 +90,7 @@ func (h *IAMHandler) PostEmailCode(c *gin.Context) {
 		return
 	}
 
-	if err := h.module.EmailCodeUseCase.Send(c.Request.Context(), req.Email); err != nil {
+	if err := h.module.EmailCodeUseCase.SendWithCaptcha(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -110,7 +113,7 @@ func (h *IAMHandler) PostRegister(c *gin.Context) {
 	}
 
 	user, err := h.module.RegistrationUseCase.Register(
-		c.Request.Context(), req.Email, req.Password, req.Nickname, req.CaptchaID, req.CaptchaAnswer, req.InviteCode,
+		c.Request.Context(), req.Email, req.Password, req.Nickname, req.Code, req.InviteCode,
 	)
 	if err != nil {
 		writeError(c, err)
@@ -131,7 +134,7 @@ func (h *IAMHandler) PostPasswordResetRequest(c *gin.Context) {
 		})
 		return
 	}
-	if err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email); err != nil {
+	if err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -170,22 +173,19 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		return
 	}
 
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
 	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password, req.CaptchaID, req.CaptchaAnswer, h.sessionMaxAge)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 
-	// Set HttpOnly (and optionally Secure) session cookie
-	c.SetCookie(
-		"sid",
-		result.Session.ID,
-		h.sessionMaxAge,
-		"/",
-		"",
-		h.sessionSecure,
-		true, // HttpOnly
-	)
+	setAuthCookies(c, result.Session.ID, csrfToken, h.sessionMaxAge, h.sessionSecure)
 
 	c.JSON(http.StatusOK, LoginResponse{User: toUserResponse(result.User)})
 }
@@ -203,7 +203,7 @@ func (h *IAMHandler) DeleteSession(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("sid", "", -1, "/", "", h.sessionSecure, true)
+	clearAuthCookies(c, h.sessionSecure)
 	c.Status(http.StatusNoContent)
 }
 
@@ -268,7 +268,7 @@ func (h *IAMHandler) PatchPassword(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("sid", "", -1, "/", "", h.sessionSecure, true)
+	clearAuthCookies(c, h.sessionSecure)
 	c.Status(http.StatusNoContent)
 }
 
@@ -599,6 +599,26 @@ func writeError(c *gin.Context, err error) {
 			"requestId": rid,
 		})
 	}
+}
+
+func setAuthCookies(c *gin.Context, sessionID, csrfToken string, maxAge int, secure bool) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(middleware.SessionCookieName, sessionID, maxAge, "/", "", secure, true)
+	c.SetCookie(middleware.CSRFCookieName, csrfToken, maxAge, "/", "", secure, false)
+}
+
+func clearAuthCookies(c *gin.Context, secure bool) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", secure, true)
+	c.SetCookie(middleware.CSRFCookieName, "", -1, "/", "", secure, false)
+}
+
+func newCSRFToken() (string, error) {
+	var token [32]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("generate csrf token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(token[:]), nil
 }
 
 // validationErrors extracts field-level validation error messages.

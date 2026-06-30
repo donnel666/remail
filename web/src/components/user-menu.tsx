@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, LogOut, MonitorCog, UserRound } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, UserRound, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/context/auth-provider";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,7 @@ function getInitial(name: string) {
 
 export function UserMenu() {
   const { t } = useTranslation();
-  const { currentUser, signOut } = useAuth();
+  const { currentUser, logout } = useAuth();
 
   if (!currentUser) return null;
 
@@ -53,26 +53,33 @@ export function UserMenu() {
         </div>
         <DropdownMenuSeparator className="mx-0 bg-border" />
         <DropdownMenuItem
-          render={<Link to="/dashboard" />}
-          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
-        >
-          <MonitorCog className="size-4 text-muted-foreground" />
-          {t("Console")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          render={<Link to="/dashboard" />}
+          render={<Link to="/account" />}
           className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
           <UserRound className="size-4 text-muted-foreground" />
-          {t("Account")}
+          {t("Personal Settings")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          render={<Link to="/apikeys" />}
+          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+        >
+          <KeyRound className="size-4 text-muted-foreground" />
+          {t("API KEY")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          render={<Link to="/financial" />}
+          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+        >
+          <Wallet className="size-4 text-muted-foreground" />
+          {t("Wallet Management")}
         </DropdownMenuItem>
         <DropdownMenuSeparator className="mx-0 bg-border" />
         <DropdownMenuItem
-          onClick={signOut}
+          onClick={() => void logout()}
           className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
           <LogOut className="size-4 text-muted-foreground" />
-          {t("Logout")}
+          {t("Exit")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -6,119 +6,100 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  getMe,
+  login as loginRequest,
+  logout as logoutRequest,
+  type LoginRequest,
+  type UserResponse,
+} from "@/lib/iam-api";
 
 export interface CurrentUser {
+  id: number;
   email: string;
+  nickname: string;
   name: string;
+  role: UserResponse["role"];
+  roleLevel: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string | null;
 }
 
 interface AuthProviderState {
   currentUser: CurrentUser | null;
   loading: boolean;
-  signIn: (user: Partial<CurrentUser>) => void;
-  signOut: () => void;
+  login: (payload: LoginRequest) => Promise<CurrentUser>;
+  logout: () => Promise<void>;
+  refreshCurrentUser: () => Promise<CurrentUser | null>;
 }
-
-const STORAGE_KEY = "remail-current-user";
 
 const AuthContext = createContext<AuthProviderState | null>(null);
 
-function readStoredUser() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as CurrentUser) : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistUser(user: CurrentUser | null) {
-  try {
-    if (user) localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {}
-}
-
-function normalizeUser(user: Partial<CurrentUser>): CurrentUser {
-  const email = user.email?.trim() || "user@remail.local";
+function toCurrentUser(user: UserResponse): CurrentUser {
+  const nickname = user.nickname?.trim() || "";
+  const name = nickname || user.email.split("@")[0] || user.email;
   return {
-    email,
-    name: user.name?.trim() || email.split("@")[0] || "Remail User",
+    id: user.id,
+    email: user.email,
+    nickname,
+    name,
+    role: user.role,
+    roleLevel: user.roleLevel,
+    enabled: user.enabled,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    lastLoginAt: user.lastLoginAt,
   };
 }
 
-function userFromMeResponse(value: unknown): CurrentUser | null {
-  if (!value || typeof value !== "object") return null;
-  const user = "user" in value ? (value as { user?: unknown }).user : value;
-  if (!user || typeof user !== "object") return null;
-
-  const record = user as Record<string, unknown>;
-  const email = typeof record.email === "string" ? record.email : "";
-  const name =
-    (typeof record.nickname === "string" && record.nickname) ||
-    (typeof record.name === "string" && record.name) ||
-    email.split("@")[0];
-
-  return email ? { email, name: name || email } : null;
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() =>
-    readStoredUser()
-  );
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const refreshCurrentUser = useCallback(async () => {
+    try {
+      const response = await getMe();
+      const nextUser = toCurrentUser(response.user);
+      setCurrentUser(nextUser);
+      return nextUser;
+    } catch {
+      setCurrentUser(null);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadCurrentUser() {
-      try {
-        const response = await fetch("/v1/me", {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (response.status === 401) {
-          setCurrentUser(null);
-          persistUser(null);
-          return;
-        }
-        if (!response.ok) return;
-        const nextUser = userFromMeResponse(await response.json());
-        if (!cancelled && nextUser) {
-          setCurrentUser(nextUser);
-          persistUser(nextUser);
-        }
-      } catch {
-        // The standalone frontend can run before the IAM API is available.
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+    void refreshCurrentUser().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
-    void loadCurrentUser();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshCurrentUser]);
 
-  const signIn = useCallback((user: Partial<CurrentUser>) => {
-    const nextUser = normalizeUser(user);
+  const login = useCallback(async (payload: LoginRequest) => {
+    const response = await loginRequest(payload);
+    const nextUser = toCurrentUser(response.user);
     setCurrentUser(nextUser);
-    persistUser(nextUser);
+    return nextUser;
   }, []);
 
-  const signOut = useCallback(() => {
-    setCurrentUser(null);
-    persistUser(null);
-    void fetch("/v1/sessions/current", {
-      method: "DELETE",
-      credentials: "include",
-    }).catch(() => {});
+  const logout = useCallback(async () => {
+    try {
+      await logoutRequest();
+    } finally {
+      setCurrentUser(null);
+    }
   }, []);
 
   const value = useMemo(
-    () => ({ currentUser, loading, signIn, signOut }),
-    [currentUser, loading, signIn, signOut]
+    () => ({ currentUser, loading, login, logout, refreshCurrentUser }),
+    [currentUser, loading, login, logout, refreshCurrentUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

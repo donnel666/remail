@@ -64,7 +64,7 @@ func (s *emailCodeSenderStub) callCount() int {
 func TestEmailCodeUseCaseSendDoesNotResendExistingCode(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &emailCodeSenderStub{}
-	uc := NewEmailCodeUseCase(store, sender)
+	uc := NewEmailCodeUseCase(store, sender, nil)
 
 	require.NoError(t, uc.Send(context.Background(), "User@Test.COM"))
 	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
@@ -75,7 +75,7 @@ func TestEmailCodeUseCaseSendDoesNotResendExistingCode(t *testing.T) {
 func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &emailCodeSenderStub{err: domain.ErrMailServiceUnavailable}
-	uc := NewEmailCodeUseCase(store, sender)
+	uc := NewEmailCodeUseCase(store, sender, nil)
 
 	err := uc.Send(context.Background(), "user@test.com")
 	require.Error(t, err)

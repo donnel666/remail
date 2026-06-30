@@ -1,38 +1,26 @@
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { Loader2, MailCheck } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { CaptchaField } from "@/components/auth/CaptchaField";
 import { useCaptcha } from "@/hooks/use-captcha";
 import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
-import { registerUser, sendEmailCode } from "@/lib/iam-api";
+import { requestPasswordReset, resetPassword } from "@/lib/iam-api";
 
-export default function Register() {
+export default function PasswordReset() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const captcha = useCaptcha();
-  const inviteCodeFromLink = useMemo(() => {
-    return new URLSearchParams(location.searchStr).get("aff")?.trim() || "";
-  }, [location.searchStr]);
   const [email, setEmail] = useState("");
-  const [nickname, setNickname] = useState("");
-  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
-  const [emailCode, setEmailCode] = useState("");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [requestingCode, setRequestingCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (inviteCodeFromLink) {
-      setInviteCode(inviteCodeFromLink);
-    }
-  }, [inviteCodeFromLink]);
 
   const handleRequestCode = async () => {
     if (!email.trim()) {
@@ -53,7 +41,7 @@ export default function Register() {
     setNotice("");
 
     try {
-      await sendEmailCode({
+      await requestPasswordReset({
         email: email.trim(),
         captchaId: captcha.captcha.captchaId,
         captchaAnswer: captchaAnswer.trim(),
@@ -72,27 +60,24 @@ export default function Register() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (password !== confirmPassword) {
+    if (newPassword !== confirmPassword) {
       setError(t("Passwords do not match."));
       return;
     }
 
     setSubmitting(true);
     setError("");
-    setNotice("");
 
     try {
-      await registerUser({
+      await resetPassword({
         email: email.trim(),
-        nickname: nickname.trim() || undefined,
-        password,
-        code: emailCode.trim(),
-        inviteCode: inviteCode.trim() || undefined,
+        code: code.trim(),
+        newPassword,
       });
-      sessionStorage.setItem(LOGIN_NOTICE_KEY, "Registration completed. Please log in.");
-      void navigate({ to: "/login" });
+      sessionStorage.setItem(LOGIN_NOTICE_KEY, "Password reset completed. Please log in.");
+      void navigate({ to: "/login", replace: true });
     } catch (nextError) {
-      setError(getIamErrorMessage(t, nextError, "Registration failed."));
+      setError(getIamErrorMessage(t, nextError, "Password reset failed."));
     } finally {
       setSubmitting(false);
     }
@@ -104,18 +89,21 @@ export default function Register() {
         <div className="mb-8 flex flex-col items-center gap-2">
           <img src="/logo.png" alt="Remail" className="h-12 w-12" />
           <h1 className="text-xl font-bold text-[var(--ink-primary)]">Remail</h1>
-          <p className="text-sm text-[var(--ink-muted)]">{t("Create your account")}</p>
+          <p className="text-sm text-[var(--ink-muted)]">{t("Reset your password")}</p>
         </div>
+
+        {notice ? (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+            <MailCheck className="size-4" />
+            {notice}
+          </div>
+        ) : null}
         {error ? (
           <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
             {error}
           </div>
         ) : null}
-        {notice ? (
-          <div className="mb-4 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-            {notice}
-          </div>
-        ) : null}
+
         <form className="space-y-4" onSubmit={handleSubmit}>
           <input
             type="email"
@@ -137,8 +125,8 @@ export default function Register() {
           <div className="grid grid-cols-[1fr_112px] gap-2">
             <input
               type="text"
-              value={emailCode}
-              onChange={(event) => setEmailCode(event.target.value)}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
               placeholder={t("Verification code")}
               className="input-antd min-w-0 w-full"
               autoComplete="one-time-code"
@@ -154,18 +142,10 @@ export default function Register() {
             </button>
           </div>
           <input
-            type="text"
-            value={nickname}
-            onChange={(event) => setNickname(event.target.value)}
-            placeholder={t("Nickname optional")}
-            className="input-antd w-full"
-            autoComplete="nickname"
-          />
-          <input
             type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder={t("Password")}
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            placeholder={t("New password")}
             className="input-antd w-full"
             autoComplete="new-password"
             minLength={6}
@@ -181,28 +161,18 @@ export default function Register() {
             minLength={6}
             required
           />
-          {inviteCodeFromLink ? null : (
-            <input
-              type="text"
-              value={inviteCode}
-              onChange={(event) => setInviteCode(event.target.value)}
-              placeholder={t("Invite code optional")}
-              className="input-antd w-full"
-              autoComplete="off"
-            />
-          )}
           <button
             className="flex h-10 w-full items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-start)] to-[var(--brand-end)] text-[14px] font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
             disabled={submitting}
           >
             {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-            {t("Register")}
+            {t("Reset password")}
           </button>
         </form>
+
         <div className="mt-5 text-center text-sm text-[var(--ink-muted)]">
-          {t("Already have an account")}{" "}
           <Link to="/login" className="font-medium text-brand hover:text-brand-hover">
-            {t("Login")}
+            {t("Back to login")}
           </Link>
         </div>
       </div>

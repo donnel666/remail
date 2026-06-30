@@ -22,6 +22,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 	// Global middleware
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID())
+	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
 	r.Use(middleware.CORS("http://localhost:3000", "http://127.0.0.1:3000"))
 
 	// Health check endpoints (outside /v1)

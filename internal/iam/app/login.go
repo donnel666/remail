@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/iam/domain"
@@ -35,11 +34,11 @@ type LoginResult struct {
 // (docs/8-iam.md:109 — only "Account or password is incorrect" is safe to expose).
 func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, captchaAnswer string, sessionTTL int) (*LoginResult, error) {
 	// Verify captcha first to avoid leaking user existence
-	if err := uc.verifyCaptcha(ctx, captchaID, captchaAnswer); err != nil {
+	if err := VerifyCaptcha(ctx, uc.captcha, captchaID, captchaAnswer); err != nil {
 		return nil, err
 	}
 
-	user, err := uc.repo.FindByEmail(ctx, email)
+	user, err := uc.repo.FindByEmail(ctx, normalizeEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("login find user: %w", err)
 	}
@@ -87,27 +86,4 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, c
 		Session: session,
 		User:    user,
 	}, nil
-}
-
-// verifyCaptcha checks the captcha. Uses the shared verification from registration.
-func (uc *LoginUseCase) verifyCaptcha(ctx context.Context, captchaID, answer string) error {
-	if captchaID == "" {
-		return domain.ErrCaptchaIncorrect
-	}
-	storedAnswer, err := uc.captcha.Get(ctx, captchaID)
-	if err != nil {
-		return fmt.Errorf("get captcha: %w", err)
-	}
-	if storedAnswer == "" {
-		return domain.ErrCaptchaIncorrect
-	}
-	matched := strings.EqualFold(storedAnswer, strings.TrimSpace(answer))
-	// Always delete after use; fail closed if replay prevention cannot be proven.
-	if err := uc.captcha.Delete(ctx, captchaID); err != nil {
-		return fmt.Errorf("delete captcha: %w", err)
-	}
-	if !matched {
-		return domain.ErrCaptchaIncorrect
-	}
-	return nil
 }

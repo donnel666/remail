@@ -141,7 +141,9 @@ type ChangePasswordRequest struct {
 
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
-	Email openapi_types.Email `json:"email"`
+	CaptchaAnswer string              `json:"captchaAnswer"`
+	CaptchaId     string              `json:"captchaId"`
+	Email         openapi_types.Email `json:"email"`
 }
 
 // Error defines model for Error.
@@ -195,7 +197,9 @@ type LoginResponse struct {
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
-	Email openapi_types.Email `json:"email"`
+	CaptchaAnswer string              `json:"captchaAnswer"`
+	CaptchaId     string              `json:"captchaId"`
+	Email         openapi_types.Email `json:"email"`
 }
 
 // PasswordResetRequest defines model for PasswordResetRequest.
@@ -244,12 +248,11 @@ type ReadyzResponse struct {
 
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
-	CaptchaAnswer string              `json:"captchaAnswer"`
-	CaptchaId     string              `json:"captchaId"`
-	Email         openapi_types.Email `json:"email"`
-	InviteCode    *string             `json:"inviteCode,omitempty"`
-	Nickname      *string             `json:"nickname,omitempty"`
-	Password      string              `json:"password"`
+	Code       string              `json:"code"`
+	Email      openapi_types.Email `json:"email"`
+	InviteCode *string             `json:"inviteCode,omitempty"`
+	Nickname   *string             `json:"nickname,omitempty"`
+	Password   string              `json:"password"`
 }
 
 // UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
@@ -275,6 +278,9 @@ type UserResponse struct {
 // UserResponseRole defines model for UserResponse.Role.
 type UserResponseRole string
 
+// CsrfToken defines model for CsrfToken.
+type CsrfToken = string
+
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
 
@@ -284,10 +290,52 @@ type GetAdminInvitesParams struct {
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostAdminInviteParams defines parameters for PostAdminInvite.
+type PostAdminInviteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchAdminInviteParams defines parameters for PatchAdminInvite.
+type PatchAdminInviteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminUsersParams defines parameters for GetAdminUsers.
 type GetAdminUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PatchAdminUserParams defines parameters for PatchAdminUser.
+type PatchAdminUserParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PutAdminUserPermissionsParams defines parameters for PutAdminUserPermissions.
+type PutAdminUserPermissionsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminRevokeSessionsParams defines parameters for PostAdminRevokeSessions.
+type PostAdminRevokeSessionsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchPasswordParams defines parameters for PatchPassword.
+type PatchPasswordParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteSessionParams defines parameters for DeleteSession.
+type DeleteSessionParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostActivationJSONRequestBody defines body for PostActivation for application/json ContentType.
@@ -342,10 +390,10 @@ type ServerInterface interface {
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
 	// Create invite
 	// (POST /v1/admin/invites)
-	PostAdminInvite(c *gin.Context)
+	PostAdminInvite(c *gin.Context, params PostAdminInviteParams)
 	// Update invite
 	// (PATCH /v1/admin/invites/{code})
-	PatchAdminInvite(c *gin.Context, code string)
+	PatchAdminInvite(c *gin.Context, code string, params PatchAdminInviteParams)
 	// List IAM permission catalog
 	// (GET /v1/admin/permissions)
 	GetAdminPermissions(c *gin.Context)
@@ -354,16 +402,16 @@ type ServerInterface interface {
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
 	// Update a user (enable/disable, change role)
 	// (PATCH /v1/admin/users/{userId})
-	PatchAdminUser(c *gin.Context, userId int)
+	PatchAdminUser(c *gin.Context, userId int, params PatchAdminUserParams)
 	// Get a user's permission overrides
 	// (GET /v1/admin/users/{userId}/permissions)
 	GetAdminUserPermissions(c *gin.Context, userId int)
 	// Replace a user's permission overrides
 	// (PUT /v1/admin/users/{userId}/permissions)
-	PutAdminUserPermissions(c *gin.Context, userId int)
+	PutAdminUserPermissions(c *gin.Context, userId int, params PutAdminUserPermissionsParams)
 	// Force logout a user (revoke all sessions)
 	// (POST /v1/admin/users/{userId}/sessions/revoke)
-	PostAdminRevokeSessions(c *gin.Context, userId int)
+	PostAdminRevokeSessions(c *gin.Context, userId int, params PostAdminRevokeSessionsParams)
 	// Create a captcha challenge
 	// (POST /v1/captchas)
 	PostCaptcha(c *gin.Context)
@@ -375,7 +423,7 @@ type ServerInterface interface {
 	GetMe(c *gin.Context)
 	// Change current user's password
 	// (PATCH /v1/password)
-	PatchPassword(c *gin.Context)
+	PatchPassword(c *gin.Context, params PatchPasswordParams)
 	// Reset password with email verification code
 	// (POST /v1/password/reset)
 	PostPasswordReset(c *gin.Context)
@@ -387,7 +435,7 @@ type ServerInterface interface {
 	PostLogin(c *gin.Context)
 	// Logout and delete current session
 	// (DELETE /v1/sessions/current)
-	DeleteSession(c *gin.Context)
+	DeleteSession(c *gin.Context, params DeleteSessionParams)
 	// Register a new user
 	// (POST /v1/users)
 	PostRegister(c *gin.Context)
@@ -494,7 +542,37 @@ func (siw *ServerInterfaceWrapper) GetAdminInvites(c *gin.Context) {
 // PostAdminInvite operation middleware
 func (siw *ServerInterfaceWrapper) PostAdminInvite(c *gin.Context) {
 
+	var err error
+	_ = err
+
 	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminInviteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
@@ -503,7 +581,7 @@ func (siw *ServerInterfaceWrapper) PostAdminInvite(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PostAdminInvite(c)
+	siw.Handler.PostAdminInvite(c, params)
 }
 
 // PatchAdminInvite operation middleware
@@ -523,6 +601,33 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 
 	c.Set(string(CookieAuthScopes), []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminInviteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -530,7 +635,7 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PatchAdminInvite(c, code)
+	siw.Handler.PatchAdminInvite(c, code, params)
 }
 
 // GetAdminPermissions operation middleware
@@ -602,6 +707,33 @@ func (siw *ServerInterfaceWrapper) PatchAdminUser(c *gin.Context) {
 
 	c.Set(string(CookieAuthScopes), []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminUserParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -609,7 +741,7 @@ func (siw *ServerInterfaceWrapper) PatchAdminUser(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PatchAdminUser(c, userId)
+	siw.Handler.PatchAdminUser(c, userId, params)
 }
 
 // GetAdminUserPermissions operation middleware
@@ -656,6 +788,33 @@ func (siw *ServerInterfaceWrapper) PutAdminUserPermissions(c *gin.Context) {
 
 	c.Set(string(CookieAuthScopes), []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminUserPermissionsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -663,7 +822,7 @@ func (siw *ServerInterfaceWrapper) PutAdminUserPermissions(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PutAdminUserPermissions(c, userId)
+	siw.Handler.PutAdminUserPermissions(c, userId, params)
 }
 
 // PostAdminRevokeSessions operation middleware
@@ -683,6 +842,33 @@ func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
 
 	c.Set(string(CookieAuthScopes), []string{})
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminRevokeSessionsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -690,7 +876,7 @@ func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PostAdminRevokeSessions(c, userId)
+	siw.Handler.PostAdminRevokeSessions(c, userId, params)
 }
 
 // PostCaptcha operation middleware
@@ -737,7 +923,37 @@ func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 // PatchPassword operation middleware
 func (siw *ServerInterfaceWrapper) PatchPassword(c *gin.Context) {
 
+	var err error
+	_ = err
+
 	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchPasswordParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
@@ -746,7 +962,7 @@ func (siw *ServerInterfaceWrapper) PatchPassword(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.PatchPassword(c)
+	siw.Handler.PatchPassword(c, params)
 }
 
 // PostPasswordReset operation middleware
@@ -791,7 +1007,37 @@ func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
 // DeleteSession operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 
+	var err error
+	_ = err
+
 	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteSessionParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
@@ -800,7 +1046,7 @@ func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.DeleteSession(c)
+	siw.Handler.DeleteSession(c, params)
 }
 
 // PostRegister operation middleware

@@ -26,17 +26,18 @@ type LoginRequest struct {
 
 // RegisterRequest is the request body for POST /v1/users.
 type RegisterRequest struct {
-	Email         string `json:"email" binding:"required,email"`
-	Password      string `json:"password" binding:"required,min=6"`
-	Nickname      string `json:"nickname" binding:"omitempty,max=100"`
-	CaptchaID     string `json:"captchaId" binding:"required"`
-	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
-	InviteCode    string `json:"inviteCode" binding:"omitempty,max=64"`
+	Email      string `json:"email" binding:"required,email"`
+	Password   string `json:"password" binding:"required,min=6"`
+	Nickname   string `json:"nickname" binding:"omitempty,max=100"`
+	Code       string `json:"code" binding:"required"`
+	InviteCode string `json:"inviteCode" binding:"omitempty,max=64"`
 }
 
 // EmailCodeRequest is the request body for POST /v1/email/code.
 type EmailCodeRequest struct {
-	Email string `json:"email" binding:"required,email"`
+	Email         string `json:"email" binding:"required,email"`
+	CaptchaID     string `json:"captchaId" binding:"required"`
+	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
 }
 
 // ChangePasswordRequest is the request body for PATCH /v1/password.
@@ -46,7 +47,9 @@ type ChangePasswordRequest struct {
 }
 
 type PasswordResetCodeRequest struct {
-	Email string `json:"email" binding:"required,email"`
+	Email         string `json:"email" binding:"required,email"`
+	CaptchaID     string `json:"captchaId" binding:"required"`
+	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
 }
 
 type PasswordResetRequest struct {
