@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"html"
 	"net"
 	"net/smtp"
 	"strings"
@@ -13,7 +14,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const emailCodeKeyPrefix = "email_code:"
+const (
+	emailCodeKeyPrefix = "email_code:"
+	emailCodeBoundary  = "remail-email-code-boundary"
+)
 
 // EmailCodeStore stores email verification codes in Redis.
 type EmailCodeStore struct {
@@ -148,15 +152,69 @@ func (s *EmailCodeSender) SendEmailCode(ctx context.Context, email, code string)
 }
 
 func emailCodeMessage(from, to, code string) string {
+	code = emailBodyValue(code)
+	plainBody := emailCodePlainText(code)
+	htmlBody := emailCodeHTML(code)
+
 	return fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: ReMail verification code\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nYour ReMail verification code is: %s\r\nIt expires in 10 minutes.\r\n",
+		"From: %s\r\nTo: %s\r\nSubject: ReMail verification code\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n%s\r\n--%s--\r\n",
 		smtpHeaderValue(from),
 		smtpHeaderValue(to),
-		code,
+		emailCodeBoundary,
+		emailCodeBoundary,
+		plainBody,
+		emailCodeBoundary,
+		htmlBody,
+		emailCodeBoundary,
 	)
+}
+
+func emailCodePlainText(code string) string {
+	return fmt.Sprintf("Your ReMail verification code is: %s\r\nIt expires in 10 minutes.\r\nIf you did not request this code, you can ignore this email.\r\n", code)
+}
+
+func emailCodeHTML(code string) string {
+	code = html.EscapeString(code)
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReMail verification code</title>
+</head>
+<body style="margin:0;background:#f6f7f9;color:#111827;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;margin:0;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="width:100%%;max-width:520px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+          <tr>
+            <td style="height:4px;background:#ff6a3d;"></td>
+          </tr>
+          <tr>
+            <td style="padding:32px 32px 28px;">
+              <div style="font-size:14px;line-height:20px;font-weight:700;color:#ff6a3d;margin:0 0 18px;">ReMail</div>
+              <h1 style="font-size:22px;line-height:30px;font-weight:700;color:#111827;margin:0 0 10px;">Verification code</h1>
+              <p style="font-size:15px;line-height:24px;color:#4b5563;margin:0 0 24px;">Use this code to continue signing in to ReMail.</p>
+              <div style="font-size:32px;line-height:40px;font-weight:700;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:18px 20px;text-align:center;margin:0 0 20px;">%s</div>
+              <p style="font-size:14px;line-height:22px;color:#6b7280;margin:0;">This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`, code)
 }
 
 func smtpHeaderValue(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
-	return strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return strings.TrimSpace(value)
+}
+
+func emailBodyValue(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return strings.TrimSpace(value)
 }

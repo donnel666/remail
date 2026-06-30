@@ -3,8 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GO_VERSION: "1.25"
+  NODE_VERSION: "22"
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   backend:
@@ -33,29 +44,29 @@ jobs:
           --health-retries 5
         ports:
           - 6379:6379
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: remail
-          MINIO_ROOT_PASSWORD: remail_secret
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 9000:9000
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: go mod download
+
+      - name: Check Go formatting
+        run: |
+          UNFORMATTED=$(gofmt -l api cmd internal)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "$UNFORMATTED"
+            exit 1
+          fi
 
       - name: Verify OpenAPI generated code
         run: |
@@ -70,6 +81,28 @@ jobs:
           pnpm build
           mkdir -p ../cmd/server/webdist
           cp -r dist/* ../cmd/server/webdist/
+
+      - name: Start MinIO
+        run: |
+          docker rm -f remail-ci-minio >/dev/null 2>&1 || true
+          docker run -d \
+            --name remail-ci-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=remail \
+            -e MINIO_ROOT_PASSWORD=remail_secret \
+            minio/minio:latest server /data --console-address ":9001"
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx remail-ci-minio; then
+              docker logs remail-ci-minio
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs remail-ci-minio
+          exit 1
 
       - name: Run go vet
         run: go vet ./...
@@ -102,7 +135,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install pnpm
         run: corepack enable && pnpm --version
@@ -143,30 +176,18 @@ jobs:
           --health-retries 5
         ports:
           - 6379:6379
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: remail
-          MINIO_ROOT_PASSWORD: remail_secret
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 9000:9000
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Build frontend for embed
         working-directory: web
@@ -177,6 +198,28 @@ jobs:
           mkdir -p ../cmd/server/webdist
           cp -r dist/* ../cmd/server/webdist/
 
+      - name: Start MinIO
+        run: |
+          docker rm -f remail-smoke-minio >/dev/null 2>&1 || true
+          docker run -d \
+            --name remail-smoke-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=remail \
+            -e MINIO_ROOT_PASSWORD=remail_secret \
+            minio/minio:latest server /data --console-address ":9001"
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx remail-smoke-minio; then
+              docker logs remail-smoke-minio
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs remail-smoke-minio
+          exit 1
+
       - name: Build server binary
         run: go build -o /tmp/remail-server ./cmd/server
 
@@ -184,15 +227,15 @@ jobs:
         run: |
           /tmp/remail-server &
           SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
-          # Wait for server to be ready (up to 30 seconds)
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
+            if curl -sf http://localhost:8080/healthz >/dev/null; then
               echo "Server ready after ${i}s"
-              break
+              exit 0
             fi
             sleep 1
           done
+          exit 1
         env:
           MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
           REDIS_ADDR: "127.0.0.1:6379"
@@ -212,7 +255,7 @@ jobs:
           test "$HTTP_CODE" = "200"
           echo "$BODY" | grep -q '"ok"'
 
-      - name: Verify /readyz returns 200 (all deps healthy)
+      - name: Verify /readyz returns 200
         run: |
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/readyz)
           BODY=$(curl -sf http://localhost:8080/readyz)
@@ -231,7 +274,7 @@ jobs:
 
       - name: Shutdown server
         if: always()
-        run: kill $SERVER_PID 2>/dev/null || true
+        run: kill "$SERVER_PID" 2>/dev/null || true
 
   docker:
     needs: [smoke]
@@ -241,3 +284,193 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t remail:ci .
+
+  image:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [docker]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image tags
+        id: image
+        shell: bash
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE_NAME}:${GITHUB_SHA}"
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              echo "${IMAGE_NAME}:main"
+            elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "${IMAGE_NAME}:${GITHUB_REF_NAME}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build release artifact
+        run: |
+          corepack enable
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+          mkdir -p cmd/server/webdist
+          cp -r web/dist/* cmd/server/webdist/
+          mkdir -p dist/remail
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
+          cp -r migrations dist/remail/migrations
+          cp deploy/compose.yml deploy/nginx.conf dist/remail/
+          tar -czf "dist/remail-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C dist remail
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          artifact="dist/remail-${TAG_NAME}-linux-amd64.tar.gz"
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG_NAME" "$artifact" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG_NAME" \
+              --generate-notes
+          fi
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [image]
+    runs-on: [self-hosted, linux, x64, remail-test]
+    concurrency:
+      group: remail-test-deploy
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare deployment files
+        env:
+          APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          SMTP_ADDR: ${{ secrets.SMTP_ADDR }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: |
+          umask 077
+          mkdir -p /opt/remail/certs
+          cp deploy/compose.yml deploy/nginx.conf /opt/remail/
+          cat > /opt/remail/.env <<EOF
+          APP_IMAGE=${APP_IMAGE}
+          DEPLOY_DOMAIN=${DEPLOY_DOMAIN}
+          MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+          MYSQL_DATABASE=remail
+          MYSQL_USER=remail
+          MYSQL_PASSWORD=${MYSQL_PASSWORD}
+          MYSQL_DSN=remail:${MYSQL_PASSWORD}@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local
+          REDIS_PASSWORD=${REDIS_PASSWORD}
+          MINIO_ROOT_USER=${MINIO_ROOT_USER}
+          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+          MINIO_BUCKET=remail
+          SESSION_SECRET=${SESSION_SECRET}
+          SESSION_SECURE=true
+          SMTP_ADDR=${SMTP_ADDR}
+          SMTP_USERNAME=${SMTP_USERNAME}
+          SMTP_PASSWORD=${SMTP_PASSWORD}
+          SMTP_FROM=${SMTP_FROM}
+          PPROF_ADDR=:6060
+          EOF
+          sed -i 's/^          //' /opt/remail/.env
+          chmod 600 /opt/remail/.env
+
+      - name: Ensure origin certificate
+        run: |
+          set -euo pipefail
+          cd /opt/remail
+          DOMAIN="$(awk -F= '$1 == "DEPLOY_DOMAIN" {print $2}' .env)"
+          if [ -z "$DOMAIN" ]; then
+            echo "DEPLOY_DOMAIN is required" >&2
+            exit 1
+          fi
+          if [ ! -s "certs/${DOMAIN}.crt" ] || [ ! -s "certs/${DOMAIN}.key" ]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+              -keyout "certs/${DOMAIN}.key" \
+              -out "certs/${DOMAIN}.crt" \
+              -subj "/CN=${DOMAIN}" \
+              -addext "subjectAltName=DNS:${DOMAIN}"
+          fi
+
+      - name: Deploy compose stack
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd /opt/remail
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker is required on the deploy host" >&2
+            exit 1
+          fi
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "docker compose plugin is required on the deploy host" >&2
+            exit 1
+          fi
+          if ! command -v openssl >/dev/null 2>&1; then
+            echo "openssl is required on the deploy host" >&2
+            exit 1
+          fi
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          docker compose --env-file .env -f compose.yml pull server
+          docker compose --env-file .env -f compose.yml up -d --remove-orphans
+          for i in $(seq 1 60); do
+            if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'; then
+              docker compose --env-file .env -f compose.yml ps
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose --env-file .env -f compose.yml logs --tail=200 server nginx
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          exit 1
