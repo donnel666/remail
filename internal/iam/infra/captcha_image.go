@@ -237,12 +237,12 @@ func inBounds(x, y int) bool {
 	return x >= 0 && x < captchaImageWidth && y >= 0 && y < captchaImageHeight
 }
 
-func clamp(value, min, max int) int {
-	if value < min {
-		return min
+func clamp(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
 	}
-	if value > max {
-		return max
+	if value > maxValue {
+		return maxValue
 	}
 	return value
 }

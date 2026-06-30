@@ -158,15 +158,15 @@ func divisionExpression() (captchaExpression, error) {
 	return captchaExpression{question: fmt.Sprintf("%d÷%d", dividend, divisor), answer: answer}, nil
 }
 
-func cryptoRandRange(min, max int) (int, error) {
-	if max < min {
-		return 0, fmt.Errorf("invalid random range %d..%d", min, max)
+func cryptoRandRange(minValue, maxValue int) (int, error) {
+	if maxValue < minValue {
+		return 0, fmt.Errorf("invalid random range %d..%d", minValue, maxValue)
 	}
-	value, err := cryptoRandInt(max - min + 1)
+	value, err := cryptoRandInt(maxValue - minValue + 1)
 	if err != nil {
 		return 0, err
 	}
-	return min + value, nil
+	return minValue + value, nil
 }
 
 func cryptoRandInt(maxExclusive int) (int, error) {
