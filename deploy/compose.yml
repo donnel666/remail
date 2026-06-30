@@ -1,3 +1,5 @@
+name: remail-app
+
 services:
   mysql:
     image: mysql:8.0
