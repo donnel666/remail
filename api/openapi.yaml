@@ -13,11 +13,11 @@ servers:
     description: Local development
 
 paths:
+  # --- System ---
   /healthz:
     get:
       operationId: healthz
       summary: Liveness probe
-      description: Returns OK if the process is alive. Does not check dependencies.
       tags:
         - System
       responses:
@@ -32,9 +32,6 @@ paths:
     get:
       operationId: readyz
       summary: Readiness probe
-      description: |
-        Returns OK only if all external dependencies (MySQL, Redis, MinIO) are reachable.
-        Returns 503 if any dependency is unhealthy.
       tags:
         - System
       responses:
@@ -51,7 +48,758 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReadyzResponse"
 
+  # --- Activation ---
+  /v1/activation:
+    get:
+      operationId: getActivation
+      summary: Check if first activation is needed
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Activation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationResponse"
+
+    post:
+      operationId: postActivation
+      summary: Activate system and create first super_admin
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivationRequest"
+      responses:
+        "201":
+          description: Super admin created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
+        "409":
+          description: Activation already completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Captcha ---
+  /v1/captchas:
+    post:
+      operationId: postCaptcha
+      summary: Create a captcha challenge
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Captcha created (answer is never in the response)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptchaResponse"
+
+  /v1/email/code:
+    post:
+      operationId: postEmailCode
+      summary: Send an email verification code
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailCodeRequest"
+      responses:
+        "204":
+          description: Verification code request accepted
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Mail service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Registration ---
+  /v1/users:
+    post:
+      operationId: postRegister
+      summary: Register a new user
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Captcha incorrect or validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Sessions (Login/Logout) ---
+  /v1/sessions:
+    post:
+      operationId: postLogin
+      summary: Login and create a session
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful, HttpOnly cookie set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                description: sid HttpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Account or password is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/sessions/current:
+    delete:
+      operationId: deleteSession
+      summary: Logout and delete current session
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Logged out successfully
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Current User ---
+  /v1/me:
+    get:
+      operationId: getMe
+      summary: Get current authenticated user profile
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Password Change ---
+  /v1/password:
+    patch:
+      operationId: patchPassword
+      summary: Change current user's password
+      description: Supplementary P1-I1 change-password endpoint.
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: Password changed, all other sessions invalidated
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Account or password is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/password/reset/request:
+    post:
+      operationId: postPasswordResetRequest
+      summary: Request a password reset verification code
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetCodeRequest"
+      responses:
+        "204":
+          description: Password reset request accepted
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Mail service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/password/reset:
+    post:
+      operationId: postPasswordReset
+      summary: Reset password with email verification code
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Password reset successfully
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Verification code is incorrect or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Admin: Users ---
+  /v1/admin/users:
+    get:
+      operationId: getAdminUsers
+      summary: List all users (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}:
+    patch:
+      operationId: patchAdminUser
+      summary: Update a user (enable/disable, change role)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Invalid request body or user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid role level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/sessions/revoke:
+    post:
+      operationId: postAdminRevokeSessions
+      summary: Force logout a user (revoke all sessions)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: All sessions revoked
+        "400":
+          description: Invalid user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/permissions:
+    get:
+      operationId: getAdminPermissions
+      summary: List IAM permission catalog
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Permission catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionCatalogResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/permissions:
+    get:
+      operationId: getAdminUserPermissions
+      summary: Get a user's permission overrides
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User permission overrides
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPermissionPoliciesResponse"
+        "400":
+          description: Invalid user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: putAdminUserPermissions
+      summary: Replace a user's permission overrides
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateUserPermissionsRequest"
+      responses:
+        "204":
+          description: User permission overrides saved
+        "400":
+          description: Invalid request body or user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid permission policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites:
+    get:
+      operationId: getAdminInvites
+      summary: List invites
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Invite list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postAdminInvite
+      summary: Create invite
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateInviteRequest"
+      responses:
+        "201":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/InviteResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Invite already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invite is invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites/{code}:
+    patch:
+      operationId: patchAdminInvite
+      summary: Update invite
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateInviteRequest"
+      responses:
+        "200":
+          description: Invite updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/InviteResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Invite not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invite is invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sid
+      description: HttpOnly session cookie set after login
+
   schemas:
     HealthResponse:
       type: object
@@ -99,4 +847,389 @@ components:
           additionalProperties:
             type: string
             example: "Email format is invalid."
+      additionalProperties: false
+
+    # --- IAM Schemas ---
+    ActivationResponse:
+      type: object
+      required:
+        - needed
+      properties:
+        needed:
+          type: boolean
+          description: Whether the system requires first-time activation
+      additionalProperties: false
+
+    ActivationRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        nickname:
+          type: string
+          maxLength: 100
+      additionalProperties: false
+
+    CaptchaResponse:
+      type: object
+      required:
+        - captchaId
+        - image
+      properties:
+        captchaId:
+          type: string
+          description: Captcha identifier (must be submitted with answer)
+        image:
+          type: string
+          description: Base64-encoded PNG data URI of the captcha image
+      additionalProperties: false
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - captchaId
+        - captchaAnswer
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        nickname:
+          type: string
+          maxLength: 100
+        captchaId:
+          type: string
+        captchaAnswer:
+          type: string
+        inviteCode:
+          type: string
+          maxLength: 64
+      additionalProperties: false
+
+    EmailCodeRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+      additionalProperties: false
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+        - captchaId
+        - captchaAnswer
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        captchaId:
+          type: string
+        captchaAnswer:
+          type: string
+      additionalProperties: false
+
+    LoginResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          $ref: "#/components/schemas/UserResponse"
+      additionalProperties: false
+
+    ChangePasswordRequest:
+      type: object
+      required:
+        - oldPassword
+        - newPassword
+      properties:
+        oldPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 6
+      additionalProperties: false
+
+    PasswordResetCodeRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+      additionalProperties: false
+
+    PasswordResetRequest:
+      type: object
+      required:
+        - email
+        - code
+        - newPassword
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+        newPassword:
+          type: string
+          minLength: 6
+      additionalProperties: false
+
+    UserResponse:
+      type: object
+      required:
+        - id
+        - email
+        - nickname
+        - role
+        - roleLevel
+        - enabled
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        nickname:
+          type: string
+        role:
+          type: string
+          enum:
+            - user
+            - supplier
+            - admin
+            - super_admin
+        roleLevel:
+          type: integer
+          description: |
+            Numeric role level: 10=user, 20=supplier, 80=admin, 100=super_admin
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    AdminUpdateUserRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        roleLevel:
+          type: integer
+          minimum: 10
+          maximum: 100
+      additionalProperties: false
+
+    PermissionCatalogResponse:
+      type: object
+      required:
+        - permissions
+      properties:
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionCatalogItemResponse"
+      additionalProperties: false
+
+    PermissionCatalogItemResponse:
+      type: object
+      required:
+        - resource
+        - actions
+      properties:
+        resource:
+          type: string
+        actions:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    PermissionPolicyRequest:
+      type: object
+      required:
+        - resource
+        - action
+        - effect
+      properties:
+        resource:
+          type: string
+        action:
+          type: string
+        effect:
+          type: string
+          enum:
+            - allow
+            - deny
+      additionalProperties: false
+
+    AdminUpdateUserPermissionsRequest:
+      type: object
+      required:
+        - policies
+      properties:
+        policies:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPolicyRequest"
+      additionalProperties: false
+
+    UserPermissionPoliciesResponse:
+      type: object
+      required:
+        - policies
+      properties:
+        policies:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPolicyResponse"
+      additionalProperties: false
+
+    PermissionPolicyResponse:
+      type: object
+      required:
+        - resource
+        - action
+        - effect
+      properties:
+        resource:
+          type: string
+        action:
+          type: string
+        effect:
+          type: string
+          enum:
+            - allow
+            - deny
+      additionalProperties: false
+
+    AdminUserListResponse:
+      type: object
+      required:
+        - users
+        - total
+        - offset
+        - limit
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    AdminCreateInviteRequest:
+      type: object
+      required:
+        - code
+        - maxUse
+      properties:
+        code:
+          type: string
+          maxLength: 64
+        enabled:
+          type: boolean
+        maxUse:
+          type: integer
+          minimum: 1
+        expireAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminUpdateInviteRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        maxUse:
+          type: integer
+          minimum: 1
+        expireAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    InviteResponse:
+      type: object
+      required:
+        - code
+        - enabled
+        - maxUse
+        - used
+        - createdAt
+        - updatedAt
+      properties:
+        code:
+          type: string
+        enabled:
+          type: boolean
+        maxUse:
+          type: integer
+        used:
+          type: integer
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    InviteListResponse:
+      type: object
+      required:
+        - invites
+        - total
+        - offset
+        - limit
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
       additionalProperties: false

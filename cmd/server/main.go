@@ -40,11 +40,13 @@ func main() {
 	}
 	defer cleanup()
 
+	pprofSrv := startPprofServer(p.PprofAddr)
+
 	// Resolve migrations directory:
-	//   1. MIGRATIONS_DIR env var (Docker sets this)
+	//   1. cfg.Migrations.Dir (MIGRATIONS_DIR, Docker sets this)
 	//   2. <exe-dir>/migrations (flat deploy layout)
 	//   3. ./migrations (local dev CWD)
-	migrationsDir := os.Getenv("MIGRATIONS_DIR")
+	migrationsDir := cfg.Migrations.Dir
 	if migrationsDir == "" {
 		migrationsDir = filepath.Join(execDir(), "migrations")
 		if _, err := os.Stat(migrationsDir); err != nil {
@@ -69,7 +71,11 @@ func main() {
 	}
 
 	// Set up Gin router
-	router := api.SetupRouter(p, feFS)
+	router, err := api.SetupRouter(p, feFS)
+	if err != nil {
+		slog.Error("router setup failed", "error", err)
+		os.Exit(1)
+	}
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -102,6 +108,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 	}
+	shutdownPprofServer(shutdownCtx, pprofSrv)
 
 	slog.Info("server exited")
 }

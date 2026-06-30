@@ -1,9 +1,9 @@
 package middleware
 
 import (
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/donnel666/remail/internal/platform"
 )
 
 // RequestID returns a middleware that ensures every request has an X-Request-ID.

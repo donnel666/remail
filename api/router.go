@@ -5,15 +5,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
+	iamapi "github.com/donnel666/remail/internal/iam/api"
+	iaminfra "github.com/donnel666/remail/internal/iam/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/gin-gonic/gin"
 )
 
 // SetupRouter creates the Gin engine with all middleware and route registrations.
-// frontendFS is the embedded frontend dist filesystem (nil in development mode).
-func SetupRouter(p *platform.Platform, frontendFS fs.FS) *gin.Engine {
+// feFS is the embedded frontend dist filesystem (nil in development mode).
+func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 	r := gin.New()
 
 	// Global middleware
@@ -21,30 +23,44 @@ func SetupRouter(p *platform.Platform, frontendFS fs.FS) *gin.Engine {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.CORS("http://localhost:3000", "http://127.0.0.1:3000"))
 
-	// Health check endpoints
+	// Health check endpoints (outside /v1)
 	h := health.NewHandler(p)
-	RegisterHandlers(r, h)
+	r.GET("/healthz", h.Healthz)
+	r.GET("/readyz", h.Readyz)
 
-	// Serve embedded frontend SPA if available
-	if frontendFS != nil {
-		serveEmbeddedFrontend(r, frontendFS)
+	// API v1 routes
+	v1 := r.Group("/v1")
+	{
+		// IAM module (activation, auth, users)
+		emailCodeSender := iaminfra.NewEmailCodeSender(iaminfra.EmailCodeSenderConfig{
+			Addr:     p.SMTP.Addr,
+			Username: p.SMTP.Username,
+			Password: p.SMTP.Password,
+			From:     p.SMTP.From,
+		})
+		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, emailCodeSender)
+		if err != nil {
+			return nil, err
+		}
+		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 	}
 
-	return r
+	// Serve embedded frontend SPA if available
+	if feFS != nil {
+		serveEmbeddedFrontend(r, feFS)
+	}
+
+	return r, nil
 }
 
 // serveEmbeddedFrontend serves the SPA frontend from the embedded filesystem.
 func serveEmbeddedFrontend(r *gin.Engine, feFS fs.FS) {
-	// Rsbuild outputs to:  dist/index.html  dist/static/js/...  dist/static/css/...
-	// The HTML references /static/js/... so we need to serve /static from the embedded fs.
 	if staticFS, err := fs.Sub(feFS, "static"); err == nil {
 		r.StaticFS("/static", http.FS(staticFS))
 	}
 
-	// SPA fallback: serve index.html for all non-API routes
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
-		// Don't serve index.html for API routes or health checks
 		if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
 			c.Status(http.StatusNotFound)
 			return

@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-06-30 | V1.1 | Codex | 补充 P1 性能诊断 pprof 入口；不改变业务 API、OpenAPI 和部署策略。 |
 
 > 目标：快速迭代、控制复杂度、保持业务边界清楚。
 >
@@ -58,6 +59,12 @@ minio                MinIO
 | 凭据哈希辅助 | HMAC-SHA256/SHA-256 封装 | 仅用于指纹、前缀、索引或请求指纹；不替代原值保存策略。 |
 | 测试 | `testing` + `testify` + `httptest` | 单元和 HTTP handler 测试。 |
 | 集成测试 | `testcontainers-go` | MySQL/Redis/MinIO 约束和闭环测试。 |
+
+补充设计：
+
+| 能力 | 选型 | 规则 |
+|------|------|------|
+| 性能诊断 | 标准库 `net/http/pprof` | 通过独立本地诊断 HTTP server 暴露 `/debug/pprof/`；`PPROF_ADDR` 为空时关闭，启用时建议绑定 `127.0.0.1:6060`。该入口不进入 OpenAPI，不作为业务 API 契约。 |
 
 ORM 使用规则：
 

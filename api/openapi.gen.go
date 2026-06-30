@@ -4,19 +4,324 @@
 package api
 
 import (
+	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+const (
+	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
+)
+
+// Defines values for PermissionPolicyRequestEffect.
+const (
+	PermissionPolicyRequestEffectAllow PermissionPolicyRequestEffect = "allow"
+	PermissionPolicyRequestEffectDeny  PermissionPolicyRequestEffect = "deny"
+)
+
+// Valid indicates whether the value is a known member of the PermissionPolicyRequestEffect enum.
+func (e PermissionPolicyRequestEffect) Valid() bool {
+	switch e {
+	case PermissionPolicyRequestEffectAllow:
+		return true
+	case PermissionPolicyRequestEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PermissionPolicyResponseEffect.
+const (
+	PermissionPolicyResponseEffectAllow PermissionPolicyResponseEffect = "allow"
+	PermissionPolicyResponseEffectDeny  PermissionPolicyResponseEffect = "deny"
+)
+
+// Valid indicates whether the value is a known member of the PermissionPolicyResponseEffect enum.
+func (e PermissionPolicyResponseEffect) Valid() bool {
+	switch e {
+	case PermissionPolicyResponseEffectAllow:
+		return true
+	case PermissionPolicyResponseEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserResponseRole.
+const (
+	Admin      UserResponseRole = "admin"
+	SuperAdmin UserResponseRole = "super_admin"
+	Supplier   UserResponseRole = "supplier"
+	User       UserResponseRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the UserResponseRole enum.
+func (e UserResponseRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case SuperAdmin:
+		return true
+	case Supplier:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// ActivationRequest defines model for ActivationRequest.
+type ActivationRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	Nickname *string             `json:"nickname,omitempty"`
+	Password string              `json:"password"`
+}
+
+// ActivationResponse defines model for ActivationResponse.
+type ActivationResponse struct {
+	// Needed Whether the system requires first-time activation
+	Needed bool `json:"needed"`
+}
+
+// AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
+type AdminCreateInviteRequest struct {
+	Code     string     `json:"code"`
+	Enabled  *bool      `json:"enabled,omitempty"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	MaxUse   int        `json:"maxUse"`
+}
+
+// AdminUpdateInviteRequest defines model for AdminUpdateInviteRequest.
+type AdminUpdateInviteRequest struct {
+	Enabled  *bool      `json:"enabled,omitempty"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	MaxUse   *int       `json:"maxUse,omitempty"`
+}
+
+// AdminUpdateUserPermissionsRequest defines model for AdminUpdateUserPermissionsRequest.
+type AdminUpdateUserPermissionsRequest struct {
+	Policies []PermissionPolicyRequest `json:"policies"`
+}
+
+// AdminUpdateUserRequest defines model for AdminUpdateUserRequest.
+type AdminUpdateUserRequest struct {
+	Enabled   *bool `json:"enabled,omitempty"`
+	RoleLevel *int  `json:"roleLevel,omitempty"`
+}
+
+// AdminUserListResponse defines model for AdminUserListResponse.
+type AdminUserListResponse struct {
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
+	Total  int            `json:"total"`
+	Users  []UserResponse `json:"users"`
+}
+
+// CaptchaResponse defines model for CaptchaResponse.
+type CaptchaResponse struct {
+	// CaptchaId Captcha identifier (must be submitted with answer)
+	CaptchaId string `json:"captchaId"`
+
+	// Image Base64-encoded PNG data URI of the captcha image
+	Image string `json:"image"`
+}
+
+// ChangePasswordRequest defines model for ChangePasswordRequest.
+type ChangePasswordRequest struct {
+	NewPassword string `json:"newPassword"`
+	OldPassword string `json:"oldPassword"`
+}
+
+// EmailCodeRequest defines model for EmailCodeRequest.
+type EmailCodeRequest struct {
+	Email openapi_types.Email `json:"email"`
+}
+
+// Error defines model for Error.
+type Error struct {
+	// Fields Field-level validation errors (optional)
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Message Safe business error message for the user
+	Message string `json:"message"`
+
+	// RequestId Correlation ID for troubleshooting
+	RequestId string `json:"requestId"`
+}
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status string `json:"status"`
 }
 
+// InviteListResponse defines model for InviteListResponse.
+type InviteListResponse struct {
+	Invites []InviteResponse `json:"invites"`
+	Limit   int              `json:"limit"`
+	Offset  int              `json:"offset"`
+	Total   int              `json:"total"`
+}
+
+// InviteResponse defines model for InviteResponse.
+type InviteResponse struct {
+	Code      string     `json:"code"`
+	CreatedAt time.Time  `json:"createdAt"`
+	Enabled   bool       `json:"enabled"`
+	ExpireAt  *time.Time `json:"expireAt,omitempty"`
+	MaxUse    int        `json:"maxUse"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Used      int        `json:"used"`
+}
+
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	CaptchaAnswer string              `json:"captchaAnswer"`
+	CaptchaId     string              `json:"captchaId"`
+	Email         openapi_types.Email `json:"email"`
+	Password      string              `json:"password"`
+}
+
+// LoginResponse defines model for LoginResponse.
+type LoginResponse struct {
+	User UserResponse `json:"user"`
+}
+
+// PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
+type PasswordResetCodeRequest struct {
+	Email openapi_types.Email `json:"email"`
+}
+
+// PasswordResetRequest defines model for PasswordResetRequest.
+type PasswordResetRequest struct {
+	Code        string              `json:"code"`
+	Email       openapi_types.Email `json:"email"`
+	NewPassword string              `json:"newPassword"`
+}
+
+// PermissionCatalogItemResponse defines model for PermissionCatalogItemResponse.
+type PermissionCatalogItemResponse struct {
+	Actions  []string `json:"actions"`
+	Resource string   `json:"resource"`
+}
+
+// PermissionCatalogResponse defines model for PermissionCatalogResponse.
+type PermissionCatalogResponse struct {
+	Permissions []PermissionCatalogItemResponse `json:"permissions"`
+}
+
+// PermissionPolicyRequest defines model for PermissionPolicyRequest.
+type PermissionPolicyRequest struct {
+	Action   string                        `json:"action"`
+	Effect   PermissionPolicyRequestEffect `json:"effect"`
+	Resource string                        `json:"resource"`
+}
+
+// PermissionPolicyRequestEffect defines model for PermissionPolicyRequest.Effect.
+type PermissionPolicyRequestEffect string
+
+// PermissionPolicyResponse defines model for PermissionPolicyResponse.
+type PermissionPolicyResponse struct {
+	Action   string                         `json:"action"`
+	Effect   PermissionPolicyResponseEffect `json:"effect"`
+	Resource string                         `json:"resource"`
+}
+
+// PermissionPolicyResponseEffect defines model for PermissionPolicyResponse.Effect.
+type PermissionPolicyResponseEffect string
+
 // ReadyzResponse defines model for ReadyzResponse.
 type ReadyzResponse struct {
 	Dependencies map[string]string `json:"dependencies"`
 	Status       string            `json:"status"`
 }
+
+// RegisterRequest defines model for RegisterRequest.
+type RegisterRequest struct {
+	CaptchaAnswer string              `json:"captchaAnswer"`
+	CaptchaId     string              `json:"captchaId"`
+	Email         openapi_types.Email `json:"email"`
+	InviteCode    *string             `json:"inviteCode,omitempty"`
+	Nickname      *string             `json:"nickname,omitempty"`
+	Password      string              `json:"password"`
+}
+
+// UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
+type UserPermissionPoliciesResponse struct {
+	Policies []PermissionPolicyResponse `json:"policies"`
+}
+
+// UserResponse defines model for UserResponse.
+type UserResponse struct {
+	CreatedAt   time.Time        `json:"createdAt"`
+	Email       string           `json:"email"`
+	Enabled     bool             `json:"enabled"`
+	Id          int              `json:"id"`
+	LastLoginAt *time.Time       `json:"lastLoginAt,omitempty"`
+	Nickname    string           `json:"nickname"`
+	Role        UserResponseRole `json:"role"`
+
+	// RoleLevel Numeric role level: 10=user, 20=supplier, 80=admin, 100=super_admin
+	RoleLevel int       `json:"roleLevel"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// UserResponseRole defines model for UserResponse.Role.
+type UserResponseRole string
+
+// cookieAuthContextKey is the context key for cookieAuth security scheme
+type cookieAuthContextKey string
+
+// GetAdminInvitesParams defines parameters for GetAdminInvites.
+type GetAdminInvitesParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminUsersParams defines parameters for GetAdminUsers.
+type GetAdminUsersParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostActivationJSONRequestBody defines body for PostActivation for application/json ContentType.
+type PostActivationJSONRequestBody = ActivationRequest
+
+// PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
+type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
+
+// PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
+type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
+
+// PatchAdminUserJSONRequestBody defines body for PatchAdminUser for application/json ContentType.
+type PatchAdminUserJSONRequestBody = AdminUpdateUserRequest
+
+// PutAdminUserPermissionsJSONRequestBody defines body for PutAdminUserPermissions for application/json ContentType.
+type PutAdminUserPermissionsJSONRequestBody = AdminUpdateUserPermissionsRequest
+
+// PostEmailCodeJSONRequestBody defines body for PostEmailCode for application/json ContentType.
+type PostEmailCodeJSONRequestBody = EmailCodeRequest
+
+// PatchPasswordJSONRequestBody defines body for PatchPassword for application/json ContentType.
+type PatchPasswordJSONRequestBody = ChangePasswordRequest
+
+// PostPasswordResetJSONRequestBody defines body for PostPasswordReset for application/json ContentType.
+type PostPasswordResetJSONRequestBody = PasswordResetRequest
+
+// PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
+type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
+
+// PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
+type PostLoginJSONRequestBody = LoginRequest
+
+// PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
+type PostRegisterJSONRequestBody = RegisterRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -26,6 +331,66 @@ type ServerInterface interface {
 	// Readiness probe
 	// (GET /readyz)
 	Readyz(c *gin.Context)
+	// Check if first activation is needed
+	// (GET /v1/activation)
+	GetActivation(c *gin.Context)
+	// Activate system and create first super_admin
+	// (POST /v1/activation)
+	PostActivation(c *gin.Context)
+	// List invites
+	// (GET /v1/admin/invites)
+	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
+	// Create invite
+	// (POST /v1/admin/invites)
+	PostAdminInvite(c *gin.Context)
+	// Update invite
+	// (PATCH /v1/admin/invites/{code})
+	PatchAdminInvite(c *gin.Context, code string)
+	// List IAM permission catalog
+	// (GET /v1/admin/permissions)
+	GetAdminPermissions(c *gin.Context)
+	// List all users (admin only)
+	// (GET /v1/admin/users)
+	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
+	// Update a user (enable/disable, change role)
+	// (PATCH /v1/admin/users/{userId})
+	PatchAdminUser(c *gin.Context, userId int)
+	// Get a user's permission overrides
+	// (GET /v1/admin/users/{userId}/permissions)
+	GetAdminUserPermissions(c *gin.Context, userId int)
+	// Replace a user's permission overrides
+	// (PUT /v1/admin/users/{userId}/permissions)
+	PutAdminUserPermissions(c *gin.Context, userId int)
+	// Force logout a user (revoke all sessions)
+	// (POST /v1/admin/users/{userId}/sessions/revoke)
+	PostAdminRevokeSessions(c *gin.Context, userId int)
+	// Create a captcha challenge
+	// (POST /v1/captchas)
+	PostCaptcha(c *gin.Context)
+	// Send an email verification code
+	// (POST /v1/email/code)
+	PostEmailCode(c *gin.Context)
+	// Get current authenticated user profile
+	// (GET /v1/me)
+	GetMe(c *gin.Context)
+	// Change current user's password
+	// (PATCH /v1/password)
+	PatchPassword(c *gin.Context)
+	// Reset password with email verification code
+	// (POST /v1/password/reset)
+	PostPasswordReset(c *gin.Context)
+	// Request a password reset verification code
+	// (POST /v1/password/reset/request)
+	PostPasswordResetRequest(c *gin.Context)
+	// Login and create a session
+	// (POST /v1/sessions)
+	PostLogin(c *gin.Context)
+	// Logout and delete current session
+	// (DELETE /v1/sessions/current)
+	DeleteSession(c *gin.Context)
+	// Register a new user
+	// (POST /v1/users)
+	PostRegister(c *gin.Context)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -63,6 +428,394 @@ func (siw *ServerInterfaceWrapper) Readyz(c *gin.Context) {
 	siw.Handler.Readyz(c)
 }
 
+// GetActivation operation middleware
+func (siw *ServerInterfaceWrapper) GetActivation(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetActivation(c)
+}
+
+// PostActivation operation middleware
+func (siw *ServerInterfaceWrapper) PostActivation(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostActivation(c)
+}
+
+// GetAdminInvites operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminInvites(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminInvitesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminInvites(c, params)
+}
+
+// PostAdminInvite operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminInvite(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminInvite(c)
+}
+
+// PatchAdminInvite operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "code" -------------
+	var code string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "code", c.Param("code"), &code, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminInvite(c, code)
+}
+
+// GetAdminPermissions operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminPermissions(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminPermissions(c)
+}
+
+// GetAdminUsers operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminUsersParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUsers(c, params)
+}
+
+// PatchAdminUser operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminUser(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminUser(c, userId)
+}
+
+// GetAdminUserPermissions operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserPermissions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserPermissions(c, userId)
+}
+
+// PutAdminUserPermissions operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminUserPermissions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminUserPermissions(c, userId)
+}
+
+// PostAdminRevokeSessions operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminRevokeSessions(c, userId)
+}
+
+// PostCaptcha operation middleware
+func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostCaptcha(c)
+}
+
+// PostEmailCode operation middleware
+func (siw *ServerInterfaceWrapper) PostEmailCode(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostEmailCode(c)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetMe(c)
+}
+
+// PatchPassword operation middleware
+func (siw *ServerInterfaceWrapper) PatchPassword(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchPassword(c)
+}
+
+// PostPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) PostPasswordReset(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostPasswordReset(c)
+}
+
+// PostPasswordResetRequest operation middleware
+func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostPasswordResetRequest(c)
+}
+
+// PostLogin operation middleware
+func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostLogin(c)
+}
+
+// DeleteSession operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteSession(c)
+}
+
+// PostRegister operation middleware
+func (siw *ServerInterfaceWrapper) PostRegister(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostRegister(c)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -92,4 +845,24 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.GET(options.BaseURL+"/healthz", wrapper.Healthz)
 	router.GET(options.BaseURL+"/readyz", wrapper.Readyz)
+	router.GET(options.BaseURL+"/v1/activation", wrapper.GetActivation)
+	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
+	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
+	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
+	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
+	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
+	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
+	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
+	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
+	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
+	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
+	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
+	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
+	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
+	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
+	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
+	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.POST(options.BaseURL+"/v1/sessions", wrapper.PostLogin)
+	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
+	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 }

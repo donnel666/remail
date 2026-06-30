@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/gin-gonic/gin"
 )
 
 // Handler holds dependencies for health check endpoints.

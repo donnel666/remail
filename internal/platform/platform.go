@@ -16,13 +16,17 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// Platform holds all initialized external service clients.
+// Platform holds all initialized external service clients and shared config.
 type Platform struct {
-	DB    *gorm.DB
-	SQLDB *sql.DB
-	Redis *redis.Client
-	MinIO *minio.Client
-	Asynq *asynq.Client
+	DB            *gorm.DB
+	SQLDB         *sql.DB
+	Redis         *redis.Client
+	MinIO         *minio.Client
+	Asynq         *asynq.Client
+	SMTP          SMTPConfig
+	SessionMaxAge int
+	SessionSecure bool
+	PprofAddr     string
 }
 
 // New initializes all external service clients and returns the Platform.
@@ -53,6 +57,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.MinIO = mc
 
 	p.Asynq = initAsynq(cfg.Redis)
+	p.SMTP = cfg.SMTP
 
 	cleanup := func() {
 		slog.Info("shutting down platform clients")
@@ -62,12 +67,17 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 		slog.Info("platform clients shut down")
 	}
 
+	p.SessionMaxAge = cfg.Session.MaxAge
+	p.SessionSecure = cfg.Session.Secure
+	p.PprofAddr = cfg.Diagnostics.PprofAddr
+
 	return p, cleanup, nil
 }
 
 func initMySQL(ctx context.Context, cfg MySQLConfig) (*gorm.DB, *sql.DB, error) {
 	gormCfg := &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+		Logger:         gormlogger.Default.LogMode(gormlogger.Warn),
+		TranslateError: true, // Map MySQL errors (e.g. 1062 duplicate) to gorm sentinels
 	}
 
 	db, err := gorm.Open(mysql.Open(cfg.DSN), gormCfg)

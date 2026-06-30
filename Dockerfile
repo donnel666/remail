@@ -21,5 +21,6 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=backend /server /server
 COPY --from=backend /app/migrations /app/migrations
+ENV MIGRATIONS_DIR=/app/migrations
 EXPOSE 8080
 ENTRYPOINT ["/server"]

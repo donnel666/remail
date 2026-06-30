@@ -32,8 +32,10 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "testkey", cfg.MinIO.AccessKey)
 	assert.Equal(t, "testsecret", cfg.MinIO.SecretKey)
 	assert.Equal(t, "remail", cfg.MinIO.Bucket)
+	assert.Equal(t, "", cfg.Migrations.Dir)
 	assert.Equal(t, "info", cfg.Log.Level)
 	assert.Equal(t, "json", cfg.Log.Format)
+	assert.Equal(t, "", cfg.Diagnostics.PprofAddr)
 }
 
 func TestConfigValidateMissingFields(t *testing.T) {

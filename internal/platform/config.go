@@ -11,12 +11,15 @@ import (
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	Server  ServerConfig
-	MySQL   MySQLConfig
-	Redis   RedisConfig
-	MinIO   MinIOConfig
-	Session SessionConfig
-	Log     LogConfig
+	Server      ServerConfig
+	MySQL       MySQLConfig
+	Redis       RedisConfig
+	MinIO       MinIOConfig
+	SMTP        SMTPConfig
+	Migrations  MigrationsConfig
+	Session     SessionConfig
+	Log         LogConfig
+	Diagnostics DiagnosticsConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -46,16 +49,35 @@ type MinIOConfig struct {
 	Bucket    string
 }
 
+// SMTPConfig holds outbound mail settings.
+type SMTPConfig struct {
+	Addr     string
+	Username string
+	Password string
+	From     string
+}
+
+// MigrationsConfig holds database migration settings.
+type MigrationsConfig struct {
+	Dir string
+}
+
 // SessionConfig holds session settings.
 type SessionConfig struct {
 	Secret string
 	MaxAge int
+	Secure bool
 }
 
 // LogConfig holds logging settings.
 type LogConfig struct {
 	Level  string
 	Format string
+}
+
+// DiagnosticsConfig holds opt-in runtime diagnostics settings.
+type DiagnosticsConfig struct {
+	PprofAddr string
 }
 
 // Load reads configuration from environment variables.
@@ -84,13 +106,26 @@ func Load() (*Config, error) {
 			UseSSL:    getBool("MINIO_USE_SSL", false),
 			Bucket:    getEnv("MINIO_BUCKET", "remail"),
 		},
+		SMTP: SMTPConfig{
+			Addr:     getEnv("SMTP_ADDR", ""),
+			Username: getEnv("SMTP_USERNAME", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
+			From:     getEnv("SMTP_FROM", ""),
+		},
+		Migrations: MigrationsConfig{
+			Dir: getEnv("MIGRATIONS_DIR", ""),
+		},
 		Session: SessionConfig{
 			Secret: getEnv("SESSION_SECRET", ""),
 			MaxAge: getInt("SESSION_MAX_AGE", 86400),
+			Secure: getBool("SESSION_SECURE", false),
 		},
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
 			Format: getEnv("LOG_FORMAT", "json"),
+		},
+		Diagnostics: DiagnosticsConfig{
+			PprofAddr: getEnv("PPROF_ADDR", ""),
 		},
 	}
 
