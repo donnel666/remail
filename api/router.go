@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/donnel666/remail/api/health"
@@ -60,9 +61,13 @@ func serveEmbeddedFrontend(r *gin.Engine, feFS fs.FS) {
 	}
 
 	r.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
+		urlPath := c.Request.URL.Path
+		if strings.HasPrefix(urlPath, "/v1/") || strings.HasPrefix(urlPath, "/healthz") || strings.HasPrefix(urlPath, "/readyz") {
 			c.Status(http.StatusNotFound)
+			return
+		}
+
+		if serveFrontendFile(c, feFS, urlPath) {
 			return
 		}
 
@@ -73,4 +78,19 @@ func serveEmbeddedFrontend(r *gin.Engine, feFS fs.FS) {
 		}
 		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	})
+}
+
+func serveFrontendFile(c *gin.Context, feFS fs.FS, urlPath string) bool {
+	name := strings.TrimPrefix(path.Clean(urlPath), "/")
+	if name == "." || name == "" {
+		return false
+	}
+
+	info, err := fs.Stat(feFS, name)
+	if err != nil || info.IsDir() {
+		return false
+	}
+
+	c.FileFromFS(name, http.FS(feFS))
+	return true
 }

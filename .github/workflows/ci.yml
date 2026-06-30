@@ -91,7 +91,7 @@ jobs:
             -e MINIO_ROOT_USER=remail \
             -e MINIO_ROOT_PASSWORD=remail_secret \
             minio/minio:latest server /data --console-address ":9001"
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
             fi
@@ -207,7 +207,7 @@ jobs:
             -e MINIO_ROOT_USER=remail \
             -e MINIO_ROOT_PASSWORD=remail_secret \
             minio/minio:latest server /data --console-address ":9001"
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
             fi
@@ -459,18 +459,63 @@ jobs:
             echo "openssl is required on the deploy host" >&2
             exit 1
           fi
+
+          wait_for_health() {
+            for _ in $(seq 1 60); do
+              if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'; then
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
+          set_app_image() {
+            image="$1"
+            tmp="$(mktemp)"
+            awk -v image="$image" '
+              BEGIN { written = 0 }
+              /^APP_IMAGE=/ { print "APP_IMAGE=" image; written = 1; next }
+              { print }
+              END { if (written == 0) print "APP_IMAGE=" image }
+            ' .env > "$tmp"
+            mv "$tmp" .env
+            chmod 600 .env
+          }
+
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-          docker compose --env-file .env -f compose.yml pull server
-          docker compose --env-file .env -f compose.yml up -d --remove-orphans
-          for i in $(seq 1 60); do
-            if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'; then
+
+          PREVIOUS_IMAGE="$(docker compose --env-file .env -f compose.yml ps -q server | xargs -r docker inspect --format '{{.Config.Image}}' | head -n1 || true)"
+          echo "Previous server image: ${PREVIOUS_IMAGE:-none}"
+
+          deploy_status=0
+          docker compose --env-file .env -f compose.yml pull server || deploy_status=$?
+          if [ "$deploy_status" -eq 0 ]; then
+            docker compose --env-file .env -f compose.yml up -d --remove-orphans || deploy_status=$?
+          fi
+
+          if [ "$deploy_status" -eq 0 ] && wait_for_health; then
+            docker compose --env-file .env -f compose.yml ps
+            docker logout ghcr.io >/dev/null 2>&1 || true
+            docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
+            exit 0
+          fi
+
+          echo "New deployment failed; collecting logs before rollback" >&2
+          docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
+          if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$APP_IMAGE" ]; then
+            echo "Rolling back to previous image: $PREVIOUS_IMAGE" >&2
+            set_app_image "$PREVIOUS_IMAGE"
+            docker compose --env-file .env -f compose.yml up -d --remove-orphans || true
+            if wait_for_health; then
+              echo "Rollback completed; previous image is healthy" >&2
               docker compose --env-file .env -f compose.yml ps
-              docker logout ghcr.io >/dev/null 2>&1 || true
-              docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
-              exit 0
+            else
+              echo "Rollback failed health check" >&2
+              docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
             fi
-            sleep 2
-          done
-          docker compose --env-file .env -f compose.yml logs --tail=200 server nginx
+          else
+            echo "No previous image available for rollback" >&2
+          fi
           docker logout ghcr.io >/dev/null 2>&1 || true
           exit 1
