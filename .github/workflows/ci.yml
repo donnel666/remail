@@ -52,10 +52,28 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable pnpm
+        working-directory: web
+        run: corepack enable
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        working-directory: web
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
 
       - name: Install dependencies
         run: go mod download
@@ -76,7 +94,6 @@ jobs:
       - name: Build frontend for embed
         working-directory: web
         run: |
-          corepack enable
           pnpm install --frozen-lockfile
           pnpm build
           mkdir -p ../cmd/server/webdist
@@ -137,8 +154,20 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install pnpm
+      - name: Enable pnpm
         run: corepack enable && pnpm --version
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -184,15 +213,32 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Enable pnpm
+        working-directory: web
+        run: corepack enable
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        working-directory: web
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
+
       - name: Build frontend for embed
         working-directory: web
         run: |
-          corepack enable
           pnpm install --frozen-lockfile
           pnpm build
           mkdir -p ../cmd/server/webdist
@@ -282,8 +328,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
-        run: docker build -t remail:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: remail:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   image:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -323,6 +377,8 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -338,14 +394,31 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Enable pnpm
+        working-directory: web
+        run: corepack enable
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        working-directory: web
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
+
       - name: Build release artifact
         run: |
-          corepack enable
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
           mkdir -p cmd/server/webdist
