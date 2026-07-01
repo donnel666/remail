@@ -20,7 +20,7 @@ type EmailResourceRepository interface {
 	CreateMicrosoft(ctx context.Context, resource *domain.EmailResource, ms *domain.MicrosoftResource) error
 
 	// CreateDomain creates a new Domain resource within a transaction.
-	CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.DomainResource) error
+	CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.MailDomainResource) error
 
 	// CreateMicrosoftBatch creates multiple Microsoft resources in a single transaction.
 	CreateMicrosoftBatch(ctx context.Context, resources []domain.EmailResource, ms []domain.MicrosoftResource) error
@@ -32,7 +32,7 @@ type EmailResourceRepository interface {
 	FindMicrosoftByID(ctx context.Context, resourceID uint) (*domain.MicrosoftResource, error)
 
 	// FindDomainByID looks up a domain resource by resource ID. Returns nil, nil if not found.
-	FindDomainByID(ctx context.Context, resourceID uint) (*domain.DomainResource, error)
+	FindDomainByID(ctx context.Context, resourceID uint) (*domain.MailDomainResource, error)
 
 	// FindMicrosoftByEmail looks up a Microsoft resource by email address.
 	FindMicrosoftByEmail(ctx context.Context, email string) (*domain.MicrosoftResource, error)
@@ -53,7 +53,7 @@ type EmailResourceRepository interface {
 	UpdateMicrosoftWithLog(ctx context.Context, resource *domain.MicrosoftResource, log *governancedomain.OperationLog) error
 
 	// UpdateDomain updates a domain resource and writes OperationLog.
-	UpdateDomainWithLog(ctx context.Context, resource *domain.DomainResource, log *governancedomain.OperationLog) error
+	UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error
 
 	// ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.
 	ListMicrosoftStatus(ctx context.Context, ids []uint) ([]MicrosoftStatusResult, error)
@@ -578,7 +578,7 @@ type CreateDomainRequest struct {
 }
 
 // Create creates a new self-hosted domain resource (P1-I2 supplier self-service).
-func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *CreateDomainRequest) (*domain.DomainResource, error) {
+func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *CreateDomainRequest) (*domain.MailDomainResource, error) {
 	if !domain.IsValidPurpose(domain.ResourcePurpose(req.Purpose)) {
 		return nil, domain.ErrInvalidPurpose
 	}
@@ -599,7 +599,7 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 		OwnerUserID: ownerUserID,
 	}
 
-	dr := &domain.DomainResource{
+	dr := &domain.MailDomainResource{
 		Domain:       req.Domain,
 		MailServerID: req.MailServerID,
 		Purpose:      domain.ResourcePurpose(req.Purpose),

@@ -24,7 +24,7 @@ import (
 type mockResourceRepo struct {
 	resources map[uint]*coredomain.EmailResource
 	microsoft map[uint]*coredomain.MicrosoftResource
-	domains   map[uint]*coredomain.DomainResource
+	domains   map[uint]*coredomain.MailDomainResource
 	seq       uint
 }
 
@@ -32,11 +32,11 @@ func newMockResourceRepo() *mockResourceRepo {
 	return &mockResourceRepo{
 		resources: make(map[uint]*coredomain.EmailResource),
 		microsoft: make(map[uint]*coredomain.MicrosoftResource),
-		domains:   make(map[uint]*coredomain.DomainResource),
+		domains:   make(map[uint]*coredomain.MailDomainResource),
 	}
 }
 
-func (r *mockResourceRepo) CreateMicrosoft(ctx context.Context, resource *coredomain.EmailResource, ms *coredomain.MicrosoftResource) error {
+func (r *mockResourceRepo) CreateMicrosoft(_ context.Context, resource *coredomain.EmailResource, ms *coredomain.MicrosoftResource) error {
 	r.seq++
 	resource.ID = r.seq
 	resource.CreatedAt = time.Now()
@@ -48,7 +48,7 @@ func (r *mockResourceRepo) CreateMicrosoft(ctx context.Context, resource *coredo
 	return nil
 }
 
-func (r *mockResourceRepo) CreateDomain(ctx context.Context, resource *coredomain.EmailResource, dr *coredomain.DomainResource) error {
+func (r *mockResourceRepo) CreateDomain(_ context.Context, resource *coredomain.EmailResource, dr *coredomain.MailDomainResource) error {
 	r.seq++
 	resource.ID = r.seq
 	resource.CreatedAt = time.Now()
@@ -67,32 +67,32 @@ func (r *mockResourceRepo) CreateMicrosoftBatch(ctx context.Context, resources [
 	return nil
 }
 
-func (r *mockResourceRepo) FindByID(ctx context.Context, id uint) (*coredomain.EmailResource, error) {
+func (r *mockResourceRepo) FindByID(_ context.Context, id uint) (*coredomain.EmailResource, error) {
 	if res, ok := r.resources[id]; ok {
 		return res, nil
 	}
 	return nil, nil
 }
 
-func (r *mockResourceRepo) FindMicrosoftByID(ctx context.Context, id uint) (*coredomain.MicrosoftResource, error) {
+func (r *mockResourceRepo) FindMicrosoftByID(_ context.Context, id uint) (*coredomain.MicrosoftResource, error) {
 	if ms, ok := r.microsoft[id]; ok {
 		return ms, nil
 	}
 	return nil, nil
 }
 
-func (r *mockResourceRepo) FindDomainByID(ctx context.Context, id uint) (*coredomain.DomainResource, error) {
+func (r *mockResourceRepo) FindDomainByID(_ context.Context, id uint) (*coredomain.MailDomainResource, error) {
 	if dr, ok := r.domains[id]; ok {
 		return dr, nil
 	}
 	return nil, nil
 }
 
-func (r *mockResourceRepo) FindMicrosoftByEmail(ctx context.Context, email string) (*coredomain.MicrosoftResource, error) {
+func (r *mockResourceRepo) FindMicrosoftByEmail(_ context.Context, _ string) (*coredomain.MicrosoftResource, error) {
 	return nil, nil
 }
 
-func (r *mockResourceRepo) List(ctx context.Context, ownerUserID uint, resourceType string, offset, limit int) ([]coredomain.EmailResource, error) {
+func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, resourceType string, _, _ int) ([]coredomain.EmailResource, error) {
 	var result []coredomain.EmailResource
 	for _, res := range r.resources {
 		if res.OwnerUserID == ownerUserID && resourceMatchesType(res.Type, resourceType) {
@@ -102,7 +102,7 @@ func (r *mockResourceRepo) List(ctx context.Context, ownerUserID uint, resourceT
 	return result, nil
 }
 
-func (r *mockResourceRepo) ListAll(ctx context.Context, resourceType string, offset, limit int) ([]coredomain.EmailResource, error) {
+func (r *mockResourceRepo) ListAll(_ context.Context, resourceType string, _, _ int) ([]coredomain.EmailResource, error) {
 	var result []coredomain.EmailResource
 	for _, res := range r.resources {
 		if resourceMatchesType(res.Type, resourceType) {
@@ -112,7 +112,7 @@ func (r *mockResourceRepo) ListAll(ctx context.Context, resourceType string, off
 	return result, nil
 }
 
-func (r *mockResourceRepo) Count(ctx context.Context, ownerUserID uint, resourceType string) (int64, error) {
+func (r *mockResourceRepo) Count(_ context.Context, ownerUserID uint, resourceType string) (int64, error) {
 	var count int64
 	for _, res := range r.resources {
 		if res.OwnerUserID == ownerUserID && resourceMatchesType(res.Type, resourceType) {
@@ -122,7 +122,7 @@ func (r *mockResourceRepo) Count(ctx context.Context, ownerUserID uint, resource
 	return count, nil
 }
 
-func (r *mockResourceRepo) CountAll(ctx context.Context, resourceType string) (int64, error) {
+func (r *mockResourceRepo) CountAll(_ context.Context, resourceType string) (int64, error) {
 	var count int64
 	for _, res := range r.resources {
 		if resourceMatchesType(res.Type, resourceType) {
@@ -136,15 +136,15 @@ func resourceMatchesType(actual coredomain.ResourceType, filter string) bool {
 	return filter == "" || filter == "all" || string(actual) == filter
 }
 
-func (r *mockResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *coredomain.MicrosoftResource, log *governancedomain.OperationLog) error {
+func (r *mockResourceRepo) UpdateMicrosoftWithLog(_ context.Context, _ *coredomain.MicrosoftResource, _ *governancedomain.OperationLog) error {
 	return nil
 }
 
-func (r *mockResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *coredomain.DomainResource, log *governancedomain.OperationLog) error {
+func (r *mockResourceRepo) UpdateDomainWithLog(_ context.Context, _ *coredomain.MailDomainResource, _ *governancedomain.OperationLog) error {
 	return nil
 }
 
-func (r *mockResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]coreapp.MicrosoftStatusResult, error) {
+func (r *mockResourceRepo) ListMicrosoftStatus(_ context.Context, ids []uint) ([]coreapp.MicrosoftStatusResult, error) {
 	var result []coreapp.MicrosoftStatusResult
 	for _, id := range ids {
 		if ms, ok := r.microsoft[id]; ok {
@@ -159,7 +159,7 @@ func (r *mockResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) 
 	return result, nil
 }
 
-func (r *mockResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
+func (r *mockResourceRepo) ListDomainStatus(_ context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
 	var result []coreapp.DomainStatusResult
 	for _, id := range ids {
 		if dr, ok := r.domains[id]; ok {
@@ -183,46 +183,45 @@ func newMockMailServerRepo() *mockMailServerRepo {
 	return &mockMailServerRepo{servers: make(map[uint]*coredomain.MailServer)}
 }
 
-func (r *mockMailServerRepo) Create(ctx context.Context, server *coredomain.MailServer) error {
+func (r *mockMailServerRepo) Create(_ context.Context, server *coredomain.MailServer) error {
 	r.seq++
 	server.ID = r.seq
 	r.servers[server.ID] = server
 	return nil
 }
 
-func (r *mockMailServerRepo) FindByID(ctx context.Context, id uint) (*coredomain.MailServer, error) {
+func (r *mockMailServerRepo) FindByID(_ context.Context, id uint) (*coredomain.MailServer, error) {
 	if s, ok := r.servers[id]; ok {
 		return s, nil
 	}
 	return nil, nil
 }
 
-func (r *mockMailServerRepo) List(ctx context.Context, ownerUserID uint, offset, limit int) ([]coredomain.MailServer, error) {
+func (r *mockMailServerRepo) List(_ context.Context, _ uint, _, _ int) ([]coredomain.MailServer, error) {
 	return nil, nil
 }
 
-func (r *mockMailServerRepo) ListAll(ctx context.Context, offset, limit int) ([]coredomain.MailServer, error) {
+func (r *mockMailServerRepo) ListAll(_ context.Context, _, _ int) ([]coredomain.MailServer, error) {
 	return nil, nil
 }
 
-func (r *mockMailServerRepo) Count(ctx context.Context, ownerUserID uint) (int64, error) {
+func (r *mockMailServerRepo) Count(_ context.Context, _ uint) (int64, error) {
 	return 0, nil
 }
 
-func (r *mockMailServerRepo) CountAll(ctx context.Context) (int64, error) {
+func (r *mockMailServerRepo) CountAll(_ context.Context) (int64, error) {
 	return 0, nil
 }
 
 type mockGeneratedMailboxRepo struct {
 	mailboxes map[uint]*coredomain.GeneratedMailbox
-	seq       uint
 }
 
 func newMockGeneratedMailboxRepo() *mockGeneratedMailboxRepo {
 	return &mockGeneratedMailboxRepo{mailboxes: make(map[uint]*coredomain.GeneratedMailbox)}
 }
 
-func (r *mockGeneratedMailboxRepo) List(ctx context.Context, resourceID uint, offset, limit int) ([]coredomain.GeneratedMailbox, error) {
+func (r *mockGeneratedMailboxRepo) List(_ context.Context, resourceID uint, _, _ int) ([]coredomain.GeneratedMailbox, error) {
 	var result []coredomain.GeneratedMailbox
 	for _, mb := range r.mailboxes {
 		if mb.ResourceID == resourceID {
@@ -232,7 +231,7 @@ func (r *mockGeneratedMailboxRepo) List(ctx context.Context, resourceID uint, of
 	return result, nil
 }
 
-func (r *mockGeneratedMailboxRepo) Count(ctx context.Context, resourceID uint) (int64, error) {
+func (r *mockGeneratedMailboxRepo) Count(_ context.Context, resourceID uint) (int64, error) {
 	var count int64
 	for _, mb := range r.mailboxes {
 		if mb.ResourceID == resourceID {
@@ -251,17 +250,17 @@ func newMockImportRepo() *mockImportRepo {
 	return &mockImportRepo{imports: make(map[uint]*coredomain.ResourceImport)}
 }
 
-func (r *mockImportRepo) Create(ctx context.Context, item *coredomain.ResourceImport) error {
+func (r *mockImportRepo) Create(_ context.Context, item *coredomain.ResourceImport) error {
 	r.seq++
 	item.ID = r.seq
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = item.CreatedAt
-	copy := *item
-	r.imports[item.ID] = &copy
+	snapshot := *item
+	r.imports[item.ID] = &snapshot
 	return nil
 }
 
-func (r *mockImportRepo) MarkSucceeded(ctx context.Context, id uint, importedCount int) error {
+func (r *mockImportRepo) MarkSucceeded(_ context.Context, id uint, importedCount int) error {
 	item := r.imports[id]
 	item.Status = coredomain.ResourceImportImported
 	item.ImportedCount = importedCount
@@ -269,7 +268,7 @@ func (r *mockImportRepo) MarkSucceeded(ctx context.Context, id uint, importedCou
 	return nil
 }
 
-func (r *mockImportRepo) MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error {
+func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey string, safeError string) error {
 	item := r.imports[id]
 	item.Status = coredomain.ResourceImportFailed
 	item.FailureObjectKey = failureObjectKey
@@ -286,7 +285,7 @@ func newMockFileStore() *mockFileStore {
 	return &mockFileStore{files: make(map[string]governancedomain.PrivateFile)}
 }
 
-func (s *mockFileStore) SavePrivate(ctx context.Context, file governancedomain.PrivateFile) (*governancedomain.StoredPrivateFile, error) {
+func (s *mockFileStore) SavePrivate(_ context.Context, file governancedomain.PrivateFile) (*governancedomain.StoredPrivateFile, error) {
 	s.files[file.ObjectKey] = file
 	return &governancedomain.StoredPrivateFile{
 		ObjectKey:   file.ObjectKey,
@@ -426,9 +425,10 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 			c.Request = req
 
 			// Set path params for parameterized routes
-			if ep.path == "/v1/resources/1" {
+			switch ep.path {
+			case "/v1/resources/1":
 				c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-			} else if ep.path == "/v1/domains/1/mailboxes" {
+			case "/v1/domains/1/mailboxes":
 				c.Params = []gin.Param{{Key: "domainId", Value: "1"}}
 			}
 
@@ -613,7 +613,7 @@ func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {
 		Status:       coredomain.MicrosoftStatusNormal,
 		ForSale:      true,
 	}
-	if err := resourceRepo.CreateMicrosoft(nil, root, ms); err != nil {
+	if err := resourceRepo.CreateMicrosoft(context.Background(), root, ms); err != nil {
 		t.Fatalf("create resource: %v", err)
 	}
 
@@ -646,7 +646,7 @@ func TestCoreHandler_ResourceDetail_NonOwnerDenied(t *testing.T) {
 	// Create a resource owned by user 1
 	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
 	ms := &coredomain.MicrosoftResource{EmailAddress: "test@example.com", Password: "secret"}
-	_ = resourceRepo.CreateMicrosoft(nil, root, ms)
+	_ = resourceRepo.CreateMicrosoft(context.Background(), root, ms)
 
 	// Non-owner (userID=2) should get 404 (ErrForbiddenResource → Resource not found)
 	w := httptest.NewRecorder()
@@ -703,7 +703,7 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 		t.Fatalf("create mail server: %v", err)
 	}
 	domainRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
-	dr := &coredomain.DomainResource{
+	dr := &coredomain.MailDomainResource{
 		Domain:       "example.com",
 		MailServerID: server.ID,
 		Purpose:      coredomain.PurposeSale,
@@ -775,7 +775,7 @@ func TestCoreHandler_DomainMailboxesOwnerAccess(t *testing.T) {
 		t.Fatalf("create mail server: %v", err)
 	}
 	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
-	dr := &coredomain.DomainResource{
+	dr := &coredomain.MailDomainResource{
 		Domain:       "example.com",
 		MailServerID: server.ID,
 		Purpose:      coredomain.PurposeSale,

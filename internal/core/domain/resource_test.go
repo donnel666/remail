@@ -31,7 +31,7 @@ func TestMicrosoftResource_IsAllocatable(t *testing.T) {
 func TestDomainResource_IsAllocatable(t *testing.T) {
 	tests := []struct {
 		name    string
-		status  DomainResourceStatus
+		status  MailDomainStatus
 		purpose ResourcePurpose
 		want    bool
 	}{
@@ -42,7 +42,7 @@ func TestDomainResource_IsAllocatable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &DomainResource{Status: tt.status, Purpose: tt.purpose}
+			r := &MailDomainResource{Status: tt.status, Purpose: tt.purpose}
 			if got := r.IsAllocatable(); got != tt.want {
 				t.Errorf("IsAllocatable() = %v, want %v", got, tt.want)
 			}
@@ -92,8 +92,8 @@ func TestMicrosoftResource_TransitionStatusRejectsIllegal(t *testing.T) {
 
 func TestDomainResource_TransitionStatus(t *testing.T) {
 	valid := []struct {
-		from DomainResourceStatus
-		to   DomainResourceStatus
+		from MailDomainStatus
+		to   MailDomainStatus
 	}{
 		{DomainStatusDNSAbnormal, DomainStatusDNSNormal},
 		{DomainStatusDNSAbnormal, DomainStatusDisabled},
@@ -104,7 +104,7 @@ func TestDomainResource_TransitionStatus(t *testing.T) {
 
 	for _, tt := range valid {
 		t.Run(string(tt.from)+"->"+string(tt.to), func(t *testing.T) {
-			r := &DomainResource{Status: tt.from}
+			r := &MailDomainResource{Status: tt.from}
 			if err := r.TransitionStatus(tt.to); err != nil {
 				t.Fatalf("TransitionStatus() unexpected error: %v", err)
 			}
@@ -116,7 +116,7 @@ func TestDomainResource_TransitionStatus(t *testing.T) {
 }
 
 func TestDomainResource_TransitionStatusRejectsIllegal(t *testing.T) {
-	r := &DomainResource{Status: DomainStatusDisabled}
+	r := &MailDomainResource{Status: DomainStatusDisabled}
 
 	err := r.TransitionStatus(DomainStatusDNSNormal)
 

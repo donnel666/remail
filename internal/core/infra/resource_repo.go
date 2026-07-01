@@ -113,29 +113,16 @@ func (DomainResourceModel) TableName() string {
 	return "domain_resources"
 }
 
-func (m *DomainResourceModel) toDomain() *domain.DomainResource {
-	return &domain.DomainResource{
+func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
+	return &domain.MailDomainResource{
 		ID:              m.ID,
 		Domain:          m.Domain,
 		MailServerID:    m.MailServerID,
 		Purpose:         domain.ResourcePurpose(m.Purpose),
-		Status:          domain.DomainResourceStatus(m.Status),
+		Status:          domain.MailDomainStatus(m.Status),
 		LastAllocatedAt: m.LastAllocatedAt,
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
-	}
-}
-
-func fromDomainDomain(dr *domain.DomainResource) *DomainResourceModel {
-	return &DomainResourceModel{
-		ID:              dr.ID,
-		Domain:          dr.Domain,
-		MailServerID:    dr.MailServerID,
-		Purpose:         string(dr.Purpose),
-		Status:          string(dr.Status),
-		LastAllocatedAt: dr.LastAllocatedAt,
-		CreatedAt:       dr.CreatedAt,
-		UpdatedAt:       dr.UpdatedAt,
 	}
 }
 
@@ -181,7 +168,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 	})
 }
 
-func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.DomainResource) error {
+func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		root := &EmailResourceModel{
 			Type:        string(resource.Type),
@@ -270,7 +257,7 @@ func (r *ResourceRepo) FindMicrosoftByID(ctx context.Context, resourceID uint) (
 	return model.toDomain(), nil
 }
 
-func (r *ResourceRepo) FindDomainByID(ctx context.Context, resourceID uint) (*domain.DomainResource, error) {
+func (r *ResourceRepo) FindDomainByID(ctx context.Context, resourceID uint) (*domain.MailDomainResource, error) {
 	var model DomainResourceModel
 	err := r.db.WithContext(ctx).First(&model, resourceID).Error
 	if err != nil {
@@ -404,7 +391,7 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 
 // UpdateDomainWithLog updates a domain resource and writes an OperationLog
 // in the same transaction.
-func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain.DomainResource, log *governancedomain.OperationLog) error {
+func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]interface{}{
 			"domain":            resource.Domain,

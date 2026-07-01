@@ -20,13 +20,13 @@ const (
 	MicrosoftStatusDisabled MicrosoftResourceStatus = "disabled"
 )
 
-// DomainResourceStatus represents the status of a domain resource.
-type DomainResourceStatus string
+// MailDomainStatus represents the status of a domain resource.
+type MailDomainStatus string
 
 const (
-	DomainStatusDNSNormal   DomainResourceStatus = "dns_normal"
-	DomainStatusDNSAbnormal DomainResourceStatus = "dns_abnormal"
-	DomainStatusDisabled    DomainResourceStatus = "disabled"
+	DomainStatusDNSNormal   MailDomainStatus = "dns_normal"
+	DomainStatusDNSAbnormal MailDomainStatus = "dns_abnormal"
+	DomainStatusDisabled    MailDomainStatus = "disabled"
 )
 
 // ResourcePurpose represents the purpose of a domain resource.
@@ -38,7 +38,7 @@ const (
 )
 
 // EmailResource is the root aggregate for all email resources.
-// Each EmailResource has exactly one sub-resource record (MicrosoftResource or DomainResource).
+// Each EmailResource has exactly one sub-resource record (MicrosoftResource or MailDomainResource).
 type EmailResource struct {
 	ID          uint
 	Type        ResourceType
@@ -126,15 +126,15 @@ type MicrosoftImportLine struct {
 	AuxiliaryAddress string
 }
 
-// --- DomainResource ---
+// --- MailDomainResource ---
 
-// DomainResource holds domain-specific resource fields.
-type DomainResource struct {
+// MailDomainResource holds self-hosted domain-specific resource fields.
+type MailDomainResource struct {
 	ID              uint // Shared PK = EmailResource.ID
 	Domain          string
 	MailServerID    uint
 	Purpose         ResourcePurpose
-	Status          DomainResourceStatus
+	Status          MailDomainStatus
 	LastAllocatedAt *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -142,7 +142,7 @@ type DomainResource struct {
 
 // IsValidDomainStatus returns true if the status is a valid state.
 func IsValidDomainStatus(s string) bool {
-	switch DomainResourceStatus(s) {
+	switch MailDomainStatus(s) {
 	case DomainStatusDNSNormal, DomainStatusDNSAbnormal, DomainStatusDisabled:
 		return true
 	default:
@@ -151,7 +151,7 @@ func IsValidDomainStatus(s string) bool {
 }
 
 // CanTransitionDomainStatus returns true when a status transition follows the Core state machine.
-func CanTransitionDomainStatus(from, to DomainResourceStatus) bool {
+func CanTransitionDomainStatus(from, to MailDomainStatus) bool {
 	switch from {
 	case DomainStatusDNSAbnormal:
 		return to == DomainStatusDNSNormal || to == DomainStatusDisabled
@@ -165,7 +165,7 @@ func CanTransitionDomainStatus(from, to DomainResourceStatus) bool {
 }
 
 // TransitionStatus moves the domain resource to a legal next status.
-func (r *DomainResource) TransitionStatus(next DomainResourceStatus) error {
+func (r *MailDomainResource) TransitionStatus(next MailDomainStatus) error {
 	if !CanTransitionDomainStatus(r.Status, next) {
 		return ErrInvalidResourceStatus
 	}
@@ -174,7 +174,7 @@ func (r *DomainResource) TransitionStatus(next DomainResourceStatus) error {
 }
 
 // IsAllocatable returns true if the domain resource can be allocated.
-func (r *DomainResource) IsAllocatable() bool {
+func (r *MailDomainResource) IsAllocatable() bool {
 	return r.Purpose == PurposeSale &&
 		r.Status == DomainStatusDNSNormal
 }
