@@ -21,6 +21,18 @@ type sessionFetcher struct {
 	}
 }
 
+// NewSessionFetcher creates a SessionFetcher for auth middleware.
+func NewSessionFetcher(
+	store interface {
+		Get(ctx context.Context, sessionID string) (*domain.Session, error)
+	},
+	repo interface {
+		FindByID(ctx context.Context, id uint) (*domain.User, error)
+	},
+) middleware.SessionFetcher {
+	return &sessionFetcher{sessionStore: store, userRepo: repo}
+}
+
 func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (uint, domain.RoleLevel, string, bool) {
 	sess, err := f.sessionStore.Get(ctx, sessionID)
 	if err != nil || sess == nil {
@@ -44,10 +56,7 @@ func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (ui
 // RegisterIAMRoutes registers all IAM routes on the given router group.
 func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, sessionSecure bool) {
 	h := NewIAMHandler(mod, sessionMaxAge, sessionSecure)
-	fetcher := &sessionFetcher{
-		sessionStore: mod.SessionStore,
-		userRepo:     mod.UserRepo,
-	}
+	fetcher := NewSessionFetcher(mod.SessionStore, mod.UserRepo)
 
 	// Public routes (no authentication required)
 	rg.GET("/activation", h.GetActivation)

@@ -65,6 +65,31 @@ func TestDeliveryErrorKeepsSentinelAndSafeDiagnostic(t *testing.T) {
 	assert.NotContains(t, err.Error(), "\n")
 }
 
+func TestSMTPDeliveryRequiresSTARTTLSBeforeAuth(t *testing.T) {
+	addr, stop := startFakeSMTPServer(t, false)
+	defer stop()
+
+	sender := NewSMTPDelivery(SMTPConfig{
+		Addr:     addr,
+		Username: "no-reply@example.com",
+		Password: "secret",
+		From:     "no-reply@example.com",
+	})
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	assert.Contains(t, err.Error(), "smtp starttls unavailable")
+}
+
+func TestRequiresSTARTTLSForSubmissionAndAuth(t *testing.T) {
+	assert.True(t, requiresSTARTTLS("587", SMTPConfig{}))
+	assert.True(t, requiresSTARTTLS("2525", SMTPConfig{Username: "user"}))
+	assert.True(t, requiresSTARTTLS("2525", SMTPConfig{Password: "secret"}))
+	assert.False(t, requiresSTARTTLS("2525", SMTPConfig{}))
+	assert.False(t, requiresSTARTTLS("465", SMTPConfig{Username: "user", Password: "secret"}))
+}
+
 func TestSMTPDeliveryTreatsQuitFailureAfterDataAsAccepted(t *testing.T) {
 	addr, stop := startFakeSMTPServer(t, true)
 	defer stop()

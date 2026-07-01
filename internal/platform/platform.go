@@ -22,6 +22,7 @@ type Platform struct {
 	SQLDB         *sql.DB
 	Redis         *redis.Client
 	MinIO         *minio.Client
+	MinIOBucket   string
 	Asynq         *asynq.Client
 	SMTP          SMTPConfig
 	SessionMaxAge int
@@ -55,6 +56,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 		return nil, nil, fmt.Errorf("minio init: %w", err)
 	}
 	p.MinIO = mc
+	p.MinIOBucket = cfg.MinIO.Bucket
 
 	p.Asynq = initAsynq(cfg.Redis)
 	p.SMTP = cfg.SMTP

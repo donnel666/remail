@@ -49,7 +49,7 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 		return deliveryError("invalid smtp addr", err)
 	}
 
-	conn, err := dialSMTP(ctx, addr, host, port)
+	conn, implicitTLS, err := dialSMTP(ctx, addr, host, port)
 	if err != nil {
 		return deliveryError("smtp dial failed", err)
 	}
@@ -62,9 +62,13 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	}
 	defer client.Close()
 
-	if ok, _ := client.Extension("STARTTLS"); ok {
-		if err := client.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}); err != nil {
-			return deliveryError("smtp starttls failed", err)
+	if !implicitTLS {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}); err != nil {
+				return deliveryError("smtp starttls failed", err)
+			}
+		} else if requiresSTARTTLS(port, s.cfg) {
+			return deliveryError("smtp starttls unavailable", nil)
 		}
 	}
 
@@ -115,15 +119,24 @@ func normalizeSMTPAddr(addr string) string {
 	return net.JoinHostPort(addr, "587")
 }
 
-func dialSMTP(ctx context.Context, addr, host, port string) (net.Conn, error) {
+func dialSMTP(ctx context.Context, addr, host, port string) (net.Conn, bool, error) {
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	if port == "465" {
-		return tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{
+		conn, err := tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			ServerName: host,
 		})
+		return conn, true, err
 	}
-	return dialer.DialContext(ctx, "tcp", addr)
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	return conn, false, err
+}
+
+func requiresSTARTTLS(port string, cfg SMTPConfig) bool {
+	if port == "465" {
+		return false
+	}
+	return port == "587" || cfg.Username != "" || cfg.Password != ""
 }
 
 func smtpMessage(from string, message domain.OutboundMessage) string {

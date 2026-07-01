@@ -1,0 +1,78 @@
+package infra
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/donnel666/remail/internal/governance/domain"
+	"github.com/minio/minio-go/v7"
+)
+
+// MinIOFileStore implements governance FilePort using a private MinIO bucket.
+type MinIOFileStore struct {
+	client  *minio.Client
+	bucket  string
+	mu      sync.Mutex
+	ensured bool
+}
+
+// NewMinIOFileStore creates a private file store backed by MinIO.
+func NewMinIOFileStore(client *minio.Client, bucket string) *MinIOFileStore {
+	return &MinIOFileStore{client: client, bucket: bucket}
+}
+
+// SavePrivate writes a private file and returns safe storage metadata.
+func (s *MinIOFileStore) SavePrivate(ctx context.Context, file domain.PrivateFile) (*domain.StoredPrivateFile, error) {
+	if file.ObjectKey == "" {
+		return nil, fmt.Errorf("private file object key is required")
+	}
+	if file.ContentType == "" {
+		file.ContentType = "application/octet-stream"
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return nil, err
+	}
+
+	reader := bytes.NewReader(file.ContentBytes)
+	_, err := s.client.PutObject(ctx, s.bucket, file.ObjectKey, reader, int64(len(file.ContentBytes)), minio.PutObjectOptions{
+		ContentType: file.ContentType,
+		UserMetadata: map[string]string{
+			"file-name": file.FileName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("put private file: %w", err)
+	}
+
+	return &domain.StoredPrivateFile{
+		ObjectKey:   file.ObjectKey,
+		FileName:    file.FileName,
+		ContentType: file.ContentType,
+		Size:        int64(len(file.ContentBytes)),
+	}, nil
+}
+
+func (s *MinIOFileStore) ensureBucket(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.ensured {
+		return nil
+	}
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("check private bucket: %w", err)
+	}
+	if !exists {
+		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
+			exists, checkErr := s.client.BucketExists(ctx, s.bucket)
+			if checkErr != nil || !exists {
+				return fmt.Errorf("create private bucket: %w", err)
+			}
+		}
+	}
+	s.ensured = true
+	return nil
+}

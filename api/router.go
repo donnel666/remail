@@ -8,6 +8,8 @@ import (
 
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
+	coreapi "github.com/donnel666/remail/internal/core/api"
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -47,6 +49,15 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 			return nil, err
 		}
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
+
+		// Core module (resources, mail servers, domains)
+		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
+		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore)
+		if err != nil {
+			return nil, err
+		}
+		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
+		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher)
 	}
 
 	// Serve embedded frontend SPA if available

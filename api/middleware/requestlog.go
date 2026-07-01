@@ -19,7 +19,6 @@ func RequestLogger(slowThreshold time.Duration) gin.HandlerFunc {
 		}
 
 		attrs := []any{
-			"request_id", GetRequestID(c),
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
 			"route", c.FullPath(),

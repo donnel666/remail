@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -139,6 +140,35 @@ type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword"`
 }
 
+// CreateDomainRequest defines model for CreateDomainRequest.
+type CreateDomainRequest struct {
+	Domain       string `json:"domain"`
+	MailServerId int    `json:"mailServerId"`
+	Purpose      string `json:"purpose"`
+}
+
+// CreateMailServerRequest defines model for CreateMailServerRequest.
+type CreateMailServerRequest struct {
+	DkimRecord    *string `json:"dkimRecord,omitempty"`
+	DmarcRecord   *string `json:"dmarcRecord,omitempty"`
+	MxRecord      *string `json:"mxRecord,omitempty"`
+	Name          *string `json:"name,omitempty"`
+	PtrRecord     *string `json:"ptrRecord,omitempty"`
+	ServerAddress string  `json:"serverAddress"`
+	SpfRecord     *string `json:"spfRecord,omitempty"`
+}
+
+// DomainResourceDetail defines model for DomainResourceDetail.
+type DomainResourceDetail struct {
+	CreatedAt       time.Time  `json:"createdAt"`
+	Domain          string     `json:"domain"`
+	Id              int        `json:"id"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	MailServerId    int        `json:"mailServerId"`
+	Purpose         string     `json:"purpose"`
+	Status          string     `json:"status"`
+}
+
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
 	CaptchaAnswer string              `json:"captchaAnswer"`
@@ -161,6 +191,12 @@ type Error struct {
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+// ImportResponse defines model for ImportResponse.
+type ImportResponse struct {
+	ImportId int `json:"importId"`
+	Imported int `json:"imported"`
 }
 
 // InviteListResponse defines model for InviteListResponse.
@@ -193,6 +229,35 @@ type LoginRequest struct {
 // LoginResponse defines model for LoginResponse.
 type LoginResponse struct {
 	User UserResponse `json:"user"`
+}
+
+// MailboxItem defines model for MailboxItem.
+type MailboxItem struct {
+	CreatedAt       time.Time  `json:"createdAt"`
+	Email           string     `json:"email"`
+	Id              int        `json:"id"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	Status          string     `json:"status"`
+}
+
+// MailboxListResponse defines model for MailboxListResponse.
+type MailboxListResponse struct {
+	Items  []MailboxItem `json:"items"`
+	Limit  int           `json:"limit"`
+	Offset int           `json:"offset"`
+	Total  int           `json:"total"`
+}
+
+// MicrosoftResourceDetail defines model for MicrosoftResourceDetail.
+type MicrosoftResourceDetail struct {
+	CreatedAt       time.Time  `json:"createdAt"`
+	EmailAddress    string     `json:"emailAddress"`
+	ForSale         bool       `json:"forSale"`
+	Id              int        `json:"id"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	LastSafeError   *string    `json:"lastSafeError,omitempty"`
+	QualityScore    int        `json:"qualityScore"`
+	Status          string     `json:"status"`
 }
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
@@ -253,6 +318,63 @@ type RegisterRequest struct {
 	InviteCode *string             `json:"inviteCode,omitempty"`
 	Nickname   *string             `json:"nickname,omitempty"`
 	Password   string              `json:"password"`
+}
+
+// ResourceItem defines model for ResourceItem.
+type ResourceItem struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Domain Domain name (domain resources only)
+	Domain *string `json:"domain,omitempty"`
+
+	// Email Email address (Microsoft resources only)
+	Email *string `json:"email,omitempty"`
+
+	// ForSale Microsoft resource is available for sale (Microsoft resources only)
+	ForSale *bool `json:"forSale,omitempty"`
+	Id      int   `json:"id"`
+	OwnerId int   `json:"ownerId"`
+
+	// Purpose Domain resource purpose (domain resources only, sale/auxiliary)
+	Purpose *string `json:"purpose,omitempty"`
+
+	// Status Resource status (e.g., pending/normal/abnormal/disabled, dns_normal/dns_abnormal)
+	Status *string `json:"status,omitempty"`
+	Type   string  `json:"type"`
+}
+
+// ResourceListResponse defines model for ResourceListResponse.
+type ResourceListResponse struct {
+	Items  []ResourceItem `json:"items"`
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
+	Total  int            `json:"total"`
+}
+
+// ServerCreateResponse defines model for ServerCreateResponse.
+type ServerCreateResponse struct {
+	CreatedAt     time.Time `json:"createdAt"`
+	Id            int       `json:"id"`
+	Name          string    `json:"name"`
+	ServerAddress string    `json:"serverAddress"`
+	Status        string    `json:"status"`
+}
+
+// ServerItem defines model for ServerItem.
+type ServerItem struct {
+	CreatedAt     time.Time `json:"createdAt"`
+	Id            int       `json:"id"`
+	Name          string    `json:"name"`
+	ServerAddress string    `json:"serverAddress"`
+	Status        string    `json:"status"`
+}
+
+// ServerListResponse defines model for ServerListResponse.
+type ServerListResponse struct {
+	Items  []ServerItem `json:"items"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
+	Total  int          `json:"total"`
 }
 
 // UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
@@ -326,8 +448,63 @@ type PostAdminRevokeSessionsParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostDomainParams defines parameters for PostDomain.
+type PostDomainParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetDomainMailboxesParams defines parameters for GetDomainMailboxes.
+type GetDomainMailboxesParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // PatchPasswordParams defines parameters for PatchPassword.
 type PatchPasswordParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetResourcesParams defines parameters for GetResources.
+type GetResourcesParams struct {
+	Scope  *string `form:"scope,omitempty" json:"scope,omitempty"`
+	Type   *string `form:"type,omitempty" json:"type,omitempty"`
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostResourceImportMultipartBody defines parameters for PostResourceImport.
+type PostResourceImportMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
+// PostResourceImportParams defines parameters for PostResourceImport.
+type PostResourceImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetResourceDetail200JSONResponseBody defines parameters for GetResourceDetail.
+type GetResourceDetail200JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// PostResourceValidateParams defines parameters for PostResourceValidate.
+type PostResourceValidateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetServersParams defines parameters for GetServers.
+type GetServersParams struct {
+	Scope  *string `form:"scope,omitempty" json:"scope,omitempty"`
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostServerParams defines parameters for PostServer.
+type PostServerParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -353,6 +530,9 @@ type PatchAdminUserJSONRequestBody = AdminUpdateUserRequest
 // PutAdminUserPermissionsJSONRequestBody defines body for PutAdminUserPermissions for application/json ContentType.
 type PutAdminUserPermissionsJSONRequestBody = AdminUpdateUserPermissionsRequest
 
+// PostDomainJSONRequestBody defines body for PostDomain for application/json ContentType.
+type PostDomainJSONRequestBody = CreateDomainRequest
+
 // PostEmailCodeJSONRequestBody defines body for PostEmailCode for application/json ContentType.
 type PostEmailCodeJSONRequestBody = EmailCodeRequest
 
@@ -365,11 +545,79 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
 
+// PostResourceImportMultipartRequestBody defines body for PostResourceImport for multipart/form-data ContentType.
+type PostResourceImportMultipartRequestBody PostResourceImportMultipartBody
+
+// PostServerJSONRequestBody defines body for PostServer for application/json ContentType.
+type PostServerJSONRequestBody = CreateMailServerRequest
+
 // PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
 type PostLoginJSONRequestBody = LoginRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// AsMicrosoftResourceDetail returns the union data inside the GetResourceDetail200JSONResponseBody as a MicrosoftResourceDetail
+func (t GetResourceDetail200JSONResponseBody) AsMicrosoftResourceDetail() (MicrosoftResourceDetail, error) {
+	var body MicrosoftResourceDetail
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMicrosoftResourceDetail overwrites any union data inside the GetResourceDetail200JSONResponseBody as the provided MicrosoftResourceDetail
+func (t *GetResourceDetail200JSONResponseBody) FromMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMicrosoftResourceDetail performs a merge with any union data inside the GetResourceDetail200JSONResponseBody, using the provided MicrosoftResourceDetail
+func (t *GetResourceDetail200JSONResponseBody) MergeMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDomainResourceDetail returns the union data inside the GetResourceDetail200JSONResponseBody as a DomainResourceDetail
+func (t GetResourceDetail200JSONResponseBody) AsDomainResourceDetail() (DomainResourceDetail, error) {
+	var body DomainResourceDetail
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDomainResourceDetail overwrites any union data inside the GetResourceDetail200JSONResponseBody as the provided DomainResourceDetail
+func (t *GetResourceDetail200JSONResponseBody) FromDomainResourceDetail(v DomainResourceDetail) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDomainResourceDetail performs a merge with any union data inside the GetResourceDetail200JSONResponseBody, using the provided DomainResourceDetail
+func (t *GetResourceDetail200JSONResponseBody) MergeDomainResourceDetail(v DomainResourceDetail) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t GetResourceDetail200JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *GetResourceDetail200JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -415,6 +663,12 @@ type ServerInterface interface {
 	// Create a captcha challenge
 	// (POST /v1/captchas)
 	PostCaptcha(c *gin.Context)
+	// Create a domain resource
+	// (POST /v1/domains)
+	PostDomain(c *gin.Context, params PostDomainParams)
+	// List generated mailboxes for a domain resource
+	// (GET /v1/domains/{domainId}/mailboxes)
+	GetDomainMailboxes(c *gin.Context, domainId int, params GetDomainMailboxesParams)
 	// Send an email verification code
 	// (POST /v1/email/code)
 	PostEmailCode(c *gin.Context)
@@ -430,6 +684,24 @@ type ServerInterface interface {
 	// Request a password reset verification code
 	// (POST /v1/password/reset/request)
 	PostPasswordResetRequest(c *gin.Context)
+	// List email resources
+	// (GET /v1/resources)
+	GetResources(c *gin.Context, params GetResourcesParams)
+	// Import Microsoft resources from TXT
+	// (POST /v1/resources/imports)
+	PostResourceImport(c *gin.Context, params PostResourceImportParams)
+	// Get resource detail (no credentials)
+	// (GET /v1/resources/{resourceId})
+	GetResourceDetail(c *gin.Context, resourceId int)
+	// Request resource validation (not yet implemented)
+	// (POST /v1/resources/{resourceId}/validate)
+	PostResourceValidate(c *gin.Context, resourceId int, params PostResourceValidateParams)
+	// List mail servers
+	// (GET /v1/servers)
+	GetServers(c *gin.Context, params GetServersParams)
+	// Create a mail server
+	// (POST /v1/servers)
+	PostServer(c *gin.Context, params PostServerParams)
 	// Login and create a session
 	// (POST /v1/sessions)
 	PostLogin(c *gin.Context)
@@ -892,6 +1164,97 @@ func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
 	siw.Handler.PostCaptcha(c)
 }
 
+// PostDomain operation middleware
+func (siw *ServerInterfaceWrapper) PostDomain(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostDomainParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostDomain(c, params)
+}
+
+// GetDomainMailboxes operation middleware
+func (siw *ServerInterfaceWrapper) GetDomainMailboxes(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDomainMailboxesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetDomainMailboxes(c, domainId, params)
+}
+
 // PostEmailCode operation middleware
 func (siw *ServerInterfaceWrapper) PostEmailCode(c *gin.Context) {
 
@@ -989,6 +1352,275 @@ func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
 	}
 
 	siw.Handler.PostPasswordResetRequest(c)
+}
+
+// GetResources operation middleware
+func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetResourcesParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResources(c, params)
+}
+
+// PostResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostResourceImport(c, params)
+}
+
+// GetResourceDetail operation middleware
+func (siw *ServerInterfaceWrapper) GetResourceDetail(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResourceDetail(c, resourceId)
+}
+
+// PostResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostResourceValidate(c, resourceId, params)
+}
+
+// GetServers operation middleware
+func (siw *ServerInterfaceWrapper) GetServers(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServersParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetServers(c, params)
+}
+
+// PostServer operation middleware
+func (siw *ServerInterfaceWrapper) PostServer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostServerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostServer(c, params)
 }
 
 // PostLogin operation middleware
@@ -1103,11 +1735,19 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
 	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
+	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
+	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
+	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
+	router.GET(options.BaseURL+"/v1/resources/:resourceId", wrapper.GetResourceDetail)
+	router.POST(options.BaseURL+"/v1/resources/:resourceId/validate", wrapper.PostResourceValidate)
+	router.GET(options.BaseURL+"/v1/servers", wrapper.GetServers)
+	router.POST(options.BaseURL+"/v1/servers", wrapper.PostServer)
 	router.POST(options.BaseURL+"/v1/sessions", wrapper.PostLogin)
 	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)

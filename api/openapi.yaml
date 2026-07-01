@@ -844,6 +844,405 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- Resources (P1-I2) ---
+  /v1/resources:
+    get:
+      operationId: getResources
+      summary: List email resources
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            default: owned
+        - name: type
+          in: query
+          schema:
+            type: string
+            default: all
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Resource list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resources/{resourceId}:
+    get:
+      operationId: getResourceDetail
+      summary: Get resource detail (no credentials)
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Resource detail
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/MicrosoftResourceDetail"
+                  - $ref: "#/components/schemas/DomainResourceDetail"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resources/imports:
+    post:
+      operationId: postResourceImport
+      summary: Import Microsoft resources from TXT
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Import complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid import format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: File storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resources/{resourceId}/validate:
+    post:
+      operationId: postResourceValidate
+      summary: Request resource validation (not yet implemented)
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      description: >
+        Stub endpoint for P1-I2. Will be implemented in P1-I3 with actual
+        Microsoft ACL / SMTP verification. Currently returns 501.
+      responses:
+        "501":
+          description: Not implemented (P1-I3)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Mail Servers (P1-I2) ---
+  /v1/servers:
+    get:
+      operationId: getServers
+      summary: List mail servers
+      tags:
+        - Mail Servers
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            default: owned
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Server list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: postServer
+      summary: Create a mail server
+      tags:
+        - Mail Servers
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMailServerRequest"
+      responses:
+        "201":
+          description: Mail server created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerCreateResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Domain Resources (P1-I2) ---
+  /v1/domains:
+    post:
+      operationId: postDomain
+      summary: Create a domain resource
+      tags:
+        - Domains
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDomainRequest"
+      responses:
+        "201":
+          description: Domain resource created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainResourceDetail"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied or mail server owner mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Mail server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Domain already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid purpose
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/domains/{domainId}/mailboxes:
+    get:
+      operationId: getDomainMailboxes
+      summary: List generated mailboxes for a domain resource
+      tags:
+        - Domains
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Mailbox list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxListResponse"
+        "400":
+          description: Invalid domain ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Domain resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   parameters:
     CsrfToken:
@@ -1302,4 +1701,274 @@ components:
           type: integer
         limit:
           type: integer
+      additionalProperties: false
+
+    # --- Resource Schemas (P1-I2) ---
+    ResourceListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    ResourceItem:
+      type: object
+      required:
+        - id
+        - type
+        - ownerId
+        - createdAt
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        ownerId:
+          type: integer
+        status:
+          type: string
+          description: Resource status (e.g., pending/normal/abnormal/disabled, dns_normal/dns_abnormal)
+        forSale:
+          type: boolean
+          description: Microsoft resource is available for sale (Microsoft resources only)
+        email:
+          type: string
+          description: Email address (Microsoft resources only)
+        domain:
+          type: string
+          description: Domain name (domain resources only)
+        purpose:
+          type: string
+          description: Domain resource purpose (domain resources only, sale/auxiliary)
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    MicrosoftResourceDetail:
+      type: object
+      required:
+        - id
+        - emailAddress
+        - forSale
+        - status
+        - qualityScore
+        - createdAt
+      properties:
+        id:
+          type: integer
+        emailAddress:
+          type: string
+        forSale:
+          type: boolean
+        status:
+          type: string
+        qualityScore:
+          type: integer
+        lastSafeError:
+          type: string
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    DomainResourceDetail:
+      type: object
+      required:
+        - id
+        - domain
+        - mailServerId
+        - purpose
+        - status
+        - createdAt
+      properties:
+        id:
+          type: integer
+        domain:
+          type: string
+        mailServerId:
+          type: integer
+        purpose:
+          type: string
+        status:
+          type: string
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ImportResponse:
+      type: object
+      required:
+        - importId
+        - imported
+      properties:
+        importId:
+          type: integer
+        imported:
+          type: integer
+      additionalProperties: false
+
+    CreateMailServerRequest:
+      type: object
+      required:
+        - serverAddress
+      properties:
+        name:
+          type: string
+        serverAddress:
+          type: string
+        mxRecord:
+          type: string
+        spfRecord:
+          type: string
+        dkimRecord:
+          type: string
+        dmarcRecord:
+          type: string
+        ptrRecord:
+          type: string
+      additionalProperties: false
+
+    ServerCreateResponse:
+      type: object
+      required:
+        - id
+        - name
+        - serverAddress
+        - status
+        - createdAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        serverAddress:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ServerListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServerItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    ServerItem:
+      type: object
+      required:
+        - id
+        - name
+        - serverAddress
+        - status
+        - createdAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        serverAddress:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    CreateDomainRequest:
+      type: object
+      required:
+        - domain
+        - mailServerId
+        - purpose
+      properties:
+        domain:
+          type: string
+        mailServerId:
+          type: integer
+        purpose:
+          type: string
+      additionalProperties: false
+
+    MailboxListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailboxItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    MailboxItem:
+      type: object
+      required:
+        - id
+        - email
+        - status
+        - createdAt
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        status:
+          type: string
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
       additionalProperties: false

@@ -5,6 +5,8 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-01 | V1.1 | Codex | 补充 P1-I2 Microsoft TXT 导入辅助邮箱行格式；不改变辅助邮箱绑定实体和状态机归属。 |
+| 2026-07-01 | V1.2 | Codex | 补充 P1-I2 ResourceImport artifact 索引；落实原始导入文件和安全失败明细进入 MinIO private bucket 的原设计。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -34,7 +36,7 @@ Go 禁止：
 | 在领域层解析 Microsoft 页面 | 协议细节只能在 MailTransport ACL。 |
 | 把 Microsoft 页面状态扩散成资源状态 | KMSI、Consent、MFA 等只做任务诊断，不进入领域枚举。 |
 | 回退到 Basic Auth 验证 Microsoft | 业务验证路径必须统一。 |
-| 把 `email----password----clientId----refreshToken` 暴露成 HTTP 契约 | 该格式只能作为导入兼容格式。 |
+| 把 Microsoft TXT 行格式暴露成 HTTP 契约 | 该格式只能作为导入文件内部格式。 |
 
 ---
 
@@ -152,11 +154,13 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 
 ## 5. 导入格式
 
-Microsoft TXT 导入只支持两种行格式：
+Microsoft TXT 导入支持四种行格式：
 
 ```text
 email----password
+email----password----辅助邮箱
 email----password----clientId----refreshToken
+email----password----clientId----refreshToken----辅助邮箱
 ```
 
 处理规则：
@@ -164,9 +168,13 @@ email----password----clientId----refreshToken
 | 行格式 | Go 导入动作 | 后续验证 |
 |--------|-------------|----------|
 | `email----password` | 创建资源，保存 email/password，状态 `pending` | 调 `AcquireToken`。 |
+| `email----password----辅助邮箱` | 创建资源，保存 email/password，状态 `pending`；辅助邮箱作为绑定输入传给 MailTransport，不进入 Core 资源表。 | 调 `AcquireToken`，辅助邮箱绑定状态由 MailTransport 记录。 |
 | `email----password----clientId----refreshToken` | 创建资源，保存四个字段，状态 `pending` | 调 `RefreshToken` 检查 RT 可用性，不重跑密码授权。 |
+| `email----password----clientId----refreshToken----辅助邮箱` | 创建资源，保存四个资源本体字段，状态 `pending`；辅助邮箱作为绑定输入传给 MailTransport，不进入 Core 资源表。 | 调 `RefreshToken`，辅助邮箱绑定状态由 MailTransport 记录。 |
 
-原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。
+P1-I2 阶段只补充 TXT 解析格式和 Core 资源创建。辅助邮箱“已分配、已发码、已验证、失败、过期”等状态必须由辅助邮箱绑定实体表达，不允许塞进 `microsoft_resources` 或 Core 资源状态枚举。
+
+导入 HTTP 契约使用 `multipart/form-data` 的 `file` 字段上传 TXT 文件。原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。Core 只保存 `ResourceImport` 安全索引，不保存原始文件内容。
 
 ---
 
