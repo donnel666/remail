@@ -19,7 +19,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     labelKey: "Resources",
     items: [
       { path: "/my-emails", labelKey: "Project Assets", icon: Shield },
-      { path: "/resources", labelKey: "Resource Management", icon: Database },
+      { path: "/resources", labelKey: "Microsoft Emails", icon: Database },
       { path: "/orders", labelKey: "Order Records", icon: ClipboardList },
       { path: "/after-sales", labelKey: "After-sales Tickets", icon: Headphones },
     ],

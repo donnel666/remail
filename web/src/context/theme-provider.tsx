@@ -57,12 +57,18 @@ export function ThemeProvider({
 
   useEffect(() => {
     const root = window.document.documentElement;
+    const body = window.document.body;
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const applyTheme = () => {
       const nextResolvedTheme = theme === "system" ? getSystemTheme() : theme;
       root.classList.remove("light", "dark");
       root.classList.add(nextResolvedTheme);
+      if (nextResolvedTheme === "dark") {
+        body.setAttribute("theme-mode", "dark");
+      } else {
+        body.removeAttribute("theme-mode");
+      }
       setResolvedTheme(nextResolvedTheme);
     };
 

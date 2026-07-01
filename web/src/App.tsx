@@ -16,6 +16,10 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
+import { LocaleProvider } from "@douyinfe/semi-ui";
+import zhCN from "@douyinfe/semi-ui/lib/es/locale/source/zh_CN";
+import enGB from "@douyinfe/semi-ui/lib/es/locale/source/en_GB";
+import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "./context/theme-provider";
 import { AuthProvider, useAuth } from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
@@ -48,6 +52,12 @@ function Loading() {
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
     </div>
   );
+}
+
+function SemiLocaleWrapper({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation();
+  const locale = i18n.language.startsWith("en") ? enGB : zhCN;
+  return <LocaleProvider locale={locale}>{children}</LocaleProvider>;
 }
 
 const PROTECTED_ROUTES = [...ROUTES_WITH_SIDEBAR, "/account", "/apikeys"];
@@ -142,15 +152,17 @@ function RouteGate({ children }: { children: ReactNode }) {
 const rootRoute = createRootRoute({
   component: () => (
     <ThemeProvider>
-      <AuthProvider>
-        <RouteGate>
-          <AppShell>
-            <Suspense fallback={<Loading />}>
-              <Outlet />
-            </Suspense>
-          </AppShell>
-        </RouteGate>
-      </AuthProvider>
+      <SemiLocaleWrapper>
+        <AuthProvider>
+          <RouteGate>
+            <AppShell>
+              <Suspense fallback={<Loading />}>
+                <Outlet />
+              </Suspense>
+            </AppShell>
+          </RouteGate>
+        </AuthProvider>
+      </SemiLocaleWrapper>
     </ThemeProvider>
   ),
 });

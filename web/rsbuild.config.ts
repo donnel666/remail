@@ -1,6 +1,14 @@
 import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
+import { createRequire } from "module";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import path from "path";
+
+const require = createRequire(import.meta.url);
+const semiUiDir = path.resolve(
+  path.dirname(require.resolve("@douyinfe/semi-ui")),
+  "../.."
+);
 
 const apiProxyTarget =
   process.env.REMAIL_API_PROXY_TARGET || "https://remail.aishop6.com";
@@ -60,6 +68,14 @@ export default defineConfig({
   },
   source: {
     entry: { index: "./src/index.tsx" },
+  },
+  resolve: {
+    alias: {
+      "@douyinfe/semi-ui/dist/css/semi.css": path.resolve(
+        semiUiDir,
+        "dist/css/semi.css"
+      ),
+    },
   },
   output: {
     distPath: { root: "dist" },

@@ -297,3 +297,127 @@
     background-position: -200% 0;
   }
 }
+
+:root,
+body,
+body[theme-mode="dark"],
+body .semi-always-dark,
+body[theme-mode="dark"] .semi-always-light,
+:host,
+:host([theme-mode="dark"]),
+:host .semi-always-light,
+:host .semi-always-dark {
+  --semi-color-primary: var(--brand);
+  --semi-color-primary-hover: var(--brand-hover);
+  --semi-color-primary-active: var(--brand-active);
+  --semi-color-primary-disabled: var(--brand-light);
+  --semi-color-primary-light-default: color-mix(
+    in oklch,
+    var(--brand) 12%,
+    transparent
+  );
+  --semi-color-primary-light-hover: color-mix(
+    in oklch,
+    var(--brand) 18%,
+    transparent
+  );
+  --semi-color-primary-light-active: color-mix(
+    in oklch,
+    var(--brand) 24%,
+    transparent
+  );
+  --semi-color-secondary: var(--brand);
+  --semi-color-secondary-hover: var(--brand-hover);
+  --semi-color-secondary-active: var(--brand-active);
+  --semi-color-secondary-disabled: var(--brand-light);
+  --semi-color-secondary-light-default: var(--semi-color-primary-light-default);
+  --semi-color-secondary-light-hover: var(--semi-color-primary-light-hover);
+  --semi-color-secondary-light-active: var(--semi-color-primary-light-active);
+  --semi-color-info: var(--brand);
+  --semi-color-info-hover: var(--brand-hover);
+  --semi-color-info-active: var(--brand-active);
+  --semi-color-info-disabled: var(--brand-light);
+  --semi-color-info-light-default: var(--semi-color-primary-light-default);
+  --semi-color-info-light-hover: var(--semi-color-primary-light-hover);
+  --semi-color-info-light-active: var(--semi-color-primary-light-active);
+  --semi-color-focus-border: var(--brand);
+  --semi-color-link: var(--brand);
+  --semi-color-link-hover: var(--brand-hover);
+  --semi-color-link-active: var(--brand-active);
+  --semi-color-link-visited: var(--brand);
+}
+
+.table-scroll-card {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 110px);
+  max-height: calc(100vh - 110px);
+}
+
+.table-scroll-card .semi-card-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.table-scroll-card .semi-card-body::-webkit-scrollbar,
+.semi-table-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-scroll-card .semi-card-body::-webkit-scrollbar-thumb,
+.semi-table-body::-webkit-scrollbar-thumb {
+  background: rgba(var(--semi-grey-2), 0.3);
+  border-radius: 2px;
+}
+
+.table-scroll-card .semi-card-body::-webkit-scrollbar-thumb:hover,
+.semi-table-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--semi-grey-2), 0.5);
+}
+
+.table-scroll-card .semi-card-body::-webkit-scrollbar-track,
+.semi-table-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.semi-radio,
+.semi-tagInput,
+.semi-input-textarea-wrapper,
+.semi-navigation-sub-title,
+.semi-page-item,
+.semi-navigation-item,
+.semi-tag-closable,
+.semi-input-wrapper,
+.semi-tabs-tab-button,
+.semi-select,
+.semi-button {
+  border-radius: 10px !important;
+}
+
+.semi-card-header,
+.semi-card-body {
+  padding: 12px !important;
+}
+
+.resources-search-input.semi-input-wrapper {
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-fill-0);
+}
+
+.resources-search-input.semi-input-wrapper:hover {
+  border-color: var(--semi-color-primary-light-active);
+  background: var(--semi-color-fill-1);
+}
+
+.resources-search-input.semi-input-wrapper-focus {
+  border-color: var(--semi-color-primary);
+  background: var(--semi-color-bg-0);
+}
+
+@media (max-width: 767px) {
+  .table-scroll-card {
+    height: calc(100vh - 77px);
+    max-height: calc(100vh - 77px);
+  }
+}
