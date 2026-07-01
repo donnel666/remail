@@ -66,6 +66,7 @@ type MicrosoftResource struct {
 	Password        string // Original value, never in API responses or logs
 	ClientID        string
 	RefreshToken    string // Original value, never in API responses or logs
+	LongLived       bool
 	RTExpireAt      *time.Time
 	ForSale         bool
 	Status          MicrosoftResourceStatus

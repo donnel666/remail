@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -355,6 +356,131 @@ func TestResourceRepoUpdateMicrosoftWithLogPreservesCredentialsMySQL(t *testing.
 	require.Equal(t, string(domain.MicrosoftStatusDisabled), stored.Status)
 	require.Equal(t, 3, stored.QualityScore)
 	require.Equal(t, "safe diagnostic", stored.LastSafeError)
+}
+
+func TestResourceRepoPublishMicrosoftWithLogIsIdempotentMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+	).Error)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &domain.MicrosoftResource{
+		EmailAddress: "publish-once@test.local",
+		Password:     "secret",
+		ForSale:      false,
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, ms))
+
+	log := governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "core.microsoft_resource.publish",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     fmt.Sprintf("%d", ms.ID),
+		Path:           fmt.Sprintf("/v1/resources/%d/publish", ms.ID),
+		Result:         "success",
+		SafeSummary:    "Microsoft resource published for sale.",
+		RequestID:      "req-publish-once",
+	}
+
+	published, err := repo.PublishMicrosoftWithLog(context.Background(), 1, ms.ID, log)
+	require.NoError(t, err)
+	require.True(t, published)
+
+	published, err = repo.PublishMicrosoftWithLog(context.Background(), 1, ms.ID, log)
+	require.NoError(t, err)
+	require.False(t, published)
+
+	var stored MicrosoftResourceModel
+	require.NoError(t, db.First(&stored, ms.ID).Error)
+	require.True(t, stored.ForSale)
+
+	var logCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM operation_logs WHERE operation_type = ? AND resource_id = ?",
+		"core.microsoft_resource.publish",
+		fmt.Sprintf("%d", ms.ID),
+	).Scan(&logCount).Error)
+	require.Equal(t, int64(1), logCount)
+}
+
+func TestResourceRepoPublishMicrosoftBatchWithLogIsConcurrentIdempotentMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+	).Error)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &domain.MicrosoftResource{
+		EmailAddress: "publish-batch@test.local",
+		Password:     "secret",
+		ForSale:      false,
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, ms))
+
+	baseLog := governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "core.microsoft_resource.publish_batch",
+		ResourceType:   "microsoft_resource",
+		Path:           "/v1/resources/publish",
+		Result:         "success",
+		SafeSummary:    "Microsoft resources published for sale.",
+		RequestID:      "req-publish-batch",
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	publishedResults := make(chan int, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			published, err := repo.PublishMicrosoftBatchWithLog(context.Background(), 1, []uint{ms.ID}, baseLog)
+			if err != nil {
+				errs <- err
+				return
+			}
+			publishedResults <- published
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(publishedResults)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	totalPublished := 0
+	for published := range publishedResults {
+		totalPublished += published
+	}
+	require.Equal(t, 1, totalPublished)
+
+	var logCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM operation_logs WHERE operation_type = ? AND resource_id = ?",
+		"core.microsoft_resource.publish_batch",
+		fmt.Sprintf("%d", ms.ID),
+	).Scan(&logCount).Error)
+	require.Equal(t, int64(1), logCount)
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

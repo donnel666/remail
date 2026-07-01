@@ -92,6 +92,8 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:admin', 'iam:invite', 'read', 'allow'),
     ('p', 'role:admin', 'iam:invite', 'write', 'allow'),
     ('p', 'role:admin', 'iam:invite', 'operate', 'allow'),
+    ('p', 'role:admin', 'iam:supplier_application', 'read', 'allow'),
+    ('p', 'role:admin', 'iam:supplier_application', 'operate', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'operate', 'allow'),
@@ -99,7 +101,28 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:super_admin', 'iam:permission', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'write', 'allow'),
-    ('p', 'role:super_admin', 'iam:invite', 'operate', 'allow');
+    ('p', 'role:super_admin', 'iam:invite', 'operate', 'allow'),
+    ('p', 'role:super_admin', 'iam:supplier_application', 'read', 'allow'),
+    ('p', 'role:super_admin', 'iam:supplier_application', 'operate', 'allow');
+
+CREATE TABLE supplier_applications (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    applicant_user_id BIGINT UNSIGNED NOT NULL,
+    reason VARCHAR(1000) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'reviewing' COMMENT 'reviewing|approved|rejected|canceled',
+    reviewing_applicant_user_id BIGINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN status = 'reviewing' THEN applicant_user_id ELSE NULL END) STORED,
+    review_reason VARCHAR(500) NOT NULL DEFAULT '',
+    reviewed_by BIGINT UNSIGNED NULL,
+    reviewed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_supplier_applications_applicant_created (applicant_user_id, created_at),
+    INDEX idx_supplier_applications_status_created (status, created_at),
+    UNIQUE INDEX idx_supplier_applications_reviewing_applicant (reviewing_applicant_user_id),
+    CONSTRAINT fk_supplier_applications_applicant FOREIGN KEY (applicant_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_supplier_applications_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT chk_supplier_applications_status CHECK (status IN ('reviewing', 'approved', 'rejected', 'canceled'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE operation_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -119,6 +142,7 @@ CREATE TABLE operation_logs (
 
 -- +goose Down
 DROP TABLE IF EXISTS operation_logs;
+DROP TABLE IF EXISTS supplier_applications;
 DROP TABLE IF EXISTS casbin_rule;
 DROP TABLE IF EXISTS user_login_devices;
 DROP TABLE IF EXISTS third_party_identities;

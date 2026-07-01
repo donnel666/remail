@@ -274,6 +274,63 @@ func (h *IAMHandler) PatchPassword(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// --- Supplier Applications ---
+
+// POST /v1/supplier-applications
+func (h *IAMHandler) PostSupplierApplication(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   domain.ErrAuthenticationRequired.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	var req SupplierApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	application, err := h.module.SupplierApplicationUseCase.Submit(c.Request.Context(), userID, req.Reason)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	resp := toSupplierApplicationResponse(application)
+	c.JSON(http.StatusCreated, gin.H{"application": resp})
+}
+
+// GET /v1/supplier-applications/current
+func (h *IAMHandler) GetCurrentSupplierApplication(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   domain.ErrAuthenticationRequired.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	application, err := h.module.SupplierApplicationUseCase.Current(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if application == nil {
+		c.JSON(http.StatusOK, SupplierApplicationCurrentResponse{Application: nil})
+		return
+	}
+	resp := toSupplierApplicationResponse(application)
+	c.JSON(http.StatusOK, SupplierApplicationCurrentResponse{Application: &resp})
+}
+
 // --- Admin ---
 
 // GET /v1/admin/users
@@ -414,6 +471,83 @@ func (h *IAMHandler) PatchAdminInvite(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"invite": toInviteResponse(invite)})
 }
 
+func (h *IAMHandler) GetAdminSupplierApplications(c *gin.Context) {
+	offset, limit, ok := parsePagination(c)
+	if !ok {
+		return
+	}
+	status := c.DefaultQuery("status", "all")
+	result, err := h.module.SupplierApplicationUseCase.List(c.Request.Context(), status, offset, limit)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	applications := make([]SupplierApplicationResponse, len(result.Applications))
+	for i := range result.Applications {
+		applications[i] = toSupplierApplicationResponse(&result.Applications[i])
+	}
+	c.JSON(http.StatusOK, SupplierApplicationListResponse{
+		Applications: applications,
+		Total:        result.Total,
+		Offset:       result.Offset,
+		Limit:        result.Limit,
+	})
+}
+
+func (h *IAMHandler) PostAdminSupplierApplicationApprove(c *gin.Context) {
+	applicationID, ok := parseSupplierApplicationIDParam(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	application, err := h.module.SupplierApplicationUseCase.Approve(
+		c.Request.Context(),
+		operatorID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+		applicationID,
+	)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	resp := toSupplierApplicationResponse(application)
+	c.JSON(http.StatusOK, gin.H{"application": resp})
+}
+
+func (h *IAMHandler) PostAdminSupplierApplicationReject(c *gin.Context) {
+	applicationID, ok := parseSupplierApplicationIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req AdminRejectSupplierApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	application, err := h.module.SupplierApplicationUseCase.Reject(
+		c.Request.Context(),
+		operatorID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+		applicationID,
+		req.ReviewReason,
+	)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	resp := toSupplierApplicationResponse(application)
+	c.JSON(http.StatusOK, gin.H{"application": resp})
+}
+
 // PATCH /v1/admin/users/:userId
 func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 	userIDStr := c.Param("userId")
@@ -488,6 +622,19 @@ func parseUserIDParam(c *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(targetUserID), true
+}
+
+func parseSupplierApplicationIDParam(c *gin.Context) (uint, bool) {
+	idStr := c.Param("applicationId")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid supplier application ID.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return 0, false
+	}
+	return uint(id), true
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
@@ -594,6 +741,26 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrInvalidPermissionPolicy):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Invalid permission policy.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrSupplierApplicationAlreadyReviewing):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "Supplier application is already under review.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrSupplierApplicationNotFound):
+		c.JSON(http.StatusNotFound, gin.H{
+			"message":   "Supplier application not found.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrInvalidSupplierApplication):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid supplier application.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrInvalidSupplierApplicationStatus):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid supplier application status.",
 			"requestId": rid,
 		})
 	default:

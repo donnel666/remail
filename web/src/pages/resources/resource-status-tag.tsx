@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Tag, Tooltip } from "@douyinfe/semi-ui";
 
-import { isAvailable, type ResourceStatus } from "./model";
+import type { ResourceStatus } from "./model";
 
 export function renderStatusTag(
   status: ResourceStatus,
@@ -10,16 +10,22 @@ export function renderStatusTag(
 ) {
   let tag: ReactNode;
 
-  if (isAvailable(status)) {
+  if (status === "normal") {
     tag = (
       <Tag color="green" shape="circle" size="small">
-        {t("Available")}
+        {t("Normal")}
       </Tag>
     );
-  } else if (status === "pending_validation") {
+  } else if (status === "pending") {
     tag = (
       <Tag color="orange" shape="circle" size="small">
-        {t("Pending validation")}
+        {t("Pending")}
+      </Tag>
+    );
+  } else if (status === "abnormal") {
+    tag = (
+      <Tag color="red" shape="circle" size="small">
+        {t("Abnormal")}
       </Tag>
     );
   } else {
@@ -30,7 +36,7 @@ export function renderStatusTag(
     );
   }
 
-  if (!isAvailable(status) && status !== "pending_validation" && reason) {
+  if (status === "abnormal" && reason) {
     return (
       <Tooltip
         content={reason}

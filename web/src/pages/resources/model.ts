@@ -1,51 +1,19 @@
+import type { ResourceItem } from "@/lib/resources-api";
+
 export type UsageScope = "private" | "public_sale";
 export type LifetimeType = "short_lived" | "long_lived";
-export type ResourceStatus =
-  | "pending_validation"
-  | "active"
-  | "available"
-  | "disabled"
-  | "expired"
-  | "isolated"
-  | "invalid";
+export type ResourceStatus = "pending" | "normal" | "abnormal" | "disabled";
 
 export interface EmailResource {
   id: number;
   emailAddress: string;
   emailType: string;
+  forSale: boolean;
   usageScope: UsageScope;
   lifetimeType: LifetimeType;
   status: ResourceStatus;
-  validationFailureReason?: string;
+  lastSafeError?: string;
 }
-
-const MICROSOFT_SUFFIXES = [
-  "@outlook.com",
-  "@hotmail.com",
-  "@live.com",
-  "@msn.com",
-  "@outlook.jp",
-  "@hotmail.co.uk",
-  "@outlook.de",
-  "@outlook.fr",
-];
-
-const MICROSOFT_STATUSES: ResourceStatus[] = [
-  "available",
-  "available",
-  "available",
-  "pending_validation",
-  "disabled",
-  "expired",
-  "isolated",
-];
-
-const MICROSOFT_FAILURE_REASONS: Partial<Record<ResourceStatus, string>> = {
-  disabled: "Account disabled by system policy",
-  expired: "Refresh token expired, re-authenticate required",
-  isolated: "Mailbox isolated after abnormal sign-in",
-  invalid: "Mailbox credentials failed validation",
-};
 
 function getEmailType(suffix: string) {
   return suffix
@@ -53,27 +21,6 @@ function getEmailType(suffix: string) {
     .replace(/\./g, "_")
     .replace(/-/g, "_");
 }
-
-function createMockMicrosoftEmail(index: number): EmailResource {
-  const suffix = MICROSOFT_SUFFIXES[index % MICROSOFT_SUFFIXES.length];
-  const status = MICROSOFT_STATUSES[index % MICROSOFT_STATUSES.length];
-  const id = index + 1;
-
-  return {
-    id,
-    emailAddress: `resource_${String(id).padStart(3, "0")}${suffix}`,
-    emailType: getEmailType(suffix),
-    usageScope: index % 4 === 0 ? "public_sale" : "private",
-    lifetimeType: index % 6 === 0 ? "short_lived" : "long_lived",
-    status,
-    validationFailureReason: MICROSOFT_FAILURE_REASONS[status],
-  };
-}
-
-export const MICROSOFT_EMAIL_RESOURCES_MOCK: EmailResource[] = Array.from(
-  { length: 100 },
-  (_, index) => createMockMicrosoftEmail(index)
-);
 
 export const MICROSOFT_EMAIL_FORMAT_HINT = `email----password
 email----password----binding_email
@@ -85,8 +32,37 @@ export function getSuffix(email: string): string {
   return index === -1 ? "" : email.slice(index).toLowerCase();
 }
 
-export function isAvailable(status: ResourceStatus) {
-  return status === "available" || status === "active";
+export function isNormal(status: ResourceStatus) {
+  return status === "normal";
+}
+
+export function toResourceStatus(status?: string): ResourceStatus {
+  switch (status) {
+    case "pending":
+    case "normal":
+    case "abnormal":
+    case "disabled":
+      return status;
+    default:
+      return "pending";
+  }
+}
+
+export function toEmailResource(item: ResourceItem): EmailResource | null {
+  if (item.type !== "microsoft" || !item.email) return null;
+
+  const forSale = Boolean(item.forSale);
+  const suffix = getSuffix(item.email);
+  return {
+    id: item.id,
+    emailAddress: item.email,
+    emailType: getEmailType(suffix),
+    forSale,
+    usageScope: forSale ? "public_sale" : "private",
+    lifetimeType: item.longLived ? "long_lived" : "short_lived",
+    status: toResourceStatus(item.status),
+    lastSafeError: item.lastSafeError || undefined,
+  };
 }
 
 export function getSuffixCounts(items: EmailResource[]) {

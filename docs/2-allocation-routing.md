@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-01 | V1.1 | Codex | 补充 Microsoft 公开出售候选与 owner 自用私有候选分层；普通 user 资源不得进入公开供给池。 |
 
 > 核心域。BC-ALLOC 只负责把订单绑定到一个邮箱使用权，不拥有资源验证、订单状态或钱包。
 
@@ -41,9 +42,18 @@
 | `domainSuffix` | 邮箱后缀 |
 | `forSale` | 出售标记快照 |
 | `qualityScore` | 质量分 |
-| `status` | `available/disabled` |
+| `status` | Core Microsoft 状态快照：`normal/abnormal/disabled`；候选刷新只保留 `normal` 可分配资源 |
 
 候选是读模型，不是库存扣减表。候选刷新时必须防御性校验资源 owner 仍具备 `supplier/admin/super_admin` 任一角色。
+
+Microsoft 候选分为两类：
+
+| 类型 | 条件 | 可分配对象 |
+|------|------|------------|
+| 公开出售候选 | `status=normal`、`forSale=true`、owner 启用且具备 `supplier/admin/super_admin` 任一角色 | 平台订单按项目规则分配给购买用户 |
+| 自用私有候选 | `status=normal`、`forSale=false`、`ownerUserId = 当前下单用户` | 只能分配给 owner 自己 |
+
+普通 `user` 拥有的 Microsoft 资源永远不得进入公开出售候选。`forSale=false` 等价于用户侧“私有=是”，不是独立状态。公开出售候选和自用私有候选必须在查询条件上显式分开，不允许用一个宽泛候选池再靠调用方过滤。
 
 ### 2.2 `MicrosoftAllocation`
 
@@ -124,7 +134,7 @@ sequenceDiagram
     T->>A: allocate(projectProductId, orderNo)
     A->>C: 读取商品权重和项目规则
     A->>A: 按非零权重选择 main/dot/plus
-    A->>A: 读取 available 候选
+    A->>A: 读取 normal 可分配候选
     alt 主邮箱类
         A->>C: 查询主邮箱/显式别名能力
         A->>A: 创建 main 或 alias 分配

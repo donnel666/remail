@@ -17,47 +17,60 @@ import {
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
 import { Layers, SlidersHorizontal } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  getCurrentSupplierApplication,
+  listOwnedMicrosoftResources,
+  publishMicrosoftResource,
+  publishMicrosoftResourcesBatch,
+} from "@/lib/resources-api";
 
 import { ImportMicrosoftEmailsModal } from "./resources/import-microsoft-emails-modal";
 import {
   getSuffix,
   getSuffixCounts,
-  isAvailable,
-  MICROSOFT_EMAIL_RESOURCES_MOCK,
   type EmailResource,
   type LifetimeType,
   type ResourceStatus,
   type UsageScope,
+  isNormal,
+  toEmailResource,
 } from "./resources/model";
 import { renderStatusTag } from "./resources/resource-status-tag";
+import { SupplierApplicationModal } from "./resources/supplier-application-modal";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 
 const { Text } = Typography;
 
-type StatusFilter = "all" | "available" | "pending_validation" | "disabled";
+type StatusFilter = "all" | "normal" | "pending" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
+const supplierRoleLevel = 20;
 
-function isDisabledStatus(status: ResourceStatus) {
-  return !isAvailable(status) && status !== "pending_validation";
+function hasSupplierRole(roleLevel?: number | null) {
+  return (roleLevel ?? 0) >= supplierRoleLevel;
 }
 
 function matchesStatusFilter(status: ResourceStatus, filter: StatusFilter) {
   if (filter === "all") return true;
-  if (filter === "available") return isAvailable(status);
-  if (filter === "pending_validation") return status === "pending_validation";
-  return isDisabledStatus(status);
+  return status === filter;
 }
 
 function matchesBooleanFilter(value: boolean, filter: BooleanFilter) {
   if (filter === "all") return true;
   return filter === "yes" ? value : !value;
+}
+
+function isEmailResource(item: EmailResource | null): item is EmailResource {
+  return item !== null;
 }
 
 interface StatisticFilterOptionProps<T extends string> {
@@ -93,16 +106,21 @@ function StatisticFilterOption<T extends string>({
   );
 }
 
-function useResources() {
+function useResources(t: TFunction) {
   const [items, setItems] = useState<EmailResource[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    setItems([...MICROSOFT_EMAIL_RESOURCES_MOCK]);
-    setLoading(false);
-  }, []);
+    try {
+      const response = await listOwnedMicrosoftResources();
+      setItems(response.items.map(toEmailResource).filter(isEmailResource));
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -113,8 +131,9 @@ function useResources() {
 
 export default function Resources() {
   const { t } = useTranslation();
+  const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
-  const { items, loading, refresh } = useResources();
+  const { items, loading, refresh } = useResources(t);
   const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [suffixKeyword, setSuffixKeyword] = useState("");
@@ -124,9 +143,15 @@ export default function Resources() {
     useState<BooleanFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
+    null
+  );
+  const [publishingBatch, setPublishingBatch] = useState(false);
+  const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
 
   const suffixCounts = useMemo(() => getSuffixCounts(items), [items]);
   const suffixSet = useMemo(
@@ -148,11 +173,10 @@ export default function Resources() {
       },
       status: {
         all: items.length,
-        available: items.filter((item) => isAvailable(item.status)).length,
-        disabled: items.filter((item) => isDisabledStatus(item.status)).length,
-        pending_validation: items.filter(
-          (item) => item.status === "pending_validation"
-        ).length,
+        abnormal: items.filter((item) => item.status === "abnormal").length,
+        disabled: items.filter((item) => item.status === "disabled").length,
+        normal: items.filter((item) => isNormal(item.status)).length,
+        pending: items.filter((item) => item.status === "pending").length,
       },
     }),
     [items]
@@ -222,12 +246,6 @@ export default function Resources() {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
 
-  useSelectionNotification({
-    selectedCount: selectedKeys.length,
-    onClear: () => setSelectedKeys([]),
-    t,
-  });
-
   const selectSuffix = (suffix: string) => {
     setActiveSuffix(suffix);
     setActivePage(1);
@@ -263,33 +281,153 @@ export default function Resources() {
     setSelectedKeys([]);
   };
 
-  const confirmCheckAll = () => {
-    Modal.confirm({
-      title: t("Confirm check all"),
-      content: t("Confirm check all content", { count: filteredItems.length }),
-      okText: t("Check all"),
-      cancelText: t("Cancel"),
-      onOk: () => {
-        Toast.success(t("Check all submitted"));
-      },
-    });
-  };
+  const showNotImplemented = useCallback(() => {
+    Toast.info(t("Feature is not implemented yet."));
+  }, [t]);
 
-  const confirmSellAll = () => {
+  const promptSupplierApplication = useCallback(async () => {
+    try {
+      const response = await getCurrentSupplierApplication();
+      if (response.application?.status === "reviewing") {
+        Toast.info(t("Supplier application is already under review."));
+        return;
+      }
+      setSupplierApplicationOpen(true);
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Supplier application failed."));
+    }
+  }, [t]);
+
+  const ensureCanPublishForSale = useCallback(async () => {
+    if (canPublishForSale) return true;
+
+    const latestUser = await refreshCurrentUser();
+    if (hasSupplierRole(latestUser?.roleLevel)) return true;
+
+    await promptSupplierApplication();
+    return false;
+  }, [canPublishForSale, promptSupplierApplication, refreshCurrentUser]);
+
+  const handleSellResource = useCallback(async (record: EmailResource) => {
+    if (record.forSale) return;
+
+    if (!(await ensureCanPublishForSale())) return;
+
+    setPublishingResourceID(record.id);
+    try {
+      await publishMicrosoftResource(record.id);
+      Toast.success(t("Resource published for sale."));
+      await refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+    } finally {
+      setPublishingResourceID(null);
+    }
+  }, [ensureCanPublishForSale, refresh, t]);
+
+  const selectedPrivateResourceIds = useMemo(() => {
+    const selectedIDSet = new Set(selectedKeys);
+    return items
+      .filter(
+        (item) =>
+          selectedIDSet.has(item.id) && item.usageScope === "private"
+      )
+      .map((item) => item.id);
+  }, [items, selectedKeys]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedKeys([]);
+  }, []);
+
+  const confirmCheckAll = useCallback(() => {
+    showNotImplemented();
+  }, [showNotImplemented]);
+
+  const confirmSellAll = useCallback(async () => {
     const sellableCount = filteredItems.filter(
       (item) => item.usageScope === "private"
     ).length;
+
+    if (sellableCount === 0) {
+      Toast.info(t("No private resources to publish."));
+      return;
+    }
+
+    if (!(await ensureCanPublishForSale())) return;
 
     Modal.confirm({
       title: t("Confirm sell all"),
       content: t("Confirm sell all content", { count: sellableCount }),
       okText: t("Sell all"),
       cancelText: t("Cancel"),
-      onOk: () => {
-        Toast.success(t("Sell all submitted"));
+      onOk: async () => {
+        setPublishingBatch(true);
+        try {
+          const response = await publishMicrosoftResourcesBatch({
+            resourceIds: filteredItems
+              .filter((item) => item.usageScope === "private")
+              .map((item) => item.id),
+          });
+          Toast.success(
+            t("Resources published for sale.", { count: response.published })
+          );
+          await refresh();
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+        } finally {
+          setPublishingBatch(false);
+        }
       },
     });
-  };
+  }, [ensureCanPublishForSale, filteredItems, refresh, t]);
+
+  const confirmSellSelected = useCallback(async () => {
+    if (selectedPrivateResourceIds.length === 0) {
+      Toast.info(t("No private resources to publish."));
+      return;
+    }
+
+    if (!(await ensureCanPublishForSale())) return;
+
+    Modal.confirm({
+      title: t("Confirm sell selected"),
+      content: t("Confirm sell selected content", {
+        count: selectedPrivateResourceIds.length,
+      }),
+      okText: t("Sell selected"),
+      cancelText: t("Cancel"),
+      onOk: async () => {
+        setPublishingBatch(true);
+        try {
+          const response = await publishMicrosoftResourcesBatch({
+            resourceIds: selectedPrivateResourceIds,
+          });
+          Toast.success(
+            t("Resources published for sale.", { count: response.published })
+          );
+          setSelectedKeys([]);
+          await refresh();
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+        } finally {
+          setPublishingBatch(false);
+        }
+      },
+    });
+  }, [ensureCanPublishForSale, refresh, selectedPrivateResourceIds, t]);
+
+  const sellSelected = useCallback(() => {
+    void confirmSellSelected();
+  }, [confirmSellSelected]);
+
+  useSelectionNotification({
+    selectedCount: selectedKeys.length,
+    onCheck: showNotImplemented,
+    onClear: clearSelection,
+    onSell: sellSelected,
+    sellLoading: publishingBatch,
+    t,
+  });
 
   const columns = useMemo(
     () =>
@@ -324,7 +462,7 @@ export default function Resources() {
           dataIndex: "status",
           width: 120,
           render: (status: ResourceStatus, record: EmailResource) =>
-            renderStatusTag(status, t, record.validationFailureReason),
+            renderStatusTag(status, t, record.lastSafeError),
         },
         {
           title: t("Private"),
@@ -352,22 +490,17 @@ export default function Resources() {
         {
           title: t("Action"),
           dataIndex: "operate",
-          width: 270,
+          width: 210,
           fixed: "right",
           render: (_: unknown, record: EmailResource) => (
             <Space wrap={false}>
-              {isAvailable(record.status) || record.status === "pending_validation" ? (
-                <Button type="danger" size="small">
-                  {t("Disable")}
-                </Button>
-              ) : (
-                <Button size="small">{t("Enable")}</Button>
-              )}
-              <Button type="tertiary" size="small">
+              <Button type="tertiary" size="small" onClick={showNotImplemented}>
                 {t("Check")}
               </Button>
               <Button
-                disabled={record.usageScope !== "private"}
+                disabled={record.forSale}
+                loading={publishingResourceID === record.id}
+                onClick={() => void handleSellResource(record)}
                 type="tertiary"
                 size="small"
               >
@@ -382,6 +515,7 @@ export default function Resources() {
                     content: record.emailAddress,
                     okText: t("Remove"),
                     cancelText: t("Cancel"),
+                    onOk: showNotImplemented,
                   });
                 }}
               >
@@ -391,7 +525,12 @@ export default function Resources() {
           ),
         },
       ] as any[],
-    [t]
+    [
+      handleSellResource,
+      publishingResourceID,
+      showNotImplemented,
+      t,
+    ]
   );
 
   const rowSelection = {
@@ -482,7 +621,8 @@ export default function Resources() {
           type="tertiary"
           size="small"
           className="flex-1 md:flex-initial"
-          onClick={confirmSellAll}
+          loading={publishingBatch}
+          onClick={() => void confirmSellAll()}
         >
           {t("Sell all")}
         </Button>
@@ -511,18 +651,25 @@ export default function Resources() {
                   value="all"
                 />
                 <StatisticFilterOption
-                  active={statusFilter === "available"}
-                  count={resourceStats.status.available}
-                  label={t("Available")}
+                  active={statusFilter === "normal"}
+                  count={resourceStats.status.normal}
+                  label={t("Normal")}
                   onSelect={applyStatusFilter}
-                  value="available"
+                  value="normal"
                 />
                 <StatisticFilterOption
-                  active={statusFilter === "pending_validation"}
-                  count={resourceStats.status.pending_validation}
-                  label={t("Pending validation")}
+                  active={statusFilter === "pending"}
+                  count={resourceStats.status.pending}
+                  label={t("Pending")}
                   onSelect={applyStatusFilter}
-                  value="pending_validation"
+                  value="pending"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "abnormal"}
+                  count={resourceStats.status.abnormal}
+                  label={t("Abnormal")}
+                  onSelect={applyStatusFilter}
+                  value="abnormal"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "disabled"}
@@ -691,6 +838,11 @@ export default function Resources() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onSuccess={refresh}
+      />
+      <SupplierApplicationModal
+        open={supplierApplicationOpen}
+        onOpenChange={setSupplierApplicationOpen}
+        onSuccess={() => undefined}
       />
     </div>
   );

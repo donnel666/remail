@@ -6,6 +6,7 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-06-30 | V1.1 | Codex | 补充 P1-I1 当前用户直接改密接口和验证码交互规则；不改变 IAM 角色、Casbin 和错误策略。 |
+| 2026-07-01 | V1.2 | Codex | 补充供应商申请流程；普通用户申请成为 supplier 只提升角色，不改变资源状态。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -31,6 +32,7 @@
 | `ThirdPartyIdentity` | 第三方账号绑定 |
 | `UserLoginDevice` | 设备指纹和最近登录 |
 | `CasbinRule` | Casbin policy 存储 |
+| `SupplierApplication` | 普通用户申请 supplier 权限的审核记录 |
 
 角色等级：
 
@@ -126,6 +128,7 @@ eft = allow/deny
 | INV-I6 | 邀请码使用必须原子递增，不能并发突破次数。 |
 | INV-I7 | 权限变更必须写 OperationLog，并刷新 Casbin enforcer/cache。 |
 | INV-I8 | 首次激活只允许发生一次。 |
+| INV-I9 | 同一用户同时只能有一个 `reviewing` 供应商申请。审批通过只提升角色，不自动发布任何资源。 |
 
 ---
 
@@ -172,6 +175,24 @@ eft = allow/deny
 | 执行找回密码 | `POST /v1/password/reset` 必须提交邮箱验证码，邮箱验证码控制最终重置动作。 |
 | 图形验证码题目 | 使用九九乘法表范围内的简单四则运算，运算符使用数学符号 `+`、`−`、`×`、`÷`。 |
 
+供应商申请补充设计：
+
+| 方法 | URI | 说明 |
+|------|-----|------|
+| `POST` | `/v1/supplier-applications` | 当前普通用户提交供应商申请，只提交申请理由。 |
+| `GET` | `/v1/supplier-applications/current` | 查询当前用户最新供应商申请，用于“出售”按钮分流。 |
+
+`SupplierApplication` 状态：
+
+```text
+reviewing
+approved
+rejected
+canceled
+```
+
+普通用户点击资源“出售”时，如果没有 `reviewing` 申请，则提交申请理由；如果已有 `reviewing` 申请，则前端提示“供应商申请正在审核中”。管理员审批通过后将申请人 `roleLevel` 提升为 `supplier`。审批通过不改变任何 Microsoft 资源的 `forSale`，用户仍需在资源页主动发布出售。
+
 后台：
 
 | 方法 | URI | 说明 |
@@ -185,6 +206,9 @@ eft = allow/deny
 | `GET` | `/v1/admin/invites` | 邀请码查询。 |
 | `POST` | `/v1/admin/invites` | 创建邀请码。 |
 | `PATCH` | `/v1/admin/invites/{code}` | 启停/调整邀请码。 |
+| `GET` | `/v1/admin/supplier-applications` | 供应商申请列表。 |
+| `POST` | `/v1/admin/supplier-applications/{applicationId}/approve` | 审批通过供应商申请，将申请人提升为 supplier。 |
+| `POST` | `/v1/admin/supplier-applications/{applicationId}/reject` | 驳回供应商申请，必须记录安全审核原因。 |
 
 ---
 

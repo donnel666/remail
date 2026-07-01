@@ -22,19 +22,26 @@ type CreateDomainRequest struct {
 	Purpose      string `json:"purpose" binding:"required"`
 }
 
+// PublishResourcesRequest is the request body for batch resource publish.
+type PublishResourcesRequest struct {
+	ResourceIDs []uint `json:"resourceIds" binding:"required,min=1,dive,required"`
+}
+
 // --- Response types ---
 
 // ResourceItemResponse is the API-safe resource list item.
 type ResourceItemResponse struct {
-	ID        uint      `json:"id"`
-	Type      string    `json:"type"`
-	OwnerID   uint      `json:"ownerId"`
-	Status    string    `json:"status"`
-	ForSale   *bool     `json:"forSale,omitempty"`
-	Email     string    `json:"email,omitempty"`
-	Domain    string    `json:"domain,omitempty"`
-	Purpose   string    `json:"purpose,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID            uint      `json:"id"`
+	Type          string    `json:"type"`
+	OwnerID       uint      `json:"ownerId"`
+	Status        string    `json:"status"`
+	ForSale       *bool     `json:"forSale,omitempty"`
+	LongLived     *bool     `json:"longLived,omitempty"`
+	LastSafeError string    `json:"lastSafeError,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	Domain        string    `json:"domain,omitempty"`
+	Purpose       string    `json:"purpose,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // ResourceListResponse is the paginated resource list response.
@@ -50,6 +57,7 @@ type MicrosoftResourceDetailResponse struct {
 	ID              uint       `json:"id"`
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
+	LongLived       bool       `json:"longLived"`
 	Status          string     `json:"status"`
 	QualityScore    int        `json:"qualityScore"`
 	LastSafeError   string     `json:"lastSafeError"`
@@ -72,6 +80,12 @@ type DomainResourceDetailResponse struct {
 type ImportResponse struct {
 	ImportID uint `json:"importId"`
 	Imported int  `json:"imported"`
+}
+
+// PublishResourcesResponse returns the batch publish result.
+type PublishResourcesResponse struct {
+	Requested int `json:"requested"`
+	Published int `json:"published"`
 }
 
 // ServerItemResponse is the mail server list item.

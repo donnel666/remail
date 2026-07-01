@@ -20,21 +20,22 @@ type UserFinder interface {
 
 // IAMModule holds all wired dependencies for the IAM module.
 type IAMModule struct {
-	ActivationUseCase     *app.ActivationUseCase
-	RegistrationUseCase   *app.RegistrationUseCase
-	LoginUseCase          *app.LoginUseCase
-	SessionUseCase        *app.SessionUseCase
-	ChangePasswordUseCase *app.ChangePasswordUseCase
-	PasswordResetUseCase  *app.PasswordResetUseCase
-	AdminUseCase          *app.AdminUseCase
-	CaptchaUseCase        *app.CaptchaUseCase
-	EmailCodeUseCase      *app.EmailCodeUseCase
-	PermissionChecker     app.PermissionChecker
-	Hasher                *infra.Hasher
-	UserRepo              UserFinder
-	SessionStore          app.SessionStore
-	CaptchaStore          app.CaptchaStore
-	EmailCodeStore        app.EmailCodeStore
+	ActivationUseCase          *app.ActivationUseCase
+	RegistrationUseCase        *app.RegistrationUseCase
+	LoginUseCase               *app.LoginUseCase
+	SessionUseCase             *app.SessionUseCase
+	ChangePasswordUseCase      *app.ChangePasswordUseCase
+	PasswordResetUseCase       *app.PasswordResetUseCase
+	AdminUseCase               *app.AdminUseCase
+	SupplierApplicationUseCase *app.SupplierApplicationUseCase
+	CaptchaUseCase             *app.CaptchaUseCase
+	EmailCodeUseCase           *app.EmailCodeUseCase
+	PermissionChecker          app.PermissionChecker
+	Hasher                     *infra.Hasher
+	UserRepo                   UserFinder
+	SessionStore               app.SessionStore
+	CaptchaStore               app.CaptchaStore
+	EmailCodeStore             app.EmailCodeStore
 }
 
 // NewIAMModule wires up all IAM dependencies.
@@ -53,24 +54,26 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	if err != nil {
 		return nil, err
 	}
+	supplierApplicationRepo := infra.NewSupplierApplicationRepo(db)
 
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery, captchaStore)
 
 	return &IAMModule{
-		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
-		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:          app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
-		SessionUseCase:        app.NewSessionUseCase(sessionStore, userRepo),
-		ChangePasswordUseCase: app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
-		PasswordResetUseCase:  app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
-		AdminUseCase:          app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, operationLogRepo),
-		CaptchaUseCase:        app.NewCaptchaUseCase(captchaStore),
-		EmailCodeUseCase:      emailCodeUseCase,
-		PermissionChecker:     permissionService,
-		Hasher:                hasher,
-		UserRepo:              userRepo,
-		SessionStore:          sessionStore,
-		CaptchaStore:          captchaStore,
-		EmailCodeStore:        emailCodeStore,
+		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
+		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
+		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
+		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
+		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
+		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
+		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, operationLogRepo),
+		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(supplierApplicationRepo, userRepo),
+		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
+		EmailCodeUseCase:           emailCodeUseCase,
+		PermissionChecker:          permissionService,
+		Hasher:                     hasher,
+		UserRepo:                   userRepo,
+		SessionStore:               sessionStore,
+		CaptchaStore:               captchaStore,
+		EmailCodeStore:             emailCodeStore,
 	}, nil
 }

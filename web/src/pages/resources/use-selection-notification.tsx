@@ -4,14 +4,20 @@ import { Button, Notification, Space, Typography } from "@douyinfe/semi-ui";
 const { Text } = Typography;
 
 interface UseSelectionNotificationOptions {
+  onCheck?: () => void;
   selectedCount: number;
   onClear: () => void;
+  onSell?: () => void;
+  sellLoading?: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 export function useSelectionNotification({
+  onCheck,
   selectedCount,
   onClear,
+  onSell,
+  sellLoading = false,
   t,
 }: UseSelectionNotificationOptions) {
   useEffect(() => {
@@ -23,15 +29,27 @@ export function useSelectionNotification({
             <Button onClick={onClear} size="small" theme="solid" type="tertiary">
               {t("Clear selection")}
             </Button>
-            <Button size="small" theme="solid" type="primary">
-              {t("Check")}
-            </Button>
-            <Button size="small" theme="solid" type="secondary">
-              {t("Sell")}
-            </Button>
-            <Button size="small" theme="solid" type="danger">
-              {t("Disable")}
-            </Button>
+            {onCheck ? (
+              <Button
+                onClick={onCheck}
+                size="small"
+                theme="solid"
+                type="primary"
+              >
+                {t("Check")}
+              </Button>
+            ) : null}
+            {onSell ? (
+              <Button
+                loading={sellLoading}
+                onClick={onSell}
+                size="small"
+                theme="solid"
+                type="secondary"
+              >
+                {t("Sell")}
+              </Button>
+            ) : null}
           </Space>
         ),
         duration: 0,
@@ -54,5 +72,5 @@ export function useSelectionNotification({
     return () => {
       Notification.close(noticeId);
     };
-  }, [onClear, selectedCount, t]);
+  }, [onCheck, onClear, onSell, selectedCount, sellLoading, t]);
 }

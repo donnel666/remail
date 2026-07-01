@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +52,12 @@ type EmailResourceRepository interface {
 
 	// UpdateMicrosoft updates non-credential Microsoft resource fields and writes OperationLog.
 	UpdateMicrosoftWithLog(ctx context.Context, resource *domain.MicrosoftResource, log *governancedomain.OperationLog) error
+
+	// PublishMicrosoftWithLog atomically publishes one owned Microsoft resource and writes OperationLog only on state change.
+	PublishMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) (bool, error)
+
+	// PublishMicrosoftBatchWithLog publishes owned Microsoft resources and writes OperationLog records atomically.
+	PublishMicrosoftBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, baseLog governancedomain.OperationLog) (int, error)
 
 	// UpdateDomain updates a domain resource and writes OperationLog.
 	UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error
@@ -105,7 +112,7 @@ func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportR
 
 // ImportMicrosoftTXTFile imports Microsoft resources from an uploaded TXT file.
 // Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
-func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, requestID string) (*ImportResult, error) {
+func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, longLived bool, requestID string) (*ImportResult, error) {
 	if len(content) == 0 {
 		return nil, domain.ErrInvalidImportFormat
 	}
@@ -183,7 +190,8 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 			Password:     line.Password,
 			ClientID:     line.ClientID,
 			RefreshToken: line.RefreshToken,
-			ForSale:      true,
+			LongLived:    longLived,
+			ForSale:      false,
 			Status:       domain.MicrosoftStatusPending,
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -342,15 +350,17 @@ func NewResourceUseCase(resources EmailResourceRepository) *ResourceUseCase {
 
 // ResourceItem is the API-safe view of a resource.
 type ResourceItem struct {
-	ID        uint                `json:"id"`
-	Type      domain.ResourceType `json:"type"`
-	OwnerID   uint                `json:"ownerId"`
-	Status    string              `json:"status"`
-	ForSale   *bool               `json:"forSale,omitempty"`
-	Email     string              `json:"email,omitempty"`
-	Domain    string              `json:"domain,omitempty"`
-	Purpose   string              `json:"purpose,omitempty"`
-	CreatedAt time.Time           `json:"createdAt"`
+	ID            uint                `json:"id"`
+	Type          domain.ResourceType `json:"type"`
+	OwnerID       uint                `json:"ownerId"`
+	Status        string              `json:"status"`
+	ForSale       *bool               `json:"forSale,omitempty"`
+	LongLived     *bool               `json:"longLived,omitempty"`
+	LastSafeError string              `json:"lastSafeError,omitempty"`
+	Email         string              `json:"email,omitempty"`
+	Domain        string              `json:"domain,omitempty"`
+	Purpose       string              `json:"purpose,omitempty"`
+	CreatedAt     time.Time           `json:"createdAt"`
 }
 
 // MicrosoftResourceDetail is the API-safe view of a Microsoft resource (no credentials).
@@ -358,6 +368,7 @@ type MicrosoftResourceDetail struct {
 	ID              uint       `json:"id"`
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
+	LongLived       bool       `json:"longLived"`
 	Status          string     `json:"status"`
 	QualityScore    int        `json:"qualityScore"`
 	LastSafeError   string     `json:"lastSafeError"`
@@ -384,12 +395,20 @@ type ResourceListResult struct {
 	Limit  int            `json:"limit"`
 }
 
+// MicrosoftBatchPublishResult holds the result of a batch publish command.
+type MicrosoftBatchPublishResult struct {
+	Requested int `json:"requested"`
+	Published int `json:"published"`
+}
+
 // MicrosoftStatusResult holds minimal API-safe status for a Microsoft resource.
 type MicrosoftStatusResult struct {
-	ID           uint
-	EmailAddress string
-	ForSale      bool
-	Status       string
+	ID            uint
+	EmailAddress  string
+	ForSale       bool
+	LongLived     bool
+	Status        string
+	LastSafeError string
 }
 
 // DomainStatusResult holds minimal API-safe status for a domain resource.
@@ -479,8 +498,11 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			if s, ok := msStatusMap[r.ID]; ok {
 				item.Status = s.Status
 				item.Email = s.EmailAddress
+				item.LastSafeError = s.LastSafeError
 				forSale := s.ForSale
 				item.ForSale = &forSale
+				longLived := s.LongLived
+				item.LongLived = &longLived
 			} else {
 				return nil, fmt.Errorf("resource invariant violation: microsoft resource %d has no subtable status", r.ID)
 			}
@@ -529,6 +551,7 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 			ID:              ms.ID,
 			EmailAddress:    ms.EmailAddress,
 			ForSale:         ms.ForSale,
+			LongLived:       ms.LongLived,
 			Status:          string(ms.Status),
 			QualityScore:    ms.QualityScore,
 			LastSafeError:   ms.LastSafeError,
@@ -556,6 +579,99 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 	}
 
 	return nil, domain.ErrInvalidResourceType
+}
+
+// PublishMicrosoftForSale publishes an owned Microsoft resource into the public supply pool.
+// The API layer enforces supplier/admin/super_admin role. This use case preserves
+// owner-only access and keeps the command one-way: private -> public supply.
+func (uc *ResourceUseCase) PublishMicrosoftForSale(ctx context.Context, resourceID, userID uint, requestID, path string) (*MicrosoftResourceDetail, error) {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if resource == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return nil, domain.ErrForbiddenResource
+	}
+	if resource.Type != domain.ResourceTypeMicrosoft {
+		return nil, domain.ErrInvalidResourceType
+	}
+
+	ms, err := uc.resources.FindMicrosoftByID(ctx, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if ms == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	if _, err := uc.resources.PublishMicrosoftWithLog(ctx, userID, resourceID, governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.microsoft_resource.publish",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     fmt.Sprintf("%d", ms.ID),
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Microsoft resource published for sale.",
+		RequestID:      requestID,
+	}); err != nil {
+		return nil, err
+	}
+	ms.ForSale = true
+
+	return &MicrosoftResourceDetail{
+		ID:              ms.ID,
+		EmailAddress:    ms.EmailAddress,
+		ForSale:         ms.ForSale,
+		LongLived:       ms.LongLived,
+		Status:          string(ms.Status),
+		QualityScore:    ms.QualityScore,
+		LastSafeError:   ms.LastSafeError,
+		LastAllocatedAt: ms.LastAllocatedAt,
+		CreatedAt:       ms.CreatedAt,
+	}, nil
+}
+
+// PublishMicrosoftForSaleBatch publishes owned Microsoft resources into the public supply pool.
+func (uc *ResourceUseCase) PublishMicrosoftForSaleBatch(ctx context.Context, resourceIDs []uint, userID uint, requestID, path string) (*MicrosoftBatchPublishResult, error) {
+	ids := uniqueResourceIDs(resourceIDs)
+	if len(ids) == 0 {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	published, err := uc.resources.PublishMicrosoftBatchWithLog(ctx, userID, ids, governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.microsoft_resource.publish_batch",
+		ResourceType:   "microsoft_resource",
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Microsoft resources published for sale.",
+		RequestID:      requestID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &MicrosoftBatchPublishResult{Requested: len(ids), Published: published}, nil
+}
+
+func uniqueResourceIDs(resourceIDs []uint) []uint {
+	seen := make(map[uint]struct{}, len(resourceIDs))
+	ids := make([]uint, 0, len(resourceIDs))
+	for _, id := range resourceIDs {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 // DomainUseCase handles domain resource management.

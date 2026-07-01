@@ -30,16 +30,8 @@ func NewCoreHandler(module *CoreModule) *CoreHandler {
 
 // GET /v1/resources
 func (h *CoreHandler) GetResources(c *gin.Context) {
-	userID, ok := middleware.GetCurrentUserID(c)
+	userID, ok := requireCurrentUserID(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"message":   "Authentication is required.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return
-	}
-
-	if !requireSupplier(c) {
 		return
 	}
 
@@ -67,15 +59,17 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	items := make([]ResourceItemResponse, len(result.Items))
 	for i, item := range result.Items {
 		items[i] = ResourceItemResponse{
-			ID:        item.ID,
-			Type:      string(item.Type),
-			OwnerID:   item.OwnerID,
-			Status:    item.Status,
-			ForSale:   item.ForSale,
-			Email:     item.Email,
-			Domain:    item.Domain,
-			Purpose:   item.Purpose,
-			CreatedAt: item.CreatedAt,
+			ID:            item.ID,
+			Type:          string(item.Type),
+			OwnerID:       item.OwnerID,
+			Status:        item.Status,
+			ForSale:       item.ForSale,
+			LongLived:     item.LongLived,
+			LastSafeError: item.LastSafeError,
+			Email:         item.Email,
+			Domain:        item.Domain,
+			Purpose:       item.Purpose,
+			CreatedAt:     item.CreatedAt,
 		}
 	}
 
@@ -94,9 +88,8 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 		return
 	}
 
-	userID, _ := middleware.GetCurrentUserID(c)
-
-	if !requireSupplier(c) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
 		return
 	}
 
@@ -113,6 +106,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 			ID:              d.ID,
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
+			LongLived:       d.LongLived,
 			Status:          d.Status,
 			QualityScore:    d.QualityScore,
 			LastSafeError:   d.LastSafeError,
@@ -136,16 +130,8 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 
 // POST /v1/resources/imports
 func (h *CoreHandler) PostResourceImport(c *gin.Context) {
-	userID, ok := middleware.GetCurrentUserID(c)
+	userID, ok := requireCurrentUserID(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"message":   "Authentication is required.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return
-	}
-
-	if !requireSupplier(c) {
 		return
 	}
 
@@ -162,6 +148,15 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 	}
 	defer file.Close()
 
+	longLived, err := strconv.ParseBool(c.PostForm("longLived"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid longLived value.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
 	content, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -171,7 +166,7 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.ImportUseCase.ImportMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, middleware.GetRequestID(c))
+	result, err := h.module.ImportUseCase.ImportMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, middleware.GetRequestID(c))
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -180,13 +175,91 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 	c.JSON(http.StatusCreated, ImportResponse{ImportID: result.ImportID, Imported: result.Imported})
 }
 
+// POST /v1/resources/:resourceId/publish
+func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
+	resourceID, ok := parseResourceID(c)
+	if !ok {
+		return
+	}
+
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	if !requireSupplier(c) {
+		return
+	}
+
+	detail, err := h.module.ResourceUseCase.PublishMicrosoftForSale(
+		c.Request.Context(),
+		resourceID,
+		userID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
+		ID:              detail.ID,
+		EmailAddress:    detail.EmailAddress,
+		ForSale:         detail.ForSale,
+		LongLived:       detail.LongLived,
+		Status:          detail.Status,
+		QualityScore:    detail.QualityScore,
+		LastSafeError:   detail.LastSafeError,
+		LastAllocatedAt: detail.LastAllocatedAt,
+		CreatedAt:       detail.CreatedAt,
+	})
+}
+
+// POST /v1/resources/publish
+func (h *CoreHandler) PostResourcePublishBatch(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	if !requireSupplier(c) {
+		return
+	}
+
+	var req PublishResourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, err := h.module.ResourceUseCase.PublishMicrosoftForSaleBatch(
+		c.Request.Context(),
+		req.ResourceIDs,
+		userID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, PublishResourcesResponse{
+		Requested: result.Requested,
+		Published: result.Published,
+	})
+}
+
 // POST /v1/resources/:resourceId/validate
 func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 	// P1-I2: stub — actual Microsoft ACL / SMTP validation will be implemented in P1-I3.
 	if _, ok := parseResourceID(c); !ok {
 		return
 	}
-	if !requireSupplier(c) {
+	if _, ok := requireCurrentUserID(c); !ok {
 		return
 	}
 
@@ -197,6 +270,19 @@ func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 }
 
 // --- Mail Servers ---
+
+// requireCurrentUserID verifies the request is authenticated and returns the current user ID.
+func requireCurrentUserID(c *gin.Context) (uint, bool) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "Authentication is required.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return 0, false
+	}
+	return userID, true
+}
 
 // requireSupplier verifies the user has at least supplier role.
 func requireSupplier(c *gin.Context) bool {

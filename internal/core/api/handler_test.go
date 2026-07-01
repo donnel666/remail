@@ -17,6 +17,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 // --- In-memory mock repositories for testing ---
@@ -136,8 +137,52 @@ func resourceMatchesType(actual coredomain.ResourceType, filter string) bool {
 	return filter == "" || filter == "all" || string(actual) == filter
 }
 
-func (r *mockResourceRepo) UpdateMicrosoftWithLog(_ context.Context, _ *coredomain.MicrosoftResource, _ *governancedomain.OperationLog) error {
+func (r *mockResourceRepo) UpdateMicrosoftWithLog(_ context.Context, resource *coredomain.MicrosoftResource, _ *governancedomain.OperationLog) error {
+	stored, ok := r.microsoft[resource.ID]
+	if !ok {
+		return coredomain.ErrResourceNotFound
+	}
+	stored.ForSale = resource.ForSale
+	stored.Status = resource.Status
+	stored.QualityScore = resource.QualityScore
+	stored.LastSafeError = resource.LastSafeError
+	stored.LastAllocatedAt = resource.LastAllocatedAt
 	return nil
+}
+
+func (r *mockResourceRepo) PublishMicrosoftWithLog(_ context.Context, ownerUserID uint, resourceID uint, _ governancedomain.OperationLog) (bool, error) {
+	root, ok := r.resources[resourceID]
+	if !ok || root.OwnerUserID != ownerUserID || root.Type != coredomain.ResourceTypeMicrosoft {
+		return false, coredomain.ErrForbiddenResource
+	}
+	ms, ok := r.microsoft[resourceID]
+	if !ok {
+		return false, coredomain.ErrResourceNotFound
+	}
+	if ms.ForSale {
+		return false, nil
+	}
+	ms.ForSale = true
+	return true, nil
+}
+
+func (r *mockResourceRepo) PublishMicrosoftBatchWithLog(_ context.Context, ownerUserID uint, resourceIDs []uint, _ governancedomain.OperationLog) (int, error) {
+	published := 0
+	for _, id := range resourceIDs {
+		root, ok := r.resources[id]
+		if !ok || root.OwnerUserID != ownerUserID || root.Type != coredomain.ResourceTypeMicrosoft {
+			return 0, coredomain.ErrForbiddenResource
+		}
+		ms, ok := r.microsoft[id]
+		if !ok {
+			return 0, coredomain.ErrResourceNotFound
+		}
+		if !ms.ForSale {
+			ms.ForSale = true
+			published++
+		}
+	}
+	return published, nil
 }
 
 func (r *mockResourceRepo) UpdateDomainWithLog(_ context.Context, _ *coredomain.MailDomainResource, _ *governancedomain.OperationLog) error {
@@ -149,10 +194,12 @@ func (r *mockResourceRepo) ListMicrosoftStatus(_ context.Context, ids []uint) ([
 	for _, id := range ids {
 		if ms, ok := r.microsoft[id]; ok {
 			result = append(result, coreapp.MicrosoftStatusResult{
-				ID:           ms.ID,
-				EmailAddress: ms.EmailAddress,
-				ForSale:      ms.ForSale,
-				Status:       string(ms.Status),
+				ID:            ms.ID,
+				EmailAddress:  ms.EmailAddress,
+				ForSale:       ms.ForSale,
+				LongLived:     ms.LongLived,
+				Status:        string(ms.Status),
+				LastSafeError: ms.LastSafeError,
 			})
 		}
 	}
@@ -388,6 +435,9 @@ func multipartImportBody(t *testing.T, fileName string, content string) (*bytes.
 	if _, err := part.Write([]byte(content)); err != nil {
 		t.Fatalf("write multipart file: %v", err)
 	}
+	if err := writer.WriteField("longLived", "true"); err != nil {
+		t.Fatalf("write longLived field: %v", err)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart writer: %v", err)
 	}
@@ -405,6 +455,8 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 		{"GET", "/v1/resources", ""},
 		{"GET", "/v1/resources/1", ""},
 		{"POST", "/v1/resources/imports", `{"content":"a@b----c"}`},
+		{"POST", "/v1/resources/publish", `{"resourceIds":[1]}`},
+		{"POST", "/v1/resources/1/publish", ""},
 		{"GET", "/v1/servers", ""},
 		{"POST", "/v1/servers", `{"serverAddress":"smtp.example.com"}`},
 		{"POST", "/v1/domains", `{"domain":"example.com","mailServerId":1,"purpose":"sale"}`},
@@ -426,7 +478,7 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 
 			// Set path params for parameterized routes
 			switch ep.path {
-			case "/v1/resources/1":
+			case "/v1/resources/1", "/v1/resources/1/publish":
 				c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
 			case "/v1/domains/1/mailboxes":
 				c.Params = []gin.Param{{Key: "domainId", Value: "1"}}
@@ -436,6 +488,10 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 			switch {
 			case ep.method == "GET" && ep.path == "/v1/resources":
 				h.GetResources(c)
+			case ep.method == "POST" && ep.path == "/v1/resources/1/publish":
+				h.PostResourcePublish(c)
+			case ep.method == "POST" && ep.path == "/v1/resources/publish":
+				h.PostResourcePublishBatch(c)
 			case ep.method == "GET" && len(ep.path) >= 14 && ep.path[:14] == "/v1/resources/":
 				h.GetResourceDetail(c)
 			case ep.method == "POST" && ep.path == "/v1/resources/imports":
@@ -458,7 +514,7 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 	}
 }
 
-func TestCoreHandler_RequiresSupplierRole(t *testing.T) {
+func TestCoreHandler_RequiresSupplierRoleForPrivilegedResourceCommands(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
@@ -470,31 +526,18 @@ func TestCoreHandler_RequiresSupplierRole(t *testing.T) {
 		call   func(*CoreHandler, *gin.Context)
 	}{
 		{
-			name:   "list resources",
-			method: "GET",
-			path:   "/v1/resources",
-			call:   (*CoreHandler).GetResources,
-		},
-		{
-			name:   "resource detail",
-			method: "GET",
-			path:   "/v1/resources/1",
-			params: []gin.Param{{Key: "resourceId", Value: "1"}},
-			call:   (*CoreHandler).GetResourceDetail,
-		},
-		{
-			name:   "import resources",
+			name:   "publish resource",
 			method: "POST",
-			path:   "/v1/resources/imports",
-			body:   `{"content":"a@b----c"}`,
-			call:   (*CoreHandler).PostResourceImport,
+			path:   "/v1/resources/1/publish",
+			params: []gin.Param{{Key: "resourceId", Value: "1"}},
+			call:   (*CoreHandler).PostResourcePublish,
 		},
 		{
-			name:   "validate resource",
+			name:   "publish resources batch",
 			method: "POST",
-			path:   "/v1/resources/1/validate",
-			params: []gin.Param{{Key: "resourceId", Value: "1"}},
-			call:   (*CoreHandler).PostResourceValidate,
+			path:   "/v1/resources/publish",
+			body:   `{"resourceIds":[1]}`,
+			call:   (*CoreHandler).PostResourcePublishBatch,
 		},
 		{
 			name:   "list servers",
@@ -551,7 +594,7 @@ func TestCoreHandler_RequiresSupplierRole(t *testing.T) {
 func TestCoreHandler_ImportSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mod, _, _, _ := setupCoreTestModule()
+	mod, resourceRepo, _, _ := setupCoreTestModule()
 	h := NewCoreHandler(mod)
 
 	body, contentType := multipartImportBody(t, "resources.txt", "user@example.com----pass123\nuser2@test.com----pass456----aux@example.net")
@@ -559,7 +602,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 20) // supplier
+	setAuthContext(c, 1, 10) // regular users can import private Microsoft resources
 
 	h.PostResourceImport(c)
 
@@ -577,6 +620,15 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	if resp.ImportID == 0 {
 		t.Errorf("expected importId > 0, got %d", resp.ImportID)
 	}
+
+	for _, ms := range resourceRepo.microsoft {
+		if ms.ForSale {
+			t.Fatalf("expected imported Microsoft resource to be private by default")
+		}
+		if !ms.LongLived {
+			t.Fatalf("expected imported Microsoft resource to inherit longLived batch option")
+		}
+	}
 }
 
 func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
@@ -590,7 +642,7 @@ func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, 10)
 
 	h.PostResourceImport(c)
 
@@ -622,7 +674,7 @@ func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, 10)
 
 	h.GetResourceDetail(c)
 
@@ -653,7 +705,7 @@ func TestCoreHandler_ResourceDetail_NonOwnerDenied(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 2, 20)
+	setAuthContext(c, 2, 10)
 
 	h.GetResourceDetail(c)
 
@@ -672,7 +724,7 @@ func TestCoreHandler_ValidateStubReturns501(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/1/validate", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, 10)
 
 	h.PostResourceValidate(c)
 
@@ -689,10 +741,12 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 
 	msRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
 	ms := &coredomain.MicrosoftResource{
-		EmailAddress: "ms@example.com",
-		Password:     "secret",
-		Status:       coredomain.MicrosoftStatusNormal,
-		ForSale:      true,
+		EmailAddress:  "ms@example.com",
+		Password:      "secret",
+		Status:        coredomain.MicrosoftStatusNormal,
+		ForSale:       true,
+		LongLived:     true,
+		LastSafeError: "safe diagnostic",
 	}
 	if err := resourceRepo.CreateMicrosoft(context.Background(), msRoot, ms); err != nil {
 		t.Fatalf("create microsoft resource: %v", err)
@@ -746,6 +800,12 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 			if item.ForSale == nil || !*item.ForSale {
 				t.Errorf("expected microsoft forSale true, got %v", item.ForSale)
 			}
+			if item.LongLived == nil || !*item.LongLived {
+				t.Errorf("expected microsoft longLived true, got %v", item.LongLived)
+			}
+			if item.LastSafeError != "safe diagnostic" {
+				t.Errorf("expected lastSafeError safe diagnostic, got %q", item.LastSafeError)
+			}
 		case string(coredomain.ResourceTypeDomain):
 			sawDomain = true
 			if item.Status != string(coredomain.DomainStatusDNSNormal) {
@@ -761,6 +821,162 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 	}
 	if !sawMicrosoft || !sawDomain {
 		t.Fatalf("expected both microsoft and domain resources, got %+v", resp.Items)
+	}
+}
+
+func TestCoreHandler_ResourceListScopeAllFallsBackToOwnedForNonAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	ownerRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ownerMs := &coredomain.MicrosoftResource{
+		EmailAddress: "owner@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusNormal,
+		ForSale:      true,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), ownerRoot, ownerMs))
+	otherRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 2}
+	otherMs := &coredomain.MicrosoftResource{
+		EmailAddress: "other@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusNormal,
+		ForSale:      true,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), otherRoot, otherMs))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/resources?scope=all", nil)
+	setAuthContext(c, 1, 10)
+
+	h.GetResources(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ResourceListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, 1, len(resp.Items))
+	require.Equal(t, int64(1), resp.Total)
+	require.Equal(t, "owner@example.com", resp.Items[0].Email)
+}
+
+func TestCoreHandler_PublishMicrosoftResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{
+		EmailAddress: "private@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusPending,
+		ForSale:      false,
+	}
+	if err := resourceRepo.CreateMicrosoft(context.Background(), root, ms); err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/1/publish", nil)
+	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
+	setAuthContext(c, 1, 20)
+
+	h.PostResourcePublish(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !resourceRepo.microsoft[1].ForSale {
+		t.Fatalf("expected resource to be published for sale")
+	}
+
+	var resp MicrosoftResourceDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.ForSale {
+		t.Fatalf("expected response forSale true")
+	}
+}
+
+func TestCoreHandler_PublishMicrosoftResourcesBatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	firstRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	first := &coredomain.MicrosoftResource{
+		EmailAddress: "private1@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusPending,
+		ForSale:      false,
+	}
+	if err := resourceRepo.CreateMicrosoft(context.Background(), firstRoot, first); err != nil {
+		t.Fatalf("create first resource: %v", err)
+	}
+
+	secondRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	second := &coredomain.MicrosoftResource{
+		EmailAddress: "public@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusPending,
+		ForSale:      true,
+	}
+	if err := resourceRepo.CreateMicrosoft(context.Background(), secondRoot, second); err != nil {
+		t.Fatalf("create second resource: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/publish", strings.NewReader(`{"resourceIds":[1,2]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, 20)
+
+	h.PostResourcePublishBatch(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !resourceRepo.microsoft[1].ForSale || !resourceRepo.microsoft[2].ForSale {
+		t.Fatalf("expected resources to be for sale")
+	}
+
+	var resp PublishResourcesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Requested != 2 || resp.Published != 1 {
+		t.Fatalf("expected requested=2 published=1, got %+v", resp)
+	}
+}
+
+func TestCoreHandler_PublishMicrosoftResourceNonOwnerDenied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "private@example.com", Password: "secret"}
+	if err := resourceRepo.CreateMicrosoft(context.Background(), root, ms); err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/1/publish", nil)
+	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
+	setAuthContext(c, 2, 20)
+
+	h.PostResourcePublish(c)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-owner, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

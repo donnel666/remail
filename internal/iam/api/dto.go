@@ -87,6 +87,14 @@ type AdminUpdateInviteRequest struct {
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 }
 
+type SupplierApplicationRequest struct {
+	Reason string `json:"reason" binding:"required,max=1000"`
+}
+
+type AdminRejectSupplierApplicationRequest struct {
+	ReviewReason string `json:"reviewReason" binding:"required,max=500"`
+}
+
 // --- Response DTOs ---
 
 // ActivationResponse is the response for GET /v1/activation.
@@ -163,6 +171,29 @@ type InviteListResponse struct {
 	Limit   int              `json:"limit"`
 }
 
+type SupplierApplicationResponse struct {
+	ID              uint       `json:"id"`
+	ApplicantUserID uint       `json:"applicantUserId"`
+	Reason          string     `json:"reason"`
+	Status          string     `json:"status"`
+	ReviewReason    string     `json:"reviewReason"`
+	ReviewedBy      *uint      `json:"reviewedBy,omitempty"`
+	ReviewedAt      *time.Time `json:"reviewedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
+type SupplierApplicationCurrentResponse struct {
+	Application *SupplierApplicationResponse `json:"application"`
+}
+
+type SupplierApplicationListResponse struct {
+	Applications []SupplierApplicationResponse `json:"applications"`
+	Total        int64                         `json:"total"`
+	Offset       int                           `json:"offset"`
+	Limit        int                           `json:"limit"`
+}
+
 // --- Helpers ---
 
 // roleName returns the human-readable role name for a role level.
@@ -210,5 +241,19 @@ func toInviteResponse(invite *domain.Invite) InviteResponse {
 		ExpireAt:  invite.ExpireAt,
 		CreatedAt: invite.CreatedAt,
 		UpdatedAt: invite.UpdatedAt,
+	}
+}
+
+func toSupplierApplicationResponse(application *domain.SupplierApplication) SupplierApplicationResponse {
+	return SupplierApplicationResponse{
+		ID:              application.ID,
+		ApplicantUserID: application.ApplicantUserID,
+		Reason:          application.Reason,
+		Status:          string(application.Status),
+		ReviewReason:    application.ReviewReason,
+		ReviewedBy:      application.ReviewedBy,
+		ReviewedAt:      application.ReviewedAt,
+		CreatedAt:       application.CreatedAt,
+		UpdatedAt:       application.UpdatedAt,
 	}
 }

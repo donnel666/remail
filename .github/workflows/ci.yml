@@ -78,6 +78,10 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
       - name: Check Go formatting
         run: |
           UNFORMATTED=$(gofmt -l api cmd internal)
@@ -91,10 +95,15 @@ jobs:
           go generate ./api
           git diff --exit-code -- api/openapi.gen.go
 
+      - name: Verify OpenAPI TypeScript schema
+        working-directory: web
+        run: |
+          pnpm generate:api
+          git diff --exit-code -- src/lib/openapi/schema.ts
+
       - name: Build frontend for embed
         working-directory: web
         run: |
-          pnpm install --frozen-lockfile
           pnpm build
           mkdir -p ../cmd/server/webdist
           cp -r dist/* ../cmd/server/webdist/

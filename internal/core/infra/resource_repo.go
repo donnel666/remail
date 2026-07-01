@@ -12,6 +12,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // --- GORM Models ---
@@ -46,8 +47,9 @@ type MicrosoftResourceModel struct {
 	Password        string     `gorm:"type:varchar(512);not null"`
 	ClientID        string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
 	RefreshToken    string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
+	LongLived       bool       `gorm:"not null;default:false;column:long_lived"`
 	RTExpireAt      *time.Time `gorm:"column:rt_expire_at"`
-	ForSale         bool       `gorm:"not null;default:true;column:for_sale"`
+	ForSale         bool       `gorm:"not null;default:false;column:for_sale"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'pending'"`
 	QualityScore    int        `gorm:"not null;default:0;column:quality_score"`
 	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
@@ -67,6 +69,7 @@ func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 		Password:        m.Password,
 		ClientID:        m.ClientID,
 		RefreshToken:    m.RefreshToken,
+		LongLived:       m.LongLived,
 		RTExpireAt:      m.RTExpireAt,
 		ForSale:         m.ForSale,
 		Status:          domain.MicrosoftResourceStatus(m.Status),
@@ -85,6 +88,7 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 		Password:        ms.Password,
 		ClientID:        ms.ClientID,
 		RefreshToken:    ms.RefreshToken,
+		LongLived:       ms.LongLived,
 		RTExpireAt:      ms.RTExpireAt,
 		ForSale:         ms.ForSale,
 		Status:          string(ms.Status),
@@ -337,10 +341,12 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 	result := make([]coreapp.MicrosoftStatusResult, len(models))
 	for i, m := range models {
 		result[i] = coreapp.MicrosoftStatusResult{
-			ID:           m.ID,
-			EmailAddress: m.EmailAddress,
-			ForSale:      m.ForSale,
-			Status:       m.Status,
+			ID:            m.ID,
+			EmailAddress:  m.EmailAddress,
+			ForSale:       m.ForSale,
+			LongLived:     m.LongLived,
+			Status:        m.Status,
+			LastSafeError: m.LastSafeError,
 		}
 	}
 	return result, nil
@@ -387,6 +393,135 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 		}
 		return nil
 	})
+}
+
+// PublishMicrosoftWithLog publishes one owned Microsoft resource and writes an
+// OperationLog only when the row actually changes from private to public supply.
+func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) (bool, error) {
+	if resourceID == 0 {
+		return false, domain.ErrResourceNotFound
+	}
+
+	published := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			First(&root).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrForbiddenResource
+			}
+			return fmt.Errorf("lock owned microsoft resource: %w", err)
+		}
+
+		var ms MicrosoftResourceModel
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", resourceID).
+			First(&ms).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock microsoft resource: %w", err)
+		}
+		if ms.ForSale {
+			return nil
+		}
+
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND for_sale = ?", resourceID, false).
+			Updates(map[string]interface{}{
+				"for_sale":   true,
+				"updated_at": time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("publish microsoft resource: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		if log.ResourceID == "" {
+			log.ResourceID = fmt.Sprintf("%d", resourceID)
+		}
+		if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
+		}
+		published = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return published, nil
+}
+
+// PublishMicrosoftBatchWithLog publishes owned Microsoft resources and writes OperationLog
+// records for the rows that actually changed from private to public supply.
+func (r *ResourceRepo) PublishMicrosoftBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, baseLog governancedomain.OperationLog) (int, error) {
+	if len(resourceIDs) == 0 {
+		return 0, domain.ErrResourceNotFound
+	}
+
+	published := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ownedRows []EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND owner_user_id = ? AND type = ?", resourceIDs, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			Order("id ASC").
+			Find(&ownedRows).Error; err != nil {
+			return fmt.Errorf("lock owned microsoft resources: %w", err)
+		}
+		if len(ownedRows) != len(resourceIDs) {
+			return domain.ErrForbiddenResource
+		}
+
+		var privateRows []MicrosoftResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Where("id IN ? AND for_sale = ?", resourceIDs, false).
+			Order("id ASC").
+			Find(&privateRows).Error; err != nil {
+			return fmt.Errorf("lock private microsoft resources: %w", err)
+		}
+		if len(privateRows) == 0 {
+			return nil
+		}
+
+		idsToPublish := make([]uint, len(privateRows))
+		for i, row := range privateRows {
+			idsToPublish[i] = row.ID
+		}
+
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id IN ? AND for_sale = ?", idsToPublish, false).
+			Updates(map[string]interface{}{
+				"for_sale":   true,
+				"updated_at": time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("publish microsoft resources: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		for _, id := range idsToPublish {
+			log := baseLog
+			log.ResourceID = fmt.Sprintf("%d", id)
+			if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+				return fmt.Errorf("create operation log: %w", err)
+			}
+		}
+
+		published = len(idsToPublish)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return published, nil
 }
 
 // UpdateDomainWithLog updates a domain resource and writes an OperationLog

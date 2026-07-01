@@ -287,6 +287,88 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/supplier-applications:
+    post:
+      operationId: postSupplierApplication
+      summary: Submit current user's supplier application
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplierApplicationRequest"
+      responses:
+        "201":
+          description: Supplier application submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - application
+                properties:
+                  application:
+                    $ref: "#/components/schemas/SupplierApplicationResponse"
+                additionalProperties: false
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Supplier application is already under review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid supplier application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/supplier-applications/current:
+    get:
+      operationId: getCurrentSupplierApplication
+      summary: Get current user's latest supplier application
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current supplier application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplierApplicationCurrentResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Password Change ---
   /v1/password:
     patch:
@@ -844,6 +926,180 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/supplier-applications:
+    get:
+      operationId: getAdminSupplierApplications
+      summary: List supplier applications
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            default: all
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Supplier application list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplierApplicationListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/supplier-applications/{applicationId}/approve:
+    post:
+      operationId: postAdminSupplierApplicationApprove
+      summary: Approve supplier application
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Supplier application approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - application
+                properties:
+                  application:
+                    $ref: "#/components/schemas/SupplierApplicationResponse"
+                additionalProperties: false
+        "400":
+          description: Invalid supplier application ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Supplier application not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid supplier application status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/supplier-applications/{applicationId}/reject:
+    post:
+      operationId: postAdminSupplierApplicationReject
+      summary: Reject supplier application
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRejectSupplierApplicationRequest"
+      responses:
+        "200":
+          description: Supplier application rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - application
+                properties:
+                  application:
+                    $ref: "#/components/schemas/SupplierApplicationResponse"
+                additionalProperties: false
+        "400":
+          description: Invalid request body or supplier application ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Supplier application not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid supplier application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Resources (P1-I2) ---
   /v1/resources:
     get:
@@ -936,6 +1192,101 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/resources/publish:
+    post:
+      operationId: postResourcePublishBatch
+      summary: Publish owned Microsoft resources to public supply
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishResourcesRequest"
+      responses:
+        "200":
+          description: Microsoft resources published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResourcesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resources/{resourceId}/publish:
+    post:
+      operationId: postResourcePublish
+      summary: Publish an owned Microsoft resource to public supply
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Microsoft resource published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicrosoftResourceDetail"
+        "400":
+          description: Invalid resource ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/resources/imports:
     post:
       operationId: postResourceImport
@@ -954,10 +1305,14 @@ paths:
               type: object
               required:
                 - file
+                - longLived
               properties:
                 file:
                   type: string
                   format: binary
+                longLived:
+                  type: boolean
+                  description: Whether every resource in this import batch is long-lived
       responses:
         "201":
           description: Import complete
@@ -1703,6 +2058,98 @@ components:
           type: integer
       additionalProperties: false
 
+    SupplierApplicationRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+      additionalProperties: false
+
+    AdminRejectSupplierApplicationRequest:
+      type: object
+      required:
+        - reviewReason
+      properties:
+        reviewReason:
+          type: string
+          maxLength: 500
+      additionalProperties: false
+
+    SupplierApplicationResponse:
+      type: object
+      required:
+        - id
+        - applicantUserId
+        - reason
+        - status
+        - reviewReason
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        applicantUserId:
+          type: integer
+        reason:
+          type: string
+        status:
+          type: string
+          enum:
+            - reviewing
+            - approved
+            - rejected
+            - canceled
+        reviewReason:
+          type: string
+        reviewedBy:
+          type: integer
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    SupplierApplicationCurrentResponse:
+      type: object
+      required:
+        - application
+      properties:
+        application:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/SupplierApplicationResponse"
+      additionalProperties: false
+
+    SupplierApplicationListResponse:
+      type: object
+      required:
+        - applications
+        - total
+        - offset
+        - limit
+      properties:
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplierApplicationResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
     # --- Resource Schemas (P1-I2) ---
     ResourceListResponse:
       type: object
@@ -1744,6 +2191,12 @@ components:
         forSale:
           type: boolean
           description: Microsoft resource is available for sale (Microsoft resources only)
+        longLived:
+          type: boolean
+          description: Microsoft resource lifetime classification selected during import
+        lastSafeError:
+          type: string
+          description: Sanitized abnormal diagnostic summary (Microsoft resources only)
         email:
           type: string
           description: Email address (Microsoft resources only)
@@ -1764,6 +2217,7 @@ components:
         - id
         - emailAddress
         - forSale
+        - longLived
         - status
         - qualityScore
         - createdAt
@@ -1773,6 +2227,8 @@ components:
         emailAddress:
           type: string
         forSale:
+          type: boolean
+        longLived:
           type: boolean
         status:
           type: string
@@ -1827,6 +2283,30 @@ components:
         importId:
           type: integer
         imported:
+          type: integer
+      additionalProperties: false
+
+    PublishResourcesRequest:
+      type: object
+      required:
+        - resourceIds
+      properties:
+        resourceIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+      additionalProperties: false
+
+    PublishResourcesResponse:
+      type: object
+      required:
+        - requested
+        - published
+      properties:
+        requested:
+          type: integer
+        published:
           type: integer
       additionalProperties: false
 

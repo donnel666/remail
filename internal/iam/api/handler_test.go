@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -24,25 +25,127 @@ import (
 // --- In-memory mock stores ---
 
 type mockUserRepo struct {
-	mu            sync.Mutex
-	users         map[uint]*domain.User
-	byID          map[string]uint
-	invites       map[string]*domain.Invite
-	policies      map[uint][]domain.PermissionPolicy
-	operationLogs *mockOperationLogPort
-	reloads       int
-	reloadErr     error
-	seq           uint
+	mu                   sync.Mutex
+	users                map[uint]*domain.User
+	byID                 map[string]uint
+	invites              map[string]*domain.Invite
+	supplierApplications map[uint]*domain.SupplierApplication
+	policies             map[uint][]domain.PermissionPolicy
+	operationLogs        *mockOperationLogPort
+	reloads              int
+	reloadErr            error
+	seq                  uint
 }
 
 func newMockUserRepo() *mockUserRepo {
 	return &mockUserRepo{
-		users:         make(map[uint]*domain.User),
-		byID:          make(map[string]uint),
-		invites:       make(map[string]*domain.Invite),
-		policies:      make(map[uint][]domain.PermissionPolicy),
-		operationLogs: &mockOperationLogPort{},
+		users:                make(map[uint]*domain.User),
+		byID:                 make(map[string]uint),
+		invites:              make(map[string]*domain.Invite),
+		supplierApplications: make(map[uint]*domain.SupplierApplication),
+		policies:             make(map[uint][]domain.PermissionPolicy),
+		operationLogs:        &mockOperationLogPort{},
 	}
+}
+
+func (r *mockUserRepo) CreateSupplierApplicationReviewing(_ context.Context, application *domain.SupplierApplication) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.supplierApplications {
+		if existing.ApplicantUserID == application.ApplicantUserID && existing.Status == domain.SupplierApplicationReviewing {
+			return domain.ErrSupplierApplicationAlreadyReviewing
+		}
+	}
+	r.seq++
+	application.ID = r.seq
+	application.CreatedAt = time.Now()
+	application.UpdatedAt = application.CreatedAt
+	cp := *application
+	r.supplierApplications[application.ID] = &cp
+	return nil
+}
+
+func (r *mockUserRepo) FindLatestSupplierApplicationByApplicantUserID(_ context.Context, applicantUserID uint) (*domain.SupplierApplication, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *domain.SupplierApplication
+	for _, application := range r.supplierApplications {
+		if application.ApplicantUserID != applicantUserID {
+			continue
+		}
+		if latest == nil || application.ID > latest.ID {
+			cp := *application
+			latest = &cp
+		}
+	}
+	return latest, nil
+}
+
+func (r *mockUserRepo) FindSupplierApplicationByID(_ context.Context, id uint) (*domain.SupplierApplication, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if application, ok := r.supplierApplications[id]; ok {
+		cp := *application
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (r *mockUserRepo) ListSupplierApplications(_ context.Context, status string, offset, limit int) ([]domain.SupplierApplication, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var result []domain.SupplierApplication
+	for _, application := range r.supplierApplications {
+		if status == "" || string(application.Status) == status {
+			result = append(result, *application)
+		}
+	}
+	if offset >= len(result) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end], nil
+}
+
+func (r *mockUserRepo) CountSupplierApplications(_ context.Context, status string) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var count int64
+	for _, application := range r.supplierApplications {
+		if status == "" || string(application.Status) == status {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *mockUserRepo) ApproveSupplierApplicationWithUserAndLog(ctx context.Context, application *domain.SupplierApplication, user *domain.User, log *governancedomain.OperationLog) error {
+	r.mu.Lock()
+	if stored, ok := r.supplierApplications[application.ID]; ok {
+		cp := *application
+		cp.UpdatedAt = time.Now()
+		*stored = cp
+	}
+	if storedUser, ok := r.users[user.ID]; ok {
+		cp := *user
+		*storedUser = cp
+	}
+	r.mu.Unlock()
+	return r.operationLogs.Create(ctx, log)
+}
+
+func (r *mockUserRepo) RejectSupplierApplicationWithLog(ctx context.Context, application *domain.SupplierApplication, log *governancedomain.OperationLog) error {
+	r.mu.Lock()
+	if stored, ok := r.supplierApplications[application.ID]; ok {
+		cp := *application
+		cp.UpdatedAt = time.Now()
+		*stored = cp
+	}
+	r.mu.Unlock()
+	return r.operationLogs.Create(ctx, log)
 }
 
 type mockOperationLogPort struct {
@@ -434,20 +537,21 @@ func newTestHandler() *IAMHandler {
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockMailDelivery{}, captchaStore)
 
 	mod := &IAMModule{
-		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
-		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:          app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
-		SessionUseCase:        app.NewSessionUseCase(sessionStore, userRepo),
-		ChangePasswordUseCase: app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
-		PasswordResetUseCase:  app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
-		AdminUseCase:          app.NewAdminUseCase(userRepo, sessionStore, userRepo, userRepo, userRepo.operationLogs),
-		CaptchaUseCase:        app.NewCaptchaUseCase(captchaStore),
-		EmailCodeUseCase:      emailCodeUseCase,
-		PermissionChecker:     allowPermissionChecker{},
-		UserRepo:              userRepo,
-		SessionStore:          sessionStore,
-		CaptchaStore:          captchaStore,
-		EmailCodeStore:        emailCodeStore,
+		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
+		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
+		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
+		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
+		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
+		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
+		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, userRepo, userRepo.operationLogs),
+		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(userRepo, userRepo),
+		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
+		EmailCodeUseCase:           emailCodeUseCase,
+		PermissionChecker:          allowPermissionChecker{},
+		UserRepo:                   userRepo,
+		SessionStore:               sessionStore,
+		CaptchaStore:               captchaStore,
+		EmailCodeStore:             emailCodeStore,
 	}
 
 	return NewIAMHandler(mod, 3600, false)
@@ -527,6 +631,19 @@ func seedUser(t *testing.T, h *IAMHandler, email string) *domain.User {
 		RoleLevel:    domain.RoleUser,
 	}
 	require.NoError(t, testRepo(h).Create(context.Background(), user))
+	return user
+}
+
+func seedUserSession(t *testing.T, h *IAMHandler, email, sessionID string) *domain.User {
+	t.Helper()
+	user := seedUser(t, h, email)
+	require.NoError(t, h.module.SessionStore.Create(context.Background(), &domain.Session{
+		ID:           sessionID,
+		UserID:       user.ID,
+		RoleLevel:    user.RoleLevel,
+		Email:        user.Email,
+		TokenVersion: user.TokenVersion,
+	}, 3600))
 	return user
 }
 
@@ -1187,6 +1304,71 @@ func TestPostPasswordResetIgnoresCleanupFailuresAfterPasswordUpdate(t *testing.T
 	require.NotNil(t, updated)
 	require.Equal(t, 1, updated.TokenVersion)
 	require.True(t, infra.NewHasher().Verify("NewPass123!", updated.PasswordHash))
+}
+
+func TestSupplierApplicationSubmitAndCurrent(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUserSession(t, h, "user@test.com", "user-session")
+
+	body := `{"reason":"I want to publish my Microsoft resources."}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/supplier-applications", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"status":"reviewing"`)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/v1/supplier-applications/current", nil)
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"status":"reviewing"`)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/supplier-applications", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "already under review")
+}
+
+func TestAdminApproveSupplierApplicationPromotesUser(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	admin := seedAdminSession(t, h, "admin-session")
+	user := seedUser(t, h, "user@test.com")
+
+	application, err := h.module.SupplierApplicationUseCase.Submit(context.Background(), user.ID, "I have resources.")
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/supplier-applications/%d/approve", application.ID), nil)
+	req.Header.Set("X-Request-ID", "req-supplier-approve")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"status":"approved"`)
+
+	updated, err := testRepo(h).FindByID(context.Background(), user.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, domain.RoleSupplier, updated.RoleLevel)
+
+	log := testRepo(h).lastLog()
+	require.NotNil(t, log)
+	require.Equal(t, admin.ID, log.OperatorUserID)
+	require.Equal(t, "iam.supplier_application.approve", log.OperationType)
+	require.Equal(t, "supplier_application", log.ResourceType)
+	require.Equal(t, "success", log.Result)
+	require.Equal(t, "req-supplier-approve", log.RequestID)
 }
 
 // --- Validation Error Tests ---

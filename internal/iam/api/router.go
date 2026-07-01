@@ -77,6 +77,8 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 		auth.GET("/me", h.GetMe)
 		auth.DELETE("/sessions/current", h.DeleteSession)
 		auth.PATCH("/password", h.PatchPassword)
+		auth.POST("/supplier-applications", h.PostSupplierApplication)
+		auth.GET("/supplier-applications/current", h.GetCurrentSupplierApplication)
 	}
 
 	// Admin routes require both the role baseline and Casbin command permission.
@@ -95,5 +97,8 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 		admin.GET("/invites", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "read"), h.GetAdminInvites)
 		admin.POST("/invites", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "write"), h.PostAdminInvite)
 		admin.PATCH("/invites/:code", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "operate"), h.PatchAdminInvite)
+		admin.GET("/supplier-applications", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "read"), h.GetAdminSupplierApplications)
+		admin.POST("/supplier-applications/:applicationId/approve", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationApprove)
+		admin.POST("/supplier-applications/:applicationId/reject", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationReject)
 	}
 }
