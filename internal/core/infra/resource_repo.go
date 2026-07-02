@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -44,6 +45,7 @@ func (m *EmailResourceModel) toDomain() *domain.EmailResource {
 type MicrosoftResourceModel struct {
 	ID              uint       `gorm:"primaryKey"`
 	EmailAddress    string     `gorm:"type:varchar(255);not null;uniqueIndex;column:email_address"`
+	EmailDomain     string     `gorm:"type:varchar(255);not null;default:'';column:email_domain"`
 	Password        string     `gorm:"type:varchar(512);not null"`
 	ClientID        string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
 	RefreshToken    string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
@@ -85,6 +87,7 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 	return &MicrosoftResourceModel{
 		ID:              ms.ID,
 		EmailAddress:    ms.EmailAddress,
+		EmailDomain:     microsoftEmailDomain(ms.EmailAddress),
 		Password:        ms.Password,
 		ClientID:        ms.ClientID,
 		RefreshToken:    ms.RefreshToken,
@@ -104,10 +107,11 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 type DomainResourceModel struct {
 	ID              uint       `gorm:"primaryKey"`
 	Domain          string     `gorm:"type:varchar(255);not null;uniqueIndex"`
+	DomainTLD       string     `gorm:"type:varchar(64);not null;default:'';column:domain_tld"`
 	OwnerUserID     uint       `gorm:"not null;column:owner_user_id"`
 	MailServerID    uint       `gorm:"not null;column:mail_server_id"`
-	Purpose         string     `gorm:"type:varchar(32);not null;default:'sale'"`
-	Status          string     `gorm:"type:varchar(32);not null;default:'dns_abnormal'"`
+	Purpose         string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
+	Status          string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime"`
@@ -138,12 +142,27 @@ type ResourceRepo struct {
 	operationLogs *governanceinfra.OperationLogRepo
 }
 
+const resourceBulkMutationChunkSize = 1000
+
 // NewResourceRepo creates a new GORM-backed resource repository.
 func NewResourceRepo(db *gorm.DB) *ResourceRepo {
 	return &ResourceRepo{
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
 	}
+}
+
+func microsoftEmailKey(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func microsoftEmailDomain(email string) string {
+	normalized := microsoftEmailKey(email)
+	index := strings.LastIndex(normalized, "@")
+	if index < 0 || index == len(normalized)-1 {
+		return ""
+	}
+	return normalized[index+1:]
 }
 
 func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.EmailResource, ms *domain.MicrosoftResource) error {
@@ -174,6 +193,66 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 
 func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing DomainResourceModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("domain = ?", dr.Domain).
+			First(&existing).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("find existing domain resource: %w", err)
+		}
+		if err == nil {
+			if domain.MailDomainStatus(existing.Status) != domain.DomainStatusDeleted {
+				return domain.ErrDuplicateDomain
+			}
+
+			now := time.Now().UTC()
+			if err := tx.Where("resource_id = ?", existing.ID).
+				Delete(&GeneratedMailboxModel{}).Error; err != nil {
+				return fmt.Errorf("clear restored domain mailboxes: %w", err)
+			}
+
+			deleteResult := tx.Where("id = ? AND status = ?", existing.ID, string(domain.DomainStatusDeleted)).
+				Delete(&DomainResourceModel{})
+			if deleteResult.Error != nil {
+				return fmt.Errorf("remove deleted domain row before restore: %w", deleteResult.Error)
+			}
+			if deleteResult.RowsAffected == 0 {
+				return domain.ErrDuplicateDomain
+			}
+
+			if err := tx.Model(&EmailResourceModel{}).
+				Where("id = ? AND type = ?", existing.ID, string(domain.ResourceTypeDomain)).
+				Updates(map[string]interface{}{
+					"owner_user_id": resource.OwnerUserID,
+					"updated_at":    now,
+				}).Error; err != nil {
+				return fmt.Errorf("restore deleted domain root: %w", err)
+			}
+
+			restored := &DomainResourceModel{
+				ID:           existing.ID,
+				OwnerUserID:  resource.OwnerUserID,
+				Domain:       dr.Domain,
+				DomainTLD:    domain.DomainTLD(dr.Domain),
+				MailServerID: dr.MailServerID,
+				Purpose:      string(dr.Purpose),
+				Status:       string(dr.Status),
+				CreatedAt:    existing.CreatedAt,
+				UpdatedAt:    now,
+			}
+			if err := tx.Create(restored).Error; err != nil {
+				return fmt.Errorf("restore deleted domain resource: %w", err)
+			}
+
+			resource.ID = existing.ID
+			resource.CreatedAt = existing.CreatedAt
+			resource.UpdatedAt = now
+			dr.ID = existing.ID
+			dr.CreatedAt = existing.CreatedAt
+			dr.UpdatedAt = now
+			return nil
+		}
+
 		root := &EmailResourceModel{
 			Type:        string(resource.Type),
 			OwnerUserID: resource.OwnerUserID,
@@ -186,6 +265,7 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 			ID:           root.ID,
 			OwnerUserID:  root.OwnerUserID,
 			Domain:       dr.Domain,
+			DomainTLD:    domain.DomainTLD(dr.Domain),
 			MailServerID: dr.MailServerID,
 			Purpose:      string(dr.Purpose),
 			Status:       string(dr.Status),
@@ -214,6 +294,87 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		return nil
 	}
 
+	seenEmails := make(map[string]struct{}, len(ms))
+	emails := make([]string, 0, len(ms))
+	for i := range ms {
+		key := microsoftEmailKey(ms[i].EmailAddress)
+		if _, ok := seenEmails[key]; ok {
+			return domain.ErrDuplicateEmail
+		}
+		seenEmails[key] = struct{}{}
+		emails = append(emails, strings.TrimSpace(ms[i].EmailAddress))
+	}
+	var existingModels []MicrosoftResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("email_address IN ?", emails).
+		Find(&existingModels).Error; err != nil {
+		return fmt.Errorf("find existing microsoft resources: %w", err)
+	}
+	existingByEmail := make(map[string]MicrosoftResourceModel, len(existingModels))
+	for _, model := range existingModels {
+		if domain.MicrosoftResourceStatus(model.Status) != domain.MicrosoftStatusDeleted {
+			return domain.ErrDuplicateEmail
+		}
+		existingByEmail[microsoftEmailKey(model.EmailAddress)] = model
+	}
+
+	newResources := make([]domain.EmailResource, 0, len(resources))
+	newMicrosoftResources := make([]domain.MicrosoftResource, 0, len(ms))
+	for i := range ms {
+		existing, ok := existingByEmail[microsoftEmailKey(ms[i].EmailAddress)]
+		if !ok {
+			newResources = append(newResources, resources[i])
+			newMicrosoftResources = append(newMicrosoftResources, ms[i])
+			continue
+		}
+
+		now := time.Now().UTC()
+		if err := tx.Model(&EmailResourceModel{}).
+			Where("id = ? AND type = ?", existing.ID, string(domain.ResourceTypeMicrosoft)).
+			Updates(map[string]interface{}{
+				"owner_user_id": resources[i].OwnerUserID,
+				"updated_at":    now,
+			}).Error; err != nil {
+			return fmt.Errorf("restore deleted email resource: %w", err)
+		}
+
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND status = ?", existing.ID, string(domain.MicrosoftStatusDeleted)).
+			Updates(map[string]interface{}{
+				"email_address":     strings.TrimSpace(ms[i].EmailAddress),
+				"email_domain":      microsoftEmailDomain(ms[i].EmailAddress),
+				"password":          ms[i].Password,
+				"client_id":         ms[i].ClientID,
+				"refresh_token":     ms[i].RefreshToken,
+				"long_lived":        ms[i].LongLived,
+				"rt_expire_at":      ms[i].RTExpireAt,
+				"for_sale":          false,
+				"status":            string(ms[i].Status),
+				"quality_score":     ms[i].QualityScore,
+				"last_safe_error":   ms[i].LastSafeError,
+				"last_allocated_at": nil,
+				"updated_at":        now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("restore deleted microsoft resource: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrDuplicateEmail
+		}
+
+		resources[i].ID = existing.ID
+		resources[i].CreatedAt = existing.CreatedAt
+		resources[i].UpdatedAt = now
+		ms[i].ID = existing.ID
+		ms[i].CreatedAt = existing.CreatedAt
+		ms[i].UpdatedAt = now
+	}
+	resources = newResources
+	ms = newMicrosoftResources
+	if len(resources) == 0 {
+		return nil
+	}
+
 	const batchSize = 1000
 	rootModels := make([]EmailResourceModel, len(resources))
 	for i := range resources {
@@ -232,9 +393,6 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		msModels[i].ID = rootModels[i].ID
 	}
 	if err := tx.CreateInBatches(&msModels, batchSize).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			return domain.ErrDuplicateEmail
-		}
 		return fmt.Errorf("create microsoft resource batch: %w", err)
 	}
 
@@ -306,11 +464,15 @@ func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails [
 	seen := make(map[string]struct{}, len(emails))
 	uniqueEmails := make([]string, 0, len(emails))
 	for _, email := range emails {
-		if _, ok := seen[email]; ok {
+		key := microsoftEmailKey(email)
+		if key == "" {
 			continue
 		}
-		seen[email] = struct{}{}
-		uniqueEmails = append(uniqueEmails, email)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		uniqueEmails = append(uniqueEmails, strings.TrimSpace(email))
 	}
 
 	const chunkSize = 1000
@@ -322,12 +484,12 @@ func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails [
 		var found []string
 		if err := r.db.WithContext(ctx).
 			Model(&MicrosoftResourceModel{}).
-			Where("email_address IN ?", uniqueEmails[start:end]).
+			Where("email_address IN ? AND status <> ?", uniqueEmails[start:end], string(domain.MicrosoftStatusDeleted)).
 			Pluck("email_address", &found).Error; err != nil {
 			return nil, fmt.Errorf("find existing microsoft emails: %w", err)
 		}
 		for _, email := range found {
-			result[email] = struct{}{}
+			result[microsoftEmailKey(email)] = struct{}{}
 		}
 	}
 	return result, nil
@@ -336,10 +498,22 @@ func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails [
 func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, resourceType string) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&EmailResourceModel{})
 	if ownerUserID > 0 {
-		q = q.Where("owner_user_id = ?", ownerUserID)
+		q = q.Where("email_resources.owner_user_id = ?", ownerUserID)
 	}
-	if resourceType != "" && resourceType != "all" {
-		q = q.Where("type = ?", resourceType)
+	switch resourceType {
+	case "", "all":
+		q = q.Joins("LEFT JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id").
+			Joins("LEFT JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id").
+			Where("email_resources.type <> ? OR ms_filter.status <> ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusDeleted)).
+			Where("email_resources.type <> ? OR dr_filter.status <> ?", string(domain.ResourceTypeDomain), string(domain.DomainStatusDeleted))
+	case string(domain.ResourceTypeMicrosoft):
+		q = q.Joins("JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id AND ms_filter.status <> ?", string(domain.MicrosoftStatusDeleted)).
+			Where("email_resources.type = ?", resourceType)
+	case string(domain.ResourceTypeDomain):
+		q = q.Joins("JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id AND dr_filter.status <> ?", string(domain.DomainStatusDeleted)).
+			Where("email_resources.type = ?", resourceType)
+	default:
+		q = q.Where("email_resources.type = ?", resourceType)
 	}
 	return q
 }
@@ -402,20 +576,36 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 
 // ListDomainStatus returns API-safe status for a batch of domain resources.
 func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
-	var models []DomainResourceModel
+	type domainStatusRow struct {
+		ID           uint
+		Domain       string
+		DomainTLD    string
+		MailServerID uint
+		Purpose      string
+		Status       string
+		MailboxCount int
+	}
+	var rows []domainStatusRow
 	err := r.db.WithContext(ctx).
-		Where("id IN ?", ids).
-		Find(&models).Error
+		Table("domain_resources AS dr").
+		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, COUNT(gm.id) AS mailbox_count").
+		Joins("LEFT JOIN generated_mailboxes gm ON gm.resource_id = dr.id AND gm.owner_user_id = dr.owner_user_id").
+		Where("dr.id IN ? AND dr.status <> ?", ids, string(domain.DomainStatusDeleted)).
+		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status").
+		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list domain status: %w", err)
 	}
-	result := make([]coreapp.DomainStatusResult, len(models))
-	for i, m := range models {
+	result := make([]coreapp.DomainStatusResult, len(rows))
+	for i, row := range rows {
 		result[i] = coreapp.DomainStatusResult{
-			ID:      m.ID,
-			Domain:  m.Domain,
-			Purpose: m.Purpose,
-			Status:  m.Status,
+			ID:           row.ID,
+			Domain:       row.Domain,
+			DomainTLD:    row.DomainTLD,
+			MailServerID: row.MailServerID,
+			Purpose:      row.Purpose,
+			Status:       row.Status,
+			MailboxCount: row.MailboxCount,
 		}
 	}
 	return result, nil
@@ -473,12 +663,15 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 			}
 			return fmt.Errorf("lock microsoft resource: %w", err)
 		}
+		if domain.MicrosoftResourceStatus(ms.Status) == domain.MicrosoftStatusDeleted {
+			return domain.ErrResourceNotFound
+		}
 		if ms.ForSale {
 			return nil
 		}
 
 		result := tx.Model(&MicrosoftResourceModel{}).
-			Where("id = ? AND for_sale = ?", resourceID, false).
+			Where("id = ? AND for_sale = ? AND status <> ?", resourceID, false, string(domain.MicrosoftStatusDeleted)).
 			Updates(map[string]interface{}{
 				"for_sale":   true,
 				"updated_at": time.Now().UTC(),
@@ -505,74 +698,422 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 	return published, nil
 }
 
-// PublishMicrosoftBatchWithLog publishes owned Microsoft resources and writes OperationLog
-// records for the rows that actually changed from private to public supply.
-func (r *ResourceRepo) PublishMicrosoftBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, baseLog governancedomain.OperationLog) (int, error) {
+// PublishResourcesBatchWithLog validates all requested resources and publishes the
+// eligible private rows in a single transaction. Already-public rows are
+// idempotently skipped; deleted rows and binding domain resources are rejected.
+func (r *ResourceRepo) PublishResourcesBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) ([]uint, error) {
 	if len(resourceIDs) == 0 {
-		return 0, domain.ErrResourceNotFound
+		return nil, domain.ErrResourceNotFound
 	}
 
-	published := 0
+	publishedIDs := make([]uint, 0, len(resourceIDs))
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var ownedRows []EmailResourceModel
+		var roots []EmailResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id IN ? AND owner_user_id = ? AND type = ?", resourceIDs, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			Where("id IN ? AND owner_user_id = ?", resourceIDs, ownerUserID).
 			Order("id ASC").
-			Find(&ownedRows).Error; err != nil {
-			return fmt.Errorf("lock owned microsoft resources: %w", err)
+			Find(&roots).Error; err != nil {
+			return fmt.Errorf("lock owned resources: %w", err)
 		}
-		if len(ownedRows) != len(resourceIDs) {
+		if len(roots) != len(resourceIDs) {
 			return domain.ErrForbiddenResource
 		}
 
-		var privateRows []MicrosoftResourceModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id").
-			Where("id IN ? AND for_sale = ?", resourceIDs, false).
-			Order("id ASC").
-			Find(&privateRows).Error; err != nil {
-			return fmt.Errorf("lock private microsoft resources: %w", err)
+		microsoftIDs := make([]uint, 0, len(roots))
+		domainIDs := make([]uint, 0, len(roots))
+		for _, root := range roots {
+			switch domain.ResourceType(root.Type) {
+			case domain.ResourceTypeMicrosoft:
+				microsoftIDs = append(microsoftIDs, root.ID)
+			case domain.ResourceTypeDomain:
+				domainIDs = append(domainIDs, root.ID)
+			default:
+				return domain.ErrInvalidResourceType
+			}
 		}
-		if len(privateRows) == 0 {
+
+		if len(microsoftIDs) > 0 {
+			ids, err := publishLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			publishedIDs = append(publishedIDs, ids...)
+		}
+		if len(domainIDs) > 0 {
+			ids, err := publishLockedDomainRows(ctx, tx, domainIDs, domainLog, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			publishedIDs = append(publishedIDs, ids...)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return publishedIDs, nil
+}
+
+func publishLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+	var rows []MicrosoftResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id IN ?", resourceIDs).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock microsoft resources: %w", err)
+	}
+	if len(rows) != len(resourceIDs) {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	idsToPublish := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		if domain.MicrosoftResourceStatus(row.Status) == domain.MicrosoftStatusDeleted {
+			return nil, domain.ErrResourceNotFound
+		}
+		if !row.ForSale {
+			idsToPublish = append(idsToPublish, row.ID)
+		}
+	}
+	if len(idsToPublish) == 0 {
+		return nil, nil
+	}
+
+	result := tx.Model(&MicrosoftResourceModel{}).
+		Where("id IN ? AND for_sale = ? AND status <> ?", idsToPublish, false, string(domain.MicrosoftStatusDeleted)).
+		Updates(map[string]interface{}{
+			"for_sale":   true,
+			"updated_at": time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return nil, fmt.Errorf("publish microsoft resources: %w", result.Error)
+	}
+	if int(result.RowsAffected) != len(idsToPublish) {
+		return nil, domain.ErrResourceNotPrivate
+	}
+
+	for _, id := range idsToPublish {
+		log := baseLog
+		log.ResourceID = fmt.Sprintf("%d", id)
+		if err := operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return nil, fmt.Errorf("create operation log: %w", err)
+		}
+	}
+
+	return idsToPublish, nil
+}
+
+func publishLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+	var rows []DomainResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id IN ?", resourceIDs).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock domain resources: %w", err)
+	}
+	if len(rows) != len(resourceIDs) {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	idsToPublish := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		switch domain.MailDomainStatus(row.Status) {
+		case domain.DomainStatusDeleted:
+			return nil, domain.ErrResourceNotFound
+		}
+
+		switch domain.ResourcePurpose(row.Purpose) {
+		case domain.PurposeNotSale:
+			idsToPublish = append(idsToPublish, row.ID)
+		case domain.PurposeSale:
+			continue
+		case domain.PurposeBinding:
+			return nil, domain.ErrResourceNotPrivate
+		default:
+			return nil, domain.ErrInvalidPurpose
+		}
+	}
+	if len(idsToPublish) == 0 {
+		return nil, nil
+	}
+
+	result := tx.Model(&DomainResourceModel{}).
+		Where("id IN ? AND purpose = ? AND status <> ?", idsToPublish, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
+		Updates(map[string]interface{}{
+			"purpose":    string(domain.PurposeSale),
+			"updated_at": time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return nil, fmt.Errorf("publish domain resources: %w", result.Error)
+	}
+	if int(result.RowsAffected) != len(idsToPublish) {
+		return nil, domain.ErrResourceNotPrivate
+	}
+
+	for _, id := range idsToPublish {
+		log := baseLog
+		log.ResourceID = fmt.Sprintf("%d", id)
+		if err := operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return nil, fmt.Errorf("create operation log: %w", err)
+		}
+	}
+
+	return idsToPublish, nil
+}
+
+// PublishResourcesByFilterWithLog publishes owned private resources matching a
+// server-side filter. It works in small transactions so "all matching" commands
+// do not build huge HTTP payloads or single massive IN clauses.
+func (r *ResourceRepo) PublishResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error) {
+	switch filter.ResourceType {
+	case domain.ResourceTypeMicrosoft:
+		return r.publishMicrosoftByFilterWithLog(ctx, ownerUserID, filter, microsoftLog)
+	case domain.ResourceTypeDomain:
+		return r.publishDomainByFilterWithLog(ctx, ownerUserID, filter, domainLog)
+	default:
+		return 0, domain.ErrInvalidResourceType
+	}
+}
+
+func (r *ResourceRepo) publishMicrosoftByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
+	published := 0
+	for {
+		candidateCount := 0
+		chunkPublished := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectMicrosoftBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
+
+			publishedIDs, err := publishLockedMicrosoftRows(ctx, tx, ids, log, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			chunkPublished = len(publishedIDs)
+			return nil
+		})
+		if err != nil {
+			return published, err
+		}
+		if candidateCount == 0 {
+			return published, nil
+		}
+		published += chunkPublished
+	}
+}
+
+func (r *ResourceRepo) publishDomainByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
+	published := 0
+	for {
+		candidateCount := 0
+		chunkPublished := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectDomainBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
+
+			publishedIDs, err := publishLockedDomainRows(ctx, tx, ids, log, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			chunkPublished = len(publishedIDs)
+			return nil
+		})
+		if err != nil {
+			return published, err
+		}
+		if candidateCount == 0 {
+			return published, nil
+		}
+		published += chunkPublished
+	}
+}
+
+func selectMicrosoftBulkIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) ([]uint, error) {
+	var ids []uint
+	err := applyMicrosoftBulkFilter(tx.WithContext(ctx), ownerUserID, filter).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("er.id ASC").
+		Limit(resourceBulkMutationChunkSize).
+		Pluck("er.id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("select microsoft bulk resources: %w", err)
+	}
+	return ids, nil
+}
+
+func selectDomainBulkIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) ([]uint, error) {
+	var ids []uint
+	err := applyDomainBulkFilter(tx.WithContext(ctx), ownerUserID, filter).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("er.id ASC").
+		Limit(resourceBulkMutationChunkSize).
+		Pluck("er.id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("select domain bulk resources: %w", err)
+	}
+	return ids, nil
+}
+
+func applyMicrosoftBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) *gorm.DB {
+	q := db.Table("email_resources AS er").
+		Joins("JOIN microsoft_resources ms ON ms.id = er.id")
+	if strings.TrimSpace(filter.Suffix) != "" {
+		q = db.Table("microsoft_resources AS ms").
+			Joins("STRAIGHT_JOIN email_resources AS er ON er.id = ms.id")
+	}
+	q = q.Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
+		Where("ms.for_sale = ? AND ms.status <> ?", false, string(domain.MicrosoftStatusDeleted))
+
+	if filter.Status != "" {
+		q = q.Where("ms.status = ?", filter.Status)
+	}
+	if filter.LongLived != nil {
+		q = q.Where("ms.long_lived = ?", *filter.LongLived)
+	}
+	if filter.CreatedFrom != nil {
+		q = q.Where("er.created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		q = q.Where("er.created_at <= ?", *filter.CreatedTo)
+	}
+	if filter.Suffix != "" {
+		suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filter.Suffix)), "@")
+		if suffix != "" {
+			q = q.Where("ms.email_domain = ?", suffix)
+		}
+	}
+	if filter.Search != "" {
+		like := "%" + filter.Search + "%"
+		normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+		q = q.Where(
+			"(LOWER(ms.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)",
+			like,
+			like,
+			normalized,
+		)
+	}
+	return q
+}
+
+func applyDomainBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) *gorm.DB {
+	q := db.Table("email_resources AS er").
+		Joins("JOIN domain_resources dr ON dr.id = er.id")
+	if strings.TrimSpace(filter.TLD) != "" {
+		q = db.Table("domain_resources AS dr").
+			Joins("STRAIGHT_JOIN email_resources AS er ON er.id = dr.id")
+	}
+	q = q.Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeDomain)).
+		Where("dr.owner_user_id = ?", ownerUserID).
+		Where("dr.purpose = ? AND dr.status <> ?", string(domain.PurposeNotSale), string(domain.DomainStatusDeleted))
+
+	if filter.Status != "" {
+		q = q.Where("dr.status = ?", filter.Status)
+	}
+	if filter.CreatedFrom != nil {
+		q = q.Where("er.created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		q = q.Where("er.created_at <= ?", *filter.CreatedTo)
+	}
+	if filter.TLD != "" {
+		tld, err := domain.NormalizeDomainSuffix(filter.TLD)
+		if err != nil {
+			q = q.Where("1 = 0")
+		} else {
+			q = q.Where("dr.domain_tld = ?", tld)
+		}
+	}
+	if filter.Search != "" {
+		q = q.Where("LOWER(dr.domain) LIKE ?", "%"+filter.Search+"%")
+	}
+	return q
+}
+
+func normalizeEmailTypeSearch(value string) string {
+	return strings.NewReplacer(".", "_", "-", "_", "@", "").Replace(value)
+}
+
+// PublishDomainWithLog publishes one owned private domain resource and writes an
+// OperationLog only when the row actually changes from private to public supply.
+func (r *ResourceRepo) PublishDomainWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) (bool, error) {
+	if resourceID == 0 {
+		return false, domain.ErrResourceNotFound
+	}
+
+	published := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeDomain)).
+			First(&root).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrForbiddenResource
+			}
+			return fmt.Errorf("lock owned domain resource: %w", err)
+		}
+
+		var dr DomainResourceModel
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", resourceID).
+			First(&dr).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock domain resource: %w", err)
+		}
+		if domain.MailDomainStatus(dr.Status) == domain.DomainStatusDeleted {
+			return domain.ErrResourceNotFound
+		}
+		if domain.ResourcePurpose(dr.Purpose) == domain.PurposeSale {
 			return nil
 		}
-
-		idsToPublish := make([]uint, len(privateRows))
-		for i, row := range privateRows {
-			idsToPublish[i] = row.ID
+		if domain.ResourcePurpose(dr.Purpose) != domain.PurposeNotSale {
+			return domain.ErrResourceNotPrivate
 		}
 
-		result := tx.Model(&MicrosoftResourceModel{}).
-			Where("id IN ? AND for_sale = ?", idsToPublish, false).
+		result := tx.Model(&DomainResourceModel{}).
+			Where("id = ? AND purpose = ? AND status <> ?", resourceID, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
 			Updates(map[string]interface{}{
-				"for_sale":   true,
+				"purpose":    string(domain.PurposeSale),
 				"updated_at": time.Now().UTC(),
 			})
 		if result.Error != nil {
-			return fmt.Errorf("publish microsoft resources: %w", result.Error)
+			return fmt.Errorf("publish domain resource: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
 			return nil
 		}
 
-		for _, id := range idsToPublish {
-			log := baseLog
-			log.ResourceID = fmt.Sprintf("%d", id)
-			if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
-				return fmt.Errorf("create operation log: %w", err)
-			}
+		if log.ResourceID == "" {
+			log.ResourceID = fmt.Sprintf("%d", resourceID)
 		}
-
-		published = len(idsToPublish)
+		if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
+		}
+		published = true
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return false, err
 	}
 	return published, nil
 }
 
-// DeletePrivateMicrosoftWithLog removes one owned Microsoft resource while it is still private.
+// DeletePrivateMicrosoftWithLog logically removes one owned Microsoft resource while it is still private.
 func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error {
 	if resourceID == 0 {
 		return domain.ErrResourceNotFound
@@ -603,6 +1144,28 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 		if ms.ForSale {
 			return domain.ErrResourceNotPrivate
 		}
+		if domain.MicrosoftResourceStatus(ms.Status) == domain.MicrosoftStatusDeleted {
+			return domain.ErrResourceNotFound
+		}
+		msDomain := ms.toDomain()
+		if err := msDomain.MarkDeleted(); err != nil {
+			return err
+		}
+
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND for_sale = ? AND status <> ?", resourceID, false, string(domain.MicrosoftStatusDeleted)).
+			Updates(map[string]interface{}{
+				"status":            string(msDomain.Status),
+				"last_safe_error":   msDomain.LastSafeError,
+				"last_allocated_at": msDomain.LastAllocatedAt,
+				"updated_at":        time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("logical delete private microsoft resource: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrResourceNotPrivate
+		}
 
 		if log.ResourceID == "" {
 			log.ResourceID = fmt.Sprintf("%d", resourceID)
@@ -610,26 +1173,330 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 		if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
 			return fmt.Errorf("create operation log: %w", err)
 		}
+		return nil
+	})
+}
 
-		result := tx.
-			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
-			Delete(&EmailResourceModel{})
+// DeletePrivateDomainWithLog logically removes one owned domain resource while it is still private.
+func (r *ResourceRepo) DeletePrivateDomainWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error {
+	if resourceID == 0 {
+		return domain.ErrResourceNotFound
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeDomain)).
+			First(&root).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrForbiddenResource
+			}
+			return fmt.Errorf("lock owned domain resource: %w", err)
+		}
+
+		var dr DomainResourceModel
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", resourceID).
+			First(&dr).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock domain resource: %w", err)
+		}
+		if domain.ResourcePurpose(dr.Purpose) != domain.PurposeNotSale {
+			return domain.ErrResourceNotPrivate
+		}
+		if domain.MailDomainStatus(dr.Status) == domain.DomainStatusDeleted {
+			return domain.ErrResourceNotFound
+		}
+		drDomain := dr.toDomain()
+		if err := drDomain.MarkDeleted(); err != nil {
+			return err
+		}
+
+		result := tx.Model(&DomainResourceModel{}).
+			Where("id = ? AND purpose = ? AND status <> ?", resourceID, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
+			Updates(map[string]interface{}{
+				"status":            string(drDomain.Status),
+				"last_allocated_at": drDomain.LastAllocatedAt,
+				"updated_at":        time.Now().UTC(),
+			})
 		if result.Error != nil {
-			return fmt.Errorf("delete private microsoft resource: %w", result.Error)
+			return fmt.Errorf("logical delete private domain resource: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return domain.ErrForbiddenResource
+			return domain.ErrResourceNotPrivate
+		}
+
+		if log.ResourceID == "" {
+			log.ResourceID = fmt.Sprintf("%d", resourceID)
+		}
+		if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
 		}
 		return nil
 	})
+}
+
+// DeleteResourcesBatchWithLog logically deletes owned private resources in a single transaction.
+// Non-private resources are skipped; missing or non-owned roots are rejected to prevent enumeration and partial cross-owner changes.
+func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) ([]uint, error) {
+	if len(resourceIDs) == 0 {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	deletedIDs := make([]uint, 0, len(resourceIDs))
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var roots []EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND owner_user_id = ?", resourceIDs, ownerUserID).
+			Order("id ASC").
+			Find(&roots).Error; err != nil {
+			return fmt.Errorf("lock owned resources for delete: %w", err)
+		}
+		if len(roots) != len(resourceIDs) {
+			return domain.ErrForbiddenResource
+		}
+
+		microsoftIDs := make([]uint, 0, len(roots))
+		domainIDs := make([]uint, 0, len(roots))
+		for _, root := range roots {
+			switch domain.ResourceType(root.Type) {
+			case domain.ResourceTypeMicrosoft:
+				microsoftIDs = append(microsoftIDs, root.ID)
+			case domain.ResourceTypeDomain:
+				domainIDs = append(domainIDs, root.ID)
+			default:
+				return domain.ErrInvalidResourceType
+			}
+		}
+
+		if len(microsoftIDs) > 0 {
+			ids, err := deleteLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			deletedIDs = append(deletedIDs, ids...)
+		}
+		if len(domainIDs) > 0 {
+			ids, err := deleteLockedDomainRows(ctx, tx, domainIDs, domainLog, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			deletedIDs = append(deletedIDs, ids...)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deletedIDs, nil
+}
+
+// DeleteResourcesByFilterWithLog logically deletes owned private resources
+// matching a server-side filter in small chunks.
+func (r *ResourceRepo) DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error) {
+	switch filter.ResourceType {
+	case domain.ResourceTypeMicrosoft:
+		return r.deleteMicrosoftByFilterWithLog(ctx, ownerUserID, filter, microsoftLog)
+	case domain.ResourceTypeDomain:
+		return r.deleteDomainByFilterWithLog(ctx, ownerUserID, filter, domainLog)
+	default:
+		return 0, domain.ErrInvalidResourceType
+	}
+}
+
+func (r *ResourceRepo) deleteMicrosoftByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
+	deleted := 0
+	for {
+		candidateCount := 0
+		chunkDeleted := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectMicrosoftBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
+
+			deletedIDs, err := deleteLockedMicrosoftRows(ctx, tx, ids, log, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			chunkDeleted = len(deletedIDs)
+			return nil
+		})
+		if err != nil {
+			return deleted, err
+		}
+		if candidateCount == 0 {
+			return deleted, nil
+		}
+		deleted += chunkDeleted
+	}
+}
+
+func (r *ResourceRepo) deleteDomainByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
+	deleted := 0
+	for {
+		candidateCount := 0
+		chunkDeleted := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectDomainBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
+
+			deletedIDs, err := deleteLockedDomainRows(ctx, tx, ids, log, r.operationLogs)
+			if err != nil {
+				return err
+			}
+			chunkDeleted = len(deletedIDs)
+			return nil
+		})
+		if err != nil {
+			return deleted, err
+		}
+		if candidateCount == 0 {
+			return deleted, nil
+		}
+		deleted += chunkDeleted
+	}
+}
+
+func deleteLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+	var rows []MicrosoftResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id IN ?", resourceIDs).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock microsoft resources for delete: %w", err)
+	}
+	if len(rows) != len(resourceIDs) {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	idsToDelete := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		if domain.MicrosoftResourceStatus(row.Status) == domain.MicrosoftStatusDeleted || row.ForSale {
+			continue
+		}
+		msDomain := row.toDomain()
+		if err := msDomain.MarkDeleted(); err != nil {
+			return nil, err
+		}
+		idsToDelete = append(idsToDelete, row.ID)
+	}
+	if len(idsToDelete) == 0 {
+		return nil, nil
+	}
+
+	result := tx.Model(&MicrosoftResourceModel{}).
+		Where("id IN ? AND for_sale = ? AND status <> ?", idsToDelete, false, string(domain.MicrosoftStatusDeleted)).
+		Updates(map[string]interface{}{
+			"status":            string(domain.MicrosoftStatusDeleted),
+			"last_safe_error":   "",
+			"last_allocated_at": nil,
+			"updated_at":        time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return nil, fmt.Errorf("delete microsoft resources: %w", result.Error)
+	}
+	if int(result.RowsAffected) != len(idsToDelete) {
+		return nil, domain.ErrResourceNotPrivate
+	}
+
+	for _, id := range idsToDelete {
+		log := baseLog
+		log.ResourceID = fmt.Sprintf("%d", id)
+		if err := operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return nil, fmt.Errorf("create operation log: %w", err)
+		}
+	}
+
+	return idsToDelete, nil
+}
+
+func deleteLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+	var rows []DomainResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id IN ?", resourceIDs).
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock domain resources for delete: %w", err)
+	}
+	if len(rows) != len(resourceIDs) {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	idsToDelete := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		if domain.MailDomainStatus(row.Status) == domain.DomainStatusDeleted {
+			continue
+		}
+		switch domain.ResourcePurpose(row.Purpose) {
+		case domain.PurposeNotSale:
+			drDomain := row.toDomain()
+			if err := drDomain.MarkDeleted(); err != nil {
+				return nil, err
+			}
+			idsToDelete = append(idsToDelete, row.ID)
+		case domain.PurposeSale, domain.PurposeBinding:
+			continue
+		default:
+			return nil, domain.ErrInvalidPurpose
+		}
+	}
+	if len(idsToDelete) == 0 {
+		return nil, nil
+	}
+
+	result := tx.Model(&DomainResourceModel{}).
+		Where("id IN ? AND purpose = ? AND status <> ?", idsToDelete, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
+		Updates(map[string]interface{}{
+			"status":            string(domain.DomainStatusDeleted),
+			"last_allocated_at": nil,
+			"updated_at":        time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return nil, fmt.Errorf("delete domain resources: %w", result.Error)
+	}
+	if int(result.RowsAffected) != len(idsToDelete) {
+		return nil, domain.ErrResourceNotPrivate
+	}
+
+	for _, id := range idsToDelete {
+		log := baseLog
+		log.ResourceID = fmt.Sprintf("%d", id)
+		if err := operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return nil, fmt.Errorf("create operation log: %w", err)
+		}
+	}
+
+	return idsToDelete, nil
 }
 
 // UpdateDomainWithLog updates a domain resource and writes an OperationLog
 // in the same transaction.
 func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		domainName, err := domain.NormalizeDomainName(resource.Domain)
+		if err != nil {
+			return err
+		}
+		resource.Domain = domainName
 		updates := map[string]interface{}{
-			"domain":            resource.Domain,
+			"domain":            domainName,
+			"domain_tld":        domain.DomainTLD(domainName),
 			"mail_server_id":    resource.MailServerID,
 			"purpose":           string(resource.Purpose),
 			"status":            string(resource.Status),

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
 	coreapp "github.com/donnel666/remail/internal/core/app"
@@ -68,7 +69,10 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 			LastSafeError: item.LastSafeError,
 			Email:         item.Email,
 			Domain:        item.Domain,
+			DomainTLD:     item.DomainTLD,
+			MailServerID:  item.MailServerID,
 			Purpose:       item.Purpose,
+			MailboxCount:  item.MailboxCount,
 			CreatedAt:     item.CreatedAt,
 		}
 	}
@@ -140,7 +144,7 @@ func (h *CoreHandler) DeleteResource(c *gin.Context) {
 		return
 	}
 
-	if err := h.module.ResourceUseCase.DeletePrivateMicrosoft(
+	if err := h.module.ResourceUseCase.DeletePrivateResource(
 		c.Request.Context(),
 		resourceID,
 		userID,
@@ -152,6 +156,50 @@ func (h *CoreHandler) DeleteResource(c *gin.Context) {
 	}
 
 	c.AbortWithStatus(http.StatusNoContent)
+}
+
+// POST /v1/resources/delete
+func (h *CoreHandler) PostResourceDeleteBatch(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	var req DeleteResourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if fields := validateBulkSelectionRequest(req.Selection); len(fields) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    fields,
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, err := h.module.ResourceUseCase.DeletePrivateResourcesBatch(
+		c.Request.Context(),
+		toAppBulkSelection(req.Selection),
+		userID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, DeleteResourcesResponse{
+		Requested:          result.Requested,
+		Deleted:            result.Deleted,
+		DeletedResourceIDs: result.DeletedResourceIDs,
+	})
 }
 
 // POST /v1/resources/imports
@@ -249,7 +297,7 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 		return
 	}
 
-	detail, err := h.module.ResourceUseCase.PublishMicrosoftForSale(
+	detail, err := h.module.ResourceUseCase.PublishResourceForSale(
 		c.Request.Context(),
 		resourceID,
 		userID,
@@ -261,17 +309,32 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
-		ID:              detail.ID,
-		EmailAddress:    detail.EmailAddress,
-		ForSale:         detail.ForSale,
-		LongLived:       detail.LongLived,
-		Status:          detail.Status,
-		QualityScore:    detail.QualityScore,
-		LastSafeError:   detail.LastSafeError,
-		LastAllocatedAt: detail.LastAllocatedAt,
-		CreatedAt:       detail.CreatedAt,
-	})
+	switch d := detail.(type) {
+	case *coreapp.MicrosoftResourceDetail:
+		c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
+			ID:              d.ID,
+			EmailAddress:    d.EmailAddress,
+			ForSale:         d.ForSale,
+			LongLived:       d.LongLived,
+			Status:          d.Status,
+			QualityScore:    d.QualityScore,
+			LastSafeError:   d.LastSafeError,
+			LastAllocatedAt: d.LastAllocatedAt,
+			CreatedAt:       d.CreatedAt,
+		})
+	case *coreapp.DomainResourceDetail:
+		c.JSON(http.StatusOK, DomainResourceDetailResponse{
+			ID:              d.ID,
+			Domain:          d.Domain,
+			MailServerID:    d.MailServerID,
+			Purpose:         d.Purpose,
+			Status:          d.Status,
+			LastAllocatedAt: d.LastAllocatedAt,
+			CreatedAt:       d.CreatedAt,
+		})
+	default:
+		writeCoreError(c, coredomain.ErrInvalidResourceType)
+	}
 }
 
 // POST /v1/resources/publish
@@ -293,10 +356,18 @@ func (h *CoreHandler) PostResourcePublishBatch(c *gin.Context) {
 		})
 		return
 	}
+	if fields := validateBulkSelectionRequest(req.Selection); len(fields) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    fields,
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
 
-	result, err := h.module.ResourceUseCase.PublishMicrosoftForSaleBatch(
+	result, err := h.module.ResourceUseCase.PublishResourcesForSaleBatch(
 		c.Request.Context(),
-		req.ResourceIDs,
+		toAppBulkSelection(req.Selection),
 		userID,
 		middleware.GetRequestID(c),
 		c.FullPath(),
@@ -307,8 +378,9 @@ func (h *CoreHandler) PostResourcePublishBatch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, PublishResourcesResponse{
-		Requested: result.Requested,
-		Published: result.Published,
+		Requested:            result.Requested,
+		Published:            result.Published,
+		PublishedResourceIDs: result.PublishedResourceIDs,
 	})
 }
 
@@ -479,10 +551,6 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 		return
 	}
 
-	if !requireSupplier(c) {
-		return
-	}
-
 	var req CreateDomainRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -493,10 +561,38 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 		return
 	}
 
+	purpose := strings.TrimSpace(req.Purpose)
+	if purpose == "" {
+		purpose = string(coredomain.PurposeNotSale)
+	}
+	roleLevel, ok := middleware.GetCurrentRoleLevel(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "Authentication is required.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	switch coredomain.ResourcePurpose(purpose) {
+	case coredomain.PurposeNotSale:
+	case coredomain.PurposeSale:
+		writeCoreError(c, coredomain.ErrInvalidPurpose)
+		return
+	case coredomain.PurposeBinding:
+		if !roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"message":   "Permission denied.",
+				"requestId": middleware.GetRequestID(c),
+			})
+			return
+		}
+	}
+
 	appReq := &coreapp.CreateDomainRequest{
 		Domain:       req.Domain,
 		MailServerID: req.MailServerID,
-		Purpose:      req.Purpose,
+		Purpose:      purpose,
+		AllowBinding: roleLevel.IsAtLeast(iamdomain.RoleAdmin),
 	}
 
 	result, err := h.module.DomainUseCase.Create(c.Request.Context(), userID, appReq)
@@ -517,11 +613,11 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 
 // GET /v1/domains/:domainId/mailboxes
 func (h *CoreHandler) GetDomainMailboxes(c *gin.Context) {
-	if !requireSupplier(c) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
 		return
 	}
 
-	userID, _ := middleware.GetCurrentUserID(c)
 	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
 	isAdmin := roleLevel.IsAtLeast(iamdomain.RoleAdmin)
 
@@ -563,6 +659,48 @@ func (h *CoreHandler) GetDomainMailboxes(c *gin.Context) {
 		Offset: result.Offset,
 		Limit:  result.Limit,
 	})
+}
+
+func toAppBulkSelection(selection ResourceBulkSelectionRequest) coreapp.ResourceBulkSelection {
+	return coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionMode(selection.Mode),
+		ResourceIDs: selection.ResourceIDs,
+		Filter: coreapp.ResourceBulkFilter{
+			ResourceType: coredomain.ResourceType(selection.Filter.ResourceType),
+			Search:       selection.Filter.Search,
+			Suffix:       selection.Filter.Suffix,
+			TLD:          selection.Filter.TLD,
+			Status:       selection.Filter.Status,
+			LongLived:    selection.Filter.LongLived,
+			CreatedFrom:  selection.Filter.CreatedFrom,
+			CreatedTo:    selection.Filter.CreatedTo,
+		},
+	}
+}
+
+func validateBulkSelectionRequest(selection ResourceBulkSelectionRequest) map[string]string {
+	fields := make(map[string]string)
+	switch selection.Mode {
+	case "ids":
+		if len(selection.ResourceIDs) == 0 {
+			fields["selection.resourceIds"] = "At least one resource ID is required."
+		} else {
+			for _, resourceID := range selection.ResourceIDs {
+				if resourceID == 0 {
+					fields["selection.resourceIds"] = "Resource IDs must be positive."
+					break
+				}
+			}
+		}
+	case "filter":
+		if selection.Filter.ResourceType == "" {
+			fields["selection.filter.resourceType"] = "Resource type is required."
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
 }
 
 // --- Helpers ---
@@ -619,9 +757,19 @@ func writeCoreError(c *gin.Context, err error) {
 			"message":   "Invalid resource status.",
 			"requestId": rid,
 		})
+	case errors.Is(err, coredomain.ErrInvalidResourceFilter):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid resource filter.",
+			"requestId": rid,
+		})
 	case errors.Is(err, coredomain.ErrResourceNotPrivate):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message":   "Only private Microsoft resources can be deleted.",
+			"message":   "Only private resources can be deleted or published.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrForbiddenPurpose):
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":   "Permission denied.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrDuplicateEmail):
@@ -655,13 +803,18 @@ func writeCoreError(c *gin.Context, err error) {
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrMailServerOwnerMismatch):
-		c.JSON(http.StatusForbidden, gin.H{
-			"message":   "Mail server owner mismatch.",
+		c.JSON(http.StatusNotFound, gin.H{
+			"message":   "Mail server not found.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrInvalidPurpose):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message":   "Invalid purpose. Must be 'sale' or 'auxiliary'.",
+			"message":   "Invalid purpose for this command.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidDomain):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid domain.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrForbiddenResource):

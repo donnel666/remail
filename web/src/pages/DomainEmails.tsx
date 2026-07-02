@@ -17,8 +17,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { Layers, SlidersHorizontal } from "lucide-react";
-import type { TFunction } from "i18next";
+import { Globe, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -29,18 +28,18 @@ import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  deleteMicrosoftResource,
-  deleteMicrosoftResourcesByFilter,
-  deleteMicrosoftResourcesBatch,
+  deleteDomainResource,
+  deleteDomainResourcesByFilter,
+  deleteDomainResourcesBatch,
   getCurrentSupplierApplication,
-  listOwnedMicrosoftResources,
-  publishMicrosoftResource,
-  publishMicrosoftResourcesByFilter,
-  publishMicrosoftResourcesBatch,
+  listOwnedDomainResources,
+  publishDomainResource,
+  publishDomainResourcesByFilter,
+  publishDomainResourcesBatch,
   type ResourceBulkFilter,
 } from "@/lib/resources-api";
 
-import { ImportMicrosoftEmailsModal } from "./resources/import-microsoft-emails-modal";
+import { ImportDomainModal } from "./resources/domain-import-modal";
 import {
   createdFromISOString,
   createdToISOString,
@@ -48,23 +47,21 @@ import {
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
-import {
-  getSuffix,
-  getSuffixCounts,
-  type EmailResource,
-  type LifetimeType,
-  type ResourceStatus,
-  type UsageScope,
-  isNormal,
-  toEmailResource,
-} from "./resources/model";
-import { renderStatusTag } from "./resources/resource-status-tag";
 import { SupplierApplicationModal } from "./resources/supplier-application-modal";
+import {
+  getTldCounts,
+  isDomainAvailable,
+  isDomainDisabled,
+  toDomainResource,
+  type DomainResource,
+  type DomainStatus,
+  type UsageScope,
+} from "./resources/domain-model";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 
 const { Text } = Typography;
 
-type StatusFilter = "all" | "normal" | "pending" | "abnormal" | "disabled";
+type StatusFilter = "all" | "normal" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
 const supplierRoleLevel = 20;
 
@@ -72,9 +69,11 @@ function hasSupplierRole(roleLevel?: number | null) {
   return (roleLevel ?? 0) >= supplierRoleLevel;
 }
 
-function matchesStatusFilter(status: ResourceStatus, filter: StatusFilter) {
+function matchesStatusFilter(status: DomainStatus, filter: StatusFilter) {
   if (filter === "all") return true;
-  return status === filter;
+  if (filter === "normal") return isDomainAvailable(status);
+  if (filter === "abnormal") return status === "abnormal";
+  return isDomainDisabled(status);
 }
 
 function matchesBooleanFilter(value: boolean, filter: BooleanFilter) {
@@ -82,8 +81,43 @@ function matchesBooleanFilter(value: boolean, filter: BooleanFilter) {
   return filter === "yes" ? value : !value;
 }
 
-function isEmailResource(item: EmailResource | null): item is EmailResource {
-  return item !== null;
+function renderDomainStatusTag(
+  status: DomainStatus,
+  t: (key: string) => string,
+  reason?: string
+) {
+  let color: "green" | "orange" | "grey";
+  let label: string;
+
+  if (isDomainAvailable(status)) {
+    color = "green";
+    label = t("Normal");
+  } else if (status === "abnormal") {
+    color = "orange";
+    label = t("Abnormal");
+  } else {
+    color = "grey";
+    label = t("Disabled");
+  }
+
+  const tag = (
+    <Tag color={color} shape="circle" size="small">
+      {label}
+    </Tag>
+  );
+
+  if (status === "abnormal" && reason) {
+    return (
+      <span
+        className="inline-flex"
+        title={reason}
+      >
+        {tag}
+      </span>
+    );
+  }
+
+  return tag;
 }
 
 interface StatisticFilterOptionProps<T extends string> {
@@ -119,11 +153,32 @@ function StatisticFilterOption<T extends string>({
   );
 }
 
-function useResources(t: TFunction) {
-  const [items, setItems] = useState<EmailResource[]>([]);
-  const [loading, setLoading] = useState(true);
+// ---------- Page component ----------
+
+export default function DomainEmails() {
+  const { t } = useTranslation();
+  const { currentUser, refreshCurrentUser } = useAuth();
+  const isMobile = useIsMobile();
+  const [items, setItems] = useState<DomainResource[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [publishingBatch, setPublishingBatch] = useState(false);
+  const [deletingBatch, setDeletingBatch] = useState(false);
+  const [publishingResourceID, setPublishingResourceID] = useState<number | null>(null);
+  const [deletingResourceID, setDeletingResourceID] = useState<number | null>(null);
+  const [activeTld, setActiveTld] = useState("all");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [privateFilter, setPrivateFilter] = useState<BooleanFilter>("all");
+  const [compactMode, setCompactMode] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+  const [activePage, setActivePage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const refreshSeqRef = useRef(0);
   const locallyDeletedResourceIDsRef = useRef(new Set<number>());
+  const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
 
   const refresh = useCallback(async () => {
     const refreshSeq = refreshSeqRef.current + 1;
@@ -133,20 +188,20 @@ function useResources(t: TFunction) {
     locallyDeletedResourceIDsRef.current.clear();
     setLoading(true);
     setItems([]);
+    setSelectedKeys([]);
     try {
       let hasRenderedFirstPage = false;
-      await listOwnedMicrosoftResources({
+      await listOwnedDomainResources({
         onPage: (pageItems) => {
           if (!isCurrentRefresh()) return;
-          const resources = pageItems
-            .map(toEmailResource)
-            .filter(isEmailResource)
+          const mapped = pageItems
+            .map(toDomainResource)
+            .filter((item): item is DomainResource => item !== null)
             .filter(
-              (resource) =>
-                !locallyDeletedResourceIDsRef.current.has(resource.id)
+              (item) => !locallyDeletedResourceIDsRef.current.has(item.id)
             );
-          if (resources.length === 0) return;
-          setItems((previous) => [...previous, ...resources]);
+          if (mapped.length === 0) return;
+          setItems((previous) => [...previous, ...mapped]);
           if (!hasRenderedFirstPage) {
             hasRenderedFirstPage = true;
             setLoading(false);
@@ -155,7 +210,7 @@ function useResources(t: TFunction) {
       });
     } catch (error) {
       if (isCurrentRefresh()) {
-        Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+        Toast.error(getIamErrorMessage(t, error, "Domains load failed."));
       }
     } finally {
       if (isCurrentRefresh()) {
@@ -168,208 +223,92 @@ function useResources(t: TFunction) {
     refreshSeqRef.current += 1;
   }, []);
 
-  const removeResource = useCallback((resourceID: number) => {
-    locallyDeletedResourceIDsRef.current.add(resourceID);
-    setItems((previous) =>
-      previous.filter((resource) => resource.id !== resourceID)
-    );
-  }, []);
-
-  const removeResourcesByPredicate = useCallback(
-    (predicate: (resource: EmailResource) => boolean) => {
-      setItems((previous) => {
-        const next: EmailResource[] = [];
-        for (const resource of previous) {
-          if (predicate(resource)) {
-            locallyDeletedResourceIDsRef.current.add(resource.id);
-            continue;
-          }
-          next.push(resource);
-        }
-        return next;
-      });
-    },
-    []
-  );
-
-  const markResourcesPublishedForSale = useCallback((resourceIDs: number[]) => {
-    const ids = new Set(resourceIDs);
-    if (ids.size === 0) return;
-    setItems((previous) =>
-      previous.map((resource) =>
-        ids.has(resource.id)
-          ? { ...resource, forSale: true, usageScope: "public_sale" }
-          : resource
-      )
-    );
-  }, []);
-
-  const markResourcesPublishedByPredicate = useCallback(
-    (predicate: (resource: EmailResource) => boolean) => {
-      setItems((previous) =>
-        previous.map((resource) =>
-          predicate(resource)
-            ? { ...resource, forSale: true, usageScope: "public_sale" }
-            : resource
-        )
-      );
-    },
-    []
-  );
-
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  return {
-    items,
-    loading,
-    refresh,
-    removeResource,
-    removeResourcesByPredicate,
-    markResourcesPublishedForSale,
-    markResourcesPublishedByPredicate,
-    invalidateRefresh,
-  };
-}
-
-export default function Resources() {
-  const { t } = useTranslation();
-  const { currentUser, refreshCurrentUser } = useAuth();
-  const isMobile = useIsMobile();
-  const {
-    items,
-    loading,
-    refresh,
-    removeResource,
-    removeResourcesByPredicate,
-    markResourcesPublishedForSale,
-    markResourcesPublishedByPredicate,
-    invalidateRefresh,
-  } = useResources(t);
-  const [activeSuffix, setActiveSuffix] = useState("all");
-  const [searchKeyword, setSearchKeyword] = useState("");
-  const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [privateFilter, setPrivateFilter] = useState<BooleanFilter>("all");
-  const [longLivedFilter, setLongLivedFilter] =
-    useState<BooleanFilter>("all");
-  const [compactMode, setCompactMode] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
-  const [activePage, setActivePage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
-    null
-  );
-  const [deletingResourceID, setDeletingResourceID] = useState<number | null>(
-    null
-  );
-  const [publishingBatch, setPublishingBatch] = useState(false);
-  const [deletingBatch, setDeletingBatch] = useState(false);
-  const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
-
-  const suffixCounts = useMemo(() => getSuffixCounts(items), [items]);
-  const suffixSet = useMemo(
-    () => new Set(suffixCounts.map(([suffix]) => suffix)),
-    [suffixCounts]
+  const tldCounts = useMemo(() => getTldCounts(items), [items]);
+  const tldSet = useMemo(
+    () => new Set(tldCounts.map(([tld]) => tld)),
+    [tldCounts]
   );
 
-  const resourceStats = useMemo(
+  const stats = useMemo(
     () => ({
-      longLived: {
+      status: {
         all: items.length,
-        no: items.filter((item) => item.lifetimeType !== "long_lived").length,
-        yes: items.filter((item) => item.lifetimeType === "long_lived").length,
+        normal: items.filter((i) => isDomainAvailable(i.status)).length,
+        abnormal: items.filter((i) => i.status === "abnormal").length,
+        disabled: items.filter((i) => isDomainDisabled(i.status)).length,
       },
       private: {
         all: items.length,
-        no: items.filter((item) => item.usageScope !== "private").length,
-        yes: items.filter((item) => item.usageScope === "private").length,
-      },
-      status: {
-        all: items.length,
-        abnormal: items.filter((item) => item.status === "abnormal").length,
-        disabled: items.filter((item) => item.status === "disabled").length,
-        normal: items.filter((item) => isNormal(item.status)).length,
-        pending: items.filter((item) => item.status === "pending").length,
+        yes: items.filter((i) => i.usageScope === "private").length,
+        no: items.filter((i) => i.usageScope !== "private").length,
       },
     }),
     [items]
   );
 
   const activeStatisticFilterCount =
-    Number(statusFilter !== "all") +
-    Number(privateFilter !== "all") +
-    Number(longLivedFilter !== "all");
+    Number(statusFilter !== "all") + Number(privateFilter !== "all");
 
   useEffect(() => {
-    if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
-      setActiveSuffix("all");
+    if (activeTld !== "all" && !tldSet.has(activeTld)) {
+      setActiveTld("all");
     }
-  }, [activeSuffix, suffixSet]);
+  }, [activeTld, tldSet]);
 
-  const matchesCurrentFilters = useCallback((item: EmailResource) => {
+  const matchesCurrentFilters = useCallback((item: DomainResource) => {
     const keyword = searchKeyword.trim().toLowerCase();
-    const suffix = getSuffix(item.emailAddress);
-    const suffixMatched = activeSuffix === "all" || suffix === activeSuffix;
+    const tldMatched = activeTld === "all" || item.domainTld === activeTld;
     const statusMatched = matchesStatusFilter(item.status, statusFilter);
     const privateMatched = matchesBooleanFilter(
       item.usageScope === "private",
       privateFilter
     );
-    const longLivedMatched = matchesBooleanFilter(
-      item.lifetimeType === "long_lived",
-      longLivedFilter
-    );
     const keywordMatched =
       keyword.length === 0 ||
-      item.emailAddress.toLowerCase().includes(keyword) ||
-      item.emailType.toLowerCase().includes(keyword) ||
-      suffix.includes(keyword);
+      item.domain.toLowerCase().includes(keyword) ||
+      item.domainTld.includes(keyword);
     const createdAtMatched = matchesCreatedAtRange(
       item.createdAt,
       createdAtRange
     );
 
     return (
-      suffixMatched &&
+      tldMatched &&
       statusMatched &&
       privateMatched &&
-      longLivedMatched &&
       keywordMatched &&
       createdAtMatched
     );
-  }, [
-    activeSuffix,
-    createdAtRange,
-    longLivedFilter,
-    privateFilter,
-    searchKeyword,
-    statusFilter,
-  ]);
+  }, [activeTld, createdAtRange, privateFilter, searchKeyword, statusFilter]);
 
   const filteredItems = useMemo(
     () => items.filter(matchesCurrentFilters),
     [items, matchesCurrentFilters]
   );
 
-  const microsoftBulkFilter = useMemo<ResourceBulkFilter>(() => {
-    const filter: ResourceBulkFilter = { resourceType: "microsoft" };
+  const domainBulkFilter = useMemo<ResourceBulkFilter>(() => {
+    const filter: ResourceBulkFilter = { resourceType: "domain" };
     const search = searchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
-    if (activeSuffix !== "all") filter.suffix = activeSuffix;
+    if (activeTld !== "all") filter.tld = activeTld;
     if (statusFilter !== "all") filter.status = statusFilter;
-    if (longLivedFilter !== "all") {
-      filter.longLived = longLivedFilter === "yes";
-    }
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [activeSuffix, createdAtRange, longLivedFilter, searchKeyword, statusFilter]);
+  }, [activeTld, createdAtRange, searchKeyword, statusFilter]);
+
+  const selectedPrivateResourceIds = useMemo(() => {
+    const selected = new Set(selectedKeys);
+    return items
+      .filter((item) => selected.has(item.id) && item.usageScope === "private")
+      .map((item) => item.id);
+  }, [items, selectedKeys]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safePage = Math.min(activePage, totalPages);
@@ -382,8 +321,8 @@ export default function Resources() {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
 
-  const selectSuffix = (suffix: string) => {
-    setActiveSuffix(suffix);
+  const selectTld = (tld: string) => {
+    setActiveTld(tld);
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -393,8 +332,7 @@ export default function Resources() {
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
-    setLongLivedFilter("all");
-    setActiveSuffix("all");
+    setActiveTld("all");
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -407,12 +345,6 @@ export default function Resources() {
 
   const applyPrivateFilter = (value: BooleanFilter) => {
     setPrivateFilter(value);
-    setActivePage(1);
-    setSelectedKeys([]);
-  };
-
-  const applyLongLivedFilter = (value: BooleanFilter) => {
-    setLongLivedFilter(value);
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -444,50 +376,73 @@ export default function Resources() {
     return false;
   }, [canPublishForSale, promptSupplierApplication, refreshCurrentUser]);
 
-  const handleSellResource = useCallback(async (record: EmailResource) => {
-    if (record.forSale) return;
-
-    if (!(await ensureCanPublishForSale())) return;
-
-    Modal.confirm({
-      title: t("Confirm sell resource"),
-      content: t("Confirm sell resource content", {
-        email: record.emailAddress,
-      }),
-      okText: t("Sell"),
-      cancelText: t("Cancel"),
-      onOk: async () => {
-        setPublishingResourceID(record.id);
-        try {
-          await publishMicrosoftResource(record.id);
-          Toast.success(t("Resource published for sale."));
-          markResourcesPublishedForSale([record.id]);
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
-        } finally {
-          setPublishingResourceID(null);
-        }
-      },
-    });
-  }, [ensureCanPublishForSale, markResourcesPublishedForSale, t]);
-
-  const selectedPrivateResourceIds = useMemo(() => {
-    const selectedIDSet = new Set(selectedKeys);
-    return items
-      .filter(
-        (item) =>
-          selectedIDSet.has(item.id) && item.usageScope === "private"
+  const markResourcesPublishedForSale = useCallback((resourceIds: number[]) => {
+    const published = new Set(resourceIds);
+    if (published.size === 0) return;
+    setItems((previous) =>
+      previous.map((item) =>
+        published.has(item.id) ? { ...item, usageScope: "public_sale" } : item
       )
-      .map((item) => item.id);
-  }, [items, selectedKeys]);
-
-  const clearSelection = useCallback(() => {
-    setSelectedKeys([]);
+    );
   }, []);
 
-  const confirmCheckAll = useCallback(() => {
+  const markResourcesPublishedByPredicate = useCallback(
+    (predicate: (item: DomainResource) => boolean) => {
+      setItems((previous) =>
+        previous.map((item) =>
+          predicate(item) ? { ...item, usageScope: "public_sale" } : item
+        )
+      );
+    },
+    []
+  );
+
+  const removeResource = useCallback((resourceId: number) => {
+    locallyDeletedResourceIDsRef.current.add(resourceId);
+    setItems((previous) => previous.filter((item) => item.id !== resourceId));
+  }, []);
+
+  const removeResourcesByPredicate = useCallback(
+    (predicate: (item: DomainResource) => boolean) => {
+      setItems((previous) => {
+        const next: DomainResource[] = [];
+        for (const item of previous) {
+          if (predicate(item)) {
+            locallyDeletedResourceIDsRef.current.add(item.id);
+            continue;
+          }
+          next.push(item);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const publishResourceIds = useCallback(async (resourceIds: number[]) => {
+    if (resourceIds.length === 0) {
+      Toast.info(t("No private resources to publish."));
+      return;
+    }
+
+    setPublishingBatch(true);
+    try {
+      const response = await publishDomainResourcesBatch(resourceIds);
+      Toast.success(
+        t("Resources published for sale.", { count: response.published })
+      );
+      markResourcesPublishedForSale(response.publishedResourceIds ?? []);
+      setSelectedKeys([]);
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+    } finally {
+      setPublishingBatch(false);
+    }
+  }, [markResourcesPublishedForSale, t]);
+
+  const confirmCheckAll = () => {
     showNotImplemented();
-  }, [showNotImplemented]);
+  };
 
   const confirmSellAll = useCallback(async () => {
     if (privateFilter === "no") {
@@ -505,9 +460,7 @@ export default function Resources() {
       onOk: async () => {
         setPublishingBatch(true);
         try {
-          const response = await publishMicrosoftResourcesByFilter(
-            microsoftBulkFilter
-          );
+          const response = await publishDomainResourcesByFilter(domainBulkFilter);
           if (response.published === 0) {
             Toast.info(t("No private resources to publish."));
           } else {
@@ -516,8 +469,7 @@ export default function Resources() {
             );
             invalidateRefresh();
             markResourcesPublishedByPredicate(
-              (item) =>
-                item.usageScope === "private" && matchesCurrentFilters(item)
+              (item) => item.usageScope === "private" && matchesCurrentFilters(item)
             );
             setSelectedKeys([]);
           }
@@ -529,11 +481,11 @@ export default function Resources() {
       },
     });
   }, [
+    domainBulkFilter,
     ensureCanPublishForSale,
     invalidateRefresh,
     markResourcesPublishedByPredicate,
     matchesCurrentFilters,
-    microsoftBulkFilter,
     privateFilter,
     t,
   ]);
@@ -553,34 +505,9 @@ export default function Resources() {
       }),
       okText: t("Sell selected"),
       cancelText: t("Cancel"),
-      onOk: async () => {
-        setPublishingBatch(true);
-        try {
-          const response = await publishMicrosoftResourcesBatch(
-            selectedPrivateResourceIds
-          );
-          Toast.success(
-            t("Resources published for sale.", { count: response.published })
-          );
-          markResourcesPublishedForSale(response.publishedResourceIds ?? []);
-          setSelectedKeys([]);
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
-        } finally {
-          setPublishingBatch(false);
-        }
-      },
+      onOk: () => publishResourceIds(selectedPrivateResourceIds),
     });
-  }, [
-    ensureCanPublishForSale,
-    markResourcesPublishedForSale,
-    selectedPrivateResourceIds,
-    t,
-  ]);
-
-  const sellSelected = useCallback(() => {
-    void confirmSellSelected();
-  }, [confirmSellSelected]);
+  }, [ensureCanPublishForSale, publishResourceIds, selectedPrivateResourceIds, t]);
 
   const deleteResourceIds = useCallback(async (resourceIds: number[]) => {
     if (resourceIds.length === 0) {
@@ -590,7 +517,7 @@ export default function Resources() {
 
     setDeletingBatch(true);
     try {
-      const response = await deleteMicrosoftResourcesBatch(resourceIds, {
+      const response = await deleteDomainResourcesBatch(resourceIds, {
         onDeleted: (resourceId) => {
           removeResource(resourceId);
           setSelectedKeys((previous) =>
@@ -637,17 +564,14 @@ export default function Resources() {
       onOk: async () => {
         setDeletingBatch(true);
         try {
-          const response = await deleteMicrosoftResourcesByFilter(
-            microsoftBulkFilter
-          );
+          const response = await deleteDomainResourcesByFilter(domainBulkFilter);
           if (response.deleted === 0) {
             Toast.info(t("No private resources to delete."));
           } else {
-            invalidateRefresh();
             removeResourcesByPredicate(
-              (item) =>
-                item.usageScope === "private" && matchesCurrentFilters(item)
+              (item) => item.usageScope === "private" && matchesCurrentFilters(item)
             );
+            invalidateRefresh();
             setSelectedKeys([]);
             Toast.success(t("Resources deleted.", { count: response.deleted }));
           }
@@ -659,30 +583,51 @@ export default function Resources() {
       },
     });
   }, [
-    matchesCurrentFilters,
-    microsoftBulkFilter,
-    privateFilter,
+    domainBulkFilter,
     invalidateRefresh,
+    matchesCurrentFilters,
+    privateFilter,
     removeResourcesByPredicate,
     t,
   ]);
 
-  const deleteSelected = useCallback(() => {
-    confirmDeleteSelected();
-  }, [confirmDeleteSelected]);
+  const handleSellResource = useCallback(async (record: DomainResource) => {
+    if (record.usageScope !== "private") return;
 
-  const handleDeleteResource = useCallback((record: EmailResource) => {
-    if (record.forSale) return;
+    if (!(await ensureCanPublishForSale())) return;
+
+    Modal.confirm({
+      title: t("Confirm sell resource"),
+      content: t("Confirm sell domain content", { domain: record.domain }),
+      okText: t("Sell"),
+      cancelText: t("Cancel"),
+      onOk: async () => {
+        setPublishingResourceID(record.id);
+        try {
+          await publishDomainResource(record.id);
+          Toast.success(t("Resource published for sale."));
+          markResourcesPublishedForSale([record.id]);
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+        } finally {
+          setPublishingResourceID(null);
+        }
+      },
+    });
+  }, [ensureCanPublishForSale, markResourcesPublishedForSale, t]);
+
+  const handleDeleteResource = useCallback((record: DomainResource) => {
+    if (record.usageScope !== "private") return;
 
     Modal.confirm({
       title: t("Confirm delete"),
-      content: record.emailAddress,
+      content: record.domain,
       okText: t("Delete"),
       cancelText: t("Cancel"),
       onOk: async () => {
         setDeletingResourceID(record.id);
         try {
-          await deleteMicrosoftResource(record.id);
+          await deleteDomainResource(record.id);
           Toast.success(t("Resource deleted."));
           removeResource(record.id);
           setSelectedKeys((previous) =>
@@ -700,9 +645,9 @@ export default function Resources() {
   useSelectionNotification({
     selectedCount: selectedKeys.length,
     onCheck: showNotImplemented,
-    onClear: clearSelection,
-    onDelete: deleteSelected,
-    onSell: sellSelected,
+    onClear: () => setSelectedKeys([]),
+    onDelete: confirmDeleteSelected,
+    onSell: confirmSellSelected,
     deleteLoading: deletingBatch,
     sellLoading: publishingBatch,
     t,
@@ -712,20 +657,20 @@ export default function Resources() {
     () =>
       [
         {
-          key: "suffix",
-          title: t("Suffix"),
-          dataIndex: "emailAddress",
-          width: 120,
-          render: (_: string, record: EmailResource) => (
+          key: "tld",
+          title: t("TLD"),
+          dataIndex: "domain",
+          width: 100,
+          render: (_: string, record: DomainResource) => (
             <Tag color="white" shape="circle">
-              {getSuffix(record.emailAddress)}
+              {record.domainTld}
             </Tag>
           ),
         },
         {
-          key: "email",
-          title: t("Email"),
-          dataIndex: "emailAddress",
+          key: "domain",
+          title: t("Domain"),
+          dataIndex: "domain",
           width: 260,
           render: (text: string) => (
             <Text
@@ -739,87 +684,80 @@ export default function Resources() {
           ),
         },
         {
-          key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: 120,
-          render: (status: ResourceStatus, record: EmailResource) =>
-            renderStatusTag(status, t, record.lastSafeError),
+          width: 130,
+          render: (status: DomainStatus) => renderDomainStatusTag(status, t),
         },
         {
-          key: "private",
-          title: t("Private"),
+          title: t("Private only"),
           dataIndex: "usageScope",
           width: 120,
           render: (scope: UsageScope) => (
-            <Tag color={scope === "private" ? "green" : "grey"} shape="circle">
-              {scope === "private" ? t("Yes") : t("No")}
-            </Tag>
-          ),
-        },
-        {
-          key: "longLived",
-          title: t("Long-lived"),
-          dataIndex: "lifetimeType",
-          width: 110,
-          render: (value: LifetimeType) => (
-            <Tag
-              color={value === "long_lived" ? "green" : "grey"}
-              shape="circle"
+            <span
+              className={`text-xs font-medium ${
+                scope === "private"
+                  ? "text-[var(--semi-color-primary)]"
+                  : "text-[var(--semi-color-text-2)]"
+              }`}
             >
-              {value === "long_lived" ? t("Yes") : t("No")}
-            </Tag>
+              {scope === "private" ? t("Yes") : t("No")}
+            </span>
           ),
         },
         {
-          key: "operate",
+          title: t("Mailboxes"),
+          dataIndex: "mailboxCount",
+          width: 110,
+          render: (count: number) => (
+            <span className="tabular-nums font-medium text-[var(--semi-color-text-1)]">
+              {count}
+            </span>
+          ),
+        },
+        {
           title: t("Action"),
           dataIndex: "operate",
-          width: 210,
+          width: 250,
           fixed: "right",
-          render: (_: unknown, record: EmailResource) => (
+          render: (_: unknown, record: DomainResource) => (
             <Space wrap={false}>
-              <Button type="tertiary" size="small" onClick={showNotImplemented}>
+              {record.usageScope === "private" ? (
+                <Button
+                  loading={publishingResourceID === record.id}
+                  onClick={() => void handleSellResource(record)}
+                  type="tertiary"
+                  size="small"
+                >
+                  {t("Sell")}
+                </Button>
+              ) : null}
+              <Button onClick={showNotImplemented} type="tertiary" size="small">
                 {t("Check")}
               </Button>
-              <Button
-                disabled={record.forSale}
-                loading={publishingResourceID === record.id}
-                onClick={() => void handleSellResource(record)}
-                type="tertiary"
-                size="small"
-              >
-                {t("Sell")}
-              </Button>
-              <Button
-                disabled={record.forSale}
-                loading={deletingResourceID === record.id}
-                type="danger"
-                size="small"
-                onClick={() => handleDeleteResource(record)}
-              >
-                {t("Delete")}
-              </Button>
+              {record.usageScope === "private" ? (
+                <Button
+                  loading={deletingResourceID === record.id}
+                  onClick={() => handleDeleteResource(record)}
+                  type="danger"
+                  size="small"
+                >
+                  {t("Delete")}
+                </Button>
+              ) : null}
             </Space>
           ),
         },
       ] as any[],
     [
       deletingResourceID,
-      handleSellResource,
       handleDeleteResource,
+      handleSellResource,
       publishingResourceID,
       showNotImplemented,
       t,
     ]
   );
-
-  const rowSelection = {
-    selectedRowKeys: selectedKeys,
-    onChange: (keys: Array<string | number>) => {
-      setSelectedKeys(keys.map((key) => Number(key)));
-    },
-  };
 
   const tableColumns = useMemo(() => {
     if (!compactMode) return columns;
@@ -830,12 +768,19 @@ export default function Resources() {
     });
   }, [columns, compactMode]);
 
+  const rowSelection = {
+    selectedRowKeys: selectedKeys,
+    onChange: (keys: Array<string | number>) => {
+      setSelectedKeys(keys.map((key) => Number(key)));
+    },
+  };
+
   const tabsArea = (
     <Tabs
-      activeKey={activeSuffix}
+      activeKey={activeTld}
       type="card"
       collapsible
-      onChange={(key) => selectSuffix(String(key))}
+      onChange={(key) => selectTld(String(key))}
       className="mb-2"
     >
       <Tabs.TabPane
@@ -843,24 +788,21 @@ export default function Resources() {
         tab={
           <span className="flex items-center gap-2">
             {t("All")}
-            <Tag color={activeSuffix === "all" ? "red" : "grey"} shape="circle">
+            <Tag color={activeTld === "all" ? "red" : "grey"} shape="circle">
               {items.length}
             </Tag>
           </span>
         }
       />
-      {suffixCounts.map(([suffix, count]) => (
+      {tldCounts.map(([tld, count]) => (
         <Tabs.TabPane
-          key={suffix}
-          itemKey={suffix}
+          key={tld}
+          itemKey={tld}
           tab={
             <span className="flex items-center gap-2">
-              <Layers size={14} />
-              {suffix}
-              <Tag
-                color={activeSuffix === suffix ? "red" : "grey"}
-                shape="circle"
-              >
+              <Globe size={14} />
+              {tld}
+              <Tag color={activeTld === tld ? "red" : "grey"} shape="circle">
                 {count}
               </Tag>
             </span>
@@ -935,35 +877,28 @@ export default function Resources() {
               <div className="mb-2 space-y-1">
                 <StatisticFilterOption
                   active={statusFilter === "all"}
-                  count={resourceStats.status.all}
+                  count={stats.status.all}
                   label={t("All")}
                   onSelect={applyStatusFilter}
                   value="all"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "normal"}
-                  count={resourceStats.status.normal}
+                  count={stats.status.normal}
                   label={t("Normal")}
                   onSelect={applyStatusFilter}
                   value="normal"
                 />
                 <StatisticFilterOption
-                  active={statusFilter === "pending"}
-                  count={resourceStats.status.pending}
-                  label={t("Pending")}
-                  onSelect={applyStatusFilter}
-                  value="pending"
-                />
-                <StatisticFilterOption
                   active={statusFilter === "abnormal"}
-                  count={resourceStats.status.abnormal}
+                  count={stats.status.abnormal}
                   label={t("Abnormal")}
                   onSelect={applyStatusFilter}
                   value="abnormal"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "disabled"}
-                  count={resourceStats.status.disabled}
+                  count={stats.status.disabled}
                   label={t("Disabled")}
                   onSelect={applyStatusFilter}
                   value="disabled"
@@ -973,53 +908,26 @@ export default function Resources() {
               <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
                 {t("Private")}
               </div>
-              <div className="mb-2 space-y-1">
+              <div className="space-y-1">
                 <StatisticFilterOption
                   active={privateFilter === "all"}
-                  count={resourceStats.private.all}
+                  count={stats.private.all}
                   label={t("All")}
                   onSelect={applyPrivateFilter}
                   value="all"
                 />
                 <StatisticFilterOption
                   active={privateFilter === "yes"}
-                  count={resourceStats.private.yes}
+                  count={stats.private.yes}
                   label={t("Yes")}
                   onSelect={applyPrivateFilter}
                   value="yes"
                 />
                 <StatisticFilterOption
                   active={privateFilter === "no"}
-                  count={resourceStats.private.no}
+                  count={stats.private.no}
                   label={t("No")}
                   onSelect={applyPrivateFilter}
-                  value="no"
-                />
-              </div>
-
-              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
-                {t("Long-lived")}
-              </div>
-              <div className="space-y-1">
-                <StatisticFilterOption
-                  active={longLivedFilter === "all"}
-                  count={resourceStats.longLived.all}
-                  label={t("All")}
-                  onSelect={applyLongLivedFilter}
-                  value="all"
-                />
-                <StatisticFilterOption
-                  active={longLivedFilter === "yes"}
-                  count={resourceStats.longLived.yes}
-                  label={t("Yes")}
-                  onSelect={applyLongLivedFilter}
-                  value="yes"
-                />
-                <StatisticFilterOption
-                  active={longLivedFilter === "no"}
-                  count={resourceStats.longLived.no}
-                  label={t("No")}
-                  onSelect={applyLongLivedFilter}
                   value="no"
                 />
               </div>
@@ -1039,7 +947,7 @@ export default function Resources() {
         </Dropdown>
         <Input
           prefix={<IconSearch />}
-          placeholder={t("Search email or suffix")}
+          placeholder={t("Search domain or suffix")}
           showClear
           size="small"
           value={searchKeyword}
@@ -1114,7 +1022,7 @@ export default function Resources() {
               darkModeImage={
                 <IllustrationNoResultDark style={{ height: 150, width: 150 }} />
               }
-              description={t("No email resources yet")}
+              description={t("No domain email resources yet")}
               image={<IllustrationNoResult style={{ height: 150, width: 150 }} />}
               style={{ padding: 30 }}
             />
@@ -1125,12 +1033,12 @@ export default function Resources() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max-content" }}
+          scroll={{ x: "max-content" }}
           size="middle"
         />
       </CardPro>
 
-      <ImportMicrosoftEmailsModal
+      <ImportDomainModal
         open={importOpen}
         onOpenChange={setImportOpen}
         onSuccess={refresh}
@@ -1138,7 +1046,9 @@ export default function Resources() {
       <SupplierApplicationModal
         open={supplierApplicationOpen}
         onOpenChange={setSupplierApplicationOpen}
-        onSuccess={() => undefined}
+        onSuccess={() => {
+          setSupplierApplicationOpen(false);
+        }}
       />
     </div>
   );

@@ -446,7 +446,7 @@ export interface paths {
         get: operations["getResourceDetail"];
         put?: never;
         post?: never;
-        /** Delete an owned private Microsoft resource */
+        /** Delete an owned private resource */
         delete: operations["deleteResource"];
         options?: never;
         head?: never;
@@ -462,8 +462,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Publish owned Microsoft resources to public supply */
+        /** Publish owned resources to public supply */
         post: operations["postResourcePublishBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resources/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete owned private resources */
+        post: operations["postResourceDeleteBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -479,7 +496,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Publish an owned Microsoft resource to public supply */
+        /** Publish an owned resource to public supply */
         post: operations["postResourcePublish"];
         delete?: never;
         options?: never;
@@ -802,7 +819,7 @@ export interface components {
             id: number;
             type: string;
             ownerId: number;
-            /** @description Resource status (e.g., pending/normal/abnormal/disabled, dns_normal/dns_abnormal) */
+            /** @description Resource status (e.g., pending/normal/abnormal/disabled/deleted) */
             status?: string;
             /** @description Microsoft resource is available for sale (Microsoft resources only) */
             forSale?: boolean;
@@ -814,8 +831,17 @@ export interface components {
             email?: string;
             /** @description Domain name (domain resources only) */
             domain?: string;
-            /** @description Domain resource purpose (domain resources only, sale/auxiliary) */
-            purpose?: string;
+            /** @description Backend-derived domain suffix used by exact domain bulk filters. */
+            domainTld?: string;
+            /** @description Mail server id for domain resources. */
+            mailServerId?: number;
+            /**
+             * @description Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
+             * @enum {string}
+             */
+            purpose?: "not_sale" | "sale" | "binding";
+            /** @description Generated mailbox count for domain resources. */
+            mailboxCount?: number;
             /** Format: date-time */
             createdAt: string;
         };
@@ -836,7 +862,12 @@ export interface components {
             id: number;
             domain: string;
             mailServerId: number;
-            purpose: string;
+            /**
+             * @description Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
+             * @enum {string}
+             */
+            purpose: "not_sale" | "sale" | "binding";
+            /** @description Domain resource status (normal/abnormal/disabled/deleted) */
             status: string;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
@@ -859,11 +890,63 @@ export interface components {
             updatedAt: string;
         };
         PublishResourcesRequest: {
-            resourceIds: number[];
+            selection: components["schemas"]["ResourceBulkSelection"];
         };
         PublishResourcesResponse: {
             requested: number;
             published: number;
+            /** @description Actual published resource IDs for ids mode. Omitted for filter mode to avoid large responses. */
+            publishedResourceIds?: number[];
+        };
+        DeleteResourcesRequest: {
+            selection: components["schemas"]["ResourceBulkSelection"];
+        };
+        ResourceBulkSelection: {
+            /**
+             * @description ids selects explicit checked resources; filter selects all private resources matching the server-side filters.
+             * @enum {string}
+             */
+            mode: "ids" | "filter";
+            /** @description Required when mode is ids. */
+            resourceIds?: number[];
+            filter?: components["schemas"]["ResourceBulkFilter"];
+        } & ({
+            /** @enum {string} */
+            mode: "ids";
+            resourceIds: number[];
+        } | {
+            /** @enum {string} */
+            mode: "filter";
+            filter: components["schemas"]["ResourceBulkFilter"];
+        });
+        ResourceBulkFilter: {
+            /** @enum {string} */
+            resourceType: "microsoft" | "domain";
+            /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
+            search?: string;
+            /** @description Exact Microsoft suffix such as @outlook.com. */
+            suffix?: string;
+            /** @description Exact domain suffix such as .com. */
+            tld?: string;
+            status?: string;
+            /** @description Microsoft long-lived filter. */
+            longLived?: boolean;
+            /**
+             * Format: date-time
+             * @description Inclusive resource creation lower bound. The frontend must send ISO date-time.
+             */
+            createdFrom?: string;
+            /**
+             * Format: date-time
+             * @description Inclusive resource creation upper bound. The frontend must send ISO date-time.
+             */
+            createdTo?: string;
+        };
+        DeleteResourcesResponse: {
+            requested: number;
+            deleted: number;
+            /** @description Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses. */
+            deletedResourceIds?: number[];
         };
         CreateMailServerRequest: {
             name?: string;
@@ -898,8 +981,13 @@ export interface components {
         };
         CreateDomainRequest: {
             domain: string;
-            mailServerId: number;
-            purpose: string;
+            /** @description Optional extension hook; omitted domains use the built-in local inbound server mx.aishop6.com */
+            mailServerId?: number;
+            /**
+             * @description Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
+             * @enum {string}
+             */
+            purpose?: "not_sale" | "binding";
         };
         MailboxListResponse: {
             items: components["schemas"]["MailboxItem"][];
@@ -2387,7 +2475,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Private Microsoft resource deleted */
+            /** @description Private resource deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -2421,7 +2509,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Resource is not private or is not a Microsoft resource */
+            /** @description Resource is not private or is already deleted */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2448,7 +2536,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Microsoft resources published */
+            /** @description Resources published */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2493,6 +2581,78 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Invalid resource status/filter or resource is not private */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postResourceDeleteBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteResourcesRequest"];
+            };
+        };
+        responses: {
+            /** @description Resources deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteResourcesResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid resource status/filter or resource is not private */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     postResourcePublish: {
@@ -2509,13 +2669,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Microsoft resource published */
+            /** @description Resource published */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MicrosoftResourceDetail"];
+                    "application/json": components["schemas"]["MicrosoftResourceDetail"] | components["schemas"]["DomainResourceDetail"];
                 };
             };
             /** @description Invalid resource ID */
@@ -2547,6 +2707,15 @@ export interface operations {
             };
             /** @description Resource not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid resource status or resource is not private */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2864,7 +3033,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Permission denied or mail server owner mismatch */
+            /** @description Permission denied */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -6,6 +6,7 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-01 | V1.1 | Codex | 补充 Microsoft 公开出售候选与 owner 自用私有候选分层；普通 user 资源不得进入公开供给池。 |
+| 2026-07-02 | V1.2 | Codex | 补充 P1-I2 Domain 状态命名改为 `normal/abnormal/disabled/deleted`；分配候选继续只接受 `purpose=sale + status=normal`。 |
 
 > 核心域。BC-ALLOC 只负责把订单绑定到一个邮箱使用权，不拥有资源验证、订单状态或钱包。
 
@@ -156,7 +157,7 @@ sequenceDiagram
     participant A as BC-ALLOC
     participant C as BC-CORE
     T->>A: allocate(projectProductId, orderNo)
-    A->>C: 查询 purpose=sale + dns_normal + server online 自建资源
+    A->>C: 查询 purpose=sale + normal + server online 自建资源
     A->>C: 排除本项目已占用 mailboxId 后选择/创建自建生成邮箱
     A->>A: 创建 DomainAllocation
     A-->>T: allocationId + deliveryEmail

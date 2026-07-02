@@ -8,6 +8,7 @@
 | 2026-07-01 | V1.1 | Codex | 补充 P1-I2 Microsoft TXT 导入辅助邮箱行格式；不改变辅助邮箱绑定实体和状态机归属。 |
 | 2026-07-01 | V1.2 | Codex | 补充 P1-I2 ResourceImport artifact 索引；落实原始导入文件和安全失败明细进入 MinIO private bucket 的原设计。 |
 | 2026-07-02 | V1.3 | Codex | 补充 P1-I2 ResourceImport 异步状态查询、Asynq 重试边界和导入成功事务幂等要求；不改变辅助邮箱绑定实体和状态机归属。 |
+| 2026-07-02 | V1.4 | Codex | 补充 P1-I2 辅助邮箱英文统一为 `bindingAddress`，中文仍称辅助邮箱；对齐 Core 的 `binding` 用途命名。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -54,7 +55,7 @@ internal/mailtransport/infra/microsoft
 | `AuthClient` | 获取 RT、刷新 AT、处理 rotated RT。 |
 | `PageFlow` | 实现页面流，处理登录页面、表单、跳转和 token polling。 |
 | `GraphClient` | 用 AT 拉取 Graph 邮件，返回结构化 message DTO。 |
-| `AuxCoordinator` | 选择辅助邮箱、等待验证码、更新绑定状态。 |
+| `BindingCoordinator` | 选择辅助邮箱、等待验证码、更新绑定状态。 |
 | `ErrorClassifier` | 把页面/Graph/网络错误映射为内部分类和安全文案。 |
 | `HTTPClient` | 使用 ProxyPort 返回的代理，统一超时、cookie jar、重试、TLS/HTTP2 设置和 requestId。 |
 
@@ -99,7 +100,7 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 | `email` | 邮箱 |
 | `clientId` | Microsoft clientId |
 | `refreshToken` | Microsoft RT |
-| `auxiliaryAddress` | 使用的辅助邮箱，可空 |
+| `bindingAddress` | 使用的辅助邮箱，可空 |
 | `category` | 失败时的内部错误分类 |
 | `message` | 安全错误文案 |
 
@@ -144,10 +145,10 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 
 | 动作 | 语义 |
 |------|------|
-| `AllocateAux` | 为 Microsoft 授权选择或复用辅助邮箱，开启一次绑定尝试。 |
-| `ResolveAux` | Microsoft 页面提示已绑定时，根据掩码恢复真实辅助邮箱。 |
-| `MarkAuxStatus` | 回写 `code_sent/verified/timeout/failed/expired`。 |
-| `WaitAuxCode` | 等待辅助邮箱验证码邮件。 |
+| `AllocateBinding` | 为 Microsoft 授权选择或复用辅助邮箱，开启一次绑定尝试。 |
+| `ResolveBinding` | Microsoft 页面提示已绑定时，根据掩码恢复真实辅助邮箱。 |
+| `MarkBindingStatus` | 回写 `code_sent/verified/timeout/failed/expired`。 |
+| `WaitBindingCode` | 等待辅助邮箱验证码邮件。 |
 
 验证码、密码、RT、accessToken 不得出现在响应、普通日志、SystemLog 或 OperationLog 中。
 
@@ -192,7 +193,7 @@ Go Microsoft ACL 返回 `category` 作为内部错误分类。对外不返回业
 | `phone` | 需要手机验证 | `422` | `Microsoft account requires additional verification.` |
 | `passkey` | 需要 Passkey | `422` | `Microsoft account requires additional verification.` |
 | `locked` | 账号锁定 | `422` | `Microsoft account is currently unavailable.` |
-| `bound` | 辅助邮箱已绑定 | `409` | `Auxiliary mailbox is already bound.` |
+| `bound` | 辅助邮箱已绑定 | `409` | `Binding mailbox is already bound.` |
 | `code_timeout` | 验证码超时 | `422` | `Verification code is incorrect or expired.` |
 | `code_error` | 验证码错误 | `422` | `Verification code is incorrect or expired.` |
 | `auth_timeout` | 授权超时 | `503` | `Microsoft authorization timed out. Please try again later.` |

@@ -1194,7 +1194,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     delete:
       operationId: deleteResource
-      summary: Delete an owned private Microsoft resource
+      summary: Delete an owned private resource
       tags:
         - Resources
       security:
@@ -1208,7 +1208,7 @@ paths:
             type: integer
       responses:
         "204":
-          description: Private Microsoft resource deleted
+          description: Private resource deleted
         "400":
           description: Invalid resource ID
           content:
@@ -1228,7 +1228,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Resource is not private or is not a Microsoft resource
+          description: Resource is not private or is already deleted
           content:
             application/json:
               schema:
@@ -1237,7 +1237,7 @@ paths:
   /v1/resources/publish:
     post:
       operationId: postResourcePublishBatch
-      summary: Publish owned Microsoft resources to public supply
+      summary: Publish owned resources to public supply
       tags:
         - Resources
       security:
@@ -1252,7 +1252,7 @@ paths:
               $ref: "#/components/schemas/PublishResourcesRequest"
       responses:
         "200":
-          description: Microsoft resources published
+          description: Resources published
           content:
             application/json:
               schema:
@@ -1281,11 +1281,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid resource status/filter or resource is not private
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resources/delete:
+    post:
+      operationId: postResourceDeleteBatch
+      summary: Delete owned private resources
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteResourcesRequest"
+      responses:
+        "200":
+          description: Resources deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResourcesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid resource status/filter or resource is not private
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/resources/{resourceId}/publish:
     post:
       operationId: postResourcePublish
-      summary: Publish an owned Microsoft resource to public supply
+      summary: Publish an owned resource to public supply
       tags:
         - Resources
       security:
@@ -1299,11 +1353,13 @@ paths:
             type: integer
       responses:
         "200":
-          description: Microsoft resource published
+          description: Resource published
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MicrosoftResourceDetail"
+                oneOf:
+                  - $ref: "#/components/schemas/MicrosoftResourceDetail"
+                  - $ref: "#/components/schemas/DomainResourceDetail"
         "400":
           description: Invalid resource ID
           content:
@@ -1324,6 +1380,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid resource status or resource is not private
           content:
             application/json:
               schema:
@@ -1594,7 +1656,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Permission denied or mail server owner mismatch
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -2263,7 +2325,7 @@ components:
           type: integer
         status:
           type: string
-          description: Resource status (e.g., pending/normal/abnormal/disabled, dns_normal/dns_abnormal)
+          description: Resource status (e.g., pending/normal/abnormal/disabled/deleted)
         forSale:
           type: boolean
           description: Microsoft resource is available for sale (Microsoft resources only)
@@ -2279,9 +2341,19 @@ components:
         domain:
           type: string
           description: Domain name (domain resources only)
+        domainTld:
+          type: string
+          description: Backend-derived domain suffix used by exact domain bulk filters.
+        mailServerId:
+          type: integer
+          description: Mail server id for domain resources.
         purpose:
           type: string
-          description: Domain resource purpose (domain resources only, sale/auxiliary)
+          enum: [not_sale, sale, binding]
+          description: Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
+        mailboxCount:
+          type: integer
+          description: Generated mailbox count for domain resources.
         createdAt:
           type: string
           format: date-time
@@ -2339,8 +2411,11 @@ components:
           type: integer
         purpose:
           type: string
+          enum: [not_sale, sale, binding]
+          description: Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
         status:
           type: string
+          description: Domain resource status (normal/abnormal/disabled/deleted)
         lastAllocatedAt:
           type: string
           format: date-time
@@ -2394,13 +2469,10 @@ components:
     PublishResourcesRequest:
       type: object
       required:
-        - resourceIds
+        - selection
       properties:
-        resourceIds:
-          type: array
-          minItems: 1
-          items:
-            type: integer
+        selection:
+          $ref: "#/components/schemas/ResourceBulkSelection"
       additionalProperties: false
 
     PublishResourcesResponse:
@@ -2413,6 +2485,112 @@ components:
           type: integer
         published:
           type: integer
+        publishedResourceIds:
+          type: array
+          description: Actual published resource IDs for ids mode. Omitted for filter mode to avoid large responses.
+          items:
+            type: integer
+      additionalProperties: false
+
+    DeleteResourcesRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/ResourceBulkSelection"
+      additionalProperties: false
+
+    ResourceBulkSelection:
+      type: object
+      required:
+        - mode
+      oneOf:
+        - required:
+            - mode
+            - resourceIds
+          properties:
+            mode:
+              type: string
+              enum: [ids]
+            resourceIds:
+              type: array
+              minItems: 1
+              items:
+                type: integer
+                minimum: 1
+        - required:
+            - mode
+            - filter
+          properties:
+            mode:
+              type: string
+              enum: [filter]
+            filter:
+              $ref: "#/components/schemas/ResourceBulkFilter"
+      properties:
+        mode:
+          type: string
+          enum: [ids, filter]
+          description: ids selects explicit checked resources; filter selects all private resources matching the server-side filters.
+        resourceIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            minimum: 1
+          description: Required when mode is ids.
+        filter:
+          $ref: "#/components/schemas/ResourceBulkFilter"
+      additionalProperties: false
+
+    ResourceBulkFilter:
+      type: object
+      required:
+        - resourceType
+      properties:
+        resourceType:
+          type: string
+          enum: [microsoft, domain]
+        search:
+          type: string
+          description: Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
+        suffix:
+          type: string
+          description: Exact Microsoft suffix such as @outlook.com.
+        tld:
+          type: string
+          description: Exact domain suffix such as .com.
+        status:
+          type: string
+        longLived:
+          type: boolean
+          description: Microsoft long-lived filter.
+        createdFrom:
+          type: string
+          format: date-time
+          description: Inclusive resource creation lower bound. The frontend must send ISO date-time.
+        createdTo:
+          type: string
+          format: date-time
+          description: Inclusive resource creation upper bound. The frontend must send ISO date-time.
+      additionalProperties: false
+
+    DeleteResourcesResponse:
+      type: object
+      required:
+        - requested
+        - deleted
+      properties:
+        requested:
+          type: integer
+        deleted:
+          type: integer
+        deletedResourceIds:
+          type: array
+          description: Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses.
+          items:
+            type: integer
       additionalProperties: false
 
     CreateMailServerRequest:
@@ -2504,15 +2682,16 @@ components:
       type: object
       required:
         - domain
-        - mailServerId
-        - purpose
       properties:
         domain:
           type: string
         mailServerId:
           type: integer
+          description: Optional extension hook; omitted domains use the built-in local inbound server mx.aishop6.com
         purpose:
           type: string
+          enum: [not_sale, binding]
+          description: Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
       additionalProperties: false
 
     MailboxListResponse:

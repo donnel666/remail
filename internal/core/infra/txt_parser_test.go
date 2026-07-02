@@ -101,15 +101,15 @@ func TestTXTParser_ParseMicrosoftImport_TrimsWhitespace(t *testing.T) {
 	assertLine(t, result[1], "user2@test.com", "pass456", "", "", "")
 }
 
-func assertLine(t *testing.T, line domain.MicrosoftImportLine, email, password, clientID, refreshToken, auxiliaryAddress string) {
+func assertLine(t *testing.T, line domain.MicrosoftImportLine, email, password, clientID, refreshToken, bindingAddress string) {
 	t.Helper()
 	if line.Email != email ||
 		line.LineNumber == 0 ||
 		line.Password != password ||
 		line.ClientID != clientID ||
 		line.RefreshToken != refreshToken ||
-		line.AuxiliaryAddress != auxiliaryAddress {
-		t.Fatalf("line mismatch:\nwant email=%q password=%q clientID=%q refreshToken=%q auxiliaryAddress=%q\ngot  %+v",
-			email, password, clientID, refreshToken, auxiliaryAddress, line)
+		line.BindingAddress != bindingAddress {
+		t.Fatalf("line mismatch:\nwant email=%q password=%q clientID=%q refreshToken=%q bindingAddress=%q\ngot  %+v",
+			email, password, clientID, refreshToken, bindingAddress, line)
 	}
 }

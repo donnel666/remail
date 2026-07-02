@@ -38,13 +38,14 @@ CREATE TABLE microsoft_resources (
     id BIGINT UNSIGNED PRIMARY KEY,
     resource_type VARCHAR(32) NOT NULL DEFAULT 'microsoft' COMMENT 'mirrors email_resources.type for DB-level traceability',
     email_address VARCHAR(255) NOT NULL,
+    email_domain VARCHAR(255) NOT NULL DEFAULT '',
     password VARCHAR(512) NOT NULL COMMENT 'original value, never in API response or logs',
     client_id VARCHAR(255) NOT NULL DEFAULT '',
     refresh_token VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'original value, never in API response or logs',
     long_lived TINYINT(1) NOT NULL DEFAULT 0,
     rt_expire_at DATETIME NULL,
     for_sale TINYINT(1) NOT NULL DEFAULT 0,
-    status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending|normal|abnormal|disabled',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending|normal|abnormal|disabled|deleted',
     quality_score INT NOT NULL DEFAULT 0,
     last_safe_error VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'sanitized diagnostic summary',
     last_allocated_at DATETIME NULL,
@@ -54,9 +55,10 @@ CREATE TABLE microsoft_resources (
     INDEX idx_microsoft_status (status),
     INDEX idx_microsoft_long_lived (long_lived),
     INDEX idx_microsoft_for_sale (for_sale, status),
+    INDEX idx_microsoft_bulk_domain (email_domain, for_sale, status, long_lived),
     CONSTRAINT fk_microsoft_resource_type FOREIGN KEY (id, resource_type) REFERENCES email_resources(id, type) ON DELETE CASCADE,
     CONSTRAINT chk_microsoft_resource_type CHECK (resource_type = 'microsoft'),
-    CONSTRAINT chk_microsoft_status CHECK (status IN ('pending', 'normal', 'abnormal', 'disabled'))
+    CONSTRAINT chk_microsoft_status CHECK (status IN ('pending', 'normal', 'abnormal', 'disabled', 'deleted'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -111,6 +113,7 @@ CREATE TABLE mail_servers (
     INDEX idx_mail_servers_owner_created (owner_user_id, created_at),
     INDEX idx_mail_servers_created (created_at),
     UNIQUE INDEX idx_mail_servers_id_owner (id, owner_user_id),
+    UNIQUE INDEX idx_mail_servers_owner_address_mx (owner_user_id, server_address, mx_record),
     INDEX idx_mail_servers_status (status),
     CONSTRAINT fk_mail_servers_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT chk_mail_servers_status CHECK (status IN ('online', 'offline', 'disabled'))
@@ -121,9 +124,10 @@ CREATE TABLE domain_resources (
     resource_type VARCHAR(32) NOT NULL DEFAULT 'domain' COMMENT 'mirrors email_resources.type for DB-level traceability',
     owner_user_id BIGINT UNSIGNED NOT NULL,
     domain VARCHAR(255) NOT NULL,
+    domain_tld VARCHAR(64) NOT NULL DEFAULT '',
     mail_server_id BIGINT UNSIGNED NOT NULL,
-    purpose VARCHAR(32) NOT NULL DEFAULT 'sale' COMMENT 'sale|auxiliary',
-    status VARCHAR(32) NOT NULL DEFAULT 'dns_abnormal' COMMENT 'dns_normal|dns_abnormal|disabled',
+    purpose VARCHAR(32) NOT NULL DEFAULT 'not_sale' COMMENT 'not_sale|sale|binding',
+    status VARCHAR(32) NOT NULL DEFAULT 'abnormal' COMMENT 'normal|abnormal|disabled|deleted',
     last_allocated_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -131,25 +135,29 @@ CREATE TABLE domain_resources (
     INDEX idx_domain_resources_owner_created (owner_user_id, created_at),
     INDEX idx_domain_resources_purpose_status (purpose, status),
     INDEX idx_domain_resources_server (mail_server_id),
+    UNIQUE INDEX idx_domain_resources_id_owner (id, owner_user_id),
+    INDEX idx_domain_resources_owner_tld_private (owner_user_id, domain_tld, purpose, status),
     CONSTRAINT fk_domain_resources_resource_owner FOREIGN KEY (id, resource_type, owner_user_id) REFERENCES email_resources(id, type, owner_user_id) ON DELETE CASCADE,
     CONSTRAINT fk_domain_resources_server_owner FOREIGN KEY (mail_server_id, owner_user_id) REFERENCES mail_servers(id, owner_user_id) ON DELETE RESTRICT,
     CONSTRAINT chk_domain_resources_type CHECK (resource_type = 'domain'),
-    CONSTRAINT chk_domain_resources_purpose CHECK (purpose IN ('sale', 'auxiliary')),
-    CONSTRAINT chk_domain_resources_status CHECK (status IN ('dns_normal', 'dns_abnormal', 'disabled'))
+    CONSTRAINT chk_domain_resources_purpose CHECK (purpose IN ('not_sale', 'sale', 'binding')),
+    CONSTRAINT chk_domain_resources_status CHECK (status IN ('normal', 'abnormal', 'disabled', 'deleted'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 CREATE TABLE generated_mailboxes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     resource_id BIGINT UNSIGNED NOT NULL,
+    owner_user_id BIGINT UNSIGNED NOT NULL,
     email VARCHAR(255) NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'normal' COMMENT 'normal|disabled',
     last_allocated_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE INDEX idx_generated_mailboxes_resource_email (resource_id, email),
-    INDEX idx_generated_mailboxes_resource_created (resource_id, created_at),
+    INDEX idx_generated_mailboxes_resource_created (resource_id, owner_user_id, created_at),
     INDEX idx_generated_mailboxes_status (status),
-    CONSTRAINT fk_generated_mailboxes_resource FOREIGN KEY (resource_id) REFERENCES domain_resources(id) ON DELETE CASCADE,
+    CONSTRAINT fk_generated_mailboxes_resource_owner FOREIGN KEY (resource_id, owner_user_id) REFERENCES domain_resources(id, owner_user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_generated_mailboxes_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT chk_generated_mailboxes_status CHECK (status IN ('normal', 'disabled'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -56,11 +56,26 @@ type EmailResourceRepository interface {
 	// PublishMicrosoftWithLog atomically publishes one owned Microsoft resource and writes OperationLog only on state change.
 	PublishMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) (bool, error)
 
-	// PublishMicrosoftBatchWithLog publishes owned Microsoft resources and writes OperationLog records atomically.
-	PublishMicrosoftBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, baseLog governancedomain.OperationLog) (int, error)
+	// PublishResourcesBatchWithLog validates and publishes selected owned resources.
+	PublishResourcesBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) ([]uint, error)
 
-	// DeletePrivateMicrosoftWithLog atomically removes one owned private Microsoft resource and writes OperationLog.
+	// PublishResourcesByFilterWithLog publishes owned resources matching a server-side filter in chunks.
+	PublishResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error)
+
+	// DeletePrivateMicrosoftWithLog atomically marks one owned private Microsoft resource as deleted and writes OperationLog.
 	DeletePrivateMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error
+
+	// PublishDomainWithLog atomically publishes one owned domain resource and writes OperationLog only on state change.
+	PublishDomainWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) (bool, error)
+
+	// DeletePrivateDomainWithLog atomically marks one owned private domain resource as deleted and writes OperationLog.
+	DeletePrivateDomainWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error
+
+	// DeleteResourcesBatchWithLog validates ownership and marks owned private resources as deleted in one transaction.
+	DeleteResourcesBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) ([]uint, error)
+
+	// DeleteResourcesByFilterWithLog marks owned private resources matching a server-side filter as deleted in chunks.
+	DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error)
 
 	// UpdateDomain updates a domain resource and writes OperationLog.
 	UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error
@@ -98,6 +113,7 @@ type MicrosoftImportTask struct {
 type MailServerRepository interface {
 	Create(ctx context.Context, server *domain.MailServer) error
 	FindByID(ctx context.Context, id uint) (*domain.MailServer, error)
+	GetOrCreateDefaultInbound(ctx context.Context, ownerUserID uint, name, serverAddress, mxRecord string) (*domain.MailServer, error)
 	List(ctx context.Context, ownerUserID uint, offset, limit int) ([]domain.MailServer, error)
 	ListAll(ctx context.Context, offset, limit int) ([]domain.MailServer, error)
 	Count(ctx context.Context, ownerUserID uint) (int64, error)
@@ -106,8 +122,8 @@ type MailServerRepository interface {
 
 // GeneratedMailboxRepository defines the persistence contract for generated mailboxes.
 type GeneratedMailboxRepository interface {
-	List(ctx context.Context, domainResourceID uint, offset, limit int) ([]domain.GeneratedMailbox, error)
-	Count(ctx context.Context, domainResourceID uint) (int64, error)
+	List(ctx context.Context, domainResourceID uint, ownerUserID uint, offset, limit int) ([]domain.GeneratedMailbox, error)
+	Count(ctx context.Context, domainResourceID uint, ownerUserID uint) (int64, error)
 }
 
 // TXTParser parses resource import TXT files.
@@ -234,7 +250,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	}
 	if len(existingEmails) > 0 {
 		for _, line := range lines {
-			if _, exists := existingEmails[line.Email]; exists {
+			if _, exists := existingEmails[microsoftEmailKey(line.Email)]; exists {
 				return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 					Line:        line.LineNumber,
 					Email:       line.Email,
@@ -333,7 +349,7 @@ type importFailure struct {
 func (uc *ImportUseCase) duplicateInFile(lines []domain.MicrosoftImportLine) (importFailure, bool) {
 	seen := make(map[string]domain.MicrosoftImportLine, len(lines))
 	for _, line := range lines {
-		key := strings.ToLower(line.Email)
+		key := microsoftEmailKey(line.Email)
 		if first, ok := seen[key]; ok {
 			return importFailure{
 				Line:        line.LineNumber,
@@ -346,6 +362,10 @@ func (uc *ImportUseCase) duplicateInFile(lines []domain.MicrosoftImportLine) (im
 		seen[key] = line
 	}
 	return importFailure{}, false
+}
+
+func microsoftEmailKey(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func importFailureFromError(err error) importFailure {
@@ -463,7 +483,10 @@ type ResourceItem struct {
 	LastSafeError string              `json:"lastSafeError,omitempty"`
 	Email         string              `json:"email,omitempty"`
 	Domain        string              `json:"domain,omitempty"`
+	DomainTLD     string              `json:"domainTld,omitempty"`
+	MailServerID  uint                `json:"mailServerId,omitempty"`
 	Purpose       string              `json:"purpose,omitempty"`
+	MailboxCount  int                 `json:"mailboxCount,omitempty"`
 	CreatedAt     time.Time           `json:"createdAt"`
 }
 
@@ -499,10 +522,45 @@ type ResourceListResult struct {
 	Limit  int            `json:"limit"`
 }
 
-// MicrosoftBatchPublishResult holds the result of a batch publish command.
-type MicrosoftBatchPublishResult struct {
-	Requested int `json:"requested"`
-	Published int `json:"published"`
+// ResourceBatchPublishResult holds the result of a batch publish command.
+type ResourceBatchPublishResult struct {
+	Requested            int    `json:"requested"`
+	Published            int    `json:"published"`
+	PublishedResourceIDs []uint `json:"publishedResourceIds,omitempty"`
+}
+
+// ResourceBatchDeleteResult holds the result of a batch delete command.
+type ResourceBatchDeleteResult struct {
+	Requested          int    `json:"requested"`
+	Deleted            int    `json:"deleted"`
+	DeletedResourceIDs []uint `json:"deletedResourceIds,omitempty"`
+}
+
+// ResourceBulkSelectionMode identifies how a bulk command selects resources.
+type ResourceBulkSelectionMode string
+
+const (
+	ResourceBulkSelectionIDs    ResourceBulkSelectionMode = "ids"
+	ResourceBulkSelectionFilter ResourceBulkSelectionMode = "filter"
+)
+
+// ResourceBulkSelection describes the resource set for a bulk command.
+type ResourceBulkSelection struct {
+	Mode        ResourceBulkSelectionMode
+	ResourceIDs []uint
+	Filter      ResourceBulkFilter
+}
+
+// ResourceBulkFilter is the server-side filter used by "all matching" commands.
+type ResourceBulkFilter struct {
+	ResourceType domain.ResourceType
+	Search       string
+	Suffix       string
+	TLD          string
+	Status       string
+	LongLived    *bool
+	CreatedFrom  *time.Time
+	CreatedTo    *time.Time
 }
 
 // MicrosoftStatusResult holds minimal API-safe status for a Microsoft resource.
@@ -517,15 +575,20 @@ type MicrosoftStatusResult struct {
 
 // DomainStatusResult holds minimal API-safe status for a domain resource.
 type DomainStatusResult struct {
-	ID      uint
-	Domain  string
-	Purpose string
-	Status  string
+	ID           uint
+	Domain       string
+	DomainTLD    string
+	MailServerID uint
+	Purpose      string
+	Status       string
+	MailboxCount int
 }
 
 const (
 	defaultResourceListLimit = 20
 	maxResourceListLimit     = 10000
+	defaultInboundServerName = "Remail Inbound"
+	defaultInboundMXRecord   = "mx.aishop6.com"
 )
 
 // List returns the user's resources.
@@ -622,7 +685,10 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			if s, ok := domainStatusMap[r.ID]; ok {
 				item.Status = s.Status
 				item.Domain = s.Domain
+				item.DomainTLD = s.DomainTLD
+				item.MailServerID = s.MailServerID
 				item.Purpose = s.Purpose
+				item.MailboxCount = s.MailboxCount
 			} else {
 				return nil, fmt.Errorf("resource invariant violation: domain resource %d has no subtable status", r.ID)
 			}
@@ -659,6 +725,9 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 		if ms == nil {
 			return nil, domain.ErrResourceNotFound
 		}
+		if ms.Status == domain.MicrosoftStatusDeleted {
+			return nil, domain.ErrResourceNotFound
+		}
 		return &MicrosoftResourceDetail{
 			ID:              ms.ID,
 			EmailAddress:    ms.EmailAddress,
@@ -677,6 +746,9 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 			return nil, err
 		}
 		if dr == nil {
+			return nil, domain.ErrResourceNotFound
+		}
+		if dr.Status == domain.DomainStatusDeleted {
 			return nil, domain.ErrResourceNotFound
 		}
 		return &DomainResourceDetail{
@@ -718,6 +790,9 @@ func (uc *ResourceUseCase) PublishMicrosoftForSale(ctx context.Context, resource
 	if ms == nil {
 		return nil, domain.ErrResourceNotFound
 	}
+	if ms.Status == domain.MicrosoftStatusDeleted {
+		return nil, domain.ErrResourceNotFound
+	}
 
 	if _, err := uc.resources.PublishMicrosoftWithLog(ctx, userID, resourceID, governancedomain.OperationLog{
 		OperatorUserID: userID,
@@ -746,27 +821,124 @@ func (uc *ResourceUseCase) PublishMicrosoftForSale(ctx context.Context, resource
 	}, nil
 }
 
-// PublishMicrosoftForSaleBatch publishes owned Microsoft resources into the public supply pool.
-func (uc *ResourceUseCase) PublishMicrosoftForSaleBatch(ctx context.Context, resourceIDs []uint, userID uint, requestID, path string) (*MicrosoftBatchPublishResult, error) {
-	ids := uniqueResourceIDs(resourceIDs)
-	if len(ids) == 0 {
-		return nil, domain.ErrResourceNotFound
-	}
-
-	published, err := uc.resources.PublishMicrosoftBatchWithLog(ctx, userID, ids, governancedomain.OperationLog{
-		OperatorUserID: userID,
-		OperationType:  "core.microsoft_resource.publish_batch",
-		ResourceType:   "microsoft_resource",
-		Path:           path,
-		Result:         "success",
-		SafeSummary:    "Microsoft resources published for sale.",
-		RequestID:      requestID,
-	})
+// PublishResourceForSale publishes an owned resource into the public supply pool.
+// The API layer enforces supplier/admin/super_admin role. This command is one-way:
+// private -> public supply.
+func (uc *ResourceUseCase) PublishResourceForSale(ctx context.Context, resourceID, userID uint, requestID, path string) (interface{}, error) {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
 	if err != nil {
 		return nil, err
 	}
+	if resource == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return nil, domain.ErrForbiddenResource
+	}
 
-	return &MicrosoftBatchPublishResult{Requested: len(ids), Published: published}, nil
+	switch resource.Type {
+	case domain.ResourceTypeMicrosoft:
+		return uc.PublishMicrosoftForSale(ctx, resourceID, userID, requestID, path)
+	case domain.ResourceTypeDomain:
+		return uc.PublishDomainForSale(ctx, resourceID, userID, requestID, path)
+	default:
+		return nil, domain.ErrInvalidResourceType
+	}
+}
+
+// PublishDomainForSale publishes an owned private domain resource into the public supply pool.
+func (uc *ResourceUseCase) PublishDomainForSale(ctx context.Context, resourceID, userID uint, requestID, path string) (*DomainResourceDetail, error) {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if resource == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return nil, domain.ErrForbiddenResource
+	}
+	if resource.Type != domain.ResourceTypeDomain {
+		return nil, domain.ErrInvalidResourceType
+	}
+
+	dr, err := uc.resources.FindDomainByID(ctx, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if dr == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+	if dr.Status == domain.DomainStatusDeleted {
+		return nil, domain.ErrResourceNotFound
+	}
+	if dr.Purpose == domain.PurposeBinding {
+		return nil, domain.ErrResourceNotPrivate
+	}
+	if dr.Purpose != domain.PurposeNotSale && dr.Purpose != domain.PurposeSale {
+		return nil, domain.ErrResourceNotPrivate
+	}
+
+	if _, err := uc.resources.PublishDomainWithLog(ctx, userID, resourceID, governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.domain_resource.publish",
+		ResourceType:   "domain_resource",
+		ResourceID:     fmt.Sprintf("%d", dr.ID),
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Domain resource published for sale.",
+		RequestID:      requestID,
+	}); err != nil {
+		return nil, err
+	}
+	dr.Purpose = domain.PurposeSale
+
+	return &DomainResourceDetail{
+		ID:              dr.ID,
+		Domain:          dr.Domain,
+		MailServerID:    dr.MailServerID,
+		Purpose:         string(dr.Purpose),
+		Status:          string(dr.Status),
+		LastAllocatedAt: dr.LastAllocatedAt,
+		CreatedAt:       dr.CreatedAt,
+	}, nil
+}
+
+// PublishResourcesForSaleBatch publishes owned resources into the public supply pool.
+func (uc *ResourceUseCase) PublishResourcesForSaleBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchPublishResult, error) {
+	microsoftLog, domainLog := publishBatchLogs(userID, requestID, path)
+
+	switch selection.Mode {
+	case ResourceBulkSelectionIDs:
+		ids := uniqueResourceIDs(selection.ResourceIDs)
+		if len(ids) == 0 {
+			return nil, domain.ErrResourceNotFound
+		}
+
+		publishedIDs, err := uc.resources.PublishResourcesBatchWithLog(ctx, userID, ids, microsoftLog, domainLog)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ResourceBatchPublishResult{
+			Requested:            len(ids),
+			Published:            len(publishedIDs),
+			PublishedResourceIDs: publishedIDs,
+		}, nil
+	case ResourceBulkSelectionFilter:
+		filter, err := normalizeResourceBulkFilter(selection.Filter)
+		if err != nil {
+			return nil, err
+		}
+
+		published, err := uc.resources.PublishResourcesByFilterWithLog(ctx, userID, filter, microsoftLog, domainLog)
+		if err != nil {
+			return nil, err
+		}
+		return &ResourceBatchPublishResult{Requested: published, Published: published}, nil
+	default:
+		return nil, domain.ErrInvalidResourceType
+	}
 }
 
 // DeletePrivateMicrosoft removes one owner-owned Microsoft resource while it is still private.
@@ -792,6 +964,9 @@ func (uc *ResourceUseCase) DeletePrivateMicrosoft(ctx context.Context, resourceI
 	if ms == nil {
 		return domain.ErrResourceNotFound
 	}
+	if ms.Status == domain.MicrosoftStatusDeleted {
+		return domain.ErrResourceNotFound
+	}
 	if ms.ForSale {
 		return domain.ErrResourceNotPrivate
 	}
@@ -806,6 +981,197 @@ func (uc *ResourceUseCase) DeletePrivateMicrosoft(ctx context.Context, resourceI
 		SafeSummary:    "Private Microsoft resource deleted.",
 		RequestID:      requestID,
 	})
+}
+
+// DeletePrivateResource removes one owner-owned private resource.
+func (uc *ResourceUseCase) DeletePrivateResource(ctx context.Context, resourceID, userID uint, requestID, path string) error {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return domain.ErrForbiddenResource
+	}
+
+	switch resource.Type {
+	case domain.ResourceTypeMicrosoft:
+		return uc.DeletePrivateMicrosoft(ctx, resourceID, userID, requestID, path)
+	case domain.ResourceTypeDomain:
+		return uc.DeletePrivateDomain(ctx, resourceID, userID, requestID, path)
+	default:
+		return domain.ErrInvalidResourceType
+	}
+}
+
+// DeletePrivateResourcesBatch deletes owned private resources in one command.
+func (uc *ResourceUseCase) DeletePrivateResourcesBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchDeleteResult, error) {
+	microsoftLog, domainLog := deleteBatchLogs(userID, requestID, path)
+
+	switch selection.Mode {
+	case ResourceBulkSelectionIDs:
+		ids := uniqueResourceIDs(selection.ResourceIDs)
+		if len(ids) == 0 {
+			return nil, domain.ErrResourceNotFound
+		}
+
+		deletedIDs, err := uc.resources.DeleteResourcesBatchWithLog(ctx, userID, ids, microsoftLog, domainLog)
+		if err != nil {
+			return nil, err
+		}
+		return &ResourceBatchDeleteResult{
+			Requested:          len(ids),
+			Deleted:            len(deletedIDs),
+			DeletedResourceIDs: deletedIDs,
+		}, nil
+	case ResourceBulkSelectionFilter:
+		filter, err := normalizeResourceBulkFilter(selection.Filter)
+		if err != nil {
+			return nil, err
+		}
+
+		deleted, err := uc.resources.DeleteResourcesByFilterWithLog(ctx, userID, filter, microsoftLog, domainLog)
+		if err != nil {
+			return nil, err
+		}
+		return &ResourceBatchDeleteResult{Requested: deleted, Deleted: deleted}, nil
+	default:
+		return nil, domain.ErrInvalidResourceType
+	}
+}
+
+// DeletePrivateDomain removes one owner-owned domain resource while it is still private.
+func (uc *ResourceUseCase) DeletePrivateDomain(ctx context.Context, resourceID, userID uint, requestID, path string) error {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return domain.ErrForbiddenResource
+	}
+	if resource.Type != domain.ResourceTypeDomain {
+		return domain.ErrInvalidResourceType
+	}
+
+	dr, err := uc.resources.FindDomainByID(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if dr == nil {
+		return domain.ErrResourceNotFound
+	}
+	if dr.Status == domain.DomainStatusDeleted {
+		return domain.ErrResourceNotFound
+	}
+	if dr.Purpose != domain.PurposeNotSale {
+		return domain.ErrResourceNotPrivate
+	}
+
+	return uc.resources.DeletePrivateDomainWithLog(ctx, userID, resourceID, governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.domain_resource.delete_private",
+		ResourceType:   "domain_resource",
+		ResourceID:     fmt.Sprintf("%d", dr.ID),
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Private domain resource deleted.",
+		RequestID:      requestID,
+	})
+}
+
+func publishBatchLogs(userID uint, requestID, path string) (governancedomain.OperationLog, governancedomain.OperationLog) {
+	return governancedomain.OperationLog{
+			OperatorUserID: userID,
+			OperationType:  "core.microsoft_resource.publish_batch",
+			ResourceType:   "microsoft_resource",
+			Path:           path,
+			Result:         "success",
+			SafeSummary:    "Microsoft resources published for sale.",
+			RequestID:      requestID,
+		}, governancedomain.OperationLog{
+			OperatorUserID: userID,
+			OperationType:  "core.domain_resource.publish_batch",
+			ResourceType:   "domain_resource",
+			Path:           path,
+			Result:         "success",
+			SafeSummary:    "Domain resources published for sale.",
+			RequestID:      requestID,
+		}
+}
+
+func deleteBatchLogs(userID uint, requestID, path string) (governancedomain.OperationLog, governancedomain.OperationLog) {
+	return governancedomain.OperationLog{
+			OperatorUserID: userID,
+			OperationType:  "core.microsoft_resource.delete_batch",
+			ResourceType:   "microsoft_resource",
+			Path:           path,
+			Result:         "success",
+			SafeSummary:    "Private Microsoft resources deleted.",
+			RequestID:      requestID,
+		}, governancedomain.OperationLog{
+			OperatorUserID: userID,
+			OperationType:  "core.domain_resource.delete_batch",
+			ResourceType:   "domain_resource",
+			Path:           path,
+			Result:         "success",
+			SafeSummary:    "Private domain resources deleted.",
+			RequestID:      requestID,
+		}
+}
+
+func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter, error) {
+	filter.Search = strings.ToLower(strings.TrimSpace(filter.Search))
+	filter.Suffix = strings.ToLower(strings.TrimSpace(filter.Suffix))
+	filter.TLD = strings.ToLower(strings.TrimSpace(filter.TLD))
+	filter.Status = strings.TrimSpace(filter.Status)
+	if filter.Status == "all" {
+		filter.Status = ""
+	}
+	if filter.CreatedFrom != nil && filter.CreatedTo != nil && filter.CreatedFrom.After(*filter.CreatedTo) {
+		return ResourceBulkFilter{}, domain.ErrInvalidResourceFilter
+	}
+
+	switch filter.ResourceType {
+	case domain.ResourceTypeMicrosoft:
+		if filter.Suffix != "" {
+			suffix := strings.TrimPrefix(filter.Suffix, "@")
+			normalized, err := domain.NormalizeDomainSuffix(suffix)
+			if err != nil {
+				return ResourceBulkFilter{}, domain.ErrInvalidResourceFilter
+			}
+			filter.Suffix = strings.TrimPrefix(normalized, ".")
+		}
+		if filter.Status != "" && !domain.IsValidMicrosoftStatus(filter.Status) {
+			return ResourceBulkFilter{}, domain.ErrInvalidResourceStatus
+		}
+		if filter.Status == string(domain.MicrosoftStatusDeleted) {
+			return ResourceBulkFilter{}, domain.ErrInvalidResourceStatus
+		}
+	case domain.ResourceTypeDomain:
+		filter.LongLived = nil
+		if filter.TLD != "" {
+			normalized, err := domain.NormalizeDomainSuffix(filter.TLD)
+			if err != nil {
+				return ResourceBulkFilter{}, domain.ErrInvalidResourceFilter
+			}
+			filter.TLD = normalized
+		}
+		if filter.Status != "" && !domain.IsValidDomainStatus(filter.Status) {
+			return ResourceBulkFilter{}, domain.ErrInvalidResourceStatus
+		}
+		if filter.Status == string(domain.DomainStatusDeleted) {
+			return ResourceBulkFilter{}, domain.ErrInvalidResourceStatus
+		}
+	default:
+		return ResourceBulkFilter{}, domain.ErrInvalidResourceType
+	}
+
+	return filter, nil
 }
 
 func uniqueResourceIDs(resourceIDs []uint) []uint {
@@ -842,15 +1208,32 @@ type CreateDomainRequest struct {
 	Domain       string
 	MailServerID uint
 	Purpose      string
+	AllowBinding bool
 }
 
-// Create creates a new self-hosted domain resource (P1-I2 supplier self-service).
+// Create creates a self-hosted domain resource. P1 defaults to the local
+// inbound server and keeps public sale as a separate publish command.
 func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *CreateDomainRequest) (*domain.MailDomainResource, error) {
-	if !domain.IsValidPurpose(domain.ResourcePurpose(req.Purpose)) {
-		return nil, domain.ErrInvalidPurpose
+	domainName, err := domain.NormalizeDomainName(req.Domain)
+	if err != nil {
+		return nil, err
 	}
 
-	server, err := uc.servers.FindByID(ctx, req.MailServerID)
+	purpose := domain.ResourcePurpose(req.Purpose)
+	if purpose == "" {
+		purpose = domain.PurposeNotSale
+	}
+	if !domain.IsValidPurpose(purpose) {
+		return nil, domain.ErrInvalidPurpose
+	}
+	if purpose == domain.PurposeSale {
+		return nil, domain.ErrInvalidPurpose
+	}
+	if purpose == domain.PurposeBinding && !req.AllowBinding {
+		return nil, domain.ErrForbiddenPurpose
+	}
+
+	server, err := uc.resolveMailServer(ctx, ownerUserID, req.MailServerID)
 	if err != nil {
 		return nil, err
 	}
@@ -858,7 +1241,7 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 		return nil, domain.ErrMailServerNotFound
 	}
 	if server.OwnerUserID != ownerUserID {
-		return nil, domain.ErrMailServerOwnerMismatch
+		return nil, domain.ErrMailServerNotFound
 	}
 
 	resource := &domain.EmailResource{
@@ -867,10 +1250,13 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 	}
 
 	dr := &domain.MailDomainResource{
-		Domain:       req.Domain,
+		Domain:       domainName,
 		MailServerID: req.MailServerID,
-		Purpose:      domain.ResourcePurpose(req.Purpose),
-		Status:       domain.DomainStatusDNSAbnormal,
+		Purpose:      purpose,
+		Status:       domain.DomainStatusAbnormal,
+	}
+	if server != nil {
+		dr.MailServerID = server.ID
 	}
 
 	if err := uc.resources.CreateDomain(ctx, resource, dr); err != nil {
@@ -878,6 +1264,18 @@ func (uc *DomainUseCase) Create(ctx context.Context, ownerUserID uint, req *Crea
 	}
 
 	return dr, nil
+}
+
+func (uc *DomainUseCase) resolveMailServer(ctx context.Context, ownerUserID uint, mailServerID uint) (*domain.MailServer, error) {
+	if mailServerID != 0 {
+		server, err := uc.servers.FindByID(ctx, mailServerID)
+		if err != nil {
+			return nil, err
+		}
+		return server, nil
+	}
+
+	return uc.servers.GetOrCreateDefaultInbound(ctx, ownerUserID, defaultInboundServerName, defaultInboundMXRecord, defaultInboundMXRecord)
 }
 
 // ServerUseCase handles mail server management.
@@ -1004,24 +1402,31 @@ func (uc *DomainMailboxUseCase) List(ctx context.Context, domainResourceID, user
 	if resource == nil {
 		return nil, domain.ErrForbiddenResource
 	}
+	if resource.Status == domain.DomainStatusDeleted {
+		return nil, domain.ErrResourceNotFound
+	}
+
+	root, err := uc.resources.FindByID(ctx, domainResourceID)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil || root.Type != domain.ResourceTypeDomain {
+		return nil, domain.ErrForbiddenResource
+	}
 
 	// Check ownership: only the owner or admin can view mailboxes
 	if !isAdmin {
-		root, err := uc.resources.FindByID(ctx, domainResourceID)
-		if err != nil {
-			return nil, err
-		}
-		if root == nil || root.OwnerUserID != userID {
+		if root.OwnerUserID != userID {
 			return nil, domain.ErrForbiddenResource
 		}
 	}
 
-	mailboxes, err := uc.mailboxes.List(ctx, domainResourceID, offset, limit)
+	mailboxes, err := uc.mailboxes.List(ctx, domainResourceID, root.OwnerUserID, offset, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	total, err := uc.mailboxes.Count(ctx, domainResourceID)
+	total, err := uc.mailboxes.Count(ctx, domainResourceID, root.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}

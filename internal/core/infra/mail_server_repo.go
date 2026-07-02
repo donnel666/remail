@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/core/domain"
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -95,6 +96,75 @@ func (r *MailServerRepo) FindByID(ctx context.Context, id uint) (*domain.MailSer
 		return nil, fmt.Errorf("find mail server: %w", err)
 	}
 	return model.toDomain(), nil
+}
+
+// GetOrCreateDefaultInbound returns the owner's built-in local inbound server.
+// The unique DB index on owner/address/MX is the concurrency guard; duplicate
+// create races re-read the existing row.
+func (r *MailServerRepo) GetOrCreateDefaultInbound(ctx context.Context, ownerUserID uint, name, serverAddress, mxRecord string) (*domain.MailServer, error) {
+	var result MailServerModel
+	err := r.db.WithContext(ctx).
+		Where("owner_user_id = ? AND server_address = ? AND mx_record = ?", ownerUserID, serverAddress, mxRecord).
+		First(&result).Error
+	if err == nil {
+		return result.toDomain(), nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("find default inbound mail server: %w", err)
+	}
+
+	var createErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		result = MailServerModel{
+			OwnerUserID:   ownerUserID,
+			Name:          name,
+			ServerAddress: serverAddress,
+			MXRecord:      mxRecord,
+			Status:        string(domain.MailServerOnline),
+		}
+
+		createErr = r.db.WithContext(ctx).Create(&result).Error
+		if createErr == nil {
+			return result.toDomain(), nil
+		}
+		if isRetryableMailServerConflict(createErr) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * 10 * time.Millisecond):
+				continue
+			}
+		}
+		if isDuplicateMailServerKey(createErr) {
+			err := r.db.WithContext(ctx).
+				Where("owner_user_id = ? AND server_address = ? AND mx_record = ?", ownerUserID, serverAddress, mxRecord).
+				First(&result).Error
+			if err != nil {
+				return nil, fmt.Errorf("find duplicate default inbound mail server: %w", err)
+			}
+			return result.toDomain(), nil
+		}
+		return nil, fmt.Errorf("create default inbound mail server: %w", createErr)
+	}
+
+	if createErr != nil {
+		return nil, fmt.Errorf("create default inbound mail server: %w", createErr)
+	}
+
+	return nil, fmt.Errorf("create default inbound mail server: exhausted retries")
+}
+
+func isDuplicateMailServerKey(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+func isRetryableMailServerConflict(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205)
 }
 
 func (r *MailServerRepo) listQuery(ctx context.Context, ownerUserID uint) *gorm.DB {

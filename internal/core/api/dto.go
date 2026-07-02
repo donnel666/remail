@@ -18,13 +18,37 @@ type CreateMailServerRequest struct {
 // CreateDomainRequest represents a domain resource creation request.
 type CreateDomainRequest struct {
 	Domain       string `json:"domain" binding:"required"`
-	MailServerID uint   `json:"mailServerId" binding:"required"`
-	Purpose      string `json:"purpose" binding:"required"`
+	MailServerID uint   `json:"mailServerId"`
+	Purpose      string `json:"purpose"`
+}
+
+// ResourceBulkFilterRequest describes the filter used by an "all matching" bulk command.
+type ResourceBulkFilterRequest struct {
+	ResourceType string     `json:"resourceType"`
+	Search       string     `json:"search,omitempty"`
+	Suffix       string     `json:"suffix,omitempty"`
+	TLD          string     `json:"tld,omitempty"`
+	Status       string     `json:"status,omitempty"`
+	LongLived    *bool      `json:"longLived,omitempty"`
+	CreatedFrom  *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo    *time.Time `json:"createdTo,omitempty"`
+}
+
+// ResourceBulkSelectionRequest describes how a bulk command selects resources.
+type ResourceBulkSelectionRequest struct {
+	Mode        string                    `json:"mode" binding:"required,oneof=ids filter"`
+	ResourceIDs []uint                    `json:"resourceIds,omitempty"`
+	Filter      ResourceBulkFilterRequest `json:"filter,omitempty"`
 }
 
 // PublishResourcesRequest is the request body for batch resource publish.
 type PublishResourcesRequest struct {
-	ResourceIDs []uint `json:"resourceIds" binding:"required,min=1,dive,required"`
+	Selection ResourceBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
+// DeleteResourcesRequest is the request body for batch resource delete.
+type DeleteResourcesRequest struct {
+	Selection ResourceBulkSelectionRequest `json:"selection" binding:"required"`
 }
 
 // --- Response types ---
@@ -40,7 +64,10 @@ type ResourceItemResponse struct {
 	LastSafeError string    `json:"lastSafeError,omitempty"`
 	Email         string    `json:"email,omitempty"`
 	Domain        string    `json:"domain,omitempty"`
+	DomainTLD     string    `json:"domainTld,omitempty"`
+	MailServerID  uint      `json:"mailServerId,omitempty"`
 	Purpose       string    `json:"purpose,omitempty"`
+	MailboxCount  int       `json:"mailboxCount,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
@@ -94,8 +121,16 @@ type ImportStatusResponse struct {
 
 // PublishResourcesResponse returns the batch publish result.
 type PublishResourcesResponse struct {
-	Requested int `json:"requested"`
-	Published int `json:"published"`
+	Requested            int    `json:"requested"`
+	Published            int    `json:"published"`
+	PublishedResourceIDs []uint `json:"publishedResourceIds,omitempty"`
+}
+
+// DeleteResourcesResponse returns the batch delete result.
+type DeleteResourcesResponse struct {
+	Requested          int    `json:"requested"`
+	Deleted            int    `json:"deleted"`
+	DeletedResourceIDs []uint `json:"deletedResourceIds,omitempty"`
 }
 
 // ServerItemResponse is the mail server list item.

@@ -18,9 +18,9 @@ func NewTXTParser() *TXTParser {
 // Format: one resource per line, separated by "----":
 //
 //	email----password
-//	email----password----auxiliaryAddress
+//	email----password----bindingAddress
 //	email----password----clientId----refreshToken
-//	email----password----clientId----refreshToken----auxiliaryAddress
+//	email----password----clientId----refreshToken----bindingAddress
 //
 // Empty lines are skipped.
 func (p *TXTParser) ParseMicrosoftImport(content string) ([]domain.MicrosoftImportLine, error) {
@@ -51,11 +51,11 @@ func (p *TXTParser) ParseMicrosoftImport(content string) ([]domain.MicrosoftImpo
 
 		clientID := ""
 		refreshToken := ""
-		auxiliaryAddress := ""
+		bindingAddress := ""
 		switch len(parts) {
 		case 3:
-			auxiliaryAddress = strings.TrimSpace(parts[2])
-			if auxiliaryAddress == "" {
+			bindingAddress = strings.TrimSpace(parts[2])
+			if bindingAddress == "" {
 				return nil, importLineError(lineNumber, parts)
 			}
 		case 4:
@@ -67,19 +67,19 @@ func (p *TXTParser) ParseMicrosoftImport(content string) ([]domain.MicrosoftImpo
 		case 5:
 			clientID = strings.TrimSpace(parts[2])
 			refreshToken = strings.TrimSpace(parts[3])
-			auxiliaryAddress = strings.TrimSpace(parts[4])
-			if clientID == "" || refreshToken == "" || auxiliaryAddress == "" {
+			bindingAddress = strings.TrimSpace(parts[4])
+			if clientID == "" || refreshToken == "" || bindingAddress == "" {
 				return nil, importLineError(lineNumber, parts)
 			}
 		}
 
 		result = append(result, domain.MicrosoftImportLine{
-			LineNumber:       lineNumber,
-			Email:            email,
-			Password:         password,
-			ClientID:         clientID,
-			RefreshToken:     refreshToken,
-			AuxiliaryAddress: auxiliaryAddress,
+			LineNumber:     lineNumber,
+			Email:          email,
+			Password:       password,
+			ClientID:       clientID,
+			RefreshToken:   refreshToken,
+			BindingAddress: bindingAddress,
 		})
 	}
 

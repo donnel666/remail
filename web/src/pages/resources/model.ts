@@ -13,6 +13,7 @@ export interface EmailResource {
   lifetimeType: LifetimeType;
   status: ResourceStatus;
   lastSafeError?: string;
+  createdAt: string;
 }
 
 function getEmailType(suffix: string) {
@@ -23,9 +24,9 @@ function getEmailType(suffix: string) {
 }
 
 export const MICROSOFT_EMAIL_FORMAT_HINT = `email----password
-email----password----binding_email
+email----password----bindingAddress
 email----password----clientID----refreshToken
-email----password----clientID----refreshToken----binding_email`;
+email----password----clientID----refreshToken----bindingAddress`;
 
 export function getSuffix(email: string): string {
   const index = email.lastIndexOf("@");
@@ -62,6 +63,7 @@ export function toEmailResource(item: ResourceItem): EmailResource | null {
     lifetimeType: item.longLived ? "long_lived" : "short_lived",
     status: toResourceStatus(item.status),
     lastSafeError: item.lastSafeError || undefined,
+    createdAt: item.createdAt,
   };
 }
 

@@ -7,7 +7,9 @@ interface UseSelectionNotificationOptions {
   onCheck?: () => void;
   selectedCount: number;
   onClear: () => void;
+  onDelete?: () => void;
   onSell?: () => void;
+  deleteLoading?: boolean;
   sellLoading?: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }
@@ -16,7 +18,9 @@ export function useSelectionNotification({
   onCheck,
   selectedCount,
   onClear,
+  onDelete,
   onSell,
+  deleteLoading = false,
   sellLoading = false,
   t,
 }: UseSelectionNotificationOptions) {
@@ -50,6 +54,17 @@ export function useSelectionNotification({
                 {t("Sell")}
               </Button>
             ) : null}
+            {onDelete ? (
+              <Button
+                loading={deleteLoading}
+                onClick={onDelete}
+                size="small"
+                theme="solid"
+                type="danger"
+              >
+                {t("Delete")}
+              </Button>
+            ) : null}
           </Space>
         ),
         duration: 0,
@@ -72,5 +87,14 @@ export function useSelectionNotification({
     return () => {
       Notification.close(noticeId);
     };
-  }, [onCheck, onClear, onSell, selectedCount, sellLoading, t]);
+  }, [
+    deleteLoading,
+    onCheck,
+    onClear,
+    onDelete,
+    onSell,
+    selectedCount,
+    sellLoading,
+    t,
+  ]);
 }

@@ -1,5 +1,5 @@
-import { Copy, Globe, Lock, Shield, Zap } from "lucide-react";
-import { useState } from "react";
+import { Typography, Toast } from "@douyinfe/semi-ui";
+import { Globe, Lock, Shield, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 const FEATURES = [
@@ -32,6 +32,7 @@ const titleBrandGradient =
   "bg-gradient-to-r from-[#8a4a34] via-[#c6533c] to-[#f4513b] bg-clip-text text-transparent dark:from-[#ffd0a3] dark:via-[#ff8a5c] dark:to-[#ff5a82]";
 const titleHotGradient =
   "bg-gradient-to-r from-[#ff7a1a] via-[#ff5a3d] to-[#ff3d73] bg-clip-text text-transparent";
+const { Text } = Typography;
 
 function TerminalCode({ responseLabel }: { responseLabel: string }) {
   return (
@@ -75,15 +76,6 @@ function TerminalCode({ responseLabel }: { responseLabel: string }) {
 
 export default function Home() {
   const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
-
-  const copyCurl = () => {
-    if (!navigator.clipboard) return;
-    void navigator.clipboard.writeText(curlRaw).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    });
-  };
 
   return (
     <section className="relative flex min-h-[calc(100svh-64px)] items-center overflow-hidden bg-background px-6 lg:px-12">
@@ -159,17 +151,16 @@ export default function Home() {
               <span className="ml-2 text-[12px] text-white/30 font-mono-data">
                 bash — remail-api
               </span>
-              <button
-                type="button"
-                onClick={copyCurl}
+              <Text
                 className="relative ml-auto inline-flex items-center text-white/30 transition-colors hover:text-[var(--brand-light)]"
                 aria-label={t("Copy API example")}
+                copyable={{
+                  content: curlRaw,
+                  onCopy: () => Toast.success(t("Copied")),
+                }}
               >
-                {copied ? (
-                  <span className="mr-1 text-[10px] text-emerald-400">{t("Copied")}</span>
-                ) : null}
-                <Copy className="size-3.5" />
-              </button>
+                <span className="sr-only">{t("Copy API example")}</span>
+              </Text>
             </div>
             <TerminalCode responseLabel={t("Response")} />
           </div>

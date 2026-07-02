@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-02 | V1.1 | Codex | 补充 P1-I2 Domain 用途命名为 `not_sale/sale/binding`，中文仍展示辅助邮箱；对齐 Core 资源设计，不新增边界上下文。 |
 
 > 本文是新项目 `/home/donnel/work/email/remail` 的 DDD 总览。
 >
@@ -73,7 +74,7 @@ flowchart LR
 | BC-ALLOC | `RoutingCandidate`、`MicrosoftAllocation`、`DomainAllocation` | 一单一资源、分配唯一性、释放 | 资源验证、订单状态、钱包 |
 | BC-BILLING | `Wallet`、`Transaction`、`Recharge`、`CardKey`、`Settlement`、`Withdrawal` | 多额度桶、不可变流水、充值、卡密、结算、提现 | 订单为什么扣款或退款 |
 | BC-TRADE | `Order`、`OrderEvent` | 订单状态机、扣款/退款绑定、分配外键、服务窗口 | 钱包余额、资源策略、邮件正文 |
-| BC-MAILTRANSPORT | `OutboundMail`、`AuxBinding`、`InboundSetting` | 协议调用、外发邮件、辅助邮箱绑定、SMTP 入站配置 | 邮件归属和项目匹配 |
+| BC-MAILTRANSPORT | `OutboundMail`、`Binding`、`InboundSetting` | 协议调用、外发邮件、辅助邮箱绑定、SMTP 入站配置 | 邮件归属和项目匹配 |
 | BC-PROXY | `Proxy`、`Binding` | 代理检测、IP 版本、7 天绑定、系统池兜底、错误计数和自动禁用 | Microsoft 页面流、资源状态、邮件事实 |
 | BC-MAILMATCH | `Message` | 邮件去重、匹配、验证码、真实服务读取 | 协议收发、订单退款、资源验证 |
 | BC-OPENAPI | `ApiKey`、`OrderToken`、`ApiLog` | 凭证签发、认证、限流、并发、日志 | 下单业务规则、邮件匹配规则 |
@@ -134,7 +135,7 @@ graph TD
 | SDK | SDK | 全局 | SDK 不要求后端另做一套接口，只从同一份 OpenAPI 选择允许 API Key 调用的操作生成。 |
 | 邮箱资源根 | `EmailResource` | BC-CORE | 统一资源身份，资源类型创建后不可变。 |
 | 微软邮箱资源 | `MicrosoftResource` | BC-CORE | Microsoft 邮箱账号和可用凭据。 |
-| 自建邮箱域名资源 | `DomainResource` | BC-CORE | 自建域名邮箱资源，带 `purpose=sale/auxiliary`。 |
+| 自建邮箱域名资源 | `DomainResource` | BC-CORE | 自建域名邮箱资源，带 `purpose=not_sale/sale/binding`；用户默认不可出售，公开出售与辅助邮箱用途分离。 |
 | 项目 | `Project` | BC-CORE | 规则中心，定义商品、访问、分配和邮件识别规则。 |
 | 项目商品 | `Product` | BC-CORE | 服务模式、价格、供应商价、资源类型、服务窗口和分配权重。 |
 | 分配 | `Allocation` | BC-ALLOC | 订单获得邮箱使用权的事实。 |

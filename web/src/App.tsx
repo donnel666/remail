@@ -24,8 +24,12 @@ import { ThemeProvider } from "./context/theme-provider";
 import { AuthProvider, useAuth } from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
 import AppShell from "./components/layout/AppShell";
-import { ROUTES_WITH_SIDEBAR } from "./components/layout/config/navigation";
+import {
+  ROUTES_WITH_SIDEBAR,
+  getSidebarRouteRequiredRoleLevel,
+} from "./components/layout/config/navigation";
 import { getActivation } from "./lib/iam-api";
+import { PlaceholderPage } from "./pages/PlaceholderPage";
 
 const Home = lazy(() => import("./pages/Home"));
 const Activation = lazy(() => import("./pages/Activation"));
@@ -43,8 +47,29 @@ const Orders = lazy(() => import("./pages/Orders"));
 const MyEmails = lazy(() => import("./pages/MyEmails"));
 const AfterSales = lazy(() => import("./pages/AfterSales"));
 const Resources = lazy(() => import("./pages/Resources"));
+const DomainEmails = lazy(() => import("./pages/DomainEmails"));
 const Invite = lazy(() => import("./pages/Invite"));
 const Recharge = lazy(() => import("./pages/Recharge"));
+
+function AdminMicrosoftEmails() {
+  return <PlaceholderPage titleKey="Admin Microsoft Emails" />;
+}
+
+function AdminDomainEmails() {
+  return <PlaceholderPage titleKey="Admin Domain Emails" />;
+}
+
+function ProxyManagement() {
+  return <PlaceholderPage titleKey="Proxy Management" />;
+}
+
+function UserManagement() {
+  return <PlaceholderPage titleKey="User Management" />;
+}
+
+function SystemSettings() {
+  return <PlaceholderPage titleKey="System Settings" />;
+}
 
 function Loading() {
   return (
@@ -60,7 +85,10 @@ function SemiLocaleWrapper({ children }: { children: ReactNode }) {
   return <LocaleProvider locale={locale}>{children}</LocaleProvider>;
 }
 
-const PROTECTED_ROUTES = [...ROUTES_WITH_SIDEBAR, "/account", "/apikeys"];
+const EXTRA_PROTECTED_ROUTES = ["/apikeys", "/invite", "/recharge"];
+const PROTECTED_ROUTES = Array.from(
+  new Set([...ROUTES_WITH_SIDEBAR, ...EXTRA_PROTECTED_ROUTES])
+);
 
 function matchesRoute(pathname: string, route: string) {
   return pathname === route || pathname.startsWith(`${route}/`);
@@ -75,6 +103,10 @@ function RouteGate({ children }: { children: ReactNode }) {
   const pathname = location.pathname;
   const isProtectedRoute = useMemo(
     () => PROTECTED_ROUTES.some((route) => matchesRoute(pathname, route)),
+    [pathname]
+  );
+  const requiredRoleLevel = useMemo(
+    () => getSidebarRouteRequiredRoleLevel(pathname),
     [pathname]
   );
 
@@ -123,6 +155,16 @@ function RouteGate({ children }: { children: ReactNode }) {
 
     if (
       !activationNeeded &&
+      !authLoading &&
+      currentUser &&
+      currentUser.roleLevel < requiredRoleLevel
+    ) {
+      void navigate({ to: "/dashboard", replace: true });
+      return;
+    }
+
+    if (
+      !activationNeeded &&
       currentUser &&
       (pathname === "/login" || pathname === "/register")
     ) {
@@ -135,6 +177,7 @@ function RouteGate({ children }: { children: ReactNode }) {
     isProtectedRoute,
     navigate,
     pathname,
+    requiredRoleLevel,
   ]);
 
   let content = children;
@@ -192,8 +235,22 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/my-emails", component: MyEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/after-sales", component: AfterSales }),
   createRoute({ getParentRoute: () => rootRoute, path: "/resources", component: Resources }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/invite", component: Invite }),
   createRoute({ getParentRoute: () => rootRoute, path: "/recharge", component: Recharge }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/admin/microsoft-emails",
+    component: AdminMicrosoftEmails,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/admin/domain-emails",
+    component: AdminDomainEmails,
+  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/proxies", component: ProxyManagement }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/users", component: UserManagement }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/settings", component: SystemSettings }),
 ]);
 
 const router = createRouter({ routeTree });

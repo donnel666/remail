@@ -14,6 +14,7 @@ const (
 type GeneratedMailbox struct {
 	ID              uint
 	ResourceID      uint
+	OwnerUserID     uint
 	Email           string
 	Status          GeneratedMailboxStatus
 	LastAllocatedAt *time.Time

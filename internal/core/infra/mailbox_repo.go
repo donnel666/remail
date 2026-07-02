@@ -13,6 +13,7 @@ import (
 type GeneratedMailboxModel struct {
 	ID              uint       `gorm:"primaryKey;autoIncrement"`
 	ResourceID      uint       `gorm:"not null;column:resource_id"`
+	OwnerUserID     uint       `gorm:"not null;column:owner_user_id"`
 	Email           string     `gorm:"type:varchar(255);not null"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'normal'"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
@@ -27,6 +28,7 @@ func (m *GeneratedMailboxModel) toDomain() *domain.GeneratedMailbox {
 	return &domain.GeneratedMailbox{
 		ID:              m.ID,
 		ResourceID:      m.ResourceID,
+		OwnerUserID:     m.OwnerUserID,
 		Email:           m.Email,
 		Status:          domain.GeneratedMailboxStatus(m.Status),
 		LastAllocatedAt: m.LastAllocatedAt,
@@ -44,10 +46,10 @@ func NewGeneratedMailboxRepo(db *gorm.DB) *GeneratedMailboxRepo {
 	return &GeneratedMailboxRepo{db: db}
 }
 
-func (r *GeneratedMailboxRepo) List(ctx context.Context, domainResourceID uint, offset, limit int) ([]domain.GeneratedMailbox, error) {
+func (r *GeneratedMailboxRepo) List(ctx context.Context, domainResourceID uint, ownerUserID uint, offset, limit int) ([]domain.GeneratedMailbox, error) {
 	var models []GeneratedMailboxModel
 	err := r.db.WithContext(ctx).
-		Where("resource_id = ?", domainResourceID).
+		Where("resource_id = ? AND owner_user_id = ?", domainResourceID, ownerUserID).
 		Order("created_at DESC").
 		Offset(offset).Limit(limit).
 		Find(&models).Error
@@ -61,11 +63,11 @@ func (r *GeneratedMailboxRepo) List(ctx context.Context, domainResourceID uint, 
 	return result, nil
 }
 
-func (r *GeneratedMailboxRepo) Count(ctx context.Context, domainResourceID uint) (int64, error) {
+func (r *GeneratedMailboxRepo) Count(ctx context.Context, domainResourceID uint, ownerUserID uint) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&GeneratedMailboxModel{}).
-		Where("resource_id = ?", domainResourceID).
+		Where("resource_id = ? AND owner_user_id = ?", domainResourceID, ownerUserID).
 		Count(&count).Error
 	if err != nil {
 		return 0, fmt.Errorf("count generated mailboxes: %w", err)

@@ -99,7 +99,7 @@ stateDiagram-v2
 |------|------|
 | `key` | 绑定 key，例如 Microsoft 邮箱。系统池兜底可为空。 |
 | `ip` | `auto/ipv4/ipv6`。 |
-| `purpose` | `auth/fetch/aux` 等内部用途，用于日志和默认 IP 策略。 |
+| `purpose` | `auth/fetch/binding` 等内部用途，用于日志和默认 IP 策略。 |
 
 默认 IP 策略：
 

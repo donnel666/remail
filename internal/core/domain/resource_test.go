@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestMicrosoftResource_IsAllocatable(t *testing.T) {
@@ -35,10 +36,12 @@ func TestDomainResource_IsAllocatable(t *testing.T) {
 		purpose ResourcePurpose
 		want    bool
 	}{
-		{"dns_normal + sale", DomainStatusDNSNormal, PurposeSale, true},
-		{"dns_normal + auxiliary", DomainStatusDNSNormal, PurposeAuxiliary, false},
-		{"dns_abnormal + sale", DomainStatusDNSAbnormal, PurposeSale, false},
+		{"normal + sale", DomainStatusNormal, PurposeSale, true},
+		{"normal + not_sale", DomainStatusNormal, PurposeNotSale, false},
+		{"normal + binding", DomainStatusNormal, PurposeBinding, false},
+		{"abnormal + sale", DomainStatusAbnormal, PurposeSale, false},
 		{"disabled + sale", DomainStatusDisabled, PurposeSale, false},
+		{"deleted + sale", DomainStatusDeleted, PurposeSale, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,16 +93,53 @@ func TestMicrosoftResource_TransitionStatusRejectsIllegal(t *testing.T) {
 	}
 }
 
+func TestMicrosoftResource_MarkDeleted(t *testing.T) {
+	allocatedAt := testTime()
+	r := &MicrosoftResource{
+		Status:          MicrosoftStatusNormal,
+		ForSale:         false,
+		LastSafeError:   "old safe error",
+		LastAllocatedAt: &allocatedAt,
+	}
+
+	err := r.MarkDeleted()
+
+	if err != nil {
+		t.Fatalf("MarkDeleted() unexpected error: %v", err)
+	}
+	if r.Status != MicrosoftStatusDeleted {
+		t.Fatalf("status = %q, want %q", r.Status, MicrosoftStatusDeleted)
+	}
+	if r.LastSafeError != "" {
+		t.Fatalf("LastSafeError = %q, want empty", r.LastSafeError)
+	}
+	if r.LastAllocatedAt != nil {
+		t.Fatalf("LastAllocatedAt = %v, want nil", r.LastAllocatedAt)
+	}
+}
+
+func TestMicrosoftResource_MarkDeletedRejectsPublicOrDeleted(t *testing.T) {
+	public := &MicrosoftResource{Status: MicrosoftStatusNormal, ForSale: true}
+	if err := public.MarkDeleted(); !errors.Is(err, ErrResourceNotPrivate) {
+		t.Fatalf("public MarkDeleted() = %v, want ErrResourceNotPrivate", err)
+	}
+
+	deleted := &MicrosoftResource{Status: MicrosoftStatusDeleted, ForSale: false}
+	if err := deleted.MarkDeleted(); !errors.Is(err, ErrResourceNotFound) {
+		t.Fatalf("deleted MarkDeleted() = %v, want ErrResourceNotFound", err)
+	}
+}
+
 func TestDomainResource_TransitionStatus(t *testing.T) {
 	valid := []struct {
 		from MailDomainStatus
 		to   MailDomainStatus
 	}{
-		{DomainStatusDNSAbnormal, DomainStatusDNSNormal},
-		{DomainStatusDNSAbnormal, DomainStatusDisabled},
-		{DomainStatusDNSNormal, DomainStatusDNSAbnormal},
-		{DomainStatusDNSNormal, DomainStatusDisabled},
-		{DomainStatusDisabled, DomainStatusDNSAbnormal},
+		{DomainStatusAbnormal, DomainStatusNormal},
+		{DomainStatusAbnormal, DomainStatusDisabled},
+		{DomainStatusNormal, DomainStatusAbnormal},
+		{DomainStatusNormal, DomainStatusDisabled},
+		{DomainStatusDisabled, DomainStatusAbnormal},
 	}
 
 	for _, tt := range valid {
@@ -118,13 +158,48 @@ func TestDomainResource_TransitionStatus(t *testing.T) {
 func TestDomainResource_TransitionStatusRejectsIllegal(t *testing.T) {
 	r := &MailDomainResource{Status: DomainStatusDisabled}
 
-	err := r.TransitionStatus(DomainStatusDNSNormal)
+	err := r.TransitionStatus(DomainStatusNormal)
 
 	if !errors.Is(err, ErrInvalidResourceStatus) {
 		t.Fatalf("expected ErrInvalidResourceStatus, got %v", err)
 	}
 	if r.Status != DomainStatusDisabled {
 		t.Fatalf("status changed after illegal transition: %q", r.Status)
+	}
+}
+
+func TestDomainResource_MarkDeleted(t *testing.T) {
+	allocatedAt := testTime()
+	r := &MailDomainResource{
+		Status:          DomainStatusNormal,
+		Purpose:         PurposeNotSale,
+		LastAllocatedAt: &allocatedAt,
+	}
+
+	err := r.MarkDeleted()
+
+	if err != nil {
+		t.Fatalf("MarkDeleted() unexpected error: %v", err)
+	}
+	if r.Status != DomainStatusDeleted {
+		t.Fatalf("status = %q, want %q", r.Status, DomainStatusDeleted)
+	}
+	if r.LastAllocatedAt != nil {
+		t.Fatalf("LastAllocatedAt = %v, want nil", r.LastAllocatedAt)
+	}
+}
+
+func TestDomainResource_MarkDeletedRejectsSaleBindingOrDeleted(t *testing.T) {
+	for _, purpose := range []ResourcePurpose{PurposeSale, PurposeBinding} {
+		r := &MailDomainResource{Status: DomainStatusNormal, Purpose: purpose}
+		if err := r.MarkDeleted(); !errors.Is(err, ErrResourceNotPrivate) {
+			t.Fatalf("%s MarkDeleted() = %v, want ErrResourceNotPrivate", purpose, err)
+		}
+	}
+
+	deleted := &MailDomainResource{Status: DomainStatusDeleted, Purpose: PurposeNotSale}
+	if err := deleted.MarkDeleted(); !errors.Is(err, ErrResourceNotFound) {
+		t.Fatalf("deleted MarkDeleted() = %v, want ErrResourceNotFound", err)
 	}
 }
 
@@ -150,8 +225,9 @@ func TestIsValidPurpose(t *testing.T) {
 		p  ResourcePurpose
 		ok bool
 	}{
+		{PurposeNotSale, true},
 		{PurposeSale, true},
-		{PurposeAuxiliary, true},
+		{PurposeBinding, true},
 		{"invalid", false},
 		{"", false},
 	}
@@ -171,6 +247,7 @@ func TestIsValidMicrosoftStatus(t *testing.T) {
 		{"normal", true},
 		{"abnormal", true},
 		{"disabled", true},
+		{"deleted", true},
 		{"unknown", false},
 		{"", false},
 	}
@@ -186,11 +263,12 @@ func TestIsValidDomainStatus(t *testing.T) {
 		s  string
 		ok bool
 	}{
-		{"dns_normal", true},
-		{"dns_abnormal", true},
+		{"normal", true},
+		{"abnormal", true},
 		{"disabled", true},
+		{"deleted", true},
 		{"unknown", false},
-		{"normal", false},
+		{"", false},
 	}
 	for _, tt := range tests {
 		if got := IsValidDomainStatus(tt.s); got != tt.ok {
@@ -232,6 +310,69 @@ func TestIsValidGeneratedMailboxStatus(t *testing.T) {
 	}
 }
 
+func TestNormalizeDomainName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"lowercase and trim", " Example.COM ", "example.com"},
+		{"strip trailing root dot", "example.com.", "example.com"},
+		{"subdomain", "Sub.Example.Co.UK", "sub.example.co.uk"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeDomainName(tt.input)
+			if err != nil {
+				t.Fatalf("NormalizeDomainName() unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("NormalizeDomainName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDomainNameRejectsInvalid(t *testing.T) {
+	invalid := []string{
+		"",
+		"localhost",
+		"https://example.com",
+		"example.com/path",
+		"example.com:443",
+		"*.example.com",
+		"example..com",
+		"-example.com",
+		"example-.com",
+		"exa_mple.com",
+		"例子.com",
+	}
+	for _, input := range invalid {
+		t.Run(input, func(t *testing.T) {
+			if _, err := NormalizeDomainName(input); !errors.Is(err, ErrInvalidDomain) {
+				t.Fatalf("NormalizeDomainName(%q) = %v, want ErrInvalidDomain", input, err)
+			}
+		})
+	}
+}
+
+func TestDomainTLD(t *testing.T) {
+	tests := []struct {
+		domain string
+		want   string
+	}{
+		{"example.com", ".com"},
+		{"sub.example.co.uk", ".co.uk"},
+		{"example.com.cn", ".com.cn"},
+		{"example.net.ar", ".net.ar"},
+	}
+	for _, tt := range tests {
+		if got := DomainTLD(tt.domain); got != tt.want {
+			t.Fatalf("DomainTLD(%q) = %q, want %q", tt.domain, got, tt.want)
+		}
+	}
+}
+
 func TestResourceType_ConstantValues(t *testing.T) {
 	if ResourceTypeMicrosoft != "microsoft" {
 		t.Errorf("ResourceTypeMicrosoft = %q, want 'microsoft'", ResourceTypeMicrosoft)
@@ -261,4 +402,8 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func testTime() time.Time {
+	return time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 }

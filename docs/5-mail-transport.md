@@ -6,6 +6,7 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-06-30 | V1.1 | Codex | 补充 SMTP 外发由 BC-MAILTRANSPORT DeliveryPort 承接；IAM 不直接持有 SMTP 协议适配器。 |
+| 2026-07-02 | V1.2 | Codex | 补充 P1-I2 辅助邮箱英文统一为 `binding`，中文仍称辅助邮箱；不改变 MailTransport 与 Core 边界。 |
 
 > 支撑域。BC-MAILTRANSPORT 封装协议细节，只提供结构化结果，不做项目匹配和订单判断。
 
@@ -50,13 +51,13 @@ stateDiagram-v2
     sending --> failed: 不可重试/超过上限
 ```
 
-### 2.2 `AuxBinding`
+### 2.2 `Binding`
 
 | 字段 | 含义 |
 |------|------|
 | `id` | 绑定 ID |
 | `resourceId` | Microsoft 资源 ID |
-| `auxiliaryAddress` | 辅助邮箱地址 |
+| `bindingAddress` | 辅助邮箱地址 |
 | `microsoftEmail` | 待验证 Microsoft 邮箱 |
 | `status` | `pending/code_sent/verified/timeout/failed/expired` |
 | `purpose` | 用途 |
@@ -149,7 +150,7 @@ Microsoft 拉取用途必须显式传入：
 | `FetchPort` | 入站自 BC-MAILMATCH | 拉取结构化邮件。 |
 | `DeliveryPort` | 入站自 BC-GOVERNANCE/BC-IAM | 外发邮件。 |
 | `InboundPort` | 出站到 BC-MAILMATCH | SMTP 入站邮件落库。 |
-| `AuxCodeWaitPort` | 出站到 BC-MAILMATCH | Microsoft ACL 等待辅助邮箱验证码。 |
+| `BindingCodeWaitPort` | 出站到 BC-MAILMATCH | Microsoft ACL 等待辅助邮箱验证码。 |
 | `ProxyPort` | 出站到 BC-PROXY | 获取 Microsoft 通讯代理并上报代理成功/失败。 |
 
 ---

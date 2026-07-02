@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+	"unicode"
+)
 
 // ResourceType represents the type of email resource.
 type ResourceType string
@@ -18,23 +22,26 @@ const (
 	MicrosoftStatusNormal   MicrosoftResourceStatus = "normal"
 	MicrosoftStatusAbnormal MicrosoftResourceStatus = "abnormal"
 	MicrosoftStatusDisabled MicrosoftResourceStatus = "disabled"
+	MicrosoftStatusDeleted  MicrosoftResourceStatus = "deleted"
 )
 
 // MailDomainStatus represents the status of a domain resource.
 type MailDomainStatus string
 
 const (
-	DomainStatusDNSNormal   MailDomainStatus = "dns_normal"
-	DomainStatusDNSAbnormal MailDomainStatus = "dns_abnormal"
-	DomainStatusDisabled    MailDomainStatus = "disabled"
+	DomainStatusNormal   MailDomainStatus = "normal"
+	DomainStatusAbnormal MailDomainStatus = "abnormal"
+	DomainStatusDisabled MailDomainStatus = "disabled"
+	DomainStatusDeleted  MailDomainStatus = "deleted"
 )
 
 // ResourcePurpose represents the purpose of a domain resource.
 type ResourcePurpose string
 
 const (
-	PurposeSale      ResourcePurpose = "sale"
-	PurposeAuxiliary ResourcePurpose = "auxiliary"
+	PurposeNotSale ResourcePurpose = "not_sale"
+	PurposeSale    ResourcePurpose = "sale"
+	PurposeBinding ResourcePurpose = "binding"
 )
 
 // EmailResource is the root aggregate for all email resources.
@@ -54,7 +61,7 @@ func IsValidResourceType(t ResourceType) bool {
 
 // IsValidPurpose returns true if the purpose is recognized.
 func IsValidPurpose(p ResourcePurpose) bool {
-	return p == PurposeSale || p == PurposeAuxiliary
+	return p == PurposeNotSale || p == PurposeSale || p == PurposeBinding
 }
 
 // --- MicrosoftResource ---
@@ -80,7 +87,7 @@ type MicrosoftResource struct {
 // IsValidMicrosoftStatus returns true if the status is a valid state.
 func IsValidMicrosoftStatus(s string) bool {
 	switch MicrosoftResourceStatus(s) {
-	case MicrosoftStatusPending, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled:
+	case MicrosoftStatusPending, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled, MicrosoftStatusDeleted:
 		return true
 	default:
 		return false
@@ -98,6 +105,8 @@ func CanTransitionMicrosoftStatus(from, to MicrosoftResourceStatus) bool {
 		return to == MicrosoftStatusPending || to == MicrosoftStatusDisabled
 	case MicrosoftStatusDisabled:
 		return to == MicrosoftStatusPending
+	case MicrosoftStatusDeleted:
+		return false
 	default:
 		return false
 	}
@@ -112,6 +121,21 @@ func (r *MicrosoftResource) TransitionStatus(next MicrosoftResourceStatus) error
 	return nil
 }
 
+// MarkDeleted applies the user private-delete command. deleted is a terminal
+// command state, not a normal validation-state transition.
+func (r *MicrosoftResource) MarkDeleted() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.ForSale {
+		return ErrResourceNotPrivate
+	}
+	r.Status = MicrosoftStatusDeleted
+	r.LastSafeError = ""
+	r.LastAllocatedAt = nil
+	return nil
+}
+
 // IsAllocatable returns true if the Microsoft resource can be allocated.
 func (r *MicrosoftResource) IsAllocatable() bool {
 	return r.Status == MicrosoftStatusNormal && r.ForSale
@@ -119,12 +143,12 @@ func (r *MicrosoftResource) IsAllocatable() bool {
 
 // MicrosoftImportLine represents a single line from a Microsoft TXT import file.
 type MicrosoftImportLine struct {
-	LineNumber       int
-	Email            string
-	Password         string
-	ClientID         string
-	RefreshToken     string
-	AuxiliaryAddress string
+	LineNumber     int
+	Email          string
+	Password       string
+	ClientID       string
+	RefreshToken   string
+	BindingAddress string
 }
 
 // --- MailDomainResource ---
@@ -144,7 +168,7 @@ type MailDomainResource struct {
 // IsValidDomainStatus returns true if the status is a valid state.
 func IsValidDomainStatus(s string) bool {
 	switch MailDomainStatus(s) {
-	case DomainStatusDNSNormal, DomainStatusDNSAbnormal, DomainStatusDisabled:
+	case DomainStatusNormal, DomainStatusAbnormal, DomainStatusDisabled, DomainStatusDeleted:
 		return true
 	default:
 		return false
@@ -154,12 +178,14 @@ func IsValidDomainStatus(s string) bool {
 // CanTransitionDomainStatus returns true when a status transition follows the Core state machine.
 func CanTransitionDomainStatus(from, to MailDomainStatus) bool {
 	switch from {
-	case DomainStatusDNSAbnormal:
-		return to == DomainStatusDNSNormal || to == DomainStatusDisabled
-	case DomainStatusDNSNormal:
-		return to == DomainStatusDNSAbnormal || to == DomainStatusDisabled
+	case DomainStatusAbnormal:
+		return to == DomainStatusNormal || to == DomainStatusDisabled
+	case DomainStatusNormal:
+		return to == DomainStatusAbnormal || to == DomainStatusDisabled
 	case DomainStatusDisabled:
-		return to == DomainStatusDNSAbnormal
+		return to == DomainStatusAbnormal
+	case DomainStatusDeleted:
+		return false
 	default:
 		return false
 	}
@@ -174,10 +200,159 @@ func (r *MailDomainResource) TransitionStatus(next MailDomainStatus) error {
 	return nil
 }
 
+// MarkDeleted applies the user private-delete command. deleted is a terminal
+// command state, not a normal validation-state transition.
+func (r *MailDomainResource) MarkDeleted() error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Purpose != PurposeNotSale {
+		return ErrResourceNotPrivate
+	}
+	r.Status = DomainStatusDeleted
+	r.LastAllocatedAt = nil
+	return nil
+}
+
 // IsAllocatable returns true if the domain resource can be allocated.
 func (r *MailDomainResource) IsAllocatable() bool {
 	return r.Purpose == PurposeSale &&
-		r.Status == DomainStatusDNSNormal
+		r.Status == DomainStatusNormal
+}
+
+var knownTwoPartTLDs = map[string]struct{}{
+	"ac.jp":  {},
+	"ac.th":  {},
+	"ac.uk":  {},
+	"co.in":  {},
+	"co.jp":  {},
+	"co.kr":  {},
+	"co.nz":  {},
+	"co.th":  {},
+	"co.uk":  {},
+	"co.za":  {},
+	"com.ar": {},
+	"com.au": {},
+	"com.br": {},
+	"com.cn": {},
+	"com.hk": {},
+	"com.mx": {},
+	"com.sg": {},
+	"com.tw": {},
+	"edu.cn": {},
+	"edu.hk": {},
+	"gen.in": {},
+	"go.jp":  {},
+	"go.th":  {},
+	"gov.cn": {},
+	"gov.uk": {},
+	"ne.jp":  {},
+	"ne.kr":  {},
+	"net.au": {},
+	"net.ar": {},
+	"net.br": {},
+	"net.cn": {},
+	"net.hk": {},
+	"net.in": {},
+	"net.nz": {},
+	"net.sg": {},
+	"net.th": {},
+	"net.tw": {},
+	"net.za": {},
+	"or.jp":  {},
+	"or.kr":  {},
+	"or.th":  {},
+	"org.ar": {},
+	"org.au": {},
+	"org.br": {},
+	"org.cn": {},
+	"org.hk": {},
+	"org.in": {},
+	"org.mx": {},
+	"org.nz": {},
+	"org.sg": {},
+	"org.tw": {},
+	"org.uk": {},
+	"org.za": {},
+}
+
+// NormalizeDomainName returns the canonical ASCII domain form accepted by Core.
+func NormalizeDomainName(value string) (string, error) {
+	canonical := normalizeDomainInput(value)
+	if canonical == "" || !strings.Contains(canonical, ".") {
+		return "", ErrInvalidDomain
+	}
+	if err := validateDomainLabels(canonical); err != nil {
+		return "", ErrInvalidDomain
+	}
+	return canonical, nil
+}
+
+// NormalizeDomainSuffix returns a canonical suffix with a leading dot.
+func NormalizeDomainSuffix(value string) (string, error) {
+	suffix := normalizeDomainInput(strings.TrimPrefix(strings.TrimSpace(value), "."))
+	if suffix == "" {
+		return "", ErrInvalidDomain
+	}
+	if err := validateDomainLabels(suffix); err != nil {
+		return "", ErrInvalidDomain
+	}
+	return "." + suffix, nil
+}
+
+// DomainTLD extracts the normalized suffix used by resource filters.
+func DomainTLD(value string) string {
+	canonical, err := NormalizeDomainName(value)
+	if err != nil {
+		return ""
+	}
+
+	parts := strings.Split(canonical, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	lastTwo := strings.Join(parts[len(parts)-2:], ".")
+	if _, ok := knownTwoPartTLDs[lastTwo]; ok {
+		return "." + lastTwo
+	}
+
+	return "." + parts[len(parts)-1]
+}
+
+func normalizeDomainInput(value string) string {
+	canonical := strings.ToLower(strings.TrimSpace(value))
+	canonical = strings.TrimSuffix(canonical, ".")
+	return canonical
+}
+
+func validateDomainLabels(value string) error {
+	if len(value) == 0 || len(value) > 253 {
+		return ErrInvalidDomain
+	}
+	if strings.Contains(value, "://") ||
+		strings.ContainsAny(value, `/\:*@`) ||
+		strings.IndexFunc(value, unicode.IsSpace) >= 0 {
+		return ErrInvalidDomain
+	}
+
+	labels := strings.Split(value, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return ErrInvalidDomain
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return ErrInvalidDomain
+		}
+		for i := 0; i < len(label); i++ {
+			ch := label[i]
+			if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+				continue
+			}
+			return ErrInvalidDomain
+		}
+	}
+	return nil
 }
 
 // --- ExplicitAlias ---

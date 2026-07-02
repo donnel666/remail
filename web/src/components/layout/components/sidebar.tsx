@@ -1,14 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/context/auth-provider";
 import { cn } from "@/lib/utils";
-import { SIDEBAR_NAV_GROUPS } from "../config/navigation";
+import { getVisibleSidebarNavGroups } from "../config/navigation";
 
 export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
+  const { currentUser } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const roleLevel = currentUser?.roleLevel ?? 0;
+  const visibleGroups = useMemo(
+    () => getVisibleSidebarNavGroups(roleLevel),
+    [roleLevel]
+  );
 
   return (
     <aside
@@ -18,8 +25,8 @@ export function Sidebar() {
       )}
     >
       <nav className={cn("flex-1 overflow-y-auto bg-background px-2", collapsed ? "pt-3" : "pt-6")}>
-        {SIDEBAR_NAV_GROUPS.map((group, groupIndex) => (
-          <section key={group.labelKey}>
+        {visibleGroups.map((group, groupIndex) => (
+          <section key={group.id}>
             {groupIndex > 0 ? (
               <div
                 className={cn(

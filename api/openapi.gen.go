@@ -18,6 +18,45 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for CreateDomainRequestPurpose.
+const (
+	CreateDomainRequestPurposeBinding CreateDomainRequestPurpose = "binding"
+	CreateDomainRequestPurposeNotSale CreateDomainRequestPurpose = "not_sale"
+)
+
+// Valid indicates whether the value is a known member of the CreateDomainRequestPurpose enum.
+func (e CreateDomainRequestPurpose) Valid() bool {
+	switch e {
+	case CreateDomainRequestPurposeBinding:
+		return true
+	case CreateDomainRequestPurposeNotSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DomainResourceDetailPurpose.
+const (
+	DomainResourceDetailPurposeBinding DomainResourceDetailPurpose = "binding"
+	DomainResourceDetailPurposeNotSale DomainResourceDetailPurpose = "not_sale"
+	DomainResourceDetailPurposeSale    DomainResourceDetailPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the DomainResourceDetailPurpose enum.
+func (e DomainResourceDetailPurpose) Valid() bool {
+	switch e {
+	case DomainResourceDetailPurposeBinding:
+		return true
+	case DomainResourceDetailPurposeNotSale:
+		return true
+	case DomainResourceDetailPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ImportStatusResponseStatus.
 const (
 	Failed     ImportStatusResponseStatus = "failed"
@@ -69,6 +108,93 @@ func (e PermissionPolicyResponseEffect) Valid() bool {
 	case PermissionPolicyResponseEffectAllow:
 		return true
 	case PermissionPolicyResponseEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceBulkFilterResourceType.
+const (
+	Domain    ResourceBulkFilterResourceType = "domain"
+	Microsoft ResourceBulkFilterResourceType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ResourceBulkFilterResourceType enum.
+func (e ResourceBulkFilterResourceType) Valid() bool {
+	switch e {
+	case Domain:
+		return true
+	case Microsoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceBulkSelectionMode.
+const (
+	ResourceBulkSelectionModeFilter ResourceBulkSelectionMode = "filter"
+	ResourceBulkSelectionModeIds    ResourceBulkSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the ResourceBulkSelectionMode enum.
+func (e ResourceBulkSelectionMode) Valid() bool {
+	switch e {
+	case ResourceBulkSelectionModeFilter:
+		return true
+	case ResourceBulkSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceBulkSelection0Mode.
+const (
+	ResourceBulkSelection0ModeIds ResourceBulkSelection0Mode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the ResourceBulkSelection0Mode enum.
+func (e ResourceBulkSelection0Mode) Valid() bool {
+	switch e {
+	case ResourceBulkSelection0ModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceBulkSelection1Mode.
+const (
+	Filter ResourceBulkSelection1Mode = "filter"
+)
+
+// Valid indicates whether the value is a known member of the ResourceBulkSelection1Mode enum.
+func (e ResourceBulkSelection1Mode) Valid() bool {
+	switch e {
+	case Filter:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceItemPurpose.
+const (
+	Binding ResourceItemPurpose = "binding"
+	NotSale ResourceItemPurpose = "not_sale"
+	Sale    ResourceItemPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the ResourceItemPurpose enum.
+func (e ResourceItemPurpose) Valid() bool {
+	switch e {
+	case Binding:
+		return true
+	case NotSale:
+		return true
+	case Sale:
 		return true
 	default:
 		return false
@@ -192,10 +318,17 @@ type ChangePasswordRequest struct {
 
 // CreateDomainRequest defines model for CreateDomainRequest.
 type CreateDomainRequest struct {
-	Domain       string `json:"domain"`
-	MailServerId int    `json:"mailServerId"`
-	Purpose      string `json:"purpose"`
+	Domain string `json:"domain"`
+
+	// MailServerId Optional extension hook; omitted domains use the built-in local inbound server mx.aishop6.com
+	MailServerId *int `json:"mailServerId,omitempty"`
+
+	// Purpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
+	Purpose *CreateDomainRequestPurpose `json:"purpose,omitempty"`
 }
+
+// CreateDomainRequestPurpose Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
+type CreateDomainRequestPurpose string
 
 // CreateMailServerRequest defines model for CreateMailServerRequest.
 type CreateMailServerRequest struct {
@@ -208,6 +341,20 @@ type CreateMailServerRequest struct {
 	SpfRecord     *string `json:"spfRecord,omitempty"`
 }
 
+// DeleteResourcesRequest defines model for DeleteResourcesRequest.
+type DeleteResourcesRequest struct {
+	Selection ResourceBulkSelection `json:"selection"`
+}
+
+// DeleteResourcesResponse defines model for DeleteResourcesResponse.
+type DeleteResourcesResponse struct {
+	Deleted int `json:"deleted"`
+
+	// DeletedResourceIds Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses.
+	DeletedResourceIds *[]int `json:"deletedResourceIds,omitempty"`
+	Requested          int    `json:"requested"`
+}
+
 // DomainResourceDetail defines model for DomainResourceDetail.
 type DomainResourceDetail struct {
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -215,9 +362,16 @@ type DomainResourceDetail struct {
 	Id              int        `json:"id"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 	MailServerId    int        `json:"mailServerId"`
-	Purpose         string     `json:"purpose"`
-	Status          string     `json:"status"`
+
+	// Purpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
+	Purpose DomainResourceDetailPurpose `json:"purpose"`
+
+	// Status Domain resource status (normal/abnormal/disabled/deleted)
+	Status string `json:"status"`
 }
+
+// DomainResourceDetailPurpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
+type DomainResourceDetailPurpose string
 
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
@@ -371,13 +525,16 @@ type PermissionPolicyResponseEffect string
 
 // PublishResourcesRequest defines model for PublishResourcesRequest.
 type PublishResourcesRequest struct {
-	ResourceIds []int `json:"resourceIds"`
+	Selection ResourceBulkSelection `json:"selection"`
 }
 
 // PublishResourcesResponse defines model for PublishResourcesResponse.
 type PublishResourcesResponse struct {
 	Published int `json:"published"`
-	Requested int `json:"requested"`
+
+	// PublishedResourceIds Actual published resource IDs for ids mode. Omitted for filter mode to avoid large responses.
+	PublishedResourceIds *[]int `json:"publishedResourceIds,omitempty"`
+	Requested            int    `json:"requested"`
 }
 
 // ReadyzResponse defines model for ReadyzResponse.
@@ -395,12 +552,74 @@ type RegisterRequest struct {
 	Password   string              `json:"password"`
 }
 
+// ResourceBulkFilter defines model for ResourceBulkFilter.
+type ResourceBulkFilter struct {
+	// CreatedFrom Inclusive resource creation lower bound. The frontend must send ISO date-time.
+	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
+
+	// CreatedTo Inclusive resource creation upper bound. The frontend must send ISO date-time.
+	CreatedTo *time.Time `json:"createdTo,omitempty"`
+
+	// LongLived Microsoft long-lived filter.
+	LongLived    *bool                          `json:"longLived,omitempty"`
+	ResourceType ResourceBulkFilterResourceType `json:"resourceType"`
+
+	// Search Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
+	Search *string `json:"search,omitempty"`
+	Status *string `json:"status,omitempty"`
+
+	// Suffix Exact Microsoft suffix such as @outlook.com.
+	Suffix *string `json:"suffix,omitempty"`
+
+	// Tld Exact domain suffix such as .com.
+	Tld *string `json:"tld,omitempty"`
+}
+
+// ResourceBulkFilterResourceType defines model for ResourceBulkFilter.ResourceType.
+type ResourceBulkFilterResourceType string
+
+// ResourceBulkSelection defines model for ResourceBulkSelection.
+type ResourceBulkSelection struct {
+	Filter *ResourceBulkFilter `json:"filter,omitempty"`
+
+	// Mode ids selects explicit checked resources; filter selects all private resources matching the server-side filters.
+	Mode ResourceBulkSelectionMode `json:"mode"`
+
+	// ResourceIds Required when mode is ids.
+	ResourceIds *[]int `json:"resourceIds,omitempty"`
+	union       json.RawMessage
+}
+
+// ResourceBulkSelectionMode ids selects explicit checked resources; filter selects all private resources matching the server-side filters.
+type ResourceBulkSelectionMode string
+
+// ResourceBulkSelection0 defines model for .
+type ResourceBulkSelection0 struct {
+	Mode        ResourceBulkSelection0Mode `json:"mode"`
+	ResourceIds []int                      `json:"resourceIds"`
+}
+
+// ResourceBulkSelection0Mode defines model for ResourceBulkSelection.0.Mode.
+type ResourceBulkSelection0Mode string
+
+// ResourceBulkSelection1 defines model for .
+type ResourceBulkSelection1 struct {
+	Filter ResourceBulkFilter         `json:"filter"`
+	Mode   ResourceBulkSelection1Mode `json:"mode"`
+}
+
+// ResourceBulkSelection1Mode defines model for ResourceBulkSelection.1.Mode.
+type ResourceBulkSelection1Mode string
+
 // ResourceItem defines model for ResourceItem.
 type ResourceItem struct {
 	CreatedAt time.Time `json:"createdAt"`
 
 	// Domain Domain name (domain resources only)
 	Domain *string `json:"domain,omitempty"`
+
+	// DomainTld Backend-derived domain suffix used by exact domain bulk filters.
+	DomainTld *string `json:"domainTld,omitempty"`
 
 	// Email Email address (Microsoft resources only)
 	Email *string `json:"email,omitempty"`
@@ -414,15 +633,24 @@ type ResourceItem struct {
 
 	// LongLived Microsoft resource lifetime classification selected during import
 	LongLived *bool `json:"longLived,omitempty"`
-	OwnerId   int   `json:"ownerId"`
 
-	// Purpose Domain resource purpose (domain resources only, sale/auxiliary)
-	Purpose *string `json:"purpose,omitempty"`
+	// MailServerId Mail server id for domain resources.
+	MailServerId *int `json:"mailServerId,omitempty"`
 
-	// Status Resource status (e.g., pending/normal/abnormal/disabled, dns_normal/dns_abnormal)
+	// MailboxCount Generated mailbox count for domain resources.
+	MailboxCount *int `json:"mailboxCount,omitempty"`
+	OwnerId      int  `json:"ownerId"`
+
+	// Purpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
+	Purpose *ResourceItemPurpose `json:"purpose,omitempty"`
+
+	// Status Resource status (e.g., pending/normal/abnormal/disabled/deleted)
 	Status *string `json:"status,omitempty"`
 	Type   string  `json:"type"`
 }
+
+// ResourceItemPurpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
+type ResourceItemPurpose string
 
 // ResourceListResponse defines model for ResourceListResponse.
 type ResourceListResponse struct {
@@ -608,6 +836,12 @@ type GetResourcesParams struct {
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostResourceDeleteBatchParams defines parameters for PostResourceDeleteBatch.
+type PostResourceDeleteBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostResourceImportMultipartBody defines parameters for PostResourceImport.
 type PostResourceImportMultipartBody struct {
 	File openapi_types.File `json:"file"`
@@ -643,6 +877,11 @@ type GetResourceDetail200JSONResponseBody struct {
 type PostResourcePublishParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostResourcePublish200JSONResponseBody defines parameters for PostResourcePublish.
+type PostResourcePublish200JSONResponseBody struct {
+	union json.RawMessage
 }
 
 // PostResourceValidateParams defines parameters for PostResourceValidate.
@@ -709,6 +948,9 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
 
+// PostResourceDeleteBatchJSONRequestBody defines body for PostResourceDeleteBatch for application/json ContentType.
+type PostResourceDeleteBatchJSONRequestBody = DeleteResourcesRequest
+
 // PostResourceImportMultipartRequestBody defines body for PostResourceImport for multipart/form-data ContentType.
 type PostResourceImportMultipartRequestBody PostResourceImportMultipartBody
 
@@ -726,6 +968,128 @@ type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// AsResourceBulkSelection0 returns the union data inside the ResourceBulkSelection as a ResourceBulkSelection0
+func (t ResourceBulkSelection) AsResourceBulkSelection0() (ResourceBulkSelection0, error) {
+	var body ResourceBulkSelection0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResourceBulkSelection0 overwrites any union data inside the ResourceBulkSelection as the provided ResourceBulkSelection0
+func (t *ResourceBulkSelection) FromResourceBulkSelection0(v ResourceBulkSelection0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResourceBulkSelection0 performs a merge with any union data inside the ResourceBulkSelection, using the provided ResourceBulkSelection0
+func (t *ResourceBulkSelection) MergeResourceBulkSelection0(v ResourceBulkSelection0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResourceBulkSelection1 returns the union data inside the ResourceBulkSelection as a ResourceBulkSelection1
+func (t ResourceBulkSelection) AsResourceBulkSelection1() (ResourceBulkSelection1, error) {
+	var body ResourceBulkSelection1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResourceBulkSelection1 overwrites any union data inside the ResourceBulkSelection as the provided ResourceBulkSelection1
+func (t *ResourceBulkSelection) FromResourceBulkSelection1(v ResourceBulkSelection1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResourceBulkSelection1 performs a merge with any union data inside the ResourceBulkSelection, using the provided ResourceBulkSelection1
+func (t *ResourceBulkSelection) MergeResourceBulkSelection1(v ResourceBulkSelection1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResourceBulkSelection) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.Filter != nil {
+		object["filter"], err = json.Marshal(t.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'filter': %w", err)
+		}
+	}
+
+	object["mode"], err = json.Marshal(t.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'mode': %w", err)
+	}
+
+	if t.ResourceIds != nil {
+		object["resourceIds"], err = json.Marshal(t.ResourceIds)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'resourceIds': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *ResourceBulkSelection) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["filter"]; found {
+		err = json.Unmarshal(raw, &t.Filter)
+		if err != nil {
+			return fmt.Errorf("error reading 'filter': %w", err)
+		}
+	}
+
+	if raw, found := object["mode"]; found {
+		err = json.Unmarshal(raw, &t.Mode)
+		if err != nil {
+			return fmt.Errorf("error reading 'mode': %w", err)
+		}
+	}
+
+	if raw, found := object["resourceIds"]; found {
+		err = json.Unmarshal(raw, &t.ResourceIds)
+		if err != nil {
+			return fmt.Errorf("error reading 'resourceIds': %w", err)
+		}
+	}
+
+	return err
+}
 
 // AsMicrosoftResourceDetail returns the union data inside the GetResourceDetail200JSONResponseBody as a MicrosoftResourceDetail
 func (t GetResourceDetail200JSONResponseBody) AsMicrosoftResourceDetail() (MicrosoftResourceDetail, error) {
@@ -785,6 +1149,68 @@ func (t GetResourceDetail200JSONResponseBody) MarshalJSON() ([]byte, error) {
 }
 
 func (t *GetResourceDetail200JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsMicrosoftResourceDetail returns the union data inside the PostResourcePublish200JSONResponseBody as a MicrosoftResourceDetail
+func (t PostResourcePublish200JSONResponseBody) AsMicrosoftResourceDetail() (MicrosoftResourceDetail, error) {
+	var body MicrosoftResourceDetail
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMicrosoftResourceDetail overwrites any union data inside the PostResourcePublish200JSONResponseBody as the provided MicrosoftResourceDetail
+func (t *PostResourcePublish200JSONResponseBody) FromMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMicrosoftResourceDetail performs a merge with any union data inside the PostResourcePublish200JSONResponseBody, using the provided MicrosoftResourceDetail
+func (t *PostResourcePublish200JSONResponseBody) MergeMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDomainResourceDetail returns the union data inside the PostResourcePublish200JSONResponseBody as a DomainResourceDetail
+func (t PostResourcePublish200JSONResponseBody) AsDomainResourceDetail() (DomainResourceDetail, error) {
+	var body DomainResourceDetail
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDomainResourceDetail overwrites any union data inside the PostResourcePublish200JSONResponseBody as the provided DomainResourceDetail
+func (t *PostResourcePublish200JSONResponseBody) FromDomainResourceDetail(v DomainResourceDetail) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDomainResourceDetail performs a merge with any union data inside the PostResourcePublish200JSONResponseBody, using the provided DomainResourceDetail
+func (t *PostResourcePublish200JSONResponseBody) MergeDomainResourceDetail(v DomainResourceDetail) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PostResourcePublish200JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PostResourcePublish200JSONResponseBody) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -869,19 +1295,22 @@ type ServerInterface interface {
 	// List email resources
 	// (GET /v1/resources)
 	GetResources(c *gin.Context, params GetResourcesParams)
+	// Delete owned private resources
+	// (POST /v1/resources/delete)
+	PostResourceDeleteBatch(c *gin.Context, params PostResourceDeleteBatchParams)
 	// Import Microsoft resources from TXT
 	// (POST /v1/resources/imports)
 	PostResourceImport(c *gin.Context, params PostResourceImportParams)
-	// Publish owned Microsoft resources to public supply
+	// Publish owned resources to public supply
 	// (POST /v1/resources/publish)
 	PostResourcePublishBatch(c *gin.Context, params PostResourcePublishBatchParams)
-	// Delete an owned private Microsoft resource
+	// Delete an owned private resource
 	// (DELETE /v1/resources/{resourceId})
 	DeleteResource(c *gin.Context, resourceId int, params DeleteResourceParams)
 	// Get resource detail (no credentials)
 	// (GET /v1/resources/{resourceId})
 	GetResourceDetail(c *gin.Context, resourceId int)
-	// Publish an owned Microsoft resource to public supply
+	// Publish an owned resource to public supply
 	// (POST /v1/resources/{resourceId}/publish)
 	PostResourcePublish(c *gin.Context, resourceId int, params PostResourcePublishParams)
 	// Request resource validation (not yet implemented)
@@ -1784,6 +2213,51 @@ func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 	siw.Handler.GetResources(c, params)
 }
 
+// PostResourceDeleteBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostResourceDeleteBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostResourceDeleteBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostResourceDeleteBatch(c, params)
+}
+
 // PostResourceImport operation middleware
 func (siw *ServerInterfaceWrapper) PostResourceImport(c *gin.Context) {
 
@@ -2337,6 +2811,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
+	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
 	router.POST(options.BaseURL+"/v1/resources/publish", wrapper.PostResourcePublishBatch)
 	router.DELETE(options.BaseURL+"/v1/resources/:resourceId", wrapper.DeleteResource)
