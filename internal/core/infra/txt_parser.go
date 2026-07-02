@@ -23,14 +23,18 @@ func NewTXTParser() *TXTParser {
 //	email----password----clientId----refreshToken----bindingAddress
 //
 // Empty lines are skipped.
-func (p *TXTParser) ParseMicrosoftImport(content string) ([]domain.MicrosoftImportLine, error) {
+func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, domain.ErrInvalidImportFormat
+		return nil, nil, domain.ErrInvalidImportFormat
+	}
+	if strategy == "" {
+		strategy = domain.ImportErrorStrategySkip
 	}
 
 	lines := strings.Split(content, "\n")
 	var result []domain.MicrosoftImportLine
+	var failures []domain.ImportLineError
 	for i, line := range lines {
 		lineNumber := i + 1
 		line = strings.TrimSpace(line)
@@ -38,59 +42,72 @@ func (p *TXTParser) ParseMicrosoftImport(content string) ([]domain.MicrosoftImpo
 			continue
 		}
 
-		parts := strings.Split(line, "----")
-		if len(parts) != 2 && len(parts) != 3 && len(parts) != 4 && len(parts) != 5 {
-			return nil, importLineError(lineNumber, parts)
+		parsed, lineErr := parseMicrosoftImportLine(lineNumber, line)
+		if lineErr != nil {
+			if strategy == domain.ImportErrorStrategyAbort {
+				return nil, nil, lineErr
+			}
+			failures = append(failures, *lineErr)
+			continue
 		}
 
-		email := strings.TrimSpace(parts[0])
-		password := strings.TrimSpace(parts[1])
-		if email == "" || password == "" {
-			return nil, importLineError(lineNumber, parts)
-		}
-
-		clientID := ""
-		refreshToken := ""
-		bindingAddress := ""
-		switch len(parts) {
-		case 3:
-			bindingAddress = strings.TrimSpace(parts[2])
-			if bindingAddress == "" {
-				return nil, importLineError(lineNumber, parts)
-			}
-		case 4:
-			clientID = strings.TrimSpace(parts[2])
-			refreshToken = strings.TrimSpace(parts[3])
-			if clientID == "" || refreshToken == "" {
-				return nil, importLineError(lineNumber, parts)
-			}
-		case 5:
-			clientID = strings.TrimSpace(parts[2])
-			refreshToken = strings.TrimSpace(parts[3])
-			bindingAddress = strings.TrimSpace(parts[4])
-			if clientID == "" || refreshToken == "" || bindingAddress == "" {
-				return nil, importLineError(lineNumber, parts)
-			}
-		}
-
-		result = append(result, domain.MicrosoftImportLine{
-			LineNumber:     lineNumber,
-			Email:          email,
-			Password:       password,
-			ClientID:       clientID,
-			RefreshToken:   refreshToken,
-			BindingAddress: bindingAddress,
-		})
+		result = append(result, *parsed)
 	}
 
-	if len(result) == 0 {
-		return nil, domain.ErrInvalidImportFormat
+	if len(result) == 0 && len(failures) == 0 {
+		return nil, nil, domain.ErrInvalidImportFormat
 	}
 
-	return result, nil
+	return result, failures, nil
 }
 
-func importLineError(lineNumber int, parts []string) error {
+func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImportLine, *domain.ImportLineError) {
+	parts := strings.Split(line, "----")
+	if len(parts) != 2 && len(parts) != 3 && len(parts) != 4 && len(parts) != 5 {
+		return nil, importLineError(lineNumber, parts)
+	}
+
+	email := strings.TrimSpace(parts[0])
+	password := strings.TrimSpace(parts[1])
+	if email == "" || password == "" {
+		return nil, importLineError(lineNumber, parts)
+	}
+
+	clientID := ""
+	refreshToken := ""
+	bindingAddress := ""
+	switch len(parts) {
+	case 3:
+		bindingAddress = strings.TrimSpace(parts[2])
+		if bindingAddress == "" {
+			return nil, importLineError(lineNumber, parts)
+		}
+	case 4:
+		clientID = strings.TrimSpace(parts[2])
+		refreshToken = strings.TrimSpace(parts[3])
+		if clientID == "" || refreshToken == "" {
+			return nil, importLineError(lineNumber, parts)
+		}
+	case 5:
+		clientID = strings.TrimSpace(parts[2])
+		refreshToken = strings.TrimSpace(parts[3])
+		bindingAddress = strings.TrimSpace(parts[4])
+		if clientID == "" || refreshToken == "" || bindingAddress == "" {
+			return nil, importLineError(lineNumber, parts)
+		}
+	}
+
+	return &domain.MicrosoftImportLine{
+		LineNumber:     lineNumber,
+		Email:          email,
+		Password:       password,
+		ClientID:       clientID,
+		RefreshToken:   refreshToken,
+		BindingAddress: bindingAddress,
+	}, nil
+}
+
+func importLineError(lineNumber int, parts []string) *domain.ImportLineError {
 	email := ""
 	if len(parts) > 0 {
 		email = strings.TrimSpace(parts[0])

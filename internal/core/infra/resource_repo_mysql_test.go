@@ -294,7 +294,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 		{EmailAddress: "dup@test.local", Password: "secret", ForSale: true, Status: domain.MicrosoftStatusPending},
 	}
 
-	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms), domain.ErrDuplicateEmail)
+	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""), domain.ErrDuplicateEmail)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
@@ -372,7 +372,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 		LastSafeError: "",
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", ""))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -452,7 +452,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftC
 		Status:       domain.MicrosoftStatusPending,
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", ""))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -496,14 +496,14 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 		{EmailAddress: "two@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
 	}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""))
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.ResourceImportImported, storedImport.Status)
 	require.Equal(t, 2, storedImport.ImportedCount)
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -1467,6 +1467,19 @@ func TestResourceRepoBulkFilterMutationsMySQL(t *testing.T) {
 	require.Equal(t, string(domain.DomainStatusNormal), saleStatus)
 	require.Equal(t, string(domain.DomainStatusNormal), bindingStatus)
 	require.Equal(t, string(domain.DomainStatusNormal), oldMatchingStatus)
+
+	var filterDeleteLog struct {
+		Count       int64
+		ResourceID  string
+		SafeSummary string
+	}
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) AS count, COALESCE(MAX(resource_id), '') AS resource_id, COALESCE(MAX(safe_summary), '') AS safe_summary FROM operation_logs WHERE request_id = ?",
+		"req-filter-delete",
+	).Scan(&filterDeleteLog).Error)
+	require.EqualValues(t, 1, filterDeleteLog.Count)
+	require.Equal(t, "filter", filterDeleteLog.ResourceID)
+	require.Contains(t, filterDeleteLog.SafeSummary, "Count: 1")
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

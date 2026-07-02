@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -142,7 +143,12 @@ type ResourceRepo struct {
 	operationLogs *governanceinfra.OperationLogRepo
 }
 
-const resourceBulkMutationChunkSize = 1000
+const (
+	resourceBulkMutationChunkSize      = 1000
+	resourceBulkOperationLogResourceID = "filter"
+	resourceImportLookupChunkSize      = 10000
+	resourceImportInsertBatchSize      = 1000
+)
 
 // NewResourceRepo creates a new GORM-backed resource repository.
 func NewResourceRepo(db *gorm.DB) *ResourceRepo {
@@ -163,6 +169,81 @@ func microsoftEmailDomain(email string) string {
 		return ""
 	}
 	return normalized[index+1:]
+}
+
+func uniqueMicrosoftEmails(emails []string) []string {
+	seen := make(map[string]struct{}, len(emails))
+	result := make([]string, 0, len(emails))
+	for _, email := range emails {
+		trimmed := strings.TrimSpace(email)
+		key := microsoftEmailKey(trimmed)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return microsoftEmailKey(result[i]) < microsoftEmailKey(result[j])
+	})
+	return result
+}
+
+func findMicrosoftResourceModelsByEmails(db *gorm.DB, emails []string, lockRows bool, includeDeleted bool) ([]MicrosoftResourceModel, error) {
+	uniqueEmails := uniqueMicrosoftEmails(emails)
+	if len(uniqueEmails) == 0 {
+		return nil, nil
+	}
+
+	models := make([]MicrosoftResourceModel, 0)
+	for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
+		end := start + resourceImportLookupChunkSize
+		if end > len(uniqueEmails) {
+			end = len(uniqueEmails)
+		}
+
+		query := db.Model(&MicrosoftResourceModel{}).Where("email_address IN ?", uniqueEmails[start:end])
+		if lockRows {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if !includeDeleted {
+			query = query.Where("status <> ?", string(domain.MicrosoftStatusDeleted))
+		}
+
+		var chunk []MicrosoftResourceModel
+		if err := query.Find(&chunk).Error; err != nil {
+			return nil, err
+		}
+		models = append(models, chunk...)
+	}
+	return models, nil
+}
+
+func findMicrosoftEmailAddressesByEmails(db *gorm.DB, emails []string) ([]string, error) {
+	uniqueEmails := uniqueMicrosoftEmails(emails)
+	if len(uniqueEmails) == 0 {
+		return nil, nil
+	}
+
+	found := make([]string, 0)
+	for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
+		end := start + resourceImportLookupChunkSize
+		if end > len(uniqueEmails) {
+			end = len(uniqueEmails)
+		}
+
+		var chunk []string
+		if err := db.Model(&MicrosoftResourceModel{}).
+			Where("email_address IN ? AND status <> ?", uniqueEmails[start:end], string(domain.MicrosoftStatusDeleted)).
+			Pluck("email_address", &chunk).Error; err != nil {
+			return nil, err
+		}
+		found = append(found, chunk...)
+	}
+	return found, nil
 }
 
 func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.EmailResource, ms *domain.MicrosoftResource) error {
@@ -304,10 +385,9 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		seenEmails[key] = struct{}{}
 		emails = append(emails, strings.TrimSpace(ms[i].EmailAddress))
 	}
-	var existingModels []MicrosoftResourceModel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("email_address IN ?", emails).
-		Find(&existingModels).Error; err != nil {
+
+	existingModels, err := findMicrosoftResourceModelsByEmails(tx, emails, true, true)
+	if err != nil {
 		return fmt.Errorf("find existing microsoft resources: %w", err)
 	}
 	existingByEmail := make(map[string]MicrosoftResourceModel, len(existingModels))
@@ -375,7 +455,6 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		return nil
 	}
 
-	const batchSize = 1000
 	rootModels := make([]EmailResourceModel, len(resources))
 	for i := range resources {
 		rootModels[i] = EmailResourceModel{
@@ -383,7 +462,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 			OwnerUserID: resources[i].OwnerUserID,
 		}
 	}
-	if err := tx.CreateInBatches(&rootModels, batchSize).Error; err != nil {
+	if err := tx.CreateInBatches(&rootModels, resourceImportInsertBatchSize).Error; err != nil {
 		return fmt.Errorf("create email resource batch: %w", err)
 	}
 
@@ -392,7 +471,10 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		msModels[i] = *fromMicrosoftDomain(&ms[i])
 		msModels[i].ID = rootModels[i].ID
 	}
-	if err := tx.CreateInBatches(&msModels, batchSize).Error; err != nil {
+	if err := tx.CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return domain.ErrDuplicateEmail
+		}
 		return fmt.Errorf("create microsoft resource batch: %w", err)
 	}
 
@@ -457,40 +539,12 @@ func (r *ResourceRepo) FindMicrosoftByEmail(ctx context.Context, email string) (
 
 func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails []string) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
-	if len(emails) == 0 {
-		return result, nil
+	found, err := findMicrosoftEmailAddressesByEmails(r.db.WithContext(ctx), emails)
+	if err != nil {
+		return nil, fmt.Errorf("find existing microsoft emails: %w", err)
 	}
-
-	seen := make(map[string]struct{}, len(emails))
-	uniqueEmails := make([]string, 0, len(emails))
-	for _, email := range emails {
-		key := microsoftEmailKey(email)
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		uniqueEmails = append(uniqueEmails, strings.TrimSpace(email))
-	}
-
-	const chunkSize = 1000
-	for start := 0; start < len(uniqueEmails); start += chunkSize {
-		end := start + chunkSize
-		if end > len(uniqueEmails) {
-			end = len(uniqueEmails)
-		}
-		var found []string
-		if err := r.db.WithContext(ctx).
-			Model(&MicrosoftResourceModel{}).
-			Where("email_address IN ? AND status <> ?", uniqueEmails[start:end], string(domain.MicrosoftStatusDeleted)).
-			Pluck("email_address", &found).Error; err != nil {
-			return nil, fmt.Errorf("find existing microsoft emails: %w", err)
-		}
-		for _, email := range found {
-			result[microsoftEmailKey(email)] = struct{}{}
-		}
+	for _, email := range found {
+		result[microsoftEmailKey(email)] = struct{}{}
 	}
 	return result, nil
 }
@@ -1297,7 +1351,7 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 }
 
 // DeleteResourcesByFilterWithLog logically deletes owned private resources
-// matching a server-side filter in small chunks.
+// matching a server-side filter with one set-based update.
 func (r *ResourceRepo) DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error) {
 	switch filter.ResourceType {
 	case domain.ResourceTypeMicrosoft:
@@ -1310,67 +1364,166 @@ func (r *ResourceRepo) DeleteResourcesByFilterWithLog(ctx context.Context, owner
 }
 
 func (r *ResourceRepo) deleteMicrosoftByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
-	deleted := 0
-	for {
-		candidateCount := 0
-		chunkDeleted := 0
-		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			ids, err := selectMicrosoftBulkIDs(ctx, tx, ownerUserID, filter)
-			if err != nil {
-				return err
-			}
-			candidateCount = len(ids)
-			if len(ids) == 0 {
-				return nil
-			}
-
-			deletedIDs, err := deleteLockedMicrosoftRows(ctx, tx, ids, log, r.operationLogs)
-			if err != nil {
-				return err
-			}
-			chunkDeleted = len(deletedIDs)
+	deleted := int64(0)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		whereSQL, whereArgs := microsoftBulkMutationWhere(ownerUserID, filter)
+		now := time.Now().UTC()
+		args := append([]interface{}{
+			string(domain.MicrosoftStatusDeleted),
+			"",
+			now,
+		}, whereArgs...)
+		result := tx.Exec(
+			"UPDATE microsoft_resources AS ms JOIN email_resources AS er ON er.id = ms.id SET ms.status = ?, ms.last_safe_error = ?, ms.last_allocated_at = NULL, ms.updated_at = ? WHERE "+whereSQL,
+			args...,
+		)
+		if result.Error != nil {
+			return fmt.Errorf("delete microsoft resources by filter: %w", result.Error)
+		}
+		deleted = result.RowsAffected
+		if deleted == 0 {
 			return nil
-		})
-		if err != nil {
-			return deleted, err
 		}
-		if candidateCount == 0 {
-			return deleted, nil
-		}
-		deleted += chunkDeleted
+		return createBulkMutationLog(ctx, tx, log, deleted, r.operationLogs)
+	})
+	if err != nil {
+		return 0, err
 	}
+	return int(deleted), nil
 }
 
 func (r *ResourceRepo) deleteDomainByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
-	deleted := 0
-	for {
-		candidateCount := 0
-		chunkDeleted := 0
-		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			ids, err := selectDomainBulkIDs(ctx, tx, ownerUserID, filter)
-			if err != nil {
-				return err
-			}
-			candidateCount = len(ids)
-			if len(ids) == 0 {
-				return nil
-			}
-
-			deletedIDs, err := deleteLockedDomainRows(ctx, tx, ids, log, r.operationLogs)
-			if err != nil {
-				return err
-			}
-			chunkDeleted = len(deletedIDs)
+	deleted := int64(0)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		whereSQL, whereArgs := domainBulkMutationWhere(ownerUserID, filter)
+		now := time.Now().UTC()
+		args := append([]interface{}{
+			string(domain.DomainStatusDeleted),
+			now,
+		}, whereArgs...)
+		result := tx.Exec(
+			"UPDATE domain_resources AS dr JOIN email_resources AS er ON er.id = dr.id SET dr.status = ?, dr.last_allocated_at = NULL, dr.updated_at = ? WHERE "+whereSQL,
+			args...,
+		)
+		if result.Error != nil {
+			return fmt.Errorf("delete domain resources by filter: %w", result.Error)
+		}
+		deleted = result.RowsAffected
+		if deleted == 0 {
 			return nil
-		})
-		if err != nil {
-			return deleted, err
 		}
-		if candidateCount == 0 {
-			return deleted, nil
-		}
-		deleted += chunkDeleted
+		return createBulkMutationLog(ctx, tx, log, deleted, r.operationLogs)
+	})
+	if err != nil {
+		return 0, err
 	}
+	return int(deleted), nil
+}
+
+func microsoftBulkMutationWhere(ownerUserID uint, filter coreapp.ResourceBulkFilter) (string, []interface{}) {
+	conditions := []string{
+		"er.owner_user_id = ?",
+		"er.type = ?",
+		"ms.for_sale = ?",
+		"ms.status <> ?",
+	}
+	args := []interface{}{
+		ownerUserID,
+		string(domain.ResourceTypeMicrosoft),
+		false,
+		string(domain.MicrosoftStatusDeleted),
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "ms.status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.LongLived != nil {
+		conditions = append(conditions, "ms.long_lived = ?")
+		args = append(args, *filter.LongLived)
+	}
+	if filter.CreatedFrom != nil {
+		conditions = append(conditions, "er.created_at >= ?")
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		conditions = append(conditions, "er.created_at <= ?")
+		args = append(args, *filter.CreatedTo)
+	}
+	if filter.Suffix != "" {
+		suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filter.Suffix)), "@")
+		if suffix != "" {
+			conditions = append(conditions, "ms.email_domain = ?")
+			args = append(args, suffix)
+		}
+	}
+	if filter.Search != "" {
+		like := "%" + filter.Search + "%"
+		normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+		conditions = append(conditions, "(LOWER(ms.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)")
+		args = append(args, like, like, normalized)
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+func domainBulkMutationWhere(ownerUserID uint, filter coreapp.ResourceBulkFilter) (string, []interface{}) {
+	conditions := []string{
+		"er.owner_user_id = ?",
+		"er.type = ?",
+		"dr.owner_user_id = ?",
+		"dr.purpose = ?",
+		"dr.status <> ?",
+	}
+	args := []interface{}{
+		ownerUserID,
+		string(domain.ResourceTypeDomain),
+		ownerUserID,
+		string(domain.PurposeNotSale),
+		string(domain.DomainStatusDeleted),
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "dr.status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.CreatedFrom != nil {
+		conditions = append(conditions, "er.created_at >= ?")
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		conditions = append(conditions, "er.created_at <= ?")
+		args = append(args, *filter.CreatedTo)
+	}
+	if filter.TLD != "" {
+		tld, err := domain.NormalizeDomainSuffix(filter.TLD)
+		if err != nil {
+			conditions = append(conditions, "1 = 0")
+		} else {
+			conditions = append(conditions, "dr.domain_tld = ?")
+			args = append(args, tld)
+		}
+	}
+	if filter.Search != "" {
+		conditions = append(conditions, "LOWER(dr.domain) LIKE ?")
+		args = append(args, "%"+filter.Search+"%")
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+func createBulkMutationLog(ctx context.Context, tx *gorm.DB, log governancedomain.OperationLog, affected int64, operationLogs *governanceinfra.OperationLogRepo) error {
+	log.ResourceID = resourceBulkOperationLogResourceID
+	log.SafeSummary = bulkMutationSummary(log.SafeSummary, affected)
+	if err := operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+		return fmt.Errorf("create operation log: %w", err)
+	}
+	return nil
+}
+
+func bulkMutationSummary(base string, affected int64) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "Bulk resource command completed."
+	}
+	base = strings.TrimSuffix(base, ".")
+	return fmt.Sprintf("%s. Count: %d.", base, affected)
 }
 
 func deleteLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {

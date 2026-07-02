@@ -108,7 +108,7 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var importModel ResourceImportModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
@@ -133,9 +133,11 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 		if err := tx.Model(&ResourceImportModel{}).
 			Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
 			Updates(map[string]interface{}{
-				"status":         string(domain.ResourceImportImported),
-				"imported_count": len(ms),
-				"updated_at":     now,
+				"status":             string(domain.ResourceImportImported),
+				"imported_count":     len(ms),
+				"failure_object_key": failureObjectKey,
+				"last_safe_error":    safeSummary,
+				"updated_at":         now,
 			}).Error; err != nil {
 			return fmt.Errorf("mark resource import succeeded: %w", err)
 		}

@@ -16,9 +16,12 @@ user3@example.com----pass3----client3----refresh3
 user4@example.com----pass4----client4----refresh4----aux4@example.net
 `
 
-	result, err := parser.ParseMicrosoftImport(content)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
 	}
 	if len(result) != 4 {
 		t.Fatalf("expected 4 lines, got %d", len(result))
@@ -33,7 +36,7 @@ user4@example.com----pass4----client4----refresh4----aux4@example.net
 func TestTXTParser_ParseMicrosoftImport_EmptyReturnsError(t *testing.T) {
 	parser := NewTXTParser()
 
-	_, err := parser.ParseMicrosoftImport("")
+	_, _, err := parser.ParseMicrosoftImport("", domain.ImportErrorStrategyAbort)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -43,9 +46,12 @@ func TestTXTParser_ParseMicrosoftImport_Blanks(t *testing.T) {
 	parser := NewTXTParser()
 	content := "\n\nuser@example.com----pass123\n\n"
 
-	result, err := parser.ParseMicrosoftImport(content)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
 	}
 	if len(result) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(result))
@@ -56,7 +62,7 @@ func TestTXTParser_ParseMicrosoftImport_Blanks(t *testing.T) {
 func TestTXTParser_ParseMicrosoftImport_AllCommentsReturnsError(t *testing.T) {
 	parser := NewTXTParser()
 
-	_, err := parser.ParseMicrosoftImport("# comment 1\n# comment 2\n\n")
+	_, _, err := parser.ParseMicrosoftImport("# comment 1\n# comment 2\n\n", domain.ImportErrorStrategyAbort)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -78,7 +84,7 @@ func TestTXTParser_ParseMicrosoftImport_InvalidLineReturnsError(t *testing.T) {
 
 	for _, content := range cases {
 		t.Run(content, func(t *testing.T) {
-			_, err := parser.ParseMicrosoftImport(content)
+			_, _, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
 			if !errors.Is(err, domain.ErrInvalidImportFormat) {
 				t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 			}
@@ -90,15 +96,44 @@ func TestTXTParser_ParseMicrosoftImport_TrimsWhitespace(t *testing.T) {
 	parser := NewTXTParser()
 	content := "  user@example.com ---- pass123 ---- aux@example.net  \n\tuser2@test.com----pass456\n"
 
-	result, err := parser.ParseMicrosoftImport(content)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
 	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(result))
 	}
 	assertLine(t, result[0], "user@example.com", "pass123", "", "", "aux@example.net")
 	assertLine(t, result[1], "user2@test.com", "pass456", "", "", "")
+}
+
+func TestTXTParser_ParseMicrosoftImport_SkipInvalidLines(t *testing.T) {
+	parser := NewTXTParser()
+	content := `
+invalid-line
+user@example.com----pass123
+email@example.com----password----
+user2@test.com----pass456
+`
+
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 valid lines, got %d", len(result))
+	}
+	assertLine(t, result[0], "user@example.com", "pass123", "", "", "")
+	assertLine(t, result[1], "user2@test.com", "pass456", "", "", "")
+	if len(failures) != 2 {
+		t.Fatalf("expected 2 failures, got %+v", failures)
+	}
+	if failures[0].Line == 0 || failures[1].Line == 0 {
+		t.Fatalf("expected failures to keep line numbers: %+v", failures)
+	}
 }
 
 func assertLine(t *testing.T, line domain.MicrosoftImportLine, email, password, clientID, refreshToken, bindingAddress string) {

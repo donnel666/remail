@@ -230,6 +230,14 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		})
 		return
 	}
+	errorStrategy, ok := coredomain.NormalizeImportErrorStrategy(c.PostForm("errorStrategy"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid errorStrategy value.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
 
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -240,7 +248,7 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.ImportUseCase.AcceptMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, middleware.GetRequestID(c))
+	result, err := h.module.ImportUseCase.AcceptMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, errorStrategy, middleware.GetRequestID(c))
 	if err != nil {
 		writeCoreError(c, err)
 		return

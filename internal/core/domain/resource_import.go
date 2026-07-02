@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ResourceImportStatus represents the lifecycle of a supplier resource import.
 type ResourceImportStatus string
@@ -10,6 +13,26 @@ const (
 	ResourceImportImported   ResourceImportStatus = "imported"
 	ResourceImportFailed     ResourceImportStatus = "failed"
 )
+
+// ImportErrorStrategy controls how a TXT import handles row-level errors.
+type ImportErrorStrategy string
+
+const (
+	ImportErrorStrategySkip  ImportErrorStrategy = "skip"
+	ImportErrorStrategyAbort ImportErrorStrategy = "abort"
+)
+
+// NormalizeImportErrorStrategy returns the supported strategy. Empty defaults to skip.
+func NormalizeImportErrorStrategy(value string) (ImportErrorStrategy, bool) {
+	switch ImportErrorStrategy(strings.ToLower(strings.TrimSpace(value))) {
+	case "", ImportErrorStrategySkip:
+		return ImportErrorStrategySkip, true
+	case ImportErrorStrategyAbort:
+		return ImportErrorStrategyAbort, true
+	default:
+		return "", false
+	}
+}
 
 // ResourceImport records private import artifacts without storing credentials in logs or responses.
 type ResourceImport struct {

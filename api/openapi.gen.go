@@ -249,6 +249,24 @@ func (e UserResponseRole) Valid() bool {
 	}
 }
 
+// Defines values for PostResourceImportMultipartBodyErrorStrategy.
+const (
+	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
+func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case Abort:
+		return true
+	case Skip:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActivationRequest defines model for ActivationRequest.
 type ActivationRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -844,7 +862,9 @@ type PostResourceDeleteBatchParams struct {
 
 // PostResourceImportMultipartBody defines parameters for PostResourceImport.
 type PostResourceImportMultipartBody struct {
-	File openapi_types.File `json:"file"`
+	// ErrorStrategy Row-level import error strategy. skip imports valid rows and records skipped row details; abort fails the import on the first row-level error.
+	ErrorStrategy *PostResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                            `json:"file"`
 
 	// LongLived Whether every resource in this import batch is long-lived
 	LongLived bool `json:"longLived"`
@@ -855,6 +875,9 @@ type PostResourceImportParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
+
+// PostResourceImportMultipartBodyErrorStrategy defines parameters for PostResourceImport.
+type PostResourceImportMultipartBodyErrorStrategy string
 
 // PostResourcePublishBatchParams defines parameters for PostResourcePublishBatch.
 type PostResourcePublishBatchParams struct {

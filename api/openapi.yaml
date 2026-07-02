@@ -1417,6 +1417,13 @@ paths:
                 longLived:
                   type: boolean
                   description: Whether every resource in this import batch is long-lived
+                errorStrategy:
+                  type: string
+                  description: Row-level import error strategy. skip imports valid rows and records skipped row details; abort fails the import on the first row-level error.
+                  default: skip
+                  enum:
+                    - skip
+                    - abort
       responses:
         "202":
           description: Import accepted

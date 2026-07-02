@@ -632,7 +632,7 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
-func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource) error {
+func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string) error {
 	item := r.imports[id]
 	if item == nil {
 		return coredomain.ErrResourceNotFound
@@ -645,6 +645,8 @@ func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Co
 	}
 	item.Status = coredomain.ResourceImportImported
 	item.ImportedCount = len(ms)
+	item.FailureObjectKey = failureObjectKey
+	item.LastSafeError = safeSummary
 	item.UpdatedAt = time.Now()
 	return nil
 }
@@ -709,13 +711,14 @@ func setupCoreTestModuleWithImportMocks() (*CoreModule, *mockResourceRepo, *mock
 
 type mockTXTParser struct{}
 
-func (p *mockTXTParser) ParseMicrosoftImport(content string) ([]coredomain.MicrosoftImportLine, error) {
+func (p *mockTXTParser) ParseMicrosoftImport(content string, strategy coredomain.ImportErrorStrategy) ([]coredomain.MicrosoftImportLine, []coredomain.ImportLineError, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, coredomain.ErrInvalidImportFormat
+		return nil, nil, coredomain.ErrInvalidImportFormat
 	}
 	lines := strings.Split(content, "\n")
 	var result []coredomain.MicrosoftImportLine
+	var failures []coredomain.ImportLineError
 	for i, line := range lines {
 		lineNumber := i + 1
 		line = strings.TrimSpace(line)
@@ -724,12 +727,20 @@ func (p *mockTXTParser) ParseMicrosoftImport(content string) ([]coredomain.Micro
 		}
 		parts := strings.Split(line, "----")
 		if len(parts) != 2 && len(parts) != 3 && len(parts) != 4 && len(parts) != 5 {
-			return nil, coredomain.ErrInvalidImportFormat
+			if strategy == coredomain.ImportErrorStrategyAbort {
+				return nil, nil, coredomain.ErrInvalidImportFormat
+			}
+			failures = append(failures, coredomain.ImportLineError{Line: lineNumber, Category: "invalid_format", SafeMessage: "Invalid import format."})
+			continue
 		}
 		email := strings.TrimSpace(parts[0])
 		password := strings.TrimSpace(parts[1])
 		if email == "" || password == "" {
-			return nil, coredomain.ErrInvalidImportFormat
+			if strategy == coredomain.ImportErrorStrategyAbort {
+				return nil, nil, coredomain.ErrInvalidImportFormat
+			}
+			failures = append(failures, coredomain.ImportLineError{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: "Invalid import format."})
+			continue
 		}
 		item := coredomain.MicrosoftImportLine{
 			LineNumber: lineNumber,
@@ -740,28 +751,40 @@ func (p *mockTXTParser) ParseMicrosoftImport(content string) ([]coredomain.Micro
 		case 3:
 			item.BindingAddress = strings.TrimSpace(parts[2])
 			if item.BindingAddress == "" {
-				return nil, coredomain.ErrInvalidImportFormat
+				if strategy == coredomain.ImportErrorStrategyAbort {
+					return nil, nil, coredomain.ErrInvalidImportFormat
+				}
+				failures = append(failures, coredomain.ImportLineError{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: "Invalid import format."})
+				continue
 			}
 		case 4:
 			item.ClientID = strings.TrimSpace(parts[2])
 			item.RefreshToken = strings.TrimSpace(parts[3])
 			if item.ClientID == "" || item.RefreshToken == "" {
-				return nil, coredomain.ErrInvalidImportFormat
+				if strategy == coredomain.ImportErrorStrategyAbort {
+					return nil, nil, coredomain.ErrInvalidImportFormat
+				}
+				failures = append(failures, coredomain.ImportLineError{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: "Invalid import format."})
+				continue
 			}
 		case 5:
 			item.ClientID = strings.TrimSpace(parts[2])
 			item.RefreshToken = strings.TrimSpace(parts[3])
 			item.BindingAddress = strings.TrimSpace(parts[4])
 			if item.ClientID == "" || item.RefreshToken == "" || item.BindingAddress == "" {
-				return nil, coredomain.ErrInvalidImportFormat
+				if strategy == coredomain.ImportErrorStrategyAbort {
+					return nil, nil, coredomain.ErrInvalidImportFormat
+				}
+				failures = append(failures, coredomain.ImportLineError{Line: lineNumber, Email: email, Category: "invalid_format", SafeMessage: "Invalid import format."})
+				continue
 			}
 		}
 		result = append(result, item)
 	}
-	if len(result) == 0 {
-		return nil, coredomain.ErrInvalidImportFormat
+	if len(result) == 0 && len(failures) == 0 {
+		return nil, nil, coredomain.ErrInvalidImportFormat
 	}
-	return result, nil
+	return result, failures, nil
 }
 
 func setAuthContext(c *gin.Context, userID uint, roleLevel int) {
@@ -769,6 +792,10 @@ func setAuthContext(c *gin.Context, userID uint, roleLevel int) {
 }
 
 func multipartImportBody(t *testing.T, fileName string, content string) (*bytes.Buffer, string) {
+	return multipartImportBodyWithStrategy(t, fileName, content, "")
+}
+
+func multipartImportBodyWithStrategy(t *testing.T, fileName string, content string, errorStrategy string) (*bytes.Buffer, string) {
 	t.Helper()
 
 	body := &bytes.Buffer{}
@@ -782,6 +809,11 @@ func multipartImportBody(t *testing.T, fileName string, content string) (*bytes.
 	}
 	if err := writer.WriteField("longLived", "true"); err != nil {
 		t.Fatalf("write longLived field: %v", err)
+	}
+	if errorStrategy != "" {
+		if err := writer.WriteField("errorStrategy", errorStrategy); err != nil {
+			t.Fatalf("write errorStrategy field: %v", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart writer: %v", err)
@@ -959,6 +991,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	}
 	require.Len(t, importQueue.tasks, 1)
 	require.Equal(t, resp.ImportID, importQueue.tasks[0].ImportID)
+	require.Equal(t, coredomain.ImportErrorStrategySkip, importQueue.tasks[0].ErrorStrategy)
 	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
 	require.Len(t, resourceRepo.microsoft, 2)
 
@@ -972,7 +1005,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	}
 }
 
-func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
+func TestCoreHandler_ImportInvalidFormatDefaultSkips(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	mod, _, _, _, importQueue, importRepo, _ := setupCoreTestModuleWithImportMocks()
@@ -990,7 +1023,67 @@ func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	require.Len(t, importQueue.tasks, 1)
 	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
+	importRecord := importRepo.imports[importQueue.tasks[0].ImportID]
+	require.Equal(t, coredomain.ResourceImportImported, importRecord.Status)
+	require.Zero(t, importRecord.ImportedCount)
+	require.NotEmpty(t, importRecord.FailureObjectKey)
+	require.Equal(t, "Skipped 1 import entry.", importRecord.LastSafeError)
+}
+
+func TestCoreHandler_ImportInvalidFormatAbortFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, _, _, _, importQueue, importRepo, _ := setupCoreTestModuleWithImportMocks()
+	h := NewCoreHandler(mod)
+
+	body, contentType := multipartImportBodyWithStrategy(t, "resources.txt", "invalid", "abort")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
+	c.Request.Header.Set("Content-Type", contentType)
+	setAuthContext(c, 1, 10)
+
+	h.PostResourceImport(c)
+
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Len(t, importQueue.tasks, 1)
+	require.Equal(t, coredomain.ImportErrorStrategyAbort, importQueue.tasks[0].ErrorStrategy)
+	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
 	require.Equal(t, coredomain.ResourceImportFailed, importRepo.imports[importQueue.tasks[0].ImportID].Status)
+}
+
+func TestCoreHandler_ImportDuplicateDefaultSkips(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _, importQueue, importRepo, _ := setupCoreTestModuleWithImportMocks()
+	h := NewCoreHandler(mod)
+	require.NoError(t, resourceRepo.CreateMicrosoft(
+		context.Background(),
+		&coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1},
+		&coredomain.MicrosoftResource{
+			EmailAddress: "duplicate@example.com",
+			Password:     "secret",
+			Status:       coredomain.MicrosoftStatusPending,
+		},
+	))
+
+	body, contentType := multipartImportBody(t, "resources.txt", "duplicate@example.com----pass123\nnew@example.com----pass456")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
+	c.Request.Header.Set("Content-Type", contentType)
+	setAuthContext(c, 1, 10)
+
+	h.PostResourceImport(c)
+
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Len(t, importQueue.tasks, 1)
+	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
+	importRecord := importRepo.imports[importQueue.tasks[0].ImportID]
+	require.Equal(t, coredomain.ResourceImportImported, importRecord.Status)
+	require.Equal(t, 1, importRecord.ImportedCount)
+	require.Equal(t, "Skipped 1 import entry.", importRecord.LastSafeError)
+	require.Len(t, resourceRepo.microsoft, 2)
 }
 
 func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {

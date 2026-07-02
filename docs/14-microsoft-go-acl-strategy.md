@@ -9,6 +9,8 @@
 | 2026-07-01 | V1.2 | Codex | 补充 P1-I2 ResourceImport artifact 索引；落实原始导入文件和安全失败明细进入 MinIO private bucket 的原设计。 |
 | 2026-07-02 | V1.3 | Codex | 补充 P1-I2 ResourceImport 异步状态查询、Asynq 重试边界和导入成功事务幂等要求；不改变辅助邮箱绑定实体和状态机归属。 |
 | 2026-07-02 | V1.4 | Codex | 补充 P1-I2 辅助邮箱英文统一为 `bindingAddress`，中文仍称辅助邮箱；对齐 Core 的 `binding` 用途命名。 |
+| 2026-07-02 | V1.5 | Codex | 补充 P1-I2 Microsoft TXT 导入错误处理策略：默认错误跳过，错误中止可选；不改变 Microsoft ACL 与 Core 资源边界。 |
+| 2026-07-02 | V1.6 | Codex | 补充 P1-I2 Microsoft 导入前端预处理策略：前端减负不改变后端权威校验。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -176,7 +178,7 @@ email----password----clientId----refreshToken----辅助邮箱
 
 P1-I2 阶段只补充 TXT 解析格式和 Core 资源创建。辅助邮箱“已分配、已发码、已验证、失败、过期”等状态必须由辅助邮箱绑定实体表达，不允许塞进 `microsoft_resources` 或 Core 资源状态枚举。
 
-导入 HTTP 契约使用 `multipart/form-data` 的 `file` 字段上传 TXT 文件。原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。Core 只保存 `ResourceImport` 安全索引，不保存原始文件内容。HTTP 层只落 MinIO private bucket、创建 `ResourceImport(processing)` 并投递 Asynq，返回 `202 Accepted`；实际解析、查重、资源创建和失败明细生成由后端 Asynq worker 异步执行。确定性业务失败写入失败明细和 `ResourceImport(failed)` 后不再重试；基础设施失败交给 Asynq 重试，耗尽重试后写安全失败摘要。资源创建和 `ResourceImport(imported)` 必须在同一个数据库事务中完成，重复投递遇到 `imported/failed` 终态直接 no-op。前端只能通过安全状态接口查询 `processing/imported/failed`、导入数量和安全错误摘要，不允许读取 MinIO objectKey。
+导入 HTTP 契约使用 `multipart/form-data` 的 `file` 字段上传 TXT 文件，并允许提交 `errorStrategy=skip|abort`。默认 `skip`，用户侧文案为“错误跳过”；`abort` 用户侧文案为“错误中止”。前端可以用同一套四种 `----` 行格式规则预处理上传内容：`skip` 时过滤行格式错误和文件内重复，`abort` 时直接拦截首个行级错误并不上传；该预处理只用于减少无效上传和 worker 压力，不替代后端解析、查重和事务唯一约束。原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。Core 只保存 `ResourceImport` 安全索引，不保存原始文件内容。HTTP 层只落 MinIO private bucket、创建 `ResourceImport(processing)` 并投递 Asynq，返回 `202 Accepted`；实际解析、查重、资源创建和失败明细生成由后端 Asynq worker 异步执行。`skip` 对行格式错误、文件内重复、已有未删除邮箱等行级错误写入失败明细并继续导入有效行，最终 `ResourceImport(imported)` 的 `importedCount` 只统计实际写入资源数；`abort` 在首个行级错误处写入失败明细并把任务置为 `ResourceImport(failed)`。确定性业务失败写入失败明细和终态后不再重试；基础设施失败交给 Asynq 重试，耗尽重试后写安全失败摘要。资源创建和 `ResourceImport(imported)` 必须在同一个数据库事务中完成，重复投递遇到 `imported/failed` 终态直接 no-op。前端只能通过安全状态接口查询 `processing/imported/failed`、导入数量和安全错误摘要，不允许读取 MinIO objectKey。
 
 ---
 

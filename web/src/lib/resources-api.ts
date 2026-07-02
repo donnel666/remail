@@ -10,6 +10,9 @@ export type ResourceItem = components["schemas"]["ResourceItem"];
 export type ImportResponse = components["schemas"]["ImportResponse"];
 export type ImportStatusResponse =
   components["schemas"]["ImportStatusResponse"];
+export type ImportErrorStrategy = NonNullable<
+  operations["postResourceImport"]["requestBody"]["content"]["multipart/form-data"]["errorStrategy"]
+>;
 export type PublishResourcesRequest =
   components["schemas"]["PublishResourcesRequest"];
 export type PublishResourcesResponse =
@@ -174,10 +177,15 @@ async function listOwnedResourcesPage(
   );
 }
 
-export async function importMicrosoftResources(file: File, longLived: boolean) {
+export async function importMicrosoftResources(
+  file: File,
+  longLived: boolean,
+  errorStrategy: ImportErrorStrategy = "skip"
+) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("longLived", String(longLived));
+  formData.append("errorStrategy", errorStrategy);
 
   return unwrap<ImportResponse>(
     await client.POST("/v1/resources/imports", {

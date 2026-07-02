@@ -2742,6 +2742,12 @@ export interface operations {
                     file: string;
                     /** @description Whether every resource in this import batch is long-lived */
                     longLived: boolean;
+                    /**
+                     * @description Row-level import error strategy. skip imports valid rows and records skipped row details; abort fails the import on the first row-level error.
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
                 };
             };
         };

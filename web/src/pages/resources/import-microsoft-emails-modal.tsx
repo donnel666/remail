@@ -1,18 +1,25 @@
 import { useMemo, useRef, useState } from "react";
 import { Button, Modal, Space, TextArea, Toast, Typography } from "@douyinfe/semi-ui";
+import type { TFunction } from "i18next";
 import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importMicrosoftResources,
+  type ImportErrorStrategy,
   waitForResourceImport,
 } from "@/lib/resources-api";
 
 import { MICROSOFT_EMAIL_FORMAT_HINT } from "./model";
+import {
+  preprocessMicrosoftImportContent,
+  type MicrosoftImportPreprocessFailure,
+} from "./microsoft-import-preprocess";
 
 const { Text } = Typography;
 const ENTRY_AREA_HEIGHT = 208;
+const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entries?\.$/;
 
 interface ImportMicrosoftEmailsModalProps {
   open: boolean;
@@ -30,6 +37,8 @@ export function ImportMicrosoftEmailsModal({
   const [lifetimeType, setLifetimeType] = useState<"long_lived" | "short_lived">(
     "long_lived"
   );
+  const [errorStrategy, setErrorStrategy] =
+    useState<ImportErrorStrategy>("skip");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,6 +56,7 @@ export function ImportMicrosoftEmailsModal({
   const reset = () => {
     setMode("paste");
     setLifetimeType("long_lived");
+    setErrorStrategy("skip");
     setText("");
     setFile(null);
     setBusy(false);
@@ -69,23 +79,45 @@ export function ImportMicrosoftEmailsModal({
     if (lines.length === 0 && !file) return;
     setBusy(true);
     try {
-      const uploadFile =
-        mode === "paste"
-          ? new File([lines.join("\n")], "microsoft-resources.txt", {
-              type: "text/plain",
-            })
-          : file;
+      const sourceText = mode === "paste" ? text : (await file?.text()) ?? "";
+      const sourceName =
+        mode === "paste" ? "microsoft-resources.txt" : file?.name;
+      if (!sourceName) return;
 
-      if (!uploadFile) return;
+      const prepared = preprocessMicrosoftImportContent(
+        sourceText,
+        errorStrategy
+      );
+      if (prepared.firstFailure) {
+        throw new Error(
+          getImportPreprocessFailureMessage(t, prepared.firstFailure)
+        );
+      }
+      if (prepared.validCount === 0) {
+        throw new Error(t("No valid import entries."));
+      }
+      if (prepared.skippedCount > 0) {
+        Toast.warning(
+          t("Import skipped errors", { count: prepared.skippedCount })
+        );
+      }
+
+      const uploadFile = new File([prepared.content], sourceName, {
+        type: "text/plain",
+      });
 
       const result = await importMicrosoftResources(
         uploadFile,
-        lifetimeType === "long_lived"
+        lifetimeType === "long_lived",
+        errorStrategy
       );
       Toast.success(t("Resource import accepted."));
       const status = await waitForResourceImport(result.importId);
       if (status.status === "failed") {
         throw new Error(t(status.lastSafeError || "Resource import failed."));
+      }
+      if (status.lastSafeError) {
+        Toast.warning(getImportWarningMessage(t, status.lastSafeError));
       }
       close();
       onSuccess();
@@ -160,6 +192,23 @@ export function ImportMicrosoftEmailsModal({
           </button>
         </div>
 
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className={switchButtonClass(errorStrategy === "skip")}
+            onClick={() => setErrorStrategy("skip")}
+            type="button"
+          >
+            {t("Skip errors")}
+          </button>
+          <button
+            className={switchButtonClass(errorStrategy === "abort")}
+            onClick={() => setErrorStrategy("abort")}
+            type="button"
+          >
+            {t("Abort on error")}
+          </button>
+        </div>
+
         <div>
           {mode === "paste" ? (
             <TextArea
@@ -215,4 +264,28 @@ export function ImportMicrosoftEmailsModal({
       </div>
     </Modal>
   );
+}
+
+function getImportWarningMessage(t: TFunction, safeMessage: string) {
+  const match = SKIPPED_IMPORT_ENTRIES_PATTERN.exec(safeMessage);
+  if (match) {
+    return t("Import skipped errors", { count: Number(match[1]) });
+  }
+  return t(safeMessage);
+}
+
+function getImportPreprocessFailureMessage(
+  t: TFunction,
+  failure: MicrosoftImportPreprocessFailure
+) {
+  if (failure.category === "duplicate_email") {
+    return t("Import duplicate line", {
+      line: failure.line,
+      firstLine: failure.firstLine,
+    });
+  }
+  if (failure.line === 0) {
+    return t("No valid import entries.");
+  }
+  return t("Import invalid line", { line: failure.line });
 }

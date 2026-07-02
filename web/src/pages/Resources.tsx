@@ -27,6 +27,7 @@ import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   deleteMicrosoftResource,
@@ -259,7 +260,7 @@ export default function Resources() {
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [activePage, setActivePage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useSharedPageSize();
   const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
     null
   );
