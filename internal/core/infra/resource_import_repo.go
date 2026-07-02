@@ -2,11 +2,13 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/donnel666/remail/internal/core/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ResourceImportModel is the GORM model for resource_imports.
@@ -42,6 +44,21 @@ func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel 
 	}
 }
 
+func (m *ResourceImportModel) toDomain() *domain.ResourceImport {
+	return &domain.ResourceImport{
+		ID:               m.ID,
+		OwnerUserID:      m.OwnerUserID,
+		ResourceType:     domain.ResourceType(m.ResourceType),
+		SourceObjectKey:  m.SourceObjectKey,
+		FailureObjectKey: m.FailureObjectKey,
+		Status:           domain.ResourceImportStatus(m.Status),
+		ImportedCount:    m.ImportedCount,
+		LastSafeError:    m.LastSafeError,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
+	}
+}
+
 // ResourceImportRepo persists resource import metadata.
 type ResourceImportRepo struct {
 	db *gorm.DB
@@ -63,25 +80,22 @@ func (r *ResourceImportRepo) Create(ctx context.Context, item *domain.ResourceIm
 	return nil
 }
 
-func (r *ResourceImportRepo) MarkSucceeded(ctx context.Context, id uint, importedCount int) error {
-	err := r.db.WithContext(ctx).
-		Model(&ResourceImportModel{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"status":         string(domain.ResourceImportImported),
-			"imported_count": importedCount,
-			"updated_at":     time.Now(),
-		}).Error
+func (r *ResourceImportRepo) FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error) {
+	var model ResourceImportModel
+	err := r.db.WithContext(ctx).First(&model, id).Error
 	if err != nil {
-		return fmt.Errorf("mark resource import succeeded: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find resource import: %w", err)
 	}
-	return nil
+	return model.toDomain(), nil
 }
 
 func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error {
 	err := r.db.WithContext(ctx).
 		Model(&ResourceImportModel{}).
-		Where("id = ?", id).
+		Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
 		Updates(map[string]interface{}{
 			"status":             string(domain.ResourceImportFailed),
 			"failure_object_key": failureObjectKey,
@@ -92,4 +106,39 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 		return fmt.Errorf("mark resource import failed: %w", err)
 	}
 	return nil
+}
+
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var importModel ResourceImportModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock resource import: %w", err)
+		}
+		switch domain.ResourceImportStatus(importModel.Status) {
+		case domain.ResourceImportImported, domain.ResourceImportFailed:
+			return nil
+		case domain.ResourceImportProcessing:
+		default:
+			return domain.ErrInvalidResourceStatus
+		}
+
+		if err := createMicrosoftBatchTx(tx, resources, ms); err != nil {
+			return err
+		}
+
+		now := time.Now()
+		if err := tx.Model(&ResourceImportModel{}).
+			Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
+			Updates(map[string]interface{}{
+				"status":         string(domain.ResourceImportImported),
+				"imported_count": len(ms),
+				"updated_at":     now,
+			}).Error; err != nil {
+			return fmt.Errorf("mark resource import succeeded: %w", err)
+		}
+		return nil
+	})
 }

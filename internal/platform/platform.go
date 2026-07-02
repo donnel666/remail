@@ -24,6 +24,7 @@ type Platform struct {
 	MinIO         *minio.Client
 	MinIOBucket   string
 	Asynq         *asynq.Client
+	AsynqServer   *asynq.Server
 	SMTP          SMTPConfig
 	SessionMaxAge int
 	SessionSecure bool
@@ -59,10 +60,12 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.MinIOBucket = cfg.MinIO.Bucket
 
 	p.Asynq = initAsynq(cfg.Redis)
+	p.AsynqServer = initAsynqServer(cfg.Redis)
 	p.SMTP = cfg.SMTP
 
 	cleanup := func() {
 		slog.Info("shutting down platform clients")
+		p.AsynqServer.Shutdown()
 		p.Asynq.Close()
 		rdb.Close()
 		sqlDB.Close()
@@ -138,4 +141,18 @@ func initAsynq(cfg RedisConfig) *asynq.Client {
 		DB:       cfg.DB,
 	}
 	return asynq.NewClient(redisOpt)
+}
+
+func initAsynqServer(cfg RedisConfig) *asynq.Server {
+	redisOpt := asynq.RedisClientOpt{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
+	}
+	return asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: 4,
+		Queues: map[string]int{
+			"default": 1,
+		},
+	})
 }

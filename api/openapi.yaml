@@ -1314,8 +1314,8 @@ paths:
                   type: boolean
                   description: Whether every resource in this import batch is long-lived
       responses:
-        "201":
-          description: Import complete
+        "202":
+          description: Import accepted
           content:
             application/json:
               schema:
@@ -1338,20 +1338,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "409":
-          description: Email already exists
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid import format
+          description: Empty import file
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
           description: File storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resource-imports/{importId}:
+    get:
+      operationId: getResourceImport
+      summary: Get resource import status
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Resource import status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportStatusResponse"
+        "400":
+          description: Invalid import id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Import not found
           content:
             application/json:
               schema:
@@ -2284,6 +2318,35 @@ components:
           type: integer
         imported:
           type: integer
+      additionalProperties: false
+
+    ImportStatusResponse:
+      type: object
+      required:
+        - importId
+        - status
+        - imported
+        - createdAt
+        - updatedAt
+      properties:
+        importId:
+          type: integer
+        status:
+          type: string
+          enum:
+            - processing
+            - imported
+            - failed
+        imported:
+          type: integer
+        lastSafeError:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     PublishResourcesRequest:

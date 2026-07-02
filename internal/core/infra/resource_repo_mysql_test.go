@@ -202,9 +202,9 @@ func TestResourceListIndexesMySQL(t *testing.T) {
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_resource_created")
 }
 
-func TestCreateMicrosoftBatchRollsBackOnDuplicateMySQL(t *testing.T) {
+func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
-	repo := NewResourceRepo(db)
+	importRepo := NewResourceImportRepo(db)
 
 	require.NoError(t, db.Exec(
 		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
@@ -213,6 +213,14 @@ func TestCreateMicrosoftBatchRollsBackOnDuplicateMySQL(t *testing.T) {
 		"hash",
 		20,
 	).Error)
+
+	importRecord := &domain.ResourceImport{
+		OwnerUserID:     1,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		SourceObjectKey: "imports/microsoft/source/duplicate.txt",
+		Status:          domain.ResourceImportProcessing,
+	}
+	require.NoError(t, importRepo.Create(context.Background(), importRecord))
 
 	resources := []domain.EmailResource{
 		{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
@@ -223,7 +231,12 @@ func TestCreateMicrosoftBatchRollsBackOnDuplicateMySQL(t *testing.T) {
 		{EmailAddress: "dup@test.local", Password: "secret", ForSale: true, Status: domain.MicrosoftStatusPending},
 	}
 
-	require.ErrorIs(t, repo.CreateMicrosoftBatch(context.Background(), resources, ms), domain.ErrDuplicateEmail)
+	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms), domain.ErrDuplicateEmail)
+
+	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.ResourceImportProcessing, storedImport.Status)
+	require.Zero(t, storedImport.ImportedCount)
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -232,6 +245,53 @@ func TestCreateMicrosoftBatchRollsBackOnDuplicateMySQL(t *testing.T) {
 	var childCount int64
 	require.NoError(t, db.Model(&MicrosoftResourceModel{}).Count(&childCount).Error)
 	require.Zero(t, childCount)
+}
+
+func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	importRepo := NewResourceImportRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+	).Error)
+
+	importRecord := &domain.ResourceImport{
+		OwnerUserID:     1,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		SourceObjectKey: "imports/microsoft/source/test.txt",
+		Status:          domain.ResourceImportProcessing,
+	}
+	require.NoError(t, importRepo.Create(context.Background(), importRecord))
+
+	resources := []domain.EmailResource{
+		{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
+		{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
+	}
+	ms := []domain.MicrosoftResource{
+		{EmailAddress: "one@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
+		{EmailAddress: "two@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
+	}
+
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms))
+
+	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.ResourceImportImported, storedImport.Status)
+	require.Equal(t, 2, storedImport.ImportedCount)
+
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms))
+
+	var rootCount int64
+	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
+	require.EqualValues(t, 2, rootCount)
+
+	var childCount int64
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).Count(&childCount).Error)
+	require.EqualValues(t, 2, childCount)
 }
 
 func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {

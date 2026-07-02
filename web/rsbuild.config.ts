@@ -16,6 +16,7 @@ const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
 const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
 const rewriteProxyCookies =
   process.env.REMAIL_DEV_PROXY_REWRITE_COOKIES !== "false";
+const apiProxyTimeoutMs = 600_000;
 
 const PROXY_HEADERS_TO_STRIP = [
   "origin",
@@ -88,8 +89,8 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
         agent: proxyAgent,
-        proxyTimeout: 30_000,
-        timeout: 30_000,
+        proxyTimeout: apiProxyTimeoutMs,
+        timeout: apiProxyTimeoutMs,
         bypass(req) {
           for (const header of PROXY_HEADERS_TO_STRIP) {
             delete req.headers[header];

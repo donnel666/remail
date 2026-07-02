@@ -14,7 +14,7 @@ import (
 )
 
 // MaxImportBytes limits TXT import content to prevent memory exhaustion.
-const MaxImportBytes = 5 * 1024 * 1024 // 5 MB
+const MaxImportBytes = 100 * 1024 * 1024 // 100 MB
 
 // CoreHandler holds the Core HTTP handlers.
 type CoreHandler struct {
@@ -166,13 +166,46 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.ImportUseCase.ImportMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, middleware.GetRequestID(c))
+	result, err := h.module.ImportUseCase.AcceptMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, middleware.GetRequestID(c))
 	if err != nil {
 		writeCoreError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, ImportResponse{ImportID: result.ImportID, Imported: result.Imported})
+	c.JSON(http.StatusAccepted, ImportResponse{ImportID: result.ImportID, Imported: result.Imported})
+}
+
+// GET /v1/resource-imports/:importId
+func (h *CoreHandler) GetResourceImport(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	rawID := c.Param("importId")
+	parsed, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || parsed == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid import id.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, err := h.module.ImportUseCase.GetImportStatus(c.Request.Context(), userID, uint(parsed))
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, ImportStatusResponse{
+		ImportID:      result.ImportID,
+		Status:        result.Status,
+		Imported:      result.Imported,
+		LastSafeError: result.LastSafeError,
+		CreatedAt:     result.CreatedAt,
+		UpdatedAt:     result.UpdatedAt,
+	})
 }
 
 // POST /v1/resources/:resourceId/publish
@@ -573,6 +606,11 @@ func writeCoreError(c *gin.Context, err error) {
 	case errors.Is(err, coredomain.ErrFileStorageUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"message":   "File storage is temporarily unavailable.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrImportQueueUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"message":   "Resource import queue is temporarily unavailable.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrMailServerNotFound):

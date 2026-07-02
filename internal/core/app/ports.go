@@ -23,9 +23,6 @@ type EmailResourceRepository interface {
 	// CreateDomain creates a new Domain resource within a transaction.
 	CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.MailDomainResource) error
 
-	// CreateMicrosoftBatch creates multiple Microsoft resources in a single transaction.
-	CreateMicrosoftBatch(ctx context.Context, resources []domain.EmailResource, ms []domain.MicrosoftResource) error
-
 	// FindByID looks up a resource by ID. Returns nil, nil if not found.
 	FindByID(ctx context.Context, id uint) (*domain.EmailResource, error)
 
@@ -37,6 +34,9 @@ type EmailResourceRepository interface {
 
 	// FindMicrosoftByEmail looks up a Microsoft resource by email address.
 	FindMicrosoftByEmail(ctx context.Context, email string) (*domain.MicrosoftResource, error)
+
+	// FindExistingMicrosoftEmails returns the imported emails that already exist.
+	FindExistingMicrosoftEmails(ctx context.Context, emails []string) (map[string]struct{}, error)
 
 	// List returns paginated resources owned by a user.
 	List(ctx context.Context, ownerUserID uint, resourceType string, offset, limit int) ([]domain.EmailResource, error)
@@ -72,8 +72,23 @@ type EmailResourceRepository interface {
 // ResourceImportRepository persists safe import artifact metadata.
 type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
-	MarkSucceeded(ctx context.Context, id uint, importedCount int) error
+	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource) error
+}
+
+// ResourceImportQueue enqueues asynchronous import work.
+type ResourceImportQueue interface {
+	EnqueueMicrosoftImport(ctx context.Context, task MicrosoftImportTask) error
+}
+
+// MicrosoftImportTask is the safe queue payload for a Microsoft resource import.
+type MicrosoftImportTask struct {
+	ImportID        uint   `json:"importId"`
+	OwnerUserID     uint   `json:"ownerUserId"`
+	SourceObjectKey string `json:"sourceObjectKey"`
+	LongLived       bool   `json:"longLived"`
+	RequestID       string `json:"requestId"`
 }
 
 // MailServerRepository defines the persistence contract for mail servers.
@@ -103,16 +118,16 @@ type ImportUseCase struct {
 	imports   ResourceImportRepository
 	parser    TXTParser
 	files     governanceapp.FilePort
+	queue     ResourceImportQueue
 }
 
 // NewImportUseCase creates a new ImportUseCase.
-func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort) *ImportUseCase {
-	return &ImportUseCase{resources: resources, imports: imports, parser: parser, files: files}
+func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort, queue ResourceImportQueue) *ImportUseCase {
+	return &ImportUseCase{resources: resources, imports: imports, parser: parser, files: files, queue: queue}
 }
 
-// ImportMicrosoftTXTFile imports Microsoft resources from an uploaded TXT file.
-// Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
-func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, longLived bool, requestID string) (*ImportResult, error) {
+// AcceptMicrosoftTXTFile stores the TXT artifact and enqueues asynchronous import processing.
+func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, longLived bool, requestID string) (*ImportResult, error) {
 	if len(content) == 0 {
 		return nil, domain.ErrInvalidImportFormat
 	}
@@ -143,12 +158,59 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 		return nil, err
 	}
 
-	lines, err := uc.parser.ParseMicrosoftImport(string(content))
+	task := MicrosoftImportTask{
+		ImportID:        importRecord.ID,
+		OwnerUserID:     ownerUserID,
+		SourceObjectKey: storedSource.ObjectKey,
+		LongLived:       longLived,
+		RequestID:       importID,
+	}
+	if err := uc.queue.EnqueueMicrosoftImport(ctx, task); err != nil {
+		_ = uc.imports.MarkFailed(ctx, importRecord.ID, "", "Import task enqueue failed.")
+		return nil, domain.ErrImportQueueUnavailable
+	}
+
+	return &ImportResult{ImportID: importRecord.ID, Imported: 0}, nil
+}
+
+// ProcessMicrosoftImport imports Microsoft resources from a stored TXT artifact.
+// Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
+func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task MicrosoftImportTask) error {
+	if task.ImportID == 0 || task.OwnerUserID == 0 || strings.TrimSpace(task.SourceObjectKey) == "" {
+		return domain.ErrInvalidImportFormat
+	}
+
+	importRecord, err := uc.imports.FindByID(ctx, task.ImportID)
 	if err != nil {
-		return nil, uc.failImport(ctx, importRecord.ID, ownerUserID, now, importID, importFailureFromError(err))
+		return err
+	}
+	if importRecord == nil {
+		return domain.ErrResourceNotFound
+	}
+	if importRecord.Status == domain.ResourceImportImported || importRecord.Status == domain.ResourceImportFailed {
+		return nil
+	}
+	if importRecord.OwnerUserID != task.OwnerUserID || importRecord.SourceObjectKey != task.SourceObjectKey {
+		return domain.ErrInvalidImportFormat
+	}
+
+	now := time.Now().UTC()
+	importID := strings.TrimSpace(task.RequestID)
+	if importID == "" {
+		importID = uuid.NewString()
+	}
+
+	source, err := uc.files.ReadPrivate(ctx, task.SourceObjectKey)
+	if err != nil {
+		return domain.ErrFileStorageUnavailable
+	}
+
+	lines, err := uc.parser.ParseMicrosoftImport(string(source.ContentBytes))
+	if err != nil {
+		return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailureFromError(err))
 	}
 	if len(lines) == 0 {
-		return nil, uc.failImport(ctx, importRecord.ID, ownerUserID, now, importID, importFailure{
+		return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 			Line:        0,
 			Category:    "invalid_format",
 			SafeMessage: "Invalid import format.",
@@ -156,22 +218,28 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 	}
 
 	if failure, ok := uc.duplicateInFile(lines); ok {
-		return nil, uc.failImport(ctx, importRecord.ID, ownerUserID, now, importID, failure)
+		return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
 	}
 
+	emails := make([]string, 0, len(lines))
 	for _, line := range lines {
-		existing, err := uc.resources.FindMicrosoftByEmail(ctx, line.Email)
-		if err != nil {
-			return nil, err
-		}
-		if existing != nil {
-			return nil, uc.failImport(ctx, importRecord.ID, ownerUserID, now, importID, importFailure{
-				Line:        line.LineNumber,
-				Email:       line.Email,
-				Category:    "duplicate_email",
-				SafeMessage: "Email address already exists.",
-				Err:         domain.ErrDuplicateEmail,
-			})
+		emails = append(emails, line.Email)
+	}
+	existingEmails, err := uc.resources.FindExistingMicrosoftEmails(ctx, emails)
+	if err != nil {
+		return err
+	}
+	if len(existingEmails) > 0 {
+		for _, line := range lines {
+			if _, exists := existingEmails[line.Email]; exists {
+				return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
+					Line:        line.LineNumber,
+					Email:       line.Email,
+					Category:    "duplicate_email",
+					SafeMessage: "Email address already exists.",
+					Err:         domain.ErrDuplicateEmail,
+				})
+			}
 		}
 	}
 
@@ -181,7 +249,7 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 	for _, line := range lines {
 		resources = append(resources, domain.EmailResource{
 			Type:        domain.ResourceTypeMicrosoft,
-			OwnerUserID: ownerUserID,
+			OwnerUserID: task.OwnerUserID,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		})
@@ -190,7 +258,7 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 			Password:     line.Password,
 			ClientID:     line.ClientID,
 			RefreshToken: line.RefreshToken,
-			LongLived:    longLived,
+			LongLived:    task.LongLived,
 			ForSale:      false,
 			Status:       domain.MicrosoftStatusPending,
 			CreatedAt:    now,
@@ -198,29 +266,57 @@ func (uc *ImportUseCase) ImportMicrosoftTXTFile(ctx context.Context, ownerUserID
 		})
 	}
 
-	if err := uc.resources.CreateMicrosoftBatch(ctx, resources, msResources); err != nil {
+	if err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources); err != nil {
 		if errors.Is(err, domain.ErrDuplicateEmail) {
-			return nil, uc.failImport(ctx, importRecord.ID, ownerUserID, now, importID, importFailure{
+			return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 				Line:        0,
 				Category:    "duplicate_email",
 				SafeMessage: "An email address in the import already exists.",
 				Err:         domain.ErrDuplicateEmail,
 			})
 		}
-		return nil, err
+		return err
 	}
 
-	if err := uc.imports.MarkSucceeded(ctx, importRecord.ID, len(lines)); err != nil {
+	return nil
+}
+
+// GetImportStatus returns a safe status view for one import owned by the current user.
+func (uc *ImportUseCase) GetImportStatus(ctx context.Context, ownerUserID uint, importID uint) (*ResourceImportStatusView, error) {
+	item, err := uc.imports.FindByID(ctx, importID)
+	if err != nil {
 		return nil, err
 	}
-
-	return &ImportResult{ImportID: importRecord.ID, Imported: len(lines)}, nil
+	if item == nil {
+		return nil, domain.ErrResourceNotFound
+	}
+	if item.OwnerUserID != ownerUserID {
+		return nil, domain.ErrForbiddenResource
+	}
+	return &ResourceImportStatusView{
+		ImportID:      item.ID,
+		Status:        string(item.Status),
+		Imported:      item.ImportedCount,
+		LastSafeError: item.LastSafeError,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
+	}, nil
 }
 
 // ImportResult holds the result of an import operation.
 type ImportResult struct {
 	ImportID uint `json:"importId"`
 	Imported int  `json:"imported"`
+}
+
+// ResourceImportStatusView is the API-safe import status view.
+type ResourceImportStatusView struct {
+	ImportID      uint      `json:"importId"`
+	Status        string    `json:"status"`
+	Imported      int       `json:"imported"`
+	LastSafeError string    `json:"lastSafeError,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type importFailure struct {
@@ -285,7 +381,12 @@ func (uc *ImportUseCase) failImport(ctx context.Context, importRecordID uint, ow
 	if err := uc.imports.MarkFailed(ctx, importRecordID, storedFailure.ObjectKey, failure.SafeMessage); err != nil {
 		return err
 	}
-	return failure.Err
+	return nil
+}
+
+// MarkImportFailed marks a processing import as failed with a safe system error.
+func (uc *ImportUseCase) MarkImportFailed(ctx context.Context, importRecordID uint, safeError string) error {
+	return uc.imports.MarkFailed(ctx, importRecordID, "", safeError)
 }
 
 func importFailureDetail(failure importFailure) string {

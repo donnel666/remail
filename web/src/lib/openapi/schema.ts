@@ -503,6 +503,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/resource-imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get resource import status */
+        get: operations["getResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/resources/{resourceId}/validate": {
         parameters: {
             query?: never;
@@ -828,6 +845,17 @@ export interface components {
         ImportResponse: {
             importId: number;
             imported: number;
+        };
+        ImportStatusResponse: {
+            importId: number;
+            /** @enum {string} */
+            status: "processing" | "imported" | "failed";
+            imported: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         PublishResourcesRequest: {
             resourceIds: number[];
@@ -2489,8 +2517,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Import complete */
-            201: {
+            /** @description Import accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2525,16 +2553,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid import format */
+            /** @description Empty import file */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2545,6 +2564,55 @@ export interface operations {
             };
             /** @description File storage temporarily unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource import status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportStatusResponse"];
+                };
+            };
+            /** @description Invalid import id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Import not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

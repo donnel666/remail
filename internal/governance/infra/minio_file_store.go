@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/donnel666/remail/internal/governance/domain"
@@ -51,6 +52,38 @@ func (s *MinIOFileStore) SavePrivate(ctx context.Context, file domain.PrivateFil
 		FileName:    file.FileName,
 		ContentType: file.ContentType,
 		Size:        int64(len(file.ContentBytes)),
+	}, nil
+}
+
+// ReadPrivate reads a private file by object key without exposing object storage details.
+func (s *MinIOFileStore) ReadPrivate(ctx context.Context, objectKey string) (*domain.PrivateFile, error) {
+	if objectKey == "" {
+		return nil, fmt.Errorf("private file object key is required")
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return nil, err
+	}
+
+	object, err := s.client.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get private file: %w", err)
+	}
+	defer object.Close()
+
+	info, err := object.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat private file: %w", err)
+	}
+	content, err := io.ReadAll(object)
+	if err != nil {
+		return nil, fmt.Errorf("read private file: %w", err)
+	}
+
+	return &domain.PrivateFile{
+		ObjectKey:    objectKey,
+		FileName:     info.UserMetadata["file-name"],
+		ContentType:  info.ContentType,
+		ContentBytes: content,
 	}, nil
 }
 

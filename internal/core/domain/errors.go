@@ -12,6 +12,7 @@ var (
 	ErrDuplicateDomain         = errors.New("domain already exists")
 	ErrInvalidImportFormat     = errors.New("invalid import format")
 	ErrFileStorageUnavailable  = errors.New("file storage is temporarily unavailable")
+	ErrImportQueueUnavailable  = errors.New("resource import queue is temporarily unavailable")
 	ErrMailServerNotFound      = errors.New("mail server not found")
 	ErrForbiddenMailServer     = errors.New("forbidden mail server access")
 	ErrInvalidMailServerStatus = errors.New("invalid mail server status")

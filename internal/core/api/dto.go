@@ -82,6 +82,16 @@ type ImportResponse struct {
 	Imported int  `json:"imported"`
 }
 
+// ImportStatusResponse returns the safe asynchronous import status.
+type ImportStatusResponse struct {
+	ImportID      uint      `json:"importId"`
+	Status        string    `json:"status"`
+	Imported      int       `json:"imported"`
+	LastSafeError string    `json:"lastSafeError,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
 // PublishResourcesResponse returns the batch publish result.
 type PublishResourcesResponse struct {
 	Requested int `json:"requested"`

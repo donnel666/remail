@@ -8,6 +8,8 @@ import {
 
 export type ResourceItem = components["schemas"]["ResourceItem"];
 export type ImportResponse = components["schemas"]["ImportResponse"];
+export type ImportStatusResponse =
+  components["schemas"]["ImportStatusResponse"];
 export type PublishResourcesRequest =
   components["schemas"]["PublishResourcesRequest"];
 export type PublishResourcesResponse =
@@ -85,6 +87,32 @@ export async function importMicrosoftResources(file: File, longLived: boolean) {
       params: { header: csrfHeader() },
     })
   );
+}
+
+export async function getResourceImportStatus(importId: number) {
+  return unwrap<ImportStatusResponse>(
+    await client.GET("/v1/resource-imports/{importId}", {
+      params: { path: { importId } },
+    })
+  );
+}
+
+export async function waitForResourceImport(
+  importId: number,
+  options: { intervalMs?: number; maxAttempts?: number } = {}
+) {
+  const intervalMs = options.intervalMs ?? 1000;
+  const maxAttempts = options.maxAttempts ?? 120;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const status = await getResourceImportStatus(importId);
+    if (status.status !== "processing") {
+      return status;
+    }
+    await new Promise((resolve) => globalThis.setTimeout(resolve, intervalMs));
+  }
+
+  return getResourceImportStatus(importId);
 }
 
 export async function publishMicrosoftResourcesBatch(

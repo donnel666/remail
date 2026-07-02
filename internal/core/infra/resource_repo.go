@@ -206,35 +206,47 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 	})
 }
 
-func (r *ResourceRepo) CreateMicrosoftBatch(ctx context.Context, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i := range resources {
-			root := &EmailResourceModel{
-				Type:        string(resources[i].Type),
-				OwnerUserID: resources[i].OwnerUserID,
-			}
-			if err := tx.Create(root).Error; err != nil {
-				return fmt.Errorf("create email resource batch: %w", err)
-			}
-
-			msModel := fromMicrosoftDomain(&ms[i])
-			msModel.ID = root.ID
-			if err := tx.Create(msModel).Error; err != nil {
-				if errors.Is(err, gorm.ErrDuplicatedKey) {
-					return domain.ErrDuplicateEmail
-				}
-				return fmt.Errorf("create microsoft resource batch: %w", err)
-			}
-
-			resources[i].ID = root.ID
-			resources[i].CreatedAt = root.CreatedAt
-			resources[i].UpdatedAt = root.UpdatedAt
-			ms[i].ID = msModel.ID
-			ms[i].CreatedAt = msModel.CreatedAt
-			ms[i].UpdatedAt = msModel.UpdatedAt
-		}
+func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
+	if len(resources) != len(ms) {
+		return fmt.Errorf("create microsoft batch: resource count mismatch")
+	}
+	if len(resources) == 0 {
 		return nil
-	})
+	}
+
+	const batchSize = 1000
+	rootModels := make([]EmailResourceModel, len(resources))
+	for i := range resources {
+		rootModels[i] = EmailResourceModel{
+			Type:        string(resources[i].Type),
+			OwnerUserID: resources[i].OwnerUserID,
+		}
+	}
+	if err := tx.CreateInBatches(&rootModels, batchSize).Error; err != nil {
+		return fmt.Errorf("create email resource batch: %w", err)
+	}
+
+	msModels := make([]MicrosoftResourceModel, len(ms))
+	for i := range ms {
+		msModels[i] = *fromMicrosoftDomain(&ms[i])
+		msModels[i].ID = rootModels[i].ID
+	}
+	if err := tx.CreateInBatches(&msModels, batchSize).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return domain.ErrDuplicateEmail
+		}
+		return fmt.Errorf("create microsoft resource batch: %w", err)
+	}
+
+	for i := range resources {
+		resources[i].ID = rootModels[i].ID
+		resources[i].CreatedAt = rootModels[i].CreatedAt
+		resources[i].UpdatedAt = rootModels[i].UpdatedAt
+		ms[i].ID = msModels[i].ID
+		ms[i].CreatedAt = msModels[i].CreatedAt
+		ms[i].UpdatedAt = msModels[i].UpdatedAt
+	}
+	return nil
 }
 
 func (r *ResourceRepo) FindByID(ctx context.Context, id uint) (*domain.EmailResource, error) {
@@ -283,6 +295,42 @@ func (r *ResourceRepo) FindMicrosoftByEmail(ctx context.Context, email string) (
 		return nil, fmt.Errorf("find microsoft by email: %w", err)
 	}
 	return model.toDomain(), nil
+}
+
+func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if len(emails) == 0 {
+		return result, nil
+	}
+
+	seen := make(map[string]struct{}, len(emails))
+	uniqueEmails := make([]string, 0, len(emails))
+	for _, email := range emails {
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		uniqueEmails = append(uniqueEmails, email)
+	}
+
+	const chunkSize = 1000
+	for start := 0; start < len(uniqueEmails); start += chunkSize {
+		end := start + chunkSize
+		if end > len(uniqueEmails) {
+			end = len(uniqueEmails)
+		}
+		var found []string
+		if err := r.db.WithContext(ctx).
+			Model(&MicrosoftResourceModel{}).
+			Where("email_address IN ?", uniqueEmails[start:end]).
+			Pluck("email_address", &found).Error; err != nil {
+			return nil, fmt.Errorf("find existing microsoft emails: %w", err)
+		}
+		for _, email := range found {
+			result[email] = struct{}{}
+		}
+	}
+	return result, nil
 }
 
 func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, resourceType string) *gorm.DB {

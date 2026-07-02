@@ -18,6 +18,27 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for ImportStatusResponseStatus.
+const (
+	Failed     ImportStatusResponseStatus = "failed"
+	Imported   ImportStatusResponseStatus = "imported"
+	Processing ImportStatusResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the ImportStatusResponseStatus enum.
+func (e ImportStatusResponseStatus) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Imported:
+		return true
+	case Processing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PermissionPolicyRequestEffect.
 const (
 	PermissionPolicyRequestEffectAllow PermissionPolicyRequestEffect = "allow"
@@ -227,6 +248,19 @@ type ImportResponse struct {
 	ImportId int `json:"importId"`
 	Imported int `json:"imported"`
 }
+
+// ImportStatusResponse defines model for ImportStatusResponse.
+type ImportStatusResponse struct {
+	CreatedAt     time.Time                  `json:"createdAt"`
+	ImportId      int                        `json:"importId"`
+	Imported      int                        `json:"imported"`
+	LastSafeError *string                    `json:"lastSafeError,omitempty"`
+	Status        ImportStatusResponseStatus `json:"status"`
+	UpdatedAt     time.Time                  `json:"updatedAt"`
+}
+
+// ImportStatusResponseStatus defines model for ImportStatusResponse.Status.
+type ImportStatusResponseStatus string
 
 // InviteListResponse defines model for InviteListResponse.
 type InviteListResponse struct {
@@ -823,6 +857,9 @@ type ServerInterface interface {
 	// Request a password reset verification code
 	// (POST /v1/password/reset/request)
 	PostPasswordResetRequest(c *gin.Context)
+	// Get resource import status
+	// (GET /v1/resource-imports/{importId})
+	GetResourceImport(c *gin.Context, importId int)
 	// List email resources
 	// (GET /v1/resources)
 	GetResources(c *gin.Context, params GetResourcesParams)
@@ -1658,6 +1695,33 @@ func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
 	siw.Handler.PostPasswordResetRequest(c)
 }
 
+// GetResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResourceImport(c, importId)
+}
+
 // GetResources operation middleware
 func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 
@@ -2208,6 +2272,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
 	router.POST(options.BaseURL+"/v1/resources/publish", wrapper.PostResourcePublishBatch)

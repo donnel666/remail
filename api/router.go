@@ -52,8 +52,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 
 		// Core module (resources, mail servers, domains)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
-		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore)
+		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq)
 		if err != nil {
+			return nil, err
+		}
+		if err := coreapi.StartCoreWorkers(p.AsynqServer, coreMod); err != nil {
 			return nil, err
 		}
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)

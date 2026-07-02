@@ -172,7 +172,7 @@
   "Short-lived": "短效",
   "Cancel": "取消",
   "Importing": "导入中...",
-  "Resources imported successfully": "资源导入成功",
+  "Resource import accepted.": "上传成功，后台导入处理中",
   "Resource import failed.": "资源导入失败。",
   "Invalid longLived value.": "长短效选择无效。",
   "Disable": "禁用",

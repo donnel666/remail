@@ -14,10 +14,42 @@ export type ApiErrorBody = Partial<components["schemas"]["Error"]>;
 
 const csrfCookieName = "csrf_token";
 const csrfHeaderName = "X-CSRF-Token";
+export const apiRequestTimeoutMs = 600_000;
+
+function withTimeoutSignal(input: Request, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutID = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const parentSignal = input.signal;
+  const abortFromParent = () => controller.abort();
+
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  return {
+    request: new Request(input, { signal: controller.signal }),
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutID);
+      parentSignal.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
+
+async function fetchWithTimeout(input: Request) {
+  const { request, cleanup } = withTimeoutSignal(input, apiRequestTimeoutMs);
+  try {
+    return await globalThis.fetch(request);
+  } finally {
+    cleanup();
+  }
+}
 
 export const apiClient = createClient<paths>({
   baseUrl: "",
   credentials: "include",
+  fetch: fetchWithTimeout,
   headers: {
     Accept: "application/json",
   },

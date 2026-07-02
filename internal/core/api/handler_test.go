@@ -61,7 +61,7 @@ func (r *mockResourceRepo) CreateDomain(_ context.Context, resource *coredomain.
 	return nil
 }
 
-func (r *mockResourceRepo) CreateMicrosoftBatch(ctx context.Context, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource) error {
+func (r *mockResourceRepo) createMicrosoftBatch(ctx context.Context, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource) error {
 	for i := range resources {
 		_ = r.CreateMicrosoft(ctx, &resources[i], &ms[i])
 	}
@@ -89,8 +89,27 @@ func (r *mockResourceRepo) FindDomainByID(_ context.Context, id uint) (*coredoma
 	return nil, nil
 }
 
-func (r *mockResourceRepo) FindMicrosoftByEmail(_ context.Context, _ string) (*coredomain.MicrosoftResource, error) {
+func (r *mockResourceRepo) FindMicrosoftByEmail(_ context.Context, email string) (*coredomain.MicrosoftResource, error) {
+	for _, ms := range r.microsoft {
+		if ms.EmailAddress == email {
+			return ms, nil
+		}
+	}
 	return nil, nil
+}
+
+func (r *mockResourceRepo) FindExistingMicrosoftEmails(_ context.Context, emails []string) (map[string]struct{}, error) {
+	wanted := make(map[string]struct{}, len(emails))
+	for _, email := range emails {
+		wanted[email] = struct{}{}
+	}
+	result := make(map[string]struct{})
+	for _, ms := range r.microsoft {
+		if _, ok := wanted[ms.EmailAddress]; ok {
+			result[ms.EmailAddress] = struct{}{}
+		}
+	}
+	return result, nil
 }
 
 func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, resourceType string, _, _ int) ([]coredomain.EmailResource, error) {
@@ -289,12 +308,13 @@ func (r *mockGeneratedMailboxRepo) Count(_ context.Context, resourceID uint) (in
 }
 
 type mockImportRepo struct {
-	imports map[uint]*coredomain.ResourceImport
-	seq     uint
+	imports   map[uint]*coredomain.ResourceImport
+	resources *mockResourceRepo
+	seq       uint
 }
 
-func newMockImportRepo() *mockImportRepo {
-	return &mockImportRepo{imports: make(map[uint]*coredomain.ResourceImport)}
+func newMockImportRepo(resources *mockResourceRepo) *mockImportRepo {
+	return &mockImportRepo{imports: make(map[uint]*coredomain.ResourceImport), resources: resources}
 }
 
 func (r *mockImportRepo) Create(_ context.Context, item *coredomain.ResourceImport) error {
@@ -307,19 +327,40 @@ func (r *mockImportRepo) Create(_ context.Context, item *coredomain.ResourceImpo
 	return nil
 }
 
-func (r *mockImportRepo) MarkSucceeded(_ context.Context, id uint, importedCount int) error {
+func (r *mockImportRepo) FindByID(_ context.Context, id uint) (*coredomain.ResourceImport, error) {
 	item := r.imports[id]
-	item.Status = coredomain.ResourceImportImported
-	item.ImportedCount = importedCount
-	item.UpdatedAt = time.Now()
-	return nil
+	if item == nil {
+		return nil, nil
+	}
+	snapshot := *item
+	return &snapshot, nil
 }
 
 func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey string, safeError string) error {
 	item := r.imports[id]
+	if item == nil || item.Status != coredomain.ResourceImportProcessing {
+		return nil
+	}
 	item.Status = coredomain.ResourceImportFailed
 	item.FailureObjectKey = failureObjectKey
 	item.LastSafeError = safeError
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
+func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource) error {
+	item := r.imports[id]
+	if item == nil {
+		return coredomain.ErrResourceNotFound
+	}
+	if item.Status != coredomain.ResourceImportProcessing {
+		return nil
+	}
+	if err := r.resources.createMicrosoftBatch(ctx, resources, ms); err != nil {
+		return err
+	}
+	item.Status = coredomain.ResourceImportImported
+	item.ImportedCount = len(ms)
 	item.UpdatedAt = time.Now()
 	return nil
 }
@@ -342,24 +383,44 @@ func (s *mockFileStore) SavePrivate(_ context.Context, file governancedomain.Pri
 	}, nil
 }
 
+func (s *mockFileStore) ReadPrivate(_ context.Context, objectKey string) (*governancedomain.PrivateFile, error) {
+	file := s.files[objectKey]
+	return &file, nil
+}
+
+type mockImportQueue struct {
+	tasks []coreapp.MicrosoftImportTask
+}
+
+func (q *mockImportQueue) EnqueueMicrosoftImport(_ context.Context, task coreapp.MicrosoftImportTask) error {
+	q.tasks = append(q.tasks, task)
+	return nil
+}
+
 // --- Test setup ---
 
 func setupCoreTestModule() (*CoreModule, *mockResourceRepo, *mockMailServerRepo, *mockGeneratedMailboxRepo) {
+	mod, resourceRepo, mailServerRepo, mailboxRepo, _, _, _ := setupCoreTestModuleWithImportMocks()
+	return mod, resourceRepo, mailServerRepo, mailboxRepo
+}
+
+func setupCoreTestModuleWithImportMocks() (*CoreModule, *mockResourceRepo, *mockMailServerRepo, *mockGeneratedMailboxRepo, *mockImportQueue, *mockImportRepo, *mockFileStore) {
 	txtParser := &mockTXTParser{}
 	resourceRepo := newMockResourceRepo()
-	importRepo := newMockImportRepo()
+	importRepo := newMockImportRepo(resourceRepo)
+	importQueue := &mockImportQueue{}
 	mailServerRepo := newMockMailServerRepo()
 	mailboxRepo := newMockGeneratedMailboxRepo()
 	fileStore := newMockFileStore()
 
 	mod := &CoreModule{
-		ImportUseCase:   coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, fileStore),
+		ImportUseCase:   coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, fileStore, importQueue),
 		ResourceUseCase: coreapp.NewResourceUseCase(resourceRepo),
 		DomainUseCase:   coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
 		ServerUseCase:   coreapp.NewServerUseCase(mailServerRepo),
 		MailboxUseCase:  coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
 	}
-	return mod, resourceRepo, mailServerRepo, mailboxRepo
+	return mod, resourceRepo, mailServerRepo, mailboxRepo, importQueue, importRepo, fileStore
 }
 
 type mockTXTParser struct{}
@@ -594,7 +655,7 @@ func TestCoreHandler_RequiresSupplierRoleForPrivilegedResourceCommands(t *testin
 func TestCoreHandler_ImportSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mod, resourceRepo, _, _ := setupCoreTestModule()
+	mod, resourceRepo, _, _, importQueue, _, _ := setupCoreTestModuleWithImportMocks()
 	h := NewCoreHandler(mod)
 
 	body, contentType := multipartImportBody(t, "resources.txt", "user@example.com----pass123\nuser2@test.com----pass456----aux@example.net")
@@ -606,20 +667,24 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 
 	h.PostResourceImport(c)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var resp ImportResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if resp.Imported <= 0 {
-		t.Errorf("expected imported > 0, got %d", resp.Imported)
+	if resp.Imported != 0 {
+		t.Errorf("expected imported 0 before async processing, got %d", resp.Imported)
 	}
 	if resp.ImportID == 0 {
 		t.Errorf("expected importId > 0, got %d", resp.ImportID)
 	}
+	require.Len(t, importQueue.tasks, 1)
+	require.Equal(t, resp.ImportID, importQueue.tasks[0].ImportID)
+	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
+	require.Len(t, resourceRepo.microsoft, 2)
 
 	for _, ms := range resourceRepo.microsoft {
 		if ms.ForSale {
@@ -634,7 +699,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	mod, _, _, _ := setupCoreTestModule()
+	mod, _, _, _, importQueue, importRepo, _ := setupCoreTestModuleWithImportMocks()
 	h := NewCoreHandler(mod)
 
 	body, contentType := multipartImportBody(t, "resources.txt", "invalid")
@@ -646,9 +711,10 @@ func TestCoreHandler_ImportInvalidFormat(t *testing.T) {
 
 	h.PostResourceImport(c)
 
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Errorf("expected 422, got %d: %s", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Len(t, importQueue.tasks, 1)
+	require.NoError(t, mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0]))
+	require.Equal(t, coredomain.ResourceImportFailed, importRepo.imports[importQueue.tasks[0].ImportID].Status)
 }
 
 func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {

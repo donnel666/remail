@@ -4,7 +4,10 @@ import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
-import { importMicrosoftResources } from "@/lib/resources-api";
+import {
+  importMicrosoftResources,
+  waitForResourceImport,
+} from "@/lib/resources-api";
 
 import { MICROSOFT_EMAIL_FORMAT_HINT } from "./model";
 
@@ -75,8 +78,15 @@ export function ImportMicrosoftEmailsModal({
 
       if (!uploadFile) return;
 
-      await importMicrosoftResources(uploadFile, lifetimeType === "long_lived");
-      Toast.success(t("Resources imported successfully"));
+      const result = await importMicrosoftResources(
+        uploadFile,
+        lifetimeType === "long_lived"
+      );
+      Toast.success(t("Resource import accepted."));
+      const status = await waitForResourceImport(result.importId);
+      if (status.status === "failed") {
+        throw new Error(t(status.lastSafeError || "Resource import failed."));
+      }
       close();
       onSuccess();
     } catch (error) {

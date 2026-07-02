@@ -172,7 +172,7 @@
   "Cancel": "Cancel",
   "Supported format": "Supported format",
   "Importing": "Importing...",
-  "Resources imported successfully": "Resources imported successfully",
+  "Resource import accepted.": "Upload accepted. Import is processing.",
   "Resource import failed.": "Resource import failed.",
   "Invalid longLived value.": "Invalid long-lived value.",
   "Disable": "Disable",

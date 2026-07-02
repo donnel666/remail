@@ -433,6 +433,7 @@ export default function Resources() {
     () =>
       [
         {
+          key: "suffix",
           title: t("Suffix"),
           dataIndex: "emailAddress",
           width: 120,
@@ -443,6 +444,7 @@ export default function Resources() {
           ),
         },
         {
+          key: "email",
           title: t("Email"),
           dataIndex: "emailAddress",
           width: 260,
@@ -458,6 +460,7 @@ export default function Resources() {
           ),
         },
         {
+          key: "status",
           title: t("Status"),
           dataIndex: "status",
           width: 120,
@@ -465,6 +468,7 @@ export default function Resources() {
             renderStatusTag(status, t, record.lastSafeError),
         },
         {
+          key: "private",
           title: t("Private"),
           dataIndex: "usageScope",
           width: 120,
@@ -475,6 +479,7 @@ export default function Resources() {
           ),
         },
         {
+          key: "longLived",
           title: t("Long-lived"),
           dataIndex: "lifetimeType",
           width: 110,
@@ -488,6 +493,7 @@ export default function Resources() {
           ),
         },
         {
+          key: "operate",
           title: t("Action"),
           dataIndex: "operate",
           width: 210,

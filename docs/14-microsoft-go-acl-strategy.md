@@ -7,6 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-01 | V1.1 | Codex | 补充 P1-I2 Microsoft TXT 导入辅助邮箱行格式；不改变辅助邮箱绑定实体和状态机归属。 |
 | 2026-07-01 | V1.2 | Codex | 补充 P1-I2 ResourceImport artifact 索引；落实原始导入文件和安全失败明细进入 MinIO private bucket 的原设计。 |
+| 2026-07-02 | V1.3 | Codex | 补充 P1-I2 ResourceImport 异步状态查询、Asynq 重试边界和导入成功事务幂等要求；不改变辅助邮箱绑定实体和状态机归属。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -174,7 +175,7 @@ email----password----clientId----refreshToken----辅助邮箱
 
 P1-I2 阶段只补充 TXT 解析格式和 Core 资源创建。辅助邮箱“已分配、已发码、已验证、失败、过期”等状态必须由辅助邮箱绑定实体表达，不允许塞进 `microsoft_resources` 或 Core 资源状态枚举。
 
-导入 HTTP 契约使用 `multipart/form-data` 的 `file` 字段上传 TXT 文件。原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。Core 只保存 `ResourceImport` 安全索引，不保存原始文件内容。
+导入 HTTP 契约使用 `multipart/form-data` 的 `file` 字段上传 TXT 文件。原始导入文件进入 MinIO private bucket；失败明细只能包含行号、邮箱、安全错误分类和安全消息。Core 只保存 `ResourceImport` 安全索引，不保存原始文件内容。HTTP 层只落 MinIO private bucket、创建 `ResourceImport(processing)` 并投递 Asynq，返回 `202 Accepted`；实际解析、查重、资源创建和失败明细生成由后端 Asynq worker 异步执行。确定性业务失败写入失败明细和 `ResourceImport(failed)` 后不再重试；基础设施失败交给 Asynq 重试，耗尽重试后写安全失败摘要。资源创建和 `ResourceImport(imported)` 必须在同一个数据库事务中完成，重复投递遇到 `imported/failed` 终态直接 no-op。前端只能通过安全状态接口查询 `processing/imported/failed`、导入数量和安全错误摘要，不允许读取 MinIO objectKey。
 
 ---
 
