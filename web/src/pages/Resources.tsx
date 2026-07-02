@@ -111,12 +111,14 @@ function useResources(t: TFunction) {
   const [items, setItems] = useState<EmailResource[]>([]);
   const [loading, setLoading] = useState(true);
   const refreshSeqRef = useRef(0);
+  const locallyDeletedResourceIDsRef = useRef(new Set<number>());
 
   const refresh = useCallback(async () => {
     const refreshSeq = refreshSeqRef.current + 1;
     refreshSeqRef.current = refreshSeq;
     const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
 
+    locallyDeletedResourceIDsRef.current.clear();
     setLoading(true);
     setItems([]);
     try {
@@ -124,7 +126,13 @@ function useResources(t: TFunction) {
       await listOwnedMicrosoftResources({
         onPage: (pageItems) => {
           if (!isCurrentRefresh()) return;
-          const resources = pageItems.map(toEmailResource).filter(isEmailResource);
+          const resources = pageItems
+            .map(toEmailResource)
+            .filter(isEmailResource)
+            .filter(
+              (resource) =>
+                !locallyDeletedResourceIDsRef.current.has(resource.id)
+            );
           if (resources.length === 0) return;
           setItems((previous) => [...previous, ...resources]);
           if (!hasRenderedFirstPage) {
@@ -144,18 +152,25 @@ function useResources(t: TFunction) {
     }
   }, [t]);
 
+  const removeResource = useCallback((resourceID: number) => {
+    locallyDeletedResourceIDsRef.current.add(resourceID);
+    setItems((previous) =>
+      previous.filter((resource) => resource.id !== resourceID)
+    );
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  return { items, loading, refresh };
+  return { items, loading, refresh, removeResource };
 }
 
 export default function Resources() {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
-  const { items, loading, refresh } = useResources(t);
+  const { items, loading, refresh, removeResource } = useResources(t);
   const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [suffixKeyword, setSuffixKeyword] = useState("");
@@ -468,10 +483,10 @@ export default function Resources() {
         try {
           await deleteMicrosoftResource(record.id);
           Toast.success(t("Resource deleted."));
+          removeResource(record.id);
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
-          await refresh();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
         } finally {
@@ -479,7 +494,7 @@ export default function Resources() {
         }
       },
     });
-  }, [refresh, t]);
+  }, [removeResource, t]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
