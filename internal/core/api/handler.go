@@ -128,6 +128,32 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 	}
 }
 
+// DELETE /v1/resources/:resourceId
+func (h *CoreHandler) DeleteResource(c *gin.Context) {
+	resourceID, ok := parseResourceID(c)
+	if !ok {
+		return
+	}
+
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	if err := h.module.ResourceUseCase.DeletePrivateMicrosoft(
+		c.Request.Context(),
+		resourceID,
+		userID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	); err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
 // POST /v1/resources/imports
 func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
@@ -586,6 +612,16 @@ func writeCoreError(c *gin.Context, err error) {
 	case errors.Is(err, coredomain.ErrInvalidResourceType):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Invalid resource type.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidResourceStatus):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid resource status.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrResourceNotPrivate):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Only private Microsoft resources can be deleted.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrDuplicateEmail):

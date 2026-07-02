@@ -59,6 +59,9 @@ type EmailResourceRepository interface {
 	// PublishMicrosoftBatchWithLog publishes owned Microsoft resources and writes OperationLog records atomically.
 	PublishMicrosoftBatchWithLog(ctx context.Context, ownerUserID uint, resourceIDs []uint, baseLog governancedomain.OperationLog) (int, error)
 
+	// DeletePrivateMicrosoftWithLog atomically removes one owned private Microsoft resource and writes OperationLog.
+	DeletePrivateMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error
+
 	// UpdateDomain updates a domain resource and writes OperationLog.
 	UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error
 
@@ -520,10 +523,18 @@ type DomainStatusResult struct {
 	Status  string
 }
 
+const (
+	defaultResourceListLimit = 20
+	maxResourceListLimit     = 10000
+)
+
 // List returns the user's resources.
 func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope string, resourceType string, offset, limit int) (*ResourceListResult, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	if limit <= 0 {
+		limit = defaultResourceListLimit
+	}
+	if limit > maxResourceListLimit {
+		limit = maxResourceListLimit
 	}
 	if offset < 0 {
 		offset = 0
@@ -756,6 +767,45 @@ func (uc *ResourceUseCase) PublishMicrosoftForSaleBatch(ctx context.Context, res
 	}
 
 	return &MicrosoftBatchPublishResult{Requested: len(ids), Published: published}, nil
+}
+
+// DeletePrivateMicrosoft removes one owner-owned Microsoft resource while it is still private.
+func (uc *ResourceUseCase) DeletePrivateMicrosoft(ctx context.Context, resourceID, userID uint, requestID, path string) error {
+	resource, err := uc.resources.FindByID(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return domain.ErrResourceNotFound
+	}
+	if resource.OwnerUserID != userID {
+		return domain.ErrForbiddenResource
+	}
+	if resource.Type != domain.ResourceTypeMicrosoft {
+		return domain.ErrInvalidResourceType
+	}
+
+	ms, err := uc.resources.FindMicrosoftByID(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if ms == nil {
+		return domain.ErrResourceNotFound
+	}
+	if ms.ForSale {
+		return domain.ErrResourceNotPrivate
+	}
+
+	return uc.resources.DeletePrivateMicrosoftWithLog(ctx, userID, resourceID, governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.microsoft_resource.delete_private",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     fmt.Sprintf("%d", ms.ID),
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Private Microsoft resource deleted.",
+		RequestID:      requestID,
+	})
 }
 
 func uniqueResourceIDs(resourceIDs []uint) []uint {

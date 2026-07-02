@@ -7,6 +7,7 @@ var (
 	ErrResourceNotFound        = errors.New("resource not found")
 	ErrInvalidResourceType     = errors.New("invalid resource type")
 	ErrInvalidResourceStatus   = errors.New("invalid resource status")
+	ErrResourceNotPrivate      = errors.New("resource is not private")
 	ErrForbiddenResource       = errors.New("forbidden resource access")
 	ErrDuplicateEmail          = errors.New("duplicate email address in resource import")
 	ErrDuplicateDomain         = errors.New("domain already exists")

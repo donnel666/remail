@@ -20,6 +20,7 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		// Resource management (supplier self-service)
 		auth.GET("/resources", h.GetResources)
 		auth.GET("/resources/:resourceId", h.GetResourceDetail)
+		auth.DELETE("/resources/:resourceId", h.DeleteResource)
 		auth.POST("/resources/imports", h.PostResourceImport)
 		auth.GET("/resource-imports/:importId", h.GetResourceImport)
 		auth.POST("/resources/publish", h.PostResourcePublishBatch)

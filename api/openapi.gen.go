@@ -628,6 +628,12 @@ type PostResourcePublishBatchParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// DeleteResourceParams defines parameters for DeleteResource.
+type DeleteResourceParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetResourceDetail200JSONResponseBody defines parameters for GetResourceDetail.
 type GetResourceDetail200JSONResponseBody struct {
 	union json.RawMessage
@@ -869,6 +875,9 @@ type ServerInterface interface {
 	// Publish owned Microsoft resources to public supply
 	// (POST /v1/resources/publish)
 	PostResourcePublishBatch(c *gin.Context, params PostResourcePublishBatchParams)
+	// Delete an owned private Microsoft resource
+	// (DELETE /v1/resources/{resourceId})
+	DeleteResource(c *gin.Context, resourceId int, params DeleteResourceParams)
 	// Get resource detail (no credentials)
 	// (GET /v1/resources/{resourceId})
 	GetResourceDetail(c *gin.Context, resourceId int)
@@ -1865,6 +1874,60 @@ func (siw *ServerInterfaceWrapper) PostResourcePublishBatch(c *gin.Context) {
 	siw.Handler.PostResourcePublishBatch(c, params)
 }
 
+// DeleteResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteResource(c, resourceId, params)
+}
+
 // GetResourceDetail operation middleware
 func (siw *ServerInterfaceWrapper) GetResourceDetail(c *gin.Context) {
 
@@ -2276,6 +2339,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
 	router.POST(options.BaseURL+"/v1/resources/publish", wrapper.PostResourcePublishBatch)
+	router.DELETE(options.BaseURL+"/v1/resources/:resourceId", wrapper.DeleteResource)
 	router.GET(options.BaseURL+"/v1/resources/:resourceId", wrapper.GetResourceDetail)
 	router.POST(options.BaseURL+"/v1/resources/:resourceId/publish", wrapper.PostResourcePublish)
 	router.POST(options.BaseURL+"/v1/resources/:resourceId/validate", wrapper.PostResourceValidate)

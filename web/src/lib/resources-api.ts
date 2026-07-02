@@ -29,9 +29,15 @@ export type SupplierApplicationSubmitResponse = JsonResponse<
   201
 >;
 
-const resourcePageLimit = 100;
+const resourcePageLimit = 10_000;
 
-export async function listOwnedMicrosoftResources() {
+interface ListOwnedMicrosoftResourcesOptions {
+  onPage?: (items: ResourceItem[], response: ResourceListResponse) => void;
+}
+
+export async function listOwnedMicrosoftResources(
+  options: ListOwnedMicrosoftResourcesOptions = {}
+) {
   const items: ResourceItem[] = [];
   let offset = 0;
   let total = 0;
@@ -43,6 +49,7 @@ export async function listOwnedMicrosoftResources() {
     latest = response;
     total = response.total;
     items.push(...response.items);
+    options.onPage?.(response.items, response);
 
     if (response.items.length === 0 || items.length >= total) {
       break;
@@ -129,6 +136,17 @@ export async function publishMicrosoftResourcesBatch(
 export async function publishMicrosoftResource(resourceId: number) {
   return unwrap<MicrosoftResourceDetail>(
     await client.POST("/v1/resources/{resourceId}/publish", {
+      params: {
+        header: csrfHeader(),
+        path: { resourceId },
+      },
+    })
+  );
+}
+
+export async function deleteMicrosoftResource(resourceId: number) {
+  await unwrap<void>(
+    await client.DELETE("/v1/resources/{resourceId}", {
       params: {
         header: csrfHeader(),
         path: { resourceId },

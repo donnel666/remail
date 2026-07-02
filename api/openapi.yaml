@@ -1130,6 +1130,7 @@ paths:
           schema:
             type: integer
             default: 20
+            maximum: 10000
       responses:
         "200":
           description: Resource list
@@ -1187,6 +1188,47 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteResource
+      summary: Delete an owned private Microsoft resource
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Private Microsoft resource deleted
+        "400":
+          description: Invalid resource ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Resource is not private or is not a Microsoft resource
           content:
             application/json:
               schema:

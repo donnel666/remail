@@ -90,7 +90,7 @@ flowchart LR
 |----|------|------|------|
 | P1-I0 | 工程骨架 | Go module、Gin、GORM、goose、Redis、Asynq、MinIO、OpenAPI、React 单控制台、Docker Compose | `/healthz`、基础 migration、CI、空库启动通过 |
 | P1-I1 | 激活和身份基线 | 首次激活 super_admin、登录、Session、user/supplier/admin/super_admin 基线、验证码 | 空用户激活、登录、改密、角色识别、验证码错误语义 |
-| P1-I2 | 邮箱资源上传 | 普通用户上传私有 Microsoft TXT；导入批次选择长效/短效；供应商单个或批量单向发布出售；供应商上传自建邮箱/域名资源；资源列表、详情、状态诊断 | 不靠 SQL 创建资源；Microsoft 默认私有；凭据禁敏；长短效字段可查可筛选；资源状态机测试 |
+| P1-I2 | 邮箱资源上传 | 普通用户上传私有 Microsoft TXT；导入批次选择长效/短效；普通用户删除自有私有 Microsoft 资源；供应商单个或批量单向发布公开出售；供应商上传自建邮箱/域名资源；资源列表、详情、状态诊断 | 不靠 SQL 创建资源；Microsoft 默认私有；凭据禁敏；长短效字段可查可筛选；资源状态机测试 |
 | P1-I3 | 资源验证 | 资源代理池、系统代理池、Go Microsoft ACL 获取/刷新 RT；自建邮箱连接/收件验证；资源转 `normal/abnormal` | Microsoft 和自建各跑通一条验证；代理绑定/兜底可查；失败有 SystemLog 和安全 message |
 | P1-I4 | 最小项目商品 | 管理员创建可售项目、商品、价格、资源类型、服务窗口、基础邮件规则 | 不走审批；项目商品能关联 Microsoft/自建资源类型 |
 | P1-I5 | 分配路由 | Microsoft 候选、自建候选、主邮箱/别名/生成邮箱分配、一单一资源、释放 | 并发分配不重复；同资源不会被两个订单抢占 |
@@ -127,7 +127,7 @@ flowchart LR
 |------|----------|
 | P1-I0 | 空库启动、健康检查、迁移、前后端构建。 |
 | P1-I1 | 首次激活、登录、验证码错误、账号或密码错误。 |
-| P1-I2 | 普通用户上传私有 Microsoft TXT 并选择长短效；supplier 单个/批量发布自有 Microsoft 资源出售；supplier 上传自建域名资源；列表和详情不泄漏凭据。 |
+| P1-I2 | 普通用户上传私有 Microsoft TXT 并选择长短效；普通用户可删除自有私有 Microsoft 资源；supplier 单个/批量发布自有 Microsoft 资源公开出售；supplier 上传自建域名资源；列表和详情不泄漏凭据。 |
 | P1-I3 | Microsoft 验证成功/失败、自建验证成功/失败，失败可查 SystemLog。 |
 | P1-I3 | resource 代理按 Microsoft 邮箱建立 7 天绑定；代理失败后能降级 system 代理。 |
 | P1-I4 | 管理员创建项目商品后，用户能看到可售项目。 |

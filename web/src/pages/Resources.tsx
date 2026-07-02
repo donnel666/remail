@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Dropdown,
@@ -28,6 +28,7 @@ import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
+  deleteMicrosoftResource,
   getCurrentSupplierApplication,
   listOwnedMicrosoftResources,
   publishMicrosoftResource,
@@ -109,16 +110,37 @@ function StatisticFilterOption<T extends string>({
 function useResources(t: TFunction) {
   const [items, setItems] = useState<EmailResource[]>([]);
   const [loading, setLoading] = useState(true);
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const refreshSeq = refreshSeqRef.current + 1;
+    refreshSeqRef.current = refreshSeq;
+    const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
+
     setLoading(true);
+    setItems([]);
     try {
-      const response = await listOwnedMicrosoftResources();
-      setItems(response.items.map(toEmailResource).filter(isEmailResource));
+      let hasRenderedFirstPage = false;
+      await listOwnedMicrosoftResources({
+        onPage: (pageItems) => {
+          if (!isCurrentRefresh()) return;
+          const resources = pageItems.map(toEmailResource).filter(isEmailResource);
+          if (resources.length === 0) return;
+          setItems((previous) => [...previous, ...resources]);
+          if (!hasRenderedFirstPage) {
+            hasRenderedFirstPage = true;
+            setLoading(false);
+          }
+        },
+      });
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+      if (isCurrentRefresh()) {
+        Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRefresh()) {
+        setLoading(false);
+      }
     }
   }, [t]);
 
@@ -148,6 +170,9 @@ export default function Resources() {
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
+    null
+  );
+  const [deletingResourceID, setDeletingResourceID] = useState<number | null>(
     null
   );
   const [publishingBatch, setPublishingBatch] = useState(false);
@@ -313,16 +338,26 @@ export default function Resources() {
 
     if (!(await ensureCanPublishForSale())) return;
 
-    setPublishingResourceID(record.id);
-    try {
-      await publishMicrosoftResource(record.id);
-      Toast.success(t("Resource published for sale."));
-      await refresh();
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Publish failed."));
-    } finally {
-      setPublishingResourceID(null);
-    }
+    Modal.confirm({
+      title: t("Confirm sell resource"),
+      content: t("Confirm sell resource content", {
+        email: record.emailAddress,
+      }),
+      okText: t("Sell"),
+      cancelText: t("Cancel"),
+      onOk: async () => {
+        setPublishingResourceID(record.id);
+        try {
+          await publishMicrosoftResource(record.id);
+          Toast.success(t("Resource published for sale."));
+          await refresh();
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+        } finally {
+          setPublishingResourceID(null);
+        }
+      },
+    });
   }, [ensureCanPublishForSale, refresh, t]);
 
   const selectedPrivateResourceIds = useMemo(() => {
@@ -420,6 +455,32 @@ export default function Resources() {
     void confirmSellSelected();
   }, [confirmSellSelected]);
 
+  const handleDeleteResource = useCallback((record: EmailResource) => {
+    if (record.forSale) return;
+
+    Modal.confirm({
+      title: t("Confirm delete"),
+      content: record.emailAddress,
+      okText: t("Delete"),
+      cancelText: t("Cancel"),
+      onOk: async () => {
+        setDeletingResourceID(record.id);
+        try {
+          await deleteMicrosoftResource(record.id);
+          Toast.success(t("Resource deleted."));
+          setSelectedKeys((previous) =>
+            previous.filter((resourceID) => resourceID !== record.id)
+          );
+          await refresh();
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Delete failed."));
+        } finally {
+          setDeletingResourceID(null);
+        }
+      },
+    });
+  }, [refresh, t]);
+
   useSelectionNotification({
     selectedCount: selectedKeys.length,
     onCheck: showNotImplemented,
@@ -513,26 +574,22 @@ export default function Resources() {
                 {t("Sell")}
               </Button>
               <Button
+                disabled={record.forSale}
+                loading={deletingResourceID === record.id}
                 type="danger"
                 size="small"
-                onClick={() => {
-                  Modal.confirm({
-                    title: t("Confirm remove"),
-                    content: record.emailAddress,
-                    okText: t("Remove"),
-                    cancelText: t("Cancel"),
-                    onOk: showNotImplemented,
-                  });
-                }}
+                onClick={() => handleDeleteResource(record)}
               >
-                {t("Remove")}
+                {t("Delete")}
               </Button>
             </Space>
           ),
         },
       ] as any[],
     [
+      deletingResourceID,
       handleSellResource,
+      handleDeleteResource,
       publishingResourceID,
       showNotImplemented,
       t,

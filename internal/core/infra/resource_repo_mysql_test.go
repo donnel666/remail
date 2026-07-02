@@ -543,6 +543,102 @@ func TestResourceRepoPublishMicrosoftBatchWithLogIsConcurrentIdempotentMySQL(t *
 	require.Equal(t, int64(1), logCount)
 }
 
+func TestResourceRepoDeletePrivateMicrosoftWithLogMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		10,
+	).Error)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &domain.MicrosoftResource{
+		EmailAddress: "delete-private@test.local",
+		Password:     "secret",
+		ForSale:      false,
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, ms))
+
+	log := governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "core.microsoft_resource.delete_private",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     fmt.Sprintf("%d", ms.ID),
+		Path:           fmt.Sprintf("/v1/resources/%d", ms.ID),
+		Result:         "success",
+		SafeSummary:    "Private Microsoft resource deleted.",
+		RequestID:      "req-delete-private",
+	}
+	require.NoError(t, repo.DeletePrivateMicrosoftWithLog(context.Background(), 1, ms.ID, log))
+
+	var rootCount int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM email_resources WHERE id = ?", ms.ID).Scan(&rootCount).Error)
+	require.Zero(t, rootCount)
+
+	var msCount int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM microsoft_resources WHERE id = ?", ms.ID).Scan(&msCount).Error)
+	require.Zero(t, msCount)
+
+	var logCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM operation_logs WHERE operation_type = ? AND resource_id = ?",
+		"core.microsoft_resource.delete_private",
+		fmt.Sprintf("%d", ms.ID),
+	).Scan(&logCount).Error)
+	require.Equal(t, int64(1), logCount)
+}
+
+func TestResourceRepoDeletePublishedMicrosoftDeniedMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		10,
+	).Error)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &domain.MicrosoftResource{
+		EmailAddress: "delete-public@test.local",
+		Password:     "secret",
+		ForSale:      true,
+		Status:       domain.MicrosoftStatusNormal,
+	}
+	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, ms))
+
+	err := repo.DeletePrivateMicrosoftWithLog(context.Background(), 1, ms.ID, governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "core.microsoft_resource.delete_private",
+		ResourceType:   "microsoft_resource",
+		ResourceID:     fmt.Sprintf("%d", ms.ID),
+		Path:           fmt.Sprintf("/v1/resources/%d", ms.ID),
+		Result:         "success",
+		SafeSummary:    "Private Microsoft resource deleted.",
+		RequestID:      "req-delete-public",
+	})
+	require.ErrorIs(t, err, domain.ErrResourceNotPrivate)
+
+	var rootCount int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM email_resources WHERE id = ?", ms.ID).Scan(&rootCount).Error)
+	require.Equal(t, int64(1), rootCount)
+
+	var logCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM operation_logs WHERE operation_type = ? AND resource_id = ?",
+		"core.microsoft_resource.delete_private",
+		fmt.Sprintf("%d", ms.ID),
+	).Scan(&logCount).Error)
+	require.Zero(t, logCount)
+}
+
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {
 	t.Helper()
 

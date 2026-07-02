@@ -572,6 +572,58 @@ func (r *ResourceRepo) PublishMicrosoftBatchWithLog(ctx context.Context, ownerUs
 	return published, nil
 }
 
+// DeletePrivateMicrosoftWithLog removes one owned Microsoft resource while it is still private.
+func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerUserID uint, resourceID uint, log governancedomain.OperationLog) error {
+	if resourceID == 0 {
+		return domain.ErrResourceNotFound
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			First(&root).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrForbiddenResource
+			}
+			return fmt.Errorf("lock owned microsoft resource: %w", err)
+		}
+
+		var ms MicrosoftResourceModel
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", resourceID).
+			First(&ms).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock microsoft resource: %w", err)
+		}
+		if ms.ForSale {
+			return domain.ErrResourceNotPrivate
+		}
+
+		if log.ResourceID == "" {
+			log.ResourceID = fmt.Sprintf("%d", resourceID)
+		}
+		if err := r.operationLogs.CreateInTx(ctx, tx, &log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
+		}
+
+		result := tx.
+			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			Delete(&EmailResourceModel{})
+		if result.Error != nil {
+			return fmt.Errorf("delete private microsoft resource: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrForbiddenResource
+		}
+		return nil
+	})
+}
+
 // UpdateDomainWithLog updates a domain resource and writes an OperationLog
 // in the same transaction.
 func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error {

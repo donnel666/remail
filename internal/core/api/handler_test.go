@@ -204,6 +204,23 @@ func (r *mockResourceRepo) PublishMicrosoftBatchWithLog(_ context.Context, owner
 	return published, nil
 }
 
+func (r *mockResourceRepo) DeletePrivateMicrosoftWithLog(_ context.Context, ownerUserID uint, resourceID uint, _ governancedomain.OperationLog) error {
+	root, ok := r.resources[resourceID]
+	if !ok || root.OwnerUserID != ownerUserID || root.Type != coredomain.ResourceTypeMicrosoft {
+		return coredomain.ErrForbiddenResource
+	}
+	ms, ok := r.microsoft[resourceID]
+	if !ok {
+		return coredomain.ErrResourceNotFound
+	}
+	if ms.ForSale {
+		return coredomain.ErrResourceNotPrivate
+	}
+	delete(r.microsoft, resourceID)
+	delete(r.resources, resourceID)
+	return nil
+}
+
 func (r *mockResourceRepo) UpdateDomainWithLog(_ context.Context, _ *coredomain.MailDomainResource, _ *governancedomain.OperationLog) error {
 	return nil
 }
@@ -515,6 +532,7 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 	}{
 		{"GET", "/v1/resources", ""},
 		{"GET", "/v1/resources/1", ""},
+		{"DELETE", "/v1/resources/1", ""},
 		{"POST", "/v1/resources/imports", `{"content":"a@b----c"}`},
 		{"POST", "/v1/resources/publish", `{"resourceIds":[1]}`},
 		{"POST", "/v1/resources/1/publish", ""},
@@ -553,6 +571,8 @@ func TestCoreHandler_RequiresAuth(t *testing.T) {
 				h.PostResourcePublish(c)
 			case ep.method == "POST" && ep.path == "/v1/resources/publish":
 				h.PostResourcePublishBatch(c)
+			case ep.method == "DELETE" && ep.path == "/v1/resources/1":
+				h.DeleteResource(c)
 			case ep.method == "GET" && len(ep.path) >= 14 && ep.path[:14] == "/v1/resources/":
 				h.GetResourceDetail(c)
 			case ep.method == "POST" && ep.path == "/v1/resources/imports":
@@ -1044,6 +1064,85 @@ func TestCoreHandler_PublishMicrosoftResourceNonOwnerDenied(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for non-owner, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestCoreHandler_DeletePrivateMicrosoftResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{
+		EmailAddress: "private-delete@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusPending,
+		ForSale:      false,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
+	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
+	setAuthContext(c, 1, 10)
+
+	h.DeleteResource(c)
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.NotContains(t, resourceRepo.resources, uint(1))
+	require.NotContains(t, resourceRepo.microsoft, uint(1))
+}
+
+func TestCoreHandler_DeletePublishedMicrosoftResourceDenied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{
+		EmailAddress: "public-delete@example.com",
+		Password:     "secret",
+		Status:       coredomain.MicrosoftStatusNormal,
+		ForSale:      true,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
+	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
+	setAuthContext(c, 1, 10)
+
+	h.DeleteResource(c)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	require.Contains(t, resourceRepo.resources, uint(1))
+	require.Contains(t, resourceRepo.microsoft, uint(1))
+}
+
+func TestCoreHandler_DeleteMicrosoftResourceNonOwnerDenied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "private-non-owner@example.com", Password: "secret"}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
+	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
+	setAuthContext(c, 2, 10)
+
+	h.DeleteResource(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.Contains(t, resourceRepo.resources, uint(1))
+	require.Contains(t, resourceRepo.microsoft, uint(1))
 }
 
 func TestCoreHandler_DomainMailboxesOwnerAccess(t *testing.T) {
