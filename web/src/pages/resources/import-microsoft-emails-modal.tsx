@@ -24,7 +24,7 @@ const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entries?\.$/;
 interface ImportMicrosoftEmailsModalProps {
   open: boolean;
   onOpenChange: (value: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 }
 
 export function ImportMicrosoftEmailsModal({
@@ -120,7 +120,7 @@ export function ImportMicrosoftEmailsModal({
         Toast.warning(getImportWarningMessage(t, status.lastSafeError));
       }
       close();
-      onSuccess();
+      await onSuccess();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
     } finally {

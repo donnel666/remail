@@ -148,6 +148,7 @@ const (
 	resourceBulkOperationLogResourceID = "filter"
 	resourceImportLookupChunkSize      = 10000
 	resourceImportInsertBatchSize      = 1000
+	microsoftImportRestoreTempTable    = "tmp_microsoft_import_restore"
 )
 
 // NewResourceRepo creates a new GORM-backed resource repository.
@@ -400,6 +401,8 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 
 	newResources := make([]domain.EmailResource, 0, len(resources))
 	newMicrosoftResources := make([]domain.MicrosoftResource, 0, len(ms))
+	restoreRows := make([]microsoftImportRestoreRow, 0, len(existingByEmail))
+	now := time.Now().UTC()
 	for i := range ms {
 		existing, ok := existingByEmail[microsoftEmailKey(ms[i].EmailAddress)]
 		if !ok {
@@ -408,39 +411,21 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 			continue
 		}
 
-		now := time.Now().UTC()
-		if err := tx.Model(&EmailResourceModel{}).
-			Where("id = ? AND type = ?", existing.ID, string(domain.ResourceTypeMicrosoft)).
-			Updates(map[string]interface{}{
-				"owner_user_id": resources[i].OwnerUserID,
-				"updated_at":    now,
-			}).Error; err != nil {
-			return fmt.Errorf("restore deleted email resource: %w", err)
-		}
-
-		result := tx.Model(&MicrosoftResourceModel{}).
-			Where("id = ? AND status = ?", existing.ID, string(domain.MicrosoftStatusDeleted)).
-			Updates(map[string]interface{}{
-				"email_address":     strings.TrimSpace(ms[i].EmailAddress),
-				"email_domain":      microsoftEmailDomain(ms[i].EmailAddress),
-				"password":          ms[i].Password,
-				"client_id":         ms[i].ClientID,
-				"refresh_token":     ms[i].RefreshToken,
-				"long_lived":        ms[i].LongLived,
-				"rt_expire_at":      ms[i].RTExpireAt,
-				"for_sale":          false,
-				"status":            string(ms[i].Status),
-				"quality_score":     ms[i].QualityScore,
-				"last_safe_error":   ms[i].LastSafeError,
-				"last_allocated_at": nil,
-				"updated_at":        now,
-			})
-		if result.Error != nil {
-			return fmt.Errorf("restore deleted microsoft resource: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return domain.ErrDuplicateEmail
-		}
+		restoreRows = append(restoreRows, microsoftImportRestoreRow{
+			ID:            existing.ID,
+			OwnerUserID:   resources[i].OwnerUserID,
+			EmailAddress:  strings.TrimSpace(ms[i].EmailAddress),
+			EmailDomain:   microsoftEmailDomain(ms[i].EmailAddress),
+			Password:      ms[i].Password,
+			ClientID:      ms[i].ClientID,
+			RefreshToken:  ms[i].RefreshToken,
+			LongLived:     ms[i].LongLived,
+			RTExpireAt:    ms[i].RTExpireAt,
+			Status:        string(ms[i].Status),
+			QualityScore:  ms[i].QualityScore,
+			LastSafeError: ms[i].LastSafeError,
+			UpdatedAt:     now,
+		})
 
 		resources[i].ID = existing.ID
 		resources[i].CreatedAt = existing.CreatedAt
@@ -448,6 +433,9 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		ms[i].ID = existing.ID
 		ms[i].CreatedAt = existing.CreatedAt
 		ms[i].UpdatedAt = now
+	}
+	if err := restoreDeletedMicrosoftBatchTx(tx, restoreRows); err != nil {
+		return err
 	}
 	resources = newResources
 	ms = newMicrosoftResources
@@ -486,6 +474,92 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		ms[i].CreatedAt = msModels[i].CreatedAt
 		ms[i].UpdatedAt = msModels[i].UpdatedAt
 	}
+	return nil
+}
+
+type microsoftImportRestoreRow struct {
+	ID            uint       `gorm:"column:id"`
+	OwnerUserID   uint       `gorm:"column:owner_user_id"`
+	EmailAddress  string     `gorm:"column:email_address"`
+	EmailDomain   string     `gorm:"column:email_domain"`
+	Password      string     `gorm:"column:password"`
+	ClientID      string     `gorm:"column:client_id"`
+	RefreshToken  string     `gorm:"column:refresh_token"`
+	LongLived     bool       `gorm:"column:long_lived"`
+	RTExpireAt    *time.Time `gorm:"column:rt_expire_at"`
+	Status        string     `gorm:"column:status"`
+	QualityScore  int        `gorm:"column:quality_score"`
+	LastSafeError string     `gorm:"column:last_safe_error"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+}
+
+func restoreDeletedMicrosoftBatchTx(tx *gorm.DB, rows []microsoftImportRestoreRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	if err := tx.Exec("DROP TEMPORARY TABLE IF EXISTS " + microsoftImportRestoreTempTable).Error; err != nil {
+		return fmt.Errorf("drop microsoft import restore temp table: %w", err)
+	}
+	defer tx.Exec("DROP TEMPORARY TABLE IF EXISTS " + microsoftImportRestoreTempTable)
+
+	if err := tx.Exec(`
+CREATE TEMPORARY TABLE ` + microsoftImportRestoreTempTable + ` (
+	id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+	owner_user_id BIGINT UNSIGNED NOT NULL,
+	email_address VARCHAR(255) NOT NULL,
+	email_domain VARCHAR(255) NOT NULL,
+	password VARCHAR(512) NOT NULL,
+	client_id VARCHAR(255) NOT NULL,
+	refresh_token VARCHAR(1024) NOT NULL,
+	long_lived BOOLEAN NOT NULL,
+	rt_expire_at DATETIME(3) NULL,
+	status VARCHAR(32) NOT NULL,
+	quality_score BIGINT NOT NULL,
+	last_safe_error VARCHAR(500) NOT NULL,
+	updated_at DATETIME(3) NOT NULL
+) ENGINE=InnoDB`).Error; err != nil {
+		return fmt.Errorf("create microsoft import restore temp table: %w", err)
+	}
+
+	if err := tx.Table(microsoftImportRestoreTempTable).CreateInBatches(&rows, resourceImportInsertBatchSize).Error; err != nil {
+		return fmt.Errorf("stage deleted microsoft restore batch: %w", err)
+	}
+
+	rootResult := tx.Exec(`
+UPDATE email_resources er
+JOIN `+microsoftImportRestoreTempTable+` ir ON ir.id = er.id
+SET er.owner_user_id = ir.owner_user_id,
+	er.updated_at = ir.updated_at
+WHERE er.type = ?`, string(domain.ResourceTypeMicrosoft))
+	if rootResult.Error != nil {
+		return fmt.Errorf("restore deleted email resources: %w", rootResult.Error)
+	}
+
+	microsoftResult := tx.Exec(`
+UPDATE microsoft_resources mr
+JOIN `+microsoftImportRestoreTempTable+` ir ON ir.id = mr.id
+SET mr.email_address = ir.email_address,
+	mr.email_domain = ir.email_domain,
+	mr.password = ir.password,
+	mr.client_id = ir.client_id,
+	mr.refresh_token = ir.refresh_token,
+	mr.long_lived = ir.long_lived,
+	mr.rt_expire_at = ir.rt_expire_at,
+	mr.for_sale = FALSE,
+	mr.status = ir.status,
+	mr.quality_score = ir.quality_score,
+	mr.last_safe_error = ir.last_safe_error,
+	mr.last_allocated_at = NULL,
+	mr.updated_at = ir.updated_at
+WHERE mr.status = ?`, string(domain.MicrosoftStatusDeleted))
+	if microsoftResult.Error != nil {
+		return fmt.Errorf("restore deleted microsoft resources: %w", microsoftResult.Error)
+	}
+	if microsoftResult.RowsAffected != int64(len(rows)) {
+		return domain.ErrDuplicateEmail
+	}
+
 	return nil
 }
 

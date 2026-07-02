@@ -672,6 +672,12 @@ export default function Resources() {
     confirmDeleteSelected();
   }, [confirmDeleteSelected]);
 
+  const handleImportSuccess = useCallback(async () => {
+    setActivePage(1);
+    setSelectedKeys([]);
+    await refresh();
+  }, [refresh]);
+
   const handleDeleteResource = useCallback((record: EmailResource) => {
     if (record.forSale) return;
 
@@ -1134,7 +1140,7 @@ export default function Resources() {
       <ImportMicrosoftEmailsModal
         open={importOpen}
         onOpenChange={setImportOpen}
-        onSuccess={refresh}
+        onSuccess={handleImportSuccess}
       />
       <SupplierApplicationModal
         open={supplierApplicationOpen}
