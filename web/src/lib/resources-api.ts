@@ -30,33 +30,95 @@ export type SupplierApplicationSubmitResponse = JsonResponse<
 >;
 
 const resourcePageLimit = 10_000;
+const resourcePageConcurrency = 4;
 
 interface ListOwnedMicrosoftResourcesOptions {
+  concurrency?: number;
   onPage?: (items: ResourceItem[], response: ResourceListResponse) => void;
+}
+
+function normalizePageConcurrency(value: number | undefined) {
+  if (!Number.isFinite(value)) return resourcePageConcurrency;
+  return Math.max(1, Math.min(8, Math.floor(value as number)));
 }
 
 export async function listOwnedMicrosoftResources(
   options: ListOwnedMicrosoftResourcesOptions = {}
 ) {
   const items: ResourceItem[] = [];
-  let offset = 0;
   let total = 0;
   let latest: ResourceListResponse | null = null;
 
-  for (;;) {
-    const response = await listOwnedMicrosoftResourcesPage(offset);
+  const firstResponse = await listOwnedMicrosoftResourcesPage(0);
+  latest = firstResponse;
+  total = firstResponse.total;
+  items.push(...firstResponse.items);
+  options.onPage?.(firstResponse.items, firstResponse);
 
-    latest = response;
-    total = response.total;
-    items.push(...response.items);
-    options.onPage?.(response.items, response);
-
-    if (response.items.length === 0 || items.length >= total) {
-      break;
-    }
-
-    offset += response.items.length;
+  if (firstResponse.items.length === 0 || items.length >= total) {
+    return {
+      ...firstResponse,
+      items,
+      limit: items.length,
+      offset: 0,
+      total,
+    };
   }
+
+  const pageOffsets: number[] = [];
+  for (
+    let pageOffset = firstResponse.items.length;
+    pageOffset < total;
+    pageOffset += resourcePageLimit
+  ) {
+    pageOffsets.push(pageOffset);
+  }
+
+  const pageBuffer = new Map<number, ResourceListResponse>();
+  let nextFlushOffset = firstResponse.items.length;
+  let nextOffsetIndex = 0;
+  let firstError: unknown;
+
+  const flushReadyPages = () => {
+    for (;;) {
+      const response = pageBuffer.get(nextFlushOffset);
+      if (!response) return;
+
+      pageBuffer.delete(nextFlushOffset);
+      latest = response;
+      items.push(...response.items);
+      options.onPage?.(response.items, response);
+      nextFlushOffset += resourcePageLimit;
+    }
+  };
+
+  const workerCount = Math.min(
+    normalizePageConcurrency(options.concurrency),
+    pageOffsets.length
+  );
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (!firstError) {
+        const pageOffset = pageOffsets[nextOffsetIndex];
+        if (pageOffset === undefined) return;
+        nextOffsetIndex += 1;
+
+        let response: ResourceListResponse;
+        try {
+          response = await listOwnedMicrosoftResourcesPage(pageOffset);
+        } catch (error) {
+          firstError ??= error;
+          return;
+        }
+        if (firstError) return;
+
+        pageBuffer.set(pageOffset, response);
+        flushReadyPages();
+      }
+    })
+  );
+
+  if (firstError) throw firstError;
 
   return {
     ...(latest as ResourceListResponse),
