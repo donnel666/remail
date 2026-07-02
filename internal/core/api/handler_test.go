@@ -450,7 +450,7 @@ func (r *mockResourceRepo) filteredPrivateIDs(ownerUserID uint, filter coreapp.R
 			if filter.Status != "" && string(dr.Status) != filter.Status {
 				continue
 			}
-			if filter.TLD != "" && coredomain.DomainTLD(dr.Domain) != filter.TLD {
+			if filter.TLD != "" && coredomain.TLD(dr.Domain) != filter.TLD {
 				continue
 			}
 			if filter.Search != "" && !strings.Contains(strings.ToLower(dr.Domain), filter.Search) {
@@ -494,7 +494,7 @@ func (r *mockResourceRepo) ListDomainStatus(_ context.Context, ids []uint) ([]co
 			result = append(result, coreapp.DomainStatusResult{
 				ID:           dr.ID,
 				Domain:       dr.Domain,
-				DomainTLD:    coredomain.DomainTLD(dr.Domain),
+				DomainTLD:    coredomain.TLD(dr.Domain),
 				MailServerID: dr.MailServerID,
 				Purpose:      string(dr.Purpose),
 				Status:       string(dr.Status),

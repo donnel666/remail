@@ -300,8 +300,8 @@ func NormalizeDomainSuffix(value string) (string, error) {
 	return "." + suffix, nil
 }
 
-// DomainTLD extracts the normalized suffix used by resource filters.
-func DomainTLD(value string) string {
+// TLD extracts the normalized suffix used by resource filters.
+func TLD(value string) string {
 	canonical, err := NormalizeDomainName(value)
 	if err != nil {
 		return ""

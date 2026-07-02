@@ -356,7 +356,7 @@ func TestNormalizeDomainNameRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestDomainTLD(t *testing.T) {
+func TestTLD(t *testing.T) {
 	tests := []struct {
 		domain string
 		want   string
@@ -367,8 +367,8 @@ func TestDomainTLD(t *testing.T) {
 		{"example.net.ar", ".net.ar"},
 	}
 	for _, tt := range tests {
-		if got := DomainTLD(tt.domain); got != tt.want {
-			t.Fatalf("DomainTLD(%q) = %q, want %q", tt.domain, got, tt.want)
+		if got := TLD(tt.domain); got != tt.want {
+			t.Fatalf("TLD(%q) = %q, want %q", tt.domain, got, tt.want)
 		}
 	}
 }

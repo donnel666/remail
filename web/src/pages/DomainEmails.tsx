@@ -1033,7 +1033,7 @@ export default function DomainEmails() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={{ x: "max-content" }}
+          scroll={compactMode ? undefined : { x: "max-content" }}
           size="middle"
         />
       </CardPro>

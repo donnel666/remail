@@ -233,7 +233,7 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 				ID:           existing.ID,
 				OwnerUserID:  resource.OwnerUserID,
 				Domain:       dr.Domain,
-				DomainTLD:    domain.DomainTLD(dr.Domain),
+				DomainTLD:    domain.TLD(dr.Domain),
 				MailServerID: dr.MailServerID,
 				Purpose:      string(dr.Purpose),
 				Status:       string(dr.Status),
@@ -265,7 +265,7 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 			ID:           root.ID,
 			OwnerUserID:  root.OwnerUserID,
 			Domain:       dr.Domain,
-			DomainTLD:    domain.DomainTLD(dr.Domain),
+			DomainTLD:    domain.TLD(dr.Domain),
 			MailServerID: dr.MailServerID,
 			Purpose:      string(dr.Purpose),
 			Status:       string(dr.Status),
@@ -1496,7 +1496,7 @@ func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain
 		resource.Domain = domainName
 		updates := map[string]interface{}{
 			"domain":            domainName,
-			"domain_tld":        domain.DomainTLD(domainName),
+			"domain_tld":        domain.TLD(domainName),
 			"mail_server_id":    resource.MailServerID,
 			"purpose":           string(resource.Purpose),
 			"status":            string(resource.Status),
