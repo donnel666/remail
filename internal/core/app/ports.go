@@ -500,12 +500,12 @@ func importFailuresDetail(failures []importFailure) string {
 	var b strings.Builder
 	b.WriteString("line,email,category,message\n")
 	for _, failure := range failures {
-		b.WriteString(fmt.Sprintf("%d,%s,%s,%s\n",
+		fmt.Fprintf(&b, "%d,%s,%s,%s\n",
 			failure.Line,
 			csvSafe(failure.Email),
 			csvSafe(failure.Category),
 			csvSafe(failure.SafeMessage),
-		))
+		)
 	}
 	return b.String()
 }
