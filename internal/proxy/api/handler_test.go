@@ -202,8 +202,11 @@ func (r *fakeProxyRepo) ClaimDispatchableProxyCheckJobs(_ context.Context, limit
 	}
 	jobs := make([]proxyapp.ProxyCheckJob, 0, len(r.checkJobs))
 	for i := range r.checkJobs {
-		if r.checkJobs[i].Status != proxyapp.ProxyCheckJobPending &&
-			!(r.checkJobs[i].UpdatedAt.Before(staleBefore) && (r.checkJobs[i].Status == proxyapp.ProxyCheckJobQueued || r.checkJobs[i].Status == proxyapp.ProxyCheckJobRunning)) {
+		eligible := r.checkJobs[i].Status == proxyapp.ProxyCheckJobPending
+		if !eligible && r.checkJobs[i].UpdatedAt.Before(staleBefore) {
+			eligible = r.checkJobs[i].Status == proxyapp.ProxyCheckJobQueued || r.checkJobs[i].Status == proxyapp.ProxyCheckJobRunning
+		}
+		if !eligible {
 			continue
 		}
 		r.checkJobs[i].Status = proxyapp.ProxyCheckJobQueued

@@ -749,14 +749,21 @@ func TestProxyRepoCreateWithLogAndCheckJobPersistsDurableJobMySQL(t *testing.T) 
 	require.Equal(t, proxy.ID, job.ProxyID)
 	require.Equal(t, proxyapp.ProxyCheckJobPending, job.Status)
 
-	require.NoError(t, repo.MarkProxyCheckJobDispatchFailed(ctx, job.ID, "redis password=secret is unavailable"))
+	queued, err := repo.MarkProxyCheckJobQueued(ctx, job.ID)
+	require.NoError(t, err)
+	require.True(t, queued)
 	var stored ProxyCheckJobModel
+	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
+	require.Equal(t, string(proxyapp.ProxyCheckJobQueued), stored.Status)
+	require.Empty(t, stored.LastSafeError)
+
+	require.NoError(t, repo.MarkProxyCheckJobDispatchFailed(ctx, job.ID, "redis password=secret is unavailable"))
 	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
 	require.Equal(t, string(proxyapp.ProxyCheckJobPending), stored.Status)
 	require.NotContains(t, stored.LastSafeError, "password=secret")
 	require.Contains(t, stored.LastSafeError, "password=***")
 
-	queued, err := repo.MarkProxyCheckJobQueued(ctx, job.ID)
+	queued, err = repo.MarkProxyCheckJobQueued(ctx, job.ID)
 	require.NoError(t, err)
 	require.True(t, queued)
 	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
