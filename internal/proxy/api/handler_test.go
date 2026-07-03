@@ -95,7 +95,7 @@ func (r *fakeProxyRepo) FindByID(_ context.Context, id uint) (*domain.Proxy, err
 	}, nil
 }
 
-func (r *fakeProxyRepo) List(_ context.Context, filter proxyapp.ProxyListFilter, _, _ int) ([]domain.Proxy, error) {
+func (r *fakeProxyRepo) List(_ context.Context, _ proxyapp.ProxyListFilter, _, _ int) ([]domain.Proxy, error) {
 	return r.listItems, nil
 }
 
