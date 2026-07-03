@@ -770,8 +770,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get proxy detail */
-        get: operations["getAdminProxy"];
+        get?: never;
         put?: never;
         post?: never;
         delete?: never;
@@ -4057,55 +4056,6 @@ export interface operations {
             };
             /** @description Invalid proxy URL or expireAt when provided */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getAdminProxy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                proxyId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Proxy detail. URL is complete for authorized admins. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProxyItem"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Proxy not found */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

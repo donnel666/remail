@@ -75,7 +75,7 @@ flowchart LR
 | BC-BILLING | `Wallet`、`Transaction`、`Recharge`、`CardKey`、`Settlement`、`Withdrawal` | 多额度桶、不可变流水、充值、卡密、结算、提现 | 订单为什么扣款或退款 |
 | BC-TRADE | `Order`、`OrderEvent` | 订单状态机、扣款/退款绑定、分配外键、服务窗口 | 钱包余额、资源策略、邮件正文 |
 | BC-MAILTRANSPORT | `OutboundMail`、`Binding`、`InboundSetting` | 协议调用、外发邮件、辅助邮箱绑定、SMTP 入站配置 | 邮件归属和项目匹配 |
-| BC-PROXY | `Proxy`、`Binding` | 代理检测、IP 版本、7 天绑定、系统池兜底、错误计数和自动禁用 | Microsoft 页面流、资源状态、邮件事实 |
+| BC-PROXY | `Proxy`、`Binding` | 代理检测、IP 版本、7 天绑定、系统池兜底、错误计数、异常隔离和管理员禁用 | Microsoft 页面流、资源状态、邮件事实 |
 | BC-MAILMATCH | `Message` | 邮件去重、匹配、验证码、真实服务读取 | 协议收发、订单退款、资源验证 |
 | BC-OPENAPI | `ApiKey`、`OrderToken`、`ApiLog` | 凭证签发、认证、限流、并发、日志 | 下单业务规则、邮件匹配规则 |
 | BC-AFTERSALE | `Ticket`、`TicketMessage`、`Attachment`、`FlowLog` | 工单状态、供应商 SLA、自动检测、平台裁决 | 订单归属和退款执行 |

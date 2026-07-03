@@ -22,7 +22,7 @@ CREATE TABLE system_logs (
 CREATE TABLE proxies (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     pool VARCHAR(16) NOT NULL COMMENT 'resource|system',
-    url VARCHAR(1024) NOT NULL COMMENT 'original proxy URL, never expose in normal lists or logs',
+    url VARCHAR(1024) NOT NULL COMMENT 'original proxy URL; authorized admin list may return it; logs/errors/diagnostics must stay redacted',
     url_hash CHAR(64) NOT NULL COMMENT 'sha256(url) for unique constraint without indexing the secret URL',
     url_host VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'lowercase proxy host for indexed search',
     expire_at DATETIME NULL COMMENT 'NULL means no expiration',

@@ -24,7 +24,6 @@ func RegisterProxyRoutes(rg *gin.RouterGroup, mod *ProxyModule, fetcher middlewa
 		admin.POST("/proxies/system", middleware.PermissionRequired(checker, "proxy:proxy", "write"), h.PostSystemProxy)
 		admin.POST("/proxies/delete", middleware.PermissionRequired(checker, "proxy:proxy", "write"), h.PostProxyDeleteBatch)
 		admin.POST("/proxies/disable", middleware.PermissionRequired(checker, "proxy:proxy", "write"), h.PostProxyDisableBatch)
-		admin.GET("/proxies/:proxyId", middleware.PermissionRequired(checker, "proxy:proxy", "read"), h.GetProxy)
 		admin.PATCH("/proxies/:proxyId", middleware.PermissionRequired(checker, "proxy:proxy", "write"), h.PatchProxy)
 		admin.POST("/proxies/:proxyId/check", middleware.PermissionRequired(checker, "proxy:proxy", "operate"), h.PostProxyCheck)
 	}

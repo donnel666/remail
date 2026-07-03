@@ -27,6 +27,7 @@ import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -38,7 +39,6 @@ import {
   deleteAdminProxiesByFilter,
   disableAdminProxiesByFilter,
   getAdminProxyStats,
-  getAdminProxy,
   importAdminProxies,
   listAdminProxies,
   type ProxyBulkFilter,
@@ -148,6 +148,42 @@ function formatDateTime(value?: string | null) {
 
 function countryOf(proxy: ProxyItem) {
   return proxy.country?.trim() || "UNKNOWN";
+}
+
+function maskMiddle(value: string, head = 4, tail = 4) {
+  if (!value) return "-";
+  if (value.length <= head + tail) return "****";
+  return `${value.slice(0, head)}****${value.slice(-tail)}`;
+}
+
+function maskProxyHost(host: string) {
+  const normalized = host.replace(/^\[/, "").replace(/\]$/, "");
+  if (!normalized) return "****";
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalized)) {
+    const parts = normalized.split(".");
+    return `${parts[0]}.****.${parts[3]}`;
+  }
+
+  if (normalized.includes(":")) {
+    const parts = normalized.split(":").filter(Boolean);
+    if (parts.length <= 2) return maskMiddle(normalized, 4, 4);
+    return `[${parts[0]}:****:${parts[parts.length - 1]}]`;
+  }
+
+  return maskMiddle(normalized, 4, 4);
+}
+
+function maskProxyURL(url: string) {
+  try {
+    const parsed = new URL(url);
+    const hasAuth = Boolean(parsed.username || parsed.password);
+    const auth = hasAuth ? "****:****@" : "";
+    const port = parsed.port ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${auth}${maskProxyHost(parsed.hostname)}${port}`;
+  } catch {
+    return maskMiddle(url, 10, 8);
+  }
 }
 
 function proxyMatchesListFilter(proxy: ProxyItem, filter: ProxyListFilter) {
@@ -589,6 +625,7 @@ function EditProxyModal({
 export default function ProxyManagement() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const refreshSeqRef = useRef(0);
   const [items, setItems] = useState<ProxyItem[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [proxyStats, setProxyStats] = useState<ProxyStatsResponse | null>(null);
@@ -612,7 +649,6 @@ export default function ProxyManagement() {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [importOpen, setImportOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyItem | null>(null);
-  const [editingLoadingID, setEditingLoadingID] = useState<number | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
 
   const listFilter = useMemo<ProxyListFilter>(() => {
@@ -649,30 +685,78 @@ export default function ProxyManagement() {
     [listFilter]
   );
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (
+    options: {
+      clearSelection?: boolean;
+      refreshStats?: boolean;
+      showLoading?: boolean;
+    } = {}
+  ) => {
+    const {
+      clearSelection = true,
+      refreshStats: shouldRefreshStats = true,
+      showLoading = true,
+    } = options;
+    const refreshSeq = refreshSeqRef.current + 1;
+    refreshSeqRef.current = refreshSeq;
+    const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
+
+    if (showLoading) setLoading(true);
     try {
       const offset = (activePage - 1) * pageSize;
-      const [response, statsResponse, currentStatsResponse] = await Promise.all([
-        listAdminProxies(listFilter, offset, pageSize),
-        getAdminProxyStats(statsFilter),
-        getAdminProxyStats(listFilter),
-      ]);
+      const [response, statsResponse, currentStatsResponse] =
+        await Promise.all([
+          listAdminProxies(listFilter, offset, pageSize),
+          shouldRefreshStats
+            ? getAdminProxyStats(statsFilter)
+            : Promise.resolve(null),
+          shouldRefreshStats
+            ? getAdminProxyStats(listFilter)
+            : Promise.resolve(null),
+        ]);
+      if (!isCurrentRefresh()) return;
       setItems(response.items);
       setTotalItems(response.total);
-      setProxyStats(statsResponse);
-      setCurrentProxyStats(currentStatsResponse);
-      setSelectedKeys([]);
+      if (statsResponse) setProxyStats(statsResponse);
+      if (currentStatsResponse) setCurrentProxyStats(currentStatsResponse);
+      if (clearSelection) setSelectedKeys([]);
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Proxies load failed."));
+      if (isCurrentRefresh()) {
+        Toast.error(getIamErrorMessage(t, error, "Proxies load failed."));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRefresh() && showLoading) setLoading(false);
     }
   }, [activePage, listFilter, pageSize, statsFilter, t]);
 
+  const previousRefreshQueryRef = useRef<{
+    activePage: number;
+    listFilter: ProxyListFilter;
+    pageSize: number;
+    statsFilter: ProxyListFilter;
+  } | null>(null);
+
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    const previous = previousRefreshQueryRef.current;
+    const onlyPageChanged =
+      previous !== null &&
+      previous.activePage !== activePage &&
+      previous.pageSize === pageSize &&
+      previous.listFilter === listFilter &&
+      previous.statsFilter === statsFilter;
+
+    previousRefreshQueryRef.current = {
+      activePage,
+      listFilter,
+      pageSize,
+      statsFilter,
+    };
+
+    void refresh({
+      refreshStats: !onlyPageChanged,
+      showLoading: !onlyPageChanged,
+    });
+  }, [activePage, listFilter, pageSize, refresh, statsFilter]);
 
   const countryCounts = useMemo(
     () => getCountryCounts(proxyStats),
@@ -1036,19 +1120,9 @@ export default function ProxyManagement() {
     [editingProxy, reconcileProxyItem, t]
   );
 
-  const openEditProxy = useCallback(
-    async (record: ProxyItem) => {
-      setEditingLoadingID(record.id);
-      try {
-        setEditingProxy(await getAdminProxy(record.id));
-      } catch (error) {
-        Toast.error(getIamErrorMessage(t, error, "Proxy load failed."));
-      } finally {
-        setEditingLoadingID(null);
-      }
-    },
-    [t]
-  );
+  const openEditProxy = useCallback((record: ProxyItem) => {
+    setEditingProxy(record);
+  }, []);
 
   const handleDeleteProxy = useCallback(
     (record: ProxyItem) => {
@@ -1088,39 +1162,6 @@ export default function ProxyManagement() {
     [reconcileProxyItem, t]
   );
 
-  const showDetails = useCallback(
-    async (record: ProxyItem) => {
-      try {
-        const detail = await getAdminProxy(record.id);
-        Modal.info({
-          title: t("Proxy details"),
-          width: 720,
-          content: (
-            <div className="max-w-full space-y-3 overflow-hidden pr-3">
-              <div className="text-xs text-[var(--semi-color-text-2)]">
-                {t("Proxy URL")}
-              </div>
-              <div className="break-all rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3 font-mono text-xs leading-relaxed">
-                <Text
-                  copyable={{
-                    content: detail.url,
-                    onCopy: () => Toast.success(t("Copied")),
-                  }}
-                >
-                  {detail.url}
-                </Text>
-              </div>
-            </div>
-          ),
-          okText: t("Close"),
-        });
-      } catch (error) {
-        Toast.error(getIamErrorMessage(t, error, "Proxy load failed."));
-      }
-    },
-    [t]
-  );
-
   const selectCountry = (country: string) => {
     setActiveCountry(country);
     setActivePage(1);
@@ -1155,7 +1196,7 @@ export default function ProxyManagement() {
           key: "country",
           title: t("Country"),
           dataIndex: "country",
-          width: 110,
+          width: "6%",
           render: (_: string, record: ProxyItem) => (
             <Tag color="white" shape="circle">
               {countryOf(record)}
@@ -1166,31 +1207,20 @@ export default function ProxyManagement() {
           key: "url",
           title: t("Proxy URL"),
           dataIndex: "url",
-          width: 280,
+          width: "21%",
           render: (text: string) => (
-            <Text
-              copyable={{
-                content: text,
-                onCopy: () => Toast.success(t("Copied")),
-              }}
-              ellipsis={{
-                showTooltip: {
-                  opts: {
-                    mouseEnterDelay: 0,
-                    mouseLeaveDelay: 0.05,
-                  },
-                },
-              }}
-            >
-              {text}
-            </Text>
+            <CopyableTableText
+              copiedText={t("Copied")}
+              copyContent={text}
+              text={maskProxyURL(text)}
+            />
           ),
         },
         {
           key: "systemProxy",
           title: t("System proxy"),
           dataIndex: "pool",
-          width: 110,
+          width: "8%",
           render: (pool: string) => (
             <Tag color={pool === "system" ? "green" : "grey"} shape="circle">
               {pool === "system" ? t("Yes") : t("No")}
@@ -1201,7 +1231,7 @@ export default function ProxyManagement() {
           key: "ipv6",
           title: "IPV6",
           dataIndex: "ipVersion",
-          width: 110,
+          width: "6%",
           render: (ipVersion: string) => (
             <Tag color={ipVersion === "ipv6" ? "green" : "grey"} shape="circle">
               {ipVersion === "ipv6" ? t("Yes") : t("No")}
@@ -1212,14 +1242,16 @@ export default function ProxyManagement() {
           key: "outboundIp",
           title: t("Outbound IP"),
           dataIndex: "outboundIp",
-          width: 150,
-          render: (text: string) => text || "-",
+          width: "10%",
+          render: (text: string) => (
+            <span className="break-all">{text || "-"}</span>
+          ),
         },
         {
           key: "latency",
           title: t("Latency"),
           dataIndex: "latencyMs",
-          width: 100,
+          width: "6%",
           render: (value: number) =>
             value > 0 ? (
               <span className="tabular-nums">{value} ms</span>
@@ -1231,7 +1263,7 @@ export default function ProxyManagement() {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: 120,
+          width: "8%",
           render: (status: string, record: ProxyItem) =>
             renderProxyStatus(status, t, record.lastSafeError),
         },
@@ -1239,14 +1271,18 @@ export default function ProxyManagement() {
           key: "expireAt",
           title: t("Expire at"),
           dataIndex: "expireAt",
-          width: 180,
-          render: (value: string) => formatDateTime(value),
+          width: "10%",
+          render: (value: string) => (
+            <span className="remail-table-cell-ellipsis">
+              {formatDateTime(value)}
+            </span>
+          ),
         },
         {
           key: "errors",
           title: t("Errors"),
           dataIndex: "errors",
-          width: 90,
+          width: "5%",
           render: (value: number) => (
             <span className="tabular-nums">{value}</span>
           ),
@@ -1255,7 +1291,7 @@ export default function ProxyManagement() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: 340,
+          width: "20%",
           fixed: "right",
           render: (_: unknown, record: ProxyItem) => (
             <Space wrap={false}>
@@ -1270,15 +1306,7 @@ export default function ProxyManagement() {
               <Button
                 type="tertiary"
                 size="small"
-                onClick={() => void showDetails(record)}
-              >
-                {t("Details")}
-              </Button>
-              <Button
-                type="tertiary"
-                size="small"
-                loading={editingLoadingID === record.id}
-                onClick={() => void openEditProxy(record)}
+                onClick={() => openEditProxy(record)}
               >
                 {t("Edit")}
               </Button>
@@ -1303,12 +1331,10 @@ export default function ProxyManagement() {
       ] as any[],
     [
       checkingIDs,
-      editingLoadingID,
       handleCheckProxy,
       handleDeleteProxy,
       handleToggleDisabled,
       openEditProxy,
-      showDetails,
       t,
       updatingID,
     ]
@@ -1384,9 +1410,9 @@ export default function ProxyManagement() {
         <Button
           type="tertiary"
           size="small"
-          className="flex-1 md:flex-initial"
+          className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
-          onClick={refresh}
+          onClick={() => void refresh()}
         >
           {t("Refresh")}
         </Button>
@@ -1629,7 +1655,7 @@ export default function ProxyManagement() {
             type="tertiary"
             size="small"
             loading={loading}
-            className="flex-1 md:flex-initial"
+            className="remail-toolbar-fixed-button flex-1 md:flex-none"
             onClick={() => setActivePage(1)}
           >
             {t("Query")}
@@ -1650,7 +1676,10 @@ export default function ProxyManagement() {
   const paginationArea = createCardProPagination({
     currentPage: safePage,
     isMobile,
-    onPageChange: (page) => setActivePage(page),
+    onPageChange: (page) => {
+      setSelectedKeys([]);
+      setActivePage(page);
+    },
     onPageSizeChange: (size) => {
       setPageSize(size);
       setActivePage(1);
@@ -1688,7 +1717,7 @@ export default function ProxyManagement() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max-content" }}
+          scroll={compactMode ? undefined : { x: "max(100%, 1320px)" }}
           size="middle"
         />
       </CardPro>

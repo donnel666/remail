@@ -51,7 +51,7 @@ func (r *fakeProxyRepo) CreateWithLogAndCheckJob(ctx context.Context, proxy *dom
 		return nil, err
 	}
 	task.ProxyID = proxy.ID
-	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchTask{}), nil
+	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{}), nil
 }
 
 func (r *fakeProxyRepo) CreateBatchWithLog(_ context.Context, proxies []*domain.Proxy, _ *governancedomain.OperationLog) ([]domain.Proxy, int, error) {
@@ -67,7 +67,7 @@ func (r *fakeProxyRepo) CreateBatchWithLog(_ context.Context, proxies []*domain.
 	return created, 0, nil
 }
 
-func (r *fakeProxyRepo) CreateBatchWithLogAndCheckJob(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckBatchTask) ([]domain.Proxy, int, *proxyapp.ProxyCheckJob, error) {
+func (r *fakeProxyRepo) CreateBatchWithLogAndCheckJob(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckBatchJobRequest) ([]domain.Proxy, int, *proxyapp.ProxyCheckJob, error) {
 	created, duplicated, err := r.CreateBatchWithLog(ctx, proxies, log)
 	if err != nil || len(created) == 0 {
 		return created, duplicated, nil, err
@@ -140,7 +140,7 @@ func (r *fakeProxyRepo) UpdateWithLogAndCheckJob(ctx context.Context, proxy *dom
 		return nil, err
 	}
 	task.ProxyID = proxy.ID
-	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchTask{}), nil
+	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{}), nil
 }
 
 func (r *fakeProxyRepo) DeleteBatch(_ context.Context, ids []uint) ([]uint, error) {
@@ -192,20 +192,23 @@ func (r *fakeProxyRepo) UpdateCheckResultWithLog(ctx context.Context, id uint, r
 	return r.UpdateCheckResult(ctx, id, result, success)
 }
 
-func (r *fakeProxyRepo) CreateCheckBatchJobWithLog(_ context.Context, task proxyapp.ProxyCheckBatchTask, _ *governancedomain.OperationLog) (*proxyapp.ProxyCheckJob, error) {
+func (r *fakeProxyRepo) CreateCheckBatchJobWithLog(_ context.Context, task proxyapp.ProxyCheckBatchJobRequest, _ *governancedomain.OperationLog) (*proxyapp.ProxyCheckJob, error) {
 	return r.createCheckJob(proxyapp.ProxyCheckJobBatch, proxyapp.ProxyCheckTask{}, task), nil
 }
 
-func (r *fakeProxyRepo) ListPendingProxyCheckJobs(_ context.Context, limit int) ([]proxyapp.ProxyCheckJob, error) {
+func (r *fakeProxyRepo) ClaimDispatchableProxyCheckJobs(_ context.Context, limit int, staleBefore time.Time) ([]proxyapp.ProxyCheckJob, error) {
 	if limit <= 0 {
 		limit = len(r.checkJobs)
 	}
 	jobs := make([]proxyapp.ProxyCheckJob, 0, len(r.checkJobs))
-	for _, job := range r.checkJobs {
-		if job.Status != proxyapp.ProxyCheckJobPending {
+	for i := range r.checkJobs {
+		if r.checkJobs[i].Status != proxyapp.ProxyCheckJobPending &&
+			!(r.checkJobs[i].UpdatedAt.Before(staleBefore) && (r.checkJobs[i].Status == proxyapp.ProxyCheckJobQueued || r.checkJobs[i].Status == proxyapp.ProxyCheckJobRunning)) {
 			continue
 		}
-		jobs = append(jobs, job)
+		r.checkJobs[i].Status = proxyapp.ProxyCheckJobQueued
+		r.checkJobs[i].LastSafeError = ""
+		jobs = append(jobs, r.checkJobs[i])
 		if len(jobs) == limit {
 			break
 		}
@@ -236,28 +239,26 @@ func (r *fakeProxyRepo) ListProxyCheckJobItemIDs(_ context.Context, jobID uint, 
 	return nil, nil
 }
 
-func (r *fakeProxyRepo) MarkProxyCheckJobQueued(_ context.Context, jobID uint) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobQueued, "")
-	return nil
+func (r *fakeProxyRepo) MarkProxyCheckJobQueued(_ context.Context, jobID uint) (bool, error) {
+	return r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobQueued, "", proxyapp.ProxyCheckJobPending), nil
 }
 
 func (r *fakeProxyRepo) MarkProxyCheckJobDispatchFailed(_ context.Context, jobID uint, safeError string) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobPending, safeError)
+	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobPending, safeError, proxyapp.ProxyCheckJobQueued)
 	return nil
 }
 
-func (r *fakeProxyRepo) MarkProxyCheckJobRunning(_ context.Context, jobID uint) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobRunning, "")
-	return nil
+func (r *fakeProxyRepo) MarkProxyCheckJobRunning(_ context.Context, jobID uint) (bool, error) {
+	return r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobRunning, "", proxyapp.ProxyCheckJobQueued), nil
 }
 
 func (r *fakeProxyRepo) MarkProxyCheckJobSucceeded(_ context.Context, jobID uint) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobSucceeded, "")
+	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobSucceeded, "", proxyapp.ProxyCheckJobRunning)
 	return nil
 }
 
 func (r *fakeProxyRepo) MarkProxyCheckJobFailed(_ context.Context, jobID uint, safeError string) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobFailed, safeError)
+	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobFailed, safeError, proxyapp.ProxyCheckJobQueued, proxyapp.ProxyCheckJobRunning)
 	return nil
 }
 
@@ -277,7 +278,7 @@ func (r *fakeProxyRepo) ReportFailure(_ context.Context, _ uint, _ string, _ boo
 	return nil, nil
 }
 
-func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchTask) *proxyapp.ProxyCheckJob {
+func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) *proxyapp.ProxyCheckJob {
 	if r.nextJobID == 0 {
 		r.nextJobID = 1
 	}
@@ -292,6 +293,7 @@ func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task pro
 		OperatorUserID: task.OperatorUserID,
 		RequestID:      task.RequestID,
 		Path:           task.Path,
+		UpdatedAt:      time.Now().UTC(),
 	}
 	if kind == proxyapp.ProxyCheckJobBatch {
 		if job.Mode == "" {
@@ -310,14 +312,27 @@ func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task pro
 	return &r.checkJobs[len(r.checkJobs)-1]
 }
 
-func (r *fakeProxyRepo) updateCheckJobStatus(jobID uint, status proxyapp.ProxyCheckJobStatus, safeError string) {
+func (r *fakeProxyRepo) updateCheckJobStatus(jobID uint, status proxyapp.ProxyCheckJobStatus, safeError string, expectedStatuses ...proxyapp.ProxyCheckJobStatus) bool {
 	for i := range r.checkJobs {
 		if r.checkJobs[i].ID == jobID {
+			if len(expectedStatuses) > 0 {
+				matched := false
+				for _, expected := range expectedStatuses {
+					if r.checkJobs[i].Status == expected {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return false
+				}
+			}
 			r.checkJobs[i].Status = status
 			r.checkJobs[i].LastSafeError = safeError
-			return
+			return true
 		}
 	}
+	return false
 }
 
 func proxyIDsFromDomain(items []domain.Proxy) []uint {
@@ -540,7 +555,6 @@ func TestPostProxyImportsContract(t *testing.T) {
 	require.Len(t, queue.batchTasks, 1)
 	require.Equal(t, proxyapp.ProxyCheckBatchModeIDs, queue.batchTasks[0].Mode)
 	require.NotZero(t, queue.batchTasks[0].JobID)
-	require.Empty(t, queue.batchTasks[0].ProxyIDs)
 }
 
 func TestPostProxyCheckBatchByFilterContract(t *testing.T) {
@@ -592,7 +606,6 @@ func TestPostProxyCheckBatchByIDsContract(t *testing.T) {
 	require.Len(t, queue.batchTasks, 1)
 	require.Equal(t, proxyapp.ProxyCheckBatchModeIDs, queue.batchTasks[0].Mode)
 	require.NotZero(t, queue.batchTasks[0].JobID)
-	require.Empty(t, queue.batchTasks[0].ProxyIDs)
 
 	var response CheckProxiesResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))

@@ -174,19 +174,6 @@ func (h *ProxyHandler) postProxy(c *gin.Context, pool domain.ProxyPool) {
 	c.JSON(http.StatusCreated, toProxyItemResponse(*proxy))
 }
 
-func (h *ProxyHandler) GetProxy(c *gin.Context) {
-	proxyID, ok := parseProxyID(c)
-	if !ok {
-		return
-	}
-	proxy, err := h.module.ProxyUseCase.Get(c.Request.Context(), proxyID)
-	if err != nil {
-		writeProxyError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toProxyItemResponse(*proxy))
-}
-
 func (h *ProxyHandler) PatchProxy(c *gin.Context) {
 	operatorUserID, ok := requireCurrentUserID(c)
 	if !ok {

@@ -125,7 +125,7 @@ func (r *ProxyRepo) CreateWithLogAndCheckJob(ctx context.Context, proxy *domain.
 			return err
 		}
 		task.ProxyID = proxy.ID
-		createdJob, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchTask{})
+		createdJob, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{})
 		if err != nil {
 			return err
 		}
@@ -168,7 +168,7 @@ func (r *ProxyRepo) CreateBatchWithLog(ctx context.Context, proxies []*domain.Pr
 	return created, duplicates, nil
 }
 
-func (r *ProxyRepo) CreateBatchWithLogAndCheckJob(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckBatchTask) ([]domain.Proxy, int, *proxyapp.ProxyCheckJob, error) {
+func (r *ProxyRepo) CreateBatchWithLogAndCheckJob(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckBatchJobRequest) ([]domain.Proxy, int, *proxyapp.ProxyCheckJob, error) {
 	if len(proxies) == 0 {
 		return nil, 0, nil, domain.ErrInvalidProxyFilter
 	}
@@ -380,7 +380,7 @@ func (r *ProxyRepo) UpdateWithLogAndCheckJob(ctx context.Context, proxy *domain.
 			return err
 		}
 		task.ProxyID = proxy.ID
-		createdJob, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchTask{})
+		createdJob, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{})
 		if err != nil {
 			return err
 		}
@@ -534,7 +534,7 @@ func (r *ProxyRepo) UpdateCheckResultWithLog(ctx context.Context, id uint, resul
 	return r.updateCheckResultWithTxLog(ctx, id, result, success, log)
 }
 
-func (r *ProxyRepo) CreateCheckBatchJobWithLog(ctx context.Context, task proxyapp.ProxyCheckBatchTask, log *governancedomain.OperationLog) (*proxyapp.ProxyCheckJob, error) {
+func (r *ProxyRepo) CreateCheckBatchJobWithLog(ctx context.Context, task proxyapp.ProxyCheckBatchJobRequest, log *governancedomain.OperationLog) (*proxyapp.ProxyCheckJob, error) {
 	var job *proxyapp.ProxyCheckJob
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		resourceID := "batch"
@@ -562,17 +562,53 @@ func (r *ProxyRepo) CreateCheckBatchJobWithLog(ctx context.Context, task proxyap
 	return job, nil
 }
 
-func (r *ProxyRepo) ListPendingProxyCheckJobs(ctx context.Context, limit int) ([]proxyapp.ProxyCheckJob, error) {
+func (r *ProxyRepo) ClaimDispatchableProxyCheckJobs(ctx context.Context, limit int, staleBefore time.Time) ([]proxyapp.ProxyCheckJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var models []ProxyCheckJobModel
-	if err := r.db.WithContext(ctx).
-		Where("status = ?", string(proxyapp.ProxyCheckJobPending)).
-		Order("created_at ASC, id ASC").
-		Limit(limit).
-		Find(&models).Error; err != nil {
-		return nil, fmt.Errorf("list pending proxy check jobs: %w", err)
+	now := time.Now().UTC()
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where(
+				"status = ? OR (status IN ? AND updated_at < ?)",
+				string(proxyapp.ProxyCheckJobPending),
+				[]string{string(proxyapp.ProxyCheckJobQueued), string(proxyapp.ProxyCheckJobRunning)},
+				staleBefore,
+			).
+			Order("created_at ASC, id ASC").
+			Limit(limit).
+			Find(&models).Error; err != nil {
+			return fmt.Errorf("claim dispatchable proxy check jobs: %w", err)
+		}
+		if len(models) == 0 {
+			return nil
+		}
+		ids := make([]uint, 0, len(models))
+		for i := range models {
+			ids = append(ids, models[i].ID)
+			models[i].Status = string(proxyapp.ProxyCheckJobQueued)
+			models[i].LastSafeError = ""
+			models[i].UpdatedAt = now
+		}
+		result := tx.Model(&ProxyCheckJobModel{}).
+			Where("id IN ?", ids).
+			Updates(map[string]any{
+				"status":          string(proxyapp.ProxyCheckJobQueued),
+				"last_safe_error": "",
+				"updated_at":      now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mark proxy check jobs claimed: %w", result.Error)
+		}
+		if result.RowsAffected != int64(len(ids)) {
+			return fmt.Errorf("claim proxy check jobs: claimed %d of %d", result.RowsAffected, len(ids))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	jobs := make([]proxyapp.ProxyCheckJob, 0, len(models))
 	for _, model := range models {
@@ -605,8 +641,8 @@ func (r *ProxyRepo) ListProxyCheckJobItemIDs(ctx context.Context, jobID uint, af
 	return ids, nil
 }
 
-func (r *ProxyRepo) MarkProxyCheckJobQueued(ctx context.Context, jobID uint) error {
-	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobQueued, "")
+func (r *ProxyRepo) MarkProxyCheckJobQueued(ctx context.Context, jobID uint) (bool, error) {
+	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobQueued, "", proxyapp.ProxyCheckJobPending)
 }
 
 func (r *ProxyRepo) MarkProxyCheckJobDispatchFailed(ctx context.Context, jobID uint, safeError string) error {
@@ -615,7 +651,7 @@ func (r *ProxyRepo) MarkProxyCheckJobDispatchFailed(ctx context.Context, jobID u
 	}
 	err := r.db.WithContext(ctx).
 		Model(&ProxyCheckJobModel{}).
-		Where("id = ?", jobID).
+		Where("id = ? AND status = ?", jobID, string(proxyapp.ProxyCheckJobQueued)).
 		Updates(map[string]any{
 			"status":          string(proxyapp.ProxyCheckJobPending),
 			"last_safe_error": domain.SafeProxyError(safeError),
@@ -627,21 +663,23 @@ func (r *ProxyRepo) MarkProxyCheckJobDispatchFailed(ctx context.Context, jobID u
 	return nil
 }
 
-func (r *ProxyRepo) MarkProxyCheckJobRunning(ctx context.Context, jobID uint) error {
-	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobRunning, "")
+func (r *ProxyRepo) MarkProxyCheckJobRunning(ctx context.Context, jobID uint) (bool, error) {
+	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobRunning, "", proxyapp.ProxyCheckJobQueued)
 }
 
 func (r *ProxyRepo) MarkProxyCheckJobSucceeded(ctx context.Context, jobID uint) error {
-	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobSucceeded, "")
+	_, err := r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobSucceeded, "", proxyapp.ProxyCheckJobRunning)
+	return err
 }
 
 func (r *ProxyRepo) MarkProxyCheckJobFailed(ctx context.Context, jobID uint, safeError string) error {
-	return r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobFailed, safeError)
+	_, err := r.updateProxyCheckJobStatus(ctx, jobID, proxyapp.ProxyCheckJobFailed, safeError, proxyapp.ProxyCheckJobQueued, proxyapp.ProxyCheckJobRunning)
+	return err
 }
 
-func (r *ProxyRepo) updateProxyCheckJobStatus(ctx context.Context, jobID uint, status proxyapp.ProxyCheckJobStatus, safeError string) error {
+func (r *ProxyRepo) updateProxyCheckJobStatus(ctx context.Context, jobID uint, status proxyapp.ProxyCheckJobStatus, safeError string, expectedStatuses ...proxyapp.ProxyCheckJobStatus) (bool, error) {
 	if jobID == 0 {
-		return nil
+		return true, nil
 	}
 	updates := map[string]any{
 		"status":     string(status),
@@ -652,14 +690,21 @@ func (r *ProxyRepo) updateProxyCheckJobStatus(ctx context.Context, jobID uint, s
 	} else if status == proxyapp.ProxyCheckJobSucceeded || status == proxyapp.ProxyCheckJobRunning || status == proxyapp.ProxyCheckJobQueued {
 		updates["last_safe_error"] = ""
 	}
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&ProxyCheckJobModel{}).
-		Where("id = ?", jobID).
-		Updates(updates).Error
-	if err != nil {
-		return fmt.Errorf("update proxy check job status: %w", err)
+		Where("id = ?", jobID)
+	if len(expectedStatuses) > 0 {
+		expected := make([]string, 0, len(expectedStatuses))
+		for _, expectedStatus := range expectedStatuses {
+			expected = append(expected, string(expectedStatus))
+		}
+		query = query.Where("status IN ?", expected)
 	}
-	return nil
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return false, fmt.Errorf("update proxy check job status: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
 }
 
 func (r *ProxyRepo) updateCheckResultWithTxLog(ctx context.Context, id uint, result domain.CheckResult, success bool, log *governancedomain.OperationLog) (*domain.Proxy, error) {
@@ -1067,7 +1112,7 @@ func (r *ProxyRepo) createOperationLogInTx(ctx context.Context, tx *gorm.DB, log
 	return nil
 }
 
-func createProxyCheckJobInTx(ctx context.Context, tx *gorm.DB, kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchTask) (*proxyapp.ProxyCheckJob, error) {
+func createProxyCheckJobInTx(ctx context.Context, tx *gorm.DB, kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) (*proxyapp.ProxyCheckJob, error) {
 	model, err := proxyCheckJobModel(kind, task, batchTask)
 	if err != nil {
 		return nil, err
@@ -1090,7 +1135,7 @@ func createProxyCheckJobInTx(ctx context.Context, tx *gorm.DB, kind proxyapp.Pro
 	return job, nil
 }
 
-func proxyCheckJobModel(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchTask) (*ProxyCheckJobModel, error) {
+func proxyCheckJobModel(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) (*ProxyCheckJobModel, error) {
 	job := &ProxyCheckJobModel{
 		Kind:           string(kind),
 		Status:         string(proxyapp.ProxyCheckJobPending),
@@ -1203,17 +1248,11 @@ func applyProxyListFilter(db *gorm.DB, filter proxyapp.ProxyListFilter) *gorm.DB
 	}
 	search := strings.TrimSpace(filter.Search)
 	if search != "" {
-		like := escapeLikePrefix(proxySearchTerm(search))
 		normalizedURL, err := domain.NormalizeProxyURL(search)
 		if err == nil {
-			db = db.Where(
-				"(url_hash = ? OR url_host LIKE ? ESCAPE '!' OR outbound_ip LIKE ? ESCAPE '!' OR country LIKE ? ESCAPE '!')",
-				proxyURLHash(normalizedURL),
-				like,
-				like,
-				like,
-			)
+			db = db.Where("url_hash = ?", proxyURLHash(normalizedURL))
 		} else {
+			like := escapeLikePrefix(proxySearchTerm(search))
 			db = db.Where(
 				"(url_host LIKE ? ESCAPE '!' OR outbound_ip LIKE ? ESCAPE '!' OR country LIKE ? ESCAPE '!')",
 				like,

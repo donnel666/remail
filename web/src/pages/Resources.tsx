@@ -10,7 +10,6 @@ import {
   Tabs,
   Tag,
   Toast,
-  Typography,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import {
@@ -25,6 +24,7 @@ import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
@@ -64,8 +64,6 @@ import {
 import { renderStatusTag } from "./resources/resource-status-tag";
 import { SupplierApplicationModal } from "./resources/supplier-application-modal";
 import { useSelectionNotification } from "./resources/use-selection-notification";
-
-const { Text } = Typography;
 
 type StatusFilter = "all" | "normal" | "pending" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
@@ -725,7 +723,7 @@ export default function Resources() {
           key: "suffix",
           title: t("Suffix"),
           dataIndex: "emailAddress",
-          width: 120,
+          width: "12%",
           render: (_: string, record: EmailResource) => (
             <Tag color="white" shape="circle">
               {getSuffix(record.emailAddress)}
@@ -736,23 +734,16 @@ export default function Resources() {
           key: "email",
           title: t("Email"),
           dataIndex: "emailAddress",
-          width: 260,
+          width: "30%",
           render: (text: string) => (
-            <Text
-              copyable={{
-                content: text,
-                onCopy: () => Toast.success(t("Copied")),
-              }}
-            >
-              {text}
-            </Text>
+            <CopyableTableText copiedText={t("Copied")} text={text} />
           ),
         },
         {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: 120,
+          width: "12%",
           render: (status: ResourceStatus, record: EmailResource) =>
             renderStatusTag(status, t, record.lastSafeError),
         },
@@ -760,7 +751,7 @@ export default function Resources() {
           key: "private",
           title: t("Private"),
           dataIndex: "usageScope",
-          width: 120,
+          width: "10%",
           render: (scope: UsageScope) => (
             <Tag color={scope === "private" ? "green" : "grey"} shape="circle">
               {scope === "private" ? t("Yes") : t("No")}
@@ -771,7 +762,7 @@ export default function Resources() {
           key: "longLived",
           title: t("Long-lived"),
           dataIndex: "lifetimeType",
-          width: 110,
+          width: "11%",
           render: (value: LifetimeType) => (
             <Tag
               color={value === "long_lived" ? "green" : "grey"}
@@ -785,7 +776,7 @@ export default function Resources() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: 210,
+          width: "25%",
           fixed: "right",
           render: (_: unknown, record: EmailResource) => (
             <Space wrap={false}>
@@ -894,7 +885,7 @@ export default function Resources() {
         <Button
           type="tertiary"
           size="small"
-          className="flex-1 md:flex-initial"
+          className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
           onClick={refresh}
         >
@@ -1079,7 +1070,7 @@ export default function Resources() {
             type="tertiary"
             size="small"
             loading={loading}
-            className="flex-1 md:flex-initial"
+            className="remail-toolbar-fixed-button flex-1 md:flex-none"
             onClick={() => setActivePage(1)}
           >
             {t("Query")}
@@ -1138,7 +1129,7 @@ export default function Resources() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max-content" }}
+          scroll={compactMode ? undefined : { x: "max(100%, 980px)" }}
           size="middle"
         />
       </CardPro>

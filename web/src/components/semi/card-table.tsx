@@ -77,6 +77,18 @@ export function CardTable<T extends RowData>({
     const finalTableProps: Record<string, unknown> = hidePagination
       ? { ...tableProps, pagination: false }
       : tableProps;
+    const incomingClassName =
+      typeof finalTableProps.className === "string"
+        ? finalTableProps.className
+        : "";
+    const tableClassName = ["remail-stable-table", incomingClassName]
+      .filter(Boolean)
+      .join(" ");
+    const desktopTableProps = {
+      ...finalTableProps,
+      className: tableClassName,
+      tableLayout: finalTableProps.tableLayout ?? "fixed",
+    };
 
     return (
       <Table
@@ -84,7 +96,7 @@ export function CardTable<T extends RowData>({
         dataSource={dataSource}
         loading={loading}
         rowKey={rowKey as never}
-        {...finalTableProps}
+        {...desktopTableProps}
       />
     );
   }

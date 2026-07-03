@@ -2292,9 +2292,6 @@ type ServerInterface interface {
 	// Create a system fallback proxy
 	// (POST /v1/admin/proxies/system)
 	PostAdminSystemProxy(c *gin.Context, params PostAdminSystemProxyParams)
-	// Get proxy detail
-	// (GET /v1/admin/proxies/{proxyId})
-	GetAdminProxy(c *gin.Context, proxyId int)
 	// Update proxy status or expiration
 	// (PATCH /v1/admin/proxies/{proxyId})
 	PatchAdminProxy(c *gin.Context, proxyId int, params PatchAdminProxyParams)
@@ -3126,33 +3123,6 @@ func (siw *ServerInterfaceWrapper) PostAdminSystemProxy(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminSystemProxy(c, params)
-}
-
-// GetAdminProxy operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminProxy(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "proxyId" -------------
-	var proxyId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "proxyId", c.Param("proxyId"), &proxyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter proxyId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminProxy(c, proxyId)
 }
 
 // PatchAdminProxy operation middleware
@@ -4514,7 +4484,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/proxies/resource", wrapper.PostAdminResourceProxy)
 	router.GET(options.BaseURL+"/v1/admin/proxies/stats", wrapper.GetAdminProxyStats)
 	router.POST(options.BaseURL+"/v1/admin/proxies/system", wrapper.PostAdminSystemProxy)
-	router.GET(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.GetAdminProxy)
 	router.PATCH(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.PatchAdminProxy)
 	router.POST(options.BaseURL+"/v1/admin/proxies/:proxyId/check", wrapper.PostAdminProxyCheck)
 	router.GET(options.BaseURL+"/v1/admin/supplier-applications", wrapper.GetAdminSupplierApplications)

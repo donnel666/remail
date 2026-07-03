@@ -135,6 +135,7 @@ func (p *Proxy) MarkChecking() error {
 		return ErrInvalidProxyStatus
 	}
 	p.Status = ProxyStatusChecking
+	p.Errors = 0
 	p.LastSafeError = ""
 	return nil
 }
@@ -176,34 +177,15 @@ func (p *Proxy) ApplyCheckFailure(result CheckResult) error {
 	p.LastCheckedAt = &checkedAt
 	switch p.Status {
 	case ProxyStatusChecking, ProxyStatusNormal, ProxyStatusAbnormal, ProxyStatusExpired:
-		if result.NonRetryable {
-			if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
-				return ErrInvalidProxyStatus
-			}
-			p.Status = ProxyStatusDisabled
-			return nil
+		if !result.NonRetryable {
+			p.Errors++
 		}
-		p.Errors++
-		if p.Errors >= 2 {
-			if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
-				return ErrInvalidProxyStatus
-			}
-			p.Status = ProxyStatusDisabled
-		} else {
-			if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
-				return ErrInvalidProxyStatus
-			}
-			p.Status = ProxyStatusAbnormal
-		}
-	case ProxyStatusDisabled:
-		if result.NonRetryable {
-			return nil
-		}
-		p.Errors++
-		if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
+		if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
 			return ErrInvalidProxyStatus
 		}
-		p.Status = ProxyStatusDisabled
+		p.Status = ProxyStatusAbnormal
+	case ProxyStatusDisabled:
+		return nil
 	default:
 		return ErrInvalidProxyStatus
 	}
@@ -224,36 +206,29 @@ func (p *Proxy) MarkExpired(now time.Time) error {
 }
 
 func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
-	p.LastSafeError = SafeProxyError(safeError)
 	if p.Status == ProxyStatusDisabled {
-		if retryable {
-			p.Errors++
-		}
 		return nil
 	}
+	p.LastSafeError = SafeProxyError(safeError)
 	if !retryable {
-		if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
-			return ErrInvalidProxyStatus
-		}
-		p.Status = ProxyStatusDisabled
-		return nil
-	}
-	p.Errors++
-	if p.Errors >= 2 {
-		if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
-			return ErrInvalidProxyStatus
-		}
-		p.Status = ProxyStatusDisabled
-	} else {
 		if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
 			return ErrInvalidProxyStatus
 		}
 		p.Status = ProxyStatusAbnormal
+		return nil
 	}
+	p.Errors++
+	if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
+		return ErrInvalidProxyStatus
+	}
+	p.Status = ProxyStatusAbnormal
 	return nil
 }
 
 func (p *Proxy) ReportSuccess(usedAt time.Time) {
+	if p.Status == ProxyStatusDisabled {
+		return
+	}
 	if usedAt.IsZero() {
 		usedAt = time.Now().UTC()
 	}

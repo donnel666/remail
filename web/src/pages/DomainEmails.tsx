@@ -10,7 +10,6 @@ import {
   Tabs,
   Tag,
   Toast,
-  Typography,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import {
@@ -24,6 +23,7 @@ import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useAuth } from "@/context/auth-provider";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
@@ -61,8 +61,6 @@ import {
   type UsageScope,
 } from "./resources/domain-model";
 import { useSelectionNotification } from "./resources/use-selection-notification";
-
-const { Text } = Typography;
 
 type StatusFilter = "all" | "normal" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
@@ -664,7 +662,7 @@ export default function DomainEmails() {
           key: "tld",
           title: t("TLD"),
           dataIndex: "domain",
-          width: 100,
+          width: "10%",
           render: (_: string, record: DomainResource) => (
             <Tag color="white" shape="circle">
               {record.domainTld}
@@ -675,28 +673,21 @@ export default function DomainEmails() {
           key: "domain",
           title: t("Domain"),
           dataIndex: "domain",
-          width: 260,
+          width: "29%",
           render: (text: string) => (
-            <Text
-              copyable={{
-                content: text,
-                onCopy: () => Toast.success(t("Copied")),
-              }}
-            >
-              {text}
-            </Text>
+            <CopyableTableText copiedText={t("Copied")} text={text} />
           ),
         },
         {
           title: t("Status"),
           dataIndex: "status",
-          width: 130,
+          width: "12%",
           render: (status: DomainStatus) => renderDomainStatusTag(status, t),
         },
         {
           title: t("Private only"),
           dataIndex: "usageScope",
-          width: 120,
+          width: "12%",
           render: (scope: UsageScope) => (
             <span
               className={`text-xs font-medium ${
@@ -712,7 +703,7 @@ export default function DomainEmails() {
         {
           title: t("Mailboxes"),
           dataIndex: "mailboxCount",
-          width: 110,
+          width: "10%",
           render: (count: number) => (
             <span className="tabular-nums font-medium text-[var(--semi-color-text-1)]">
               {count}
@@ -722,7 +713,7 @@ export default function DomainEmails() {
         {
           title: t("Action"),
           dataIndex: "operate",
-          width: 250,
+          width: "27%",
           fixed: "right",
           render: (_: unknown, record: DomainResource) => (
             <Space wrap={false}>
@@ -830,7 +821,7 @@ export default function DomainEmails() {
         <Button
           type="tertiary"
           size="small"
-          className="flex-1 md:flex-initial"
+          className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
           onClick={refresh}
         >
@@ -981,7 +972,7 @@ export default function DomainEmails() {
             type="tertiary"
             size="small"
             loading={loading}
-            className="flex-1 md:flex-initial"
+            className="remail-toolbar-fixed-button flex-1 md:flex-none"
             onClick={() => setActivePage(1)}
           >
             {t("Query")}
@@ -1040,7 +1031,7 @@ export default function DomainEmails() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max-content" }}
+          scroll={compactMode ? undefined : { x: "max(100%, 980px)" }}
           size="middle"
         />
       </CardPro>

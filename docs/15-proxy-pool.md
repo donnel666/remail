@@ -7,7 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-02 | V1.1 | Codex | 补充代理管理页按国家标签聚合、检测端点兜底、IPv4/IPv6 展示和测速目标；不改变两级代理池、绑定和状态机策略。 |
 | 2026-07-03 | V1.2 | Codex | 补充管理端按 ID 批量删除代理的维护能力；仅用于管理员清理代理池，不改变两级代理池、绑定和状态机策略。 |
-| 2026-07-03 | V1.3 | Codex | 补充代理错误可重试分类：可重试错误累计次数，不可重试错误直接禁用；补充按筛选条件批量删除和创建时间筛选。 |
+| 2026-07-03 | V1.3 | Codex | 补充代理错误可重试分类：可重试错误累计次数，不可重试错误进入异常；补充按筛选条件批量删除和创建时间筛选。 |
 | 2026-07-03 | V1.4 | Codex | 补充代理高可用兜底策略：资源代理、系统代理最多 3 次代理尝试后切换系统直连。 |
 | 2026-07-03 | V1.5 | Codex | 补充代理管理端服务器分页、统计查询、批量导入/检测命令和代理错误禁敏兜底；不改变两级代理池、绑定和状态机策略。 |
 | 2026-07-03 | V1.6 | Codex | 补充代理选择 SQL 证据、失效绑定覆盖和 SystemLog 表归属说明；仅补实现验收约束，不改变代理池策略。 |
@@ -19,6 +19,10 @@
 | 2026-07-03 | V1.12 | Codex | 补充代理检测任务事实入库：HTTP 成功以 durable check job 写入为准，Asynq 仅作为执行通道；不改变代理状态机和选择策略。 |
 | 2026-07-03 | V1.13 | Codex | 补充管理端代理 URL 展示策略：代理管理属于管理员分组页面，授权管理员接口返回完整 URL；不改变日志、错误和诊断禁敏策略。 |
 | 2026-07-03 | V1.14 | Codex | 补充固定 ID 批量检测使用 `proxy_check_job_items` 子表和 dispatcher 恢复 pending job；仅补实现约束，不改变代理状态机和选择策略。 |
+| 2026-07-03 | V1.15 | Codex | 纠正代理错误状态策略：系统检测和运行期错误只进入 `abnormal`，`disabled` 仅允许管理员手工禁用。 |
+| 2026-07-03 | V1.16 | Codex | 移除代理单独详情读取接口：管理员列表项已经返回完整 URL，复制、编辑和维护统一使用列表读模型。 |
+| 2026-07-03 | V1.17 | Codex | 补充检测 job `queued/running` stale 恢复策略，避免 worker 硬中断后任务永久卡住。 |
+| 2026-07-03 | V1.18 | Codex | 补充检测 job claim 策略：dispatcher 必须用数据库行锁和状态条件原子 claim，worker 只能从 `queued` 进入 `running`，终态不得被回退。 |
 
 > 支撑域。BC-PROXY 负责 Microsoft 通讯用代理的录入、检测、选择、绑定、轮转和禁用，不拥有 Microsoft 页面流、资源状态或订单状态。
 
@@ -78,9 +82,9 @@
 
 `ip` 字段在实现中展示为 `ipVersion=ipv4|ipv6`，同时保留 `outboundIp` 作为本次检测到的出口 IP，便于管理员排障。测速目标使用 Microsoft 和 Google 的轻量 URL 兜底，优先把测速 URL 的成功往返耗时写入 `latencyMs`；如果测速 URL 都失败，才回退到成功识别端点的耗时。后续如果接入专门测速 URL，只能补充测速 adapter，不改变代理状态机和选择规则。
 
-检测属于耗时外部网络任务，不允许在 HTTP 请求内同步等待真实探测。新增和导入代理由后端用例在写入 `checking` 状态后创建 durable check job，不允许依赖前端再补一次检测请求。`POST /v1/admin/proxies/{proxyId}/check` 只负责校验、把单个代理置为 `checking`，并在同一事务里写入单个检测 job；`POST /v1/admin/proxies/check` 的 ID 批量模式只负责校验 ID 并写入一个 durable batch job，筛选批量模式只负责校验筛选条件、统计目标代理数并写入一个 durable batch job；批量 worker 再按 ID 或稳定 ID 分段读取代理、逐个置为 `checking` 并写入单个检测 job。成功提交均返回 `202 Accepted`，成功语义以 durable job 已写入为准。Asynq 只作为执行通道：dispatch 失败不得把代理置为异常，只能把 job 保持为 `pending`、写入安全错误和 SystemLog，管理员显式重新检测或后续 dispatcher 可继续处理该 job。一个单代理检测任务只执行一次，任务内部最多做 3 次探测尝试；3 次都失败后立即写入 `abnormal` 和安全诊断，不依赖 Asynq 重试继续拖延结论。基础设施失败必须尝试写 SystemLog，管理员需要再次检测时显式触发重新检测。不可重试错误直接 `disabled`。`expired` 状态只影响分配候选，不阻止管理员检测、编辑、删除和禁用；重新检测会先把 `expired` 置为 `checking`，检测结果再由 worker 写回。
+检测属于耗时外部网络任务，不允许在 HTTP 请求内同步等待真实探测。新增和导入代理由后端用例在写入 `checking` 状态后创建 durable check job，不允许依赖前端再补一次检测请求。`POST /v1/admin/proxies/{proxyId}/check` 只负责校验、清空该代理连续错误数、把单个代理置为 `checking`，并在同一事务里写入单个检测 job；`POST /v1/admin/proxies/check` 的 ID 批量模式只负责校验 ID 并写入一个 durable batch job，筛选批量模式只负责校验筛选条件、统计目标代理数并写入一个 durable batch job；批量 worker 再按 ID 或稳定 ID 分段读取代理、逐个清空错误数、置为 `checking` 并写入单个检测 job。成功提交均返回 `202 Accepted`，成功语义以 durable job 已写入为准。Asynq 只作为执行通道：dispatch 失败不得把代理置为异常，只能把 job 保持为 `pending`、写入安全错误和 SystemLog，管理员显式重新检测或后续 dispatcher 可继续处理该 job。dispatcher 还必须扫描超过任务超时预算仍停留在 `queued/running` 的 stale job，并在数据库事务内用行锁和状态条件原子 claim 后重新投递，避免 worker 硬中断后检测永久卡住；已经进入 `succeeded/failed` 的终态 job 不得被 dispatcher 或 worker 回退为 `queued/running`。一个单代理检测任务只执行一次，任务内部最多做 3 次探测尝试；3 次都失败后立即写入 `abnormal` 和安全诊断，不依赖 Asynq 重试继续拖延结论。基础设施失败必须尝试写 SystemLog，管理员需要再次检测时显式触发重新检测。不可重试错误也只能写入 `abnormal`，不得自动禁用。`expired` 状态只影响分配候选，不阻止管理员检测、编辑、删除和禁用；重新检测会先把 `expired` 置为 `checking`，检测结果再由 worker 写回。
 
-管理页按 `country` 聚合为顶部标签卡，`All` 标签展示全部代理；列表筛选支持 `pool`、`ipVersion`、`ipv6`、`status`、`country`、`createdFrom/createdTo` 和搜索。列表必须使用服务器分页和后端筛选，不允许为了本地分页或统计把代理全量拉到浏览器。国家标签和筛选计数通过统计查询返回，只做 `COUNT/GROUP BY`，不返回代理 URL 原文。代理管理属于管理员分组页面，授权管理员列表、详情、创建、更新和检测响应可返回完整 URL；日志、错误响应、SystemLog detail、OperationLog summary 和非授权场景仍必须禁敏。
+管理页按 `country` 聚合为顶部标签卡，`All` 标签展示全部代理；列表筛选支持 `pool`、`ipVersion`、`ipv6`、`status`、`country`、`createdFrom/createdTo` 和搜索。列表必须使用服务器分页和后端筛选，不允许为了本地分页或统计把代理全量拉到浏览器。国家标签和筛选计数通过统计查询返回，只做 `COUNT/GROUP BY`，不返回代理 URL 原文。代理管理属于管理员分组页面，授权管理员列表、创建、更新和检测响应可返回完整 URL；列表行本身就是复制、编辑和维护代理的读契约，不再保留单独详情读取接口。日志、错误响应、SystemLog detail、OperationLog summary 和非授权场景仍必须禁敏。
 
 管理页左上角提供当前筛选范围的批量维护按钮。当前筛选范围内存在非禁用代理时，按钮显示“全部禁用”，调用筛选条件批量禁用接口并同步把匹配代理置为 `disabled`；当前筛选范围内全部代理均为 `disabled` 时，按钮显示“全部启用”，但启用不得直接改成 `normal`，只能对当前筛选下的禁用代理提交异步检测，检测通过后由 worker 写入 `normal`。
 
@@ -99,13 +103,14 @@ stateDiagram-v2
     [*] --> checking: 创建/重新检测
     checking --> normal: 检测成功
     checking --> abnormal: 检测任务内部重试耗尽
-    checking --> disabled: 不可重试错误/连续可重试错误达到阈值
     normal --> abnormal: 可重试错误
+    normal --> abnormal: 不可重试错误
     abnormal --> normal: 重新检测成功
-    abnormal --> disabled: 连续可重试错误达到阈值/不可重试错误
-    normal --> disabled: 连续错误达到阈值/不可重试错误
     normal --> expired: 到期
     abnormal --> expired: 到期
+    checking --> disabled: 管理员禁用
+    normal --> disabled: 管理员禁用
+    abnormal --> disabled: 管理员禁用
     disabled --> checking: 重新检测
     expired --> checking: 重新检测
     expired --> disabled: 管理员禁用
@@ -181,11 +186,12 @@ stateDiagram-v2
 | 场景 | 处理 |
 |------|------|
 | 单次可重试代理错误 | `errors + 1`，写安全诊断，状态置 `abnormal`。 |
-| 可重试错误连续达到 2 次 | 自动置 `disabled`。 |
-| 不可重试代理错误 | 直接置 `disabled`，不递增 `errors`，写安全诊断。 |
+| 可重试错误连续出现 | 继续累计 `errors`，状态保持 `abnormal`，不得自动禁用。 |
+| 不可重试代理错误 | 状态置 `abnormal`，不递增 `errors`，写安全诊断，仍不得自动禁用。 |
 | 成功使用或检测成功 | `errors=0`，更新 `lastUsedAt/lastCheckedAt`。 |
 | 资源代理异常 | 本次业务允许降级时，重新获取 `system` 池代理。 |
 | 代理尝试耗尽或代理池不可用 | 返回系统直连配置，写 SystemLog，避免代理池故障拖垮主业务。 |
+| 管理员禁用 | 只有管理端显式禁用操作才能把代理置为 `disabled`。 |
 
 ---
 
@@ -197,7 +203,7 @@ stateDiagram-v2
 | INV-P2 | 代理 URL 原值保存，但不得进入普通日志、错误响应、导出和普通列表。 |
 | INV-P3 | `resource` 池按 key 建 7 天绑定，同一 key 绑定有效期内不得随意轮转。 |
 | INV-P4 | `system` 池只做兜底轮转，不创建绑定关系。 |
-| INV-P5 | 检测中的可重试错误在任务内部最多尝试 3 次；仍失败必须置 `abnormal`，连续 2 次可重试错误必须自动禁用代理；不可重试错误必须直接禁用代理。 |
+| INV-P5 | 检测中的可重试错误在任务内部最多尝试 3 次；仍失败必须置 `abnormal`。系统检测和运行期错误都不得自动禁用代理，`disabled` 只能由管理员显式操作产生。 |
 | INV-P6 | 设置了 `expireAt` 的代理过期后不可再被选择，过期扫描只允许把 `normal/abnormal` 置为 `expired`，不得覆盖 `checking/disabled`；未设置有效期的代理不参与过期扫描。`expired` 不阻塞检测、编辑、删除和禁用。 |
 | INV-P7 | 选择代理必须支持 `auto/ipv4/ipv6`，辅助邮箱绑定强制 IPv4。 |
 | INV-P8 | 同等健康度下资源池选择优先绑定数最少，避免少数代理被过度绑定。 |
@@ -211,7 +217,7 @@ stateDiagram-v2
 | Port | 方向 | 职责 |
 |------|------|------|
 | `ProxyPort` | 入站自 BC-MAILTRANSPORT | 按 key、用途、IP 要求和 attempt 获取代理或直连路线，并上报代理成功/失败。 |
-| `LogPort` | 出站到 BC-GOVERNANCE | 写代理检测、自动禁用、兜底失败等 SystemLog。 |
+| `LogPort` | 出站到 BC-GOVERNANCE | 写代理检测和兜底失败等 SystemLog。 |
 
 BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代理表。
 
@@ -229,14 +235,13 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 | `POST` | `/v1/admin/proxies/check` | 按代理 ID 或筛选条件批量提交异步检测任务；返回 `202 Accepted` 和入队数量，前端不得逐条编排批量检测请求。 |
 | `POST` | `/v1/admin/proxies/resource` | 新增资源代理；请求体只有 `url` 和可选 `expireAt`。 |
 | `POST` | `/v1/admin/proxies/system` | 新增系统代理；请求体只有 `url` 和可选 `expireAt`。 |
-| `GET` | `/v1/admin/proxies/{proxyId}` | 代理详情；授权时可查看完整 URL。 |
 | `PATCH` | `/v1/admin/proxies/{proxyId}` | 启停、更新代理 URL 和到期时间；URL 变化会重新进入异步检测。 |
 | `POST` | `/v1/admin/proxies/{proxyId}/check` | 重新检测代理，返回 `202 Accepted` 和已置为 `checking` 的代理快照。 |
 | `POST` | `/v1/admin/proxies/delete` | 按代理 ID 或筛选条件批量删除管理端代理；删除代理时级联清理绑定关系。 |
 | `POST` | `/v1/admin/proxies/disable` | 按筛选条件批量禁用管理端代理；仅支持 `all + filter`，不支持前端逐条编排。 |
 | `GET` | `/v1/admin/proxies/bindings` | 查看资源代理绑定；支持 `key/proxyId/ip` 筛选。 |
 
-写动作写 OperationLog；自动检测、自动禁用和兜底失败写 SystemLog。
+写动作写 OperationLog；自动检测和兜底失败写 SystemLog。
 
 ---
 
@@ -249,13 +254,13 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 | 绑定唯一性 | `key + ip` 同一时间只能有一个有效绑定。 |
 | 最少绑定优先 | 选择代理和创建绑定必须在事务内完成，避免并发都选中同一代理。 |
 | 健康优先 | 只选择 `normal` 代理；查询仍按 `errors ASC` 排序作为历史数据和并发兜底。DDL 必须保留 `pool/status/ip/errors/expireAt` 方向索引支撑选择查询，其中 `expireAt IS NULL` 表示长期有效。 |
-| 错误计数 | 可重试错误上报使用条件更新，连续错误 2 次自动禁用；不可重试错误直接禁用且不递增 `errors`。 |
+| 错误计数 | 可重试错误上报递增 `errors` 并置 `abnormal`；不可重试错误不递增 `errors` 但同样置 `abnormal`。任何错误上报都不得自动写 `disabled`。 |
 | 过期扫描与选择 | `expireAt` 有索引；扫描只允许把 `normal/abnormal` 批量置 `expired`，不得覆盖 `checking/disabled`。资源池和系统池选择 SQL 必须用 `(expireAt IS NULL OR expireAt > now)` 排除已到期代理。 |
 | 统计查询 | 管理页统计只允许 `COUNT/GROUP BY`，不得返回完整代理行给前端再本地统计。 |
 | 安全诊断 | `lastSafeError`、SystemLog detail 和 OperationLog summary 写入前必须做代理 URL、账号密码、token 类片段禁敏。 |
 | OperationLog 原子性 | 管理端创建、导入、更新、删除和检测写代理表时，业务写与 OperationLog 必须在同一个显式事务内提交，日志失败必须回滚业务写。 |
-| 检测任务事实 | `proxy_check_jobs` 保存 `single/batch` 检测 job，状态为 `pending/queued/running/succeeded/failed`；`batch_mode=ids/filter` 区分固定 ID 批量和筛选批量，固定 ID 明细必须写入 `proxy_check_job_items`，不得塞进大 JSON 字段。创建/导入/更新/重新检测等写代理状态的入口必须在同一事务内写入 job 和 OperationLog。Asynq dispatch 失败只更新 job 诊断和 SystemLog，不改变代理健康状态；后台 dispatcher 必须周期扫描 `pending` job 并重新 dispatch，避免任务通道短暂失败后 job 永久滞留。 |
-| 批量检测 | 按筛选条件批量提交检测不得一次性加载全部代理 ID，HTTP 请求只允许统计目标数量并写入一个 durable batch job；按固定 ID 批量提交检测不得把全部 ID 放入 Asynq payload，只能用 `proxy_check_job_items` 分段读取。批量 worker 必须按稳定 ID 分段读取并写入单代理 durable job，再 dispatch 到 Asynq 执行通道，单代理 worker 内部最多 3 次探测后写 `normal/abnormal/disabled`。 |
+| 检测任务事实 | `proxy_check_jobs` 保存 `single/batch` 检测 job，状态为 `pending/queued/running/succeeded/failed`；`batch_mode=ids/filter` 区分固定 ID 批量和筛选批量，固定 ID 明细必须写入 `proxy_check_job_items`，不得塞进大 JSON 字段。创建/导入/更新/重新检测等写代理状态的入口必须在同一事务内写入 job 和 OperationLog。Asynq dispatch 失败只更新 job 诊断和 SystemLog，不改变代理健康状态；后台 dispatcher 必须周期扫描 `pending` job 和超过任务超时预算的 stale `queued/running` job，并通过 `SELECT ... FOR UPDATE SKIP LOCKED` 或等价条件更新原子 claim 后重新 dispatch，避免任务通道短暂失败或 worker 硬中断后 job 永久滞留。worker 只能把 `queued` claim 为 `running`，只能把 `running` 写为 `succeeded/failed`，终态不得回退。 |
+| 批量检测 | 按筛选条件批量提交检测不得一次性加载全部代理 ID，HTTP 请求只允许统计目标数量并写入一个 durable batch job；按固定 ID 批量提交检测不得把全部 ID 放入 Asynq payload，只能用 `proxy_check_job_items` 分段读取。批量 worker 必须按稳定 ID 分段读取并写入单代理 durable job，再 dispatch 到 Asynq 执行通道，单代理 worker 内部最多 3 次探测后只写 `normal/abnormal`。 |
 | 批量禁用 | 按筛选条件批量禁用必须由后端单次批量更新完成，并和 OperationLog 在同一事务内提交；前端不得逐条 PATCH。批量启用只能复用批量检测入口，不得直接把状态写成 `normal`。 |
 | EXPLAIN 证据 | 验收测试必须 EXPLAIN 生产选择 SQL 本身：resource 选择查询命中 `idx_proxies_select_health`，active binding 子查询命中 `idx_proxy_bindings_expire_proxy`；system 选择查询命中 `idx_proxies_select_health`。 |
 
@@ -265,7 +270,7 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 
 - 同一 key 100 并发获取，只创建一个有效绑定。
 - 不同 key 并发获取，优先落到绑定数最少的代理。
-- 检测任务内部 3 次探测失败后变为 abnormal，代理连续两次错误后自动 disabled。
+- 检测任务内部 3 次探测失败后变为 abnormal，连续错误只累计 errors，不会自动 disabled。
 - resource 代理失败后能获取 system 代理，且不创建 Binding。
 - 代理尝试达到 3 次或代理池不可用时返回 direct 路线，直连不上报代理错误计数。
 
@@ -279,5 +284,5 @@ BC-MAILTRANSPORT 只拿到本次可用代理配置，不直接查询或修改代
 | ADR-PROXY-2 | 两级代理池 | 资源池保证账号连续性，系统池保证异常兜底。 |
 | ADR-PROXY-3 | 资源池 7 天绑定 | Microsoft 账号短期固定出口，降低风控和不稳定。 |
 | ADR-PROXY-4 | 辅助邮箱强制 IPv4 | 当前目标服务器不支持 IPv6，规则必须固化。 |
-| ADR-PROXY-5 | 连续错误 2 次禁用 | 快速隔离坏代理，避免反复污染 Microsoft 请求。 |
+| ADR-PROXY-5 | 错误只置异常，不自动禁用 | 轮转只选择 normal 代理即可隔离异常代理；disabled 必须保留为管理员手工维护语义。 |
 | ADR-PROXY-6 | 3 次代理尝试后直连 | 代理池是体验增强能力，不允许代理池自身成为主业务不可用的单点。 |

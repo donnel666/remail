@@ -85,14 +85,6 @@ export async function importAdminProxies(payload: ImportProxiesRequest) {
   );
 }
 
-export async function getAdminProxy(proxyId: number) {
-  return unwrap<ProxyItem>(
-    await client.GET("/v1/admin/proxies/{proxyId}", {
-      params: { path: { proxyId } },
-    })
-  );
-}
-
 export async function updateAdminProxy(
   proxyId: number,
   payload: UpdateProxyRequest

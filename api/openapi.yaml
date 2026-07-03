@@ -2257,45 +2257,6 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   /v1/admin/proxies/{proxyId}:
-    get:
-      operationId: getAdminProxy
-      summary: Get proxy detail
-      tags:
-        - Proxy Pool
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: proxyId
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Proxy detail. URL is complete for authorized admins.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProxyItem"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: Proxy not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
     patch:
       operationId: patchAdminProxy
       summary: Update proxy status or expiration

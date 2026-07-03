@@ -19,7 +19,7 @@ const proxyCheckDispatcherInterval = 15 * time.Second
 func RegisterProxyTaskHandlers(mux *asynq.ServeMux, module *ProxyModule) {
 	mux.HandleFunc(proxyinfra.TypeProxyCheckDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		defer module.ProxyUseCase.ScheduleProxyCheckDispatcher(context.Background(), proxyCheckDispatcherInterval)
-		result, err := module.ProxyUseCase.DispatchPendingProxyCheckJobs(ctx, 0)
+		result, err := module.ProxyUseCase.DispatchProxyCheckJobs(ctx, 0)
 		if err != nil {
 			module.ProxyUseCase.LogTaskFailure(ctx, "proxy.check_dispatcher_failed", "", "proxy_check_job", "dispatcher", "Proxy check dispatcher failed.", err)
 			return err

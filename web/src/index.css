@@ -359,6 +359,60 @@ body[theme-mode="dark"] .semi-always-light,
   overflow-y: auto;
 }
 
+.remail-stable-table .semi-table {
+  table-layout: fixed;
+}
+
+.remail-stable-table .semi-table-row-head,
+.remail-stable-table .semi-table-row-cell {
+  overflow: hidden;
+}
+
+.remail-table-cell-ellipsis {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remail-table-cell-ellipsis .semi-typography {
+  max-width: 100%;
+}
+
+.remail-copyable-table-text {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.remail-copyable-table-text .semi-typography {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+}
+
+.remail-copyable-table-text-content {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remail-toolbar-fixed-button {
+  min-width: 64px;
+}
+
+@media (min-width: 768px) {
+  .remail-toolbar-fixed-button {
+    flex: none !important;
+    width: 72px;
+  }
+}
+
 .table-scroll-card .semi-card-body::-webkit-scrollbar,
 .semi-table-body::-webkit-scrollbar {
   width: 6px;
