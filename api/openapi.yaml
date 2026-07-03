@@ -1771,7 +1771,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [checking, normal, disabled, expired]
+            enum: [checking, normal, abnormal, disabled, expired]
         - name: country
           in: query
           schema:
@@ -1802,7 +1802,7 @@ paths:
             default: 20
       responses:
         "200":
-          description: Proxy list. URL is redacted in list responses.
+          description: Proxy list. URL is complete for authorized admins.
           content:
             application/json:
               schema:
@@ -1853,7 +1853,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [checking, normal, disabled, expired]
+            enum: [checking, normal, abnormal, disabled, expired]
         - name: country
           in: query
           schema:
@@ -2004,6 +2004,54 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/proxies/disable:
+    post:
+      operationId: postAdminProxyDisableBatch
+      summary: Disable proxy pool entries by filter
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisableProxiesRequest"
+      responses:
+        "200":
+          description: Proxies disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisableProxiesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/proxies/imports:
     post:
       operationId: postAdminProxyImports
@@ -2022,7 +2070,7 @@ paths:
               $ref: "#/components/schemas/ImportProxiesRequest"
       responses:
         "201":
-          description: Proxies imported. Duplicate URLs are skipped and counted.
+          description: Proxies imported with checking status and durable asynchronous check jobs accepted. Asynq dispatch failures leave pending check jobs for dispatcher recovery and are logged. Duplicate URLs are skipped and counted.
           content:
             application/json:
               schema:
@@ -2045,14 +2093,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "409":
-          description: Every submitted proxy already exists or is duplicated in the request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid proxy pool, URL or expireAt
+          description: Invalid proxy pool, URL or expireAt when provided
           content:
             application/json:
               schema:
@@ -2075,8 +2117,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CheckProxiesRequest"
       responses:
-        "200":
-          description: Batch check completed. Failed checks return updated disabled or expired proxies when available.
+        "202":
+          description: Batch check scheduler task accepted. Results are written asynchronously to proxy status.
           content:
             application/json:
               schema:
@@ -2124,7 +2166,7 @@ paths:
               $ref: "#/components/schemas/CreateProxyRequest"
       responses:
         "201":
-          description: Resource proxy created with checking status
+          description: Resource proxy created with checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged.
           content:
             application/json:
               schema:
@@ -2154,7 +2196,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid proxy URL or expireAt
+          description: Invalid proxy URL or expireAt when provided
           content:
             application/json:
               schema:
@@ -2178,7 +2220,7 @@ paths:
               $ref: "#/components/schemas/CreateProxyRequest"
       responses:
         "201":
-          description: System proxy created with checking status
+          description: System proxy created with checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged.
           content:
             application/json:
               schema:
@@ -2208,7 +2250,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid proxy URL or expireAt
+          description: Invalid proxy URL or expireAt when provided
           content:
             application/json:
               schema:
@@ -2305,8 +2347,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: Proxy already exists in the same pool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
-          description: Invalid status or expireAt
+          description: Invalid status or expireAt when provided
           content:
             application/json:
               schema:
@@ -2328,8 +2376,8 @@ paths:
           schema:
             type: integer
       responses:
-        "200":
-          description: Proxy check completed. Failed checks still return the updated proxy with disabled or expired status.
+        "202":
+          description: Proxy moved to checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged.
           content:
             application/json:
               schema:
@@ -2352,7 +2400,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
+        "422":
+          description: Proxy status does not allow checking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   parameters:
     CsrfToken:
@@ -3212,6 +3265,31 @@ components:
 
     DeleteProxiesRequest:
       type: object
+      oneOf:
+        - required:
+            - proxyIds
+          properties:
+            all:
+              type: boolean
+              enum: [false]
+            proxyIds:
+              type: array
+              minItems: 1
+              items:
+                type: integer
+                minimum: 1
+        - required:
+            - all
+            - filter
+          properties:
+            all:
+              type: boolean
+              enum: [true]
+            filter:
+              $ref: "#/components/schemas/ProxyBulkFilter"
+          not:
+            required:
+              - proxyIds
       properties:
         all:
           type: boolean
@@ -3220,7 +3298,7 @@ components:
           $ref: "#/components/schemas/ProxyBulkFilter"
         proxyIds:
           type: array
-          minItems: 0
+          minItems: 1
           items:
             type: integer
             minimum: 1
@@ -3239,7 +3317,7 @@ components:
           type: boolean
         status:
           type: string
-          enum: [checking, normal, disabled, expired]
+          enum: [checking, normal, abnormal, disabled, expired]
         country:
           type: string
         search:
@@ -3270,8 +3348,61 @@ components:
           type: boolean
       additionalProperties: false
 
+    DisableProxiesRequest:
+      type: object
+      required:
+        - all
+        - filter
+      properties:
+        all:
+          type: boolean
+          enum: [true]
+          description: Disable every proxy matching filter. This endpoint only supports filter mode.
+        filter:
+          $ref: "#/components/schemas/ProxyBulkFilter"
+      additionalProperties: false
+
+    DisableProxiesResponse:
+      type: object
+      required:
+        - requested
+        - disabled
+      properties:
+        requested:
+          type: integer
+        disabled:
+          type: integer
+        disabledByFilter:
+          type: boolean
+      additionalProperties: false
+
     CheckProxiesRequest:
       type: object
+      oneOf:
+        - required:
+            - proxyIds
+          properties:
+            all:
+              type: boolean
+              enum: [false]
+            proxyIds:
+              type: array
+              minItems: 1
+              items:
+                type: integer
+                minimum: 1
+        - required:
+            - all
+            - filter
+          properties:
+            all:
+              type: boolean
+              enum: [true]
+            filter:
+              $ref: "#/components/schemas/ProxyBulkFilter"
+          not:
+            required:
+              - proxyIds
       properties:
         all:
           type: boolean
@@ -3280,7 +3411,7 @@ components:
           $ref: "#/components/schemas/ProxyBulkFilter"
         proxyIds:
           type: array
-          minItems: 0
+          minItems: 1
           items:
             type: integer
             minimum: 1
@@ -3290,18 +3421,25 @@ components:
       type: object
       required:
         - requested
+        - queued
         - checked
         - failed
         - items
       properties:
         requested:
           type: integer
+        queued:
+          type: integer
+          description: Number of proxy checks accepted as durable check jobs. Filter mode creates one durable batch scheduler job while this value still reports the matched proxy count.
         checked:
           type: integer
+          description: Reserved for completed synchronous checks. Always 0 for asynchronous check submission.
         failed:
           type: integer
+          description: Reserved for completed synchronous checks. Always 0 for asynchronous check submission.
         items:
           type: array
+          description: Queued proxy snapshots. Empty for fully asynchronous batch submissions.
           items:
             $ref: "#/components/schemas/ProxyItem"
       additionalProperties: false
@@ -3311,7 +3449,6 @@ components:
       required:
         - pool
         - urls
-        - expireAt
       properties:
         pool:
           type: string
@@ -3325,6 +3462,8 @@ components:
         expireAt:
           type: string
           format: date-time
+          nullable: true
+          description: Optional proxy expiration time. null or omitted means no expiration.
       additionalProperties: false
 
     ImportProxiesResponse:
@@ -3482,10 +3621,12 @@ components:
           enum: [resource, system]
         url:
           type: string
-          description: Redacted in list responses; complete only in authorized detail responses.
+          description: Complete proxy URL for authorized admin endpoints. Logs, errors and diagnostics remain redacted.
         expireAt:
           type: string
           format: date-time
+          nullable: true
+          description: null means no expiration.
         ipVersion:
           type: string
           description: Detected proxy outbound IP version. Empty before the first successful check.
@@ -3497,7 +3638,7 @@ components:
           type: integer
         status:
           type: string
-          enum: [checking, normal, disabled, expired]
+          enum: [checking, normal, abnormal, disabled, expired]
         errors:
           type: integer
         lastSafeError:
@@ -3522,7 +3663,6 @@ components:
       type: object
       required:
         - url
-        - expireAt
       properties:
         url:
           type: string
@@ -3530,11 +3670,16 @@ components:
         expireAt:
           type: string
           format: date-time
+          nullable: true
+          description: Optional proxy expiration time. null or omitted means no expiration.
       additionalProperties: false
 
     UpdateProxyRequest:
       type: object
       properties:
+        url:
+          type: string
+          description: Updated proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h. Changing URL resets detected fields and queues an async check.
         status:
           type: string
           enum: [checking, disabled]
@@ -3542,6 +3687,8 @@ components:
         expireAt:
           type: string
           format: date-time
+          nullable: true
+          description: Optional proxy expiration time. Send null to clear expiration.
       additionalProperties: false
 
     CreateMailServerRequest:

@@ -16,6 +16,8 @@ export type UpdateProxyRequest = components["schemas"]["UpdateProxyRequest"];
 export type ProxyBulkFilter = components["schemas"]["ProxyBulkFilter"];
 export type DeleteProxiesResponse =
   components["schemas"]["DeleteProxiesResponse"];
+export type DisableProxiesResponse =
+  components["schemas"]["DisableProxiesResponse"];
 export type CheckProxiesResponse =
   components["schemas"]["CheckProxiesResponse"];
 
@@ -27,7 +29,7 @@ export interface ProxyListFilter {
   ipv6?: boolean;
   pool?: "resource" | "system";
   search?: string;
-  status?: "checking" | "normal" | "disabled" | "expired";
+  status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
 }
 
 export async function listAdminProxies(
@@ -147,6 +149,15 @@ export async function deleteAdminProxies(proxyIds: number[]) {
 export async function deleteAdminProxiesByFilter(filter: ProxyBulkFilter) {
   return unwrap<DeleteProxiesResponse>(
     await client.POST("/v1/admin/proxies/delete", {
+      body: { all: true, filter },
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
+export async function disableAdminProxiesByFilter(filter: ProxyBulkFilter) {
+  return unwrap<DisableProxiesResponse>(
+    await client.POST("/v1/admin/proxies/disable", {
       body: { all: true, filter },
       params: { header: csrfHeader() },
     })

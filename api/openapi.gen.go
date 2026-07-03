@@ -18,6 +18,36 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for CheckProxiesRequest0All.
+const (
+	CheckProxiesRequest0AllFalse CheckProxiesRequest0All = false
+)
+
+// Valid indicates whether the value is a known member of the CheckProxiesRequest0All enum.
+func (e CheckProxiesRequest0All) Valid() bool {
+	switch e {
+	case CheckProxiesRequest0AllFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CheckProxiesRequest1All.
+const (
+	CheckProxiesRequest1AllTrue CheckProxiesRequest1All = true
+)
+
+// Valid indicates whether the value is a known member of the CheckProxiesRequest1All enum.
+func (e CheckProxiesRequest1All) Valid() bool {
+	switch e {
+	case CheckProxiesRequest1AllTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateDomainRequestPurpose.
 const (
 	CreateDomainRequestPurposeBinding CreateDomainRequestPurpose = "binding"
@@ -30,6 +60,51 @@ func (e CreateDomainRequestPurpose) Valid() bool {
 	case CreateDomainRequestPurposeBinding:
 		return true
 	case CreateDomainRequestPurposeNotSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteProxiesRequest0All.
+const (
+	DeleteProxiesRequest0AllFalse DeleteProxiesRequest0All = false
+)
+
+// Valid indicates whether the value is a known member of the DeleteProxiesRequest0All enum.
+func (e DeleteProxiesRequest0All) Valid() bool {
+	switch e {
+	case DeleteProxiesRequest0AllFalse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteProxiesRequest1All.
+const (
+	DeleteProxiesRequest1AllTrue DeleteProxiesRequest1All = true
+)
+
+// Valid indicates whether the value is a known member of the DeleteProxiesRequest1All enum.
+func (e DeleteProxiesRequest1All) Valid() bool {
+	switch e {
+	case DeleteProxiesRequest1AllTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisableProxiesRequestAll.
+const (
+	True DisableProxiesRequestAll = true
+)
+
+// Valid indicates whether the value is a known member of the DisableProxiesRequestAll enum.
+func (e DisableProxiesRequestAll) Valid() bool {
+	switch e {
+	case True:
 		return true
 	default:
 		return false
@@ -191,6 +266,7 @@ func (e ProxyBulkFilterPool) Valid() bool {
 
 // Defines values for ProxyBulkFilterStatus.
 const (
+	ProxyBulkFilterStatusAbnormal ProxyBulkFilterStatus = "abnormal"
 	ProxyBulkFilterStatusChecking ProxyBulkFilterStatus = "checking"
 	ProxyBulkFilterStatusDisabled ProxyBulkFilterStatus = "disabled"
 	ProxyBulkFilterStatusExpired  ProxyBulkFilterStatus = "expired"
@@ -200,6 +276,8 @@ const (
 // Valid indicates whether the value is a known member of the ProxyBulkFilterStatus enum.
 func (e ProxyBulkFilterStatus) Valid() bool {
 	switch e {
+	case ProxyBulkFilterStatusAbnormal:
+		return true
 	case ProxyBulkFilterStatusChecking:
 		return true
 	case ProxyBulkFilterStatusDisabled:
@@ -233,6 +311,7 @@ func (e ProxyItemPool) Valid() bool {
 
 // Defines values for ProxyItemStatus.
 const (
+	ProxyItemStatusAbnormal ProxyItemStatus = "abnormal"
 	ProxyItemStatusChecking ProxyItemStatus = "checking"
 	ProxyItemStatusDisabled ProxyItemStatus = "disabled"
 	ProxyItemStatusExpired  ProxyItemStatus = "expired"
@@ -242,6 +321,8 @@ const (
 // Valid indicates whether the value is a known member of the ProxyItemStatus enum.
 func (e ProxyItemStatus) Valid() bool {
 	switch e {
+	case ProxyItemStatusAbnormal:
+		return true
 	case ProxyItemStatusChecking:
 		return true
 	case ProxyItemStatusDisabled:
@@ -449,6 +530,7 @@ func (e GetAdminProxiesParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxiesParamsStatus.
 const (
+	GetAdminProxiesParamsStatusAbnormal GetAdminProxiesParamsStatus = "abnormal"
 	GetAdminProxiesParamsStatusChecking GetAdminProxiesParamsStatus = "checking"
 	GetAdminProxiesParamsStatusDisabled GetAdminProxiesParamsStatus = "disabled"
 	GetAdminProxiesParamsStatusExpired  GetAdminProxiesParamsStatus = "expired"
@@ -458,6 +540,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminProxiesParamsStatus enum.
 func (e GetAdminProxiesParamsStatus) Valid() bool {
 	switch e {
+	case GetAdminProxiesParamsStatusAbnormal:
+		return true
 	case GetAdminProxiesParamsStatusChecking:
 		return true
 	case GetAdminProxiesParamsStatusDisabled:
@@ -533,6 +617,7 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
+	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
 	Checking GetAdminProxyStatsParamsStatus = "checking"
 	Disabled GetAdminProxyStatsParamsStatus = "disabled"
 	Expired  GetAdminProxyStatsParamsStatus = "expired"
@@ -542,6 +627,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
+	case Abnormal:
+		return true
 	case Checking:
 		return true
 	case Disabled:
@@ -646,14 +733,41 @@ type CheckProxiesRequest struct {
 	All      *bool            `json:"all,omitempty"`
 	Filter   *ProxyBulkFilter `json:"filter,omitempty"`
 	ProxyIds *[]int           `json:"proxyIds,omitempty"`
+	union    json.RawMessage
 }
+
+// CheckProxiesRequest0 defines model for .
+type CheckProxiesRequest0 struct {
+	All      *CheckProxiesRequest0All `json:"all,omitempty"`
+	ProxyIds []int                    `json:"proxyIds"`
+}
+
+// CheckProxiesRequest0All defines model for CheckProxiesRequest.0.All.
+type CheckProxiesRequest0All bool
+
+// CheckProxiesRequest1 defines model for .
+type CheckProxiesRequest1 struct {
+	All    CheckProxiesRequest1All `json:"all"`
+	Filter ProxyBulkFilter         `json:"filter"`
+}
+
+// CheckProxiesRequest1All defines model for CheckProxiesRequest.1.All.
+type CheckProxiesRequest1All bool
 
 // CheckProxiesResponse defines model for CheckProxiesResponse.
 type CheckProxiesResponse struct {
-	Checked   int         `json:"checked"`
-	Failed    int         `json:"failed"`
-	Items     []ProxyItem `json:"items"`
-	Requested int         `json:"requested"`
+	// Checked Reserved for completed synchronous checks. Always 0 for asynchronous check submission.
+	Checked int `json:"checked"`
+
+	// Failed Reserved for completed synchronous checks. Always 0 for asynchronous check submission.
+	Failed int `json:"failed"`
+
+	// Items Queued proxy snapshots. Empty for fully asynchronous batch submissions.
+	Items []ProxyItem `json:"items"`
+
+	// Queued Number of proxy checks accepted as durable check jobs. Filter mode creates one durable batch scheduler job while this value still reports the matched proxy count.
+	Queued    int `json:"queued"`
+	Requested int `json:"requested"`
 }
 
 // CreateDomainRequest defines model for CreateDomainRequest.
@@ -683,7 +797,8 @@ type CreateMailServerRequest struct {
 
 // CreateProxyRequest defines model for CreateProxyRequest.
 type CreateProxyRequest struct {
-	ExpireAt time.Time `json:"expireAt"`
+	// ExpireAt Optional proxy expiration time. null or omitted means no expiration.
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
 
 	// Url Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h.
 	Url string `json:"url"`
@@ -695,7 +810,26 @@ type DeleteProxiesRequest struct {
 	All      *bool            `json:"all,omitempty"`
 	Filter   *ProxyBulkFilter `json:"filter,omitempty"`
 	ProxyIds *[]int           `json:"proxyIds,omitempty"`
+	union    json.RawMessage
 }
+
+// DeleteProxiesRequest0 defines model for .
+type DeleteProxiesRequest0 struct {
+	All      *DeleteProxiesRequest0All `json:"all,omitempty"`
+	ProxyIds []int                     `json:"proxyIds"`
+}
+
+// DeleteProxiesRequest0All defines model for DeleteProxiesRequest.0.All.
+type DeleteProxiesRequest0All bool
+
+// DeleteProxiesRequest1 defines model for .
+type DeleteProxiesRequest1 struct {
+	All    DeleteProxiesRequest1All `json:"all"`
+	Filter ProxyBulkFilter          `json:"filter"`
+}
+
+// DeleteProxiesRequest1All defines model for DeleteProxiesRequest.1.All.
+type DeleteProxiesRequest1All bool
 
 // DeleteProxiesResponse defines model for DeleteProxiesResponse.
 type DeleteProxiesResponse struct {
@@ -717,6 +851,23 @@ type DeleteResourcesResponse struct {
 	// DeletedResourceIds Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses.
 	DeletedResourceIds *[]int `json:"deletedResourceIds,omitempty"`
 	Requested          int    `json:"requested"`
+}
+
+// DisableProxiesRequest defines model for DisableProxiesRequest.
+type DisableProxiesRequest struct {
+	// All Disable every proxy matching filter. This endpoint only supports filter mode.
+	All    DisableProxiesRequestAll `json:"all"`
+	Filter ProxyBulkFilter          `json:"filter"`
+}
+
+// DisableProxiesRequestAll Disable every proxy matching filter. This endpoint only supports filter mode.
+type DisableProxiesRequestAll bool
+
+// DisableProxiesResponse defines model for DisableProxiesResponse.
+type DisableProxiesResponse struct {
+	Disabled         int   `json:"disabled"`
+	DisabledByFilter *bool `json:"disabledByFilter,omitempty"`
+	Requested        int   `json:"requested"`
 }
 
 // DomainResourceDetail defines model for DomainResourceDetail.
@@ -763,7 +914,8 @@ type HealthResponse struct {
 
 // ImportProxiesRequest defines model for ImportProxiesRequest.
 type ImportProxiesRequest struct {
-	ExpireAt time.Time                `json:"expireAt"`
+	// ExpireAt Optional proxy expiration time. null or omitted means no expiration.
+	ExpireAt *time.Time               `json:"expireAt,omitempty"`
 	Pool     ImportProxiesRequestPool `json:"pool"`
 	Urls     []string                 `json:"urls"`
 }
@@ -959,8 +1111,10 @@ type ProxyItem struct {
 	Country   string    `json:"country"`
 	CreatedAt time.Time `json:"createdAt"`
 	Errors    int       `json:"errors"`
-	ExpireAt  time.Time `json:"expireAt"`
-	Id        int       `json:"id"`
+
+	// ExpireAt null means no expiration.
+	ExpireAt *time.Time `json:"expireAt"`
+	Id       int        `json:"id"`
 
 	// IpVersion Detected proxy outbound IP version. Empty before the first successful check.
 	IpVersion     string          `json:"ipVersion"`
@@ -973,7 +1127,7 @@ type ProxyItem struct {
 	Status        ProxyItemStatus `json:"status"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
 
-	// Url Redacted in list responses; complete only in authorized detail responses.
+	// Url Complete proxy URL for authorized admin endpoints. Logs, errors and diagnostics remain redacted.
 	Url string `json:"url"`
 }
 
@@ -1199,10 +1353,14 @@ type SupplierApplicationResponseStatus string
 
 // UpdateProxyRequest defines model for UpdateProxyRequest.
 type UpdateProxyRequest struct {
+	// ExpireAt Optional proxy expiration time. Send null to clear expiration.
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 
 	// Status Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
 	Status *UpdateProxyRequestStatus `json:"status,omitempty"`
+
+	// Url Updated proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h. Changing URL resets detected fields and queues an async check.
+	Url *string `json:"url,omitempty"`
 }
 
 // UpdateProxyRequestStatus Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
@@ -1298,6 +1456,12 @@ type PostAdminProxyCheckBatchParams struct {
 
 // PostAdminProxyDeleteBatchParams defines parameters for PostAdminProxyDeleteBatch.
 type PostAdminProxyDeleteBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProxyDisableBatchParams defines parameters for PostAdminProxyDisableBatch.
+type PostAdminProxyDisableBatchParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -1521,6 +1685,9 @@ type PostAdminProxyCheckBatchJSONRequestBody = CheckProxiesRequest
 // PostAdminProxyDeleteBatchJSONRequestBody defines body for PostAdminProxyDeleteBatch for application/json ContentType.
 type PostAdminProxyDeleteBatchJSONRequestBody = DeleteProxiesRequest
 
+// PostAdminProxyDisableBatchJSONRequestBody defines body for PostAdminProxyDisableBatch for application/json ContentType.
+type PostAdminProxyDisableBatchJSONRequestBody = DisableProxiesRequest
+
 // PostAdminProxyImportsJSONRequestBody defines body for PostAdminProxyImports for application/json ContentType.
 type PostAdminProxyImportsJSONRequestBody = ImportProxiesRequest
 
@@ -1577,6 +1744,254 @@ type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// AsCheckProxiesRequest0 returns the union data inside the CheckProxiesRequest as a CheckProxiesRequest0
+func (t CheckProxiesRequest) AsCheckProxiesRequest0() (CheckProxiesRequest0, error) {
+	var body CheckProxiesRequest0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCheckProxiesRequest0 overwrites any union data inside the CheckProxiesRequest as the provided CheckProxiesRequest0
+func (t *CheckProxiesRequest) FromCheckProxiesRequest0(v CheckProxiesRequest0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCheckProxiesRequest0 performs a merge with any union data inside the CheckProxiesRequest, using the provided CheckProxiesRequest0
+func (t *CheckProxiesRequest) MergeCheckProxiesRequest0(v CheckProxiesRequest0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCheckProxiesRequest1 returns the union data inside the CheckProxiesRequest as a CheckProxiesRequest1
+func (t CheckProxiesRequest) AsCheckProxiesRequest1() (CheckProxiesRequest1, error) {
+	var body CheckProxiesRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCheckProxiesRequest1 overwrites any union data inside the CheckProxiesRequest as the provided CheckProxiesRequest1
+func (t *CheckProxiesRequest) FromCheckProxiesRequest1(v CheckProxiesRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCheckProxiesRequest1 performs a merge with any union data inside the CheckProxiesRequest, using the provided CheckProxiesRequest1
+func (t *CheckProxiesRequest) MergeCheckProxiesRequest1(v CheckProxiesRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CheckProxiesRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.All != nil {
+		object["all"], err = json.Marshal(t.All)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'all': %w", err)
+		}
+	}
+
+	if t.Filter != nil {
+		object["filter"], err = json.Marshal(t.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'filter': %w", err)
+		}
+	}
+
+	if t.ProxyIds != nil {
+		object["proxyIds"], err = json.Marshal(t.ProxyIds)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'proxyIds': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *CheckProxiesRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["all"]; found {
+		err = json.Unmarshal(raw, &t.All)
+		if err != nil {
+			return fmt.Errorf("error reading 'all': %w", err)
+		}
+	}
+
+	if raw, found := object["filter"]; found {
+		err = json.Unmarshal(raw, &t.Filter)
+		if err != nil {
+			return fmt.Errorf("error reading 'filter': %w", err)
+		}
+	}
+
+	if raw, found := object["proxyIds"]; found {
+		err = json.Unmarshal(raw, &t.ProxyIds)
+		if err != nil {
+			return fmt.Errorf("error reading 'proxyIds': %w", err)
+		}
+	}
+
+	return err
+}
+
+// AsDeleteProxiesRequest0 returns the union data inside the DeleteProxiesRequest as a DeleteProxiesRequest0
+func (t DeleteProxiesRequest) AsDeleteProxiesRequest0() (DeleteProxiesRequest0, error) {
+	var body DeleteProxiesRequest0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDeleteProxiesRequest0 overwrites any union data inside the DeleteProxiesRequest as the provided DeleteProxiesRequest0
+func (t *DeleteProxiesRequest) FromDeleteProxiesRequest0(v DeleteProxiesRequest0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDeleteProxiesRequest0 performs a merge with any union data inside the DeleteProxiesRequest, using the provided DeleteProxiesRequest0
+func (t *DeleteProxiesRequest) MergeDeleteProxiesRequest0(v DeleteProxiesRequest0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDeleteProxiesRequest1 returns the union data inside the DeleteProxiesRequest as a DeleteProxiesRequest1
+func (t DeleteProxiesRequest) AsDeleteProxiesRequest1() (DeleteProxiesRequest1, error) {
+	var body DeleteProxiesRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDeleteProxiesRequest1 overwrites any union data inside the DeleteProxiesRequest as the provided DeleteProxiesRequest1
+func (t *DeleteProxiesRequest) FromDeleteProxiesRequest1(v DeleteProxiesRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDeleteProxiesRequest1 performs a merge with any union data inside the DeleteProxiesRequest, using the provided DeleteProxiesRequest1
+func (t *DeleteProxiesRequest) MergeDeleteProxiesRequest1(v DeleteProxiesRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DeleteProxiesRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.All != nil {
+		object["all"], err = json.Marshal(t.All)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'all': %w", err)
+		}
+	}
+
+	if t.Filter != nil {
+		object["filter"], err = json.Marshal(t.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'filter': %w", err)
+		}
+	}
+
+	if t.ProxyIds != nil {
+		object["proxyIds"], err = json.Marshal(t.ProxyIds)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'proxyIds': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *DeleteProxiesRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["all"]; found {
+		err = json.Unmarshal(raw, &t.All)
+		if err != nil {
+			return fmt.Errorf("error reading 'all': %w", err)
+		}
+	}
+
+	if raw, found := object["filter"]; found {
+		err = json.Unmarshal(raw, &t.Filter)
+		if err != nil {
+			return fmt.Errorf("error reading 'filter': %w", err)
+		}
+	}
+
+	if raw, found := object["proxyIds"]; found {
+		err = json.Unmarshal(raw, &t.ProxyIds)
+		if err != nil {
+			return fmt.Errorf("error reading 'proxyIds': %w", err)
+		}
+	}
+
+	return err
+}
 
 // AsResourceBulkSelection0 returns the union data inside the ResourceBulkSelection as a ResourceBulkSelection0
 func (t ResourceBulkSelection) AsResourceBulkSelection0() (ResourceBulkSelection0, error) {
@@ -1862,6 +2277,9 @@ type ServerInterface interface {
 	// Delete proxy pool entries by IDs or filter
 	// (POST /v1/admin/proxies/delete)
 	PostAdminProxyDeleteBatch(c *gin.Context, params PostAdminProxyDeleteBatchParams)
+	// Disable proxy pool entries by filter
+	// (POST /v1/admin/proxies/disable)
+	PostAdminProxyDisableBatch(c *gin.Context, params PostAdminProxyDisableBatchParams)
 	// Import proxy pool entries in batch
 	// (POST /v1/admin/proxies/imports)
 	PostAdminProxyImports(c *gin.Context, params PostAdminProxyImportsParams)
@@ -2443,6 +2861,51 @@ func (siw *ServerInterfaceWrapper) PostAdminProxyDeleteBatch(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProxyDeleteBatch(c, params)
+}
+
+// PostAdminProxyDisableBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProxyDisableBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProxyDisableBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProxyDisableBatch(c, params)
 }
 
 // PostAdminProxyImports operation middleware
@@ -4046,6 +4509,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/proxies/bindings", wrapper.GetAdminProxyBindings)
 	router.POST(options.BaseURL+"/v1/admin/proxies/check", wrapper.PostAdminProxyCheckBatch)
 	router.POST(options.BaseURL+"/v1/admin/proxies/delete", wrapper.PostAdminProxyDeleteBatch)
+	router.POST(options.BaseURL+"/v1/admin/proxies/disable", wrapper.PostAdminProxyDisableBatch)
 	router.POST(options.BaseURL+"/v1/admin/proxies/imports", wrapper.PostAdminProxyImports)
 	router.POST(options.BaseURL+"/v1/admin/proxies/resource", wrapper.PostAdminResourceProxy)
 	router.GET(options.BaseURL+"/v1/admin/proxies/stats", wrapper.GetAdminProxyStats)

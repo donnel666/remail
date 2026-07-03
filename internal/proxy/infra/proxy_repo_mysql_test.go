@@ -97,13 +97,17 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_key_ip")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_proxy_expire")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_expire_proxy")
+	requireIndexExists(t, db, "proxy_check_jobs", "idx_proxy_check_jobs_status_created")
+	requireIndexExists(t, db, "proxy_check_jobs", "idx_proxy_check_jobs_proxy_created")
+	requireIndexExists(t, db, "proxy_check_job_items", "idx_proxy_check_job_items_job_proxy")
+	requireIndexExists(t, db, "proxy_check_job_items", "idx_proxy_check_job_items_proxy")
 
 	expireAt := time.Now().UTC().Add(time.Hour)
 	require.NoError(t, db.Create(&ProxyModel{
 		Pool:     "resource",
 		URL:      "socks5://user:pass@127.0.0.1:1080",
 		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: expireAt,
+		ExpireAt: ptrTime(expireAt),
 		Country:  "UNKNOWN",
 		Status:   "checking",
 	}).Error)
@@ -111,7 +115,7 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 		Pool:     "resource",
 		URL:      "socks5://user:pass@127.0.0.1:1080",
 		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: expireAt,
+		ExpireAt: ptrTime(expireAt),
 		Country:  "UNKNOWN",
 		Status:   "checking",
 	}).Error)
@@ -119,7 +123,7 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 		Pool:     "system",
 		URL:      "socks5://user:pass@127.0.0.1:1080",
 		URLHash:  proxyURLHash("socks5://user:pass@127.0.0.1:1080"),
-		ExpireAt: expireAt,
+		ExpireAt: ptrTime(expireAt),
 		Country:  "UNKNOWN",
 		Status:   "checking",
 	}).Error)
@@ -127,7 +131,7 @@ func TestProxySchemaConstraintsMySQL(t *testing.T) {
 		Pool:     "resource",
 		URL:      "http://127.0.0.1:18080",
 		URLHash:  proxyURLHash("http://127.0.0.1:18080"),
-		ExpireAt: expireAt,
+		ExpireAt: ptrTime(expireAt),
 		Country:  "UNKNOWN",
 		Status:   "invalid",
 	}).Error)
@@ -182,15 +186,25 @@ func TestProxyRepoCheckResultMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
+	require.NoError(t, updated.MarkChecking())
+	require.NoError(t, repo.Update(ctx, updated))
 	updated, err = repo.UpdateCheckResult(ctx, proxy.ID, domain.CheckResult{
 		LastSafeError: "Proxy endpoint is unreachable.",
 		CheckedAt:     time.Now().UTC(),
 	}, false)
 	require.NoError(t, err)
-	require.Equal(t, domain.ProxyStatusNormal, updated.Status)
+	require.Equal(t, domain.ProxyStatusAbnormal, updated.Status)
 	require.Equal(t, 1, updated.Errors)
 	require.Equal(t, "Proxy endpoint is unreachable.", updated.LastSafeError)
 
+	items, err = repo.List(ctx, proxyapp.ProxyListFilter{
+		Status: domain.ProxyStatusAbnormal,
+	}, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	require.NoError(t, updated.MarkChecking())
+	require.NoError(t, repo.Update(ctx, updated))
 	updated, err = repo.UpdateCheckResult(ctx, proxy.ID, domain.CheckResult{
 		LastSafeError: "Proxy endpoint is unreachable.",
 		CheckedAt:     time.Now().UTC(),
@@ -204,8 +218,13 @@ func TestProxyRepoCheckResultMySQL(t *testing.T) {
 		LastSafeError: "Invalid proxy URL.",
 		CheckedAt:     time.Now().UTC(),
 	}, false)
+	require.ErrorIs(t, err, domain.ErrInvalidProxyStatus)
+	require.Nil(t, updated)
+
+	stillDisabled, err := repo.FindByID(ctx, proxy.ID)
 	require.NoError(t, err)
-	require.Equal(t, domain.ProxyStatusDisabled, updated.Status)
+	require.Equal(t, domain.ProxyStatusDisabled, stillDisabled.Status)
+	require.Equal(t, 2, stillDisabled.Errors)
 
 	invalidProxy := &domain.Proxy{
 		Pool:     domain.ProxyPoolResource,
@@ -223,6 +242,30 @@ func TestProxyRepoCheckResultMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, domain.ProxyStatusDisabled, updated.Status)
 	require.Equal(t, 0, updated.Errors)
+
+	disabledProxy := &domain.Proxy{
+		Pool:     domain.ProxyPoolResource,
+		URL:      "http://127.0.0.1:18082",
+		ExpireAt: time.Now().UTC().Add(time.Hour),
+		Status:   domain.ProxyStatusDisabled,
+		Country:  "US",
+	}
+	require.NoError(t, repo.Create(ctx, disabledProxy))
+
+	updated, err = repo.UpdateCheckResult(ctx, disabledProxy.ID, domain.CheckResult{
+		IPVersion:  domain.ProxyIPv4,
+		OutboundIP: "198.51.100.10",
+		Country:    "sg",
+		LatencyMs:  66,
+		CheckedAt:  time.Now().UTC(),
+	}, true)
+	require.ErrorIs(t, err, domain.ErrInvalidProxyStatus)
+	require.Nil(t, updated)
+
+	stillDisabled, err = repo.FindByID(ctx, disabledProxy.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.ProxyStatusDisabled, stillDisabled.Status)
+	require.Equal(t, "US", stillDisabled.Country)
 }
 
 func TestProxyRepoAcquireResourceBindingMySQL(t *testing.T) {
@@ -472,6 +515,15 @@ func TestProxyRepoMaintenanceMySQL(t *testing.T) {
 		Country:    "US",
 		Status:     domain.ProxyStatusNormal,
 	}
+	checkingExpired := &domain.Proxy{
+		Pool:       domain.ProxyPoolResource,
+		URL:        "http://127.0.0.1:20083",
+		ExpireAt:   now.Add(-time.Minute),
+		IPVersion:  domain.ProxyIPv4,
+		OutboundIP: "198.51.100.21",
+		Country:    "US",
+		Status:     domain.ProxyStatusChecking,
+	}
 	normal := &domain.Proxy{
 		Pool:       domain.ProxyPoolSystem,
 		URL:        "http://127.0.0.1:20082",
@@ -482,6 +534,7 @@ func TestProxyRepoMaintenanceMySQL(t *testing.T) {
 		Status:     domain.ProxyStatusNormal,
 	}
 	require.NoError(t, repo.Create(ctx, expired))
+	require.NoError(t, repo.Create(ctx, checkingExpired))
 	require.NoError(t, repo.Create(ctx, normal))
 
 	updated, err := repo.MarkExpiredBefore(ctx, now)
@@ -490,6 +543,9 @@ func TestProxyRepoMaintenanceMySQL(t *testing.T) {
 	stored, err := repo.FindByID(ctx, expired.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.ProxyStatusExpired, stored.Status)
+	stored, err = repo.FindByID(ctx, checkingExpired.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.ProxyStatusChecking, stored.Status)
 
 	deleted, err := repo.DeleteByFilter(ctx, proxyapp.ProxyListFilter{
 		Pool: domain.ProxyPoolSystem,
@@ -554,13 +610,14 @@ func TestProxyRepoExplainEvidenceMySQL(t *testing.T) {
 	requireIndexExists(t, db, "proxies", "idx_proxies_select_health")
 	requireIndexExists(t, db, "proxies", "idx_proxies_created")
 	requireIndexExists(t, db, "proxy_bindings", "idx_proxy_bindings_expire_proxy")
+	requireIndexExists(t, db, "proxy_check_jobs", "idx_proxy_check_jobs_status_created")
 
 	now := time.Now().UTC()
 	require.NoError(t, db.Create(&ProxyModel{
 		Pool:       "resource",
 		URL:        "http://127.0.0.1:22081",
 		URLHash:    proxyURLHash("http://127.0.0.1:22081"),
-		ExpireAt:   now.Add(time.Hour),
+		ExpireAt:   ptrTime(now.Add(time.Hour)),
 		IPVersion:  "ipv4",
 		OutboundIP: "198.51.100.50",
 		Country:    "US",
@@ -570,7 +627,7 @@ func TestProxyRepoExplainEvidenceMySQL(t *testing.T) {
 		Pool:       "system",
 		URL:        "http://127.0.0.1:22082",
 		URLHash:    proxyURLHash("http://127.0.0.1:22082"),
-		ExpireAt:   now.Add(time.Hour),
+		ExpireAt:   ptrTime(now.Add(time.Hour)),
 		IPVersion:  "ipv6",
 		OutboundIP: "2001:db8::50",
 		Country:    "JP",
@@ -615,6 +672,111 @@ func TestProxyRepoCreateWithLogRollsBackWhenOperationLogFailsMySQL(t *testing.T)
 	var count int64
 	require.NoError(t, db.Model(&ProxyModel{}).Where("url_hash = ?", proxyURLHash("http://127.0.0.1:23081")).Count(&count).Error)
 	require.Equal(t, int64(0), count)
+}
+
+func TestProxyRepoCreateWithLogAndCheckJobPersistsDurableJobMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	proxy := &domain.Proxy{
+		Pool:     domain.ProxyPoolResource,
+		URL:      "http://127.0.0.1:23181",
+		ExpireAt: time.Now().UTC().Add(time.Hour),
+		Status:   domain.ProxyStatusChecking,
+		Country:  "UNKNOWN",
+	}
+
+	job, err := repo.CreateWithLogAndCheckJob(ctx, proxy, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "proxy.proxy.create",
+		ResourceType:   "proxy",
+		Path:           "/v1/admin/proxies/resource",
+		Result:         "success",
+		SafeSummary:    "Proxy created.",
+		RequestID:      "durable-job-test",
+	}, proxyapp.ProxyCheckTask{
+		OperatorUserID: 1,
+		RequestID:      "durable-job-test",
+		Path:           "/v1/admin/proxies/resource",
+	})
+
+	require.NoError(t, err)
+	require.NotZero(t, proxy.ID)
+	require.NotNil(t, job)
+	require.NotZero(t, job.ID)
+	require.Equal(t, proxy.ID, job.ProxyID)
+	require.Equal(t, proxyapp.ProxyCheckJobPending, job.Status)
+
+	require.NoError(t, repo.MarkProxyCheckJobDispatchFailed(ctx, job.ID, "redis password=secret is unavailable"))
+	var stored ProxyCheckJobModel
+	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
+	require.Equal(t, string(proxyapp.ProxyCheckJobPending), stored.Status)
+	require.NotContains(t, stored.LastSafeError, "password=secret")
+	require.Contains(t, stored.LastSafeError, "password=***")
+
+	require.NoError(t, repo.MarkProxyCheckJobQueued(ctx, job.ID))
+	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
+	require.Equal(t, string(proxyapp.ProxyCheckJobQueued), stored.Status)
+	require.Empty(t, stored.LastSafeError)
+}
+
+func TestProxyRepoCreateCheckBatchJobPersistsItemIDsMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	expireAt := time.Now().UTC().Add(time.Hour)
+
+	first := &domain.Proxy{
+		Pool:     domain.ProxyPoolSystem,
+		URL:      "http://127.0.0.1:23182",
+		ExpireAt: expireAt,
+		Status:   domain.ProxyStatusChecking,
+		Country:  "UNKNOWN",
+	}
+	second := &domain.Proxy{
+		Pool:     domain.ProxyPoolSystem,
+		URL:      "http://127.0.0.1:23183",
+		ExpireAt: expireAt,
+		Status:   domain.ProxyStatusChecking,
+		Country:  "UNKNOWN",
+	}
+	require.NoError(t, repo.Create(ctx, first))
+	require.NoError(t, repo.Create(ctx, second))
+
+	job, err := repo.CreateCheckBatchJobWithLog(ctx, proxyapp.ProxyCheckBatchTask{
+		Mode:           proxyapp.ProxyCheckBatchModeIDs,
+		ProxyIDs:       []uint{first.ID, second.ID, first.ID},
+		OperatorUserID: 1,
+		RequestID:      "durable-batch-job-test",
+		Path:           "/v1/admin/proxies/check",
+	}, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "proxy.proxy.check_batch",
+		ResourceType:   "proxy",
+		Path:           "/v1/admin/proxies/check",
+		Result:         "success",
+		SafeSummary:    "Proxy batch check queued.",
+		RequestID:      "durable-batch-job-test",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.Equal(t, proxyapp.ProxyCheckJobBatch, job.Kind)
+	require.Equal(t, proxyapp.ProxyCheckBatchModeIDs, job.Mode)
+	require.Equal(t, []uint{first.ID, second.ID}, job.ProxyIDs)
+
+	firstPage, err := repo.ListProxyCheckJobItemIDs(ctx, job.ID, 0, 1)
+	require.NoError(t, err)
+	require.Equal(t, []uint{first.ID}, firstPage)
+	secondPage, err := repo.ListProxyCheckJobItemIDs(ctx, job.ID, first.ID, 10)
+	require.NoError(t, err)
+	require.Equal(t, []uint{second.ID}, secondPage)
+
+	pending, err := repo.ListPendingProxyCheckJobs(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, proxyapp.ProxyCheckBatchModeIDs, pending[0].Mode)
+	require.Empty(t, pending[0].ProxyIDs)
 }
 
 func TestProxyRepoDeleteBatchWithLogWritesNoopAuditMySQL(t *testing.T) {

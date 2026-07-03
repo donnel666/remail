@@ -678,6 +678,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/proxies/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable proxy pool entries by filter */
+        post: operations["postAdminProxyDisableBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/proxies/imports": {
         parameters: {
             query?: never;
@@ -1124,7 +1141,15 @@ export interface components {
             all?: boolean;
             filter?: components["schemas"]["ProxyBulkFilter"];
             proxyIds?: number[];
-        };
+        } & ({
+            /** @enum {boolean} */
+            all?: false;
+            proxyIds: number[];
+        } | {
+            /** @enum {boolean} */
+            all: true;
+            filter: components["schemas"]["ProxyBulkFilter"];
+        });
         ProxyBulkFilter: {
             /** @enum {string} */
             pool?: "resource" | "system";
@@ -1132,7 +1157,7 @@ export interface components {
             ip?: "auto" | "ipv4" | "ipv6";
             ipv6?: boolean;
             /** @enum {string} */
-            status?: "checking" | "normal" | "disabled" | "expired";
+            status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
             country?: string;
             search?: string;
             /** Format: date-time */
@@ -1146,24 +1171,53 @@ export interface components {
             deletedProxyIds?: number[];
             deletedByFilter?: boolean;
         };
+        DisableProxiesRequest: {
+            /**
+             * @description Disable every proxy matching filter. This endpoint only supports filter mode.
+             * @enum {boolean}
+             */
+            all: true;
+            filter: components["schemas"]["ProxyBulkFilter"];
+        };
+        DisableProxiesResponse: {
+            requested: number;
+            disabled: number;
+            disabledByFilter?: boolean;
+        };
         CheckProxiesRequest: {
             /** @description Check every proxy matching filter. When false or omitted, proxyIds mode is used. */
             all?: boolean;
             filter?: components["schemas"]["ProxyBulkFilter"];
             proxyIds?: number[];
-        };
+        } & ({
+            /** @enum {boolean} */
+            all?: false;
+            proxyIds: number[];
+        } | {
+            /** @enum {boolean} */
+            all: true;
+            filter: components["schemas"]["ProxyBulkFilter"];
+        });
         CheckProxiesResponse: {
             requested: number;
+            /** @description Number of proxy checks accepted as durable check jobs. Filter mode creates one durable batch scheduler job while this value still reports the matched proxy count. */
+            queued: number;
+            /** @description Reserved for completed synchronous checks. Always 0 for asynchronous check submission. */
             checked: number;
+            /** @description Reserved for completed synchronous checks. Always 0 for asynchronous check submission. */
             failed: number;
+            /** @description Queued proxy snapshots. Empty for fully asynchronous batch submissions. */
             items: components["schemas"]["ProxyItem"][];
         };
         ImportProxiesRequest: {
             /** @enum {string} */
             pool: "resource" | "system";
             urls: string[];
-            /** Format: date-time */
-            expireAt: string;
+            /**
+             * Format: date-time
+             * @description Optional proxy expiration time. null or omitted means no expiration.
+             */
+            expireAt?: string | null;
         };
         ImportProxiesResponse: {
             requested: number;
@@ -1211,17 +1265,20 @@ export interface components {
             id: number;
             /** @enum {string} */
             pool: "resource" | "system";
-            /** @description Redacted in list responses; complete only in authorized detail responses. */
+            /** @description Complete proxy URL for authorized admin endpoints. Logs, errors and diagnostics remain redacted. */
             url: string;
-            /** Format: date-time */
-            expireAt: string;
+            /**
+             * Format: date-time
+             * @description null means no expiration.
+             */
+            expireAt: string | null;
             /** @description Detected proxy outbound IP version. Empty before the first successful check. */
             ipVersion: string;
             outboundIp: string;
             country: string;
             latencyMs: number;
             /** @enum {string} */
-            status: "checking" | "normal" | "disabled" | "expired";
+            status: "checking" | "normal" | "abnormal" | "disabled" | "expired";
             errors: number;
             lastSafeError?: string;
             /** Format: date-time */
@@ -1236,17 +1293,25 @@ export interface components {
         CreateProxyRequest: {
             /** @description Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h. */
             url: string;
-            /** Format: date-time */
-            expireAt: string;
+            /**
+             * Format: date-time
+             * @description Optional proxy expiration time. null or omitted means no expiration.
+             */
+            expireAt?: string | null;
         };
         UpdateProxyRequest: {
+            /** @description Updated proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h. Changing URL resets detected fields and queues an async check. */
+            url?: string;
             /**
              * @description Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
              * @enum {string}
              */
             status?: "checking" | "disabled";
-            /** Format: date-time */
-            expireAt?: string;
+            /**
+             * Format: date-time
+             * @description Optional proxy expiration time. Send null to clear expiration.
+             */
+            expireAt?: string | null;
         };
         CreateMailServerRequest: {
             name?: string;
@@ -3444,7 +3509,7 @@ export interface operations {
                 pool?: "resource" | "system";
                 ip?: "auto" | "ipv4" | "ipv6";
                 ipv6?: boolean;
-                status?: "checking" | "normal" | "disabled" | "expired";
+                status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
                 country?: string;
                 search?: string;
                 createdFrom?: string;
@@ -3458,7 +3523,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Proxy list. URL is redacted in list responses. */
+            /** @description Proxy list. URL is complete for authorized admins. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3502,7 +3567,7 @@ export interface operations {
                 pool?: "resource" | "system";
                 ip?: "auto" | "ipv4" | "ipv6";
                 ipv6?: boolean;
-                status?: "checking" | "normal" | "disabled" | "expired";
+                status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
                 country?: string;
                 search?: string;
                 createdFrom?: string;
@@ -3668,6 +3733,69 @@ export interface operations {
             };
         };
     };
+    postAdminProxyDisableBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisableProxiesRequest"];
+            };
+        };
+        responses: {
+            /** @description Proxies disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisableProxiesResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     postAdminProxyImports: {
         parameters: {
             query?: never;
@@ -3684,7 +3812,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Proxies imported. Duplicate URLs are skipped and counted. */
+            /** @description Proxies imported with checking status and durable asynchronous check jobs accepted. Asynq dispatch failures leave pending check jobs for dispatcher recovery and are logged. Duplicate URLs are skipped and counted. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3720,16 +3848,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Every submitted proxy already exists or is duplicated in the request */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid proxy pool, URL or expireAt */
+            /** @description Invalid proxy pool, URL or expireAt when provided */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3756,8 +3875,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Batch check completed. Failed checks return updated disabled or expired proxies when available. */
-            200: {
+            /** @description Batch check scheduler task accepted. Results are written asynchronously to proxy status. */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3819,7 +3938,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Resource proxy created with checking status */
+            /** @description Resource proxy created with checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3864,7 +3983,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid proxy URL or expireAt */
+            /** @description Invalid proxy URL or expireAt when provided */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3891,7 +4010,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description System proxy created with checking status */
+            /** @description System proxy created with checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3936,7 +4055,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid proxy URL or expireAt */
+            /** @description Invalid proxy URL or expireAt when provided */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4059,7 +4178,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid status or expireAt */
+            /** @description Proxy already exists in the same pool */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid status or expireAt when provided */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4084,8 +4212,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Proxy check completed. Failed checks still return the updated proxy with disabled or expired status. */
-            200: {
+            /** @description Proxy moved to checking status and a durable asynchronous check job accepted. Asynq dispatch failures leave the check job pending for dispatcher recovery and are logged. */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4113,6 +4241,15 @@ export interface operations {
             };
             /** @description Proxy not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy status does not allow checking */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

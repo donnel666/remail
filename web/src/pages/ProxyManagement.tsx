@@ -36,6 +36,7 @@ import {
   checkAdminProxiesByFilter,
   deleteAdminProxies,
   deleteAdminProxiesByFilter,
+  disableAdminProxiesByFilter,
   getAdminProxyStats,
   getAdminProxy,
   importAdminProxies,
@@ -61,12 +62,11 @@ const { Text } = Typography;
 
 type SystemProxyFilter = "all" | "yes" | "no";
 type IPv6Filter = "all" | "yes" | "no";
-type StatusFilter = "all" | "checking" | "normal" | "disabled" | "expired";
+type StatusFilter = "all" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
 type ProxyPool = "resource" | "system";
 type ProxyImportMode = "paste" | "file";
 
 const PROXY_ENTRY_AREA_HEIGHT = 208;
-const DEFAULT_PROXY_EXPIRE_DAYS = 30;
 const PROXY_IMPORT_FORMAT_HINT = [
   "http://user:password@host:port",
   "https://user:password@host:port",
@@ -114,6 +114,7 @@ function renderProxyStatus(status: string, t: (key: string) => string, reason?: 
   > = {
     checking: { color: "orange", label: t("Checking") },
     normal: { color: "green", label: t("Normal") },
+    abnormal: { color: "red", label: t("Abnormal") },
     disabled: { color: "grey", label: t("Disabled") },
     expired: { color: "red", label: t("Expired") },
   };
@@ -123,7 +124,7 @@ function renderProxyStatus(status: string, t: (key: string) => string, reason?: 
       {item.label}
     </Tag>
   );
-  if ((status === "disabled" || status === "expired") && reason) {
+  if ((status === "abnormal" || status === "disabled" || status === "expired") && reason) {
     return (
       <Tooltip
         content={reason}
@@ -174,7 +175,7 @@ function proxyMatchesListFilter(proxy: ProxyItem, filter: ProxyListFilter) {
 const emptyStats = {
   ipv6: { all: 0, no: 0, yes: 0 },
   systemProxy: { all: 0, no: 0, yes: 0 },
-  status: { all: 0, checking: 0, disabled: 0, expired: 0, normal: 0 },
+  status: { all: 0, abnormal: 0, checking: 0, disabled: 0, expired: 0, normal: 0 },
 };
 
 function countOf(
@@ -202,6 +203,7 @@ function proxyStatsFromResponse(stats?: ProxyStatsResponse | null) {
     },
     status: {
       all: total,
+      abnormal: countOf(stats.statuses, "abnormal"),
       checking: countOf(stats.statuses, "checking"),
       disabled: countOf(stats.statuses, "disabled"),
       expired: countOf(stats.statuses, "expired"),
@@ -213,13 +215,13 @@ function proxyStatsFromResponse(stats?: ProxyStatsResponse | null) {
 function getCountryCounts(stats?: ProxyStatsResponse | null) {
   return (stats?.countries ?? [])
     .map((item) => [item.key || "UNKNOWN", item.count] as [string, number])
-    .sort((a, b) => a[0].localeCompare(b[0]));
-}
-
-function defaultProxyExpireAtDate() {
-  const date = new Date();
-  date.setDate(date.getDate() + DEFAULT_PROXY_EXPIRE_DAYS);
-  return date;
+    .sort((a, b) => {
+      const leftUnknown = a[0].toUpperCase() === "UNKNOWN";
+      const rightUnknown = b[0].toUpperCase() === "UNKNOWN";
+      if (leftUnknown && !rightUnknown) return 1;
+      if (!leftUnknown && rightUnknown) return -1;
+      return a[0].localeCompare(b[0]);
+    });
 }
 
 function parseProxyImportContent(content: string) {
@@ -252,11 +254,73 @@ function parseProxyImportContent(content: string) {
   return { entries, invalidLines };
 }
 
+function proxyExpireAtAfter(amount: "day" | "month" | "year") {
+  const next = new Date();
+  if (amount === "day") next.setDate(next.getDate() + 1);
+  if (amount === "month") next.setMonth(next.getMonth() + 1);
+  if (amount === "year") next.setFullYear(next.getFullYear() + 1);
+  return next;
+}
+
+function ProxyExpireAtPicker({
+  onChange,
+  value,
+}: {
+  onChange: (value: Date | null) => void;
+  value: Date | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2">
+      <DatePicker
+        type="dateTime"
+        format="yyyy-MM-dd HH:mm:ss"
+        showClear
+        value={value ?? undefined}
+        style={{ width: "100%" }}
+        onChange={(nextValue) => {
+          if (nextValue instanceof Date) {
+            onChange(nextValue);
+          } else {
+            onChange(null);
+          }
+        }}
+      />
+      <div className="grid grid-cols-3 gap-2">
+        <Button
+          size="small"
+          theme="outline"
+          type="tertiary"
+          onClick={() => onChange(proxyExpireAtAfter("day"))}
+        >
+          {t("One day")}
+        </Button>
+        <Button
+          size="small"
+          theme="outline"
+          type="tertiary"
+          onClick={() => onChange(proxyExpireAtAfter("month"))}
+        >
+          {t("One month")}
+        </Button>
+        <Button
+          size="small"
+          theme="outline"
+          type="tertiary"
+          onClick={() => onChange(proxyExpireAtAfter("year"))}
+        >
+          {t("One year")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface ImportProxyModalProps {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   onSubmit: (payload: {
-    expireAt: string;
+    expireAt: string | null;
     pool: ProxyPool;
     urls: string[];
   }) => Promise<void>;
@@ -271,7 +335,7 @@ function ImportProxyModal({
   const [mode, setMode] = useState<ProxyImportMode>("paste");
   const [pool, setPool] = useState<ProxyPool>("resource");
   const [text, setText] = useState("");
-  const [expireAt, setExpireAt] = useState<Date>(() => defaultProxyExpireAtDate());
+  const [expireAt, setExpireAt] = useState<Date | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -285,7 +349,7 @@ function ImportProxyModal({
     setMode("paste");
     setPool("resource");
     setText("");
-    setExpireAt(defaultProxyExpireAtDate());
+    setExpireAt(null);
     setFile(null);
     setBusy(false);
   };
@@ -317,7 +381,7 @@ function ImportProxyModal({
         throw new Error(t("No valid proxy entries."));
       }
       await onSubmit({
-        expireAt: expireAt.toISOString(),
+        expireAt: expireAt?.toISOString() ?? null,
         pool,
         urls: prepared.entries,
       });
@@ -397,17 +461,7 @@ function ImportProxyModal({
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-1)]">
             {t("Expire at")}
           </div>
-          <DatePicker
-            type="dateTime"
-            format="yyyy-MM-dd HH:mm:ss"
-            value={expireAt}
-            style={{ width: "100%" }}
-            onChange={(value) => {
-              if (value instanceof Date) {
-                setExpireAt(value);
-              }
-            }}
-          />
+          <ProxyExpireAtPicker value={expireAt} onChange={setExpireAt} />
         </div>
 
         <div>
@@ -471,7 +525,7 @@ interface EditProxyModalProps {
   open: boolean;
   proxy?: ProxyItem | null;
   onCancel: () => void;
-  onSubmit: (payload: { expireAt: string }) => Promise<void>;
+  onSubmit: (payload: { expireAt: string | null; url: string }) => Promise<void>;
 }
 
 function EditProxyModal({
@@ -481,11 +535,13 @@ function EditProxyModal({
   onSubmit,
 }: EditProxyModalProps) {
   const { t } = useTranslation();
+  const [proxyURL, setProxyURL] = useState("");
   const [expireAt, setExpireAt] = useState<Date | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setProxyURL(proxy?.url ?? "");
     setExpireAt(proxy?.expireAt ? new Date(proxy.expireAt) : null);
   }, [open, proxy]);
 
@@ -498,14 +554,16 @@ function EditProxyModal({
       cancelText={t("Cancel")}
       confirmLoading={submitting}
       onOk={async () => {
-        const iso = expireAt?.toISOString();
-        if (!iso) {
-          Toast.error(t("Please select proxy expiration time."));
+        if (!proxyURL.trim()) {
+          Toast.error(t("Please enter proxy URL."));
           return;
         }
         setSubmitting(true);
         try {
-          await onSubmit({ expireAt: iso });
+          await onSubmit({
+            expireAt: expireAt?.toISOString() ?? null,
+            url: proxyURL.trim(),
+          });
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Proxy update failed."));
         } finally {
@@ -514,33 +572,14 @@ function EditProxyModal({
       }}
     >
       <Form labelPosition="top">
-        {proxy ? (
-          <Form.Slot label={t("Proxy URL")}>
-            <Text
-              copyable={{
-                content: proxy.url,
-                onCopy: () => Toast.success(t("Copied")),
-              }}
-            >
-              {proxy.url}
-            </Text>
-          </Form.Slot>
-        ) : null}
-        <Form.Slot label={t("Expire at")}>
-          <DatePicker
-            type="dateTime"
-            format="yyyy-MM-dd HH:mm:ss"
-            showClear
-            value={expireAt ?? undefined}
-            style={{ width: "100%" }}
-            onChange={(value) => {
-              if (value instanceof Date) {
-                setExpireAt(value);
-              } else {
-                setExpireAt(null);
-              }
-            }}
+        <Form.Slot label={t("Proxy URL")}>
+          <Input
+            value={proxyURL}
+            onChange={(value) => setProxyURL(String(value))}
           />
+        </Form.Slot>
+        <Form.Slot label={t("Expire at")}>
+          <ProxyExpireAtPicker value={expireAt} onChange={setExpireAt} />
         </Form.Slot>
       </Form>
     </Modal>
@@ -553,10 +592,13 @@ export default function ProxyManagement() {
   const [items, setItems] = useState<ProxyItem[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [proxyStats, setProxyStats] = useState<ProxyStatsResponse | null>(null);
+  const [currentProxyStats, setCurrentProxyStats] =
+    useState<ProxyStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingIDs, setCheckingIDs] = useState<Set<number>>(new Set());
   const [updatingID, setUpdatingID] = useState<number | null>(null);
   const [deletingBatch, setDeletingBatch] = useState(false);
+  const [togglingAllDisabled, setTogglingAllDisabled] = useState(false);
   const [activeCountry, setActiveCountry] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -570,6 +612,7 @@ export default function ProxyManagement() {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [importOpen, setImportOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyItem | null>(null);
+  const [editingLoadingID, setEditingLoadingID] = useState<number | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
 
   const listFilter = useMemo<ProxyListFilter>(() => {
@@ -610,13 +653,15 @@ export default function ProxyManagement() {
     setLoading(true);
     try {
       const offset = (activePage - 1) * pageSize;
-      const [response, statsResponse] = await Promise.all([
+      const [response, statsResponse, currentStatsResponse] = await Promise.all([
         listAdminProxies(listFilter, offset, pageSize),
         getAdminProxyStats(statsFilter),
+        getAdminProxyStats(listFilter),
       ]);
       setItems(response.items);
       setTotalItems(response.total);
       setProxyStats(statsResponse);
+      setCurrentProxyStats(currentStatsResponse);
       setSelectedKeys([]);
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Proxies load failed."));
@@ -645,6 +690,18 @@ export default function ProxyManagement() {
   }, [activeCountry, countrySet]);
 
   const stats = useMemo(() => proxyStatsFromResponse(proxyStats), [proxyStats]);
+  const currentStats = useMemo(
+    () => proxyStatsFromResponse(currentProxyStats),
+    [currentProxyStats]
+  );
+  const disableCandidateCount =
+    currentStats.status.checking +
+    currentStats.status.normal +
+    currentStats.status.abnormal +
+    currentStats.status.expired;
+  const enableCandidateCount = currentStats.status.disabled;
+  const hasToggleCandidates = disableCandidateCount > 0 || enableCandidateCount > 0;
+  const allFilteredDisabled = disableCandidateCount === 0 && enableCandidateCount > 0;
 
   const activeStatisticFilterCount =
     Number(statusFilter !== "all") +
@@ -681,11 +738,16 @@ export default function ProxyManagement() {
 
   const refreshStats = useCallback(async () => {
     try {
-      setProxyStats(await getAdminProxyStats(statsFilter));
+      const [statsResponse, currentStatsResponse] = await Promise.all([
+        getAdminProxyStats(statsFilter),
+        getAdminProxyStats(listFilter),
+      ]);
+      setProxyStats(statsResponse);
+      setCurrentProxyStats(currentStatsResponse);
     } catch {
       // Stats are secondary; the next page refresh will retry.
     }
-  }, [statsFilter]);
+  }, [listFilter, statsFilter]);
 
   const reconcileProxyItem = useCallback(
     (next: ProxyItem) => {
@@ -714,14 +776,10 @@ export default function ProxyManagement() {
     async (proxyID: number, notify = true) => {
       setCheckingIDs((previous) => new Set(previous).add(proxyID));
       try {
-        const checked = await checkAdminProxy(proxyID);
-        reconcileProxyItem(checked);
+        const queued = await checkAdminProxy(proxyID);
+        reconcileProxyItem(queued);
         if (notify) {
-          if (checked.status === "normal") {
-            Toast.success(t("Proxy check succeeded."));
-          } else {
-            Toast.warning(checked.lastSafeError || t("Proxy check failed."));
-          }
+          Toast.success(t("Proxy check submitted."));
         }
       } catch (error) {
         if (notify) {
@@ -749,9 +807,8 @@ export default function ProxyManagement() {
       updateProxyItems(response.items);
       await refresh();
       Toast.success(
-        t("Proxy check completed with summary", {
-          checked: response.checked,
-          failed: response.failed,
+        t("Proxy check submitted with summary", {
+          queued: response.queued,
         })
       );
     } catch (error) {
@@ -783,9 +840,8 @@ export default function ProxyManagement() {
       removeProxyItems(hiddenIDs);
       void refreshStats();
       Toast.success(
-        t("Proxy check completed with summary", {
-          checked: response.checked,
-          failed: response.failed,
+        t("Proxy check submitted with summary", {
+          queued: response.queued,
         })
       );
     } catch (error) {
@@ -878,22 +934,82 @@ export default function ProxyManagement() {
     });
   }, [proxyBulkFilter, refreshStats, t, totalItems]);
 
+  const handleToggleFilteredDisabled = useCallback(() => {
+    if (!hasToggleCandidates) {
+      Toast.info(t("No proxies to update."));
+      return;
+    }
+
+    if (allFilteredDisabled) {
+      Modal.confirm({
+        title: t("Confirm enable all"),
+        content: t("Confirm enable all proxy content", {
+          count: enableCandidateCount,
+        }),
+        okText: t("Enable all"),
+        cancelText: t("Cancel"),
+        onOk: async () => {
+          setTogglingAllDisabled(true);
+          try {
+            const response = await checkAdminProxiesByFilter({
+              ...proxyBulkFilter,
+              status: "disabled",
+            });
+            await refresh();
+            Toast.success(
+              t("Proxy check submitted with summary", {
+                queued: response.queued,
+              })
+            );
+          } catch (error) {
+            Toast.error(getIamErrorMessage(t, error, "Proxy check failed."));
+          } finally {
+            setTogglingAllDisabled(false);
+          }
+        },
+      });
+      return;
+    }
+
+    Modal.confirm({
+      title: t("Confirm disable all"),
+      content: t("Confirm disable all proxy content", {
+        count: disableCandidateCount,
+      }),
+      okText: t("Disable all"),
+      cancelText: t("Cancel"),
+      okButtonProps: { type: "danger" },
+      onOk: async () => {
+        setTogglingAllDisabled(true);
+        try {
+          const response = await disableAdminProxiesByFilter(proxyBulkFilter);
+          await refresh();
+          Toast.success(t("Proxies disabled.", { count: response.disabled }));
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Proxy update failed."));
+        } finally {
+          setTogglingAllDisabled(false);
+        }
+      },
+    });
+  }, [
+    allFilteredDisabled,
+    disableCandidateCount,
+    enableCandidateCount,
+    hasToggleCandidates,
+    proxyBulkFilter,
+    refresh,
+    t,
+  ]);
+
   const handleImportProxies = useCallback(
-    async (payload: { expireAt: string; pool: ProxyPool; urls: string[] }) => {
+    async (payload: { expireAt: string | null; pool: ProxyPool; urls: string[] }) => {
       const response = await importAdminProxies({
         expireAt: payload.expireAt,
         pool: payload.pool,
         urls: payload.urls,
       });
       updateProxyItems(response.items);
-      if (response.items.length > 0) {
-        void checkAdminProxies(response.items.map((item) => item.id))
-          .then((checkResponse) => {
-            updateProxyItems(checkResponse.items);
-            void refresh();
-          })
-          .catch(() => undefined);
-      }
       await refresh();
       setSelectedKeys([]);
       Toast.success(
@@ -907,16 +1023,45 @@ export default function ProxyManagement() {
   );
 
   const handleEditProxy = useCallback(
-    async (payload: { expireAt: string }) => {
+    async (payload: { expireAt: string | null; url: string }) => {
       if (!editingProxy) return;
       const updated = await updateAdminProxy(editingProxy.id, {
         expireAt: payload.expireAt,
+        url: payload.url,
       });
       reconcileProxyItem(updated);
       setEditingProxy(null);
       Toast.success(t("Proxy updated."));
     },
     [editingProxy, reconcileProxyItem, t]
+  );
+
+  const openEditProxy = useCallback(
+    async (record: ProxyItem) => {
+      setEditingLoadingID(record.id);
+      try {
+        setEditingProxy(await getAdminProxy(record.id));
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Proxy load failed."));
+      } finally {
+        setEditingLoadingID(null);
+      }
+    },
+    [t]
+  );
+
+  const handleDeleteProxy = useCallback(
+    (record: ProxyItem) => {
+      Modal.confirm({
+        title: t("Confirm"),
+        content: t("Confirm delete selected proxy content", { count: 1 }),
+        okText: t("Delete"),
+        cancelText: t("Cancel"),
+        okButtonProps: { type: "danger" },
+        onOk: () => deleteProxyIDs([record.id]),
+      });
+    },
+    [deleteProxyIDs, t]
   );
 
   const handleToggleDisabled = useCallback(
@@ -949,19 +1094,22 @@ export default function ProxyManagement() {
         const detail = await getAdminProxy(record.id);
         Modal.info({
           title: t("Proxy details"),
+          width: 720,
           content: (
-            <div className="space-y-3">
+            <div className="max-w-full space-y-3 overflow-hidden pr-3">
               <div className="text-xs text-[var(--semi-color-text-2)]">
                 {t("Proxy URL")}
               </div>
-              <Text
-                copyable={{
-                  content: detail.url,
-                  onCopy: () => Toast.success(t("Copied")),
-                }}
-              >
-                {detail.url}
-              </Text>
+              <div className="break-all rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3 font-mono text-xs leading-relaxed">
+                <Text
+                  copyable={{
+                    content: detail.url,
+                    onCopy: () => Toast.success(t("Copied")),
+                  }}
+                >
+                  {detail.url}
+                </Text>
+              </div>
             </div>
           ),
           okText: t("Close"),
@@ -1107,7 +1255,7 @@ export default function ProxyManagement() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: 280,
+          width: 340,
           fixed: "right",
           render: (_: unknown, record: ProxyItem) => (
             <Space wrap={false}>
@@ -1129,12 +1277,19 @@ export default function ProxyManagement() {
               <Button
                 type="tertiary"
                 size="small"
-                onClick={() => setEditingProxy(record)}
+                loading={editingLoadingID === record.id}
+                onClick={() => void openEditProxy(record)}
               >
                 {t("Edit")}
               </Button>
               <Button
-                disabled={record.status === "expired"}
+                type="danger"
+                size="small"
+                onClick={() => handleDeleteProxy(record)}
+              >
+                {t("Delete")}
+              </Button>
+              <Button
                 type={record.status === "disabled" ? "tertiary" : "danger"}
                 size="small"
                 loading={updatingID === record.id}
@@ -1148,8 +1303,11 @@ export default function ProxyManagement() {
       ] as any[],
     [
       checkingIDs,
+      editingLoadingID,
       handleCheckProxy,
+      handleDeleteProxy,
       handleToggleDisabled,
+      openEditProxy,
       showDetails,
       t,
       updatingID,
@@ -1241,6 +1399,16 @@ export default function ProxyManagement() {
           {t("Check all")}
         </Button>
         <Button
+          type={allFilteredDisabled ? "tertiary" : "danger"}
+          size="small"
+          className="flex-1 md:flex-initial"
+          disabled={!hasToggleCandidates}
+          loading={togglingAllDisabled}
+          onClick={handleToggleFilteredDisabled}
+        >
+          {allFilteredDisabled ? t("Enable all") : t("Disable all")}
+        </Button>
+        <Button
           type="danger"
           size="small"
           className="flex-1 md:flex-initial"
@@ -1298,6 +1466,17 @@ export default function ProxyManagement() {
                     setSelectedKeys([]);
                   }}
                   value="normal"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "abnormal"}
+                  count={stats.status.abnormal}
+                  label={t("Abnormal")}
+                  onSelect={(value) => {
+                    setStatusFilter(value);
+                    setActivePage(1);
+                    setSelectedKeys([]);
+                  }}
+                  value="abnormal"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "disabled"}

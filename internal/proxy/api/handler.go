@@ -39,7 +39,7 @@ func (h *ProxyHandler) GetProxies(c *gin.Context) {
 
 	items := make([]ProxyItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = toProxyItemResponse(result.Items[i], false)
+		items[i] = toProxyItemResponse(result.Items[i])
 	}
 	c.JSON(http.StatusOK, ProxyListResponse{
 		Items:  items,
@@ -136,7 +136,7 @@ func (h *ProxyHandler) PostProxyImports(c *gin.Context) {
 	}
 	items := make([]ProxyItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = toProxyItemResponse(result.Items[i], false)
+		items[i] = toProxyItemResponse(result.Items[i])
 	}
 	c.JSON(http.StatusCreated, ImportProxiesResponse{
 		Requested:  result.Requested,
@@ -171,7 +171,7 @@ func (h *ProxyHandler) postProxy(c *gin.Context, pool domain.ProxyPool) {
 		writeProxyError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, toProxyItemResponse(*proxy, false))
+	c.JSON(http.StatusCreated, toProxyItemResponse(*proxy))
 }
 
 func (h *ProxyHandler) GetProxy(c *gin.Context) {
@@ -184,7 +184,7 @@ func (h *ProxyHandler) GetProxy(c *gin.Context) {
 		writeProxyError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toProxyItemResponse(*proxy, true))
+	c.JSON(http.StatusOK, toProxyItemResponse(*proxy))
 }
 
 func (h *ProxyHandler) PatchProxy(c *gin.Context) {
@@ -213,14 +213,16 @@ func (h *ProxyHandler) PatchProxy(c *gin.Context) {
 	}
 
 	proxy, err := h.module.ProxyUseCase.Update(c.Request.Context(), proxyID, operatorUserID, middleware.GetRequestID(c), c.FullPath(), proxyapp.UpdateProxyRequest{
-		Status:   status,
-		ExpireAt: req.ExpireAt,
+		URL:         req.URL,
+		Status:      status,
+		ExpireAt:    req.ExpireAt,
+		ExpireAtSet: req.ExpireAtSet,
 	})
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toProxyItemResponse(*proxy, false))
+	c.JSON(http.StatusOK, toProxyItemResponse(*proxy))
 }
 
 func (h *ProxyHandler) PostProxyDeleteBatch(c *gin.Context) {
@@ -266,6 +268,43 @@ func (h *ProxyHandler) PostProxyDeleteBatch(c *gin.Context) {
 	})
 }
 
+func (h *ProxyHandler) PostProxyDisableBatch(c *gin.Context) {
+	operatorUserID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	var req DisableProxiesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !req.All {
+		writeProxyError(c, domain.ErrInvalidProxyFilter)
+		return
+	}
+	filter, filterOK := proxyFilterFromBulkRequest(req.Filter)
+	if !filterOK {
+		writeProxyError(c, domain.ErrInvalidProxyFilter)
+		return
+	}
+
+	result, err := h.module.ProxyUseCase.DisableByFilter(c.Request.Context(), filter, operatorUserID, middleware.GetRequestID(c), c.FullPath())
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, DisableProxiesResponse{
+		Requested:        result.Requested,
+		Disabled:         result.Disabled,
+		DisabledByFilter: result.DisabledByFilter,
+	})
+}
+
 func (h *ProxyHandler) PostProxyCheckBatch(c *gin.Context) {
 	operatorUserID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -303,10 +342,11 @@ func (h *ProxyHandler) PostProxyCheckBatch(c *gin.Context) {
 	}
 	items := make([]ProxyItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = toProxyItemResponse(result.Items[i], false)
+		items[i] = toProxyItemResponse(result.Items[i])
 	}
-	c.JSON(http.StatusOK, CheckProxiesResponse{
+	c.JSON(http.StatusAccepted, CheckProxiesResponse{
 		Requested: result.Requested,
+		Queued:    result.Queued,
 		Checked:   result.Checked,
 		Failed:    result.Failed,
 		Items:     items,
@@ -324,15 +364,11 @@ func (h *ProxyHandler) PostProxyCheck(c *gin.Context) {
 	}
 
 	proxy, err := h.module.ProxyUseCase.Check(c.Request.Context(), proxyID, operatorUserID, middleware.GetRequestID(c), c.FullPath())
-	if proxy != nil && (errors.Is(err, domain.ErrProxyCheckFailed) || errors.Is(err, domain.ErrProxyUnavailable)) {
-		c.JSON(http.StatusOK, toProxyItemResponse(*proxy, false))
-		return
-	}
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toProxyItemResponse(*proxy, false))
+	c.JSON(http.StatusAccepted, toProxyItemResponse(*proxy))
 }
 
 func parseProxyFilter(c *gin.Context) (proxyapp.ProxyListFilter, bool) {
@@ -510,16 +546,17 @@ func requireCurrentUserID(c *gin.Context) (uint, bool) {
 	return userID, true
 }
 
-func toProxyItemResponse(proxy domain.Proxy, includeRawURL bool) ProxyItemResponse {
-	urlValue := domain.RedactProxyURL(proxy.URL)
-	if includeRawURL {
-		urlValue = proxy.URL
+func toProxyItemResponse(proxy domain.Proxy) ProxyItemResponse {
+	var expireAt *time.Time
+	if !proxy.ExpireAt.IsZero() {
+		value := proxy.ExpireAt
+		expireAt = &value
 	}
 	return ProxyItemResponse{
 		ID:            proxy.ID,
 		Pool:          string(proxy.Pool),
-		URL:           urlValue,
-		ExpireAt:      proxy.ExpireAt,
+		URL:           proxy.URL,
+		ExpireAt:      expireAt,
 		IPVersion:     string(proxy.IPVersion),
 		OutboundIP:    proxy.OutboundIP,
 		Country:       proxy.Country,

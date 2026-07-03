@@ -49,7 +49,7 @@ func TestProxyStatusTransitions(t *testing.T) {
 	require.Equal(t, 0, proxy.Errors)
 
 	require.NoError(t, proxy.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusNormal, proxy.Status)
+	require.Equal(t, ProxyStatusAbnormal, proxy.Status)
 	require.Equal(t, 1, proxy.Errors)
 	require.NoError(t, proxy.ReportFailure("network timeout", true))
 	require.Equal(t, ProxyStatusDisabled, proxy.Status)
@@ -83,7 +83,7 @@ func TestProxyCheckFailureRetryability(t *testing.T) {
 		LastSafeError: "Proxy endpoint is unreachable.",
 		CheckedAt:     checkedAt,
 	}))
-	require.Equal(t, ProxyStatusNormal, retryable.Status)
+	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
 	require.Equal(t, 1, retryable.Errors)
 
 	require.NoError(t, retryable.ApplyCheckFailure(CheckResult{
@@ -120,7 +120,7 @@ func TestProxyCheckFailureRetryability(t *testing.T) {
 func TestProxyReportFailureRetryability(t *testing.T) {
 	retryable := &Proxy{Status: ProxyStatusNormal}
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusNormal, retryable.Status)
+	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
 	require.Equal(t, 1, retryable.Errors)
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
 	require.Equal(t, ProxyStatusDisabled, retryable.Status)
@@ -130,4 +130,21 @@ func TestProxyReportFailureRetryability(t *testing.T) {
 	require.NoError(t, nonRetryable.ReportFailure("invalid proxy url", false))
 	require.Equal(t, ProxyStatusDisabled, nonRetryable.Status)
 	require.Equal(t, 0, nonRetryable.Errors)
+}
+
+func TestProxyExpiredTransitionsRequireCheckingBeforeResult(t *testing.T) {
+	proxy := &Proxy{Status: ProxyStatusExpired}
+
+	require.False(t, CanTransitionProxyStatus(ProxyStatusExpired, ProxyStatusNormal))
+	require.False(t, CanTransitionProxyStatus(ProxyStatusExpired, ProxyStatusAbnormal))
+	require.NoError(t, proxy.MarkChecking())
+
+	require.NoError(t, proxy.ApplyCheckSuccess(CheckResult{
+		IPVersion:  ProxyIPv4,
+		OutboundIP: "198.51.100.20",
+		Country:    "US",
+		LatencyMs:  42,
+		CheckedAt:  time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
+	}))
+	require.Equal(t, ProxyStatusNormal, proxy.Status)
 }

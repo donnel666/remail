@@ -16,6 +16,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 )
 
 // SetupRouter creates the Gin engine with all middleware and route registrations.
@@ -35,6 +36,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 	r.GET("/readyz", h.Readyz)
 
 	// API v1 routes
+	taskMux := asynq.NewServeMux()
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
@@ -57,18 +59,20 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := coreapi.StartCoreWorkers(p.AsynqServer, coreMod); err != nil {
-			return nil, err
-		}
+		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher)
 
 		// Proxy module (admin proxy pool maintenance)
-		proxyMod, err := proxyapi.NewProxyModule(p.DB)
+		proxyMod, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
 		if err != nil {
 			return nil, err
 		}
+		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)
 		proxyapi.RegisterProxyRoutes(v1, proxyMod, iamSessionFetcher, iamMod.PermissionChecker)
+	}
+	if err := p.AsynqServer.Start(taskMux); err != nil {
+		return nil, err
 	}
 
 	// Serve embedded frontend SPA if available

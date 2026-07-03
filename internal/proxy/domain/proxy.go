@@ -28,6 +28,7 @@ type ProxyStatus string
 const (
 	ProxyStatusChecking ProxyStatus = "checking"
 	ProxyStatusNormal   ProxyStatus = "normal"
+	ProxyStatusAbnormal ProxyStatus = "abnormal"
 	ProxyStatusDisabled ProxyStatus = "disabled"
 	ProxyStatusExpired  ProxyStatus = "expired"
 )
@@ -102,7 +103,7 @@ func IsValidStoredProxyIPVersion(value string) bool {
 
 func IsValidProxyStatus(value string) bool {
 	switch ProxyStatus(value) {
-	case ProxyStatusChecking, ProxyStatusNormal, ProxyStatusDisabled, ProxyStatusExpired:
+	case ProxyStatusChecking, ProxyStatusNormal, ProxyStatusAbnormal, ProxyStatusDisabled, ProxyStatusExpired:
 		return true
 	default:
 		return false
@@ -115,13 +116,15 @@ func CanTransitionProxyStatus(from, to ProxyStatus) bool {
 	}
 	switch from {
 	case ProxyStatusChecking:
-		return to == ProxyStatusNormal || to == ProxyStatusDisabled || to == ProxyStatusExpired
+		return to == ProxyStatusNormal || to == ProxyStatusAbnormal || to == ProxyStatusDisabled
 	case ProxyStatusNormal:
-		return to == ProxyStatusChecking || to == ProxyStatusDisabled || to == ProxyStatusExpired
+		return to == ProxyStatusChecking || to == ProxyStatusAbnormal || to == ProxyStatusDisabled || to == ProxyStatusExpired
+	case ProxyStatusAbnormal:
+		return to == ProxyStatusChecking || to == ProxyStatusNormal || to == ProxyStatusDisabled || to == ProxyStatusExpired
 	case ProxyStatusDisabled:
-		return to == ProxyStatusChecking || to == ProxyStatusExpired
-	case ProxyStatusExpired:
 		return to == ProxyStatusChecking
+	case ProxyStatusExpired:
+		return to == ProxyStatusChecking || to == ProxyStatusDisabled
 	default:
 		return false
 	}
@@ -172,7 +175,7 @@ func (p *Proxy) ApplyCheckFailure(result CheckResult) error {
 	}
 	p.LastCheckedAt = &checkedAt
 	switch p.Status {
-	case ProxyStatusChecking, ProxyStatusNormal:
+	case ProxyStatusChecking, ProxyStatusNormal, ProxyStatusAbnormal, ProxyStatusExpired:
 		if result.NonRetryable {
 			if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
 				return ErrInvalidProxyStatus
@@ -186,6 +189,11 @@ func (p *Proxy) ApplyCheckFailure(result CheckResult) error {
 				return ErrInvalidProxyStatus
 			}
 			p.Status = ProxyStatusDisabled
+		} else {
+			if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
+				return ErrInvalidProxyStatus
+			}
+			p.Status = ProxyStatusAbnormal
 		}
 	case ProxyStatusDisabled:
 		if result.NonRetryable {
@@ -196,8 +204,6 @@ func (p *Proxy) ApplyCheckFailure(result CheckResult) error {
 			return ErrInvalidProxyStatus
 		}
 		p.Status = ProxyStatusDisabled
-	case ProxyStatusExpired:
-		return ErrProxyUnavailable
 	default:
 		return ErrInvalidProxyStatus
 	}
@@ -218,10 +224,13 @@ func (p *Proxy) MarkExpired(now time.Time) error {
 }
 
 func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
-	if p.Status == ProxyStatusExpired {
-		return ErrProxyUnavailable
-	}
 	p.LastSafeError = SafeProxyError(safeError)
+	if p.Status == ProxyStatusDisabled {
+		if retryable {
+			p.Errors++
+		}
+		return nil
+	}
 	if !retryable {
 		if !CanTransitionProxyStatus(p.Status, ProxyStatusDisabled) {
 			return ErrInvalidProxyStatus
@@ -235,6 +244,11 @@ func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
 			return ErrInvalidProxyStatus
 		}
 		p.Status = ProxyStatusDisabled
+	} else {
+		if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
+			return ErrInvalidProxyStatus
+		}
+		p.Status = ProxyStatusAbnormal
 	}
 	return nil
 }

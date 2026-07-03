@@ -25,12 +25,12 @@ CREATE TABLE proxies (
     url VARCHAR(1024) NOT NULL COMMENT 'original proxy URL, never expose in normal lists or logs',
     url_hash CHAR(64) NOT NULL COMMENT 'sha256(url) for unique constraint without indexing the secret URL',
     url_host VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'lowercase proxy host for indexed search',
-    expire_at DATETIME NOT NULL,
+    expire_at DATETIME NULL COMMENT 'NULL means no expiration',
     ip_version VARCHAR(8) NOT NULL DEFAULT '' COMMENT 'ipv4|ipv6, detected by system',
     outbound_ip VARCHAR(64) NOT NULL DEFAULT '',
     country VARCHAR(64) NOT NULL DEFAULT 'UNKNOWN',
     latency_ms INT NOT NULL DEFAULT 0,
-    status VARCHAR(32) NOT NULL DEFAULT 'checking' COMMENT 'checking|normal|disabled|expired',
+    status VARCHAR(32) NOT NULL DEFAULT 'checking' COMMENT 'checking|normal|abnormal|disabled|expired',
     errors INT NOT NULL DEFAULT 0,
     last_safe_error VARCHAR(500) NOT NULL DEFAULT '',
     last_checked_at DATETIME NULL,
@@ -47,7 +47,7 @@ CREATE TABLE proxies (
     INDEX idx_proxies_created (created_at),
     CONSTRAINT chk_proxies_pool CHECK (pool IN ('resource', 'system')),
     CONSTRAINT chk_proxies_ip_version CHECK (ip_version IN ('', 'ipv4', 'ipv6')),
-    CONSTRAINT chk_proxies_status CHECK (status IN ('checking', 'normal', 'disabled', 'expired')),
+    CONSTRAINT chk_proxies_status CHECK (status IN ('checking', 'normal', 'abnormal', 'disabled', 'expired')),
     CONSTRAINT chk_proxies_errors CHECK (errors >= 0),
     CONSTRAINT chk_proxies_latency CHECK (latency_ms >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -68,6 +68,38 @@ CREATE TABLE proxy_bindings (
     CONSTRAINT chk_proxy_bindings_ip CHECK (ip_version IN ('ipv4', 'ipv6'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE proxy_check_jobs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    kind VARCHAR(16) NOT NULL COMMENT 'single|batch',
+    batch_mode VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'ids|filter for batch jobs',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending|queued|running|succeeded|failed',
+    proxy_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    filter_json TEXT NOT NULL,
+    operator_user_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    request_id VARCHAR(64) NOT NULL DEFAULT '',
+    path VARCHAR(255) NOT NULL DEFAULT '',
+    last_safe_error VARCHAR(500) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_proxy_check_jobs_status_created (status, created_at),
+    INDEX idx_proxy_check_jobs_proxy_created (proxy_id, created_at),
+    INDEX idx_proxy_check_jobs_request_id (request_id),
+    CONSTRAINT chk_proxy_check_jobs_kind CHECK (kind IN ('single', 'batch')),
+    CONSTRAINT chk_proxy_check_jobs_batch_mode CHECK (batch_mode IN ('', 'ids', 'filter')),
+    CONSTRAINT chk_proxy_check_jobs_status CHECK (status IN ('pending', 'queued', 'running', 'succeeded', 'failed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE proxy_check_job_items (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id BIGINT UNSIGNED NOT NULL,
+    proxy_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE INDEX idx_proxy_check_job_items_job_proxy (job_id, proxy_id),
+    INDEX idx_proxy_check_job_items_proxy (proxy_id),
+    CONSTRAINT fk_proxy_check_job_items_job FOREIGN KEY (job_id) REFERENCES proxy_check_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_proxy_check_job_items_proxy FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO casbin_rule (ptype, v0, v1, v2, v3)
 VALUES
     ('p', 'role:admin', 'proxy:proxy', 'read', 'allow'),
@@ -83,6 +115,8 @@ WHERE ptype = 'p'
   AND v0 IN ('role:admin', 'role:super_admin')
   AND v1 = 'proxy:proxy';
 
+DROP TABLE IF EXISTS proxy_check_job_items;
 DROP TABLE IF EXISTS proxy_bindings;
+DROP TABLE IF EXISTS proxy_check_jobs;
 DROP TABLE IF EXISTS proxies;
 DROP TABLE IF EXISTS system_logs;

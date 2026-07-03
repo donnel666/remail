@@ -1,12 +1,15 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ProxyItemResponse struct {
 	ID            uint       `json:"id"`
 	Pool          string     `json:"pool"`
 	URL           string     `json:"url"`
-	ExpireAt      time.Time  `json:"expireAt"`
+	ExpireAt      *time.Time `json:"expireAt"`
 	IPVersion     string     `json:"ipVersion"`
 	OutboundIP    string     `json:"outboundIp"`
 	Country       string     `json:"country"`
@@ -58,14 +61,14 @@ type ProxyBindingListResponse struct {
 }
 
 type CreateProxyRequest struct {
-	URL      string    `json:"url" binding:"required"`
-	ExpireAt time.Time `json:"expireAt" binding:"required"`
+	URL      string     `json:"url" binding:"required"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
 }
 
 type ImportProxiesRequest struct {
-	Pool     string    `json:"pool" binding:"required"`
-	URLs     []string  `json:"urls" binding:"required,min=1,dive,required"`
-	ExpireAt time.Time `json:"expireAt" binding:"required"`
+	Pool     string     `json:"pool" binding:"required"`
+	URLs     []string   `json:"urls" binding:"required,min=1,dive,required"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
 }
 
 type ImportProxiesResponse struct {
@@ -76,8 +79,33 @@ type ImportProxiesResponse struct {
 }
 
 type UpdateProxyRequest struct {
-	Status   *string    `json:"status,omitempty"`
-	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	URL         *string    `json:"url,omitempty"`
+	Status      *string    `json:"status,omitempty"`
+	ExpireAt    *time.Time `json:"expireAt,omitempty"`
+	ExpireAtSet bool       `json:"-"`
+}
+
+func (r *UpdateProxyRequest) UnmarshalJSON(data []byte) error {
+	type wireUpdateProxyRequest struct {
+		URL      *string    `json:"url,omitempty"`
+		Status   *string    `json:"status,omitempty"`
+		ExpireAt *time.Time `json:"expireAt,omitempty"`
+	}
+	var wire wireUpdateProxyRequest
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.URL = wire.URL
+	r.Status = wire.Status
+	r.ExpireAt = wire.ExpireAt
+	if _, ok := raw["expireAt"]; ok {
+		r.ExpireAtSet = true
+	}
+	return nil
 }
 
 type ProxyBulkFilterRequest struct {
@@ -104,6 +132,17 @@ type DeleteProxiesResponse struct {
 	DeletedByFilter bool   `json:"deletedByFilter,omitempty"`
 }
 
+type DisableProxiesRequest struct {
+	All    bool                    `json:"all,omitempty"`
+	Filter *ProxyBulkFilterRequest `json:"filter,omitempty"`
+}
+
+type DisableProxiesResponse struct {
+	Requested        int  `json:"requested"`
+	Disabled         int  `json:"disabled"`
+	DisabledByFilter bool `json:"disabledByFilter,omitempty"`
+}
+
 type CheckProxiesRequest struct {
 	All      bool                    `json:"all,omitempty"`
 	Filter   *ProxyBulkFilterRequest `json:"filter,omitempty"`
@@ -112,6 +151,7 @@ type CheckProxiesRequest struct {
 
 type CheckProxiesResponse struct {
 	Requested int                 `json:"requested"`
+	Queued    int                 `json:"queued"`
 	Checked   int                 `json:"checked"`
 	Failed    int                 `json:"failed"`
 	Items     []ProxyItemResponse `json:"items"`

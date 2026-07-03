@@ -16,6 +16,11 @@ import (
 // StartCoreWorkers registers Core task handlers and starts the Asynq server.
 func StartCoreWorkers(server *asynq.Server, module *CoreModule) error {
 	mux := asynq.NewServeMux()
+	RegisterCoreTaskHandlers(mux, module)
+	return server.Start(mux)
+}
+
+func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 	mux.HandleFunc(coreinfra.TypeMicrosoftImport, func(ctx context.Context, task *asynq.Task) error {
 		var payload coreapp.MicrosoftImportTask
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
@@ -55,8 +60,6 @@ func StartCoreWorkers(server *asynq.Server, module *CoreModule) error {
 		)
 		return nil
 	})
-
-	return server.Start(mux)
 }
 
 func isFinalAttempt(ctx context.Context) bool {
