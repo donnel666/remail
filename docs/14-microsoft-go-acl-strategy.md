@@ -11,6 +11,7 @@
 | 2026-07-02 | V1.4 | Codex | 补充 P1-I2 辅助邮箱英文统一为 `bindingAddress`，中文仍称辅助邮箱；对齐 Core 的 `binding` 用途命名。 |
 | 2026-07-02 | V1.5 | Codex | 补充 P1-I2 Microsoft TXT 导入错误处理策略：默认错误跳过，错误中止可选；不改变 Microsoft ACL 与 Core 资源边界。 |
 | 2026-07-02 | V1.6 | Codex | 补充 P1-I2 Microsoft 导入前端预处理策略：前端减负不改变后端权威校验。 |
+| 2026-07-03 | V1.7 | Codex | 补充 Microsoft ACL 使用 BC-PROXY 的直连兜底和 3 次代理尝试预算；不改变 Microsoft ACL 边界。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -59,7 +60,7 @@ internal/mailtransport/infra/microsoft
 | `GraphClient` | 用 AT 拉取 Graph 邮件，返回结构化 message DTO。 |
 | `BindingCoordinator` | 选择辅助邮箱、等待验证码、更新绑定状态。 |
 | `ErrorClassifier` | 把页面/Graph/网络错误映射为内部分类和安全文案。 |
-| `HTTPClient` | 使用 ProxyPort 返回的代理，统一超时、cookie jar、重试、TLS/HTTP2 设置和 requestId。 |
+| `HTTPClient` | 使用 ProxyPort 返回的代理或直连路线，统一超时、cookie jar、重试、TLS/HTTP2 设置、attempt 和 requestId。 |
 
 推荐库：
 
@@ -203,7 +204,7 @@ Go Microsoft ACL 返回 `category` 作为内部错误分类。对外不返回业
 
 账号不存在、密码错误必须合并为同一类对外文案，避免账号枚举；验证码错误可以直接说明验证码错误或过期。
 
-代理错误必须上报 BC-PROXY。资源代理失败时，允许本次业务按代理池规则获取系统代理重试；系统代理也不可用时 fail closed，返回安全业务文案，内部详情写 SystemLog。
+代理错误必须上报 BC-PROXY。资源代理失败时，允许本次业务按代理池规则获取系统代理重试；同一业务链路最多尝试 3 次代理路线。达到尝试预算或资源/系统代理都不可用时，ProxyPort 返回 `direct=true` 的系统直连路线，HTTPClient 必须禁用代理继续执行；直连失败属于上游或本机网络失败，不得上报为代理失败计数，内部详情写 SystemLog。
 
 IP 版本规则：
 

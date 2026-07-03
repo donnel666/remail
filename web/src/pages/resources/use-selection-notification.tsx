@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Button, Notification, Space, Typography } from "@douyinfe/semi-ui";
 
 const { Text } = Typography;
+const selectionNoticeId = "resources-batch-actions";
 
 interface UseSelectionNotificationOptions {
   onCheck?: () => void;
@@ -10,6 +11,7 @@ interface UseSelectionNotificationOptions {
   onDelete?: () => void;
   onSell?: () => void;
   deleteLoading?: boolean;
+  selectionDescriptionKey?: string;
   sellLoading?: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }
@@ -21,11 +23,11 @@ export function useSelectionNotification({
   onDelete,
   onSell,
   deleteLoading = false,
+  selectionDescriptionKey = "Selected resources",
   sellLoading = false,
   t,
 }: UseSelectionNotificationOptions) {
   useEffect(() => {
-    const noticeId = "resources-batch-actions";
     if (selectedCount > 0) {
       Notification.info({
         content: (
@@ -68,33 +70,36 @@ export function useSelectionNotification({
           </Space>
         ),
         duration: 0,
-        id: noticeId,
+        id: selectionNoticeId,
         position: "bottom",
         showClose: false,
         title: (
           <Space wrap>
             <span>{t("Batch action")}</span>
             <Text size="small" type="tertiary">
-              {t("Selected resources", { count: selectedCount })}
+              {t(selectionDescriptionKey, { count: selectedCount })}
             </Text>
           </Space>
         ),
       });
     } else {
-      Notification.close(noticeId);
+      Notification.close(selectionNoticeId);
     }
-
-    return () => {
-      Notification.close(noticeId);
-    };
   }, [
     deleteLoading,
     onCheck,
     onClear,
     onDelete,
     onSell,
+    selectionDescriptionKey,
     selectedCount,
     sellLoading,
     t,
   ]);
+
+  useEffect(() => {
+    return () => {
+      Notification.close(selectionNoticeId);
+    };
+  }, []);
 }

@@ -14,6 +14,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
+	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +62,13 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 		}
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher)
+
+		// Proxy module (admin proxy pool maintenance)
+		proxyMod, err := proxyapi.NewProxyModule(p.DB)
+		if err != nil {
+			return nil, err
+		}
+		proxyapi.RegisterProxyRoutes(v1, proxyMod, iamSessionFetcher, iamMod.PermissionChecker)
 	}
 
 	// Serve embedded frontend SPA if available

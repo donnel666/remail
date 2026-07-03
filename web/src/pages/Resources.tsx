@@ -43,6 +43,8 @@ import {
 
 import { ImportMicrosoftEmailsModal } from "./resources/import-microsoft-emails-modal";
 import {
+  DATE_RANGE_DROPDOWN_CLASS,
+  createDateRangePresets,
   createdFromISOString,
   createdToISOString,
   matchesCreatedAtRange,
@@ -269,6 +271,7 @@ export default function Resources() {
   );
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
+  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
 
   const suffixCounts = useMemo(() => getSuffixCounts(items), [items]);
@@ -1058,6 +1061,9 @@ export default function Resources() {
           type="dateTimeRange"
           format="yyyy-MM-dd HH:mm:ss"
           placeholder={[t("Start time"), t("End time")]}
+          presetPosition="bottom"
+          presets={dateRangePresets}
+          dropdownClassName={DATE_RANGE_DROPDOWN_CLASS}
           showClear
           size="small"
           value={createdAtRange}

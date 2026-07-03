@@ -610,6 +610,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/proxies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List proxy pool entries */
+        get: operations["getAdminProxies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get proxy pool statistics */
+        get: operations["getAdminProxyStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List resource proxy bindings */
+        get: operations["getAdminProxyBindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete proxy pool entries by IDs or filter */
+        post: operations["postAdminProxyDeleteBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import proxy pool entries in batch */
+        post: operations["postAdminProxyImports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check proxy pool entries by IDs or filter */
+        post: operations["postAdminProxyCheckBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a resource proxy */
+        post: operations["postAdminResourceProxy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a system fallback proxy */
+        post: operations["postAdminSystemProxy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proxies/{proxyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get proxy detail */
+        get: operations["getAdminProxy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update proxy status or expiration */
+        patch: operations["patchAdminProxy"];
+        trace?: never;
+    };
+    "/v1/admin/proxies/{proxyId}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check a proxy and update detected metadata */
+        post: operations["postAdminProxyCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -947,6 +1118,135 @@ export interface components {
             deleted: number;
             /** @description Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses. */
             deletedResourceIds?: number[];
+        };
+        DeleteProxiesRequest: {
+            /** @description Delete every proxy matching filter. When false or omitted, proxyIds mode is used. */
+            all?: boolean;
+            filter?: components["schemas"]["ProxyBulkFilter"];
+            proxyIds?: number[];
+        };
+        ProxyBulkFilter: {
+            /** @enum {string} */
+            pool?: "resource" | "system";
+            /** @enum {string} */
+            ip?: "auto" | "ipv4" | "ipv6";
+            ipv6?: boolean;
+            /** @enum {string} */
+            status?: "checking" | "normal" | "disabled" | "expired";
+            country?: string;
+            search?: string;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        DeleteProxiesResponse: {
+            requested: number;
+            deleted: number;
+            deletedProxyIds?: number[];
+            deletedByFilter?: boolean;
+        };
+        CheckProxiesRequest: {
+            /** @description Check every proxy matching filter. When false or omitted, proxyIds mode is used. */
+            all?: boolean;
+            filter?: components["schemas"]["ProxyBulkFilter"];
+            proxyIds?: number[];
+        };
+        CheckProxiesResponse: {
+            requested: number;
+            checked: number;
+            failed: number;
+            items: components["schemas"]["ProxyItem"][];
+        };
+        ImportProxiesRequest: {
+            /** @enum {string} */
+            pool: "resource" | "system";
+            urls: string[];
+            /** Format: date-time */
+            expireAt: string;
+        };
+        ImportProxiesResponse: {
+            requested: number;
+            created: number;
+            duplicated: number;
+            items: components["schemas"]["ProxyItem"][];
+        };
+        ProxyCount: {
+            key: string;
+            count: number;
+        };
+        ProxyStatsResponse: {
+            total: number;
+            countries: components["schemas"]["ProxyCount"][];
+            statuses: components["schemas"]["ProxyCount"][];
+            pools: components["schemas"]["ProxyCount"][];
+            ipVersions: components["schemas"]["ProxyCount"][];
+        };
+        ProxyListResponse: {
+            items: components["schemas"]["ProxyItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        ProxyBindingListResponse: {
+            items: components["schemas"]["ProxyBindingItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        ProxyBindingItem: {
+            id: number;
+            key: string;
+            proxyId: number;
+            /** @enum {string} */
+            ipVersion: "ipv4" | "ipv6";
+            /** Format: date-time */
+            expireAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastUsedAt?: string | null;
+        };
+        ProxyItem: {
+            id: number;
+            /** @enum {string} */
+            pool: "resource" | "system";
+            /** @description Redacted in list responses; complete only in authorized detail responses. */
+            url: string;
+            /** Format: date-time */
+            expireAt: string;
+            /** @description Detected proxy outbound IP version. Empty before the first successful check. */
+            ipVersion: string;
+            outboundIp: string;
+            country: string;
+            latencyMs: number;
+            /** @enum {string} */
+            status: "checking" | "normal" | "disabled" | "expired";
+            errors: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastCheckedAt?: string | null;
+            /** Format: date-time */
+            lastUsedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreateProxyRequest: {
+            /** @description Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h. */
+            url: string;
+            /** Format: date-time */
+            expireAt: string;
+        };
+        UpdateProxyRequest: {
+            /**
+             * @description Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
+             * @enum {string}
+             */
+            status?: "checking" | "disabled";
+            /** Format: date-time */
+            expireAt?: string;
         };
         CreateMailServerRequest: {
             name?: string;
@@ -3128,6 +3428,690 @@ export interface operations {
                 };
             };
             /** @description Domain resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProxies: {
+        parameters: {
+            query?: {
+                pool?: "resource" | "system";
+                ip?: "auto" | "ipv4" | "ipv6";
+                ipv6?: boolean;
+                status?: "checking" | "normal" | "disabled" | "expired";
+                country?: string;
+                search?: string;
+                createdFrom?: string;
+                createdTo?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxy list. URL is redacted in list responses. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProxyStats: {
+        parameters: {
+            query?: {
+                pool?: "resource" | "system";
+                ip?: "auto" | "ipv4" | "ipv6";
+                ipv6?: boolean;
+                status?: "checking" | "normal" | "disabled" | "expired";
+                country?: string;
+                search?: string;
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxy counts grouped for the management page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyStatsResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProxyBindings: {
+        parameters: {
+            query?: {
+                key?: string;
+                proxyId?: number;
+                ip?: "auto" | "ipv4" | "ipv6";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active resource proxy bindings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyBindingListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy binding filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProxyDeleteBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteProxiesRequest"];
+            };
+        };
+        responses: {
+            /** @description Proxies deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteProxiesResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy IDs */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProxyImports: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportProxiesRequest"];
+            };
+        };
+        responses: {
+            /** @description Proxies imported. Duplicate URLs are skipped and counted. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportProxiesResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Every submitted proxy already exists or is duplicated in the request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy pool, URL or expireAt */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProxyCheckBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckProxiesRequest"];
+            };
+        };
+        responses: {
+            /** @description Batch check completed. Failed checks return updated disabled or expired proxies when available. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckProxiesResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy IDs or filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminResourceProxy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProxyRequest"];
+            };
+        };
+        responses: {
+            /** @description Resource proxy created with checking status */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyItem"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy already exists in the same pool */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy URL or expireAt */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminSystemProxy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProxyRequest"];
+            };
+        };
+        responses: {
+            /** @description System proxy created with checking status */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyItem"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy already exists in the same pool */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid proxy URL or expireAt */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxy detail. URL is complete for authorized admins. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyItem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchAdminProxy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                proxyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProxyRequest"];
+            };
+        };
+        responses: {
+            /** @description Proxy updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyItem"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid status or expireAt */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProxyCheck: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                proxyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxy check completed. Failed checks still return the updated proxy with disabled or expired status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyItem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Proxy not found */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -91,8 +91,8 @@ paths:
           description: Activation already completed
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+                schema:
+                  $ref: "#/components/schemas/Error"
         "400":
           description: Invalid request body
           content:
@@ -1743,6 +1743,616 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- Proxy Pool ---
+  /v1/admin/proxies:
+    get:
+      operationId: getAdminProxies
+      summary: List proxy pool entries
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pool
+          in: query
+          schema:
+            type: string
+            enum: [resource, system]
+        - name: ip
+          in: query
+          schema:
+            type: string
+            enum: [auto, ipv4, ipv6]
+        - name: ipv6
+          in: query
+          schema:
+            type: boolean
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [checking, normal, disabled, expired]
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Proxy list. URL is redacted in list responses.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/stats:
+    get:
+      operationId: getAdminProxyStats
+      summary: Get proxy pool statistics
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pool
+          in: query
+          schema:
+            type: string
+            enum: [resource, system]
+        - name: ip
+          in: query
+          schema:
+            type: string
+            enum: [auto, ipv4, ipv6]
+        - name: ipv6
+          in: query
+          schema:
+            type: boolean
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [checking, normal, disabled, expired]
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Proxy counts grouped for the management page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyStatsResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/bindings:
+    get:
+      operationId: getAdminProxyBindings
+      summary: List resource proxy bindings
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: key
+          in: query
+          schema:
+            type: string
+        - name: proxyId
+          in: query
+          schema:
+            type: integer
+        - name: ip
+          in: query
+          schema:
+            type: string
+            enum: [auto, ipv4, ipv6]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Active resource proxy bindings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyBindingListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy binding filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/delete:
+    post:
+      operationId: postAdminProxyDeleteBatch
+      summary: Delete proxy pool entries by IDs or filter
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteProxiesRequest"
+      responses:
+        "200":
+          description: Proxies deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteProxiesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy IDs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/imports:
+    post:
+      operationId: postAdminProxyImports
+      summary: Import proxy pool entries in batch
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportProxiesRequest"
+      responses:
+        "201":
+          description: Proxies imported. Duplicate URLs are skipped and counted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportProxiesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Every submitted proxy already exists or is duplicated in the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy pool, URL or expireAt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/check:
+    post:
+      operationId: postAdminProxyCheckBatch
+      summary: Check proxy pool entries by IDs or filter
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckProxiesRequest"
+      responses:
+        "200":
+          description: Batch check completed. Failed checks return updated disabled or expired proxies when available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckProxiesResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy IDs or filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/resource:
+    post:
+      operationId: postAdminResourceProxy
+      summary: Create a resource proxy
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProxyRequest"
+      responses:
+        "201":
+          description: Resource proxy created with checking status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyItem"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Proxy already exists in the same pool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy URL or expireAt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/system:
+    post:
+      operationId: postAdminSystemProxy
+      summary: Create a system fallback proxy
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProxyRequest"
+      responses:
+        "201":
+          description: System proxy created with checking status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyItem"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Proxy already exists in the same pool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid proxy URL or expireAt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/{proxyId}:
+    get:
+      operationId: getAdminProxy
+      summary: Get proxy detail
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: proxyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Proxy detail. URL is complete for authorized admins.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyItem"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Proxy not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    patch:
+      operationId: patchAdminProxy
+      summary: Update proxy status or expiration
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: proxyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProxyRequest"
+      responses:
+        "200":
+          description: Proxy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyItem"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Proxy not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid status or expireAt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/proxies/{proxyId}/check:
+    post:
+      operationId: postAdminProxyCheck
+      summary: Check a proxy and update detected metadata
+      tags:
+        - Proxy Pool
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: proxyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Proxy check completed. Failed checks still return the updated proxy with disabled or expired status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyItem"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Proxy not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   parameters:
     CsrfToken:
@@ -2598,6 +3208,340 @@ components:
           description: Actual deleted resource IDs for ids mode. Omitted for filter mode to avoid large responses.
           items:
             type: integer
+      additionalProperties: false
+
+    DeleteProxiesRequest:
+      type: object
+      properties:
+        all:
+          type: boolean
+          description: Delete every proxy matching filter. When false or omitted, proxyIds mode is used.
+        filter:
+          $ref: "#/components/schemas/ProxyBulkFilter"
+        proxyIds:
+          type: array
+          minItems: 0
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+
+    ProxyBulkFilter:
+      type: object
+      properties:
+        pool:
+          type: string
+          enum: [resource, system]
+        ip:
+          type: string
+          enum: [auto, ipv4, ipv6]
+        ipv6:
+          type: boolean
+        status:
+          type: string
+          enum: [checking, normal, disabled, expired]
+        country:
+          type: string
+        search:
+          type: string
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    DeleteProxiesResponse:
+      type: object
+      required:
+        - requested
+        - deleted
+      properties:
+        requested:
+          type: integer
+        deleted:
+          type: integer
+        deletedProxyIds:
+          type: array
+          items:
+            type: integer
+        deletedByFilter:
+          type: boolean
+      additionalProperties: false
+
+    CheckProxiesRequest:
+      type: object
+      properties:
+        all:
+          type: boolean
+          description: Check every proxy matching filter. When false or omitted, proxyIds mode is used.
+        filter:
+          $ref: "#/components/schemas/ProxyBulkFilter"
+        proxyIds:
+          type: array
+          minItems: 0
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+
+    CheckProxiesResponse:
+      type: object
+      required:
+        - requested
+        - checked
+        - failed
+        - items
+      properties:
+        requested:
+          type: integer
+        checked:
+          type: integer
+        failed:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyItem"
+      additionalProperties: false
+
+    ImportProxiesRequest:
+      type: object
+      required:
+        - pool
+        - urls
+        - expireAt
+      properties:
+        pool:
+          type: string
+          enum: [resource, system]
+        urls:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            description: Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h.
+        expireAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ImportProxiesResponse:
+      type: object
+      required:
+        - requested
+        - created
+        - duplicated
+        - items
+      properties:
+        requested:
+          type: integer
+        created:
+          type: integer
+        duplicated:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyItem"
+      additionalProperties: false
+
+    ProxyCount:
+      type: object
+      required:
+        - key
+        - count
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+      additionalProperties: false
+
+    ProxyStatsResponse:
+      type: object
+      required:
+        - total
+        - countries
+        - statuses
+        - pools
+        - ipVersions
+      properties:
+        total:
+          type: integer
+        countries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyCount"
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyCount"
+        pools:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyCount"
+        ipVersions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyCount"
+      additionalProperties: false
+
+    ProxyListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    ProxyBindingListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyBindingItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    ProxyBindingItem:
+      type: object
+      required:
+        - id
+        - key
+        - proxyId
+        - ipVersion
+        - expireAt
+        - createdAt
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        proxyId:
+          type: integer
+        ipVersion:
+          type: string
+          enum: [ipv4, ipv6]
+        expireAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    ProxyItem:
+      type: object
+      required:
+        - id
+        - pool
+        - url
+        - expireAt
+        - ipVersion
+        - outboundIp
+        - country
+        - latencyMs
+        - status
+        - errors
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        pool:
+          type: string
+          enum: [resource, system]
+        url:
+          type: string
+          description: Redacted in list responses; complete only in authorized detail responses.
+        expireAt:
+          type: string
+          format: date-time
+        ipVersion:
+          type: string
+          description: Detected proxy outbound IP version. Empty before the first successful check.
+        outboundIp:
+          type: string
+        country:
+          type: string
+        latencyMs:
+          type: integer
+        status:
+          type: string
+          enum: [checking, normal, disabled, expired]
+        errors:
+          type: integer
+        lastSafeError:
+          type: string
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    CreateProxyRequest:
+      type: object
+      required:
+        - url
+        - expireAt
+      properties:
+        url:
+          type: string
+          description: Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h.
+        expireAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    UpdateProxyRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [checking, disabled]
+          description: Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
+        expireAt:
+          type: string
+          format: date-time
       additionalProperties: false
 
     CreateMailServerRequest:

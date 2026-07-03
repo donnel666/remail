@@ -48,6 +48,7 @@ const MyEmails = lazy(() => import("./pages/MyEmails"));
 const AfterSales = lazy(() => import("./pages/AfterSales"));
 const Resources = lazy(() => import("./pages/Resources"));
 const DomainEmails = lazy(() => import("./pages/DomainEmails"));
+const ProxyManagement = lazy(() => import("./pages/ProxyManagement"));
 const Invite = lazy(() => import("./pages/Invite"));
 const Recharge = lazy(() => import("./pages/Recharge"));
 
@@ -57,10 +58,6 @@ function AdminMicrosoftEmails() {
 
 function AdminDomainEmails() {
   return <PlaceholderPage titleKey="Admin Domain Emails" />;
-}
-
-function ProxyManagement() {
-  return <PlaceholderPage titleKey="Proxy Management" />;
 }
 
 function UserManagement() {

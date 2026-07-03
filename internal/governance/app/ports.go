@@ -11,6 +11,11 @@ type OperationLogPort interface {
 	Create(ctx context.Context, log *domain.OperationLog) error
 }
 
+// SystemLogPort is used by business contexts to write safe diagnostic records.
+type SystemLogPort interface {
+	Create(ctx context.Context, log *domain.SystemLog) error
+}
+
 // FilePort stores private files for business contexts without exposing object storage details.
 type FilePort interface {
 	SavePrivate(ctx context.Context, file domain.PrivateFile) (*domain.StoredPrivateFile, error)

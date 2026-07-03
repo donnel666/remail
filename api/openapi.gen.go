@@ -57,6 +57,24 @@ func (e DomainResourceDetailPurpose) Valid() bool {
 	}
 }
 
+// Defines values for ImportProxiesRequestPool.
+const (
+	ImportProxiesRequestPoolResource ImportProxiesRequestPool = "resource"
+	ImportProxiesRequestPoolSystem   ImportProxiesRequestPool = "system"
+)
+
+// Valid indicates whether the value is a known member of the ImportProxiesRequestPool enum.
+func (e ImportProxiesRequestPool) Valid() bool {
+	switch e {
+	case ImportProxiesRequestPoolResource:
+		return true
+	case ImportProxiesRequestPoolSystem:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ImportStatusResponseStatus.
 const (
 	Failed     ImportStatusResponseStatus = "failed"
@@ -108,6 +126,129 @@ func (e PermissionPolicyResponseEffect) Valid() bool {
 	case PermissionPolicyResponseEffectAllow:
 		return true
 	case PermissionPolicyResponseEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyBindingItemIpVersion.
+const (
+	ProxyBindingItemIpVersionIpv4 ProxyBindingItemIpVersion = "ipv4"
+	ProxyBindingItemIpVersionIpv6 ProxyBindingItemIpVersion = "ipv6"
+)
+
+// Valid indicates whether the value is a known member of the ProxyBindingItemIpVersion enum.
+func (e ProxyBindingItemIpVersion) Valid() bool {
+	switch e {
+	case ProxyBindingItemIpVersionIpv4:
+		return true
+	case ProxyBindingItemIpVersionIpv6:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyBulkFilterIp.
+const (
+	ProxyBulkFilterIpAuto ProxyBulkFilterIp = "auto"
+	ProxyBulkFilterIpIpv4 ProxyBulkFilterIp = "ipv4"
+	ProxyBulkFilterIpIpv6 ProxyBulkFilterIp = "ipv6"
+)
+
+// Valid indicates whether the value is a known member of the ProxyBulkFilterIp enum.
+func (e ProxyBulkFilterIp) Valid() bool {
+	switch e {
+	case ProxyBulkFilterIpAuto:
+		return true
+	case ProxyBulkFilterIpIpv4:
+		return true
+	case ProxyBulkFilterIpIpv6:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyBulkFilterPool.
+const (
+	ProxyBulkFilterPoolResource ProxyBulkFilterPool = "resource"
+	ProxyBulkFilterPoolSystem   ProxyBulkFilterPool = "system"
+)
+
+// Valid indicates whether the value is a known member of the ProxyBulkFilterPool enum.
+func (e ProxyBulkFilterPool) Valid() bool {
+	switch e {
+	case ProxyBulkFilterPoolResource:
+		return true
+	case ProxyBulkFilterPoolSystem:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyBulkFilterStatus.
+const (
+	ProxyBulkFilterStatusChecking ProxyBulkFilterStatus = "checking"
+	ProxyBulkFilterStatusDisabled ProxyBulkFilterStatus = "disabled"
+	ProxyBulkFilterStatusExpired  ProxyBulkFilterStatus = "expired"
+	ProxyBulkFilterStatusNormal   ProxyBulkFilterStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the ProxyBulkFilterStatus enum.
+func (e ProxyBulkFilterStatus) Valid() bool {
+	switch e {
+	case ProxyBulkFilterStatusChecking:
+		return true
+	case ProxyBulkFilterStatusDisabled:
+		return true
+	case ProxyBulkFilterStatusExpired:
+		return true
+	case ProxyBulkFilterStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyItemPool.
+const (
+	ProxyItemPoolResource ProxyItemPool = "resource"
+	ProxyItemPoolSystem   ProxyItemPool = "system"
+)
+
+// Valid indicates whether the value is a known member of the ProxyItemPool enum.
+func (e ProxyItemPool) Valid() bool {
+	switch e {
+	case ProxyItemPoolResource:
+		return true
+	case ProxyItemPoolSystem:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyItemStatus.
+const (
+	ProxyItemStatusChecking ProxyItemStatus = "checking"
+	ProxyItemStatusDisabled ProxyItemStatus = "disabled"
+	ProxyItemStatusExpired  ProxyItemStatus = "expired"
+	ProxyItemStatusNormal   ProxyItemStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the ProxyItemStatus enum.
+func (e ProxyItemStatus) Valid() bool {
+	switch e {
+	case ProxyItemStatusChecking:
+		return true
+	case ProxyItemStatusDisabled:
+		return true
+	case ProxyItemStatusExpired:
+		return true
+	case ProxyItemStatusNormal:
 		return true
 	default:
 		return false
@@ -225,6 +366,24 @@ func (e SupplierApplicationResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for UpdateProxyRequestStatus.
+const (
+	UpdateProxyRequestStatusChecking UpdateProxyRequestStatus = "checking"
+	UpdateProxyRequestStatusDisabled UpdateProxyRequestStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the UpdateProxyRequestStatus enum.
+func (e UpdateProxyRequestStatus) Valid() bool {
+	switch e {
+	case UpdateProxyRequestStatusChecking:
+		return true
+	case UpdateProxyRequestStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UserResponseRole.
 const (
 	Admin      UserResponseRole = "admin"
@@ -243,6 +402,153 @@ func (e UserResponseRole) Valid() bool {
 	case Supplier:
 		return true
 	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxiesParamsPool.
+const (
+	GetAdminProxiesParamsPoolResource GetAdminProxiesParamsPool = "resource"
+	GetAdminProxiesParamsPoolSystem   GetAdminProxiesParamsPool = "system"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxiesParamsPool enum.
+func (e GetAdminProxiesParamsPool) Valid() bool {
+	switch e {
+	case GetAdminProxiesParamsPoolResource:
+		return true
+	case GetAdminProxiesParamsPoolSystem:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxiesParamsIp.
+const (
+	GetAdminProxiesParamsIpAuto GetAdminProxiesParamsIp = "auto"
+	GetAdminProxiesParamsIpIpv4 GetAdminProxiesParamsIp = "ipv4"
+	GetAdminProxiesParamsIpIpv6 GetAdminProxiesParamsIp = "ipv6"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxiesParamsIp enum.
+func (e GetAdminProxiesParamsIp) Valid() bool {
+	switch e {
+	case GetAdminProxiesParamsIpAuto:
+		return true
+	case GetAdminProxiesParamsIpIpv4:
+		return true
+	case GetAdminProxiesParamsIpIpv6:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxiesParamsStatus.
+const (
+	GetAdminProxiesParamsStatusChecking GetAdminProxiesParamsStatus = "checking"
+	GetAdminProxiesParamsStatusDisabled GetAdminProxiesParamsStatus = "disabled"
+	GetAdminProxiesParamsStatusExpired  GetAdminProxiesParamsStatus = "expired"
+	GetAdminProxiesParamsStatusNormal   GetAdminProxiesParamsStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxiesParamsStatus enum.
+func (e GetAdminProxiesParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminProxiesParamsStatusChecking:
+		return true
+	case GetAdminProxiesParamsStatusDisabled:
+		return true
+	case GetAdminProxiesParamsStatusExpired:
+		return true
+	case GetAdminProxiesParamsStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxyBindingsParamsIp.
+const (
+	GetAdminProxyBindingsParamsIpAuto GetAdminProxyBindingsParamsIp = "auto"
+	GetAdminProxyBindingsParamsIpIpv4 GetAdminProxyBindingsParamsIp = "ipv4"
+	GetAdminProxyBindingsParamsIpIpv6 GetAdminProxyBindingsParamsIp = "ipv6"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxyBindingsParamsIp enum.
+func (e GetAdminProxyBindingsParamsIp) Valid() bool {
+	switch e {
+	case GetAdminProxyBindingsParamsIpAuto:
+		return true
+	case GetAdminProxyBindingsParamsIpIpv4:
+		return true
+	case GetAdminProxyBindingsParamsIpIpv6:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxyStatsParamsPool.
+const (
+	Resource GetAdminProxyStatsParamsPool = "resource"
+	System   GetAdminProxyStatsParamsPool = "system"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
+func (e GetAdminProxyStatsParamsPool) Valid() bool {
+	switch e {
+	case Resource:
+		return true
+	case System:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxyStatsParamsIp.
+const (
+	Auto GetAdminProxyStatsParamsIp = "auto"
+	Ipv4 GetAdminProxyStatsParamsIp = "ipv4"
+	Ipv6 GetAdminProxyStatsParamsIp = "ipv6"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsIp enum.
+func (e GetAdminProxyStatsParamsIp) Valid() bool {
+	switch e {
+	case Auto:
+		return true
+	case Ipv4:
+		return true
+	case Ipv6:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProxyStatsParamsStatus.
+const (
+	Checking GetAdminProxyStatsParamsStatus = "checking"
+	Disabled GetAdminProxyStatsParamsStatus = "disabled"
+	Expired  GetAdminProxyStatsParamsStatus = "expired"
+	Normal   GetAdminProxyStatsParamsStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
+func (e GetAdminProxyStatsParamsStatus) Valid() bool {
+	switch e {
+	case Checking:
+		return true
+	case Disabled:
+		return true
+	case Expired:
+		return true
+	case Normal:
 		return true
 	default:
 		return false
@@ -334,6 +640,22 @@ type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword"`
 }
 
+// CheckProxiesRequest defines model for CheckProxiesRequest.
+type CheckProxiesRequest struct {
+	// All Check every proxy matching filter. When false or omitted, proxyIds mode is used.
+	All      *bool            `json:"all,omitempty"`
+	Filter   *ProxyBulkFilter `json:"filter,omitempty"`
+	ProxyIds *[]int           `json:"proxyIds,omitempty"`
+}
+
+// CheckProxiesResponse defines model for CheckProxiesResponse.
+type CheckProxiesResponse struct {
+	Checked   int         `json:"checked"`
+	Failed    int         `json:"failed"`
+	Items     []ProxyItem `json:"items"`
+	Requested int         `json:"requested"`
+}
+
 // CreateDomainRequest defines model for CreateDomainRequest.
 type CreateDomainRequest struct {
 	Domain string `json:"domain"`
@@ -357,6 +679,30 @@ type CreateMailServerRequest struct {
 	PtrRecord     *string `json:"ptrRecord,omitempty"`
 	ServerAddress string  `json:"serverAddress"`
 	SpfRecord     *string `json:"spfRecord,omitempty"`
+}
+
+// CreateProxyRequest defines model for CreateProxyRequest.
+type CreateProxyRequest struct {
+	ExpireAt time.Time `json:"expireAt"`
+
+	// Url Original proxy URL. Must include an explicit port and supports http, https, socks5 and socks5h.
+	Url string `json:"url"`
+}
+
+// DeleteProxiesRequest defines model for DeleteProxiesRequest.
+type DeleteProxiesRequest struct {
+	// All Delete every proxy matching filter. When false or omitted, proxyIds mode is used.
+	All      *bool            `json:"all,omitempty"`
+	Filter   *ProxyBulkFilter `json:"filter,omitempty"`
+	ProxyIds *[]int           `json:"proxyIds,omitempty"`
+}
+
+// DeleteProxiesResponse defines model for DeleteProxiesResponse.
+type DeleteProxiesResponse struct {
+	Deleted         int    `json:"deleted"`
+	DeletedByFilter *bool  `json:"deletedByFilter,omitempty"`
+	DeletedProxyIds *[]int `json:"deletedProxyIds,omitempty"`
+	Requested       int    `json:"requested"`
 }
 
 // DeleteResourcesRequest defines model for DeleteResourcesRequest.
@@ -413,6 +759,24 @@ type Error struct {
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+// ImportProxiesRequest defines model for ImportProxiesRequest.
+type ImportProxiesRequest struct {
+	ExpireAt time.Time                `json:"expireAt"`
+	Pool     ImportProxiesRequestPool `json:"pool"`
+	Urls     []string                 `json:"urls"`
+}
+
+// ImportProxiesRequestPool defines model for ImportProxiesRequest.Pool.
+type ImportProxiesRequestPool string
+
+// ImportProxiesResponse defines model for ImportProxiesResponse.
+type ImportProxiesResponse struct {
+	Created    int         `json:"created"`
+	Duplicated int         `json:"duplicated"`
+	Items      []ProxyItem `json:"items"`
+	Requested  int         `json:"requested"`
 }
 
 // ImportResponse defines model for ImportResponse.
@@ -540,6 +904,101 @@ type PermissionPolicyResponse struct {
 
 // PermissionPolicyResponseEffect defines model for PermissionPolicyResponse.Effect.
 type PermissionPolicyResponseEffect string
+
+// ProxyBindingItem defines model for ProxyBindingItem.
+type ProxyBindingItem struct {
+	CreatedAt  time.Time                 `json:"createdAt"`
+	ExpireAt   time.Time                 `json:"expireAt"`
+	Id         int                       `json:"id"`
+	IpVersion  ProxyBindingItemIpVersion `json:"ipVersion"`
+	Key        string                    `json:"key"`
+	LastUsedAt *time.Time                `json:"lastUsedAt,omitempty"`
+	ProxyId    int                       `json:"proxyId"`
+}
+
+// ProxyBindingItemIpVersion defines model for ProxyBindingItem.IpVersion.
+type ProxyBindingItemIpVersion string
+
+// ProxyBindingListResponse defines model for ProxyBindingListResponse.
+type ProxyBindingListResponse struct {
+	Items  []ProxyBindingItem `json:"items"`
+	Limit  int                `json:"limit"`
+	Offset int                `json:"offset"`
+	Total  int                `json:"total"`
+}
+
+// ProxyBulkFilter defines model for ProxyBulkFilter.
+type ProxyBulkFilter struct {
+	Country     *string                `json:"country,omitempty"`
+	CreatedFrom *time.Time             `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time             `json:"createdTo,omitempty"`
+	Ip          *ProxyBulkFilterIp     `json:"ip,omitempty"`
+	Ipv6        *bool                  `json:"ipv6,omitempty"`
+	Pool        *ProxyBulkFilterPool   `json:"pool,omitempty"`
+	Search      *string                `json:"search,omitempty"`
+	Status      *ProxyBulkFilterStatus `json:"status,omitempty"`
+}
+
+// ProxyBulkFilterIp defines model for ProxyBulkFilter.Ip.
+type ProxyBulkFilterIp string
+
+// ProxyBulkFilterPool defines model for ProxyBulkFilter.Pool.
+type ProxyBulkFilterPool string
+
+// ProxyBulkFilterStatus defines model for ProxyBulkFilter.Status.
+type ProxyBulkFilterStatus string
+
+// ProxyCount defines model for ProxyCount.
+type ProxyCount struct {
+	Count int    `json:"count"`
+	Key   string `json:"key"`
+}
+
+// ProxyItem defines model for ProxyItem.
+type ProxyItem struct {
+	Country   string    `json:"country"`
+	CreatedAt time.Time `json:"createdAt"`
+	Errors    int       `json:"errors"`
+	ExpireAt  time.Time `json:"expireAt"`
+	Id        int       `json:"id"`
+
+	// IpVersion Detected proxy outbound IP version. Empty before the first successful check.
+	IpVersion     string          `json:"ipVersion"`
+	LastCheckedAt *time.Time      `json:"lastCheckedAt,omitempty"`
+	LastSafeError *string         `json:"lastSafeError,omitempty"`
+	LastUsedAt    *time.Time      `json:"lastUsedAt,omitempty"`
+	LatencyMs     int             `json:"latencyMs"`
+	OutboundIp    string          `json:"outboundIp"`
+	Pool          ProxyItemPool   `json:"pool"`
+	Status        ProxyItemStatus `json:"status"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
+
+	// Url Redacted in list responses; complete only in authorized detail responses.
+	Url string `json:"url"`
+}
+
+// ProxyItemPool defines model for ProxyItem.Pool.
+type ProxyItemPool string
+
+// ProxyItemStatus defines model for ProxyItem.Status.
+type ProxyItemStatus string
+
+// ProxyListResponse defines model for ProxyListResponse.
+type ProxyListResponse struct {
+	Items  []ProxyItem `json:"items"`
+	Limit  int         `json:"limit"`
+	Offset int         `json:"offset"`
+	Total  int         `json:"total"`
+}
+
+// ProxyStatsResponse defines model for ProxyStatsResponse.
+type ProxyStatsResponse struct {
+	Countries  []ProxyCount `json:"countries"`
+	IpVersions []ProxyCount `json:"ipVersions"`
+	Pools      []ProxyCount `json:"pools"`
+	Statuses   []ProxyCount `json:"statuses"`
+	Total      int          `json:"total"`
+}
 
 // PublishResourcesRequest defines model for PublishResourcesRequest.
 type PublishResourcesRequest struct {
@@ -738,6 +1197,17 @@ type SupplierApplicationResponse struct {
 // SupplierApplicationResponseStatus defines model for SupplierApplicationResponse.Status.
 type SupplierApplicationResponseStatus string
 
+// UpdateProxyRequest defines model for UpdateProxyRequest.
+type UpdateProxyRequest struct {
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+
+	// Status Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
+	Status *UpdateProxyRequestStatus `json:"status,omitempty"`
+}
+
+// UpdateProxyRequestStatus Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
+type UpdateProxyRequestStatus string
+
 // UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
 type UserPermissionPoliciesResponse struct {
 	Policies []PermissionPolicyResponse `json:"policies"`
@@ -781,6 +1251,104 @@ type PostAdminInviteParams struct {
 
 // PatchAdminInviteParams defines parameters for PatchAdminInvite.
 type PatchAdminInviteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminProxiesParams defines parameters for GetAdminProxies.
+type GetAdminProxiesParams struct {
+	Pool        *GetAdminProxiesParamsPool   `form:"pool,omitempty" json:"pool,omitempty"`
+	Ip          *GetAdminProxiesParamsIp     `form:"ip,omitempty" json:"ip,omitempty"`
+	Ipv6        *bool                        `form:"ipv6,omitempty" json:"ipv6,omitempty"`
+	Status      *GetAdminProxiesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Country     *string                      `form:"country,omitempty" json:"country,omitempty"`
+	Search      *string                      `form:"search,omitempty" json:"search,omitempty"`
+	CreatedFrom *time.Time                   `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                   `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Offset      *int                         `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit       *int                         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminProxiesParamsPool defines parameters for GetAdminProxies.
+type GetAdminProxiesParamsPool string
+
+// GetAdminProxiesParamsIp defines parameters for GetAdminProxies.
+type GetAdminProxiesParamsIp string
+
+// GetAdminProxiesParamsStatus defines parameters for GetAdminProxies.
+type GetAdminProxiesParamsStatus string
+
+// GetAdminProxyBindingsParams defines parameters for GetAdminProxyBindings.
+type GetAdminProxyBindingsParams struct {
+	Key     *string                        `form:"key,omitempty" json:"key,omitempty"`
+	ProxyId *int                           `form:"proxyId,omitempty" json:"proxyId,omitempty"`
+	Ip      *GetAdminProxyBindingsParamsIp `form:"ip,omitempty" json:"ip,omitempty"`
+	Offset  *int                           `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit   *int                           `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminProxyBindingsParamsIp defines parameters for GetAdminProxyBindings.
+type GetAdminProxyBindingsParamsIp string
+
+// PostAdminProxyCheckBatchParams defines parameters for PostAdminProxyCheckBatch.
+type PostAdminProxyCheckBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProxyDeleteBatchParams defines parameters for PostAdminProxyDeleteBatch.
+type PostAdminProxyDeleteBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProxyImportsParams defines parameters for PostAdminProxyImports.
+type PostAdminProxyImportsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminResourceProxyParams defines parameters for PostAdminResourceProxy.
+type PostAdminResourceProxyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminProxyStatsParams defines parameters for GetAdminProxyStats.
+type GetAdminProxyStatsParams struct {
+	Pool        *GetAdminProxyStatsParamsPool   `form:"pool,omitempty" json:"pool,omitempty"`
+	Ip          *GetAdminProxyStatsParamsIp     `form:"ip,omitempty" json:"ip,omitempty"`
+	Ipv6        *bool                           `form:"ipv6,omitempty" json:"ipv6,omitempty"`
+	Status      *GetAdminProxyStatsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Country     *string                         `form:"country,omitempty" json:"country,omitempty"`
+	Search      *string                         `form:"search,omitempty" json:"search,omitempty"`
+	CreatedFrom *time.Time                      `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                      `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// GetAdminProxyStatsParamsPool defines parameters for GetAdminProxyStats.
+type GetAdminProxyStatsParamsPool string
+
+// GetAdminProxyStatsParamsIp defines parameters for GetAdminProxyStats.
+type GetAdminProxyStatsParamsIp string
+
+// GetAdminProxyStatsParamsStatus defines parameters for GetAdminProxyStats.
+type GetAdminProxyStatsParamsStatus string
+
+// PostAdminSystemProxyParams defines parameters for PostAdminSystemProxy.
+type PostAdminSystemProxyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchAdminProxyParams defines parameters for PatchAdminProxy.
+type PatchAdminProxyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProxyCheckParams defines parameters for PostAdminProxyCheck.
+type PostAdminProxyCheckParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -946,6 +1514,24 @@ type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 
 // PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
 type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
+
+// PostAdminProxyCheckBatchJSONRequestBody defines body for PostAdminProxyCheckBatch for application/json ContentType.
+type PostAdminProxyCheckBatchJSONRequestBody = CheckProxiesRequest
+
+// PostAdminProxyDeleteBatchJSONRequestBody defines body for PostAdminProxyDeleteBatch for application/json ContentType.
+type PostAdminProxyDeleteBatchJSONRequestBody = DeleteProxiesRequest
+
+// PostAdminProxyImportsJSONRequestBody defines body for PostAdminProxyImports for application/json ContentType.
+type PostAdminProxyImportsJSONRequestBody = ImportProxiesRequest
+
+// PostAdminResourceProxyJSONRequestBody defines body for PostAdminResourceProxy for application/json ContentType.
+type PostAdminResourceProxyJSONRequestBody = CreateProxyRequest
+
+// PostAdminSystemProxyJSONRequestBody defines body for PostAdminSystemProxy for application/json ContentType.
+type PostAdminSystemProxyJSONRequestBody = CreateProxyRequest
+
+// PatchAdminProxyJSONRequestBody defines body for PatchAdminProxy for application/json ContentType.
+type PatchAdminProxyJSONRequestBody = UpdateProxyRequest
 
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
@@ -1264,6 +1850,39 @@ type ServerInterface interface {
 	// List IAM permission catalog
 	// (GET /v1/admin/permissions)
 	GetAdminPermissions(c *gin.Context)
+	// List proxy pool entries
+	// (GET /v1/admin/proxies)
+	GetAdminProxies(c *gin.Context, params GetAdminProxiesParams)
+	// List resource proxy bindings
+	// (GET /v1/admin/proxies/bindings)
+	GetAdminProxyBindings(c *gin.Context, params GetAdminProxyBindingsParams)
+	// Check proxy pool entries by IDs or filter
+	// (POST /v1/admin/proxies/check)
+	PostAdminProxyCheckBatch(c *gin.Context, params PostAdminProxyCheckBatchParams)
+	// Delete proxy pool entries by IDs or filter
+	// (POST /v1/admin/proxies/delete)
+	PostAdminProxyDeleteBatch(c *gin.Context, params PostAdminProxyDeleteBatchParams)
+	// Import proxy pool entries in batch
+	// (POST /v1/admin/proxies/imports)
+	PostAdminProxyImports(c *gin.Context, params PostAdminProxyImportsParams)
+	// Create a resource proxy
+	// (POST /v1/admin/proxies/resource)
+	PostAdminResourceProxy(c *gin.Context, params PostAdminResourceProxyParams)
+	// Get proxy pool statistics
+	// (GET /v1/admin/proxies/stats)
+	GetAdminProxyStats(c *gin.Context, params GetAdminProxyStatsParams)
+	// Create a system fallback proxy
+	// (POST /v1/admin/proxies/system)
+	PostAdminSystemProxy(c *gin.Context, params PostAdminSystemProxyParams)
+	// Get proxy detail
+	// (GET /v1/admin/proxies/{proxyId})
+	GetAdminProxy(c *gin.Context, proxyId int)
+	// Update proxy status or expiration
+	// (PATCH /v1/admin/proxies/{proxyId})
+	PatchAdminProxy(c *gin.Context, proxyId int, params PatchAdminProxyParams)
+	// Check a proxy and update detected metadata
+	// (POST /v1/admin/proxies/{proxyId}/check)
+	PostAdminProxyCheck(c *gin.Context, proxyId int, params PostAdminProxyCheckParams)
 	// List supplier applications
 	// (GET /v1/admin/supplier-applications)
 	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
@@ -1572,6 +2191,613 @@ func (siw *ServerInterfaceWrapper) GetAdminPermissions(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminPermissions(c)
+}
+
+// GetAdminProxies operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProxies(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProxiesParams
+
+	// ------------- Optional query parameter "pool" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pool", c.Request.URL.Query(), &params.Pool, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter pool: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ip" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ip", c.Request.URL.Query(), &params.Ip, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ip: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ipv6" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ipv6", c.Request.URL.Query(), &params.Ipv6, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ipv6: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "country" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "country", c.Request.URL.Query(), &params.Country, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter country: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProxies(c, params)
+}
+
+// GetAdminProxyBindings operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProxyBindings(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProxyBindingsParams
+
+	// ------------- Optional query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "key", c.Request.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter key: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "proxyId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "proxyId", c.Request.URL.Query(), &params.ProxyId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter proxyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ip" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ip", c.Request.URL.Query(), &params.Ip, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ip: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProxyBindings(c, params)
+}
+
+// PostAdminProxyCheckBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProxyCheckBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProxyCheckBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProxyCheckBatch(c, params)
+}
+
+// PostAdminProxyDeleteBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProxyDeleteBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProxyDeleteBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProxyDeleteBatch(c, params)
+}
+
+// PostAdminProxyImports operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProxyImports(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProxyImportsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProxyImports(c, params)
+}
+
+// PostAdminResourceProxy operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminResourceProxy(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminResourceProxyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminResourceProxy(c, params)
+}
+
+// GetAdminProxyStats operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProxyStats(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProxyStatsParams
+
+	// ------------- Optional query parameter "pool" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pool", c.Request.URL.Query(), &params.Pool, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter pool: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ip" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ip", c.Request.URL.Query(), &params.Ip, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ip: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ipv6" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ipv6", c.Request.URL.Query(), &params.Ipv6, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ipv6: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "country" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "country", c.Request.URL.Query(), &params.Country, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter country: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProxyStats(c, params)
+}
+
+// PostAdminSystemProxy operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminSystemProxy(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminSystemProxyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminSystemProxy(c, params)
+}
+
+// GetAdminProxy operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProxy(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxyId" -------------
+	var proxyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxyId", c.Param("proxyId"), &proxyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter proxyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProxy(c, proxyId)
+}
+
+// PatchAdminProxy operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminProxy(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxyId" -------------
+	var proxyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxyId", c.Param("proxyId"), &proxyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter proxyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminProxyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminProxy(c, proxyId, params)
+}
+
+// PostAdminProxyCheck operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProxyCheck(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxyId" -------------
+	var proxyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxyId", c.Param("proxyId"), &proxyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter proxyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProxyCheckParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProxyCheck(c, proxyId, params)
 }
 
 // GetAdminSupplierApplications operation middleware
@@ -2816,6 +4042,17 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
 	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
+	router.GET(options.BaseURL+"/v1/admin/proxies", wrapper.GetAdminProxies)
+	router.GET(options.BaseURL+"/v1/admin/proxies/bindings", wrapper.GetAdminProxyBindings)
+	router.POST(options.BaseURL+"/v1/admin/proxies/check", wrapper.PostAdminProxyCheckBatch)
+	router.POST(options.BaseURL+"/v1/admin/proxies/delete", wrapper.PostAdminProxyDeleteBatch)
+	router.POST(options.BaseURL+"/v1/admin/proxies/imports", wrapper.PostAdminProxyImports)
+	router.POST(options.BaseURL+"/v1/admin/proxies/resource", wrapper.PostAdminResourceProxy)
+	router.GET(options.BaseURL+"/v1/admin/proxies/stats", wrapper.GetAdminProxyStats)
+	router.POST(options.BaseURL+"/v1/admin/proxies/system", wrapper.PostAdminSystemProxy)
+	router.GET(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.GetAdminProxy)
+	router.PATCH(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.PatchAdminProxy)
+	router.POST(options.BaseURL+"/v1/admin/proxies/:proxyId/check", wrapper.PostAdminProxyCheck)
 	router.GET(options.BaseURL+"/v1/admin/supplier-applications", wrapper.GetAdminSupplierApplications)
 	router.POST(options.BaseURL+"/v1/admin/supplier-applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
 	router.POST(options.BaseURL+"/v1/admin/supplier-applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)

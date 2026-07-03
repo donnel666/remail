@@ -415,6 +415,29 @@ body[theme-mode="dark"] .semi-always-light,
   background: var(--semi-color-bg-0);
 }
 
+.remail-date-range-dropdown .semi-datepicker-quick-control .semi-button {
+  border-color: var(--semi-color-border) !important;
+  background: var(--semi-color-fill-0) !important;
+  color: var(--semi-color-text-0) !important;
+}
+
+.remail-date-range-dropdown .semi-datepicker-quick-control .semi-button:hover {
+  border-color: var(--semi-color-border) !important;
+  background: var(--semi-color-fill-1) !important;
+  color: var(--semi-color-text-0) !important;
+}
+
+.remail-date-range-dropdown .semi-datepicker-quick-control .semi-button:active {
+  background: var(--semi-color-fill-2) !important;
+}
+
+.remail-date-range-dropdown
+  .semi-datepicker-quick-control
+  .semi-button
+  .semi-typography {
+  color: inherit !important;
+}
+
 @media (max-width: 767px) {
   .table-scroll-card {
     height: calc(100vh - 77px);

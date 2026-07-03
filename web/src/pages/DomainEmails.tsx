@@ -42,6 +42,8 @@ import {
 
 import { ImportDomainModal } from "./resources/domain-import-modal";
 import {
+  DATE_RANGE_DROPDOWN_CLASS,
+  createDateRangePresets,
   createdFromISOString,
   createdToISOString,
   matchesCreatedAtRange,
@@ -179,6 +181,7 @@ export default function DomainEmails() {
   const [pageSize, setPageSize] = useSharedPageSize();
   const refreshSeqRef = useRef(0);
   const locallyDeletedResourceIDsRef = useRef(new Set<number>());
+  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
 
   const refresh = useCallback(async () => {
@@ -960,6 +963,9 @@ export default function DomainEmails() {
           type="dateTimeRange"
           format="yyyy-MM-dd HH:mm:ss"
           placeholder={[t("Start time"), t("End time")]}
+          presetPosition="bottom"
+          presets={dateRangePresets}
+          dropdownClassName={DATE_RANGE_DROPDOWN_CLASS}
           showClear
           size="small"
           value={createdAtRange}
