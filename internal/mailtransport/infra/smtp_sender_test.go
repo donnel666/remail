@@ -6,15 +6,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
@@ -203,6 +207,89 @@ func TestSMTPDeliverySignsMessagesWhenDKIMEnabled(t *testing.T) {
 	assert.Contains(t, raw, "From: <no-reply@example.com>")
 }
 
+func TestDirectSMTPDeliveryUsesTCP4AndStandardSMTPFlow(t *testing.T) {
+	addr, dataCh, commands, stop := startDirectCapturingSMTPServer(t, false, tls.Certificate{})
+	defer stop()
+
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{
+		From:       "no-reply@example.com",
+		Domain:     "example.com",
+		HELODomain: "mx.example.com",
+	})
+	var dialNetworks []string
+	dialer := &net.Dialer{}
+	sender.dialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialNetworks = append(dialNetworks, network)
+		return dialer.DialContext(ctx, network, address)
+	}
+
+	err := sender.sendRawToTarget(
+		context.Background(),
+		addr,
+		"localhost",
+		"mx.example.com",
+		"no-reply@example.com",
+		"user@example.com",
+		[]byte("From: no-reply@example.com\r\nTo: user@example.com\r\nSubject: direct\r\n\r\nbody\r\n"),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"tcp4"}, dialNetworks)
+	raw := <-dataCh
+	assert.Contains(t, raw, "Subject: direct")
+	assert.Contains(t, raw, "body")
+	assert.Equal(t, []string{
+		"EHLO mx.example.com",
+		"MAIL FROM:<no-reply@example.com>",
+		"RCPT TO:<user@example.com>",
+		"DATA",
+		"QUIT",
+	}, commands())
+}
+
+func TestDirectSMTPDeliveryUpgradesWhenSTARTTLSAdvertised(t *testing.T) {
+	cert, roots := newTestServerTLS(t)
+	addr, dataCh, commands, stop := startDirectCapturingSMTPServer(t, true, cert)
+	defer stop()
+
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{
+		From:       "no-reply@example.com",
+		Domain:     "example.com",
+		HELODomain: "mx.example.com",
+	})
+	sender.tlsConfig = func(serverName string) *tls.Config {
+		return &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: serverName,
+			RootCAs:    roots,
+		}
+	}
+
+	err := sender.sendRawToTarget(
+		context.Background(),
+		addr,
+		"localhost",
+		"mx.example.com",
+		"no-reply@example.com",
+		"user@example.com",
+		[]byte("From: no-reply@example.com\r\nTo: user@example.com\r\nSubject: tls\r\n\r\nbody\r\n"),
+	)
+
+	require.NoError(t, err)
+	raw := <-dataCh
+	assert.Contains(t, raw, "Subject: tls")
+	assert.Contains(t, raw, "body")
+
+	commandList := commands()
+	firstEHLO := requireCommandIndex(t, commandList, "EHLO mx.example.com")
+	startTLS := requireCommandIndex(t, commandList, "STARTTLS")
+	secondEHLO := requireCommandLastIndex(t, commandList, "EHLO mx.example.com")
+	mailFrom := requireCommandIndex(t, commandList, "MAIL FROM:<no-reply@example.com>")
+	require.Less(t, firstEHLO, startTLS)
+	require.Less(t, startTLS, secondEHLO)
+	require.Less(t, secondEHLO, mailFrom)
+}
+
 func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 	t.Helper()
 
@@ -348,6 +435,148 @@ func startCapturingSMTPServer(t *testing.T) (string, <-chan string, func()) {
 	}
 }
 
+func startDirectCapturingSMTPServer(t *testing.T, advertiseSTARTTLS bool, cert tls.Certificate) (string, <-chan string, func() []string, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	dataCh := make(chan string, 1)
+	done := make(chan struct{})
+	var mu sync.Mutex
+	var active net.Conn
+	commands := make([]string, 0, 8)
+	recordCommand := func(line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		commands = append(commands, normalizeSMTPCommand(line))
+	}
+	commandSnapshot := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), commands...)
+	}
+
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		active = conn
+		mu.Unlock()
+		defer conn.Close()
+
+		rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+		writeSMTPLine(t, rw, "220 remail-test")
+		tlsActive := false
+		for {
+			line, err := rw.ReadString('\n')
+			if err != nil {
+				return
+			}
+			recordCommand(line)
+			cmd := strings.ToUpper(strings.TrimSpace(line))
+			switch {
+			case strings.HasPrefix(cmd, "EHLO"):
+				writeSMTPLine(t, rw, "250-remail-test")
+				if advertiseSTARTTLS && !tlsActive {
+					writeSMTPLine(t, rw, "250-STARTTLS")
+				}
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "STARTTLS"):
+				if !advertiseSTARTTLS {
+					writeSMTPLine(t, rw, "454 TLS not available")
+					continue
+				}
+				writeSMTPLine(t, rw, "220 Ready to start TLS")
+				tlsConn := tls.Server(conn, &tls.Config{
+					MinVersion:   tls.VersionTLS12,
+					Certificates: []tls.Certificate{cert},
+				})
+				if err := tlsConn.Handshake(); err != nil {
+					return
+				}
+				conn = tlsConn
+				mu.Lock()
+				active = conn
+				mu.Unlock()
+				rw = bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+				tlsActive = true
+			case strings.HasPrefix(cmd, "MAIL FROM:"):
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "RCPT TO:"):
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "DATA"):
+				writeSMTPLine(t, rw, "354 End data with <CR><LF>.<CR><LF>")
+				var data strings.Builder
+				for {
+					dataLine, err := rw.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if strings.TrimSpace(dataLine) == "." {
+						break
+					}
+					data.WriteString(dataLine)
+				}
+				dataCh <- data.String()
+				writeSMTPLine(t, rw, "250 queued")
+			case strings.HasPrefix(cmd, "QUIT"):
+				writeSMTPLine(t, rw, "221 bye")
+				return
+			default:
+				writeSMTPLine(t, rw, "250 OK")
+			}
+		}
+	}()
+
+	return ln.Addr().String(), dataCh, commandSnapshot, func() {
+		_ = ln.Close()
+		mu.Lock()
+		if active != nil {
+			_ = active.Close()
+		}
+		mu.Unlock()
+		<-done
+	}
+}
+
+func normalizeSMTPCommand(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) == 1 {
+		return strings.ToUpper(parts[0])
+	}
+	return strings.ToUpper(parts[0]) + " " + parts[1]
+}
+
+func requireCommandIndex(t *testing.T, commands []string, want string) int {
+	t.Helper()
+	for i, command := range commands {
+		if command == want {
+			return i
+		}
+	}
+	require.Failf(t, "smtp command not found", "want %q in %v", want, commands)
+	return -1
+}
+
+func requireCommandLastIndex(t *testing.T, commands []string, want string) int {
+	t.Helper()
+	for i := len(commands) - 1; i >= 0; i-- {
+		if commands[i] == want {
+			return i
+		}
+	}
+	require.Failf(t, "smtp command not found", "want %q in %v", want, commands)
+	return -1
+}
+
 func newTestDKIMSigner(t *testing.T) (*DKIMSigner, string) {
 	t.Helper()
 
@@ -363,6 +592,35 @@ func newTestDKIMSigner(t *testing.T) (*DKIMSigner, string) {
 
 	dnsRecord := "v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(publicKey)
 	return signer, dnsRecord
+}
+
+func newTestServerTLS(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+
+	roots := x509.NewCertPool()
+	require.True(t, roots.AppendCertsFromPEM(certPEM))
+	return cert, roots
 }
 
 func newTestEd25519PrivateKeyPEM(t *testing.T) ([]byte, ed25519.PublicKey) {

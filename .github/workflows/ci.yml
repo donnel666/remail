@@ -18,32 +18,8 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
-  backend:
+  backend-static:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: remail
-          MYSQL_USER: remail
-          MYSQL_PASSWORD: remail
-        options: >-
-          --health-cmd "mysqladmin ping -h localhost"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 3306:3306
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
 
     steps:
       - uses: actions/checkout@v4
@@ -101,12 +77,52 @@ jobs:
           pnpm generate:api
           git diff --exit-code -- src/lib/openapi/schema.ts
 
-      - name: Build frontend for embed
-        working-directory: web
-        run: |
-          pnpm build
-          mkdir -p ../cmd/server/webdist
-          cp -r dist/* ../cmd/server/webdist/
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+  backend-test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: remail
+          MYSQL_USER: remail
+          MYSQL_PASSWORD: remail
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 3306:3306
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install dependencies
+        run: go mod download
 
       - name: Start MinIO
         run: |
@@ -130,9 +146,6 @@ jobs:
           docker logs remail-ci-minio
           exit 1
 
-      - name: Run go vet
-        run: go vet ./...
-
       - name: Run tests
         run: go test ./... -v -count=1
         env:
@@ -144,11 +157,6 @@ jobs:
           MINIO_USE_SSL: "false"
           MINIO_BUCKET: "remail"
           SESSION_SECRET: "ci-test-secret"
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
 
   frontend:
     runs-on: ubuntu-latest
@@ -188,7 +196,7 @@ jobs:
         run: pnpm build
 
   smoke:
-    needs: [backend, frontend]
+    needs: [backend-static, backend-test, frontend]
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -332,6 +340,7 @@ jobs:
         run: kill "$SERVER_PID" 2>/dev/null || true
 
   docker:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     needs: [smoke]
     runs-on: ubuntu-latest
     steps:
@@ -350,7 +359,7 @@ jobs:
 
   image:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [docker]
+    needs: [smoke]
     runs-on: ubuntu-latest
 
     steps:

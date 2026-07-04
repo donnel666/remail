@@ -1,0 +1,1 @@
+placeholder for Go embed; real frontend assets are copied here during build.

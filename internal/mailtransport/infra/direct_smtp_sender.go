@@ -5,13 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/smtp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
-	gomail "github.com/wneessen/go-mail"
 )
 
 type DirectSMTPConfig struct {
@@ -23,14 +22,21 @@ type DirectSMTPConfig struct {
 }
 
 type DirectSMTPDelivery struct {
-	cfg DirectSMTPConfig
+	cfg         DirectSMTPConfig
+	dialContext func(context.Context, string, string) (net.Conn, error)
+	tlsConfig   func(serverName string) *tls.Config
 }
 
 func NewDirectSMTPDelivery(cfg DirectSMTPConfig) *DirectSMTPDelivery {
 	if cfg.DialTimeout == 0 {
 		cfg.DialTimeout = 15 * time.Second
 	}
-	return &DirectSMTPDelivery{cfg: cfg}
+	dialer := &net.Dialer{Timeout: cfg.DialTimeout}
+	return &DirectSMTPDelivery{
+		cfg:         cfg,
+		dialContext: dialer.DialContext,
+		tlsConfig:   directSMTPTLSConfig,
+	}
 }
 
 func (s *DirectSMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage) error {
@@ -66,25 +72,77 @@ func (s *DirectSMTPDelivery) sendToTarget(ctx context.Context, target, heloName,
 	if err != nil {
 		return err
 	}
-	portNum, err := strconv.Atoi(port)
-	if err != nil {
-		return err
+	if port == "" {
+		return fmt.Errorf("smtp target port is empty")
 	}
 	rawMessage, err := newSignedSMTPMessage(from, to, message, s.cfg.DKIM)
 	if err != nil {
 		return err
 	}
-	client, err := gomail.NewClient(host,
-		gomail.WithPort(portNum),
-		gomail.WithTimeout(s.cfg.DialTimeout),
-		gomail.WithHELO(heloName),
-		gomail.WithTLSPolicy(gomail.TLSOpportunistic),
-		gomail.WithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}),
-	)
+	return s.sendRawToTarget(ctx, target, host, heloName, from, to, rawMessage)
+}
+
+func (s *DirectSMTPDelivery) sendRawToTarget(ctx context.Context, target, tlsServerName, heloName, from, to string, rawMessage []byte) error {
+	conn, err := s.dialContext(ctx, "tcp4", target)
 	if err != nil {
-		return err
+		return fmt.Errorf("dial tcp4 failed: %w", err)
 	}
-	return sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage)
+	if deadline, ok := directSMTPDeadline(ctx, s.cfg.DialTimeout); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	client, err := smtp.NewClient(conn, tlsServerName)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("smtp client failed: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Hello(heloName); err != nil {
+		return fmt.Errorf("hello failed: %w", err)
+	}
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		tlsConfig := s.tlsConfig
+		if tlsConfig == nil {
+			tlsConfig = directSMTPTLSConfig
+		}
+		if err := client.StartTLS(tlsConfig(tlsServerName)); err != nil {
+			return fmt.Errorf("starttls failed: %w", err)
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("mail from failed: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to failed: %w", err)
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("data failed: %w", err)
+	}
+	if _, err := writer.Write(rawMessage); err != nil {
+		_ = writer.Close()
+		return fmt.Errorf("write failed: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("data close failed: %w", err)
+	}
+	_ = client.Quit()
+	return nil
+}
+
+func directSMTPDeadline(ctx context.Context, fallback time.Duration) (time.Time, bool) {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline, true
+	}
+	if fallback <= 0 {
+		return time.Time{}, false
+	}
+	return time.Now().Add(fallback * 2), true
+}
+
+func directSMTPTLSConfig(serverName string) *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
 }
 
 func lookupMXTargets(ctx context.Context, domainName string) ([]string, error) {

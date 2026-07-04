@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -13,71 +14,23 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+var coreMySQLTestServer = testmysql.New("remail_core_test")
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = coreMySQLTestServer.Close(context.Background())
+	os.Exit(code)
+}
 
 func newCoreMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	ctx := context.Background()
-	req := testcontainers.ContainerRequest{
-		Image:        "mysql:8.0",
-		ExposedPorts: []string{"3306/tcp"},
-		Env: map[string]string{
-			"MYSQL_ROOT_PASSWORD": "root",
-			"MYSQL_DATABASE":      "remail_test",
-			"MYSQL_USER":          "remail",
-			"MYSQL_PASSWORD":      "remail",
-		},
-		WaitingFor: wait.ForListeningPort("3306/tcp").WithStartupTimeout(2 * time.Minute),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, container.Terminate(context.Background()))
-	})
-
-	host, err := container.Host(ctx)
-	require.NoError(t, err)
-	port, err := container.MappedPort(ctx, "3306/tcp")
-	require.NoError(t, err)
-
-	dsn := fmt.Sprintf("remail:remail@tcp(%s:%s)/remail_test?charset=utf8mb4&parseTime=True&loc=Local", host, port.Port())
-	var db *gorm.DB
-	var sqlDB *sql.DB
-	var lastErr error
-	require.Eventually(t, func() bool {
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-
-		db, lastErr = gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
-		if lastErr != nil {
-			return false
-		}
-
-		sqlDB, lastErr = db.DB()
-		if lastErr != nil {
-			return false
-		}
-		lastErr = sqlDB.PingContext(ctx)
-		return lastErr == nil
-	}, 30*time.Second, 500*time.Millisecond, "mysql did not become ready: %v", lastErr)
-	t.Cleanup(func() {
-		require.NoError(t, sqlDB.Close())
-	})
-
-	require.NoError(t, platform.RunMigrations(sqlDB, coreMigrationsDir(t)))
-	return db
+	return coreMySQLTestServer.Database(t, coreMigrationsDir(t))
 }
 
 func coreMigrationsDir(t *testing.T) string {

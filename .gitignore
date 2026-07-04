@@ -1,7 +1,9 @@
 # Go
 /tmp/
 cmd/server/server
-cmd/server/webdist/
+cmd/server/webdist/*
+!cmd/server/webdist/
+!cmd/server/webdist/placeholder.txt
 *.exe
 *.test
 *.out
