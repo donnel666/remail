@@ -39,6 +39,12 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "no-reply@aishop6.com", cfg.SMTP.From)
 	assert.Equal(t, "aishop6.com", cfg.SMTP.Domain)
 	assert.Equal(t, "mx.aishop6.com", cfg.SMTP.HELODomain)
+	assert.False(t, cfg.SMTP.DKIMEnabled)
+	assert.Equal(t, "aishop6.com", cfg.SMTP.DKIMDomain)
+	assert.Equal(t, "mx", cfg.SMTP.DKIMSelector)
+	assert.Equal(t, "", cfg.SMTP.DKIMAlgorithm)
+	assert.Equal(t, "", cfg.SMTP.DKIMPrivateKey)
+	assert.Equal(t, "", cfg.SMTP.DKIMPrivateKeyFile)
 	assert.False(t, cfg.SMTP.InboundEnabled)
 	assert.Equal(t, ":2525", cfg.SMTP.InboundAddr)
 	assert.Equal(t, "mx.aishop6.com", cfg.SMTP.InboundDomain)
@@ -64,4 +70,42 @@ func TestConfigValidateRelayRequiresAddr(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SMTP_ADDR")
+}
+
+func TestConfigLoadDKIM(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("SMTP_DKIM_ENABLED", "true")
+	t.Setenv("SMTP_DKIM_DOMAIN", "example.com")
+	t.Setenv("SMTP_DKIM_SELECTOR", "mx")
+	t.Setenv("SMTP_DKIM_ALGORITHM", "ed25519-sha256")
+	t.Setenv("SMTP_DKIM_IDENTITY", "@example.com")
+	t.Setenv("SMTP_DKIM_PRIVATE_KEY_FILE", "/run/secrets/smtp-dkim-private-key.pem")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.True(t, cfg.SMTP.DKIMEnabled)
+	assert.Equal(t, "example.com", cfg.SMTP.DKIMDomain)
+	assert.Equal(t, "mx", cfg.SMTP.DKIMSelector)
+	assert.Equal(t, "ed25519-sha256", cfg.SMTP.DKIMAlgorithm)
+	assert.Equal(t, "@example.com", cfg.SMTP.DKIMIdentity)
+	assert.Equal(t, "/run/secrets/smtp-dkim-private-key.pem", cfg.SMTP.DKIMPrivateKeyFile)
+}
+
+func TestConfigRejectsAmbiguousDKIMPrivateKeySource(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("SMTP_DKIM_ENABLED", "true")
+	t.Setenv("SMTP_DKIM_PRIVATE_KEY", "private-key")
+	t.Setenv("SMTP_DKIM_PRIVATE_KEY_FILE", "/run/secrets/smtp-dkim-private-key.pem")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot both be set")
 }

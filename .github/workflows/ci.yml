@@ -474,10 +474,18 @@ jobs:
           MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          SMTP_DKIM_PRIVATE_KEY: ${{ secrets.SMTP_DKIM_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
           umask 077
-          mkdir -p /opt/remail/certs
+          mkdir -p /opt/remail/certs /opt/remail/secrets
           cp deploy/compose.yml deploy/nginx.conf /opt/remail/
+          if [ -z "$SMTP_DKIM_PRIVATE_KEY" ]; then
+            echo "SMTP_DKIM_PRIVATE_KEY GitHub secret is required" >&2
+            exit 1
+          fi
+          printf '%s\n' "$SMTP_DKIM_PRIVATE_KEY" > /opt/remail/secrets/smtp-dkim-private-key.pem
+          chmod 600 /opt/remail/secrets/smtp-dkim-private-key.pem
           cat > /opt/remail/.env <<EOF
           APP_IMAGE=${APP_IMAGE}
           DEPLOY_DOMAIN=${DEPLOY_DOMAIN}
@@ -499,6 +507,12 @@ jobs:
           SMTP_FROM=no-reply@aishop6.com
           SMTP_DOMAIN=aishop6.com
           SMTP_HELO_DOMAIN=mx.aishop6.com
+          SMTP_DKIM_ENABLED=true
+          SMTP_DKIM_DOMAIN=aishop6.com
+          SMTP_DKIM_SELECTOR=mx
+          SMTP_DKIM_ALGORITHM=ed25519-sha256
+          SMTP_DKIM_IDENTITY=@aishop6.com
+          SMTP_DKIM_PRIVATE_KEY_FILE=/run/secrets/smtp-dkim-private-key.pem
           SMTP_INBOUND_ENABLED=true
           SMTP_INBOUND_ADDR=:2525
           SMTP_INBOUND_DOMAIN=mx.aishop6.com

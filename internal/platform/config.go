@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -58,6 +59,13 @@ type SMTPConfig struct {
 	From                   string
 	Domain                 string
 	HELODomain             string
+	DKIMEnabled            bool
+	DKIMDomain             string
+	DKIMSelector           string
+	DKIMAlgorithm          string
+	DKIMIdentity           string
+	DKIMPrivateKey         string
+	DKIMPrivateKeyFile     string
 	InboundEnabled         bool
 	InboundAddr            string
 	InboundDomain          string
@@ -172,6 +180,27 @@ func (c *Config) validate() error {
 	if c.SMTP.Mode == "relay" && c.SMTP.Addr == "" {
 		return fmt.Errorf("SMTP_ADDR is required when SMTP_MODE=relay")
 	}
+	if c.SMTP.DKIMEnabled {
+		if c.SMTP.DKIMDomain == "" {
+			return fmt.Errorf("SMTP_DKIM_DOMAIN is required when SMTP_DKIM_ENABLED=true")
+		}
+		if c.SMTP.DKIMSelector == "" {
+			return fmt.Errorf("SMTP_DKIM_SELECTOR is required when SMTP_DKIM_ENABLED=true")
+		}
+		hasRawDKIMPrivateKey := strings.TrimSpace(c.SMTP.DKIMPrivateKey) != ""
+		hasDKIMPrivateKeyFile := strings.TrimSpace(c.SMTP.DKIMPrivateKeyFile) != ""
+		if !hasRawDKIMPrivateKey && !hasDKIMPrivateKeyFile {
+			return fmt.Errorf("SMTP_DKIM_PRIVATE_KEY or SMTP_DKIM_PRIVATE_KEY_FILE is required when SMTP_DKIM_ENABLED=true")
+		}
+		if hasRawDKIMPrivateKey && hasDKIMPrivateKeyFile {
+			return fmt.Errorf("SMTP_DKIM_PRIVATE_KEY and SMTP_DKIM_PRIVATE_KEY_FILE cannot both be set")
+		}
+		switch c.SMTP.DKIMAlgorithm {
+		case "", "ed25519-sha256", "rsa-sha256":
+		default:
+			return fmt.Errorf("SMTP_DKIM_ALGORITHM must be ed25519-sha256 or rsa-sha256")
+		}
+	}
 	return nil
 }
 
@@ -185,6 +214,13 @@ func loadSMTPConfig() SMTPConfig {
 		From:                   getEnv("SMTP_FROM", "no-reply@aishop6.com"),
 		Domain:                 getEnv("SMTP_DOMAIN", "aishop6.com"),
 		HELODomain:             heloDomain,
+		DKIMEnabled:            getBool("SMTP_DKIM_ENABLED", false),
+		DKIMDomain:             getEnv("SMTP_DKIM_DOMAIN", getEnv("SMTP_DOMAIN", "aishop6.com")),
+		DKIMSelector:           getEnv("SMTP_DKIM_SELECTOR", "mx"),
+		DKIMAlgorithm:          getEnv("SMTP_DKIM_ALGORITHM", ""),
+		DKIMIdentity:           getEnv("SMTP_DKIM_IDENTITY", ""),
+		DKIMPrivateKey:         getEnv("SMTP_DKIM_PRIVATE_KEY", ""),
+		DKIMPrivateKeyFile:     getEnv("SMTP_DKIM_PRIVATE_KEY_FILE", ""),
 		InboundEnabled:         getBool("SMTP_INBOUND_ENABLED", false),
 		InboundAddr:            getEnv("SMTP_INBOUND_ADDR", ":2525"),
 		InboundDomain:          getEnv("SMTP_INBOUND_DOMAIN", heloDomain),

@@ -1,9 +1,11 @@
 package infra
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	stdmail "net/mail"
 	"regexp"
@@ -22,6 +24,7 @@ type SMTPConfig struct {
 	Username string
 	Password string
 	From     string
+	DKIM     *DKIMSigner
 }
 
 type SMTPDelivery struct {
@@ -51,7 +54,7 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	if err != nil {
 		return deliveryError("invalid smtp port", err)
 	}
-	mailMessage, err := newSMTPMessage(from, to, message)
+	rawMessage, err := newSignedSMTPMessage(from, to, message, s.cfg.DKIM)
 	if err != nil {
 		return deliveryError("smtp message failed", err)
 	}
@@ -80,20 +83,38 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	if err != nil {
 		return deliveryError("smtp client failed", err)
 	}
-	if err := sendMailWithAcceptedClose(ctx, client, mailMessage); err != nil {
+	if err := sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage); err != nil {
 		return deliveryError("smtp send failed", err)
 	}
 	return nil
 }
 
-func sendMailWithAcceptedClose(ctx context.Context, client *gomail.Client, message *gomail.Msg) error {
+func sendRawMailWithAcceptedClose(ctx context.Context, client *gomail.Client, from string, to string, rawMessage []byte) error {
 	smtpClient, err := client.DialToSMTPClientWithContext(ctx)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
 	}
-	if err := client.SendWithSMTPClient(smtpClient, message); err != nil {
+	if err := smtpClient.Mail(from); err != nil {
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("send failed: %w", err)
+		return fmt.Errorf("mail from failed: %w", err)
+	}
+	if err := smtpClient.Rcpt(to); err != nil {
+		_ = client.CloseWithSMTPClient(smtpClient)
+		return fmt.Errorf("rcpt to failed: %w", err)
+	}
+	writer, err := smtpClient.Data()
+	if err != nil {
+		_ = client.CloseWithSMTPClient(smtpClient)
+		return fmt.Errorf("data failed: %w", err)
+	}
+	if _, err := io.Copy(writer, bytes.NewReader(rawMessage)); err != nil {
+		_ = writer.Close()
+		_ = client.CloseWithSMTPClient(smtpClient)
+		return fmt.Errorf("write failed: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		_ = client.CloseWithSMTPClient(smtpClient)
+		return fmt.Errorf("data close failed: %w", err)
 	}
 	_ = client.CloseWithSMTPClient(smtpClient)
 	return nil
@@ -148,6 +169,29 @@ func newSMTPMessage(from string, to string, message domain.OutboundMessage) (*go
 		}
 	}
 	return msg, nil
+}
+
+func newSignedSMTPMessage(from string, to string, message domain.OutboundMessage, signer *DKIMSigner) ([]byte, error) {
+	mailMessage, err := newSMTPMessage(from, to, message)
+	if err != nil {
+		return nil, err
+	}
+	rawMessage, err := renderSMTPMessageBytes(mailMessage)
+	if err != nil {
+		return nil, err
+	}
+	if signer == nil {
+		return rawMessage, nil
+	}
+	return signer.Sign(rawMessage)
+}
+
+func renderSMTPMessageBytes(message *gomail.Msg) ([]byte, error) {
+	var raw bytes.Buffer
+	if _, err := message.WriteTo(&raw); err != nil {
+		return nil, err
+	}
+	return raw.Bytes(), nil
 }
 
 func deliveryError(stage string, err error) error {

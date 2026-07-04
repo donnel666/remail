@@ -41,16 +41,19 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
-	var err error
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
+		sender, err := mailSender(p.SMTP)
+		if err != nil {
+			return nil, cleanup, err
+		}
 		mailMod, err = mailapi.NewMailTransportModule(
 			p.DB,
 			fileStore,
 			p.Asynq,
-			mailSender(p.SMTP),
+			sender,
 			outboundSender(p.SMTP),
 			mailinfra.InboundSMTPConfig{
 				Enabled:         p.SMTP.InboundEnabled,
@@ -106,20 +109,34 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	return r, cleanup, nil
 }
 
-func mailSender(cfg platform.SMTPConfig) mailapp.SenderPort {
+func mailSender(cfg platform.SMTPConfig) (mailapp.SenderPort, error) {
+	dkimSigner, err := mailinfra.NewDKIMSigner(mailinfra.DKIMConfig{
+		Enabled:        cfg.DKIMEnabled,
+		Domain:         cfg.DKIMDomain,
+		Selector:       cfg.DKIMSelector,
+		Algorithm:      cfg.DKIMAlgorithm,
+		Identity:       cfg.DKIMIdentity,
+		PrivateKey:     cfg.DKIMPrivateKey,
+		PrivateKeyFile: cfg.DKIMPrivateKeyFile,
+	})
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Mode == "relay" {
 		return mailinfra.NewSMTPDelivery(mailinfra.SMTPConfig{
 			Addr:     cfg.Addr,
 			Username: cfg.Username,
 			Password: cfg.Password,
 			From:     cfg.From,
-		})
+			DKIM:     dkimSigner,
+		}), nil
 	}
 	return mailinfra.NewDirectSMTPDelivery(mailinfra.DirectSMTPConfig{
 		From:       cfg.From,
 		Domain:     cfg.Domain,
 		HELODomain: cfg.HELODomain,
-	})
+		DKIM:       dkimSigner,
+	}), nil
 }
 
 func outboundSender(cfg platform.SMTPConfig) string {

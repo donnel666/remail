@@ -30,6 +30,31 @@ func TestServeEmbeddedFrontendServesRootAssetBeforeSPAFallback(t *testing.T) {
 	}
 }
 
+func TestServeEmbeddedFrontendServesWellKnownAssetBeforeSPAFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	serveEmbeddedFrontend(r, fstest.MapFS{
+		"index.html":                  {Data: []byte("<!doctype html><div id=\"root\"></div>")},
+		".well-known/bimi/logo.svg":   {Data: []byte("<svg></svg>")},
+		".well-known/bimi/readme.txt": {Data: []byte("well-known")},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/bimi/logo.svg", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if got := w.Body.String(); got != "<svg></svg>" {
+		t.Fatalf("expected BIMI asset body, got %q", got)
+	}
+	if got := w.Header().Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("expected SVG content type, got %q", got)
+	}
+}
+
 func TestServeEmbeddedFrontendFallsBackToIndexForSPARoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -4,6 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net"
@@ -13,6 +18,7 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/emersion/go-msgauth/dkim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,6 +56,80 @@ func TestSMTPMessageSanitizesHeadersAndHTML(t *testing.T) {
 	assert.NotContains(t, raw, "\r\nBcc:")
 	assert.NotContains(t, raw, "\r\nCc:")
 	assert.Contains(t, raw, "&lt;123456&gt;")
+}
+
+func TestDKIMSignerSignsAndVerifiesEd25519Message(t *testing.T) {
+	signer, dnsRecord := newTestDKIMSigner(t)
+	msg, err := newSMTPMessage("no-reply@example.com", "user@example.com", mailapp.VerificationCodeMessage("user@example.com", "123456"))
+	require.NoError(t, err)
+	raw, err := renderSMTPMessageBytes(msg)
+	require.NoError(t, err)
+
+	signed, err := signer.Sign(raw)
+	require.NoError(t, err)
+
+	signedText := string(signed)
+	assert.Contains(t, signedText, "DKIM-Signature:")
+	assert.Contains(t, signedText, "a=ed25519-sha256")
+	assert.Contains(t, signedText, "d=example.com")
+	assert.Contains(t, signedText, "s=mx")
+	assert.Contains(t, signedText, "c=relaxed/relaxed")
+
+	verifications, err := dkim.VerifyWithOptions(bytes.NewReader(signed), &dkim.VerifyOptions{
+		LookupTXT: func(domain string) ([]string, error) {
+			assert.Equal(t, "mx._domainkey.example.com", domain)
+			return []string{dnsRecord}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, verifications, 1)
+	require.NoError(t, verifications[0].Err)
+	assert.Equal(t, "example.com", verifications[0].Domain)
+}
+
+func TestDKIMSignerRejectsAlgorithmMismatch(t *testing.T) {
+	privateKeyPEM, _ := newTestEd25519PrivateKeyPEM(t)
+
+	_, err := NewDKIMSigner(DKIMConfig{
+		Enabled:    true,
+		Domain:     "example.com",
+		Selector:   "mx",
+		Algorithm:  "rsa-sha256",
+		PrivateKey: string(privateKeyPEM),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "algorithm mismatch")
+}
+
+func TestDKIMSignerRejectsIdentityOutsideSigningDomain(t *testing.T) {
+	privateKeyPEM, _ := newTestEd25519PrivateKeyPEM(t)
+
+	_, err := NewDKIMSigner(DKIMConfig{
+		Enabled:    true,
+		Domain:     "example.com",
+		Selector:   "mx",
+		Identity:   "no-reply@evil.test",
+		PrivateKey: string(privateKeyPEM),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "identity must belong")
+}
+
+func TestDKIMSignerRejectsAmbiguousPrivateKeySource(t *testing.T) {
+	privateKeyPEM, _ := newTestEd25519PrivateKeyPEM(t)
+
+	_, err := NewDKIMSigner(DKIMConfig{
+		Enabled:        true,
+		Domain:         "example.com",
+		Selector:       "mx",
+		PrivateKey:     string(privateKeyPEM),
+		PrivateKeyFile: "/run/secrets/smtp-dkim-private-key.pem",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
 }
 
 func TestNormalizeSMTPAddrDefaultsHostOnlyToSubmissionPort(t *testing.T) {
@@ -106,6 +186,21 @@ func TestSMTPDeliveryTreatsQuitFailureAfterDataAsAccepted(t *testing.T) {
 	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
 
 	require.NoError(t, err)
+}
+
+func TestSMTPDeliverySignsMessagesWhenDKIMEnabled(t *testing.T) {
+	signer, _ := newTestDKIMSigner(t)
+	addr, dataCh, stop := startCapturingSMTPServer(t)
+	defer stop()
+
+	sender := NewSMTPDelivery(SMTPConfig{Addr: addr, From: "no-reply@example.com", DKIM: signer})
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	require.NoError(t, err)
+	raw := <-dataCh
+	assert.Contains(t, raw, "DKIM-Signature:")
+	assert.Contains(t, raw, "a=ed25519-sha256")
+	assert.Contains(t, raw, "From: <no-reply@example.com>")
 }
 
 func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
@@ -179,6 +274,105 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 		mu.Unlock()
 		<-done
 	}
+}
+
+func startCapturingSMTPServer(t *testing.T) (string, <-chan string, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	dataCh := make(chan string, 1)
+	done := make(chan struct{})
+	var mu sync.Mutex
+	var active net.Conn
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		active = conn
+		mu.Unlock()
+		defer conn.Close()
+
+		rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+		writeSMTPLine(t, rw, "220 remail-test")
+		for {
+			line, err := rw.ReadString('\n')
+			if err != nil {
+				return
+			}
+			cmd := strings.ToUpper(strings.TrimSpace(line))
+			switch {
+			case strings.HasPrefix(cmd, "EHLO"):
+				writeSMTPLine(t, rw, "250-remail-test")
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "MAIL FROM:"):
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "RCPT TO:"):
+				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "DATA"):
+				writeSMTPLine(t, rw, "354 End data with <CR><LF>.<CR><LF>")
+				var data strings.Builder
+				for {
+					dataLine, err := rw.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if strings.TrimSpace(dataLine) == "." {
+						break
+					}
+					data.WriteString(dataLine)
+				}
+				dataCh <- data.String()
+				writeSMTPLine(t, rw, "250 queued")
+			case strings.HasPrefix(cmd, "QUIT"):
+				writeSMTPLine(t, rw, "221 bye")
+				return
+			default:
+				writeSMTPLine(t, rw, "250 OK")
+			}
+		}
+	}()
+
+	return ln.Addr().String(), dataCh, func() {
+		_ = ln.Close()
+		mu.Lock()
+		if active != nil {
+			_ = active.Close()
+		}
+		mu.Unlock()
+		<-done
+	}
+}
+
+func newTestDKIMSigner(t *testing.T) (*DKIMSigner, string) {
+	t.Helper()
+
+	privateKeyPEM, publicKey := newTestEd25519PrivateKeyPEM(t)
+	signer, err := NewDKIMSigner(DKIMConfig{
+		Enabled:    true,
+		Domain:     "example.com",
+		Selector:   "mx",
+		Algorithm:  "ed25519-sha256",
+		PrivateKey: string(privateKeyPEM),
+	})
+	require.NoError(t, err)
+
+	dnsRecord := "v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(publicKey)
+	return signer, dnsRecord
+}
+
+func newTestEd25519PrivateKeyPEM(t *testing.T) ([]byte, ed25519.PublicKey) {
+	t.Helper()
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), publicKey
 }
 
 func writeSMTPLine(t *testing.T, rw *bufio.ReadWriter, line string) {

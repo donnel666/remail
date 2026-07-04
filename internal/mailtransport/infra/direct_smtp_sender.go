@@ -19,6 +19,7 @@ type DirectSMTPConfig struct {
 	Domain      string
 	HELODomain  string
 	DialTimeout time.Duration
+	DKIM        *DKIMSigner
 }
 
 type DirectSMTPDelivery struct {
@@ -69,7 +70,7 @@ func (s *DirectSMTPDelivery) sendToTarget(ctx context.Context, target, heloName,
 	if err != nil {
 		return err
 	}
-	mailMessage, err := newSMTPMessage(from, to, message)
+	rawMessage, err := newSignedSMTPMessage(from, to, message, s.cfg.DKIM)
 	if err != nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func (s *DirectSMTPDelivery) sendToTarget(ctx context.Context, target, heloName,
 	if err != nil {
 		return err
 	}
-	return sendMailWithAcceptedClose(ctx, client, mailMessage)
+	return sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage)
 }
 
 func lookupMXTargets(ctx context.Context, domainName string) ([]string, error) {
