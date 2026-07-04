@@ -108,6 +108,15 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
+func sortedAnyKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sortStrings(keys)
+	return keys
+}
+
 func sortStrings(values []string) {
 	if len(values) < 2 {
 		return

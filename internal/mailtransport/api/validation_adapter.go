@@ -7,6 +7,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 )
@@ -41,6 +42,10 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 	}
 
 	preferredBindingAddress, err := a.preferredBindingAddress(ctx, req.ResourceID)
+	if err != nil {
+		return coreapp.MicrosoftValidationResult{}, err
+	}
+	preferredBindingAddress, err = a.prepareBindingAddress(ctx, req, preferredBindingAddress)
 	if err != nil {
 		return coreapp.MicrosoftValidationResult{}, err
 	}
@@ -118,15 +123,13 @@ func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreap
 	if a == nil || a.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
-	ipVersion := proxydomain.ProxyIPAuto
 	purpose := proxydomain.ProxyPurposeAuth
 	if strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.RefreshToken) == "" {
-		ipVersion = proxydomain.ProxyIPv4
 		purpose = proxydomain.ProxyPurposeBinding
 	}
 	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
 		Key:                 strings.ToLower(strings.TrimSpace(req.EmailAddress)),
-		IPVersion:           ipVersion,
+		IPVersion:           proxydomain.ProxyIPv4,
 		Purpose:             purpose,
 		AllowSystemFallback: true,
 		Attempt:             attempt,
@@ -221,6 +224,27 @@ func (a *ResourceValidationAdapter) preferredBindingAddress(ctx context.Context,
 		return "", nil
 	}
 	return a.bindings.PreferredAddress(ctx, resourceID)
+}
+
+func (a *ResourceValidationAdapter) prepareBindingAddress(ctx context.Context, req coreapp.MicrosoftValidationRequest, preferredBindingAddress string) (string, error) {
+	if a == nil || a.bindings == nil {
+		return preferredBindingAddress, nil
+	}
+	if strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != "" {
+		return preferredBindingAddress, nil
+	}
+	bindingAddress := strings.TrimSpace(preferredBindingAddress)
+	if bindingAddress == "" {
+		generated, err := msacl.DeterministicAuxiliaryAddress(req.EmailAddress)
+		if err != nil {
+			return "", err
+		}
+		bindingAddress = generated
+	}
+	if err := a.bindings.EnsureForValidation(ctx, req.ResourceID, req.OwnerUserID, req.EmailAddress, bindingAddress); err != nil {
+		return "", err
+	}
+	return bindingAddress, nil
 }
 
 func (a *ResourceValidationAdapter) recordBindingResult(ctx context.Context, req coreapp.MicrosoftValidationRequest, result mailinfra.MicrosoftOAuthResult) error {

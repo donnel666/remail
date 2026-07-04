@@ -15,9 +15,12 @@ import (
 	"time"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	"github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"gorm.io/gorm"
 )
+
+const msaclContentSearchWindow = 10 * time.Minute
 
 type MSACLMailboxReader struct {
 	db    *gorm.DB
@@ -40,7 +43,7 @@ func (r *MSACLMailboxReader) List(ctx context.Context, mailbox string, limit int
 		limit = 50
 	}
 
-	query := r.db.WithContext(ctx).Model(&InboundMailModel{})
+	query := r.db.WithContext(ctx).Model(&InboundMailModel{}).Where("status IN ?", msaclReadableInboundStatuses())
 	if fuzzy && !strings.Contains(mailbox, "@") {
 		query = query.Where("recipient LIKE ?", mailbox+"%")
 	} else {
@@ -67,8 +70,11 @@ func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string
 	}
 
 	var rows []InboundMailModel
+	since := time.Now().UTC().Add(-msaclContentSearchWindow)
 	if err := r.db.WithContext(ctx).
 		Model(&InboundMailModel{}).
+		Where("status IN ?", msaclReadableInboundStatuses()).
+		Where("created_at >= ?", since).
 		Order("created_at DESC, id DESC").
 		Limit(limit * 4).
 		Find(&rows).Error; err != nil {
@@ -90,6 +96,14 @@ func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string
 		}
 	}
 	return filtered, nil
+}
+
+func msaclReadableInboundStatuses() []string {
+	return []string{
+		string(domain.InboundStatusPending),
+		string(domain.InboundStatusProcessing),
+		string(domain.InboundStatusStored),
+	}
 }
 
 func (r *MSACLMailboxReader) rowsToEmailObjects(ctx context.Context, rows []InboundMailModel) ([]msacl.EmailObj, error) {

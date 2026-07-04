@@ -153,9 +153,8 @@ stateDiagram-v2
 
 | 场景 | IP 要求 |
 |------|---------|
-| 辅助邮箱绑定 | 强制 `ipv4`，因为目标服务器不支持 IPv6。 |
-| Microsoft 收件/Graph 拉取 | 可用 `auto`，允许 IPv6。 |
-| 普通 Microsoft 授权 | 默认 `auto`，调用方可强制 IPv4/IPv6。 |
+| Microsoft 资源验证 | 获取 RT、刷新 AT、Graph 拉取和辅助邮箱绑定统一强制 `ipv4`，因为 Microsoft 验证链路在当前环境不支持 IPv6 代理。 |
+| 其他 Microsoft 调用 | 默认仍通过调用方明确传入 `auto/ipv4/ipv6`；未明确前不得复用资源验证的 IPv4 约束。 |
 
 资源池选择流程：
 
@@ -205,7 +204,7 @@ stateDiagram-v2
 | INV-P4 | `system` 池只做兜底轮转，不创建绑定关系。 |
 | INV-P5 | 检测中的可重试错误在任务内部最多尝试 3 次；仍失败必须置 `abnormal`。系统检测和运行期错误都不得自动禁用代理，`disabled` 只能由管理员显式操作产生。 |
 | INV-P6 | 设置了 `expireAt` 的代理过期后不可再被选择，过期扫描只允许把 `normal/abnormal` 置为 `expired`，不得覆盖 `checking/disabled`；未设置有效期的代理不参与过期扫描。`expired` 不阻塞检测、编辑、删除和禁用。 |
-| INV-P7 | 选择代理必须支持 `auto/ipv4/ipv6`，辅助邮箱绑定强制 IPv4。 |
+| INV-P7 | 选择代理必须支持 `auto/ipv4/ipv6`；Microsoft 资源验证链路必须强制请求 IPv4。 |
 | INV-P8 | 同等健康度下资源池选择优先绑定数最少，避免少数代理被过度绑定。 |
 | INV-P9 | 同一业务链路最多尝试 3 次代理路线，之后必须切换系统直连；直连失败不计入代理错误。 |
 | INV-P10 | 只有 `normal` 代理可被选择；历史 normal 数据如存在 `errors > 0`，仍必须优先选择 `errors` 更低的代理。 |

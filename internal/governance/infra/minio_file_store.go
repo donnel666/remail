@@ -26,18 +26,34 @@ func NewMinIOFileStore(client *minio.Client, bucket string) *MinIOFileStore {
 
 // SavePrivate writes a private file and returns safe storage metadata.
 func (s *MinIOFileStore) SavePrivate(ctx context.Context, file domain.PrivateFile) (*domain.StoredPrivateFile, error) {
+	return s.SavePrivateStream(ctx, domain.PrivateFileStream{
+		ObjectKey:   file.ObjectKey,
+		FileName:    file.FileName,
+		ContentType: file.ContentType,
+		Content:     bytes.NewReader(file.ContentBytes),
+		Size:        int64(len(file.ContentBytes)),
+	})
+}
+
+// SavePrivateStream writes a private file from a stream and returns safe storage metadata.
+func (s *MinIOFileStore) SavePrivateStream(ctx context.Context, file domain.PrivateFileStream) (*domain.StoredPrivateFile, error) {
 	if file.ObjectKey == "" {
 		return nil, fmt.Errorf("private file object key is required")
 	}
 	if file.ContentType == "" {
 		file.ContentType = "application/octet-stream"
 	}
+	if file.Content == nil {
+		return nil, fmt.Errorf("private file content is required")
+	}
+	if file.Size < 0 {
+		return nil, fmt.Errorf("private file size is required")
+	}
 	if err := s.ensureBucket(ctx); err != nil {
 		return nil, err
 	}
 
-	reader := bytes.NewReader(file.ContentBytes)
-	_, err := s.client.PutObject(ctx, s.bucket, file.ObjectKey, reader, int64(len(file.ContentBytes)), minio.PutObjectOptions{
+	_, err := s.client.PutObject(ctx, s.bucket, file.ObjectKey, file.Content, file.Size, minio.PutObjectOptions{
 		ContentType: file.ContentType,
 		UserMetadata: map[string]string{
 			"file-name": file.FileName,
@@ -51,7 +67,7 @@ func (s *MinIOFileStore) SavePrivate(ctx context.Context, file domain.PrivateFil
 		ObjectKey:   file.ObjectKey,
 		FileName:    file.FileName,
 		ContentType: file.ContentType,
-		Size:        int64(len(file.ContentBytes)),
+		Size:        file.Size,
 	}, nil
 }
 

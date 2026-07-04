@@ -32,11 +32,7 @@ func requestDeviceCode(session *Session) (string, string, error) {
 	var data map[string]any
 	if err := resp.JSON(&data); err != nil {
 		logError("devicecode 返回非 JSON: status=%d", resp.StatusCode)
-		if len(resp.Body) > 200 {
-			logDebug("devicecode 非 JSON 响应片段: %q", resp.Body[:200])
-		} else {
-			logDebug("devicecode 非 JSON 响应片段: %q", resp.Body)
-		}
+		logDebug("devicecode 非 JSON 响应: body_len=%d", len(resp.Body))
 		return "", "", newAuthError(fmt.Sprintf("获取 device code 失败 (HTTP %d)", resp.StatusCode))
 	}
 	userCode := asString(data["user_code"])
@@ -244,10 +240,10 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 		var result map[string]any
 		if err := resp.JSON(&result); err != nil {
 			logError("checkpassword 返回非 JSON 响应: status=%d", resp.StatusCode)
-			logDebug("checkpassword 非 JSON 响应片段: %q", left(resp.Body, 200))
+			logDebug("checkpassword 非 JSON 响应: body_len=%d", len(resp.Body))
 			return "", newAuthError(fmt.Sprintf("密码验证返回异常响应 (HTTP %d)", resp.StatusCode))
 		}
-		logDebug("步骤5: checkpassword 响应=%v", result)
+		logDebug("步骤5: checkpassword validation=%s error=%s", asString(result["validationresult"]), asString(result["error"]))
 		if asString(result["validationresult"]) != "succeed" {
 			return "", newAuthError("密码错误", AuthStatusPasswordError)
 		}
@@ -538,7 +534,7 @@ func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string
 		}
 		var data map[string]any
 		if err := resp.JSON(&data); err != nil {
-			logWarning("token 轮询返回非 JSON: status=%d body=%s", resp.StatusCode, left(resp.Body, 200))
+			logWarning("token 轮询返回非 JSON: status=%d body_len=%d", resp.StatusCode, len(resp.Body))
 			continue
 		}
 		if asString(data["access_token"]) != "" {
@@ -546,7 +542,7 @@ func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string
 			return data, nil
 		}
 		errorCode := asString(data["error"])
-		logDebug("token 轮询 #%d: error=%s full=%s", pollCount, errorCode, left(fmt.Sprint(data), 200))
+		logDebug("token 轮询 #%d: error=%s", pollCount, errorCode)
 		if errorCode != "" && errorCode != "authorization_pending" && errorCode != "slow_down" {
 			return nil, newAuthError(fmt.Sprintf("Token 错误: %s", firstNonEmpty(asString(data["error_description"]), errorCode)), AuthStatusAuthTimeout, boundMailbox)
 		}

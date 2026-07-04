@@ -19,5 +19,6 @@ type SystemLogPort interface {
 // FilePort stores private files for business contexts without exposing object storage details.
 type FilePort interface {
 	SavePrivate(ctx context.Context, file domain.PrivateFile) (*domain.StoredPrivateFile, error)
+	SavePrivateStream(ctx context.Context, file domain.PrivateFileStream) (*domain.StoredPrivateFile, error)
 	ReadPrivate(ctx context.Context, objectKey string) (*domain.PrivateFile, error)
 }

@@ -433,7 +433,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 	}
 	if errMap := asMap(verifyResult["error"]); errMap != nil {
 		logWarning("VerifyCode 失败: code=%s message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"])))
-		logDebug("VerifyCode 失败响应: %v", verifyResult)
+		logDebug("VerifyCode 失败响应 keys=%v", sortedAnyKeys(verifyResult))
 		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"]))), AuthStatusVerifyCodeError)
 	}
 	route := asString(verifyResult["route"])
@@ -887,7 +887,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 		if authErr, ok := err.(*AuthError); ok && authErr.Status != "" {
 			status = authErr.Status
 		}
-		return "", "", "", newAuthError(fmt.Sprintf("%s (已绑定邮箱 %s)", err, tempMail), status, tempMail)
+		return "", "", "", newAuthError(err.Error(), status, tempMail)
 	}
 	logInfo("获取到验证码")
 
@@ -906,7 +906,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 	if _, ok := verifyFields["GeneralVerify"]; !ok {
 		verifyFields["GeneralVerify"] = "0"
 	}
-	logDebug("VerifyProof fields=%v iProofOptions=%s", sortedKeys(verifyFields), verifyFields["iProofOptions"])
+	logDebug("VerifyProof fields=%v", sortedKeys(verifyFields))
 	resp, err = requestWithRetryPost(session, verifyAction, "VerifyProof", tempMail, requestOptions{
 		Data: verifyFields,
 		Headers: navHeaders(session, map[string]string{
@@ -985,6 +985,9 @@ func handleProofsPage(session *Session, page, rawURL, action, proxy string, alre
 
 	isAddEmail := isAddEmailPage(page, action)
 	isSPA := len(page) > 50000
+	if isAddEmail && !alreadyBound {
+		return bindAuxiliaryEmail(session, page, rawURL, proxy, email, preferredBindingAddress)
+	}
 	if !isSPA && action != "" && action != "#" && strings.HasPrefix(action, "http") {
 		logInfo("尝试跳过安全证明页")
 		skippedPage, skippedURL, err := trySkipProofsPage(session, page, rawURL, action)
@@ -999,9 +1002,6 @@ func handleProofsPage(session *Session, page, rawURL, action, proxy string, alre
 		return skippedPage, skippedURL, "", nil
 	}
 
-	if isAddEmail && !alreadyBound {
-		return bindAuxiliaryEmail(session, page, rawURL, proxy, email, preferredBindingAddress)
-	}
 	if alreadyBound && isAddEmail {
 		logInfo("已绑定过辅助邮箱, 跳过后续 proofs 页面 (Skip)")
 	}

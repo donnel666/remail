@@ -18,17 +18,17 @@ const (
 
 	tokenPollTimeout  = 15
 	tokenPollInterval = 3
-
-	mailPollInterval = 5
 )
 
 var (
-	mailAPIBase     = strings.TrimRight(envString("CLOUD_MAIL_BASE", "https://remail.aishop6.com"), "/")
-	mailAPIKey      = strings.TrimSpace(envString("CLOUD_MAIL_JWT", envString("CLOUD_MAIL_API_KEY", "")))
-	mailDomains     = configuredMailDomains()
-	mailDomainIndex = envInt("CLOUD_MAIL_DOMAIN_INDEX", 0)
-	mailPollTimeout = envInt("CLOUD_MAIL_POLL_TIMEOUT", 60)
-	mailUseProxy    = envBool("CLOUD_MAIL_USE_PROXY", false)
+	mailAPIBase          = strings.TrimRight(envString("CLOUD_MAIL_BASE", "https://remail.aishop6.com"), "/")
+	mailAPIKey           = strings.TrimSpace(envString("CLOUD_MAIL_JWT", envString("CLOUD_MAIL_API_KEY", "")))
+	mailDomains          = configuredMailDomains()
+	mailDomainIndex      = envInt("CLOUD_MAIL_DOMAIN_INDEX", 0)
+	mailPollTimeout      = envInt("CLOUD_MAIL_POLL_TIMEOUT", 60)
+	mailPollInterval     = envInt("CLOUD_MAIL_POLL_INTERVAL", 2)
+	mailLateArrivalGrace = envInt("CLOUD_MAIL_LATE_ARRIVAL_GRACE", 12)
+	mailUseProxy         = envBool("CLOUD_MAIL_USE_PROXY", false)
 
 	rngMu sync.Mutex
 	rng   = rand.New(rand.NewSource(time.Now().UnixNano()))

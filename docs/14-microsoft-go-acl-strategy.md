@@ -18,6 +18,7 @@
 | 2026-07-04 | V1.11 | Codex | 补充 P1-I3 Microsoft 资源验证三段式流程：RT 获取/刷新、Graph 优先 IMAP 回退收件、项目邮件匹配预留；资源健康成功条件止于第二步收件成功。此为缺失设计补充，不改变资源状态机。 |
 | 2026-07-04 | V1.12 | Codex | 补充 P1-I3 Microsoft `graphAvailable` 回写策略：第二步收件成功后记录 Graph 主路径是否可用，供资源页展示和筛选。此为缺失设计补充，不改变 ACL 成功条件。 |
 | 2026-07-04 | V1.13 | Codex | 纠正 P1-I3 验证码失败分类和资源状态边界：`code_timeout/code_error` 是确定性绑定失败，不归入 `request` 重试；`deleted` 是 Core 命令终态，不由 ACL 产生。此为缺失设计补充，不改变 Microsoft 页面交互策略。 |
+| 2026-07-04 | V1.14 | Codex | 补充 P1-I3 本机收码适配策略：当前系统没有旧 `rt` 的输出文件/外部邮件 API 即时可见性，必须用数据库绑定事实替代已知辅助邮箱记录，并允许收码读取 pending 入站原文和晚到宽限。此为缺失设计补充，不改变 KMSI/Consent/OTP/Token 主流程。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -99,7 +100,7 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 | `resourceId` | Go 资源 ID，用于追踪。 |
 | `email` | Microsoft 邮箱。 |
 | `password` | Microsoft 邮箱密码，原值只在 ACL 内部使用。 |
-| `proxy` | BC-PROXY 返回的代理配置，辅助邮箱绑定必须是 IPv4。 |
+| `proxy` | BC-PROXY 返回的代理配置；Microsoft 资源验证链路必须请求 IPv4。 |
 | `requestId` | 任务追踪 ID。 |
 
 输出：
@@ -196,7 +197,9 @@ P1-I3 适配规则：
 | 入站接收 | SMTP RCPT 阶段必须能通过 `microsoft_binding_mailboxes.binding_address` 解析到 Microsoft 资源和 owner，使 Microsoft 发来的验证码进入当前入站任务。 |
 | 状态回写 | 验证成功回写 `verified`；验证码超时回写 `timeout`；确定性绑定失败回写 `failed`；这些状态只用于 MailTransport 排障，不改变 Core 资源状态枚举。 |
 
-`rt` 的 Microsoft 页面交互顺序、KMSI/Consent/Identity/Proofs 处理、错误分类、验证码轮询和代理尝试策略不得因为接入当前系统而重写。允许变化的只有输入来源、收码读取实现、状态持久化和安全诊断输出。
+旧 `rt` 通过输出文件和进程内 `knownAuxiliary` 记录解决“掩码辅助邮箱 -> 真实辅助邮箱”的反查。本项目不得恢复文件侧通道，必须在验证开始前把确定性生成的辅助邮箱写成 `MicrosoftBindingMailbox(pending)`，用数据库事实承担同一职责；入口预注册不得清空已有 `verified` 绑定事实。AddProof 页面在当前系统中属于绑定流程，不应先尝试跳过后再处理验证码；否则 Microsoft 可能已经发码，而系统还没有进入绑定收码提交路径。
+
+`rt` 的 KMSI/Consent/Identity/OTP/Token polling 主流程、错误分类、验证码提取规则和代理尝试预算不得因为接入当前系统而重写。允许变化的只有输入来源、AddProof 绑定优先级、收码读取实现、状态持久化和安全诊断输出。
 
 ---
 
@@ -253,9 +256,9 @@ IP 版本规则：
 
 | 场景 | 策略 |
 |------|------|
+| 获取 RT/刷新 AT | 强制 `ipv4`。 |
+| Graph 邮件拉取 | 强制 `ipv4`，沿用同一次验证链路的代理路线。 |
 | 辅助邮箱绑定 | 强制 `ipv4`。 |
-| Graph 邮件拉取 | 默认 `auto`，允许 `ipv6`。 |
-| 获取 RT/刷新 AT | 默认 `auto`，调用方可指定 `ipv4/ipv6`。 |
 
 ---
 

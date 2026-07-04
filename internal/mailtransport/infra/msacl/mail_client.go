@@ -354,6 +354,7 @@ func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenK
 	if timeout <= 0 {
 		timeout = mailPollTimeout
 	}
+	pollInterval := normalizedMailPollInterval()
 	if seenKeys == nil {
 		seenKeys = map[string]struct{}{}
 	}
@@ -373,7 +374,7 @@ func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenK
 			errorCount++
 			lastError = err
 			logWarning("轮询 #%d: 邮箱 %s 请求失败: %s", pollCount, mailbox, err)
-			if err := sleepContext(ctx, time.Duration(mailPollInterval)*time.Second); err != nil {
+			if err := sleepContext(ctx, time.Duration(pollInterval)*time.Second); err != nil {
 				return "", wrapAuthError(fmt.Sprintf("辅助邮箱验证码轮询取消: %s", err), AuthStatusRequestError, err)
 			}
 			continue
@@ -388,31 +389,39 @@ func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenK
 				return code, nil
 			}
 		}
-		if err := sleepContext(ctx, time.Duration(mailPollInterval)*time.Second); err != nil {
+		if err := sleepContext(ctx, time.Duration(pollInterval)*time.Second); err != nil {
 			return "", wrapAuthError(fmt.Sprintf("辅助邮箱验证码轮询取消: %s", err), AuthStatusRequestError, err)
 		}
 	}
 
-	emails, err := mailList(ctx, mailbox, proxy, 10, false)
-	if err != nil {
+	code, finalErr := finalMailboxCodeCheck(ctx, mailbox, proxy, seenKeys, "超时前最终检查")
+	if finalErr != nil {
 		errorCount++
-		lastError = err
-		logWarning("最终检查邮箱 %s 请求失败: %s", mailbox, err)
-	} else {
-		logDebug("超时前最终检查: 邮箱 %s 收到 %d 封邮件", mailbox, len(emails))
-		for _, email := range emails {
-			if _, ok := seenKeys[mailMessageKey(email)]; ok {
+		lastError = finalErr
+		logWarning("最终检查邮箱 %s 请求失败: %s", mailbox, finalErr)
+	} else if code != "" {
+		return code, nil
+	}
+
+	if grace := normalizedMailLateArrivalGrace(); grace > 0 {
+		graceDeadline := time.Now().Add(time.Duration(grace) * time.Second)
+		gracePoll := 1 * time.Second
+		for time.Now().Before(graceDeadline) {
+			if err := sleepContext(ctx, gracePoll); err != nil {
+				return "", wrapAuthError(fmt.Sprintf("辅助邮箱验证码轮询取消: %s", err), AuthStatusRequestError, err)
+			}
+			pollCount++
+			code, err := finalMailboxCodeCheck(ctx, mailbox, proxy, seenKeys, "晚到宽限检查")
+			if err != nil {
+				errorCount++
+				lastError = err
+				logWarning("晚到宽限检查邮箱 %s 请求失败: %s", mailbox, err)
 				continue
 			}
-			if code := extractCodeFromEmail(email); code != "" {
-				logDebug("最终检查收到邮箱验证码")
+			if code != "" {
+				logInfo("晚到宽限检查收到邮箱验证码")
 				return code, nil
 			}
-			preview := email.Preview
-			if len(preview) > 120 {
-				preview = preview[:120]
-			}
-			logDebug("最终检查未提取验证码: id=%v subject=%s preview=%s", email.ID, email.Subject, preview)
 		}
 	}
 
@@ -422,6 +431,39 @@ func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenK
 	logError("邮箱验证码超时 (%ds, 轮询 %d 次)", timeout, pollCount)
 	logDebug("邮箱验证码超时邮箱: %s", mailbox)
 	return "", newAuthError("辅助邮箱验证码超时未收到", AuthStatusCodeTimeout)
+}
+
+func normalizedMailPollInterval() int {
+	if mailPollInterval <= 0 {
+		return 2
+	}
+	return mailPollInterval
+}
+
+func normalizedMailLateArrivalGrace() int {
+	if mailLateArrivalGrace < 0 {
+		return 0
+	}
+	return mailLateArrivalGrace
+}
+
+func finalMailboxCodeCheck(ctx context.Context, mailbox, proxy string, seenKeys map[string]struct{}, label string) (string, error) {
+	emails, err := mailList(ctx, mailbox, proxy, 10, false)
+	if err != nil {
+		return "", err
+	}
+	logDebug("%s: 邮箱 %s 收到 %d 封邮件", label, mailbox, len(emails))
+	for _, email := range emails {
+		if _, ok := seenKeys[mailMessageKey(email)]; ok {
+			continue
+		}
+		if code := extractCodeFromEmail(email); code != "" {
+			logDebug("%s收到邮箱验证码", label)
+			return code, nil
+		}
+		logDebug("%s未提取验证码: id=%v subject_len=%d preview_len=%d", label, email.ID, len(email.Subject), len(email.Preview))
+	}
+	return "", nil
 }
 
 func startCodeWatcher(ctx context.Context, mailbox, proxy string, timeout int, seenKeys map[string]struct{}) *MailWatcher {
@@ -454,7 +496,7 @@ func (w *MailWatcher) run() {
 
 func (w *MailWatcher) getCode(timeout int) (string, error) {
 	if timeout <= 0 {
-		timeout = w.timeout + mailPollInterval + 5
+		timeout = w.defaultCodeWaitTimeout()
 	}
 	select {
 	case result := <-w.ch:
@@ -470,6 +512,13 @@ func (w *MailWatcher) getCode(timeout int) (string, error) {
 	case <-w.ctx.Done():
 		return "", wrapAuthError(fmt.Sprintf("辅助邮箱验证码轮询取消: %s", w.ctx.Err()), AuthStatusRequestError, w.ctx.Err())
 	}
+}
+
+func (w *MailWatcher) defaultCodeWaitTimeout() int {
+	if w == nil {
+		return normalizedMailPollInterval() + normalizedMailLateArrivalGrace() + 5
+	}
+	return w.timeout + normalizedMailPollInterval() + normalizedMailLateArrivalGrace() + 5
 }
 
 func firstNonNil(values ...any) any {

@@ -29,6 +29,10 @@ func deterministicAuxiliaryAddress(accountEmail string) (string, error) {
 	return deterministicAuxiliaryAddressForDomain(accountEmail, domain)
 }
 
+func DeterministicAuxiliaryAddress(accountEmail string) (string, error) {
+	return deterministicAuxiliaryAddress(accountEmail)
+}
+
 func deterministicAuxiliaryAddressForDomain(accountEmail, domainName string) (string, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(accountEmail))
 	local, sourceDomain, ok := strings.Cut(normalizedEmail, "@")

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
@@ -39,6 +40,8 @@ type InboundRawMessage struct {
 	Recipients   []domain.InboundRecipient
 	RemoteAddr   string
 	ContentBytes []byte
+	Content      io.Reader
+	ContentSize  int64
 }
 
 type InboundProcessTask struct {
@@ -81,18 +84,13 @@ func (s *InboundService) ResolveRecipient(ctx context.Context, email string) (*d
 }
 
 func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) ([]domain.InboundMail, error) {
-	if len(message.ContentBytes) == 0 || len(message.Recipients) == 0 {
+	if (len(message.ContentBytes) == 0 && message.Content == nil) || len(message.Recipients) == 0 {
 		return nil, domain.ErrInboundRecipientRejected
 	}
 
 	now := s.now().UTC()
 	objectKey := inboundObjectKey(now, uuid.NewString())
-	stored, err := s.files.SavePrivate(ctx, governancedomain.PrivateFile{
-		ObjectKey:    objectKey,
-		FileName:     "inbound.eml",
-		ContentType:  "message/rfc822",
-		ContentBytes: message.ContentBytes,
-	})
+	stored, err := s.saveRawMessage(ctx, objectKey, message)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
 	}
@@ -124,6 +122,27 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 		}
 	}
 	return mails, nil
+}
+
+func (s *InboundService) saveRawMessage(ctx context.Context, objectKey string, message InboundRawMessage) (*governancedomain.StoredPrivateFile, error) {
+	if message.Content != nil {
+		if message.ContentSize <= 0 {
+			return nil, fmt.Errorf("inbound message size is required")
+		}
+		return s.files.SavePrivateStream(ctx, governancedomain.PrivateFileStream{
+			ObjectKey:   objectKey,
+			FileName:    "inbound.eml",
+			ContentType: "message/rfc822",
+			Content:     message.Content,
+			Size:        message.ContentSize,
+		})
+	}
+	return s.files.SavePrivate(ctx, governancedomain.PrivateFile{
+		ObjectKey:    objectKey,
+		FileName:     "inbound.eml",
+		ContentType:  "message/rfc822",
+		ContentBytes: message.ContentBytes,
+	})
 }
 
 func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, finalAttempt bool) error {

@@ -127,6 +127,37 @@ func (r *MicrosoftBindingRepo) UpsertForResource(ctx context.Context, resourceID
 	})
 }
 
+func (r *MicrosoftBindingRepo) EnsureForValidation(ctx context.Context, resourceID uint, ownerUserID uint, accountEmail string, bindingAddress string) error {
+	accountEmail = normalizeBindingEmail(accountEmail)
+	bindingAddress = normalizeBindingEmail(bindingAddress)
+	if resourceID == 0 || ownerUserID == 0 || accountEmail == "" || bindingAddress == "" {
+		return nil
+	}
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		return ensureMicrosoftBindingForValidationTx(tx.WithContext(ctx), &MicrosoftBindingMailboxModel{
+			ResourceID:     resourceID,
+			ResourceType:   "microsoft",
+			OwnerUserID:    ownerUserID,
+			AccountEmail:   accountEmail,
+			BindingAddress: bindingAddress,
+			Purpose:        "validation",
+			Status:         string(domain.MicrosoftBindingPending),
+		})
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return ensureMicrosoftBindingForValidationTx(tx, &MicrosoftBindingMailboxModel{
+			ResourceID:     resourceID,
+			ResourceType:   "microsoft",
+			OwnerUserID:    ownerUserID,
+			AccountEmail:   accountEmail,
+			BindingAddress: bindingAddress,
+			Purpose:        "validation",
+			Status:         string(domain.MicrosoftBindingPending),
+		})
+	})
+}
+
 func (r *MicrosoftBindingRepo) PreferredAddress(ctx context.Context, resourceID uint) (string, error) {
 	if resourceID == 0 {
 		return "", nil
@@ -207,6 +238,59 @@ func upsertMicrosoftBindingTx(tx *gorm.DB, model *MicrosoftBindingMailboxModel) 
 	}).Create(model).Error
 	if err != nil {
 		return fmt.Errorf("upsert microsoft binding mailbox: %w", err)
+	}
+	return nil
+}
+
+func ensureMicrosoftBindingForValidationTx(tx *gorm.DB, model *MicrosoftBindingMailboxModel) error {
+	if model == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	var existing MicrosoftBindingMailboxModel
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("resource_id = ?", model.ResourceID).
+		First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return tx.Create(&MicrosoftBindingMailboxModel{
+			ResourceID:     model.ResourceID,
+			ResourceType:   firstNonBlank(model.ResourceType, "microsoft"),
+			OwnerUserID:    model.OwnerUserID,
+			AccountEmail:   model.AccountEmail,
+			BindingAddress: model.BindingAddress,
+			Purpose:        firstNonBlank(model.Purpose, "validation"),
+			Status:         string(domain.MicrosoftBindingPending),
+			SelectedAt:     &now,
+		}).Error
+	}
+	if err != nil {
+		return fmt.Errorf("find microsoft binding mailbox: %w", err)
+	}
+	updates := map[string]any{
+		"owner_user_id": existing.OwnerUserID,
+		"resource_type": existing.ResourceType,
+		"account_email": existing.AccountEmail,
+		"purpose":       existing.Purpose,
+		"selected_at":   now,
+		"updated_at":    now,
+	}
+	if existing.Status != string(domain.MicrosoftBindingVerified) {
+		updates["owner_user_id"] = model.OwnerUserID
+		updates["resource_type"] = firstNonBlank(model.ResourceType, "microsoft")
+		updates["account_email"] = model.AccountEmail
+		updates["binding_address"] = model.BindingAddress
+		updates["purpose"] = firstNonBlank(model.Purpose, "validation")
+		updates["status"] = string(domain.MicrosoftBindingPending)
+		updates["category"] = ""
+		updates["last_safe_error"] = ""
+		updates["code_sent_at"] = nil
+		updates["verified_at"] = nil
+		updates["expires_at"] = model.ExpiresAt
+	}
+	if err := tx.Model(&MicrosoftBindingMailboxModel{}).
+		Where("id = ?", existing.ID).
+		Updates(updates).Error; err != nil {
+		return fmt.Errorf("ensure microsoft binding mailbox: %w", err)
 	}
 	return nil
 }

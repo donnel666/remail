@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +131,25 @@ func (s *fileStoreStub) SavePrivate(_ context.Context, file governancedomain.Pri
 		FileName:    file.FileName,
 		ContentType: file.ContentType,
 		Size:        int64(len(file.ContentBytes)),
+	}, nil
+}
+
+func (s *fileStoreStub) SavePrivateStream(_ context.Context, file governancedomain.PrivateFileStream) (*governancedomain.StoredPrivateFile, error) {
+	content, err := io.ReadAll(file.Content)
+	if err != nil {
+		return nil, err
+	}
+	s.files[file.ObjectKey] = governancedomain.PrivateFile{
+		ObjectKey:    file.ObjectKey,
+		FileName:     file.FileName,
+		ContentType:  file.ContentType,
+		ContentBytes: content,
+	}
+	return &governancedomain.StoredPrivateFile{
+		ObjectKey:   file.ObjectKey,
+		FileName:    file.FileName,
+		ContentType: file.ContentType,
+		Size:        int64(len(content)),
 	}, nil
 }
 
