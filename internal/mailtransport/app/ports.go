@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 )
+
+var diagnosticEmailPattern = regexp.MustCompile(`(?i)\b([a-z0-9._%+\-])[a-z0-9._%+\-]*@([a-z0-9.\-]+\.[a-z]{2,})\b`)
 
 type DeliveryPort interface {
 	Send(ctx context.Context, message domain.OutboundMessage) error
@@ -145,6 +148,7 @@ func messageDigest(parts ...any) string {
 
 func safeDiagnostic(value string) string {
 	value = bodyValue(value)
+	value = diagnosticEmailPattern.ReplaceAllString(value, "$1***@$2")
 	const maxLen = 240
 	if len(value) > maxLen {
 		return value[:maxLen]

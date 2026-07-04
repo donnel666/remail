@@ -51,10 +51,20 @@ type MinIOConfig struct {
 
 // SMTPConfig holds outbound mail settings.
 type SMTPConfig struct {
-	Addr     string
-	Username string
-	Password string
-	From     string
+	Mode                   string
+	Addr                   string
+	Username               string
+	Password               string
+	From                   string
+	Domain                 string
+	HELODomain             string
+	InboundEnabled         bool
+	InboundAddr            string
+	InboundDomain          string
+	InboundMaxMessageBytes int64
+	InboundMaxRecipients   int
+	InboundReadTimeout     time.Duration
+	InboundWriteTimeout    time.Duration
 }
 
 // MigrationsConfig holds database migration settings.
@@ -112,12 +122,7 @@ func Load() (*Config, error) {
 			UseSSL:    getBool("MINIO_USE_SSL", false),
 			Bucket:    getEnv("MINIO_BUCKET", "remail"),
 		},
-		SMTP: SMTPConfig{
-			Addr:     getEnv("SMTP_ADDR", ""),
-			Username: getEnv("SMTP_USERNAME", ""),
-			Password: getEnv("SMTP_PASSWORD", ""),
-			From:     getEnv("SMTP_FROM", ""),
-		},
+		SMTP: loadSMTPConfig(),
 		Migrations: MigrationsConfig{
 			Dir: getEnv("MIGRATIONS_DIR", ""),
 		},
@@ -161,7 +166,33 @@ func (c *Config) validate() error {
 	if c.Session.Secret == "" {
 		return fmt.Errorf("SESSION_SECRET is required")
 	}
+	if c.SMTP.Mode != "direct" && c.SMTP.Mode != "relay" {
+		return fmt.Errorf("SMTP_MODE must be direct or relay")
+	}
+	if c.SMTP.Mode == "relay" && c.SMTP.Addr == "" {
+		return fmt.Errorf("SMTP_ADDR is required when SMTP_MODE=relay")
+	}
 	return nil
+}
+
+func loadSMTPConfig() SMTPConfig {
+	heloDomain := getEnv("SMTP_HELO_DOMAIN", "mx.aishop6.com")
+	return SMTPConfig{
+		Mode:                   getEnv("SMTP_MODE", "direct"),
+		Addr:                   getEnv("SMTP_ADDR", ""),
+		Username:               getEnv("SMTP_USERNAME", ""),
+		Password:               getEnv("SMTP_PASSWORD", ""),
+		From:                   getEnv("SMTP_FROM", "no-reply@aishop6.com"),
+		Domain:                 getEnv("SMTP_DOMAIN", "aishop6.com"),
+		HELODomain:             heloDomain,
+		InboundEnabled:         getBool("SMTP_INBOUND_ENABLED", false),
+		InboundAddr:            getEnv("SMTP_INBOUND_ADDR", ":2525"),
+		InboundDomain:          getEnv("SMTP_INBOUND_DOMAIN", heloDomain),
+		InboundMaxMessageBytes: getInt64("SMTP_INBOUND_MAX_MESSAGE_BYTES", 10<<20),
+		InboundMaxRecipients:   getInt("SMTP_INBOUND_MAX_RECIPIENTS", 20),
+		InboundReadTimeout:     getDuration("SMTP_INBOUND_READ_TIMEOUT", 30*time.Second),
+		InboundWriteTimeout:    getDuration("SMTP_INBOUND_WRITE_TIMEOUT", 30*time.Second),
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -174,6 +205,15 @@ func getEnv(key, fallback string) string {
 func getInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func getInt64(key string, fallback int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return i
 		}
 	}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"path"
@@ -11,6 +12,7 @@ import (
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
+	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
@@ -21,8 +23,9 @@ import (
 
 // SetupRouter creates the Gin engine with all middleware and route registrations.
 // feFS is the embedded frontend dist filesystem (nil in development mode).
-func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
+func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Context), error) {
 	r := gin.New()
+	cleanup := func(context.Context) {}
 
 	// Global middleware
 	r.Use(gin.Recovery())
@@ -37,27 +40,43 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
+	var mailMod *mailapi.MailTransportModule
+	var err error
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
-		smtpDelivery := mailinfra.NewSMTPDelivery(mailinfra.SMTPConfig{
-			Addr:     p.SMTP.Addr,
-			Username: p.SMTP.Username,
-			Password: p.SMTP.Password,
-			From:     p.SMTP.From,
-		})
-		mailDelivery := mailapp.NewDeliveryService(mailinfra.NewOutboundMailStore(p.Redis), smtpDelivery)
-		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailDelivery)
+		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
+		mailMod, err = mailapi.NewMailTransportModule(
+			p.DB,
+			fileStore,
+			p.Asynq,
+			mailSender(p.SMTP),
+			outboundSender(p.SMTP),
+			mailinfra.InboundSMTPConfig{
+				Enabled:         p.SMTP.InboundEnabled,
+				Addr:            p.SMTP.InboundAddr,
+				Domain:          p.SMTP.InboundDomain,
+				MaxMessageBytes: p.SMTP.InboundMaxMessageBytes,
+				MaxRecipients:   p.SMTP.InboundMaxRecipients,
+				ReadTimeout:     p.SMTP.InboundReadTimeout,
+				WriteTimeout:    p.SMTP.InboundWriteTimeout,
+			},
+		)
 		if err != nil {
-			return nil, err
+			return nil, cleanup, err
+		}
+		mailapi.RegisterMailTransportTaskHandlers(taskMux, mailMod)
+
+		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailMod.DeliveryUseCase)
+		if err != nil {
+			return nil, cleanup, err
 		}
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 
 		// Core module (resources, mail servers, domains)
-		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
 		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq)
 		if err != nil {
-			return nil, err
+			return nil, cleanup, err
 		}
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
@@ -66,13 +85,17 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 		// Proxy module (admin proxy pool maintenance)
 		proxyMod, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
 		if err != nil {
-			return nil, err
+			return nil, cleanup, err
 		}
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)
 		proxyapi.RegisterProxyRoutes(v1, proxyMod, iamSessionFetcher, iamMod.PermissionChecker)
 	}
 	if err := p.AsynqServer.Start(taskMux); err != nil {
-		return nil, err
+		cleanup(context.Background())
+		return nil, cleanup, err
+	}
+	if mailMod != nil {
+		cleanup = mailMod.Start(context.Background())
 	}
 
 	// Serve embedded frontend SPA if available
@@ -80,7 +103,30 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, error) {
 		serveEmbeddedFrontend(r, feFS)
 	}
 
-	return r, nil
+	return r, cleanup, nil
+}
+
+func mailSender(cfg platform.SMTPConfig) mailapp.SenderPort {
+	if cfg.Mode == "relay" {
+		return mailinfra.NewSMTPDelivery(mailinfra.SMTPConfig{
+			Addr:     cfg.Addr,
+			Username: cfg.Username,
+			Password: cfg.Password,
+			From:     cfg.From,
+		})
+	}
+	return mailinfra.NewDirectSMTPDelivery(mailinfra.DirectSMTPConfig{
+		From:       cfg.From,
+		Domain:     cfg.Domain,
+		HELODomain: cfg.HELODomain,
+	})
+}
+
+func outboundSender(cfg platform.SMTPConfig) string {
+	if strings.TrimSpace(cfg.From) != "" {
+		return strings.TrimSpace(cfg.From)
+	}
+	return strings.TrimSpace(cfg.Username)
 }
 
 // serveEmbeddedFrontend serves the SPA frontend from the embedded filesystem.

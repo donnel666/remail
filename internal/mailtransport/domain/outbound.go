@@ -1,7 +1,10 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -13,7 +16,10 @@ const (
 	PurposeSecurityNotice   OutboundPurpose = "security_notice"
 )
 
-var ErrDeliveryUnavailable = errors.New("mail delivery is temporarily unavailable")
+var (
+	ErrDeliveryUnavailable         = errors.New("mail delivery is temporarily unavailable")
+	ErrOutboundIdempotencyConflict = errors.New("outbound mail idempotency key conflicts")
+)
 
 type OutboundStatus string
 
@@ -27,6 +33,7 @@ const (
 type OutboundMessage struct {
 	IdempotencyKey string
 	Purpose        OutboundPurpose
+	From           string
 	To             string
 	Subject        string
 	TextBody       string
@@ -34,10 +41,15 @@ type OutboundMessage struct {
 }
 
 type OutboundMail struct {
+	ID             uint            `json:"id"`
 	IdempotencyKey string          `json:"idempotencyKey"`
+	RequestHash    string          `json:"requestHash"`
 	Purpose        OutboundPurpose `json:"purpose"`
+	Sender         string          `json:"sender"`
 	Recipient      string          `json:"recipient"`
 	Subject        string          `json:"subject"`
+	TextBody       string          `json:"textBody"`
+	HTMLBody       string          `json:"htmlBody"`
 	Status         OutboundStatus  `json:"status"`
 	Retries        int             `json:"retries"`
 	FailureReason  string          `json:"failureReason"`
@@ -49,19 +61,38 @@ type OutboundMail struct {
 func NewOutboundMail(message OutboundMessage, now time.Time) *OutboundMail {
 	return &OutboundMail{
 		IdempotencyKey: message.IdempotencyKey,
+		RequestHash:    message.RequestHash(),
 		Purpose:        message.Purpose,
+		Sender:         message.From,
 		Recipient:      message.To,
 		Subject:        message.Subject,
+		TextBody:       message.TextBody,
+		HTMLBody:       message.HTMLBody,
 		Status:         OutboundStatusPending,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 }
 
+func (m OutboundMessage) RequestHash() string {
+	h := sha256.New()
+	for _, part := range []any{m.Purpose, m.From, m.To, m.Subject, m.TextBody, m.HTMLBody} {
+		_, _ = fmt.Fprint(h, part)
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (m *OutboundMail) MarkSending(now time.Time) {
 	m.Status = OutboundStatusSending
 	m.Retries++
 	m.FailureReason = ""
+	m.UpdatedAt = now
+}
+
+func (m *OutboundMail) MarkPending(now time.Time, reason string) {
+	m.Status = OutboundStatusPending
+	m.FailureReason = reason
 	m.UpdatedAt = now
 }
 

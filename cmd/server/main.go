@@ -74,11 +74,12 @@ func main() {
 	}
 
 	// Set up Gin router
-	router, err := api.SetupRouter(p, feFS)
+	router, routerCleanup, err := api.SetupRouter(p, feFS)
 	if err != nil {
 		slog.Error("router setup failed", "error", err)
 		os.Exit(1)
 	}
+	defer routerCleanup(context.Background())
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -111,6 +112,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 	}
+	routerCleanup(shutdownCtx)
 	stopRuntimeDiagnostics()
 	shutdownPprofServer(shutdownCtx, pprofSrv)
 

@@ -712,6 +712,11 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Invalid role level.",
 			"requestId": rid,
 		})
+	case errors.Is(err, maildomain.ErrOutboundIdempotencyConflict):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "Idempotency key conflicts with another request.",
+			"requestId": rid,
+		})
 	case errors.Is(err, maildomain.ErrDeliveryUnavailable):
 		slog.Warn("mail delivery unavailable", "request_id", rid, "error", err.Error())
 		c.JSON(http.StatusServiceUnavailable, gin.H{

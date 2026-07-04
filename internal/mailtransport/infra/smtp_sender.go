@@ -1,22 +1,21 @@
 package infra
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"mime"
-	"mime/quotedprintable"
 	"net"
-	"net/mail"
-	"net/smtp"
+	stdmail "net/mail"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	gomail "github.com/wneessen/go-mail"
 )
 
-const mixedBoundary = "remail-mail-boundary"
+var diagnosticEmailPattern = regexp.MustCompile(`(?i)\b([a-z0-9._%+\-])[a-z0-9._%+\-]*@([a-z0-9.\-]+\.[a-z]{2,})\b`)
 
 type SMTPConfig struct {
 	Addr     string
@@ -35,7 +34,7 @@ func NewSMTPDelivery(cfg SMTPConfig) *SMTPDelivery {
 
 func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage) error {
 	addr := normalizeSMTPAddr(s.cfg.Addr)
-	from := envelopeAddress(s.cfg.From)
+	from := envelopeAddress(firstNonEmpty(message.From, s.cfg.From))
 	if from == "" {
 		from = envelopeAddress(s.cfg.Username)
 	}
@@ -48,57 +47,55 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	if err != nil {
 		return deliveryError("invalid smtp addr", err)
 	}
-
-	conn, implicitTLS, err := dialSMTP(ctx, addr, host, port)
+	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		return deliveryError("smtp dial failed", err)
+		return deliveryError("invalid smtp port", err)
 	}
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-	client, err := smtp.NewClient(conn, host)
+	mailMessage, err := newSMTPMessage(from, to, message)
 	if err != nil {
-		_ = conn.Close()
+		return deliveryError("smtp message failed", err)
+	}
+
+	options := []gomail.Option{
+		gomail.WithPort(portNum),
+		gomail.WithTimeout(30 * time.Second),
+		gomail.WithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}),
+	}
+	if port == "465" {
+		options = append(options, gomail.WithSSL(), gomail.WithTLSPolicy(gomail.TLSMandatory))
+	} else if requiresSTARTTLS(port, s.cfg) {
+		options = append(options, gomail.WithTLSPolicy(gomail.TLSMandatory))
+	} else {
+		options = append(options, gomail.WithTLSPolicy(gomail.TLSOpportunistic))
+	}
+	if s.cfg.Username != "" || s.cfg.Password != "" {
+		options = append(options,
+			gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover),
+			gomail.WithUsername(s.cfg.Username),
+			gomail.WithPassword(s.cfg.Password),
+		)
+	}
+
+	client, err := gomail.NewClient(host, options...)
+	if err != nil {
 		return deliveryError("smtp client failed", err)
 	}
-	defer client.Close()
-
-	if !implicitTLS {
-		if ok, _ := client.Extension("STARTTLS"); ok {
-			if err := client.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}); err != nil {
-				return deliveryError("smtp starttls failed", err)
-			}
-		} else if requiresSTARTTLS(port, s.cfg) {
-			return deliveryError("smtp starttls unavailable", nil)
-		}
+	if err := sendMailWithAcceptedClose(ctx, client, mailMessage); err != nil {
+		return deliveryError("smtp send failed", err)
 	}
+	return nil
+}
 
-	if s.cfg.Username != "" || s.cfg.Password != "" {
-		auth := smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, host)
-		if err := client.Auth(auth); err != nil {
-			return deliveryError("smtp auth failed", err)
-		}
-	}
-
-	if err := client.Mail(from); err != nil {
-		return deliveryError("smtp from rejected", err)
-	}
-	if err := client.Rcpt(to); err != nil {
-		return deliveryError("smtp recipient rejected", err)
-	}
-
-	writer, err := client.Data()
+func sendMailWithAcceptedClose(ctx context.Context, client *gomail.Client, message *gomail.Msg) error {
+	smtpClient, err := client.DialToSMTPClientWithContext(ctx)
 	if err != nil {
-		return deliveryError("smtp data failed", err)
+		return fmt.Errorf("dial failed: %w", err)
 	}
-	message.To = to
-	if _, err := writer.Write([]byte(smtpMessage(from, message))); err != nil {
-		_ = writer.Close()
-		return deliveryError("smtp write failed", err)
+	if err := client.SendWithSMTPClient(smtpClient, message); err != nil {
+		_ = client.CloseWithSMTPClient(smtpClient)
+		return fmt.Errorf("send failed: %w", err)
 	}
-	if err := writer.Close(); err != nil {
-		return deliveryError("smtp close data failed", err)
-	}
-	_ = client.Quit()
+	_ = client.CloseWithSMTPClient(smtpClient)
 	return nil
 }
 
@@ -119,19 +116,6 @@ func normalizeSMTPAddr(addr string) string {
 	return net.JoinHostPort(addr, "587")
 }
 
-func dialSMTP(ctx context.Context, addr, host, port string) (net.Conn, bool, error) {
-	dialer := net.Dialer{Timeout: 10 * time.Second}
-	if port == "465" {
-		conn, err := tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			ServerName: host,
-		})
-		return conn, true, err
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	return conn, false, err
-}
-
 func requiresSTARTTLS(port string, cfg SMTPConfig) bool {
 	if port == "465" {
 		return false
@@ -139,19 +123,31 @@ func requiresSTARTTLS(port string, cfg SMTPConfig) bool {
 	return port == "587" || cfg.Username != "" || cfg.Password != ""
 }
 
-func smtpMessage(from string, message domain.OutboundMessage) string {
-	return fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n--%s--\r\n",
-		headerValue(from),
-		headerValue(message.To),
-		subjectHeaderValue(message.Subject),
-		mixedBoundary,
-		mixedBoundary,
-		quotedPrintable(message.TextBody),
-		mixedBoundary,
-		quotedPrintable(message.HTMLBody),
-		mixedBoundary,
-	)
+func newSMTPMessage(from string, to string, message domain.OutboundMessage) (*gomail.Msg, error) {
+	msg := gomail.NewMsg()
+	if err := msg.EnvelopeFrom(from); err != nil {
+		return nil, err
+	}
+	if err := msg.From(from); err != nil {
+		return nil, err
+	}
+	if err := msg.To(to); err != nil {
+		return nil, err
+	}
+	msg.SetDate()
+	msg.SetMessageID()
+	msg.Subject(headerValue(message.Subject))
+	if strings.TrimSpace(message.TextBody) != "" {
+		msg.SetBodyString(gomail.TypeTextPlain, message.TextBody)
+	}
+	if strings.TrimSpace(message.HTMLBody) != "" {
+		if strings.TrimSpace(message.TextBody) == "" {
+			msg.SetBodyString(gomail.TypeTextHTML, message.HTMLBody)
+		} else {
+			msg.AddAlternativeString(gomail.TypeTextHTML, message.HTMLBody)
+		}
+	}
+	return msg, nil
 }
 
 func deliveryError(stage string, err error) error {
@@ -166,7 +162,7 @@ func envelopeAddress(value string) string {
 	if value == "" {
 		return ""
 	}
-	address, err := mail.ParseAddress(value)
+	address, err := stdmail.ParseAddress(value)
 	if err == nil {
 		return address.Address
 	}
@@ -186,36 +182,12 @@ func headerValue(value string) string {
 	return strings.TrimSpace(value)
 }
 
-func subjectHeaderValue(value string) string {
-	value = headerValue(value)
-	if value == "" || isASCII(value) {
-		return value
-	}
-	return mime.QEncoding.Encode("UTF-8", value)
-}
-
-func isASCII(value string) bool {
-	for i := 0; i < len(value); i++ {
-		if value[i] > 127 {
-			return false
-		}
-	}
-	return true
-}
-
 func safeDiagnostic(value string) string {
 	value = headerValue(value)
+	value = diagnosticEmailPattern.ReplaceAllString(value, "$1***@$2")
 	const maxLen = 240
 	if len(value) > maxLen {
 		return value[:maxLen]
 	}
 	return value
-}
-
-func quotedPrintable(value string) string {
-	var buf bytes.Buffer
-	writer := quotedprintable.NewWriter(&buf)
-	_, _ = writer.Write([]byte(value))
-	_ = writer.Close()
-	return buf.String()
 }

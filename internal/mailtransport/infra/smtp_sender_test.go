@@ -2,10 +2,13 @@ package infra
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -15,33 +18,38 @@ import (
 )
 
 func TestSMTPMessageUsesMultipartAlternative(t *testing.T) {
-	msg := smtpMessage("no-reply@example.com", mailapp.VerificationCodeMessage("user@example.com", "123456"))
+	msg, err := newSMTPMessage("no-reply@example.com", "user@example.com", mailapp.VerificationCodeMessage("user@example.com", "123456"))
+	require.NoError(t, err)
 
-	assert.Contains(t, msg, "Subject: =?UTF-8?")
-	assert.Contains(t, msg, "Content-Type: multipart/alternative")
-	assert.Contains(t, msg, "Content-Type: text/plain; charset=UTF-8")
-	assert.Contains(t, msg, "Content-Type: text/html; charset=UTF-8")
-	assert.Contains(t, msg, "123456")
-	assert.Contains(t, msg, "data:image/png;base64,")
-	assert.Contains(t, msg, "Remail")
-	assert.Contains(t, msg, "linear-gradient")
-	assert.Contains(t, msg, "shine-text")
-	assert.Contains(t, msg, "sweep-shine")
-	assert.Contains(t, msg, "#8a4a34")
-	assert.Contains(t, msg, "#ff3d73")
-	assert.Contains(t, msg, "<h1")
-	assert.True(t, strings.HasSuffix(msg, "--"+mixedBoundary+"--\r\n"))
+	raw := renderSMTPMessage(t, msg)
+	assert.Contains(t, raw, "Subject:")
+	assert.Contains(t, raw, "=?UTF-8?q?ReMail")
+	assert.Contains(t, raw, "Content-Type: multipart/alternative")
+	assert.Contains(t, raw, "Content-Type: text/plain; charset=UTF-8")
+	assert.Contains(t, raw, "Content-Type: text/html; charset=UTF-8")
+	assert.Contains(t, raw, "123456")
+	assert.Contains(t, raw, "data:image/png;base64,")
+	assert.Contains(t, raw, "Remail")
+	assert.Contains(t, raw, "linear-gradient")
+	assert.Contains(t, raw, "shine-text")
+	assert.Contains(t, raw, "sweep-shine")
+	assert.Contains(t, raw, "#8a4a34")
+	assert.Contains(t, raw, "#ff3d73")
+	assert.Contains(t, raw, "<h1")
 }
 
 func TestSMTPMessageSanitizesHeadersAndHTML(t *testing.T) {
-	msg := smtpMessage(
-		"sender@example.com\r\nBcc: audit@example.com",
+	msg, err := newSMTPMessage(
+		envelopeAddress("sender@example.com\r\nBcc: audit@example.com"),
+		envelopeAddress("user@example.com\r\nCc: audit@example.com"),
 		mailapp.VerificationCodeMessage("user@example.com\r\nCc: audit@example.com", "<123456>"),
 	)
+	require.NoError(t, err)
 
-	assert.NotContains(t, msg, "\r\nBcc:")
-	assert.NotContains(t, msg, "\r\nCc:")
-	assert.Contains(t, msg, "&lt;123456&gt;")
+	raw := renderSMTPMessage(t, msg)
+	assert.NotContains(t, raw, "\r\nBcc:")
+	assert.NotContains(t, raw, "\r\nCc:")
+	assert.Contains(t, raw, "&lt;123456&gt;")
 }
 
 func TestNormalizeSMTPAddrDefaultsHostOnlyToSubmissionPort(t *testing.T) {
@@ -79,7 +87,7 @@ func TestSMTPDeliveryRequiresSTARTTLSBeforeAuth(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
-	assert.Contains(t, err.Error(), "smtp starttls unavailable")
+	assert.Contains(t, strings.ToLower(err.Error()), "starttls")
 }
 
 func TestRequiresSTARTTLSForSubmissionAndAuth(t *testing.T) {
@@ -107,12 +115,17 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 	require.NoError(t, err)
 
 	done := make(chan struct{})
+	var mu sync.Mutex
+	var active net.Conn
 	go func() {
 		defer close(done)
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
+		mu.Lock()
+		active = conn
+		mu.Unlock()
 		defer conn.Close()
 
 		rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
@@ -127,6 +140,8 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 			case strings.HasPrefix(cmd, "EHLO"):
 				writeSMTPLine(t, rw, "250-remail-test")
 				writeSMTPLine(t, rw, "250 OK")
+			case strings.HasPrefix(cmd, "STARTTLS"):
+				writeSMTPLine(t, rw, "454 TLS not available")
 			case strings.HasPrefix(cmd, "MAIL FROM:"):
 				writeSMTPLine(t, rw, "250 OK")
 			case strings.HasPrefix(cmd, "RCPT TO:"):
@@ -157,6 +172,11 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 
 	return ln.Addr().String(), func() {
 		_ = ln.Close()
+		mu.Lock()
+		if active != nil {
+			_ = active.Close()
+		}
+		mu.Unlock()
 		<-done
 	}
 }
@@ -167,4 +187,14 @@ func writeSMTPLine(t *testing.T, rw *bufio.ReadWriter, line string) {
 	_, err := rw.WriteString(line + "\r\n")
 	require.NoError(t, err)
 	require.NoError(t, rw.Flush())
+}
+
+func renderSMTPMessage(t *testing.T, msg interface {
+	WriteTo(io.Writer) (int64, error)
+}) string {
+	t.Helper()
+	var buf bytes.Buffer
+	_, err := msg.WriteTo(&buf)
+	require.NoError(t, err)
+	return buf.String()
 }

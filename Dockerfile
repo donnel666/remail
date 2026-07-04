@@ -10,6 +10,7 @@ RUN pnpm build
 # Stage 2: Go build
 FROM golang:1.25-alpine AS backend
 WORKDIR /app
+ENV GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
@@ -22,5 +23,5 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=backend /server /server
 COPY --from=backend /app/migrations /app/migrations
 ENV MIGRATIONS_DIR=/app/migrations
-EXPOSE 8080
+EXPOSE 8080 2525
 ENTRYPOINT ["/server"]

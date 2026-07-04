@@ -206,6 +206,14 @@ func TestResourceListIndexesMySQL(t *testing.T) {
 	requireIndexExists(t, db, "domain_resources", "idx_domain_resources_owner_tld_private")
 	requireIndexExists(t, db, "microsoft_resources", "idx_microsoft_bulk_domain")
 	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_resource_created")
+	requireIndexExists(t, db, "generated_mailboxes", "idx_generated_mailboxes_email_status")
+	requireIndexExists(t, db, "outbound_mails", "idx_outbound_mails_idempotency_key")
+	requireIndexExists(t, db, "outbound_mails", "idx_outbound_mails_status_created")
+	requireIndexExists(t, db, "outbound_mails", "idx_outbound_mails_status_updated")
+	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_status_created")
+	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_status_updated")
+	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_resource_created")
+	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_recipient_created")
 }
 
 func TestMailServerRepoGetOrCreateDefaultInboundConcurrentMySQL(t *testing.T) {
@@ -609,6 +617,14 @@ func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {
 	requireExplainUsesIndex(t, db,
 		"idx_domain_resources_owner_tld_private",
 		"EXPLAIN SELECT er.id FROM domain_resources AS dr STRAIGHT_JOIN email_resources AS er ON er.id = dr.id WHERE er.owner_user_id = 1 AND er.type = 'domain' AND dr.owner_user_id = 1 AND dr.purpose = 'not_sale' AND dr.status <> 'deleted' AND dr.domain_tld = '.com' ORDER BY er.id ASC LIMIT 1000",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_outbound_mails_status_created",
+		"EXPLAIN SELECT id FROM outbound_mails WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 100",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_inbound_mails_status_created",
+		"EXPLAIN SELECT id FROM inbound_mails WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 100",
 	)
 }
 
