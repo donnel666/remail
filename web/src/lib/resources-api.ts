@@ -37,6 +37,8 @@ export type SupplierApplicationRequest =
   components["schemas"]["SupplierApplicationRequest"];
 export type ResourceListResponse =
   components["schemas"]["ResourceListResponse"];
+export type ResourceValidationResponse =
+  components["schemas"]["ResourceValidationResponse"];
 export type SupplierApplicationSubmitResponse = JsonResponse<
   operations["postSupplierApplication"],
   201
@@ -202,6 +204,71 @@ export async function getResourceImportStatus(importId: number) {
       params: { path: { importId } },
     })
   );
+}
+
+export async function validateResource(resourceId: number) {
+  return unwrap<ResourceValidationResponse>(
+    await client.POST("/v1/resources/{resourceId}/validate", {
+      params: {
+        header: csrfHeader(),
+        path: { resourceId },
+      },
+    })
+  );
+}
+
+export async function getResourceValidationStatus(validationId: number) {
+  return unwrap<ResourceValidationResponse>(
+    await client.GET("/v1/resource-validations/{validationId}", {
+      params: { path: { validationId } },
+    })
+  );
+}
+
+export async function waitForResourceValidation(
+  validationId: number,
+  options: { intervalMs?: number; maxAttempts?: number } = {}
+) {
+  const intervalMs = options.intervalMs ?? 1000;
+  const maxAttempts = options.maxAttempts ?? 180;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const status = await getResourceValidationStatus(validationId);
+    if (status.status === "succeeded" || status.status === "failed") {
+      return status;
+    }
+    await new Promise((resolve) => globalThis.setTimeout(resolve, intervalMs));
+  }
+
+  return getResourceValidationStatus(validationId);
+}
+
+export async function validateResources(
+  resourceIds: number[],
+  options: {
+    concurrency?: number;
+    onQueued?: (resourceId: number, validation: ResourceValidationResponse) => void;
+  } = {}
+) {
+  const ids = uniquePositiveResourceIds(resourceIds);
+  const concurrency = normalizePageConcurrency(options.concurrency);
+  const validations: ResourceValidationResponse[] = [];
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, ids.length) }, async () => {
+      for (;;) {
+        const resourceId = ids[nextIndex];
+        if (resourceId === undefined) return;
+        nextIndex += 1;
+        const validation = await validateResource(resourceId);
+        validations.push(validation);
+        options.onQueued?.(resourceId, validation);
+      }
+    })
+  );
+
+  return validations;
 }
 
 export async function waitForResourceImport(

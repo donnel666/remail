@@ -152,19 +152,19 @@ func (e ImportProxiesRequestPool) Valid() bool {
 
 // Defines values for ImportStatusResponseStatus.
 const (
-	Failed     ImportStatusResponseStatus = "failed"
-	Imported   ImportStatusResponseStatus = "imported"
-	Processing ImportStatusResponseStatus = "processing"
+	ImportStatusResponseStatusFailed     ImportStatusResponseStatus = "failed"
+	ImportStatusResponseStatusImported   ImportStatusResponseStatus = "imported"
+	ImportStatusResponseStatusProcessing ImportStatusResponseStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the ImportStatusResponseStatus enum.
 func (e ImportStatusResponseStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case ImportStatusResponseStatusFailed:
 		return true
-	case Imported:
+	case ImportStatusResponseStatusImported:
 		return true
-	case Processing:
+	case ImportStatusResponseStatusProcessing:
 		return true
 	default:
 		return false
@@ -338,16 +338,16 @@ func (e ProxyItemStatus) Valid() bool {
 
 // Defines values for ResourceBulkFilterResourceType.
 const (
-	Domain    ResourceBulkFilterResourceType = "domain"
-	Microsoft ResourceBulkFilterResourceType = "microsoft"
+	ResourceBulkFilterResourceTypeDomain    ResourceBulkFilterResourceType = "domain"
+	ResourceBulkFilterResourceTypeMicrosoft ResourceBulkFilterResourceType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkFilterResourceType enum.
 func (e ResourceBulkFilterResourceType) Valid() bool {
 	switch e {
-	case Domain:
+	case ResourceBulkFilterResourceTypeDomain:
 		return true
-	case Microsoft:
+	case ResourceBulkFilterResourceTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -417,6 +417,48 @@ func (e ResourceItemPurpose) Valid() bool {
 	case NotSale:
 		return true
 	case Sale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceValidationResponseResourceType.
+const (
+	ResourceValidationResponseResourceTypeDomain    ResourceValidationResponseResourceType = "domain"
+	ResourceValidationResponseResourceTypeMicrosoft ResourceValidationResponseResourceType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ResourceValidationResponseResourceType enum.
+func (e ResourceValidationResponseResourceType) Valid() bool {
+	switch e {
+	case ResourceValidationResponseResourceTypeDomain:
+		return true
+	case ResourceValidationResponseResourceTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceValidationResponseStatus.
+const (
+	ResourceValidationResponseStatusFailed    ResourceValidationResponseStatus = "failed"
+	ResourceValidationResponseStatusQueued    ResourceValidationResponseStatus = "queued"
+	ResourceValidationResponseStatusRunning   ResourceValidationResponseStatus = "running"
+	ResourceValidationResponseStatusSucceeded ResourceValidationResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ResourceValidationResponseStatus enum.
+func (e ResourceValidationResponseStatus) Valid() bool {
+	switch e {
+	case ResourceValidationResponseStatusFailed:
+		return true
+	case ResourceValidationResponseStatusQueued:
+		return true
+	case ResourceValidationResponseStatusRunning:
+		return true
+	case ResourceValidationResponseStatusSucceeded:
 		return true
 	default:
 		return false
@@ -876,6 +918,7 @@ type DomainResourceDetail struct {
 	Domain          string     `json:"domain"`
 	Id              int        `json:"id"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	LastSafeError   *string    `json:"lastSafeError,omitempty"`
 	MailServerId    int        `json:"mailServerId"`
 
 	// Purpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
@@ -1004,6 +1047,7 @@ type MicrosoftResourceDetail struct {
 	CreatedAt       time.Time  `json:"createdAt"`
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
+	GraphAvailable  bool       `json:"graphAvailable"`
 	Id              int        `json:"id"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 	LastSafeError   *string    `json:"lastSafeError,omitempty"`
@@ -1191,6 +1235,9 @@ type ResourceBulkFilter struct {
 	// CreatedTo Inclusive resource creation upper bound. The frontend must send ISO date-time.
 	CreatedTo *time.Time `json:"createdTo,omitempty"`
 
+	// GraphAvailable Microsoft Graph availability filter.
+	GraphAvailable *bool `json:"graphAvailable,omitempty"`
+
 	// LongLived Microsoft long-lived filter.
 	LongLived    *bool                          `json:"longLived,omitempty"`
 	ResourceType ResourceBulkFilterResourceType `json:"resourceType"`
@@ -1257,7 +1304,10 @@ type ResourceItem struct {
 
 	// ForSale Microsoft resource is available for sale (Microsoft resources only)
 	ForSale *bool `json:"forSale,omitempty"`
-	Id      int   `json:"id"`
+
+	// GraphAvailable Whether Microsoft Graph mail fetch is available after validation (Microsoft resources only)
+	GraphAvailable *bool `json:"graphAvailable,omitempty"`
+	Id             int   `json:"id"`
 
 	// LastSafeError Sanitized abnormal diagnostic summary (Microsoft resources only)
 	LastSafeError *string `json:"lastSafeError,omitempty"`
@@ -1290,6 +1340,25 @@ type ResourceListResponse struct {
 	Offset int            `json:"offset"`
 	Total  int            `json:"total"`
 }
+
+// ResourceValidationResponse defines model for ResourceValidationResponse.
+type ResourceValidationResponse struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// LastSafeError Sanitized validation diagnostic. Never contains credentials, tokens, email bodies, or upstream raw details.
+	LastSafeError *string                                `json:"lastSafeError,omitempty"`
+	ResourceId    int                                    `json:"resourceId"`
+	ResourceType  ResourceValidationResponseResourceType `json:"resourceType"`
+	Status        ResourceValidationResponseStatus       `json:"status"`
+	UpdatedAt     time.Time                              `json:"updatedAt"`
+	ValidationId  int                                    `json:"validationId"`
+}
+
+// ResourceValidationResponseResourceType defines model for ResourceValidationResponse.ResourceType.
+type ResourceValidationResponseResourceType string
+
+// ResourceValidationResponseStatus defines model for ResourceValidationResponse.Status.
+type ResourceValidationResponseStatus string
 
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
@@ -2349,6 +2418,9 @@ type ServerInterface interface {
 	// Get resource import status
 	// (GET /v1/resource-imports/{importId})
 	GetResourceImport(c *gin.Context, importId int)
+	// Get resource validation status
+	// (GET /v1/resource-validations/{validationId})
+	GetResourceValidation(c *gin.Context, validationId int)
 	// List email resources
 	// (GET /v1/resources)
 	GetResources(c *gin.Context, params GetResourcesParams)
@@ -2370,7 +2442,7 @@ type ServerInterface interface {
 	// Publish an owned resource to public supply
 	// (POST /v1/resources/{resourceId}/publish)
 	PostResourcePublish(c *gin.Context, resourceId int, params PostResourcePublishParams)
-	// Request resource validation (not yet implemented)
+	// Queue asynchronous resource validation
 	// (POST /v1/resources/{resourceId}/validate)
 	PostResourceValidate(c *gin.Context, resourceId int, params PostResourceValidateParams)
 	// List mail servers
@@ -3842,6 +3914,33 @@ func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
 	siw.Handler.GetResourceImport(c, importId)
 }
 
+// GetResourceValidation operation middleware
+func (siw *ServerInterfaceWrapper) GetResourceValidation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "validationId" -------------
+	var validationId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "validationId", c.Param("validationId"), &validationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter validationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResourceValidation(c, validationId)
+}
+
 // GetResources operation middleware
 func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 
@@ -4503,6 +4602,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
+	router.GET(options.BaseURL+"/v1/resource-validations/:validationId", wrapper.GetResourceValidation)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)

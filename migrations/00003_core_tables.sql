@@ -43,6 +43,7 @@ CREATE TABLE microsoft_resources (
     client_id VARCHAR(255) NOT NULL DEFAULT '',
     refresh_token VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'original value, never in API response or logs',
     long_lived TINYINT(1) NOT NULL DEFAULT 0,
+    graph_available TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'whether Microsoft Graph mail fetch is available after validation',
     rt_expire_at DATETIME NULL,
     for_sale TINYINT(1) NOT NULL DEFAULT 0,
     status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending|normal|abnormal|disabled|deleted',
@@ -54,8 +55,9 @@ CREATE TABLE microsoft_resources (
     UNIQUE INDEX idx_microsoft_email (email_address),
     INDEX idx_microsoft_status (status),
     INDEX idx_microsoft_long_lived (long_lived),
+    INDEX idx_microsoft_graph_available (graph_available),
     INDEX idx_microsoft_for_sale (for_sale, status),
-    INDEX idx_microsoft_bulk_domain (email_domain, for_sale, status, long_lived),
+    INDEX idx_microsoft_bulk_domain (email_domain, for_sale, status, long_lived, graph_available),
     CONSTRAINT fk_microsoft_resource_type FOREIGN KEY (id, resource_type) REFERENCES email_resources(id, type) ON DELETE CASCADE,
     CONSTRAINT chk_microsoft_resource_type CHECK (resource_type = 'microsoft'),
     CONSTRAINT chk_microsoft_status CHECK (status IN ('pending', 'normal', 'abnormal', 'disabled', 'deleted'))

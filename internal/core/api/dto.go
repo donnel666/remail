@@ -24,14 +24,15 @@ type CreateDomainRequest struct {
 
 // ResourceBulkFilterRequest describes the filter used by an "all matching" bulk command.
 type ResourceBulkFilterRequest struct {
-	ResourceType string     `json:"resourceType"`
-	Search       string     `json:"search,omitempty"`
-	Suffix       string     `json:"suffix,omitempty"`
-	TLD          string     `json:"tld,omitempty"`
-	Status       string     `json:"status,omitempty"`
-	LongLived    *bool      `json:"longLived,omitempty"`
-	CreatedFrom  *time.Time `json:"createdFrom,omitempty"`
-	CreatedTo    *time.Time `json:"createdTo,omitempty"`
+	ResourceType   string     `json:"resourceType"`
+	Search         string     `json:"search,omitempty"`
+	Suffix         string     `json:"suffix,omitempty"`
+	TLD            string     `json:"tld,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	LongLived      *bool      `json:"longLived,omitempty"`
+	GraphAvailable *bool      `json:"graphAvailable,omitempty"`
+	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time `json:"createdTo,omitempty"`
 }
 
 // ResourceBulkSelectionRequest describes how a bulk command selects resources.
@@ -55,20 +56,21 @@ type DeleteResourcesRequest struct {
 
 // ResourceItemResponse is the API-safe resource list item.
 type ResourceItemResponse struct {
-	ID            uint      `json:"id"`
-	Type          string    `json:"type"`
-	OwnerID       uint      `json:"ownerId"`
-	Status        string    `json:"status"`
-	ForSale       *bool     `json:"forSale,omitempty"`
-	LongLived     *bool     `json:"longLived,omitempty"`
-	LastSafeError string    `json:"lastSafeError,omitempty"`
-	Email         string    `json:"email,omitempty"`
-	Domain        string    `json:"domain,omitempty"`
-	DomainTLD     string    `json:"domainTld,omitempty"`
-	MailServerID  uint      `json:"mailServerId,omitempty"`
-	Purpose       string    `json:"purpose,omitempty"`
-	MailboxCount  int       `json:"mailboxCount,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID             uint      `json:"id"`
+	Type           string    `json:"type"`
+	OwnerID        uint      `json:"ownerId"`
+	Status         string    `json:"status"`
+	ForSale        *bool     `json:"forSale,omitempty"`
+	LongLived      *bool     `json:"longLived,omitempty"`
+	GraphAvailable *bool     `json:"graphAvailable,omitempty"`
+	LastSafeError  string    `json:"lastSafeError,omitempty"`
+	Email          string    `json:"email,omitempty"`
+	Domain         string    `json:"domain,omitempty"`
+	DomainTLD      string    `json:"domainTld,omitempty"`
+	MailServerID   uint      `json:"mailServerId,omitempty"`
+	Purpose        string    `json:"purpose,omitempty"`
+	MailboxCount   int       `json:"mailboxCount,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // ResourceListResponse is the paginated resource list response.
@@ -85,6 +87,7 @@ type MicrosoftResourceDetailResponse struct {
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
 	LongLived       bool       `json:"longLived"`
+	GraphAvailable  bool       `json:"graphAvailable"`
 	Status          string     `json:"status"`
 	QualityScore    int        `json:"qualityScore"`
 	LastSafeError   string     `json:"lastSafeError"`
@@ -99,6 +102,7 @@ type DomainResourceDetailResponse struct {
 	MailServerID    uint       `json:"mailServerId"`
 	Purpose         string     `json:"purpose"`
 	Status          string     `json:"status"`
+	LastSafeError   string     `json:"lastSafeError,omitempty"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 }
@@ -131,6 +135,17 @@ type DeleteResourcesResponse struct {
 	Requested          int    `json:"requested"`
 	Deleted            int    `json:"deleted"`
 	DeletedResourceIDs []uint `json:"deletedResourceIds,omitempty"`
+}
+
+// ResourceValidationResponse returns an asynchronous validation job view.
+type ResourceValidationResponse struct {
+	ValidationID  uint      `json:"validationId"`
+	ResourceID    uint      `json:"resourceId"`
+	ResourceType  string    `json:"resourceType"`
+	Status        string    `json:"status"`
+	LastSafeError string    `json:"lastSafeError,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // ServerItemResponse is the mail server list item.

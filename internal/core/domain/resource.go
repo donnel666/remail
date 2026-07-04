@@ -74,6 +74,7 @@ type MicrosoftResource struct {
 	ClientID        string
 	RefreshToken    string // Original value, never in API responses or logs
 	LongLived       bool
+	GraphAvailable  bool
 	RTExpireAt      *time.Time
 	ForSale         bool
 	Status          MicrosoftResourceStatus
@@ -160,6 +161,7 @@ type MailDomainResource struct {
 	MailServerID    uint
 	Purpose         ResourcePurpose
 	Status          MailDomainStatus
+	LastSafeError   string // Sanitized diagnostic summary
 	LastAllocatedAt *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -210,6 +212,7 @@ func (r *MailDomainResource) MarkDeleted() error {
 		return ErrResourceNotPrivate
 	}
 	r.Status = DomainStatusDeleted
+	r.LastSafeError = ""
 	r.LastAllocatedAt = nil
 	return nil
 }

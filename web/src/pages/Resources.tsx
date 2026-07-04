@@ -38,6 +38,9 @@ import {
   publishMicrosoftResource,
   publishMicrosoftResourcesByFilter,
   publishMicrosoftResourcesBatch,
+  validateResource,
+  validateResources,
+  waitForResourceValidation,
   type ResourceBulkFilter,
 } from "@/lib/resources-api";
 
@@ -255,6 +258,7 @@ export default function Resources() {
   const [privateFilter, setPrivateFilter] = useState<BooleanFilter>("all");
   const [longLivedFilter, setLongLivedFilter] =
     useState<BooleanFilter>("all");
+  const [graphFilter, setGraphFilter] = useState<BooleanFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
@@ -269,6 +273,10 @@ export default function Resources() {
   );
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
+  const [checkingBatch, setCheckingBatch] = useState(false);
+  const [checkingResourceIDs, setCheckingResourceIDs] = useState<Set<number>>(
+    () => new Set()
+  );
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
 
@@ -284,6 +292,11 @@ export default function Resources() {
         all: items.length,
         no: items.filter((item) => item.lifetimeType !== "long_lived").length,
         yes: items.filter((item) => item.lifetimeType === "long_lived").length,
+      },
+      graph: {
+        all: items.length,
+        no: items.filter((item) => !item.graphAvailable).length,
+        yes: items.filter((item) => item.graphAvailable).length,
       },
       private: {
         all: items.length,
@@ -304,7 +317,8 @@ export default function Resources() {
   const activeStatisticFilterCount =
     Number(statusFilter !== "all") +
     Number(privateFilter !== "all") +
-    Number(longLivedFilter !== "all");
+    Number(longLivedFilter !== "all") +
+    Number(graphFilter !== "all");
 
   useEffect(() => {
     if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
@@ -325,6 +339,10 @@ export default function Resources() {
       item.lifetimeType === "long_lived",
       longLivedFilter
     );
+    const graphMatched = matchesBooleanFilter(
+      item.graphAvailable,
+      graphFilter
+    );
     const keywordMatched =
       keyword.length === 0 ||
       item.emailAddress.toLowerCase().includes(keyword) ||
@@ -340,12 +358,14 @@ export default function Resources() {
       statusMatched &&
       privateMatched &&
       longLivedMatched &&
+      graphMatched &&
       keywordMatched &&
       createdAtMatched
     );
   }, [
     activeSuffix,
     createdAtRange,
+    graphFilter,
     longLivedFilter,
     privateFilter,
     searchKeyword,
@@ -368,10 +388,20 @@ export default function Resources() {
     if (longLivedFilter !== "all") {
       filter.longLived = longLivedFilter === "yes";
     }
+    if (graphFilter !== "all") {
+      filter.graphAvailable = graphFilter === "yes";
+    }
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [activeSuffix, createdAtRange, longLivedFilter, searchKeyword, statusFilter]);
+  }, [
+    activeSuffix,
+    createdAtRange,
+    graphFilter,
+    longLivedFilter,
+    searchKeyword,
+    statusFilter,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safePage = Math.min(activePage, totalPages);
@@ -396,6 +426,7 @@ export default function Resources() {
     setStatusFilter("all");
     setPrivateFilter("all");
     setLongLivedFilter("all");
+    setGraphFilter("all");
     setActiveSuffix("all");
     setActivePage(1);
     setSelectedKeys([]);
@@ -419,9 +450,75 @@ export default function Resources() {
     setSelectedKeys([]);
   };
 
-  const showNotImplemented = useCallback(() => {
-    Toast.info(t("Feature is not implemented yet."));
-  }, [t]);
+  const applyGraphFilter = (value: BooleanFilter) => {
+    setGraphFilter(value);
+    setActivePage(1);
+    setSelectedKeys([]);
+  };
+
+  const markCheckingResources = useCallback(
+    (resourceIds: number[], checking: boolean) => {
+      setCheckingResourceIDs((previous) => {
+        const next = new Set(previous);
+        for (const resourceId of resourceIds) {
+          if (checking) {
+            next.add(resourceId);
+          } else {
+            next.delete(resourceId);
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleCheckResource = useCallback(async (record: EmailResource) => {
+    markCheckingResources([record.id], true);
+    try {
+      const validation = await validateResource(record.id);
+      Toast.info(t("Resource validation submitted."));
+      const finalStatus = await waitForResourceValidation(
+        validation.validationId
+      );
+      if (finalStatus.status === "succeeded") {
+        Toast.success(t("Resource validation succeeded."));
+      } else {
+        Toast.error(
+          finalStatus.lastSafeError || t("Resource validation failed.")
+        );
+      }
+      await refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    } finally {
+      markCheckingResources([record.id], false);
+    }
+  }, [markCheckingResources, refresh, t]);
+
+  const queueResourceChecks = useCallback(async (resourceIds: number[]) => {
+    const ids = Array.from(new Set(resourceIds.filter((id) => id > 0)));
+    if (ids.length === 0) {
+      Toast.info(t("No resources to check."));
+      return;
+    }
+
+    setCheckingBatch(true);
+    markCheckingResources(ids, true);
+    try {
+      const validations = await validateResources(ids);
+      Toast.success(
+        t("Resource validations submitted.", { count: validations.length })
+      );
+      setSelectedKeys([]);
+      void refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    } finally {
+      markCheckingResources(ids, false);
+      setCheckingBatch(false);
+    }
+  }, [markCheckingResources, refresh, t]);
 
   const promptSupplierApplication = useCallback(async () => {
     try {
@@ -488,8 +585,8 @@ export default function Resources() {
   }, []);
 
   const confirmCheckAll = useCallback(() => {
-    showNotImplemented();
-  }, [showNotImplemented]);
+    void queueResourceChecks(filteredItems.map((item) => item.id));
+  }, [filteredItems, queueResourceChecks]);
 
   const confirmSellAll = useCallback(async () => {
     if (privateFilter === "no") {
@@ -707,7 +804,8 @@ export default function Resources() {
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
-    onCheck: showNotImplemented,
+    checkLoading: checkingBatch,
+    onCheck: () => void queueResourceChecks(selectedKeys),
     onClear: clearSelection,
     onDelete: deleteSelected,
     onSell: sellSelected,
@@ -723,7 +821,7 @@ export default function Resources() {
           key: "suffix",
           title: t("Suffix"),
           dataIndex: "emailAddress",
-          width: "12%",
+          width: "11%",
           render: (_: string, record: EmailResource) => (
             <Tag color="white" shape="circle">
               {getSuffix(record.emailAddress)}
@@ -734,7 +832,7 @@ export default function Resources() {
           key: "email",
           title: t("Email"),
           dataIndex: "emailAddress",
-          width: "30%",
+          width: "27%",
           render: (text: string) => (
             <CopyableTableText copiedText={t("Copied")} text={text} />
           ),
@@ -743,7 +841,7 @@ export default function Resources() {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: "12%",
+          width: "11%",
           render: (status: ResourceStatus, record: EmailResource) =>
             renderStatusTag(status, t, record.lastSafeError),
         },
@@ -751,7 +849,7 @@ export default function Resources() {
           key: "private",
           title: t("Private"),
           dataIndex: "usageScope",
-          width: "10%",
+          width: "9%",
           render: (scope: UsageScope) => (
             <Tag color={scope === "private" ? "green" : "grey"} shape="circle">
               {scope === "private" ? t("Yes") : t("No")}
@@ -762,7 +860,7 @@ export default function Resources() {
           key: "longLived",
           title: t("Long-lived"),
           dataIndex: "lifetimeType",
-          width: "11%",
+          width: "10%",
           render: (value: LifetimeType) => (
             <Tag
               color={value === "long_lived" ? "green" : "grey"}
@@ -773,14 +871,30 @@ export default function Resources() {
           ),
         },
         {
+          key: "graph",
+          title: t("Graph"),
+          dataIndex: "graphAvailable",
+          width: "8%",
+          render: (value: boolean) => (
+            <Tag color={value ? "green" : "grey"} shape="circle">
+              {value ? t("Yes") : t("No")}
+            </Tag>
+          ),
+        },
+        {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: "25%",
+          width: "24%",
           fixed: "right",
           render: (_: unknown, record: EmailResource) => (
             <Space wrap={false}>
-              <Button type="tertiary" size="small" onClick={showNotImplemented}>
+              <Button
+                loading={checkingResourceIDs.has(record.id)}
+                type="tertiary"
+                size="small"
+                onClick={() => void handleCheckResource(record)}
+              >
                 {t("Check")}
               </Button>
               <Button
@@ -807,10 +921,11 @@ export default function Resources() {
       ] as any[],
     [
       deletingResourceID,
+      checkingResourceIDs,
+      handleCheckResource,
       handleSellResource,
       handleDeleteResource,
       publishingResourceID,
-      showNotImplemented,
       t,
     ]
   );
@@ -895,6 +1010,7 @@ export default function Resources() {
           type="tertiary"
           size="small"
           className="flex-1 md:flex-initial"
+          loading={checkingBatch}
           onClick={confirmCheckAll}
         >
           {t("Check all")}
@@ -1021,6 +1137,33 @@ export default function Resources() {
                   count={resourceStats.longLived.no}
                   label={t("No")}
                   onSelect={applyLongLivedFilter}
+                  value="no"
+                />
+              </div>
+
+              <div className="px-2 pb-1 pt-2 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Graph")}
+              </div>
+              <div className="space-y-1">
+                <StatisticFilterOption
+                  active={graphFilter === "all"}
+                  count={resourceStats.graph.all}
+                  label={t("All")}
+                  onSelect={applyGraphFilter}
+                  value="all"
+                />
+                <StatisticFilterOption
+                  active={graphFilter === "yes"}
+                  count={resourceStats.graph.yes}
+                  label={t("Yes")}
+                  onSelect={applyGraphFilter}
+                  value="yes"
+                />
+                <StatisticFilterOption
+                  active={graphFilter === "no"}
+                  count={resourceStats.graph.no}
+                  label={t("No")}
+                  onSelect={applyGraphFilter}
                   value="no"
                 />
               </div>

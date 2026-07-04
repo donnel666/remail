@@ -51,6 +51,7 @@ type MicrosoftResourceModel struct {
 	ClientID        string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
 	RefreshToken    string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
 	LongLived       bool       `gorm:"not null;default:false;column:long_lived"`
+	GraphAvailable  bool       `gorm:"not null;default:false;column:graph_available"`
 	RTExpireAt      *time.Time `gorm:"column:rt_expire_at"`
 	ForSale         bool       `gorm:"not null;default:false;column:for_sale"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'pending'"`
@@ -73,6 +74,7 @@ func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 		ClientID:        m.ClientID,
 		RefreshToken:    m.RefreshToken,
 		LongLived:       m.LongLived,
+		GraphAvailable:  m.GraphAvailable,
 		RTExpireAt:      m.RTExpireAt,
 		ForSale:         m.ForSale,
 		Status:          domain.MicrosoftResourceStatus(m.Status),
@@ -93,6 +95,7 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 		ClientID:        ms.ClientID,
 		RefreshToken:    ms.RefreshToken,
 		LongLived:       ms.LongLived,
+		GraphAvailable:  ms.GraphAvailable,
 		RTExpireAt:      ms.RTExpireAt,
 		ForSale:         ms.ForSale,
 		Status:          string(ms.Status),
@@ -113,6 +116,7 @@ type DomainResourceModel struct {
 	MailServerID    uint       `gorm:"not null;column:mail_server_id"`
 	Purpose         string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
+	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime"`
@@ -129,6 +133,7 @@ func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
 		MailServerID:    m.MailServerID,
 		Purpose:         domain.ResourcePurpose(m.Purpose),
 		Status:          domain.MailDomainStatus(m.Status),
+		LastSafeError:   m.LastSafeError,
 		LastAllocatedAt: m.LastAllocatedAt,
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
@@ -312,15 +317,16 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 			}
 
 			restored := &DomainResourceModel{
-				ID:           existing.ID,
-				OwnerUserID:  resource.OwnerUserID,
-				Domain:       dr.Domain,
-				DomainTLD:    domain.TLD(dr.Domain),
-				MailServerID: dr.MailServerID,
-				Purpose:      string(dr.Purpose),
-				Status:       string(dr.Status),
-				CreatedAt:    existing.CreatedAt,
-				UpdatedAt:    now,
+				ID:            existing.ID,
+				OwnerUserID:   resource.OwnerUserID,
+				Domain:        dr.Domain,
+				DomainTLD:     domain.TLD(dr.Domain),
+				MailServerID:  dr.MailServerID,
+				Purpose:       string(dr.Purpose),
+				Status:        string(dr.Status),
+				LastSafeError: dr.LastSafeError,
+				CreatedAt:     existing.CreatedAt,
+				UpdatedAt:     now,
 			}
 			if err := tx.Create(restored).Error; err != nil {
 				return fmt.Errorf("restore deleted domain resource: %w", err)
@@ -344,13 +350,14 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 		}
 
 		domainModel := &DomainResourceModel{
-			ID:           root.ID,
-			OwnerUserID:  root.OwnerUserID,
-			Domain:       dr.Domain,
-			DomainTLD:    domain.TLD(dr.Domain),
-			MailServerID: dr.MailServerID,
-			Purpose:      string(dr.Purpose),
-			Status:       string(dr.Status),
+			ID:            root.ID,
+			OwnerUserID:   root.OwnerUserID,
+			Domain:        dr.Domain,
+			DomainTLD:     domain.TLD(dr.Domain),
+			MailServerID:  dr.MailServerID,
+			Purpose:       string(dr.Purpose),
+			Status:        string(dr.Status),
+			LastSafeError: dr.LastSafeError,
 		}
 		if err := tx.Create(domainModel).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -412,19 +419,20 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		}
 
 		restoreRows = append(restoreRows, microsoftImportRestoreRow{
-			ID:            existing.ID,
-			OwnerUserID:   resources[i].OwnerUserID,
-			EmailAddress:  strings.TrimSpace(ms[i].EmailAddress),
-			EmailDomain:   microsoftEmailDomain(ms[i].EmailAddress),
-			Password:      ms[i].Password,
-			ClientID:      ms[i].ClientID,
-			RefreshToken:  ms[i].RefreshToken,
-			LongLived:     ms[i].LongLived,
-			RTExpireAt:    ms[i].RTExpireAt,
-			Status:        string(ms[i].Status),
-			QualityScore:  ms[i].QualityScore,
-			LastSafeError: ms[i].LastSafeError,
-			UpdatedAt:     now,
+			ID:             existing.ID,
+			OwnerUserID:    resources[i].OwnerUserID,
+			EmailAddress:   strings.TrimSpace(ms[i].EmailAddress),
+			EmailDomain:    microsoftEmailDomain(ms[i].EmailAddress),
+			Password:       ms[i].Password,
+			ClientID:       ms[i].ClientID,
+			RefreshToken:   ms[i].RefreshToken,
+			LongLived:      ms[i].LongLived,
+			GraphAvailable: ms[i].GraphAvailable,
+			RTExpireAt:     ms[i].RTExpireAt,
+			Status:         string(ms[i].Status),
+			QualityScore:   ms[i].QualityScore,
+			LastSafeError:  ms[i].LastSafeError,
+			UpdatedAt:      now,
 		})
 
 		resources[i].ID = existing.ID
@@ -478,19 +486,20 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 }
 
 type microsoftImportRestoreRow struct {
-	ID            uint       `gorm:"column:id"`
-	OwnerUserID   uint       `gorm:"column:owner_user_id"`
-	EmailAddress  string     `gorm:"column:email_address"`
-	EmailDomain   string     `gorm:"column:email_domain"`
-	Password      string     `gorm:"column:password"`
-	ClientID      string     `gorm:"column:client_id"`
-	RefreshToken  string     `gorm:"column:refresh_token"`
-	LongLived     bool       `gorm:"column:long_lived"`
-	RTExpireAt    *time.Time `gorm:"column:rt_expire_at"`
-	Status        string     `gorm:"column:status"`
-	QualityScore  int        `gorm:"column:quality_score"`
-	LastSafeError string     `gorm:"column:last_safe_error"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+	ID             uint       `gorm:"column:id"`
+	OwnerUserID    uint       `gorm:"column:owner_user_id"`
+	EmailAddress   string     `gorm:"column:email_address"`
+	EmailDomain    string     `gorm:"column:email_domain"`
+	Password       string     `gorm:"column:password"`
+	ClientID       string     `gorm:"column:client_id"`
+	RefreshToken   string     `gorm:"column:refresh_token"`
+	LongLived      bool       `gorm:"column:long_lived"`
+	GraphAvailable bool       `gorm:"column:graph_available"`
+	RTExpireAt     *time.Time `gorm:"column:rt_expire_at"`
+	Status         string     `gorm:"column:status"`
+	QualityScore   int        `gorm:"column:quality_score"`
+	LastSafeError  string     `gorm:"column:last_safe_error"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
 }
 
 func restoreDeletedMicrosoftBatchTx(tx *gorm.DB, rows []microsoftImportRestoreRow) error {
@@ -513,6 +522,7 @@ CREATE TEMPORARY TABLE ` + microsoftImportRestoreTempTable + ` (
 	client_id VARCHAR(255) NOT NULL,
 	refresh_token VARCHAR(1024) NOT NULL,
 	long_lived BOOLEAN NOT NULL,
+	graph_available BOOLEAN NOT NULL,
 	rt_expire_at DATETIME(3) NULL,
 	status VARCHAR(32) NOT NULL,
 	quality_score BIGINT NOT NULL,
@@ -545,6 +555,7 @@ SET mr.email_address = ir.email_address,
 	mr.client_id = ir.client_id,
 	mr.refresh_token = ir.refresh_token,
 	mr.long_lived = ir.long_lived,
+	mr.graph_available = ir.graph_available,
 	mr.rt_expire_at = ir.rt_expire_at,
 	mr.for_sale = FALSE,
 	mr.status = ir.status,
@@ -691,12 +702,13 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 	result := make([]coreapp.MicrosoftStatusResult, len(models))
 	for i, m := range models {
 		result[i] = coreapp.MicrosoftStatusResult{
-			ID:            m.ID,
-			EmailAddress:  m.EmailAddress,
-			ForSale:       m.ForSale,
-			LongLived:     m.LongLived,
-			Status:        m.Status,
-			LastSafeError: m.LastSafeError,
+			ID:             m.ID,
+			EmailAddress:   m.EmailAddress,
+			ForSale:        m.ForSale,
+			LongLived:      m.LongLived,
+			GraphAvailable: m.GraphAvailable,
+			Status:         m.Status,
+			LastSafeError:  m.LastSafeError,
 		}
 	}
 	return result, nil
@@ -705,21 +717,22 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 // ListDomainStatus returns API-safe status for a batch of domain resources.
 func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
 	type domainStatusRow struct {
-		ID           uint
-		Domain       string
-		DomainTLD    string
-		MailServerID uint
-		Purpose      string
-		Status       string
-		MailboxCount int
+		ID            uint
+		Domain        string
+		DomainTLD     string
+		MailServerID  uint
+		Purpose       string
+		Status        string
+		LastSafeError string
+		MailboxCount  int
 	}
 	var rows []domainStatusRow
 	err := r.db.WithContext(ctx).
 		Table("domain_resources AS dr").
-		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, COUNT(gm.id) AS mailbox_count").
+		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, COUNT(gm.id) AS mailbox_count").
 		Joins("LEFT JOIN generated_mailboxes gm ON gm.resource_id = dr.id AND gm.owner_user_id = dr.owner_user_id").
 		Where("dr.id IN ? AND dr.status <> ?", ids, string(domain.DomainStatusDeleted)).
-		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status").
+		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error").
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list domain status: %w", err)
@@ -727,13 +740,14 @@ func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]core
 	result := make([]coreapp.DomainStatusResult, len(rows))
 	for i, row := range rows {
 		result[i] = coreapp.DomainStatusResult{
-			ID:           row.ID,
-			Domain:       row.Domain,
-			DomainTLD:    row.DomainTLD,
-			MailServerID: row.MailServerID,
-			Purpose:      row.Purpose,
-			Status:       row.Status,
-			MailboxCount: row.MailboxCount,
+			ID:            row.ID,
+			Domain:        row.Domain,
+			DomainTLD:     row.DomainTLD,
+			MailServerID:  row.MailServerID,
+			Purpose:       row.Purpose,
+			Status:        row.Status,
+			LastSafeError: row.LastSafeError,
+			MailboxCount:  row.MailboxCount,
 		}
 	}
 	return result, nil
@@ -747,6 +761,7 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 			"for_sale":          resource.ForSale,
 			"status":            string(resource.Status),
 			"quality_score":     resource.QualityScore,
+			"graph_available":   resource.GraphAvailable,
 			"last_safe_error":   resource.LastSafeError,
 			"last_allocated_at": resource.LastAllocatedAt,
 			"updated_at":        time.Now(),
@@ -1109,6 +1124,9 @@ func applyMicrosoftBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.Reso
 	}
 	if filter.LongLived != nil {
 		q = q.Where("ms.long_lived = ?", *filter.LongLived)
+	}
+	if filter.GraphAvailable != nil {
+		q = q.Where("ms.graph_available = ?", *filter.GraphAvailable)
 	}
 	if filter.CreatedFrom != nil {
 		q = q.Where("er.created_at >= ?", *filter.CreatedFrom)
@@ -1473,10 +1491,11 @@ func (r *ResourceRepo) deleteDomainByFilterWithLog(ctx context.Context, ownerUse
 		now := time.Now().UTC()
 		args := append([]interface{}{
 			string(domain.DomainStatusDeleted),
+			"",
 			now,
 		}, whereArgs...)
 		result := tx.Exec(
-			"UPDATE domain_resources AS dr JOIN email_resources AS er ON er.id = dr.id SET dr.status = ?, dr.last_allocated_at = NULL, dr.updated_at = ? WHERE "+whereSQL,
+			"UPDATE domain_resources AS dr JOIN email_resources AS er ON er.id = dr.id SET dr.status = ?, dr.last_safe_error = ?, dr.last_allocated_at = NULL, dr.updated_at = ? WHERE "+whereSQL,
 			args...,
 		)
 		if result.Error != nil {
@@ -1514,6 +1533,10 @@ func microsoftBulkMutationWhere(ownerUserID uint, filter coreapp.ResourceBulkFil
 	if filter.LongLived != nil {
 		conditions = append(conditions, "ms.long_lived = ?")
 		args = append(args, *filter.LongLived)
+	}
+	if filter.GraphAvailable != nil {
+		conditions = append(conditions, "ms.graph_available = ?")
+		args = append(args, *filter.GraphAvailable)
 	}
 	if filter.CreatedFrom != nil {
 		conditions = append(conditions, "er.created_at >= ?")
@@ -1691,6 +1714,7 @@ func deleteLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint
 		Where("id IN ? AND purpose = ? AND status <> ?", idsToDelete, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
 		Updates(map[string]interface{}{
 			"status":            string(domain.DomainStatusDeleted),
+			"last_safe_error":   "",
 			"last_allocated_at": nil,
 			"updated_at":        time.Now().UTC(),
 		})
@@ -1727,6 +1751,7 @@ func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain
 			"mail_server_id":    resource.MailServerID,
 			"purpose":           string(resource.Purpose),
 			"status":            string(resource.Status),
+			"last_safe_error":   resource.LastSafeError,
 			"last_allocated_at": resource.LastAllocatedAt,
 			"updated_at":        time.Now(),
 		}

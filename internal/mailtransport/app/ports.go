@@ -115,7 +115,7 @@ func verificationCodeHTML(code string) string {
               <p style="font-size:14px;line-height:22px;font-weight:700;margin:0 0 4px;">
                 <span class="remail-title" style="position:relative;display:inline-block;color:#111827;white-space:nowrap;">
                   <span style="position:relative;z-index:1;">
-                    <span class="remail-brand-gradient" style="color:#c6533c;background:linear-gradient(90deg,#8a4a34 0%%,#c6533c 50%%,#f4513b 100%%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">Remail</span><span style="color:#111827;">，轻松收码</span>
+                    <span class="remail-brand-gradient" style="color:#c6533c;background:linear-gradient(90deg,#8a4a34 0%%,#c6533c 50%%,#f4513b 100%%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">Remail</span><span class="remail-suffix-fallback" style="color:#111827;-webkit-text-fill-color:#111827;background:none;">，轻松收码</span>
                   </span>
                   <span class="shine-text" aria-hidden="true" style="display:none;color:transparent;">Remail，轻松收码</span>
                 </span>

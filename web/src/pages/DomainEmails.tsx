@@ -37,6 +37,9 @@ import {
   publishDomainResource,
   publishDomainResourcesByFilter,
   publishDomainResourcesBatch,
+  validateResource,
+  validateResources,
+  waitForResourceValidation,
   type ResourceBulkFilter,
 } from "@/lib/resources-api";
 
@@ -164,8 +167,16 @@ export default function DomainEmails() {
   const [loading, setLoading] = useState(false);
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
-  const [publishingResourceID, setPublishingResourceID] = useState<number | null>(null);
-  const [deletingResourceID, setDeletingResourceID] = useState<number | null>(null);
+  const [checkingBatch, setCheckingBatch] = useState(false);
+  const [publishingResourceID, setPublishingResourceID] = useState<
+    number | null
+  >(null);
+  const [deletingResourceID, setDeletingResourceID] = useState<number | null>(
+    null
+  );
+  const [checkingResourceIDs, setCheckingResourceIDs] = useState<Set<number>>(
+    () => new Set()
+  );
   const [activeTld, setActiveTld] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -351,9 +362,73 @@ export default function DomainEmails() {
     setSelectedKeys([]);
   };
 
-  const showNotImplemented = useCallback(() => {
-    Toast.info(t("Feature is not implemented yet."));
-  }, [t]);
+  const clearSelection = useCallback(() => {
+    setSelectedKeys([]);
+  }, []);
+
+  const markCheckingResources = useCallback(
+    (resourceIds: number[], checking: boolean) => {
+      setCheckingResourceIDs((previous) => {
+        const next = new Set(previous);
+        for (const resourceId of resourceIds) {
+          if (checking) {
+            next.add(resourceId);
+          } else {
+            next.delete(resourceId);
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleCheckResource = useCallback(async (record: DomainResource) => {
+    markCheckingResources([record.id], true);
+    try {
+      const validation = await validateResource(record.id);
+      Toast.info(t("Resource validation submitted."));
+      const finalStatus = await waitForResourceValidation(
+        validation.validationId
+      );
+      if (finalStatus.status === "succeeded") {
+        Toast.success(t("Resource validation succeeded."));
+      } else {
+        Toast.error(
+          finalStatus.lastSafeError || t("Resource validation failed.")
+        );
+      }
+      await refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    } finally {
+      markCheckingResources([record.id], false);
+    }
+  }, [markCheckingResources, refresh, t]);
+
+  const queueResourceChecks = useCallback(async (resourceIds: number[]) => {
+    const ids = Array.from(new Set(resourceIds.filter((id) => id > 0)));
+    if (ids.length === 0) {
+      Toast.info(t("No resources to check."));
+      return;
+    }
+
+    setCheckingBatch(true);
+    markCheckingResources(ids, true);
+    try {
+      const validations = await validateResources(ids);
+      Toast.success(
+        t("Resource validations submitted.", { count: validations.length })
+      );
+      setSelectedKeys([]);
+      void refresh();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    } finally {
+      markCheckingResources(ids, false);
+      setCheckingBatch(false);
+    }
+  }, [markCheckingResources, refresh, t]);
 
   const promptSupplierApplication = useCallback(async () => {
     try {
@@ -442,9 +517,9 @@ export default function DomainEmails() {
     }
   }, [markResourcesPublishedForSale, t]);
 
-  const confirmCheckAll = () => {
-    showNotImplemented();
-  };
+  const confirmCheckAll = useCallback(() => {
+    void queueResourceChecks(filteredItems.map((item) => item.id));
+  }, [filteredItems, queueResourceChecks]);
 
   const confirmSellAll = useCallback(async () => {
     if (privateFilter === "no") {
@@ -646,8 +721,9 @@ export default function DomainEmails() {
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
-    onCheck: showNotImplemented,
-    onClear: () => setSelectedKeys([]),
+    checkLoading: checkingBatch,
+    onCheck: () => void queueResourceChecks(selectedKeys),
+    onClear: clearSelection,
     onDelete: confirmDeleteSelected,
     onSell: confirmSellSelected,
     deleteLoading: deletingBatch,
@@ -682,7 +758,8 @@ export default function DomainEmails() {
           title: t("Status"),
           dataIndex: "status",
           width: "12%",
-          render: (status: DomainStatus) => renderDomainStatusTag(status, t),
+          render: (status: DomainStatus, record: DomainResource) =>
+            renderDomainStatusTag(status, t, record.lastSafeError),
         },
         {
           title: t("Private only"),
@@ -717,39 +794,43 @@ export default function DomainEmails() {
           fixed: "right",
           render: (_: unknown, record: DomainResource) => (
             <Space wrap={false}>
-              {record.usageScope === "private" ? (
-                <Button
-                  loading={publishingResourceID === record.id}
-                  onClick={() => void handleSellResource(record)}
-                  type="tertiary"
-                  size="small"
-                >
-                  {t("Sell")}
-                </Button>
-              ) : null}
-              <Button onClick={showNotImplemented} type="tertiary" size="small">
+              <Button
+                disabled={record.usageScope !== "private"}
+                loading={publishingResourceID === record.id}
+                onClick={() => void handleSellResource(record)}
+                type="tertiary"
+                size="small"
+              >
+                {t("Sell")}
+              </Button>
+              <Button
+                loading={checkingResourceIDs.has(record.id)}
+                onClick={() => void handleCheckResource(record)}
+                type="tertiary"
+                size="small"
+              >
                 {t("Check")}
               </Button>
-              {record.usageScope === "private" ? (
-                <Button
-                  loading={deletingResourceID === record.id}
-                  onClick={() => handleDeleteResource(record)}
-                  type="danger"
-                  size="small"
-                >
-                  {t("Delete")}
-                </Button>
-              ) : null}
+              <Button
+                disabled={record.usageScope !== "private"}
+                loading={deletingResourceID === record.id}
+                onClick={() => handleDeleteResource(record)}
+                type="danger"
+                size="small"
+              >
+                {t("Delete")}
+              </Button>
             </Space>
           ),
         },
       ] as any[],
     [
+      checkingResourceIDs,
       deletingResourceID,
       handleDeleteResource,
+      handleCheckResource,
       handleSellResource,
       publishingResourceID,
-      showNotImplemented,
       t,
     ]
   );
@@ -831,6 +912,7 @@ export default function DomainEmails() {
           type="tertiary"
           size="small"
           className="flex-1 md:flex-initial"
+          loading={checkingBatch}
           onClick={confirmCheckAll}
         >
           {t("Check all")}

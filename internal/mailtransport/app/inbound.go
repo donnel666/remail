@@ -99,6 +99,12 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 
 	mails := make([]domain.InboundMail, 0, len(message.Recipients))
 	for _, recipient := range message.Recipients {
+		if normalizeEmailAddress(recipient.Email) == "" ||
+			recipient.ResourceID == 0 ||
+			recipient.OwnerUserID == 0 ||
+			!domain.IsValidInboundResourceType(recipient.ResourceType) {
+			return nil, domain.ErrInboundRecipientRejected
+		}
 		mails = append(mails, *domain.NewInboundMail(
 			normalizeEmailAddress(message.EnvelopeFrom),
 			recipient,

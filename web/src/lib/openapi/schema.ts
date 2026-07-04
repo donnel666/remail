@@ -548,10 +548,27 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Request resource validation (not yet implemented)
-         * @description Stub endpoint for P1-I2. Will be implemented in P1-I3 with actual Microsoft ACL / SMTP verification. Currently returns 501.
+         * Queue asynchronous resource validation
+         * @description Creates a durable validation job and returns immediately. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in the backend worker.
          */
         post: operations["postResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resource-validations/{validationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get resource validation status */
+        get: operations["getResourceValidation"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1012,6 +1029,8 @@ export interface components {
             forSale?: boolean;
             /** @description Microsoft resource lifetime classification selected during import */
             longLived?: boolean;
+            /** @description Whether Microsoft Graph mail fetch is available after validation (Microsoft resources only) */
+            graphAvailable?: boolean;
             /** @description Sanitized abnormal diagnostic summary (Microsoft resources only) */
             lastSafeError?: string;
             /** @description Email address (Microsoft resources only) */
@@ -1037,6 +1056,7 @@ export interface components {
             emailAddress: string;
             forSale: boolean;
             longLived: boolean;
+            graphAvailable: boolean;
             status: string;
             qualityScore: number;
             lastSafeError?: string;
@@ -1056,6 +1076,7 @@ export interface components {
             purpose: "not_sale" | "sale" | "binding";
             /** @description Domain resource status (normal/abnormal/disabled/deleted) */
             status: string;
+            lastSafeError?: string;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
             /** Format: date-time */
@@ -1070,6 +1091,20 @@ export interface components {
             /** @enum {string} */
             status: "processing" | "imported" | "failed";
             imported: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ResourceValidationResponse: {
+            validationId: number;
+            resourceId: number;
+            /** @enum {string} */
+            resourceType: "microsoft" | "domain";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            /** @description Sanitized validation diagnostic. Never contains credentials, tokens, email bodies, or upstream raw details. */
             lastSafeError?: string;
             /** Format: date-time */
             createdAt: string;
@@ -1118,6 +1153,8 @@ export interface components {
             status?: string;
             /** @description Microsoft long-lived filter. */
             longLived?: boolean;
+            /** @description Microsoft Graph availability filter. */
+            graphAvailable?: boolean;
             /**
              * Format: date-time
              * @description Inclusive resource creation lower bound. The frontend must send ISO date-time.
@@ -3235,6 +3272,24 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Resource validation queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceValidationResponse"];
+                };
+            };
+            /** @description Invalid resource id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Authentication required */
             401: {
                 headers: {
@@ -3253,8 +3308,66 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not implemented (P1-I3) */
-            501: {
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Resource status does not allow validation */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getResourceValidation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                validationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource validation status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceValidationResponse"];
+                };
+            };
+            /** @description Invalid validation id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation job not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

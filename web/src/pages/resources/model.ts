@@ -11,6 +11,7 @@ export interface EmailResource {
   forSale: boolean;
   usageScope: UsageScope;
   lifetimeType: LifetimeType;
+  graphAvailable: boolean;
   status: ResourceStatus;
   lastSafeError?: string;
   createdAt: string;
@@ -61,6 +62,7 @@ export function toEmailResource(item: ResourceItem): EmailResource | null {
     forSale,
     usageScope: forSale ? "public_sale" : "private",
     lifetimeType: item.longLived ? "long_lived" : "short_lived",
+    graphAvailable: Boolean(item.graphAvailable),
     status: toResourceStatus(item.status),
     lastSafeError: item.lastSafeError || undefined,
     createdAt: item.createdAt,

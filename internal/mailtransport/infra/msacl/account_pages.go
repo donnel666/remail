@@ -1,0 +1,1174 @@
+package msacl
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"html"
+	"net/url"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+)
+
+var transientRequestMarkers = []string{
+	"Failed to perform",
+	"curl: (18)",
+	"curl: (23)",
+	"curl: (28)",
+	"curl: (52)",
+	"curl: (56)",
+}
+
+type ProofData struct {
+	Data        string
+	Display     string
+	Type        int
+	ClearDigits string
+}
+
+func extractPPFT(page string) string {
+	patterns := []string{
+		`(?is)name="PPFT"[^>]*value="([^"]*)"`,
+		`(?is)name=\\"PPFT\\"[^>]*?value=\\"([^\\"]+)`,
+		`(?is)"sFT":"([^"]+)"`,
+		`(?is)sFT["']?\s*[:=]\s*["']([^"']+)`,
+	}
+	for _, pattern := range patterns {
+		if m := regexp.MustCompile(pattern).FindStringSubmatch(page); len(m) > 1 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+func extractPostURL(page string) string {
+	patterns := []string{
+		`(?is)"urlPost":"([^"]+)"`,
+		`(?is)urlPost\s*[:=]\s*['"]([^'"]+)`,
+		`(?is)https://login\.live\.com/ppsecure/post\.srf[^"'\s\\]*`,
+	}
+	for _, pattern := range patterns {
+		m := regexp.MustCompile(pattern).FindStringSubmatch(page)
+		if len(m) > 1 {
+			return strings.ReplaceAll(m[1], `\/`, `/`)
+		}
+		if len(m) == 1 {
+			return m[0]
+		}
+	}
+	return ""
+}
+
+func extractFormAction(page string) string {
+	re := regexp.MustCompile(`(?is)<form\b[^>]*>`)
+	for _, tag := range re.FindAllString(page, -1) {
+		if action := extractTagAttrs(tag)["action"]; action != "" {
+			return action
+		}
+	}
+	return ""
+}
+
+func extractTagAttrs(tag string) map[string]string {
+	attrs := map[string]string{}
+	re := regexp.MustCompile(`(?is)([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	for _, match := range re.FindAllStringSubmatch(tag, -1) {
+		value := ""
+		for _, group := range match[2:] {
+			if group != "" {
+				value = group
+				break
+			}
+		}
+		attrs[strings.ToLower(match[1])] = html.UnescapeString(value)
+	}
+	return attrs
+}
+
+func extractFormHTML(page, formID string) string {
+	re := regexp.MustCompile(`(?is)<form\b[^>]*>.*?</form>`)
+	for _, formHTML := range re.FindAllString(page, -1) {
+		openTag := strings.SplitN(formHTML, ">", 2)[0]
+		attrs := extractTagAttrs(openTag)
+		if strings.EqualFold(attrs["id"], formID) {
+			return formHTML
+		}
+	}
+	return ""
+}
+
+func extractFormActionByID(page, formID string) string {
+	formHTML := extractFormHTML(page, formID)
+	if formHTML == "" {
+		return ""
+	}
+	return extractFormAction(formHTML)
+}
+
+func extractHiddenInputs(page string) map[string]string {
+	fields := map[string]string{}
+	re := regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	for _, tag := range re.FindAllString(page, -1) {
+		attrs := extractTagAttrs(tag)
+		if strings.ToLower(attrs["type"]) != "hidden" {
+			continue
+		}
+		name := attrs["name"]
+		if name == "" {
+			continue
+		}
+		fields[name] = attrs["value"]
+	}
+	return fields
+}
+
+func extractFormFields(page, formID string) map[string]string {
+	formHTML := extractFormHTML(page, formID)
+	if formHTML == "" {
+		return map[string]string{}
+	}
+	fields := map[string]string{}
+	re := regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	for _, tag := range re.FindAllString(formHTML, -1) {
+		attrs := extractTagAttrs(tag)
+		name := attrs["name"]
+		if name == "" {
+			continue
+		}
+		inputType := strings.ToLower(attrs["type"])
+		if inputType == "" {
+			inputType = "text"
+		}
+		if inputType == "hidden" {
+			fields[name] = attrs["value"]
+		} else if (inputType == "radio" || inputType == "checkbox") && strings.Contains(strings.ToLower(tag), "checked") {
+			fields[name] = attrs["value"]
+		}
+	}
+	return fields
+}
+
+func extractSkipURL(page string) string {
+	m := regexp.MustCompile(`(?is)"skip"\s*:\s*\{\s*"url"\s*:\s*"([^"]+)"`).FindStringSubmatch(page)
+	if len(m) < 2 {
+		return ""
+	}
+	urlValue := m[1]
+	urlValue = strings.ReplaceAll(urlValue, `\u002f`, `/`)
+	urlValue = strings.ReplaceAll(urlValue, `\u0026`, "&")
+	urlValue = strings.ReplaceAll(urlValue, `\/`, `/`)
+	return urlValue
+}
+
+func getQueryParam(rawURL, key string) string {
+	parts, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	for name, values := range parts.Query() {
+		if strings.EqualFold(name, key) && len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
+}
+
+func postEmptyForm(session *Session, rawURL string, referer ...string) (*HTTPResponse, error) {
+	headers := navHeaders(session, map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+	if len(referer) > 0 && referer[0] != "" {
+		headers["Referer"] = referer[0]
+	}
+	return requestWithRetryPost(session, rawURL, "空表单提交", "", requestOptions{
+		Data:              map[string]string{},
+		Headers:           headers,
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+}
+
+func isInterruptPage(rawURL string) bool {
+	low := strings.ToLower(rawURL)
+	return strings.Contains(low, "account.live.com") && (strings.Contains(low, "/proofs/") || strings.Contains(low, "/interrupt/") || strings.Contains(low, "/identity/") || strings.Contains(low, "/cancel"))
+}
+
+func isAccountRecoverURL(rawURL string) bool {
+	low := strings.ToLower(rawURL)
+	return strings.Contains(low, "account.live.com") && strings.Contains(low, "/recover")
+}
+
+func isAutoSubmitPage(page, action string) bool {
+	return action != "" && strings.Contains(strings.ToLower(action), "account.live.com") && strings.Contains(page, "DoSubmit")
+}
+
+func identityBoundMailbox(ctx context.Context, page, email, proxy string, proofData []ProofData, preferredBindingAddress string) string {
+	proofs := extractIdentityProofs(page)
+	ourProof := findOurIdentityProof(proofs)
+	maskedEmail := asString(ourProof["name"])
+	if maskedEmail == "" {
+		for _, proof := range proofData {
+			if proof.Type == 1 {
+				maskedEmail = proof.Display
+				break
+			}
+		}
+	}
+	if maskedEmail == "" {
+		maskedEmail = detectExistingProofInPage(page)
+	}
+	if maskedEmail != "" && isProjectMailboxAddress(maskedEmail) {
+		if resolvedMailbox := lookupRealMailbox(ctx, maskedEmail, email, proxy, preferredBindingAddress); resolvedMailbox != "" {
+			return resolvedMailbox
+		}
+		return maskedEmail
+	}
+	return ""
+}
+
+func identityBoundDisplay(page string, proofData []ProofData) string {
+	proofs := extractIdentityProofs(page)
+	ourProof := findOurIdentityProof(proofs)
+	maskedEmail := asString(ourProof["name"])
+	if maskedEmail == "" {
+		for _, proof := range proofData {
+			if proof.Type == 1 {
+				maskedEmail = proof.Display
+				break
+			}
+		}
+	}
+	if maskedEmail != "" {
+		return maskedEmail
+	}
+	return detectExistingProofInPage(page)
+}
+
+func alreadyBoundError(display, boundMailbox string) *AuthError {
+	display = strings.TrimSpace(firstNonEmpty(display, boundMailbox))
+	message := "已绑定辅助邮箱"
+	if display != "" {
+		message = fmt.Sprintf("已绑定辅助邮箱(%s)", display)
+	}
+	return &AuthError{
+		Message:      message,
+		Status:       AuthStatusAlreadyBound,
+		BoundMailbox: boundMailbox,
+		BoundDisplay: display,
+	}
+}
+
+func handleIdentityPage(session *Session, page, rawURL, proxy, email string, proofData []ProofData, allowExistingProofVerification bool, preferredBindingAddress string) (string, string, string, error) {
+	skipURL := extractSkipURL(page)
+	if skipURL != "" && (strings.Contains(skipURL, "res=success") || strings.Contains(skipURL, "res=cancel")) {
+		resp, err := postEmptyForm(session, skipURL, rawURL)
+		if err != nil {
+			return "", "", "", err
+		}
+		return resp.Body, resp.URL, "", nil
+	}
+
+	otherProof := detectExistingProofInPage(page)
+	if otherProof != "" && !isProjectMailboxAddress(otherProof) {
+		logWarning("identity 页: 已绑定辅助邮箱 %s, 跳过", otherProof)
+		return "", "", "", alreadyBoundError(otherProof, "")
+	}
+
+	if len(proofData) > 0 || len(extractIdentityProofs(page)) > 0 {
+		if !allowExistingProofVerification {
+			boundMailbox := identityBoundMailbox(session.context(), page, email, proxy, proofData, preferredBindingAddress)
+			if boundMailbox != "" && isProjectMailboxAddress(boundMailbox) {
+				logInfo("identity 页: 已绑定本项目辅助邮箱, 继续接码验证")
+				return handleOTPVerification(session, page, rawURL, email, proxy, proofData, preferredBindingAddress)
+			}
+			display := firstNonEmpty(boundMailbox, identityBoundDisplay(page, proofData))
+			logInfo("identity 页: 账号已绑定辅助邮箱, 跳过")
+			return "", "", "", alreadyBoundError(display, boundMailbox)
+		}
+		return handleOTPVerification(session, page, rawURL, email, proxy, proofData, preferredBindingAddress)
+	}
+
+	logWarning("identity 页无法处理 (无 proof_data), 页面关键词: %v", pageKeywordSubset(page, []string{"SendOtt", "VerifyCode", "AddProof", "EmailAddress", "iOttText", "验证", "代码", "安全代码"}))
+	return "", "", "", newAuthError("需要辅助邮箱验证码 (identity 页无法处理)", AuthStatusUnknownMailbox)
+}
+
+func handleOTPVerification(session *Session, page, rawURL, email, proxy string, proofData []ProofData, preferredBindingAddress string) (string, string, string, error) {
+	apiCanary := extractConfigString(page, "apiCanary")
+	token := extractConfigString(page, "token")
+	purpose := extractConfigString(page, "proofPurpose")
+	if purpose == "" {
+		purpose = "UnfamiliarLocationHard"
+	}
+	returnURL := firstNonEmpty(extractReturnURL(page), extractSkipURL(page))
+	proofs := extractIdentityProofs(page)
+	ourProof := findOurIdentityProof(proofs)
+	if len(ourProof) == 0 {
+		for _, proof := range proofs {
+			if asString(proof["type"]) == "Email" && asString(proof["name"]) != "" {
+				return "", "", "", alreadyBoundError(asString(proof["name"]), "")
+			}
+		}
+		for _, proof := range proofData {
+			if proof.Type == 1 && proof.Display != "" {
+				return "", "", "", newAuthError(fmt.Sprintf("identity 页缺少可用 proof, GetCredentialType 中有 %s", proof.Display))
+			}
+		}
+		return "", "", "", newAuthError("身份验证需要验证码但找不到可用的 proof, 跳过", AuthStatusUnknownMailbox)
+	}
+
+	maskedEmail := asString(ourProof["name"])
+	epid := asString(ourProof["epid"])
+	if apiCanary == "" || epid == "" || returnURL == "" {
+		return "", "", "", newAuthError("OTP 验证: identity 页缺少 apiCanary/epid/return_url")
+	}
+	logInfo("OTP 验证: 找到可用辅助邮箱 proof")
+	logDebug("OTP 验证: masked_email=%s", maskedEmail)
+
+	realMailbox := lookupRealMailbox(session.context(), maskedEmail, email, proxy, preferredBindingAddress)
+	if realMailbox == "" {
+		return "", "", "", newAuthError(fmt.Sprintf("找不到 %s 对应的真实邮箱, 跳过", maskedEmail), AuthStatusUnknownMailbox)
+	}
+	logInfo("OTP 验证: 已匹配真实邮箱")
+	logDebug("OTP 验证: real_mailbox=%s", realMailbox)
+
+	seenKeys := snapshotMailboxKeys(session.context(), realMailbox, proxy)
+	var code string
+	var lastErr error
+	for ottAttempt := 1; ottAttempt <= 3; ottAttempt++ {
+		if ottAttempt > 1 {
+			if err := session.sleep(2 * time.Second); err != nil {
+				return "", "", "", wrapAuthError(fmt.Sprintf("OTP 重试取消: %s", err), AuthStatusRequestError, err)
+			}
+			seenKeys = snapshotMailboxKeys(session.context(), realMailbox, proxy)
+			logInfo("OTP 重试 #%d: 重新发送验证码 (排除旧邮件)", ottAttempt)
+		}
+		watcher := startCodeWatcher(session.context(), realMailbox, proxy, 0, seenKeys)
+		resp, err := requestWithRetryPost(session, "https://account.live.com/API/Proofs/SendOtt", "SendOtt", realMailbox, requestOptions{
+			JSON: map[string]any{
+				"token":                  token,
+				"purpose":                purpose,
+				"epid":                   epid,
+				"autoVerification":       false,
+				"autoVerificationFailed": false,
+				"confirmProof":           realMailbox,
+				"HFId":                   "",
+				"HId":                    "",
+				"HSId":                   "",
+				"HSol":                   "",
+				"HType":                  "",
+				"HPId":                   "",
+			},
+			Headers: corsHeaders(session, map[string]string{
+				"Content-Type": "application/json; charset=utf-8",
+				"Origin":       "https://account.live.com",
+				"Referer":      rawURL,
+				"canary":       apiCanary,
+			}),
+		})
+		if err != nil {
+			return "", "", "", err
+		}
+		logInfo("SendOtt 响应: status=%d", resp.StatusCode)
+		var result map[string]any
+		if err := resp.JSON(&result); err != nil {
+			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 返回非 JSON (HTTP %d)", resp.StatusCode))
+		}
+		if errMap := asMap(result["error"]); errMap != nil {
+			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 失败: code=%s", asString(errMap["code"])))
+		}
+		if value := asString(result["apiCanary"]); value != "" {
+			apiCanary = value
+		}
+		logInfo("OTP 验证: 验证码已发送 (第%d次)", ottAttempt)
+
+		code, err = watcher.getCode(0)
+		if err == nil {
+			logInfo("OTP 验证: 收到验证码")
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		authErr, _ := err.(*AuthError)
+		if ottAttempt < 3 && authErr != nil && authErr.Status == AuthStatusCodeTimeout {
+			logWarning("OTP 收码超时 (第%d次), 准备重试", ottAttempt)
+			continue
+		}
+		status := AuthStatusRequestError
+		if authErr != nil && authErr.Status != "" {
+			status = authErr.Status
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, err), status, realMailbox)
+	}
+	if lastErr != nil {
+		status := AuthStatusRequestError
+		if authErr, ok := lastErr.(*AuthError); ok && authErr.Status != "" {
+			status = authErr.Status
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, lastErr), status, realMailbox)
+	}
+
+	resp, err := requestWithRetryPost(session, "https://account.live.com/API/Proofs/VerifyCode", "VerifyCode", realMailbox, requestOptions{
+		JSON: map[string]any{
+			"code":         code,
+			"action":       "IptVerify",
+			"purpose":      purpose,
+			"epid":         epid,
+			"confirmProof": realMailbox,
+		},
+		Headers: corsHeaders(session, map[string]string{
+			"Content-Type": "application/json; charset=utf-8",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+			"canary":       apiCanary,
+		}),
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	logInfo("OTP 验证码提交响应: status=%d", resp.StatusCode)
+	logDebug("OTP 验证码提交响应 url=%s", resp.URL)
+	var verifyResult map[string]any
+	if err := resp.JSON(&verifyResult); err != nil {
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 返回非 JSON (HTTP %d)", resp.StatusCode))
+	}
+	if errMap := asMap(verifyResult["error"]); errMap != nil {
+		logWarning("VerifyCode 失败: code=%s message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"])))
+		logDebug("VerifyCode 失败响应: %v", verifyResult)
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"]))), AuthStatusVerifyCodeError)
+	}
+	route := asString(verifyResult["route"])
+	finalURL := returnURL
+	if route != "" {
+		finalURL = appendQueryParam(returnURL, "route", route)
+	}
+	logInfo("OTP 验证成功")
+	logDebug("OTP 验证成功, return_url=%s", finalURL)
+	resp, err = requestWithRetryGet(session, finalURL, "OTP 验证成功后跳转", realMailbox, requestOptions{
+		Headers:           navHeaders(session, map[string]string{"Referer": rawURL}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	return resp.Body, resp.URL, realMailbox, nil
+}
+
+func extractConfigString(page, key string) string {
+	pattern := fmt.Sprintf(`(?is)"%s"\s*:\s*"((?:\\.|[^"\\])*)"`, regexp.QuoteMeta(key))
+	m := regexp.MustCompile(pattern).FindStringSubmatch(page)
+	if len(m) < 2 {
+		return ""
+	}
+	return jsonDecodeString(m[1])
+}
+
+func extractIdentityProofs(page string) []map[string]any {
+	raw := extractConfigString(page, "rawProofList")
+	if raw == "" {
+		return nil
+	}
+	var data []map[string]any
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		logWarning("identity 页 rawProofList 解析失败: %s", err)
+		return nil
+	}
+	return data
+}
+
+func findOurIdentityProof(proofs []map[string]any) map[string]any {
+	for _, proof := range proofs {
+		if isProjectMailboxAddress(asString(proof["name"])) {
+			return proof
+		}
+	}
+	return nil
+}
+
+func extractReturnURL(page string) string {
+	m := regexp.MustCompile(`(?is)"return"\s*:\s*\{\s*"url"\s*:\s*"((?:\\.|[^"\\])*)"`).FindStringSubmatch(page)
+	if len(m) < 2 {
+		return ""
+	}
+	return jsonDecodeString(m[1])
+}
+
+func appendQueryParam(rawURL, key, value string) string {
+	parts, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	query := parts.Query()
+	query.Del(key)
+	query.Add(key, value)
+	parts.RawQuery = query.Encode()
+	return parts.String()
+}
+
+func extractPageHint(page string, limit int) string {
+	if limit <= 0 {
+		limit = 220
+	}
+	var snippets []string
+	if m := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`).FindStringSubmatch(page); len(m) > 1 {
+		snippets = append(snippets, m[1])
+	}
+	lowered := strings.ToLower(page)
+	for _, keyword := range []string{"验证码", "安全代码", "一次性代码", "验证", "错误", "不正确", "verify", "verification", "security code", "incorrect", "error"} {
+		index := strings.Index(lowered, strings.ToLower(keyword))
+		if index >= 0 {
+			start := index - 90
+			if start < 0 {
+				start = 0
+			}
+			end := index + 180
+			if end > len(page) {
+				end = len(page)
+			}
+			snippets = append(snippets, page[start:end])
+		}
+	}
+	if len(snippets) == 0 {
+		return ""
+	}
+	text := strings.Join(snippets, " ")
+	text = regexp.MustCompile(`(?is)<script\b.*?</script>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)<style\b.*?</style>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(text, " ")
+	text = html.UnescapeString(text)
+	text = regexp.MustCompile(`https?://\S+`).ReplaceAllString(text, "[url]")
+	text = regexp.MustCompile(`[\w.+-]+@[\w.-]+`).ReplaceAllString(text, "[email]")
+	text = regexp.MustCompile(`\b\d{4,8}\b`).ReplaceAllString(text, "[code]")
+	text = regexp.MustCompile(`[A-Za-z0-9+/_%=-]{80,}`).ReplaceAllString(text, "[token]")
+	text = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(text, " "))
+	if len(text) > limit {
+		return text[:limit]
+	}
+	return text
+}
+
+func accountEmailMask(accountEmail string) string {
+	local, domain, ok := strings.Cut(accountEmail, "@")
+	if !ok || local == "" || domain == "" {
+		return ""
+	}
+	if len(local) >= 3 {
+		return fmt.Sprintf("%s**%s@%s", local[:2], local[len(local)-1:], domain)
+	}
+	if len(local) == 2 {
+		return fmt.Sprintf("%s**%s@%s", local[:1], local[1:], domain)
+	}
+	return local + "**@" + domain
+}
+
+func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy string, preferredBindingAddress string) string {
+	prefix := ""
+	if m := regexp.MustCompile(`(?i)^([a-z0-9]{1,5})\*+`).FindStringSubmatch(maskedEmail); len(m) > 1 {
+		prefix = m[1]
+	} else {
+		prefix = strings.Split(maskedEmail, "*")[0]
+	}
+	prefix = regexp.MustCompile(`[^a-z0-9]`).ReplaceAllString(strings.ToLower(prefix), "")
+	domain := "aishop6.com"
+	if strings.Contains(maskedEmail, "@") {
+		domain = strings.ToLower(strings.SplitN(maskedEmail, "@", 2)[1])
+	}
+	accountKey := strings.ToLower(strings.TrimSpace(accountEmail))
+
+	if preferred := strings.ToLower(strings.TrimSpace(preferredBindingAddress)); preferred != "" && mailboxMatchesMasked(maskedEmail, preferred) {
+		logInfo("通过导入输入找到当前账号真实辅助邮箱")
+		logDebug("导入输入匹配: account=%s, real_mailbox=%s", accountEmail, preferred)
+		return preferred
+	}
+
+	if generated, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedEmail, generated) {
+		logInfo("通过辅助邮箱生成规则匹配真实地址")
+		logDebug("生成规则匹配: account=%s, masked_email=%s, real_mailbox=%s", accountEmail, maskedEmail, generated)
+		return generated
+	}
+
+	if recorded := lookupRecordedMailboxForAccount(accountKey, domain); recorded != "" {
+		logInfo("通过输出记录找到当前账号真实辅助邮箱")
+		logDebug("输出记录匹配: account=%s, real_mailbox=%s", accountEmail, recorded)
+		return recorded
+	}
+
+	if mask := accountEmailMask(accountEmail); mask != "" {
+		func() {
+			defer func() {
+				if recover() != nil {
+					logWarning("按账号掩码搜索临时邮箱失败")
+				}
+			}()
+			results := searchMailboxesByContent(ctx, mask, proxy)
+			var candidates []string
+			for _, addr := range results {
+				addr = strings.ToLower(addr)
+				if addr != "" && strings.HasSuffix(addr, "@"+domain) && (prefix == "" || strings.HasPrefix(addr, prefix)) {
+					candidates = append(candidates, addr)
+				}
+			}
+			if len(candidates) > 0 {
+				if len(candidates) > 1 {
+					logWarning("正文掩码匹配到多个邮箱, 使用最新一条: account=%s, mask=%s, candidates=%v", accountEmail, mask, firstN(candidates, 5))
+				}
+				logInfo("通过邮件正文账号掩码找到真实辅助邮箱")
+				logDebug("正文掩码匹配: account=%s, mask=%s, real_mailbox=%s", accountEmail, mask, candidates[0])
+				prefix = "\x00" + candidates[0]
+			}
+		}()
+		if strings.HasPrefix(prefix, "\x00") {
+			return strings.TrimPrefix(prefix, "\x00")
+		}
+	}
+
+	if recorded := lookupRecordedMailboxByPrefix(prefix, domain); recorded != "" {
+		logInfo("通过输出记录找到掩码邮箱对应真实地址")
+		logDebug("输出记录前缀匹配: masked_email=%s, real_mailbox=%s", maskedEmail, recorded)
+		return recorded
+	}
+
+	results := searchMailboxes(ctx, prefix, proxy)
+	var candidates []string
+	for _, result := range results {
+		addr := strings.ToLower(result)
+		if strings.HasPrefix(addr, prefix) && strings.HasSuffix(addr, "@"+domain) {
+			candidates = append(candidates, addr)
+		}
+	}
+	if len(candidates) == 1 || (len(candidates) > 1 && len(prefix) >= 4) {
+		logInfo("通过 API 找到掩码邮箱对应真实地址")
+		logDebug("掩码邮箱匹配: masked_email=%s, real_mailbox=%s", maskedEmail, candidates[0])
+		return candidates[0]
+	}
+	if len(candidates) > 1 {
+		logWarning("掩码前缀过短且匹配到多个邮箱: masked_email=%s, candidates=%v", maskedEmail, firstN(candidates, 5))
+	}
+	return ""
+}
+
+func resultRecordFiles() []string {
+	return nil
+}
+
+func lookupRecordedMailboxForAccount(accountKey, domain string) string {
+	if accountKey == "" {
+		return ""
+	}
+	var matches []string
+	for _, filePath := range resultRecordFiles() {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, rawLine := range strings.Split(string(data), "\n") {
+			sourceEmail, mailbox := parseRecordedMailboxLine(rawLine, domain)
+			if sourceEmail == accountKey && mailbox != "" {
+				matches = append(matches, mailbox)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1]
+}
+
+func lookupRecordedMailboxByPrefix(prefix, domain string) string {
+	if len(prefix) < 4 {
+		return ""
+	}
+	var matches []string
+	for _, filePath := range resultRecordFiles() {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, rawLine := range strings.Split(string(data), "\n") {
+			_, mailbox := parseRecordedMailboxLine(rawLine, domain)
+			if mailbox != "" && strings.HasPrefix(mailbox, prefix) {
+				matches = append(matches, mailbox)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1]
+}
+
+func parseRecordedMailboxLine(line, domain string) (string, string) {
+	line = stripProgressPrefix(strings.TrimSpace(line))
+	if line == "" {
+		return "", ""
+	}
+	if strings.Contains(line, ">") {
+		line = strings.TrimSpace(strings.SplitN(line, ">", 2)[0])
+	}
+	parts := strings.Split(line, "----")
+	if len(parts) < 3 {
+		return "", ""
+	}
+	sourceEmail := strings.ToLower(strings.TrimSpace(parts[0]))
+	candidates := []string{}
+	if len(parts) >= 5 {
+		candidates = append(candidates, parts[4])
+	}
+	candidates = append(candidates, parts[2])
+	for _, candidate := range candidates {
+		mailbox := strings.ToLower(strings.TrimSpace(candidate))
+		if mailbox != "" && strings.HasSuffix(mailbox, "@"+domain) {
+			return sourceEmail, mailbox
+		}
+	}
+	return sourceEmail, ""
+}
+
+func cleanProofDisplay(value string) string {
+	value = strings.TrimSpace(html.UnescapeString(value))
+	value = regexp.MustCompile(`[<\s]`).Split(value, 2)[0]
+	return strings.Trim(value, " \"'<>.,;:，。；：")
+}
+
+func detectExistingProofInPage(page string) string {
+	patterns := []string{
+		`我们将向\s+(\S+@\S+)`,
+		`[Ww]e.{0,5}ll send a code to\s+(\S+@\S+)`,
+		`(\S{1,3}\*{2,}\S{0,3}@\S+)`,
+	}
+	for _, pattern := range patterns {
+		if m := regexp.MustCompile(`(?is)` + pattern).FindStringSubmatch(page); len(m) > 1 {
+			return cleanProofDisplay(m[1])
+		}
+	}
+	return ""
+}
+
+func handlePasskeyInterrupt(session *Session, page, rawURL string) (string, string, bool, error) {
+	skipURL := extractSkipURL(page)
+	if skipURL == "" {
+		if m := regexp.MustCompile(`(?i)[?&]ru=([^&]+)`).FindStringSubmatch(rawURL); len(m) > 1 {
+			if decoded, err := url.QueryUnescape(m[1]); err == nil {
+				skipURL = decoded
+			}
+		}
+	}
+	if skipURL != "" && strings.HasPrefix(skipURL, "http") {
+		resp, err := requestWithRetryGet(session, skipURL, "passkey 跳过", "", requestOptions{
+			Headers: navHeaders(session, nil),
+		})
+		if err != nil {
+			return "", "", false, err
+		}
+		return resp.Body, resp.URL, true, nil
+	}
+	return "", "", false, nil
+}
+
+func extractEmailProofValue(page, mailbox string) string {
+	mailbox = strings.ToLower(strings.TrimSpace(mailbox))
+	if mailbox == "" {
+		return ""
+	}
+	formHTML := extractFormHTML(page, "frmVerifyProof")
+	if formHTML == "" {
+		formHTML = page
+	}
+	inputTags := regexp.MustCompile(`(?is)<input\b[^>]*>`).FindAllString(formHTML, -1)
+	for _, preferredName := range []string{"iProofOptions", "proof"} {
+		for _, tag := range inputTags {
+			attrs := extractTagAttrs(tag)
+			name := attrs["name"]
+			value := attrs["value"]
+			if name == preferredName && strings.Contains(strings.ToLower(value), mailbox) && strings.Contains(strings.ToLower(value), "||email||") {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func submitSLTFormIfPresent(session *Session, page, rawURL, boundMailbox, label string) (string, string, bool, error) {
+	sltFields := extractFormFields(page, "frmSubmitSLT")
+	sltAction := extractFormActionByID(page, "frmSubmitSLT")
+	if sltFields["slt"] == "" || sltAction == "" {
+		return page, rawURL, false, nil
+	}
+	sltAction = resolveURL(rawURL, sltAction)
+	logInfo("%s accepted, submitting SLT form", label)
+	logDebug("SLT form action=%s fields=%v", sltAction, sortedKeys(sltFields))
+	resp, err := requestWithRetryPost(session, sltAction, "SLT submit", boundMailbox, requestOptions{
+		Data: sltFields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      "https://account.live.com/",
+		}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", false, err
+	}
+	logInfo("SLT submit response: status=%d", resp.StatusCode)
+	logDebug("SLT submit response url=%s", resp.URL)
+	return resp.Body, resp.URL, true, nil
+}
+
+func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail string, preferredBindingAddress string) (string, string, string, error) {
+	action := extractFormAction(page)
+	if action == "" || action == "#" || !strings.HasPrefix(action, "http") {
+		return "", "", "", newAuthError("绑定页无法解析 form")
+	}
+	canary := extractHiddenInputs(page)["canary"]
+	if canary == "" {
+		if m := regexp.MustCompile(`(?is)name="canary"[^>]*value="([^"]*)"`).FindStringSubmatch(page); len(m) > 1 {
+			canary = m[1]
+		}
+	}
+
+	tempMail, err := createTempMailbox(session.context(), accountEmail, preferredBindingAddress)
+	if err != nil {
+		return "", "", "", err
+	}
+	logDebug("已创建临时邮箱: %s (代理: %s)", tempMail, firstNonEmpty(proxy, "默认"))
+	watcher := startCodeWatcher(session.context(), tempMail, proxy, 0, nil)
+	logDebug("已启动后台收码线程, 监听邮箱: %s", tempMail)
+
+	logInfo("提交临时邮箱到 AddProof")
+	logDebug("AddProof: mailbox=%s, action=%s", tempMail, action)
+	resp, err := requestWithRetryPost(session, action, "AddProof", tempMail, requestOptions{
+		Data: map[string]string{
+			"iProofOptions":          "Email",
+			"DisplayPhoneCountryISO": "CN",
+			"DisplayPhoneNumber":     "",
+			"EmailAddress":           tempMail,
+			"canary":                 canary,
+			"action":                 "AddProof",
+			"PhoneNumber":            "",
+			"PhoneCountryISO":        "",
+		},
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+		}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	verifyPage := resp.Body
+	verifyURL := resp.URL
+	logDebug("AddProof 响应 url=%s", verifyURL)
+
+	verifyAction := extractFormAction(verifyPage)
+	if verifyAction == "" || !strings.HasPrefix(verifyAction, "http") {
+		verifyAction = verifyURL
+	}
+	verifyFields := extractFormFields(verifyPage, "frmVerifyProof")
+	if len(verifyFields) == 0 {
+		verifyFields = extractHiddenInputs(verifyPage)
+	}
+	delete(verifyFields, "slt")
+	verifyCanary := firstNonEmpty(verifyFields["canary"], canary)
+	if verifyCanary == "" {
+		if m := regexp.MustCompile(`(?is)name="canary"[^>]*value="([^"]*)"`).FindStringSubmatch(verifyPage); len(m) > 1 {
+			verifyCanary = firstNonEmpty(m[1], canary)
+		}
+	}
+
+	code, err := watcher.getCode(0)
+	if err != nil {
+		logError("获取验证码失败: %s", err)
+		logDebug("获取验证码失败邮箱: %s", tempMail)
+		status := AuthStatusRequestError
+		if authErr, ok := err.(*AuthError); ok && authErr.Status != "" {
+			status = authErr.Status
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("%s (已绑定邮箱 %s)", err, tempMail), status, tempMail)
+	}
+	logInfo("获取到验证码")
+
+	logInfo("提交验证码到 VerifyProof")
+	logDebug("VerifyProof: action=%s", verifyAction)
+	if proofValue := extractEmailProofValue(verifyPage, tempMail); proofValue != "" {
+		verifyFields["iProofOptions"] = proofValue
+	} else if verifyFields["iProofOptions"] == "" {
+		verifyFields["iProofOptions"] = fmt.Sprintf("OTT||%s||Email||0||c", tempMail)
+		logWarning("VerifyProof iProofOptions missing, using fallback")
+	}
+	delete(verifyFields, "proof")
+	verifyFields["iOttText"] = code
+	verifyFields["action"] = "VerifyProof"
+	verifyFields["canary"] = verifyCanary
+	if _, ok := verifyFields["GeneralVerify"]; !ok {
+		verifyFields["GeneralVerify"] = "0"
+	}
+	logDebug("VerifyProof fields=%v iProofOptions=%s", sortedKeys(verifyFields), verifyFields["iProofOptions"])
+	resp, err = requestWithRetryPost(session, verifyAction, "VerifyProof", tempMail, requestOptions{
+		Data: verifyFields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      verifyURL,
+		}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	verifyResponseURL := resp.URL
+	logInfo("VerifyProof 响应: status=%d", resp.StatusCode)
+	logDebug("VerifyProof 响应 url=%s", verifyResponseURL)
+	sltPage, sltURL, sltSubmitted, err := submitSLTFormIfPresent(session, resp.Body, verifyResponseURL, tempMail, "VerifyProof")
+	if err != nil {
+		return "", "", "", err
+	}
+	if sltSubmitted {
+		return sltPage, sltURL, tempMail, nil
+	}
+	if strings.Contains(strings.ToLower(verifyResponseURL), "/proofs/verify") {
+		hint := extractPageHint(resp.Body, 220)
+		if hint != "" {
+			logWarning("VerifyProof 后仍停留验证页: %s", hint)
+		} else {
+			logWarning("VerifyProof 后仍停留验证页")
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyProof failed: %s", firstNonEmpty(hint, "still on verify page")), AuthStatusCodeTimeout, tempMail)
+	}
+	return resp.Body, resp.URL, tempMail, nil
+}
+
+func isAddEmailPage(page, action string) bool {
+	return (strings.Contains(page, "EmailAddress") || strings.Contains(page, "AddProof") || strings.Contains(page, "备用电子邮件")) && action != "" && action != "#" && strings.HasPrefix(action, "http")
+}
+
+func trySkipProofsPage(session *Session, page, rawURL, action string) (string, string, error) {
+	fields := extractHiddenInputs(page)
+	if fields["iProofOptions"] == "" {
+		fields["iProofOptions"] = "Email"
+	}
+	fields["action"] = "Skip"
+	if fields["PhoneNumber"] == "" {
+		fields["PhoneNumber"] = ""
+	}
+	if fields["EmailAddress"] == "" {
+		fields["EmailAddress"] = ""
+	}
+	resp, err := requestWithRetryPost(session, action, "Skip proofs", "", requestOptions{
+		Data: fields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+		}),
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return resp.Body, resp.URL, nil
+}
+
+func handleProofsPage(session *Session, page, rawURL, action, proxy string, alreadyBound bool, email string, preferredBindingAddress string) (string, string, string, error) {
+	skipURL := extractSkipURL(page)
+	if skipURL != "" && (strings.Contains(skipURL, "res=success") || strings.Contains(skipURL, "res=cancel")) {
+		logInfo("尝试通过 skip URL 跳过安全证明页")
+		resp, err := postEmptyForm(session, skipURL, rawURL)
+		if err != nil {
+			return "", "", "", err
+		}
+		return resp.Body, resp.URL, "", nil
+	}
+
+	isAddEmail := isAddEmailPage(page, action)
+	isSPA := len(page) > 50000
+	if !isSPA && action != "" && action != "#" && strings.HasPrefix(action, "http") {
+		logInfo("尝试跳过安全证明页")
+		skippedPage, skippedURL, err := trySkipProofsPage(session, page, rawURL, action)
+		if err != nil {
+			return "", "", "", err
+		}
+		skippedAction := extractFormAction(skippedPage)
+		if isAddEmail && !alreadyBound && isAddEmailPage(skippedPage, skippedAction) {
+			logInfo("安全证明页无法跳过, 改为绑定辅助邮箱")
+			return bindAuxiliaryEmail(session, skippedPage, skippedURL, proxy, email, preferredBindingAddress)
+		}
+		return skippedPage, skippedURL, "", nil
+	}
+
+	if isAddEmail && !alreadyBound {
+		return bindAuxiliaryEmail(session, page, rawURL, proxy, email, preferredBindingAddress)
+	}
+	if alreadyBound && isAddEmail {
+		logInfo("已绑定过辅助邮箱, 跳过后续 proofs 页面 (Skip)")
+	}
+	if strings.Contains(page, "SendOtt") || strings.Contains(page, "VerifyCode") {
+		if hint := extractPageHint(page, 220); hint != "" {
+			logWarning("安全证明页仍要求验证码: %s", hint)
+		}
+		return "", "", "", newAuthError("安全证明页仍要求验证码", AuthStatusCodeTimeout)
+	}
+	if strings.Contains(page, "AddAlias") || strings.Contains(page, "AliasAccrual") {
+		return "", "", "", newAuthError("需要绑定辅助邮箱")
+	}
+	if strings.Contains(page, "proofList") || strings.Contains(page, "ProofPickerControl") {
+		return "", "", "", newAuthError("需要身份验证")
+	}
+	return "", "", "", newAuthError("需要身份验证")
+}
+
+func handleAutoSubmit(session *Session, page, rawURL, action string) (string, string, error) {
+	if !strings.HasPrefix(action, "http") {
+		action = "https://account.live.com" + action
+	}
+	fields := extractHiddenInputs(page)
+	if strings.Contains(strings.ToLower(action), "consent") {
+		fields["ucaccept"] = "Yes"
+	}
+	resp, err := requestWithRetryPost(session, action, "自动跳转", "", requestOptions{
+		Data: fields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://login.live.com",
+			"Referer":      rawURL,
+		}),
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return resp.Body, resp.URL, nil
+}
+
+func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds int, email string, proofData []ProofData, preferredBindingAddress string) (string, string, string, error) {
+	if maxRounds <= 0 {
+		maxRounds = 10
+	}
+	boundMailbox := ""
+	for roundNum := 1; roundNum <= maxRounds; roundNum++ {
+		low := strings.ToLower(rawURL)
+		action := extractFormAction(page)
+		isInterrupt := isInterruptPage(rawURL)
+		isAuto := isAutoSubmitPage(page, action)
+
+		if isAccountRecoverURL(rawURL) || isAccountRecoverURL(action) {
+			logWarning("检测到账号异常恢复页")
+			return "", "", "", newAuthError("账号异常", AuthStatusAccountAbnormal)
+		}
+		if !isInterrupt && !isAuto {
+			logDebug("handle_account_pages: 无可处理页, url=%s action=%s page_len=%d has_DoSubmit=%t has_form=%t", rawURL, action, len(page), strings.Contains(page, "DoSubmit"), strings.Contains(strings.ToLower(page), "<form"))
+			break
+		}
+
+		pageKind := "登录后续页面"
+		if strings.Contains(low, "/identity/") {
+			pageKind = "身份验证页"
+		} else if strings.Contains(low, "/proofs/") {
+			pageKind = "安全证明页"
+		} else if strings.Contains(low, "/interrupt/") || strings.Contains(low, "passkey") {
+			pageKind = "中断跳过页"
+		} else if isAuto {
+			pageKind = "自动跳转页"
+		}
+		logInfo("处理%s #%d", pageKind, roundNum)
+		logDebug("中断页循环 #%d: url=%s, is_interrupt=%t, is_auto=%t, action=%s", roundNum, rawURL, isInterrupt, isAuto, action)
+
+		if strings.Contains(low, "/identity/") && strings.Contains(low, "account.live.com") {
+			nextPage, nextURL, tempMail, err := handleIdentityPage(session, page, rawURL, proxy, email, proofData, false, preferredBindingAddress)
+			if err != nil {
+				return "", "", "", err
+			}
+			page, rawURL = nextPage, nextURL
+			if tempMail != "" {
+				boundMailbox = tempMail
+			}
+			continue
+		}
+
+		if (strings.Contains(low, "/interrupt/") || strings.Contains(low, "passkey")) && strings.Contains(low, "account.live.com") {
+			nextPage, nextURL, ok, err := handlePasskeyInterrupt(session, page, rawURL)
+			if err != nil {
+				return "", "", "", err
+			}
+			if ok {
+				page, rawURL = nextPage, nextURL
+				continue
+			}
+		}
+
+		if isAuto && !isInterrupt {
+			if action != "" && strings.Contains(strings.ToLower(action), "identity/confirm") {
+				logInfo("自动跳转: 进入 identity/confirm 获取 OTP 上下文")
+				nextPage, nextURL, err := handleAutoSubmit(session, page, rawURL, action)
+				if err != nil {
+					return "", "", "", err
+				}
+				page, rawURL = nextPage, nextURL
+				continue
+			}
+			if action == "" {
+				break
+			}
+			nextPage, nextURL, err := handleAutoSubmit(session, page, rawURL, action)
+			if err != nil {
+				return "", "", "", err
+			}
+			page, rawURL = nextPage, nextURL
+			continue
+		}
+
+		if strings.Contains(low, "/proofs/") {
+			nextPage, nextURL, tempMail, err := handleProofsPage(session, page, rawURL, action, proxy, boundMailbox != "", email, preferredBindingAddress)
+			if err != nil {
+				return "", "", "", err
+			}
+			page, rawURL = nextPage, nextURL
+			if tempMail != "" {
+				boundMailbox = tempMail
+			}
+			continue
+		}
+		break
+	}
+	return page, rawURL, boundMailbox, nil
+}
+
+func resolveURL(baseURL, ref string) string {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return ref
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+	return base.ResolveReference(u).String()
+}
+
+func pageKeywordSubset(page string, keywords []string) []string {
+	var found []string
+	for _, keyword := range keywords {
+		if strings.Contains(page, keyword) {
+			found = append(found, keyword)
+		}
+	}
+	return found
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstN(values []string, n int) []string {
+	if len(values) <= n {
+		return values
+	}
+	return values[:n]
+}

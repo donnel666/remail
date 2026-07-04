@@ -142,6 +142,104 @@ func TestResourceSchemaConstraintsMySQL(t *testing.T) {
 		"user@valid.example.com",
 		"normal",
 	).Error)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO inbound_mails(envelope_from, recipient, resource_id, resource_type, owner_user_id, source_object_key) VALUES (?, ?, ?, ?, ?, ?)",
+		"sender@example.com",
+		"user@valid.example.com",
+		103,
+		"domain",
+		1,
+		"mailtransport/inbound/domain.eml",
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO inbound_mails(envelope_from, recipient, resource_id, resource_type, owner_user_id, source_object_key) VALUES (?, ?, ?, ?, ?, ?)",
+		"sender@example.com",
+		"user@valid.example.com",
+		103,
+		"microsoft",
+		1,
+		"mailtransport/inbound/wrong-type.eml",
+	).Error)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, ?, ?), (?, ?, ?)",
+		104,
+		"microsoft",
+		1,
+		105,
+		"microsoft",
+		1,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO microsoft_resources(id, email_address, email_domain, password, status) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+		104,
+		"ms104@example.com",
+		"example.com",
+		"secret",
+		"pending",
+		105,
+		"ms105@example.com",
+		"example.com",
+		"secret",
+		"pending",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO inbound_mails(envelope_from, recipient, resource_id, resource_type, owner_user_id, source_object_key) VALUES (?, ?, ?, ?, ?, ?)",
+		"sender@example.com",
+		"bind@example.com",
+		104,
+		"microsoft",
+		1,
+		"mailtransport/inbound/microsoft.eml",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO microsoft_binding_mailboxes(resource_id, owner_user_id, account_email, binding_address, status) VALUES (?, ?, ?, ?, ?)",
+		104,
+		1,
+		"ms104@example.com",
+		"bind@example.com",
+		"pending",
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO microsoft_binding_mailboxes(resource_id, owner_user_id, account_email, binding_address, status) VALUES (?, ?, ?, ?, ?)",
+		105,
+		1,
+		"ms105@example.com",
+		"bind@example.com",
+		"pending",
+	).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE microsoft_binding_mailboxes SET status = ? WHERE resource_id = ?",
+		"expired",
+		104,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO microsoft_binding_mailboxes(resource_id, owner_user_id, account_email, binding_address, status) VALUES (?, ?, ?, ?, ?)",
+		105,
+		1,
+		"ms105@example.com",
+		"bind@example.com",
+		"pending",
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO resource_validation_jobs(resource_id, resource_type, owner_user_id) VALUES (?, ?, ?)",
+		99999,
+		"microsoft",
+		1,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO resource_validation_jobs(resource_id, resource_type, owner_user_id) VALUES (?, ?, ?)",
+		104,
+		"microsoft",
+		1,
+	).Error)
+	require.Error(t, db.Exec(
+		"INSERT INTO resource_validation_jobs(resource_id, resource_type, owner_user_id) VALUES (?, ?, ?)",
+		104,
+		"microsoft",
+		1,
+	).Error)
 }
 
 func TestResourceListIndexesMySQL(t *testing.T) {
@@ -255,7 +353,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 		{EmailAddress: "dup@test.local", Password: "secret", ForSale: true, Status: domain.MicrosoftStatusPending},
 	}
 
-	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""), domain.ErrDuplicateEmail)
+	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil), domain.ErrDuplicateEmail)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
@@ -333,7 +431,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 		LastSafeError: "",
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", ""))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -413,7 +511,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftC
 		Status:       domain.MicrosoftStatusPending,
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", ""))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -457,14 +555,14 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 		{EmailAddress: "two@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
 	}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil))
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.ResourceImportImported, storedImport.Status)
 	require.Equal(t, 2, storedImport.ImportedCount)
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", ""))
+	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil))
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)

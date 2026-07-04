@@ -12,6 +12,11 @@
 | 2026-07-04 | V1.5 | Codex | 补充外发邮件 DKIM 签名策略：MailTransport infra 在 SMTP DATA 前对最终 RFC822 原文签名，私钥只来自部署 Secret 或本地文件，不进入业务事实和日志。此为缺失设计补充，不改变 IAM/通知业务对 DeliveryPort 的依赖方向。 |
 | 2026-07-04 | V1.6 | Codex | 补充 BIMI 品牌 Logo 发布策略：前端 public 固定发布 BIMI 专用 SVG，DNS 仅引用静态 SVG；BIMI 不参与邮件投递和业务判定，只用于支持邮箱客户端品牌展示。此为缺失设计补充，不改变 MailTransport 认证边界。 |
 | 2026-07-04 | V1.7 | Codex | 补充 direct SMTP 外发协议策略：默认直连外发使用 Go 标准库 SMTP 会话并强制 IPv4 连接对方 MX，避免运行时默认双栈拨号和第三方客户端实现差异导致投递不稳定。此为缺失设计补充，不改变异步发送、DKIM 或入站策略。 |
+| 2026-07-04 | V1.8 | Codex | 补充 P1-I3 资源验证 Port 执行策略：Microsoft/DNS 验证只能由异步 worker 调用，MailTransport 只返回结构化分类和安全文案，不直接拥有资源状态。此为缺失设计补充，不改变 Core 对资源状态的所有权。 |
+| 2026-07-04 | V1.9 | Codex | 补充 P1-I3 资源验证临时失败分类：MailTransport 返回 `request` 表示基础设施或上游临时不可用，由 Core 任务重试处理，不直接判定资源异常。此为缺失设计补充，不改变 Core 对资源状态的所有权。 |
+| 2026-07-04 | V1.10 | Codex | 补充 P1-I3 Microsoft 辅助邮箱绑定事实落库：导入输入和验证流程使用 `Binding` 状态机，验证码通过本机入站邮件读取。此为缺失设计补充，不改变 Microsoft ACL 交互流程。 |
+| 2026-07-04 | V1.11 | Codex | 补充 P1-I3 Microsoft Graph 协议能力返回：验证 Port 在收件成功后返回 Graph 是否可用，Core 仅保存能力事实并用于筛选。此为缺失设计补充，不改变 MailTransport/Core 边界。 |
+| 2026-07-04 | V1.12 | Codex | 纠正 P1-I3 入站邮件归属：`InboundMail` 归属到 Core 资源根 `resourceType/resourceId/ownerUserId`，同时支持 Domain 收件和 Microsoft 辅助邮箱收码。此为缺失设计补充，不改变 MailTransport 只保存邮件事实的边界。 |
 
 > 支撑域。BC-MAILTRANSPORT 封装协议细节，只提供结构化结果，不做项目匹配和订单判断。
 
@@ -103,7 +108,7 @@ stateDiagram-v2
 | `id` | 入站邮件任务 ID |
 | `envelopeFrom` | SMTP MAIL FROM，安全存储信封地址 |
 | `recipient` | 单个 SMTP RCPT TO；多收件人拆成多条任务事实，共用同一原文 objectKey |
-| `resourceId/ownerUserId` | RCPT 阶段解析出的 Domain 资源和 owner |
+| `resourceType/resourceId/ownerUserId` | RCPT 阶段解析出的资源根和 owner；`resourceType=domain` 表示自建域名或生成邮箱，`resourceType=microsoft` 表示 Microsoft 辅助邮箱收码 |
 | `sourceObjectKey` | MinIO private bucket 中的 RFC822 原文 |
 | `status` | `pending/processing/stored/failed` |
 | `failureReason` | 安全失败摘要 |
@@ -182,6 +187,18 @@ Microsoft 拉取用途必须显式传入：
 | `InboundPort` | 出站到 BC-MAILMATCH | SMTP 入站邮件落库。 |
 | `BindingCodeWaitPort` | 出站到 BC-MAILMATCH | Microsoft ACL 等待辅助邮箱验证码。 |
 | `ProxyPort` | 出站到 BC-PROXY | 获取 Microsoft 通讯代理并上报代理成功/失败。 |
+
+P1-I3 补充：
+
+| Port | 方向 | 职责 |
+|------|------|------|
+| `ResourceValidationPort` | 入站自 BC-CORE worker | 验证 Microsoft RT/获取 RT、自建域名 MX；只返回结构化结果，不直接修改资源状态。 |
+
+`ResourceValidationPort` 返回的 `request` 分类只表示协议请求、代理、DNS 或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据；只有密码、账号异常、DNS 配置错误等确定性分类才允许 Core 把资源状态写为 `abnormal`。
+
+P1-I3 Microsoft 验证流程使用同一个 `Binding` 实体承接辅助邮箱事实。Core 导入 TXT 时只把 `bindingAddress` 作为输入交给 MailTransport，MailTransport 写入 `pending` 绑定记录；同一 active `bindingAddress` 只能归属一个 Microsoft 资源，避免 SMTP RCPT 解析歧义。验证 worker 进入 Microsoft 页面流后复用该地址，或在没有输入时按 ACL 规则生成地址。SMTP 入站解析辅助邮箱地址后写入 `InboundMail(resourceType=microsoft)`，`BindingCodeWaitPort` 读取本机 `InboundMail` 的 RFC822 原文并沿用 ACL 的验证码提取规则。该流程不改变 Microsoft 页面交互策略，只替换本系统的输入、收码和状态回写端口。
+
+P1-I3 Microsoft 资源验证的资源健康判断止于“RT 可用且收件接口可读”。MailTransport 必须先完成 RT 获取或刷新，再优先通过 Graph 分页读取收件箱和垃圾箱；Graph 失败时使用同一 RT 换 IMAP token 回退 Outlook IMAP。Graph 或 IMAP 任一路径读取正常，即 `ResourceValidationPort` 可返回成功。Port 同时返回 `graphAvailable`：Graph 路径成功为 `true`，IMAP 回退成功为 `false`。该字段是协议能力事实，不是资源状态，也不改变后续分配条件。读取到的结构化邮件只作为后续 BC-MAILMATCH/Project 匹配的输入预留；项目匹配和关系插入属于第三步业务增强，不参与 Microsoft 资源本体状态判断。
 
 ---
 

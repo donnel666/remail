@@ -30,7 +30,28 @@ func (r *InboundResourceResolver) ResolveInboundRecipient(ctx context.Context, e
 
 	var resolved domain.InboundRecipient
 	err := r.db.WithContext(ctx).Raw(`
-SELECT gm.email AS email, gm.resource_id AS resource_id, gm.owner_user_id AS owner_user_id
+SELECT mb.binding_address AS email,
+       mb.resource_id AS resource_id,
+       'microsoft' AS resource_type,
+       mb.owner_user_id AS owner_user_id
+FROM microsoft_binding_mailboxes AS mb
+JOIN microsoft_resources AS mr ON mr.id = mb.resource_id
+WHERE mb.binding_address = ?
+  AND mb.status IN ('pending', 'code_sent', 'verified', 'timeout', 'failed')
+  AND mr.status NOT IN ('deleted', 'disabled')
+LIMIT 1`, email).Scan(&resolved).Error
+	if err != nil {
+		return nil, fmt.Errorf("resolve microsoft binding mailbox: %w", err)
+	}
+	if resolved.ResourceID != 0 {
+		return &resolved, nil
+	}
+
+	err = r.db.WithContext(ctx).Raw(`
+SELECT gm.email AS email,
+       gm.resource_id AS resource_id,
+       'domain' AS resource_type,
+       gm.owner_user_id AS owner_user_id
 FROM generated_mailboxes AS gm
 JOIN domain_resources AS dr
   ON dr.id = gm.resource_id AND dr.owner_user_id = gm.owner_user_id
@@ -46,7 +67,10 @@ LIMIT 1`, email).Scan(&resolved).Error
 	}
 
 	err = r.db.WithContext(ctx).Raw(`
-SELECT ? AS email, dr.id AS resource_id, dr.owner_user_id AS owner_user_id
+SELECT ? AS email,
+       dr.id AS resource_id,
+       'domain' AS resource_type,
+       dr.owner_user_id AS owner_user_id
 FROM domain_resources AS dr
 WHERE dr.domain = ?
   AND dr.status NOT IN ('deleted', 'disabled')

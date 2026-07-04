@@ -10,6 +10,7 @@ export interface DomainResource {
   mailServerId: number;
   usageScope: UsageScope;
   status: DomainStatus;
+  lastSafeError?: string;
   mailboxCount: number;
   createdAt: string;
 }
@@ -56,6 +57,7 @@ export function toDomainResource(item: ResourceItem): DomainResource | null {
     mailServerId: item.mailServerId ?? 0,
     usageScope: item.purpose === "sale" ? "public_sale" : "private",
     status: mapDomainStatus(item.status),
+    lastSafeError: item.lastSafeError || undefined,
     mailboxCount: item.mailboxCount ?? 0,
     createdAt: item.createdAt,
   };

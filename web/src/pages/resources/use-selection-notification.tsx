@@ -7,6 +7,7 @@ const selectionNoticeId = "resources-batch-actions";
 interface UseSelectionNotificationOptions {
   onCheck?: () => void;
   selectedCount: number;
+  checkLoading?: boolean;
   onClear: () => void;
   onDelete?: () => void;
   onSell?: () => void;
@@ -19,6 +20,7 @@ interface UseSelectionNotificationOptions {
 export function useSelectionNotification({
   onCheck,
   selectedCount,
+  checkLoading = false,
   onClear,
   onDelete,
   onSell,
@@ -37,6 +39,7 @@ export function useSelectionNotification({
             </Button>
             {onCheck ? (
               <Button
+                loading={checkLoading}
                 onClick={onCheck}
                 size="small"
                 theme="solid"
@@ -87,6 +90,7 @@ export function useSelectionNotification({
     }
   }, [
     deleteLoading,
+    checkLoading,
     onCheck,
     onClear,
     onDelete,

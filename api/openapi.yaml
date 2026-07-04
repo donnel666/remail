@@ -1505,7 +1505,7 @@ paths:
   /v1/resources/{resourceId}/validate:
     post:
       operationId: postResourceValidate
-      summary: Request resource validation (not yet implemented)
+      summary: Queue asynchronous resource validation
       tags:
         - Resources
       security:
@@ -1518,11 +1518,18 @@ paths:
           schema:
             type: integer
       description: >
-        Stub endpoint for P1-I2. Will be implemented in P1-I3 with actual
-        Microsoft ACL / SMTP verification. Currently returns 501.
+        Creates a durable validation job and returns immediately. Microsoft
+        OAuth/Graph checks and domain DNS checks run asynchronously in the
+        backend worker.
       responses:
-        "501":
-          description: Not implemented (P1-I3)
+        "202":
+          description: Resource validation queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceValidationResponse"
+        "400":
+          description: Invalid resource id
           content:
             application/json:
               schema:
@@ -1535,6 +1542,58 @@ paths:
                 $ref: "#/components/schemas/Error"
         "403":
           description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Resource status does not allow validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/resource-validations/{validationId}:
+    get:
+      operationId: getResourceValidation
+      summary: Get resource validation status
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: validationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Resource validation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceValidationResponse"
+        "400":
+          description: Invalid validation id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Validation job not found
           content:
             application/json:
               schema:
@@ -2963,6 +3022,9 @@ components:
         longLived:
           type: boolean
           description: Microsoft resource lifetime classification selected during import
+        graphAvailable:
+          type: boolean
+          description: Whether Microsoft Graph mail fetch is available after validation (Microsoft resources only)
         lastSafeError:
           type: string
           description: Sanitized abnormal diagnostic summary (Microsoft resources only)
@@ -2997,6 +3059,7 @@ components:
         - emailAddress
         - forSale
         - longLived
+        - graphAvailable
         - status
         - qualityScore
         - createdAt
@@ -3008,6 +3071,8 @@ components:
         forSale:
           type: boolean
         longLived:
+          type: boolean
+        graphAvailable:
           type: boolean
         status:
           type: string
@@ -3047,6 +3112,8 @@ components:
         status:
           type: string
           description: Domain resource status (normal/abnormal/disabled/deleted)
+        lastSafeError:
+          type: string
         lastAllocatedAt:
           type: string
           format: date-time
@@ -3089,6 +3156,41 @@ components:
           type: integer
         lastSafeError:
           type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ResourceValidationResponse:
+      type: object
+      required:
+        - validationId
+        - resourceId
+        - resourceType
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        validationId:
+          type: integer
+        resourceId:
+          type: integer
+        resourceType:
+          type: string
+          enum: [microsoft, domain]
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - succeeded
+            - failed
+        lastSafeError:
+          type: string
+          description: Sanitized validation diagnostic. Never contains credentials, tokens, email bodies, or upstream raw details.
         createdAt:
           type: string
           format: date-time
@@ -3197,6 +3299,9 @@ components:
         longLived:
           type: boolean
           description: Microsoft long-lived filter.
+        graphAvailable:
+          type: boolean
+          description: Microsoft Graph availability filter.
         createdFrom:
           type: string
           format: date-time

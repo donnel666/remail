@@ -92,12 +92,25 @@ type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
 	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
-	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string) error
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) error
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
 type ResourceImportQueue interface {
 	EnqueueMicrosoftImport(ctx context.Context, task MicrosoftImportTask) error
+}
+
+// MicrosoftBindingInputRecorder records MailTransport auxiliary mailbox inputs
+// collected during Microsoft TXT import. Core owns the TXT parsing, while the
+// binding state machine remains in BC-MAILTRANSPORT.
+type MicrosoftBindingInputRecorder interface {
+	RecordMicrosoftBindingInputs(ctx context.Context, inputs []MicrosoftBindingInput) error
+}
+
+type MicrosoftBindingInput struct {
+	OwnerUserID    uint
+	EmailAddress   string
+	BindingAddress string
 }
 
 // MicrosoftImportTask is the safe queue payload for a Microsoft resource import.
@@ -134,16 +147,28 @@ type TXTParser interface {
 
 // ImportUseCase handles supplier resource import operations.
 type ImportUseCase struct {
-	resources EmailResourceRepository
-	imports   ResourceImportRepository
-	parser    TXTParser
-	files     governanceapp.FilePort
-	queue     ResourceImportQueue
+	resources       EmailResourceRepository
+	imports         ResourceImportRepository
+	parser          TXTParser
+	files           governanceapp.FilePort
+	queue           ResourceImportQueue
+	bindingRecorder MicrosoftBindingInputRecorder
 }
 
 // NewImportUseCase creates a new ImportUseCase.
-func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort, queue ResourceImportQueue) *ImportUseCase {
-	return &ImportUseCase{resources: resources, imports: imports, parser: parser, files: files, queue: queue}
+func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort, queue ResourceImportQueue, recorders ...MicrosoftBindingInputRecorder) *ImportUseCase {
+	var recorder MicrosoftBindingInputRecorder
+	if len(recorders) > 0 {
+		recorder = recorders[0]
+	}
+	return &ImportUseCase{
+		resources:       resources,
+		imports:         imports,
+		parser:          parser,
+		files:           files,
+		queue:           queue,
+		bindingRecorder: recorder,
+	}
 }
 
 // AcceptMicrosoftTXTFile stores the TXT artifact and enqueues asynchronous import processing.
@@ -316,7 +341,10 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 		return err
 	}
 
-	if err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary); err != nil {
+	afterCreate := func(txCtx context.Context) error {
+		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, lines)
+	}
+	if err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate); err != nil {
 		if errors.Is(err, domain.ErrDuplicateEmail) {
 			return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 				Line:        0,
@@ -329,6 +357,27 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	}
 
 	return nil
+}
+
+func (uc *ImportUseCase) recordMicrosoftBindingInputs(ctx context.Context, ownerUserID uint, lines []domain.MicrosoftImportLine) error {
+	if uc.bindingRecorder == nil {
+		return nil
+	}
+	inputs := make([]MicrosoftBindingInput, 0)
+	for _, line := range lines {
+		if strings.TrimSpace(line.BindingAddress) == "" {
+			continue
+		}
+		inputs = append(inputs, MicrosoftBindingInput{
+			OwnerUserID:    ownerUserID,
+			EmailAddress:   line.Email,
+			BindingAddress: line.BindingAddress,
+		})
+	}
+	if len(inputs) == 0 {
+		return nil
+	}
+	return uc.bindingRecorder.RecordMicrosoftBindingInputs(ctx, inputs)
 }
 
 // GetImportStatus returns a safe status view for one import owned by the current user.
@@ -569,20 +618,21 @@ func NewResourceUseCase(resources EmailResourceRepository) *ResourceUseCase {
 
 // ResourceItem is the API-safe view of a resource.
 type ResourceItem struct {
-	ID            uint                `json:"id"`
-	Type          domain.ResourceType `json:"type"`
-	OwnerID       uint                `json:"ownerId"`
-	Status        string              `json:"status"`
-	ForSale       *bool               `json:"forSale,omitempty"`
-	LongLived     *bool               `json:"longLived,omitempty"`
-	LastSafeError string              `json:"lastSafeError,omitempty"`
-	Email         string              `json:"email,omitempty"`
-	Domain        string              `json:"domain,omitempty"`
-	DomainTLD     string              `json:"domainTld,omitempty"`
-	MailServerID  uint                `json:"mailServerId,omitempty"`
-	Purpose       string              `json:"purpose,omitempty"`
-	MailboxCount  int                 `json:"mailboxCount,omitempty"`
-	CreatedAt     time.Time           `json:"createdAt"`
+	ID             uint                `json:"id"`
+	Type           domain.ResourceType `json:"type"`
+	OwnerID        uint                `json:"ownerId"`
+	Status         string              `json:"status"`
+	ForSale        *bool               `json:"forSale,omitempty"`
+	LongLived      *bool               `json:"longLived,omitempty"`
+	GraphAvailable *bool               `json:"graphAvailable,omitempty"`
+	LastSafeError  string              `json:"lastSafeError,omitempty"`
+	Email          string              `json:"email,omitempty"`
+	Domain         string              `json:"domain,omitempty"`
+	DomainTLD      string              `json:"domainTld,omitempty"`
+	MailServerID   uint                `json:"mailServerId,omitempty"`
+	Purpose        string              `json:"purpose,omitempty"`
+	MailboxCount   int                 `json:"mailboxCount,omitempty"`
+	CreatedAt      time.Time           `json:"createdAt"`
 }
 
 // MicrosoftResourceDetail is the API-safe view of a Microsoft resource (no credentials).
@@ -591,6 +641,7 @@ type MicrosoftResourceDetail struct {
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
 	LongLived       bool       `json:"longLived"`
+	GraphAvailable  bool       `json:"graphAvailable"`
 	Status          string     `json:"status"`
 	QualityScore    int        `json:"qualityScore"`
 	LastSafeError   string     `json:"lastSafeError"`
@@ -605,6 +656,7 @@ type DomainResourceDetail struct {
 	MailServerID    uint       `json:"mailServerId"`
 	Purpose         string     `json:"purpose"`
 	Status          string     `json:"status"`
+	LastSafeError   string     `json:"lastSafeError"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 }
@@ -648,35 +700,38 @@ type ResourceBulkSelection struct {
 
 // ResourceBulkFilter is the server-side filter used by "all matching" commands.
 type ResourceBulkFilter struct {
-	ResourceType domain.ResourceType
-	Search       string
-	Suffix       string
-	TLD          string
-	Status       string
-	LongLived    *bool
-	CreatedFrom  *time.Time
-	CreatedTo    *time.Time
+	ResourceType   domain.ResourceType
+	Search         string
+	Suffix         string
+	TLD            string
+	Status         string
+	LongLived      *bool
+	GraphAvailable *bool
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
 }
 
 // MicrosoftStatusResult holds minimal API-safe status for a Microsoft resource.
 type MicrosoftStatusResult struct {
-	ID            uint
-	EmailAddress  string
-	ForSale       bool
-	LongLived     bool
-	Status        string
-	LastSafeError string
+	ID             uint
+	EmailAddress   string
+	ForSale        bool
+	LongLived      bool
+	GraphAvailable bool
+	Status         string
+	LastSafeError  string
 }
 
 // DomainStatusResult holds minimal API-safe status for a domain resource.
 type DomainStatusResult struct {
-	ID           uint
-	Domain       string
-	DomainTLD    string
-	MailServerID uint
-	Purpose      string
-	Status       string
-	MailboxCount int
+	ID            uint
+	Domain        string
+	DomainTLD     string
+	MailServerID  uint
+	Purpose       string
+	Status        string
+	LastSafeError string
+	MailboxCount  int
 }
 
 const (
@@ -773,6 +828,8 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 				item.ForSale = &forSale
 				longLived := s.LongLived
 				item.LongLived = &longLived
+				graphAvailable := s.GraphAvailable
+				item.GraphAvailable = &graphAvailable
 			} else {
 				return nil, fmt.Errorf("resource invariant violation: microsoft resource %d has no subtable status", r.ID)
 			}
@@ -783,6 +840,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 				item.DomainTLD = s.DomainTLD
 				item.MailServerID = s.MailServerID
 				item.Purpose = s.Purpose
+				item.LastSafeError = s.LastSafeError
 				item.MailboxCount = s.MailboxCount
 			} else {
 				return nil, fmt.Errorf("resource invariant violation: domain resource %d has no subtable status", r.ID)
@@ -828,6 +886,7 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 			EmailAddress:    ms.EmailAddress,
 			ForSale:         ms.ForSale,
 			LongLived:       ms.LongLived,
+			GraphAvailable:  ms.GraphAvailable,
 			Status:          string(ms.Status),
 			QualityScore:    ms.QualityScore,
 			LastSafeError:   ms.LastSafeError,
@@ -852,6 +911,7 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 			MailServerID:    dr.MailServerID,
 			Purpose:         string(dr.Purpose),
 			Status:          string(dr.Status),
+			LastSafeError:   dr.LastSafeError,
 			LastAllocatedAt: dr.LastAllocatedAt,
 			CreatedAt:       dr.CreatedAt,
 		}, nil
@@ -908,6 +968,7 @@ func (uc *ResourceUseCase) PublishMicrosoftForSale(ctx context.Context, resource
 		EmailAddress:    ms.EmailAddress,
 		ForSale:         ms.ForSale,
 		LongLived:       ms.LongLived,
+		GraphAvailable:  ms.GraphAvailable,
 		Status:          string(ms.Status),
 		QualityScore:    ms.QualityScore,
 		LastSafeError:   ms.LastSafeError,
@@ -994,6 +1055,7 @@ func (uc *ResourceUseCase) PublishDomainForSale(ctx context.Context, resourceID,
 		MailServerID:    dr.MailServerID,
 		Purpose:         string(dr.Purpose),
 		Status:          string(dr.Status),
+		LastSafeError:   dr.LastSafeError,
 		LastAllocatedAt: dr.LastAllocatedAt,
 		CreatedAt:       dr.CreatedAt,
 	}, nil
@@ -1249,6 +1311,7 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 		}
 	case domain.ResourceTypeDomain:
 		filter.LongLived = nil
+		filter.GraphAvailable = nil
 		if filter.TLD != "" {
 			normalized, err := domain.NormalizeDomainSuffix(filter.TLD)
 			if err != nil {

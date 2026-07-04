@@ -11,27 +11,31 @@ import (
 
 // CoreModule holds all wired dependencies for the Core (resource) module.
 type CoreModule struct {
-	ImportUseCase   *coreapp.ImportUseCase
-	ResourceUseCase *coreapp.ResourceUseCase
-	DomainUseCase   *coreapp.DomainUseCase
-	ServerUseCase   *coreapp.ServerUseCase
-	MailboxUseCase  *coreapp.DomainMailboxUseCase
+	ImportUseCase     *coreapp.ImportUseCase
+	ResourceUseCase   *coreapp.ResourceUseCase
+	ValidationUseCase *coreapp.ResourceValidationUseCase
+	DomainUseCase     *coreapp.DomainUseCase
+	ServerUseCase     *coreapp.ServerUseCase
+	MailboxUseCase    *coreapp.DomainMailboxUseCase
 }
 
 // NewCoreModule wires up all Core module dependencies.
-func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client) (*CoreModule, error) {
+func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client, validator coreapp.ResourceValidationPort, bindingRecorder coreapp.MicrosoftBindingInputRecorder) (*CoreModule, error) {
 	txtParser := coreinfra.NewTXTParser()
 	resourceRepo := coreinfra.NewResourceRepo(db)
 	importRepo := coreinfra.NewResourceImportRepo(db)
 	importQueue := coreinfra.NewResourceImportQueue(asynqClient)
+	validationRepo := coreinfra.NewResourceValidationRepo(db)
+	validationQueue := coreinfra.NewResourceValidationQueue(asynqClient)
 	mailServerRepo := coreinfra.NewMailServerRepo(db)
 	mailboxRepo := coreinfra.NewGeneratedMailboxRepo(db)
 
 	return &CoreModule{
-		ImportUseCase:   coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue),
-		ResourceUseCase: coreapp.NewResourceUseCase(resourceRepo),
-		DomainUseCase:   coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
-		ServerUseCase:   coreapp.NewServerUseCase(mailServerRepo),
-		MailboxUseCase:  coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
+		ImportUseCase:     coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue, bindingRecorder),
+		ResourceUseCase:   coreapp.NewResourceUseCase(resourceRepo),
+		ValidationUseCase: coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator),
+		DomainUseCase:     coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
+		ServerUseCase:     coreapp.NewServerUseCase(mailServerRepo),
+		MailboxUseCase:    coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
 	}, nil
 }

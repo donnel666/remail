@@ -17,6 +17,7 @@ type InboundMailModel struct {
 	EnvelopeFrom    string    `gorm:"type:varchar(320);not null;column:envelope_from"`
 	Recipient       string    `gorm:"type:varchar(320);not null"`
 	ResourceID      uint      `gorm:"not null;column:resource_id"`
+	ResourceType    string    `gorm:"type:varchar(32);not null;column:resource_type"`
 	OwnerUserID     uint      `gorm:"not null;column:owner_user_id"`
 	SourceObjectKey string    `gorm:"type:varchar(500);not null;column:source_object_key"`
 	Status          string    `gorm:"type:varchar(32);not null;default:'pending'"`
@@ -35,6 +36,7 @@ func (m *InboundMailModel) toDomain() *domain.InboundMail {
 		EnvelopeFrom:    m.EnvelopeFrom,
 		Recipient:       m.Recipient,
 		ResourceID:      m.ResourceID,
+		ResourceType:    domain.InboundResourceType(m.ResourceType),
 		OwnerUserID:     m.OwnerUserID,
 		SourceObjectKey: m.SourceObjectKey,
 		Status:          domain.InboundStatus(m.Status),
@@ -50,6 +52,7 @@ func inboundMailFromDomain(mail domain.InboundMail) *InboundMailModel {
 		EnvelopeFrom:    mail.EnvelopeFrom,
 		Recipient:       mail.Recipient,
 		ResourceID:      mail.ResourceID,
+		ResourceType:    string(mail.ResourceType),
 		OwnerUserID:     mail.OwnerUserID,
 		SourceObjectKey: mail.SourceObjectKey,
 		Status:          string(mail.Status),

@@ -7,10 +7,13 @@ import (
 	"sync"
 	"time"
 
+	coreapp "github.com/donnel666/remail/internal/core/app"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	smtpserver "github.com/emersion/go-smtp"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
@@ -21,6 +24,8 @@ type MailTransportModule struct {
 	OutboundDelivery    *mailapp.AsyncDeliveryService
 	OutboundSendUseCase *mailapp.OutboundSendUseCase
 	InboundUseCase      *mailapp.InboundService
+	ValidationUseCase   coreapp.ResourceValidationPort
+	BindingRecorder     coreapp.MicrosoftBindingInputRecorder
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
 }
@@ -32,6 +37,7 @@ func NewMailTransportModule(
 	sender mailapp.SenderPort,
 	outboundFrom string,
 	inboundCfg mailinfra.InboundSMTPConfig,
+	proxies *proxyapp.ProxyUseCase,
 ) (*MailTransportModule, error) {
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 	outboundStore := mailinfra.NewOutboundMailStore(db)
@@ -39,6 +45,8 @@ func NewMailTransportModule(
 	inboundRepo := mailinfra.NewInboundMailRepo(db)
 	inboundResolver := mailinfra.NewInboundResourceResolver(db)
 	inboundQueue := mailinfra.NewInboundMailQueue(asynqClient)
+	bindingRepo := mailinfra.NewMicrosoftBindingRepo(db)
+	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReader(db, files))
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
 	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundStore, outboundQueue, systemLogs, outboundFrom)
@@ -47,6 +55,8 @@ func NewMailTransportModule(
 		OutboundDelivery:    outboundDelivery,
 		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(outboundStore, sender, systemLogs),
 		InboundUseCase:      inboundUseCase,
+		ValidationUseCase:   NewResourceValidationAdapter(proxies, bindingRepo),
+		BindingRecorder:     NewMicrosoftBindingInputAdapter(bindingRepo),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 	}
 	if inboundCfg.Enabled {

@@ -60,20 +60,21 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	items := make([]ResourceItemResponse, len(result.Items))
 	for i, item := range result.Items {
 		items[i] = ResourceItemResponse{
-			ID:            item.ID,
-			Type:          string(item.Type),
-			OwnerID:       item.OwnerID,
-			Status:        item.Status,
-			ForSale:       item.ForSale,
-			LongLived:     item.LongLived,
-			LastSafeError: item.LastSafeError,
-			Email:         item.Email,
-			Domain:        item.Domain,
-			DomainTLD:     item.DomainTLD,
-			MailServerID:  item.MailServerID,
-			Purpose:       item.Purpose,
-			MailboxCount:  item.MailboxCount,
-			CreatedAt:     item.CreatedAt,
+			ID:             item.ID,
+			Type:           string(item.Type),
+			OwnerID:        item.OwnerID,
+			Status:         item.Status,
+			ForSale:        item.ForSale,
+			LongLived:      item.LongLived,
+			GraphAvailable: item.GraphAvailable,
+			LastSafeError:  item.LastSafeError,
+			Email:          item.Email,
+			Domain:         item.Domain,
+			DomainTLD:      item.DomainTLD,
+			MailServerID:   item.MailServerID,
+			Purpose:        item.Purpose,
+			MailboxCount:   item.MailboxCount,
+			CreatedAt:      item.CreatedAt,
 		}
 	}
 
@@ -111,6 +112,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,
+			GraphAvailable:  d.GraphAvailable,
 			Status:          d.Status,
 			QualityScore:    d.QualityScore,
 			LastSafeError:   d.LastSafeError,
@@ -124,6 +126,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 			MailServerID:    d.MailServerID,
 			Purpose:         d.Purpose,
 			Status:          d.Status,
+			LastSafeError:   d.LastSafeError,
 			LastAllocatedAt: d.LastAllocatedAt,
 			CreatedAt:       d.CreatedAt,
 		})
@@ -324,6 +327,7 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,
+			GraphAvailable:  d.GraphAvailable,
 			Status:          d.Status,
 			QualityScore:    d.QualityScore,
 			LastSafeError:   d.LastSafeError,
@@ -394,18 +398,51 @@ func (h *CoreHandler) PostResourcePublishBatch(c *gin.Context) {
 
 // POST /v1/resources/:resourceId/validate
 func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
-	// P1-I2: stub — actual Microsoft ACL / SMTP validation will be implemented in P1-I3.
-	if _, ok := parseResourceID(c); !ok {
+	resourceID, ok := parseResourceID(c)
+	if !ok {
 		return
 	}
-	if _, ok := requireCurrentUserID(c); !ok {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
 		return
 	}
 
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message":   "Resource validation is not yet implemented. It will be available in the next iteration.",
-		"requestId": middleware.GetRequestID(c),
-	})
+	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	result, err := h.module.ValidationUseCase.Create(
+		c.Request.Context(),
+		resourceID,
+		userID,
+		roleLevel.IsAtLeast(iamdomain.RoleAdmin),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusAccepted, toValidationResponse(result))
+}
+
+// GET /v1/resource-validations/:validationId
+func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	validationID, ok := parseUintParam(c, "validationId", "Invalid validation id.")
+	if !ok {
+		return
+	}
+
+	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	result, err := h.module.ValidationUseCase.Get(c.Request.Context(), validationID, userID, roleLevel.IsAtLeast(iamdomain.RoleAdmin))
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, toValidationResponse(result))
 }
 
 // --- Mail Servers ---
@@ -441,6 +478,18 @@ func requireSupplier(c *gin.Context) bool {
 		return false
 	}
 	return true
+}
+
+func toValidationResponse(result *coreapp.ValidationResultView) ResourceValidationResponse {
+	return ResourceValidationResponse{
+		ValidationID:  result.ValidationID,
+		ResourceID:    result.ResourceID,
+		ResourceType:  result.ResourceType,
+		Status:        result.Status,
+		LastSafeError: result.LastSafeError,
+		CreatedAt:     result.CreatedAt,
+		UpdatedAt:     result.UpdatedAt,
+	}
 }
 
 // GET /v1/servers
@@ -674,14 +723,15 @@ func toAppBulkSelection(selection ResourceBulkSelectionRequest) coreapp.Resource
 		Mode:        coreapp.ResourceBulkSelectionMode(selection.Mode),
 		ResourceIDs: selection.ResourceIDs,
 		Filter: coreapp.ResourceBulkFilter{
-			ResourceType: coredomain.ResourceType(selection.Filter.ResourceType),
-			Search:       selection.Filter.Search,
-			Suffix:       selection.Filter.Suffix,
-			TLD:          selection.Filter.TLD,
-			Status:       selection.Filter.Status,
-			LongLived:    selection.Filter.LongLived,
-			CreatedFrom:  selection.Filter.CreatedFrom,
-			CreatedTo:    selection.Filter.CreatedTo,
+			ResourceType:   coredomain.ResourceType(selection.Filter.ResourceType),
+			Search:         selection.Filter.Search,
+			Suffix:         selection.Filter.Suffix,
+			TLD:            selection.Filter.TLD,
+			Status:         selection.Filter.Status,
+			LongLived:      selection.Filter.LongLived,
+			GraphAvailable: selection.Filter.GraphAvailable,
+			CreatedFrom:    selection.Filter.CreatedFrom,
+			CreatedTo:      selection.Filter.CreatedTo,
 		},
 	}
 }
@@ -714,11 +764,15 @@ func validateBulkSelectionRequest(selection ResourceBulkSelectionRequest) map[st
 // --- Helpers ---
 
 func parseResourceID(c *gin.Context) (uint, bool) {
-	idStr := c.Param("resourceId")
+	return parseUintParam(c, "resourceId", "Invalid resource ID.")
+}
+
+func parseUintParam(c *gin.Context, name string, message string) (uint, bool) {
+	idStr := c.Param(name)
 	id, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"message":   "Invalid resource ID.",
+			"message":   message,
 			"requestId": middleware.GetRequestID(c),
 		})
 		return 0, false

@@ -173,8 +173,8 @@ func TestInboundServiceAcceptStoresRawMailAndEnqueuesPerRecipient(t *testing.T) 
 	mails, err := service.Accept(context.Background(), InboundRawMessage{
 		EnvelopeFrom: "Sender@Example.COM",
 		Recipients: []domain.InboundRecipient{
-			{Email: "a@test.com", ResourceID: 10, OwnerUserID: 1},
-			{Email: "b@test.com", ResourceID: 10, OwnerUserID: 1},
+			{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1},
+			{Email: "b@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1},
 		},
 		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
 	})
@@ -196,7 +196,7 @@ func TestInboundServiceProcessMarksStoredWhenObjectReadable(t *testing.T) {
 
 	mails, err := service.Accept(context.Background(), InboundRawMessage{
 		EnvelopeFrom: "sender@example.com",
-		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, OwnerUserID: 1}},
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
 		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
 	})
 	require.NoError(t, err)
@@ -222,6 +222,23 @@ func TestInboundServiceRejectsUnknownRecipient(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInboundRecipientRejected)
 }
 
+func TestInboundServiceAcceptRejectsInvalidResolvedRecipient(t *testing.T) {
+	service := NewInboundService(
+		newInboundRepoStub(),
+		inboundResolverStub{},
+		newFileStoreStub(),
+		&inboundQueueStub{},
+		nil,
+	)
+
+	_, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.ErrorIs(t, err, domain.ErrInboundRecipientRejected)
+}
+
 func TestInboundServiceAcceptKeepsPendingAndLogsWhenQueueUnavailable(t *testing.T) {
 	repo := newInboundRepoStub()
 	logs := &systemLogStub{}
@@ -235,7 +252,7 @@ func TestInboundServiceAcceptKeepsPendingAndLogsWhenQueueUnavailable(t *testing.
 
 	mails, err := service.Accept(context.Background(), InboundRawMessage{
 		EnvelopeFrom: "sender@example.com",
-		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, OwnerUserID: 1}},
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
 		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
 	})
 	require.NoError(t, err)

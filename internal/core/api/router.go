@@ -27,6 +27,7 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		auth.POST("/resources/publish", h.PostResourcePublishBatch)
 		auth.POST("/resources/:resourceId/publish", h.PostResourcePublish)
 		auth.POST("/resources/:resourceId/validate", h.PostResourceValidate)
+		auth.GET("/resource-validations/:validationId", h.GetResourceValidation)
 
 		// Mail server management
 		auth.GET("/servers", h.GetServers)

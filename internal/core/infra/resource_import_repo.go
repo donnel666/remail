@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/core/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -108,7 +109,7 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string) error {
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var importModel ResourceImportModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
@@ -127,6 +128,11 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 
 		if err := createMicrosoftBatchTx(tx, resources, ms); err != nil {
 			return err
+		}
+		if afterCreate != nil {
+			if err := afterCreate(platform.WithGormTx(ctx, tx)); err != nil {
+				return fmt.Errorf("record microsoft binding inputs: %w", err)
+			}
 		}
 
 		now := time.Now()

@@ -45,6 +45,14 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	{
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
+
+		// Proxy module is initialized before MailTransport so Microsoft ACL can
+		// use the proxy pool through a port instead of bypassing BC-PROXY.
+		proxyMod, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
+		if err != nil {
+			return nil, cleanup, err
+		}
+
 		sender, err := mailSender(p.SMTP)
 		if err != nil {
 			return nil, cleanup, err
@@ -64,6 +72,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				ReadTimeout:     p.SMTP.InboundReadTimeout,
 				WriteTimeout:    p.SMTP.InboundWriteTimeout,
 			},
+			proxyMod.ProxyUseCase,
 		)
 		if err != nil {
 			return nil, cleanup, err
@@ -77,7 +86,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 
 		// Core module (resources, mail servers, domains)
-		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq)
+		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq, mailMod.ValidationUseCase, mailMod.BindingRecorder)
 		if err != nil {
 			return nil, cleanup, err
 		}
@@ -86,10 +95,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher)
 
 		// Proxy module (admin proxy pool maintenance)
-		proxyMod, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
-		if err != nil {
-			return nil, cleanup, err
-		}
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)
 		proxyapi.RegisterProxyRoutes(v1, proxyMod, iamSessionFetcher, iamMod.PermissionChecker)
 	}

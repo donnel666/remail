@@ -12,6 +12,12 @@
 | 2026-07-02 | V1.5 | Codex | 补充 P1-I2 Microsoft TXT 导入错误处理策略：默认错误跳过，错误中止可选；不改变 Microsoft ACL 与 Core 资源边界。 |
 | 2026-07-02 | V1.6 | Codex | 补充 P1-I2 Microsoft 导入前端预处理策略：前端减负不改变后端权威校验。 |
 | 2026-07-03 | V1.7 | Codex | 补充 Microsoft ACL 使用 BC-PROXY 的直连兜底和 3 次代理尝试预算；不改变 Microsoft ACL 边界。 |
+| 2026-07-04 | V1.8 | Codex | 补充 P1-I3 资源验证异步入口：Core 创建 `ResourceValidation` 任务，MailTransport ACL 在 worker 内执行 Microsoft RT 刷新或获取 RT；此为缺失设计补充，不改变 Microsoft ACL 归属。 |
+| 2026-07-04 | V1.9 | Codex | 补充 P1-I3 Microsoft ACL 临时失败分类：代理、超时、上游 5xx/429 等请求失败返回 `request`，由 Core 验证任务重试，不直接把资源置异常。此为缺失设计补充，不改变 Microsoft ACL 归属。 |
+| 2026-07-04 | V1.10 | Codex | 补充 P1-I3 `rt` 验证流程适配边界：Microsoft 页面交互流程保持不变，只把辅助邮箱输入、收码来源和状态回写适配到当前 MailTransport。此为缺失设计补充，不改变 ACL 核心策略。 |
+| 2026-07-04 | V1.11 | Codex | 补充 P1-I3 Microsoft 资源验证三段式流程：RT 获取/刷新、Graph 优先 IMAP 回退收件、项目邮件匹配预留；资源健康成功条件止于第二步收件成功。此为缺失设计补充，不改变资源状态机。 |
+| 2026-07-04 | V1.12 | Codex | 补充 P1-I3 Microsoft `graphAvailable` 回写策略：第二步收件成功后记录 Graph 主路径是否可用，供资源页展示和筛选。此为缺失设计补充，不改变 ACL 成功条件。 |
+| 2026-07-04 | V1.13 | Codex | 纠正 P1-I3 验证码失败分类和资源状态边界：`code_timeout/code_error` 是确定性绑定失败，不归入 `request` 重试；`deleted` 是 Core 命令终态，不由 ACL 产生。此为缺失设计补充，不改变 Microsoft 页面交互策略。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -140,6 +146,31 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 
 成功返回结构化 `messages[]`，Go 将其转换为 BC-MAILMATCH 的 `Message`。
 
+### 3.4 P1-I3 `ValidateResource`
+
+用途：验证 Microsoft 资源本体是否可用。该流程在 Core 的异步 `ResourceValidation` worker 中调用，HTTP 请求不得同步等待 Microsoft 网络调用。
+
+验证分三步：
+
+| 步骤 | 当前要求 | 是否影响资源健康 |
+|------|----------|------------------|
+| 1. RT 获取/刷新 | 有 `clientId + refreshToken` 时先用 RT 换 Graph AT；没有 RT 时沿用 `rt` 页面流获取 RT，辅助邮箱绑定策略不改。 | 是。获取/刷新失败按错误分类返回。 |
+| 2. 收全部邮件 | 优先用 RT 换 Graph AT 调 Microsoft Graph，分页读取 `Inbox` 和 `JunkEmail`；Graph 不可用时用同一 RT 换 IMAP token 回退 Outlook IMAP。 | 是。Graph 或 IMAP 任一路径读取接口返回正常，即资源验证可成功。 |
+| 3. 项目匹配与关系插入 | 将第二步结构化邮件交给后续 BC-MAILMATCH/Project 规则，匹配系统项目并插入业务关系。 | 否。该步骤是业务增强，不参与资源本体是否正常的判断。 |
+
+当前 P1-I3 只必须完成前两步。第三步必须在代码中保留扩展点并在文档中记录技术债，等 Project 与 MailMatch 模块具备项目规则、邮件匹配和关系落库能力后再接入。第三步失败、未实现或无匹配结果，不得把 Microsoft 资源置为 `abnormal`。
+
+收件策略：
+
+| 项 | 规则 |
+|----|------|
+| 主路径 | Graph REST API。使用验证 HTTP client/session 发请求，复用 TLS 指纹、代理、超时和安全日志策略。 |
+| 回退 | Graph token 或 Graph 拉取失败后，使用 RT 换 IMAP accessToken，再连接 Outlook IMAP 读取 `INBOX` 和垃圾箱。 |
+| 文件夹 | 验证阶段必须包含收件箱和垃圾箱；Graph 文件夹使用 `inbox`、`junkemail`。 |
+| 分页 | Graph 读取必须跟随 `@odata.nextLink`，直到文件夹读完。 |
+| 结果 | 只返回结构化摘要给验证编排；正文、Token、验证码不得进入 Core、响应或普通日志。 |
+| 成功 | 第二步 Graph 或 IMAP 任一路径接口正常返回，即本次资源验证可以成功。Graph 路径成功时返回 `graphAvailable=true`；Graph 失败但 IMAP 回退成功时返回 `graphAvailable=false`。 |
+
 ---
 
 ## 4. 辅助邮箱绑定
@@ -154,6 +185,18 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 | `WaitBindingCode` | 等待辅助邮箱验证码邮件。 |
 
 验证码、密码、RT、accessToken 不得出现在响应、普通日志、SystemLog 或 OperationLog 中。
+
+P1-I3 适配规则：
+
+| 对接点 | 当前系统策略 |
+|--------|--------------|
+| 导入输入 | Core 解析 TXT 中的 `bindingAddress` 后，只通过 Port 交给 MailTransport 记录 `MicrosoftBindingMailbox(pending)`；不写入 `microsoft_resources`，不进入 Core 资源状态机。 |
+| 页面流使用 | `AcquireToken` 页面流遇到 AddProof/Identity/OTP 时，优先使用 `MicrosoftBindingMailbox.bindingAddress`；没有输入记录时，继续使用原 `rt` 确定性辅助邮箱生成规则。 |
+| 收码来源 | `WaitBindingCode` 的轮询、去重和验证码提取逻辑沿用 `rt`；底层 `MailboxReader` 在本项目中读取 `inbound_mails + MinIO private RFC822`，不再依赖旧项目 API。 |
+| 入站接收 | SMTP RCPT 阶段必须能通过 `microsoft_binding_mailboxes.binding_address` 解析到 Microsoft 资源和 owner，使 Microsoft 发来的验证码进入当前入站任务。 |
+| 状态回写 | 验证成功回写 `verified`；验证码超时回写 `timeout`；确定性绑定失败回写 `failed`；这些状态只用于 MailTransport 排障，不改变 Core 资源状态枚举。 |
+
+`rt` 的 Microsoft 页面交互顺序、KMSI/Consent/Identity/Proofs 处理、错误分类、验证码轮询和代理尝试策略不得因为接入当前系统而重写。允许变化的只有输入来源、收码读取实现、状态持久化和安全诊断输出。
 
 ---
 
@@ -202,7 +245,7 @@ Go Microsoft ACL 返回 `category` 作为内部错误分类。对外不返回业
 | `auth_timeout` | 授权超时 | `503` | `Microsoft authorization timed out. Please try again later.` |
 | `request` | 上游请求失败 | `502/503` | `Microsoft mail service is temporarily unavailable.` |
 
-账号不存在、密码错误必须合并为同一类对外文案，避免账号枚举；验证码错误可以直接说明验证码错误或过期。
+账号不存在、密码错误必须合并为同一类对外文案，避免账号枚举；验证码错误或超时可以直接说明验证码错误或过期。`code_timeout/code_error` 是本次绑定验证码流程的确定性失败，不能归入 `request` 触发基础设施重试。
 
 代理错误必须上报 BC-PROXY。资源代理失败时，允许本次业务按代理池规则获取系统代理重试；同一业务链路最多尝试 3 次代理路线。达到尝试预算或资源/系统代理都不可用时，ProxyPort 返回 `direct=true` 的系统直连路线，HTTPClient 必须禁用代理继续执行；直连失败属于上游或本机网络失败，不得上报为代理失败计数，内部详情写 SystemLog。
 
@@ -227,9 +270,10 @@ pending
 normal
 abnormal
 disabled
+deleted
 ```
 
-KMSI、Consent、MFA、手机验证、页面跳转、Graph 错误都只能作为 ACL 结果和诊断返回，不进入资源状态枚举。
+`deleted` 是 Core 用户删除私有资源命令写入的终态，不由 Microsoft ACL 验证流程产生。KMSI、Consent、MFA、手机验证、页面跳转、Graph 错误都只能作为 ACL 结果和诊断返回，不进入资源状态枚举。
 
 ---
 
@@ -239,11 +283,15 @@ Microsoft 页面流和 Graph 请求是外部网络调用，不能放进数据库
 
 | 步骤 | 规则 |
 |------|------|
-| 创建验证任务 | 短事务写任务和资源诊断状态。 |
+| 创建验证任务 | HTTP 入口只短事务写 `ResourceValidation(queued)` 和 OperationLog，投递 Asynq 后返回 `202 Accepted`。 |
 | 执行 Microsoft ACL | 事务外执行，带 requestId 和超时。 |
 | 成功保存凭据 | 短事务保存 clientId/RT、更新资源状态、写事件。 |
 | 失败记录诊断 | 短事务写安全诊断和 SystemLog。 |
 | rotated RT | 拉取或刷新成功后必须在短事务内保存新 RT。 |
+
+已有 `clientId + refreshToken` 的资源验证优先走 OAuth token endpoint 刷新 AT；成功且上游返回新 RT 时保存 rotated RT，没有新 RT 则保留旧 RT。只有 `email + password` 的资源验证走 `AcquireToken` 页面流。页面流实现必须封装在 MailTransport ACL 内部，Core 只能感知稳定分类和安全文案。
+
+Microsoft ACL 的 `request` 分类只表示代理、网络、超时、上游限流或服务不可用等临时请求失败。Core 收到该分类后只能让 `ResourceValidation` 任务在 `maxAttempts` 内重试或等待 dispatcher 恢复；达到上限后只把验证任务置为 `failed`，不能把 Microsoft 资源状态写成 `abnormal`。密码错误、MFA、账号锁定、账号异常、验证码错误或超时等确定性分类才是资源本体或绑定流程异常证据。
 
 ---
 
