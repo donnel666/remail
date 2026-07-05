@@ -92,7 +92,8 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			"owner_user_id", payload.OwnerUserID,
 			"request_id", payload.RequestID,
 		)
-		if err := module.ImportUseCase.ProcessMicrosoftImport(ctx, payload); err != nil {
+		result, err := module.ImportUseCase.ProcessMicrosoftImport(ctx, payload)
+		if err != nil {
 			finalAttempt := isFinalAttempt(ctx)
 			slog.Warn(
 				"microsoft import task failed",
@@ -111,14 +112,42 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			}
 			return err
 		}
+		queuedValidations, err := queueMicrosoftImportValidations(ctx, module, payload, result)
+		if err != nil {
+			slog.Warn(
+				"microsoft import validation queue failed",
+				"import_id", payload.ImportID,
+				"owner_user_id", payload.OwnerUserID,
+				"request_id", payload.RequestID,
+				"error", err,
+			)
+		}
 		slog.Info(
 			"microsoft import task finished",
 			"import_id", payload.ImportID,
 			"owner_user_id", payload.OwnerUserID,
 			"request_id", payload.RequestID,
+			"validation_jobs_queued", queuedValidations,
 		)
 		return nil
 	})
+}
+
+func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, payload coreapp.MicrosoftImportTask, result *coreapp.MicrosoftImportProcessResult) (int, error) {
+	if module == nil || module.ValidationUseCase == nil || result == nil || len(result.ImportedResourceIDs) == 0 {
+		return 0, nil
+	}
+	validationResult, err := module.ValidationUseCase.CreateBatch(ctx, coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: result.ImportedResourceIDs,
+	}, payload.OwnerUserID, payload.RequestID, "/v1/resources/imports")
+	if err != nil {
+		return 0, err
+	}
+	if validationResult == nil {
+		return 0, nil
+	}
+	return validationResult.Queued, nil
 }
 
 func startResourceValidationDispatcherSeeder(module *CoreModule) {

@@ -23,6 +23,8 @@
 | 2026-07-04 | V1.16 | Codex | 补充 P1-I3 Microsoft 辅助邮箱输入交接：Core 只解析 TXT 中的 `bindingAddress` 并通过 Port 交给 MailTransport，绑定状态仍由 MailTransport 拥有。此为缺失设计补充，不改变 Core 资源聚合边界。 |
 | 2026-07-04 | V1.17 | Codex | 补充 P1-I3 Microsoft `graphAvailable` 协议能力事实：验证后记录 Graph 是否可读，列表和批量 filter 可筛选；此为缺失设计补充，不新增资源状态。 |
 | 2026-07-04 | V1.18 | Codex | 纠正 P1-I3 ResourceValidation 临时失败重试上限：基础设施失败只在任务事实内有限重试，耗尽后任务终态失败但不改资源状态。此为缺失设计补充，不改变资源状态机。 |
+| 2026-07-04 | V1.19 | Codex | 补充 P1-I3 ResourceValidation 批量提交和导入后自动排队：批量检测 HTTP 入口只批量创建/复用验证任务并唤醒 dispatcher；Microsoft 导入事务成功后自动提交本批资源的异步验证任务。此为缺失设计补充，不改变资源状态机。 |
+| 2026-07-05 | V1.20 | Codex | 补充 P1-I3 ResourceValidation Domain filter 的 `purpose` 筛选：用于让域名资源“全部检测”和用户侧私有/出售筛选一致；此为缺失接口筛选补充，不新增用途枚举。 |
 
 > 核心域。BC-CORE 是邮箱资源和项目规则的所有者。分配记录、订单、邮件事实、钱包余额不在本上下文内。
 
@@ -152,6 +154,8 @@ Microsoft 协议交互细节不在 Core 领域模型中表达。登录页面、R
 | 步骤 | 要求 |
 |------|------|
 | `POST /v1/resources/{resourceId}/validate` | 只校验登录、owner/admin 权限、资源存在且未删除，创建 `ResourceValidation(queued)`，投递 Asynq 后返回 `202 Accepted` 和 `validationId`。 |
+| `POST /v1/resource-validations` | 批量检测入口，接收 `selection.mode=ids|filter`，只批量创建或复用 `ResourceValidation(queued/running)` 任务并唤醒 dispatcher，返回 `202 Accepted`；客户端不得为批量检测循环调用单资源验证接口。Domain `filter` 可使用既有 `purpose=not_sale/sale/binding` 筛选，保证“全部检测”与用户侧私有/出售筛选一致。 |
+| Microsoft 导入后自动验证 | `ResourceImport(imported)` 与 Microsoft 资源创建在同一事务成功后，导入 worker 使用本批 resource IDs 调用批量检测入口的应用能力；不得在导入事务或导入 HTTP 请求内执行 Microsoft 外部验证。 |
 | worker 执行 | 根据资源类型调用 BC-MAILTRANSPORT 的 Microsoft ACL 或 DNS 验证 Port；外部网络调用不得进入数据库事务。 |
 | Microsoft 成功条件 | MailTransport 完成 RT 获取/刷新，并通过 Graph 或 IMAP 任一路径正常读取收件箱和垃圾箱后，即可判定 Microsoft 资源本体正常。后续项目邮件匹配和关系插入不影响资源健康状态。 |
 | 成功回写 | 短事务把 Microsoft/Domain 资源状态置为 `normal`，清空安全错误；Microsoft 如返回 rotated RT，必须同步保存；Microsoft 如通过 Graph 收件则 `graphAvailable=true`，如通过 IMAP 回退收件则 `graphAvailable=false`。 |

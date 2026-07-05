@@ -558,6 +558,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/resource-validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue asynchronous resource validations in batch
+         * @description Creates or reuses durable validation jobs for the selected resources and returns immediately. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in the backend worker. This endpoint is the batch counterpart of POST /v1/resources/{resourceId}/validate and avoids client-side request loops.
+         */
+        post: operations["postResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/resource-validations/{validationId}": {
         parameters: {
             query?: never;
@@ -1111,6 +1131,15 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        ValidateResourcesRequest: {
+            selection: components["schemas"]["ResourceBulkSelection"];
+        };
+        ResourceValidationsResponse: {
+            /** @description Number of resources accepted by the selection after ownership and status checks. */
+            requested: number;
+            /** @description Number of resources accepted for asynchronous validation. Existing active jobs are reused. */
+            queued: number;
+        };
         PublishResourcesRequest: {
             selection: components["schemas"]["ResourceBulkSelection"];
         };
@@ -1151,6 +1180,13 @@ export interface components {
             /** @description Exact domain suffix such as .com. */
             tld?: string;
             status?: string;
+            /**
+             * @description Domain resource purpose filter. not_sale means private/unavailable for sale; sale means public supply; binding is displayed as auxiliary mailbox in Chinese.
+             * @enum {string}
+             */
+            purpose?: "not_sale" | "sale" | "binding";
+            /** @description Microsoft public supply filter. false is private; true is public sale. */
+            forSale?: boolean;
             /** @description Microsoft long-lived filter. */
             longLived?: boolean;
             /** @description Microsoft Graph availability filter. */
@@ -3318,6 +3354,69 @@ export interface operations {
                 };
             };
             /** @description Resource status does not allow validation */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateResourcesRequest"];
+            };
+        };
+        responses: {
+            /** @description Resource validations queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceValidationsResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid resource status/filter */
             422: {
                 headers: {
                     [name: string]: unknown;

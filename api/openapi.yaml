@@ -1559,6 +1559,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/resource-validations:
+    post:
+      operationId: postResourceValidations
+      summary: Queue asynchronous resource validations in batch
+      tags:
+        - Resources
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      description: >
+        Creates or reuses durable validation jobs for the selected resources and
+        returns immediately. Microsoft OAuth/Graph checks and domain DNS checks
+        run asynchronously in the backend worker. This endpoint is the batch
+        counterpart of POST /v1/resources/{resourceId}/validate and avoids
+        client-side request loops.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateResourcesRequest"
+      responses:
+        "202":
+          description: Resource validations queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceValidationsResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid resource status/filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/resource-validations/{validationId}:
     get:
       operationId: getResourceValidation
@@ -3199,6 +3253,29 @@ components:
           format: date-time
       additionalProperties: false
 
+    ValidateResourcesRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/ResourceBulkSelection"
+      additionalProperties: false
+
+    ResourceValidationsResponse:
+      type: object
+      required:
+        - requested
+        - queued
+      properties:
+        requested:
+          type: integer
+          description: Number of resources accepted by the selection after ownership and status checks.
+        queued:
+          type: integer
+          description: Number of resources accepted for asynchronous validation. Existing active jobs are reused.
+      additionalProperties: false
+
     PublishResourcesRequest:
       type: object
       required:
@@ -3296,6 +3373,13 @@ components:
           description: Exact domain suffix such as .com.
         status:
           type: string
+        purpose:
+          type: string
+          enum: [not_sale, sale, binding]
+          description: Domain resource purpose filter. not_sale means private/unavailable for sale; sale means public supply; binding is displayed as auxiliary mailbox in Chinese.
+        forSale:
+          type: boolean
+          description: Microsoft public supply filter. false is private; true is public sale.
         longLived:
           type: boolean
           description: Microsoft long-lived filter.

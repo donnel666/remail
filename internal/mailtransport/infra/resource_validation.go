@@ -66,7 +66,7 @@ func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOA
 	email := strings.TrimSpace(req.EmailAddress)
 	password := strings.TrimSpace(req.Password)
 	if email == "" || password == "" {
-		return microsoftOAuthFailure("password", "Microsoft account or password is incorrect.", false), nil
+		return microsoftOAuthFailure("password", "Microsoft account or password is missing.", false), nil
 	}
 	result, err := msacl.Authorize(ctx, email, password, req.ProxyURL, req.BindingAddress)
 	if err != nil {
@@ -159,13 +159,23 @@ func classifyMicrosoftTokenFailure(statusCode int, body map[string]any) (string,
 	case statusCode == 429 || statusCode >= 500:
 		return "request", "Microsoft mail service is temporarily unavailable.", true
 	case strings.Contains(errorCode, "invalid_grant") || strings.Contains(errorDescription, "invalid grant"):
-		return "abnormal", "Microsoft account requires manual review.", false
+		return "oauth_invalid_grant", "Microsoft refresh token is invalid or expired.", false
 	case strings.Contains(errorDescription, "mfa") || strings.Contains(errorDescription, "multi-factor"):
-		return "mfa", "Microsoft account requires additional verification.", false
-	case strings.Contains(errorDescription, "password") || strings.Contains(errorDescription, "invalid username"):
-		return "password", "Microsoft account or password is incorrect.", false
+		return "mfa", "Microsoft account requires authenticator verification.", false
+	case strings.Contains(errorDescription, "passkey"):
+		return "passkey", "Microsoft account requires passkey verification.", false
+	case strings.Contains(errorDescription, "phone"):
+		return "phone", "Microsoft account requires phone verification.", false
+	case strings.Contains(errorDescription, "password"):
+		return "password", "Microsoft account password is incorrect.", false
+	case strings.Contains(errorDescription, "invalid username") || strings.Contains(errorDescription, "user account does not exist"):
+		return "unknown_mailbox", "Microsoft account does not exist or recovery mailbox is not supported.", false
 	case strings.Contains(errorDescription, "locked"):
-		return "locked", "Microsoft account is currently unavailable.", false
+		return "locked", "Microsoft account is locked.", false
+	case strings.Contains(errorCode, "invalid_client") || strings.Contains(errorDescription, "client"):
+		return "oauth_client", "Microsoft OAuth client is invalid or not allowed.", false
+	case strings.Contains(errorDescription, "consent") || strings.Contains(errorDescription, "permission"):
+		return "oauth_permission", "Microsoft OAuth permission is not available.", false
 	default:
 		return "request", "Microsoft mail service is temporarily unavailable.", statusCode >= 500
 	}

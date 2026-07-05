@@ -53,41 +53,47 @@ func mapAuthError(err error, proxyFailure bool) Result {
 		boundMailbox = strings.TrimSpace(authErr.BoundMailbox)
 	}
 	switch status {
-	case AuthStatusPasswordError, AuthStatusUnknownMailbox:
-		return aclFailure("password", "Microsoft account or password is incorrect.", false)
-	case AuthStatusMFARequired, AuthStatusPasskeyRequired:
-		return aclFailure("mfa", "Microsoft account requires additional verification.", false)
+	case AuthStatusPasswordError:
+		return aclFailure("password", "Microsoft account password is incorrect.", false)
+	case AuthStatusUnknownMailbox:
+		return aclFailure("unknown_mailbox", "Microsoft account does not exist or recovery mailbox is not supported.", false)
+	case AuthStatusMFARequired:
+		return aclFailure("mfa", "Microsoft account requires authenticator verification.", false)
+	case AuthStatusPasskeyRequired:
+		return aclFailure("passkey", "Microsoft account requires passkey verification.", false)
 	case AuthStatusPhoneVerification:
-		return aclFailure("phone", "Microsoft account requires additional verification.", false)
+		return aclFailure("phone", "Microsoft account requires phone verification.", false)
 	case AuthStatusAccountLocked:
-		return aclFailure("locked", "Microsoft account is currently unavailable.", false)
-	case AuthStatusAccountAbnormal, AuthStatusAlreadyBound:
-		result := aclFailure("abnormal", "Microsoft account requires manual review.", false)
+		return aclFailure("locked", "Microsoft account is locked.", false)
+	case AuthStatusAccountAbnormal:
+		return aclFailure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
+	case AuthStatusAlreadyBound:
+		result := aclFailure("already_bound", "Microsoft account is already bound to another recovery mailbox.", false)
 		result.BindingAddress = boundMailbox
 		if boundMailbox != "" {
 			result.BindingStatus = string(maildomain.MicrosoftBindingFailed)
 		}
 		return result
 	case AuthStatusCodeTimeout:
-		result := aclFailure("code_timeout", "Verification code is incorrect or expired.", false)
+		result := aclFailure("code_timeout", "Auxiliary mailbox verification code was not received in time.", false)
 		result.BindingAddress = boundMailbox
 		if boundMailbox != "" {
 			result.BindingStatus = string(maildomain.MicrosoftBindingTimeout)
 		}
 		return result
 	case AuthStatusVerifyCodeError:
-		result := aclFailure("code_error", "Verification code is incorrect or expired.", false)
+		result := aclFailure("code_error", "Auxiliary mailbox verification code is incorrect or expired.", false)
 		result.BindingAddress = boundMailbox
 		if boundMailbox != "" {
 			result.BindingStatus = string(maildomain.MicrosoftBindingFailed)
 		}
 		return result
 	case AuthStatusAuthTimeout:
-		return aclFailure("request", "Microsoft mail service is temporarily unavailable.", proxyFailure)
+		return aclFailure("auth_timeout", "Microsoft authorization timed out.", proxyFailure)
 	case AuthStatusRequestError:
-		return aclFailure("request", "Microsoft mail service is temporarily unavailable.", proxyFailure)
+		return aclFailure("request", "Microsoft authorization request failed temporarily.", proxyFailure)
 	default:
-		return aclFailure("request", "Microsoft mail service is temporarily unavailable.", proxyFailure)
+		return aclFailure("unknown", "Microsoft authorization failed with unknown status.", proxyFailure)
 	}
 }
 

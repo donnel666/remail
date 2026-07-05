@@ -131,7 +131,7 @@ func (c *MicrosoftMailFetchClient) FetchAll(ctx context.Context, req MicrosoftMa
 func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMailFetchRequest, imapFallback microsoftIMAPClient) (MicrosoftMailFetchResult, error) {
 	req = normalizeMailFetchRequest(req)
 	if req.EmailAddress == "" || req.ClientID == "" || req.RefreshToken == "" {
-		return microsoftMailFetchFailure("abnormal", "Microsoft account requires manual review.", false), nil
+		return microsoftMailFetchFailure("missing_token", "Microsoft mail fetch credentials are incomplete.", false), nil
 	}
 	graphResult, graphErr := c.fetchGraphAll(ctx, req)
 	if graphErr == nil && graphResult.Valid {
@@ -286,7 +286,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 
 	if err := client.Authenticate(newXOAuth2Client(req.EmailAddress, accessToken)); err != nil {
 		_ = client.Logout().Wait()
-		return microsoftMailFetchFailure("abnormal", "Microsoft account requires manual review.", false), err
+		return microsoftMailFetchFailure("imap_auth_failed", "Microsoft IMAP authentication failed.", false), err
 	}
 
 	result := MicrosoftMailFetchResult{
@@ -590,8 +590,10 @@ func classifyMicrosoftGraphFailure(err error) (string, string, bool) {
 	var httpErr *microsoftGraphHTTPError
 	if errors.As(err, &httpErr) {
 		switch {
-		case httpErr.statusCode == 401 || httpErr.statusCode == 403:
-			return "abnormal", "Microsoft account requires manual review.", false
+		case httpErr.statusCode == 401:
+			return "graph_unauthorized", "Microsoft Graph access token is unauthorized or expired.", false
+		case httpErr.statusCode == 403:
+			return "graph_forbidden", "Microsoft Graph mailbox permission is not available.", false
 		case httpErr.statusCode == 429 || httpErr.statusCode >= 500:
 			return "request", "Microsoft mail service is temporarily unavailable.", true
 		default:

@@ -84,3 +84,66 @@ func TestMicrosoftMailFetchClientFallsBackToIMAPAfterGraphFailure(t *testing.T) 
 	assert.Equal(t, "imap-rotated-rt", result.RefreshToken)
 	assert.Equal(t, "Microsoft mail service is temporarily unavailable.", result.GraphSafeError)
 }
+
+func TestMicrosoftMailFetchClientRejectsIncompleteCredentialsWithSpecificCategory(t *testing.T) {
+	client := NewMicrosoftMailFetchClient()
+
+	result, err := client.fetchAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "user@example.com",
+		ClientID:     "client-id",
+	}, nil)
+
+	require.NoError(t, err)
+	assert.False(t, result.Valid)
+	assert.Equal(t, "missing_token", result.Category)
+	assert.Equal(t, "Microsoft mail fetch credentials are incomplete.", result.SafeMessage)
+}
+
+func TestClassifyMicrosoftGraphFailureKeepsAuthFailureGranularity(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		category    string
+		safeMessage string
+		proxy       bool
+	}{
+		{
+			name: "unauthorized",
+			err: &microsoftGraphHTTPError{
+				statusCode: 401,
+				message:    "invalid token",
+			},
+			category:    "graph_unauthorized",
+			safeMessage: "Microsoft Graph access token is unauthorized or expired.",
+		},
+		{
+			name: "forbidden",
+			err: &microsoftGraphHTTPError{
+				statusCode: 403,
+				message:    "missing permission",
+			},
+			category:    "graph_forbidden",
+			safeMessage: "Microsoft Graph mailbox permission is not available.",
+		},
+		{
+			name: "rate limited",
+			err: &microsoftGraphHTTPError{
+				statusCode: 429,
+				message:    "too many requests",
+			},
+			category:    "request",
+			safeMessage: "Microsoft mail service is temporarily unavailable.",
+			proxy:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			category, message, proxy := classifyMicrosoftGraphFailure(tt.err)
+
+			assert.Equal(t, tt.category, category)
+			assert.Equal(t, tt.safeMessage, message)
+			assert.Equal(t, tt.proxy, proxy)
+		})
+	}
+}

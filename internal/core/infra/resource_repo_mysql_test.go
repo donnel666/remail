@@ -353,7 +353,8 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 		{EmailAddress: "dup@test.local", Password: "secret", ForSale: true, Status: domain.MicrosoftStatusPending},
 	}
 
-	require.ErrorIs(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil), domain.ErrDuplicateEmail)
+	_, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	require.ErrorIs(t, err, domain.ErrDuplicateEmail)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
@@ -431,7 +432,9 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 		LastSafeError: "",
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil))
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil)
+	require.NoError(t, err)
+	require.Len(t, importedIDs, 1)
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -511,7 +514,9 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftC
 		Status:       domain.MicrosoftStatusPending,
 	}}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil))
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil)
+	require.NoError(t, err)
+	require.Len(t, importedIDs, 1)
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -555,14 +560,18 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 		{EmailAddress: "two@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
 	}
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil))
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	require.NoError(t, err)
+	require.Len(t, importedIDs, 2)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.ResourceImportImported, storedImport.Status)
 	require.Equal(t, 2, storedImport.ImportedCount)
 
-	require.NoError(t, importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil))
+	importedIDs, err = importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	require.NoError(t, err)
+	require.Empty(t, importedIDs)
 
 	var rootCount int64
 	require.NoError(t, db.Model(&EmailResourceModel{}).Count(&rootCount).Error)
@@ -1547,6 +1556,203 @@ func TestResourceRepoBulkFilterMutationsMySQL(t *testing.T) {
 	require.EqualValues(t, 1, filterDeleteLog.Count)
 	require.Equal(t, "filter", filterDeleteLog.ResourceID)
 	require.Contains(t, filterDeleteLog.SafeSummary, "Count: 1")
+}
+
+func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+	).Error)
+
+	normal := &domain.MicrosoftResource{
+		EmailAddress: "validation-normal@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, normal))
+	abnormal := &domain.MicrosoftResource{
+		EmailAddress:  "validation-abnormal@outlook.com",
+		Password:      "secret",
+		Status:        domain.MicrosoftStatusAbnormal,
+		LastSafeError: "previous safe error",
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, abnormal))
+
+	created, err := validationRepo.CreateWithLog(ctx, &domain.ResourceValidation{
+		ResourceID:   normal.ID,
+		ResourceType: domain.ResourceTypeMicrosoft,
+		OwnerUserID:  1,
+		Status:       domain.ResourceValidationQueued,
+		MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
+		RequestID:    "req-existing-validation",
+		Path:         "/v1/resources/:resourceId/validate",
+	}, nil)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	result, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: []uint{normal.ID, abnormal.ID},
+	}, nil, "req-batch-validation", "/v1/resource-validations")
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Requested)
+	require.Equal(t, 2, result.Queued)
+	require.Equal(t, 1, result.Created)
+
+	var normalActiveJobs int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ? AND status IN (?, ?)",
+		normal.ID,
+		string(domain.ResourceValidationQueued),
+		string(domain.ResourceValidationRunning),
+	).Scan(&normalActiveJobs).Error)
+	require.EqualValues(t, 1, normalActiveJobs)
+
+	var abnormalStatus, abnormalSafeError string
+	require.NoError(t, db.Raw(
+		"SELECT status, last_safe_error FROM microsoft_resources WHERE id = ?",
+		abnormal.ID,
+	).Row().Scan(&abnormalStatus, &abnormalSafeError))
+	require.Equal(t, string(domain.MicrosoftStatusPending), abnormalStatus)
+	require.Empty(t, abnormalSafeError)
+}
+
+func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCreateMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+		2,
+		"other@test.local",
+		"hash",
+		20,
+	).Error)
+
+	owned := &domain.MicrosoftResource{
+		EmailAddress: "owned-validation@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, owned))
+	other := &domain.MicrosoftResource{
+		EmailAddress: "other-validation@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 2}, other))
+
+	_, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: []uint{owned.ID, other.ID},
+	}, nil, "req-batch-forbidden", "/v1/resource-validations")
+	require.ErrorIs(t, err, domain.ErrForbiddenResource)
+
+	var activeJobs int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM resource_validation_jobs WHERE status IN (?, ?)",
+		string(domain.ResourceValidationQueued),
+		string(domain.ResourceValidationRunning),
+	).Scan(&activeJobs).Error)
+	require.Zero(t, activeJobs)
+}
+
+func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		20,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
+		200,
+		1,
+		"mx.aishop6.com",
+		"mx.aishop6.com",
+		"online",
+	).Error)
+
+	privateDomain := &domain.MailDomainResource{
+		Domain:       "private-validation.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeNotSale,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(ctx, &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}, privateDomain))
+	saleDomain := &domain.MailDomainResource{
+		Domain:       "sale-validation.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeSale,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(ctx, &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}, saleDomain))
+	bindingDomain := &domain.MailDomainResource{
+		Domain:       "binding-validation.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeBinding,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(ctx, &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}, bindingDomain))
+	oldPrivateDomain := &domain.MailDomainResource{
+		Domain:       "old-private-validation.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeNotSale,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(ctx, &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}, oldPrivateDomain))
+	require.NoError(t, db.Exec(
+		"UPDATE email_resources SET created_at = ? WHERE id = ?",
+		time.Now().Add(-48*time.Hour),
+		oldPrivateDomain.ID,
+	).Error)
+
+	createdFrom := time.Now().Add(-time.Hour)
+	createdTo := time.Now().Add(time.Hour)
+	result, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
+		Mode: coreapp.ResourceBulkSelectionFilter,
+		Filter: coreapp.ResourceBulkFilter{
+			ResourceType: domain.ResourceTypeDomain,
+			TLD:          ".com",
+			Status:       string(domain.DomainStatusNormal),
+			Purpose:      string(domain.PurposeNotSale),
+			CreatedFrom:  &createdFrom,
+			CreatedTo:    &createdTo,
+		},
+	}, nil, "req-domain-validation-filter", "/v1/resource-validations")
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Requested)
+	require.Equal(t, 1, result.Created)
+
+	var privateJobs, saleJobs, bindingJobs, oldJobs int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", privateDomain.ID).Scan(&privateJobs).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", saleDomain.ID).Scan(&saleJobs).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", bindingDomain.ID).Scan(&bindingJobs).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", oldPrivateDomain.ID).Scan(&oldJobs).Error)
+	require.EqualValues(t, 1, privateJobs)
+	require.Zero(t, saleJobs)
+	require.Zero(t, bindingJobs)
+	require.Zero(t, oldJobs)
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

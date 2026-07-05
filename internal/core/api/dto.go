@@ -29,6 +29,8 @@ type ResourceBulkFilterRequest struct {
 	Suffix         string     `json:"suffix,omitempty"`
 	TLD            string     `json:"tld,omitempty"`
 	Status         string     `json:"status,omitempty"`
+	Purpose        string     `json:"purpose,omitempty"`
+	ForSale        *bool      `json:"forSale,omitempty"`
 	LongLived      *bool      `json:"longLived,omitempty"`
 	GraphAvailable *bool      `json:"graphAvailable,omitempty"`
 	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
@@ -49,6 +51,11 @@ type PublishResourcesRequest struct {
 
 // DeleteResourcesRequest is the request body for batch resource delete.
 type DeleteResourcesRequest struct {
+	Selection ResourceBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
+// ValidateResourcesRequest is the request body for batch resource validation.
+type ValidateResourcesRequest struct {
 	Selection ResourceBulkSelectionRequest `json:"selection" binding:"required"`
 }
 
@@ -146,6 +153,12 @@ type ResourceValidationResponse struct {
 	LastSafeError string    `json:"lastSafeError,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// ResourceValidationsResponse returns a bulk asynchronous validation submission result.
+type ResourceValidationsResponse struct {
+	Requested int `json:"requested"`
+	Queued    int `json:"queued"`
 }
 
 // ServerItemResponse is the mail server list item.

@@ -109,8 +109,9 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) ([]uint, error) {
+	var importedResourceIDs []uint
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var importModel ResourceImportModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -129,6 +130,11 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 		if err := createMicrosoftBatchTx(tx, resources, ms); err != nil {
 			return err
 		}
+		ids, err := findMicrosoftResourceIDsByImportRowsTx(tx, ms)
+		if err != nil {
+			return err
+		}
+		importedResourceIDs = ids
 		if afterCreate != nil {
 			if err := afterCreate(platform.WithGormTx(ctx, tx)); err != nil {
 				return fmt.Errorf("record microsoft binding inputs: %w", err)
@@ -149,4 +155,30 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return importedResourceIDs, nil
+}
+
+func findMicrosoftResourceIDsByImportRowsTx(tx *gorm.DB, rows []domain.MicrosoftResource) ([]uint, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	emails := make([]string, 0, len(rows))
+	for _, row := range rows {
+		emails = append(emails, row.EmailAddress)
+	}
+	models, err := findMicrosoftResourceModelsByEmails(tx, emails, false, false)
+	if err != nil {
+		return nil, fmt.Errorf("find imported microsoft resource ids: %w", err)
+	}
+	if len(models) != len(uniqueMicrosoftEmails(emails)) {
+		return nil, domain.ErrResourceNotFound
+	}
+	ids := make([]uint, 0, len(models))
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	return ids, nil
 }

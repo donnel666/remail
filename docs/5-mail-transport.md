@@ -18,6 +18,7 @@
 | 2026-07-04 | V1.11 | Codex | 补充 P1-I3 Microsoft Graph 协议能力返回：验证 Port 在收件成功后返回 Graph 是否可用，Core 仅保存能力事实并用于筛选。此为缺失设计补充，不改变 MailTransport/Core 边界。 |
 | 2026-07-04 | V1.12 | Codex | 纠正 P1-I3 入站邮件归属：`InboundMail` 归属到 Core 资源根 `resourceType/resourceId/ownerUserId`，同时支持 Domain 收件和 Microsoft 辅助邮箱收码。此为缺失设计补充，不改变 MailTransport 只保存邮件事实的边界。 |
 | 2026-07-04 | V1.13 | Codex | 补充 P1-I3 本机 SMTP 入站可靠性策略：DATA 阶段按配置流式限量读取并记录安全耗时日志；Microsoft 收码读取允许消费已落原文但尚未完成异步 `stored` 标记的入站邮件，并保留晚到宽限窗口。此为缺失设计补充，不改变 MailMatch 边界。 |
+| 2026-07-05 | V1.14 | Codex | 补充 P1-I3 Microsoft 验证临时失败分类边界：`request/auth_timeout` 均由 Core 任务重试处理，不作为资源本体异常证据。此为缺失诊断补充，不改变 Core 对资源状态的所有权。 |
 
 > 支撑域。BC-MAILTRANSPORT 封装协议细节，只提供结构化结果，不做项目匹配和订单判断。
 
@@ -195,7 +196,7 @@ P1-I3 补充：
 |------|------|------|
 | `ResourceValidationPort` | 入站自 BC-CORE worker | 验证 Microsoft RT/获取 RT、自建域名 MX；只返回结构化结果，不直接修改资源状态。 |
 
-`ResourceValidationPort` 返回的 `request` 分类只表示协议请求、代理、DNS 或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据；只有密码、账号异常、DNS 配置错误等确定性分类才允许 Core 把资源状态写为 `abnormal`。
+`ResourceValidationPort` 返回的 `request/auth_timeout` 分类只表示协议请求、代理、DNS、授权轮询超时或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据；只有密码、账号异常、DNS 配置错误等确定性分类才允许 Core 把资源状态写为 `abnormal`。
 
 P1-I3 Microsoft 验证流程使用同一个 `Binding` 实体承接辅助邮箱事实。Core 导入 TXT 时只把 `bindingAddress` 作为输入交给 MailTransport，MailTransport 写入 `pending` 绑定记录；同一 active `bindingAddress` 只能归属一个 Microsoft 资源，避免 SMTP RCPT 解析歧义。验证 worker 进入 Microsoft 页面流后复用该地址，或在没有输入时按 ACL 规则生成地址。SMTP 入站解析辅助邮箱地址后写入 `InboundMail(resourceType=microsoft)`，`BindingCodeWaitPort` 读取本机 `InboundMail` 的 RFC822 原文并沿用 ACL 的验证码提取规则。该流程不改变 Microsoft 页面交互策略，只替换本系统的输入、收码和状态回写端口。
 

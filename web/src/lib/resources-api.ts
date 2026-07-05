@@ -21,6 +21,10 @@ export type DeleteResourcesRequest =
   components["schemas"]["DeleteResourcesRequest"];
 export type DeleteResourcesResponse =
   components["schemas"]["DeleteResourcesResponse"];
+export type ValidateResourcesRequest =
+  components["schemas"]["ValidateResourcesRequest"];
+export type ResourceValidationsResponse =
+  components["schemas"]["ResourceValidationsResponse"];
 export type ResourceBulkFilter = components["schemas"]["ResourceBulkFilter"];
 export type MicrosoftResourceDetail =
   components["schemas"]["MicrosoftResourceDetail"];
@@ -225,50 +229,15 @@ export async function getResourceValidationStatus(validationId: number) {
   );
 }
 
-export async function waitForResourceValidation(
-  validationId: number,
-  options: { intervalMs?: number; maxAttempts?: number } = {}
+export async function validateResourcesBatch(
+  payload: ValidateResourcesRequest
 ) {
-  const intervalMs = options.intervalMs ?? 1000;
-  const maxAttempts = options.maxAttempts ?? 180;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const status = await getResourceValidationStatus(validationId);
-    if (status.status === "succeeded" || status.status === "failed") {
-      return status;
-    }
-    await new Promise((resolve) => globalThis.setTimeout(resolve, intervalMs));
-  }
-
-  return getResourceValidationStatus(validationId);
-}
-
-export async function validateResources(
-  resourceIds: number[],
-  options: {
-    concurrency?: number;
-    onQueued?: (resourceId: number, validation: ResourceValidationResponse) => void;
-  } = {}
-) {
-  const ids = uniquePositiveResourceIds(resourceIds);
-  const concurrency = normalizePageConcurrency(options.concurrency);
-  const validations: ResourceValidationResponse[] = [];
-  let nextIndex = 0;
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, ids.length) }, async () => {
-      for (;;) {
-        const resourceId = ids[nextIndex];
-        if (resourceId === undefined) return;
-        nextIndex += 1;
-        const validation = await validateResource(resourceId);
-        validations.push(validation);
-        options.onQueued?.(resourceId, validation);
-      }
+  return unwrap<ResourceValidationsResponse>(
+    await client.POST("/v1/resource-validations", {
+      body: payload,
+      params: { header: csrfHeader() },
     })
   );
-
-  return validations;
 }
 
 export async function waitForResourceImport(
@@ -321,6 +290,30 @@ function filterSelection(filter: ResourceBulkFilter) {
 export function publishMicrosoftResourcesBatch(resourceIds: number[]) {
   return publishResourcesBatch({
     selection: idsSelection(resourceIds),
+  });
+}
+
+export function validateMicrosoftResourcesBatch(resourceIds: number[]) {
+  return validateResourcesBatch({
+    selection: idsSelection(resourceIds),
+  });
+}
+
+export function validateMicrosoftResourcesByFilter(filter: ResourceBulkFilter) {
+  return validateResourcesBatch({
+    selection: filterSelection(filter),
+  });
+}
+
+export function validateDomainResourcesBatch(resourceIds: number[]) {
+  return validateResourcesBatch({
+    selection: idsSelection(resourceIds),
+  });
+}
+
+export function validateDomainResourcesByFilter(filter: ResourceBulkFilter) {
+  return validateResourcesBatch({
+    selection: filterSelection(filter),
   });
 }
 

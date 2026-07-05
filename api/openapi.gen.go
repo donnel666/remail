@@ -336,6 +336,27 @@ func (e ProxyItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for ResourceBulkFilterPurpose.
+const (
+	ResourceBulkFilterPurposeBinding ResourceBulkFilterPurpose = "binding"
+	ResourceBulkFilterPurposeNotSale ResourceBulkFilterPurpose = "not_sale"
+	ResourceBulkFilterPurposeSale    ResourceBulkFilterPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the ResourceBulkFilterPurpose enum.
+func (e ResourceBulkFilterPurpose) Valid() bool {
+	switch e {
+	case ResourceBulkFilterPurposeBinding:
+		return true
+	case ResourceBulkFilterPurposeNotSale:
+		return true
+	case ResourceBulkFilterPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResourceBulkFilterResourceType.
 const (
 	ResourceBulkFilterResourceTypeDomain    ResourceBulkFilterResourceType = "domain"
@@ -404,19 +425,19 @@ func (e ResourceBulkSelection1Mode) Valid() bool {
 
 // Defines values for ResourceItemPurpose.
 const (
-	Binding ResourceItemPurpose = "binding"
-	NotSale ResourceItemPurpose = "not_sale"
-	Sale    ResourceItemPurpose = "sale"
+	ResourceItemPurposeBinding ResourceItemPurpose = "binding"
+	ResourceItemPurposeNotSale ResourceItemPurpose = "not_sale"
+	ResourceItemPurposeSale    ResourceItemPurpose = "sale"
 )
 
 // Valid indicates whether the value is a known member of the ResourceItemPurpose enum.
 func (e ResourceItemPurpose) Valid() bool {
 	switch e {
-	case Binding:
+	case ResourceItemPurposeBinding:
 		return true
-	case NotSale:
+	case ResourceItemPurposeNotSale:
 		return true
-	case Sale:
+	case ResourceItemPurposeSale:
 		return true
 	default:
 		return false
@@ -1235,11 +1256,17 @@ type ResourceBulkFilter struct {
 	// CreatedTo Inclusive resource creation upper bound. The frontend must send ISO date-time.
 	CreatedTo *time.Time `json:"createdTo,omitempty"`
 
+	// ForSale Microsoft public supply filter. false is private; true is public sale.
+	ForSale *bool `json:"forSale,omitempty"`
+
 	// GraphAvailable Microsoft Graph availability filter.
 	GraphAvailable *bool `json:"graphAvailable,omitempty"`
 
 	// LongLived Microsoft long-lived filter.
-	LongLived    *bool                          `json:"longLived,omitempty"`
+	LongLived *bool `json:"longLived,omitempty"`
+
+	// Purpose Domain resource purpose filter. not_sale means private/unavailable for sale; sale means public supply; binding is displayed as auxiliary mailbox in Chinese.
+	Purpose      *ResourceBulkFilterPurpose     `json:"purpose,omitempty"`
 	ResourceType ResourceBulkFilterResourceType `json:"resourceType"`
 
 	// Search Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
@@ -1252,6 +1279,9 @@ type ResourceBulkFilter struct {
 	// Tld Exact domain suffix such as .com.
 	Tld *string `json:"tld,omitempty"`
 }
+
+// ResourceBulkFilterPurpose Domain resource purpose filter. not_sale means private/unavailable for sale; sale means public supply; binding is displayed as auxiliary mailbox in Chinese.
+type ResourceBulkFilterPurpose string
 
 // ResourceBulkFilterResourceType defines model for ResourceBulkFilter.ResourceType.
 type ResourceBulkFilterResourceType string
@@ -1360,6 +1390,15 @@ type ResourceValidationResponseResourceType string
 // ResourceValidationResponseStatus defines model for ResourceValidationResponse.Status.
 type ResourceValidationResponseStatus string
 
+// ResourceValidationsResponse defines model for ResourceValidationsResponse.
+type ResourceValidationsResponse struct {
+	// Queued Number of resources accepted for asynchronous validation. Existing active jobs are reused.
+	Queued int `json:"queued"`
+
+	// Requested Number of resources accepted by the selection after ownership and status checks.
+	Requested int `json:"requested"`
+}
+
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
 	CreatedAt     time.Time `json:"createdAt"`
@@ -1457,6 +1496,11 @@ type UserResponse struct {
 
 // UserResponseRole defines model for UserResponse.Role.
 type UserResponseRole string
+
+// ValidateResourcesRequest defines model for ValidateResourcesRequest.
+type ValidateResourcesRequest struct {
+	Selection ResourceBulkSelection `json:"selection"`
+}
 
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
@@ -1647,6 +1691,12 @@ type PatchPasswordParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostResourceValidationsParams defines parameters for PostResourceValidations.
+type PostResourceValidationsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetResourcesParams defines parameters for GetResources.
 type GetResourcesParams struct {
 	Scope  *string `form:"scope,omitempty" json:"scope,omitempty"`
@@ -1792,6 +1842,9 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
+
+// PostResourceValidationsJSONRequestBody defines body for PostResourceValidations for application/json ContentType.
+type PostResourceValidationsJSONRequestBody = ValidateResourcesRequest
 
 // PostResourceDeleteBatchJSONRequestBody defines body for PostResourceDeleteBatch for application/json ContentType.
 type PostResourceDeleteBatchJSONRequestBody = DeleteResourcesRequest
@@ -2418,6 +2471,9 @@ type ServerInterface interface {
 	// Get resource import status
 	// (GET /v1/resource-imports/{importId})
 	GetResourceImport(c *gin.Context, importId int)
+	// Queue asynchronous resource validations in batch
+	// (POST /v1/resource-validations)
+	PostResourceValidations(c *gin.Context, params PostResourceValidationsParams)
 	// Get resource validation status
 	// (GET /v1/resource-validations/{validationId})
 	GetResourceValidation(c *gin.Context, validationId int)
@@ -3914,6 +3970,51 @@ func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
 	siw.Handler.GetResourceImport(c, importId)
 }
 
+// PostResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostResourceValidations(c, params)
+}
+
 // GetResourceValidation operation middleware
 func (siw *ServerInterfaceWrapper) GetResourceValidation(c *gin.Context) {
 
@@ -4602,6 +4703,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
+	router.POST(options.BaseURL+"/v1/resource-validations", wrapper.PostResourceValidations)
 	router.GET(options.BaseURL+"/v1/resource-validations/:validationId", wrapper.GetResourceValidation)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)

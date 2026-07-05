@@ -15,6 +15,7 @@ import (
 // resource state changes after the external ACL has finished.
 type ResourceValidationRepository interface {
 	CreateWithLog(ctx context.Context, job *domain.ResourceValidation, log *governancedomain.OperationLog) (bool, error)
+	CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
 	FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error)
 	ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.ResourceValidation, error)
 	MarkRunning(ctx context.Context, id uint) (bool, error)
@@ -79,6 +80,15 @@ type DispatchResourceValidationJobsResult struct {
 	Attempted int
 	Queued    int
 	Failed    int
+}
+
+// ResourceBatchValidationResult reports a bulk validation submission.
+// Queued means accepted for validation; active jobs are reused instead of
+// creating duplicate validation facts.
+type ResourceBatchValidationResult struct {
+	Requested int
+	Queued    int
+	Created   int
 }
 
 type ValidationResultView struct {
@@ -183,6 +193,44 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 	}
 
 	return validationView(job), nil
+}
+
+func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchValidationResult, error) {
+	switch selection.Mode {
+	case ResourceBulkSelectionIDs:
+		ids := uniqueResourceIDs(selection.ResourceIDs)
+		if len(ids) == 0 {
+			return nil, domain.ErrResourceNotFound
+		}
+		selection.ResourceIDs = ids
+	case ResourceBulkSelectionFilter:
+		filter, err := normalizeResourceBulkFilter(selection.Filter)
+		if err != nil {
+			return nil, err
+		}
+		selection.Filter = filter
+	default:
+		return nil, domain.ErrInvalidResourceType
+	}
+
+	log := &governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.resource.validate_batch",
+		ResourceType:   "resource",
+		ResourceID:     "batch",
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Resource validations queued.",
+		RequestID:      requestID,
+	}
+	result, err := uc.validations.CreateBatchWithLog(ctx, userID, selection, log, requestID, path)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Queued > 0 {
+		uc.ScheduleDispatcher(ctx, 0)
+	}
+	return result, nil
 }
 
 func (uc *ResourceValidationUseCase) Get(ctx context.Context, validationID uint, userID uint, isAdmin bool) (*ValidationResultView, error) {
@@ -355,7 +403,12 @@ func (uc *ResourceValidationUseCase) markValidationRetryableFailure(ctx context.
 }
 
 func isRetryableValidationCategory(category string) bool {
-	return strings.TrimSpace(category) == "request"
+	switch strings.TrimSpace(category) {
+	case "request", "auth_timeout":
+		return true
+	default:
+		return false
+	}
 }
 
 func validationSystemLog(job *domain.ResourceValidation, valid bool, category string, safeMessage string) *governancedomain.SystemLog {

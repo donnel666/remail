@@ -19,6 +19,7 @@
 | 2026-07-04 | V1.12 | Codex | 补充 P1-I3 Microsoft `graphAvailable` 回写策略：第二步收件成功后记录 Graph 主路径是否可用，供资源页展示和筛选。此为缺失设计补充，不改变 ACL 成功条件。 |
 | 2026-07-04 | V1.13 | Codex | 纠正 P1-I3 验证码失败分类和资源状态边界：`code_timeout/code_error` 是确定性绑定失败，不归入 `request` 重试；`deleted` 是 Core 命令终态，不由 ACL 产生。此为缺失设计补充，不改变 Microsoft 页面交互策略。 |
 | 2026-07-04 | V1.14 | Codex | 补充 P1-I3 本机收码适配策略：当前系统没有旧 `rt` 的输出文件/外部邮件 API 即时可见性，必须用数据库绑定事实替代已知辅助邮箱记录，并允许收码读取 pending 入站原文和晚到宽限。此为缺失设计补充，不改变 KMSI/Consent/OTP/Token 主流程。 |
+| 2026-07-05 | V1.15 | Codex | 补充 P1-I3 Microsoft 验证错误分类细化：保留参考实现的密码、未知邮箱、MFA、Passkey、手机验证、锁定、账号异常、已绑定、OAuth、Graph/IMAP 等内部分类；`request/auth_timeout` 为临时失败，由 Core 任务重试处理。此为缺失诊断补充，不改变资源状态机。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定。
 >
@@ -235,20 +236,28 @@ Go Microsoft ACL 返回 `category` 作为内部错误分类。对外不返回业
 
 | 错误分类 | 业务含义 | 对外 HTTP | 对外 message 原则 |
 |----------|----------|-----------|--------------------|
-| `password` | 密码错误 | `422` | `Microsoft account or password is incorrect.` |
-| `unknown` | 账号不存在或不可用 | `422` | `Microsoft account or password is incorrect.` |
-| `abnormal` | 账号异常 | `422` | `Microsoft account requires manual review.` |
-| `mfa` | 需要 MFA | `422` | `Microsoft account requires additional verification.` |
-| `phone` | 需要手机验证 | `422` | `Microsoft account requires additional verification.` |
-| `passkey` | 需要 Passkey | `422` | `Microsoft account requires additional verification.` |
-| `locked` | 账号锁定 | `422` | `Microsoft account is currently unavailable.` |
-| `bound` | 辅助邮箱已绑定 | `409` | `Binding mailbox is already bound.` |
-| `code_timeout` | 验证码超时 | `422` | `Verification code is incorrect or expired.` |
-| `code_error` | 验证码错误 | `422` | `Verification code is incorrect or expired.` |
-| `auth_timeout` | 授权超时 | `503` | `Microsoft authorization timed out. Please try again later.` |
-| `request` | 上游请求失败 | `502/503` | `Microsoft mail service is temporarily unavailable.` |
+| `password` | 密码错误 | `422` | `Microsoft account password is incorrect.` |
+| `unknown_mailbox` | 账号不存在或辅助邮箱恢复路径不可用 | `422` | `Microsoft account does not exist or recovery mailbox is not supported.` |
+| `mfa` | 需要 Authenticator 验证 | `422` | `Microsoft account requires authenticator verification.` |
+| `passkey` | 需要 Passkey | `422` | `Microsoft account requires passkey verification.` |
+| `phone` | 需要手机验证 | `422` | `Microsoft account requires phone verification.` |
+| `locked` | 账号锁定 | `422` | `Microsoft account is locked.` |
+| `account_abnormal` | 账号受限或需要恢复 | `422` | `Microsoft account is restricted or requires recovery.` |
+| `already_bound` | 辅助邮箱已被其他恢复信息绑定 | `409` | `Microsoft account is already bound to another recovery mailbox.` |
+| `code_timeout` | 辅助邮箱验证码超时 | `422` | `Auxiliary mailbox verification code was not received in time.` |
+| `code_error` | 辅助邮箱验证码错误或过期 | `422` | `Auxiliary mailbox verification code is incorrect or expired.` |
+| `oauth_invalid_grant` | RT 无效或过期 | `422` | `Microsoft refresh token is invalid or expired.` |
+| `oauth_client` | OAuth client 无效或不允许 | `422` | `Microsoft OAuth client is invalid or not allowed.` |
+| `oauth_permission` | OAuth 权限不可用 | `422` | `Microsoft OAuth permission is not available.` |
+| `missing_token` | 收件所需 token 不完整 | `422` | `Microsoft mail fetch credentials are incomplete.` |
+| `graph_unauthorized` | Graph access token 未授权或过期 | `422` | `Microsoft Graph access token is unauthorized or expired.` |
+| `graph_forbidden` | Graph 邮箱权限不可用 | `422` | `Microsoft Graph mailbox permission is not available.` |
+| `imap_auth_failed` | IMAP XOAUTH2 认证失败 | `422` | `Microsoft IMAP authentication failed.` |
+| `unknown` | 未识别的 Microsoft 页面或授权状态 | `422` | `Microsoft authorization failed with unknown status.` |
+| `auth_timeout` | 授权轮询超时 | `503` | `Microsoft authorization timed out.` |
+| `request` | 代理、网络、上游 429/5xx 或协议请求临时失败 | `502/503` | `Microsoft mail service is temporarily unavailable.` |
 
-账号不存在、密码错误必须合并为同一类对外文案，避免账号枚举；验证码错误或超时可以直接说明验证码错误或过期。`code_timeout/code_error` 是本次绑定验证码流程的确定性失败，不能归入 `request` 触发基础设施重试。
+登录和公开身份接口仍必须合并账号不存在、密码错误，避免账号枚举。资源验证诊断只展示给资源 owner 或管理员，可以保留上述安全分类文案以便排障，但不得写入密码、RT、accessToken、验证码、邮箱正文、Microsoft 原始响应或页面片段。`request/auth_timeout` 是临时失败，必须由 Core `ResourceValidation` 任务重试处理，耗尽后只失败任务、不把资源置为 `abnormal`。`code_timeout/code_error` 是本次绑定验证码流程的确定性失败，不能归入 `request` 触发基础设施重试。
 
 代理错误必须上报 BC-PROXY。资源代理失败时，允许本次业务按代理池规则获取系统代理重试；同一业务链路最多尝试 3 次代理路线。达到尝试预算或资源/系统代理都不可用时，ProxyPort 返回 `direct=true` 的系统直连路线，HTTPClient 必须禁用代理继续执行；直连失败属于上游或本机网络失败，不得上报为代理失败计数，内部详情写 SystemLog。
 

@@ -424,6 +424,49 @@ func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 	c.JSON(http.StatusAccepted, toValidationResponse(result))
 }
 
+// POST /v1/resource-validations
+func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	var req ValidateResourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if fields := validateBulkSelectionRequest(req.Selection); len(fields) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    fields,
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, err := h.module.ValidationUseCase.CreateBatch(
+		c.Request.Context(),
+		toAppBulkSelection(req.Selection),
+		userID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusAccepted, ResourceValidationsResponse{
+		Requested: result.Requested,
+		Queued:    result.Queued,
+	})
+}
+
 // GET /v1/resource-validations/:validationId
 func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
@@ -728,6 +771,8 @@ func toAppBulkSelection(selection ResourceBulkSelectionRequest) coreapp.Resource
 			Suffix:         selection.Filter.Suffix,
 			TLD:            selection.Filter.TLD,
 			Status:         selection.Filter.Status,
+			Purpose:        selection.Filter.Purpose,
+			ForSale:        selection.Filter.ForSale,
 			LongLived:      selection.Filter.LongLived,
 			GraphAvailable: selection.Filter.GraphAvailable,
 			CreatedFrom:    selection.Filter.CreatedFrom,

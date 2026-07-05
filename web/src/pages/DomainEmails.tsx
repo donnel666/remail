@@ -37,9 +37,8 @@ import {
   publishDomainResource,
   publishDomainResourcesByFilter,
   publishDomainResourcesBatch,
-  validateResource,
-  validateResources,
-  waitForResourceValidation,
+  validateDomainResourcesBatch,
+  validateDomainResourcesByFilter,
   type ResourceBulkFilter,
 } from "@/lib/resources-api";
 
@@ -167,15 +166,11 @@ export default function DomainEmails() {
   const [loading, setLoading] = useState(false);
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
-  const [checkingBatch, setCheckingBatch] = useState(false);
   const [publishingResourceID, setPublishingResourceID] = useState<
     number | null
   >(null);
   const [deletingResourceID, setDeletingResourceID] = useState<number | null>(
     null
-  );
-  const [checkingResourceIDs, setCheckingResourceIDs] = useState<Set<number>>(
-    () => new Set()
   );
   const [activeTld, setActiveTld] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -311,10 +306,13 @@ export default function DomainEmails() {
     if (search) filter.search = search;
     if (activeTld !== "all") filter.tld = activeTld;
     if (statusFilter !== "all") filter.status = statusFilter;
+    if (privateFilter !== "all") {
+      filter.purpose = privateFilter === "yes" ? "not_sale" : "sale";
+    }
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [activeTld, createdAtRange, searchKeyword, statusFilter]);
+  }, [activeTld, createdAtRange, privateFilter, searchKeyword, statusFilter]);
 
   const selectedPrivateResourceIds = useMemo(() => {
     const selected = new Set(selectedKeys);
@@ -366,45 +364,14 @@ export default function DomainEmails() {
     setSelectedKeys([]);
   }, []);
 
-  const markCheckingResources = useCallback(
-    (resourceIds: number[], checking: boolean) => {
-      setCheckingResourceIDs((previous) => {
-        const next = new Set(previous);
-        for (const resourceId of resourceIds) {
-          if (checking) {
-            next.add(resourceId);
-          } else {
-            next.delete(resourceId);
-          }
-        }
-        return next;
-      });
-    },
-    []
-  );
-
   const handleCheckResource = useCallback(async (record: DomainResource) => {
-    markCheckingResources([record.id], true);
     try {
-      const validation = await validateResource(record.id);
-      Toast.info(t("Resource validation submitted."));
-      const finalStatus = await waitForResourceValidation(
-        validation.validationId
-      );
-      if (finalStatus.status === "succeeded") {
-        Toast.success(t("Resource validation succeeded."));
-      } else {
-        Toast.error(
-          finalStatus.lastSafeError || t("Resource validation failed.")
-        );
-      }
-      await refresh();
+      await validateDomainResourcesBatch([record.id]);
+      Toast.success(t("Resource validation submitted."));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
-    } finally {
-      markCheckingResources([record.id], false);
     }
-  }, [markCheckingResources, refresh, t]);
+  }, [t]);
 
   const queueResourceChecks = useCallback(async (resourceIds: number[]) => {
     const ids = Array.from(new Set(resourceIds.filter((id) => id > 0)));
@@ -413,22 +380,33 @@ export default function DomainEmails() {
       return;
     }
 
-    setCheckingBatch(true);
-    markCheckingResources(ids, true);
     try {
-      const validations = await validateResources(ids);
+      const response = await validateDomainResourcesBatch(ids);
       Toast.success(
-        t("Resource validations submitted.", { count: validations.length })
+        t("Resource validations submitted.", { count: response.queued })
       );
       setSelectedKeys([]);
-      void refresh();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
-    } finally {
-      markCheckingResources(ids, false);
-      setCheckingBatch(false);
     }
-  }, [markCheckingResources, refresh, t]);
+  }, [t]);
+
+  const queueFilteredResourceChecks = useCallback(async () => {
+    if (filteredItems.length === 0) {
+      Toast.info(t("No resources to check."));
+      return;
+    }
+
+    try {
+      const response = await validateDomainResourcesByFilter(domainBulkFilter);
+      Toast.success(
+        t("Resource validations submitted.", { count: response.queued })
+      );
+      setSelectedKeys([]);
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    }
+  }, [domainBulkFilter, filteredItems.length, t]);
 
   const promptSupplierApplication = useCallback(async () => {
     try {
@@ -518,8 +496,8 @@ export default function DomainEmails() {
   }, [markResourcesPublishedForSale, t]);
 
   const confirmCheckAll = useCallback(() => {
-    void queueResourceChecks(filteredItems.map((item) => item.id));
-  }, [filteredItems, queueResourceChecks]);
+    void queueFilteredResourceChecks();
+  }, [queueFilteredResourceChecks]);
 
   const confirmSellAll = useCallback(async () => {
     if (privateFilter === "no") {
@@ -721,7 +699,6 @@ export default function DomainEmails() {
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
-    checkLoading: checkingBatch,
     onCheck: () => void queueResourceChecks(selectedKeys),
     onClear: clearSelection,
     onDelete: confirmDeleteSelected,
@@ -804,7 +781,6 @@ export default function DomainEmails() {
                 {t("Sell")}
               </Button>
               <Button
-                loading={checkingResourceIDs.has(record.id)}
                 onClick={() => void handleCheckResource(record)}
                 type="tertiary"
                 size="small"
@@ -825,7 +801,6 @@ export default function DomainEmails() {
         },
       ] as any[],
     [
-      checkingResourceIDs,
       deletingResourceID,
       handleDeleteResource,
       handleCheckResource,
@@ -912,7 +887,6 @@ export default function DomainEmails() {
           type="tertiary"
           size="small"
           className="flex-1 md:flex-initial"
-          loading={checkingBatch}
           onClick={confirmCheckAll}
         >
           {t("Check all")}

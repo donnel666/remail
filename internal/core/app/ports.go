@@ -92,7 +92,7 @@ type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
 	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
-	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) error
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) ([]uint, error)
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
@@ -121,6 +121,12 @@ type MicrosoftImportTask struct {
 	LongLived       bool                       `json:"longLived"`
 	ErrorStrategy   domain.ImportErrorStrategy `json:"errorStrategy"`
 	RequestID       string                     `json:"requestId"`
+}
+
+// MicrosoftImportProcessResult reports resources created or restored by one import task.
+type MicrosoftImportProcessResult struct {
+	ImportedResourceIDs []uint
+	Imported            int
 }
 
 // MailServerRepository defines the persistence contract for mail servers.
@@ -226,23 +232,23 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 
 // ProcessMicrosoftImport imports Microsoft resources from a stored TXT artifact.
 // Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
-func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task MicrosoftImportTask) error {
+func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (*MicrosoftImportProcessResult, error) {
 	if task.ImportID == 0 || task.OwnerUserID == 0 || strings.TrimSpace(task.SourceObjectKey) == "" {
-		return domain.ErrInvalidImportFormat
+		return nil, domain.ErrInvalidImportFormat
 	}
 
 	importRecord, err := uc.imports.FindByID(ctx, task.ImportID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if importRecord == nil {
-		return domain.ErrResourceNotFound
+		return nil, domain.ErrResourceNotFound
 	}
 	if importRecord.Status == domain.ResourceImportImported || importRecord.Status == domain.ResourceImportFailed {
-		return nil
+		return &MicrosoftImportProcessResult{}, nil
 	}
 	if importRecord.OwnerUserID != task.OwnerUserID || importRecord.SourceObjectKey != task.SourceObjectKey {
-		return domain.ErrInvalidImportFormat
+		return nil, domain.ErrInvalidImportFormat
 	}
 
 	now := time.Now().UTC()
@@ -252,21 +258,21 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	}
 	errorStrategy, ok := domain.NormalizeImportErrorStrategy(string(task.ErrorStrategy))
 	if !ok {
-		return domain.ErrInvalidImportFormat
+		return nil, domain.ErrInvalidImportFormat
 	}
 
 	source, err := uc.files.ReadPrivate(ctx, task.SourceObjectKey)
 	if err != nil {
-		return domain.ErrFileStorageUnavailable
+		return nil, domain.ErrFileStorageUnavailable
 	}
 
 	lines, parseFailures, err := uc.parser.ParseMicrosoftImport(string(source.ContentBytes), errorStrategy)
 	if err != nil {
-		return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailureFromError(err))
+		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailureFromError(err))
 	}
 	failures := importFailuresFromLineErrors(parseFailures)
 	if len(lines) == 0 && len(failures) == 0 {
-		return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
+		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 			Line:        0,
 			Category:    "invalid_format",
 			SafeMessage: "Invalid import format.",
@@ -275,7 +281,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 
 	if errorStrategy == domain.ImportErrorStrategyAbort {
 		if failure, ok := uc.duplicateInFile(lines); ok {
-			return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
+			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
 		}
 	} else {
 		var duplicateFailures []importFailure
@@ -289,7 +295,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	}
 	existingEmails, err := uc.resources.FindExistingMicrosoftEmails(ctx, emails)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(existingEmails) > 0 {
 		nextLines := lines[:0]
@@ -303,7 +309,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 					Err:         domain.ErrDuplicateEmail,
 				}
 				if errorStrategy == domain.ImportErrorStrategyAbort {
-					return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
+					return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
 				}
 				failures = append(failures, failure)
 				continue
@@ -338,25 +344,29 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 
 	failureObjectKey, safeSummary, err := uc.saveImportFailures(ctx, task.OwnerUserID, now, importID, failures)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	afterCreate := func(txCtx context.Context) error {
 		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, lines)
 	}
-	if err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate); err != nil {
+	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate)
+	if err != nil {
 		if errors.Is(err, domain.ErrDuplicateEmail) {
-			return uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
+			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
 				Line:        0,
 				Category:    "duplicate_email",
 				SafeMessage: "An email address in the import already exists.",
 				Err:         domain.ErrDuplicateEmail,
 			})
 		}
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &MicrosoftImportProcessResult{
+		ImportedResourceIDs: importedResourceIDs,
+		Imported:            len(importedResourceIDs),
+	}, nil
 }
 
 func (uc *ImportUseCase) recordMicrosoftBindingInputs(ctx context.Context, ownerUserID uint, lines []domain.MicrosoftImportLine) error {
@@ -705,6 +715,8 @@ type ResourceBulkFilter struct {
 	Suffix         string
 	TLD            string
 	Status         string
+	Purpose        string
+	ForSale        *bool
 	LongLived      *bool
 	GraphAvailable *bool
 	CreatedFrom    *time.Time
@@ -1286,8 +1298,12 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 	filter.Suffix = strings.ToLower(strings.TrimSpace(filter.Suffix))
 	filter.TLD = strings.ToLower(strings.TrimSpace(filter.TLD))
 	filter.Status = strings.TrimSpace(filter.Status)
+	filter.Purpose = strings.TrimSpace(filter.Purpose)
 	if filter.Status == "all" {
 		filter.Status = ""
+	}
+	if filter.Purpose == "all" {
+		filter.Purpose = ""
 	}
 	if filter.CreatedFrom != nil && filter.CreatedTo != nil && filter.CreatedFrom.After(*filter.CreatedTo) {
 		return ResourceBulkFilter{}, domain.ErrInvalidResourceFilter
@@ -1295,6 +1311,7 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 
 	switch filter.ResourceType {
 	case domain.ResourceTypeMicrosoft:
+		filter.Purpose = ""
 		if filter.Suffix != "" {
 			suffix := strings.TrimPrefix(filter.Suffix, "@")
 			normalized, err := domain.NormalizeDomainSuffix(suffix)
@@ -1310,8 +1327,12 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 			return ResourceBulkFilter{}, domain.ErrInvalidResourceStatus
 		}
 	case domain.ResourceTypeDomain:
+		filter.ForSale = nil
 		filter.LongLived = nil
 		filter.GraphAvailable = nil
+		if filter.Purpose != "" && !domain.IsValidPurpose(domain.ResourcePurpose(filter.Purpose)) {
+			return ResourceBulkFilter{}, domain.ErrInvalidPurpose
+		}
 		if filter.TLD != "" {
 			normalized, err := domain.NormalizeDomainSuffix(filter.TLD)
 			if err != nil {
