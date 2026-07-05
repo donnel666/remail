@@ -41,6 +41,375 @@ func newMockResourceRepo() *mockResourceRepo {
 	}
 }
 
+type mockProjectRepo struct {
+	details   map[uint]*coredomain.ProjectDetail
+	summaries []coreapp.ProjectSummary
+	nextID    uint
+	logs      []*governancedomain.OperationLog
+}
+
+func newMockProjectRepo() *mockProjectRepo {
+	return &mockProjectRepo{
+		details: make(map[uint]*coredomain.ProjectDetail),
+		nextID:  100,
+	}
+}
+
+func (r *mockProjectRepo) CreateWithLog(_ context.Context, detail *coredomain.ProjectDetail, log *governancedomain.OperationLog) error {
+	r.nextID++
+	detail.Project.ID = r.nextID
+	for i := range detail.Products {
+		detail.Products[i].ID = uint(i + 1)
+		detail.Products[i].ProjectID = detail.Project.ID
+	}
+	for i := range detail.MailRules {
+		detail.MailRules[i].ID = uint(i + 1)
+		detail.MailRules[i].ProjectID = detail.Project.ID
+	}
+	r.details[detail.Project.ID] = detail
+	r.summaries = append(r.summaries, coreapp.ProjectSummary{
+		Project:       detail.Project,
+		Products:      detail.Products,
+		ProductCount:  len(detail.Products),
+		MailRuleCount: len(detail.MailRules),
+	})
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) ResubmitWithLog(_ context.Context, applicantUserID uint, detail *coredomain.ProjectDetail, log *governancedomain.OperationLog) error {
+	existing := r.details[detail.Project.ID]
+	if existing == nil {
+		return coredomain.ErrProjectNotFound
+	}
+	if existing.Project.ApplicantUserID == nil || *existing.Project.ApplicantUserID != applicantUserID {
+		return coredomain.ErrForbiddenProject
+	}
+	if existing.Project.Status != coredomain.ProjectStatusDelisted {
+		return coredomain.ErrInvalidProjectStatus
+	}
+	detail.Project.CreatedAt = existing.Project.CreatedAt
+	for i := range detail.MailRules {
+		detail.MailRules[i].ID = uint(i + 1)
+		detail.MailRules[i].ProjectID = detail.Project.ID
+	}
+	detail.Products = existing.Products
+	r.details[detail.Project.ID] = detail
+	for i := range r.summaries {
+		if r.summaries[i].Project.ID == detail.Project.ID {
+			r.summaries[i] = coreapp.ProjectSummary{
+				Project:       detail.Project,
+				Products:      detail.Products,
+				ProductCount:  len(detail.Products),
+				MailRuleCount: len(detail.MailRules),
+			}
+			break
+		}
+	}
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) UpdateWithLog(_ context.Context, detail *coredomain.ProjectDetail, log *governancedomain.OperationLog) error {
+	existing := r.details[detail.Project.ID]
+	if existing == nil {
+		return coredomain.ErrProjectNotFound
+	}
+	if existing.Project.Status == coredomain.ProjectStatusReviewing {
+		return coredomain.ErrInvalidProjectStatus
+	}
+	detail.Project.Status = existing.Project.Status
+	detail.Project.ApplicantUserID = existing.Project.ApplicantUserID
+	detail.Project.ReviewReason = existing.Project.ReviewReason
+	detail.Project.CreatedAt = existing.Project.CreatedAt
+	for i := range detail.Products {
+		detail.Products[i].ID = uint(i + 1)
+		detail.Products[i].ProjectID = detail.Project.ID
+	}
+	for i := range detail.MailRules {
+		detail.MailRules[i].ID = uint(i + 1)
+		detail.MailRules[i].ProjectID = detail.Project.ID
+	}
+	r.details[detail.Project.ID] = detail
+	r.upsertSummary(detail)
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) ApproveWithConfigAndLog(_ context.Context, detail *coredomain.ProjectDetail, log *governancedomain.OperationLog) error {
+	existing := r.details[detail.Project.ID]
+	if existing == nil {
+		return coredomain.ErrProjectNotFound
+	}
+	if existing.Project.Status != coredomain.ProjectStatusReviewing {
+		return coredomain.ErrInvalidProjectStatus
+	}
+	detail.Project.Status = coredomain.ProjectStatusListed
+	detail.Project.ApplicantUserID = existing.Project.ApplicantUserID
+	detail.Project.ReviewReason = ""
+	detail.Project.CreatedAt = existing.Project.CreatedAt
+	for i := range detail.Products {
+		detail.Products[i].ID = uint(i + 1)
+		detail.Products[i].ProjectID = detail.Project.ID
+	}
+	for i := range detail.MailRules {
+		detail.MailRules[i].ID = uint(i + 1)
+		detail.MailRules[i].ProjectID = detail.Project.ID
+	}
+	r.details[detail.Project.ID] = detail
+	r.upsertSummary(detail)
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) TransitionWithLog(_ context.Context, projectID uint, from coredomain.ProjectStatus, to coredomain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (*coredomain.ProjectDetail, error) {
+	detail := r.details[projectID]
+	if detail == nil {
+		return nil, coredomain.ErrProjectNotFound
+	}
+	if detail.Project.Status != from {
+		return nil, coredomain.ErrInvalidProjectStatus
+	}
+	detail.Project.Status = to
+	detail.Project.ReviewReason = reviewReason
+	r.upsertSummary(detail)
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return detail, nil
+}
+
+func (r *mockProjectRepo) DeleteWithLog(_ context.Context, projectID uint, log *governancedomain.OperationLog) error {
+	detail := r.details[projectID]
+	if detail == nil {
+		return coredomain.ErrProjectNotFound
+	}
+	if detail.Project.Status == coredomain.ProjectStatusReviewing {
+		return coredomain.ErrInvalidProjectStatus
+	}
+	delete(r.details, projectID)
+	next := r.summaries[:0]
+	for _, summary := range r.summaries {
+		if summary.Project.ID != projectID {
+			next = append(next, summary)
+		}
+	}
+	r.summaries = next
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) BulkTransitionWithLog(_ context.Context, filter coreapp.ProjectListFilter, from coredomain.ProjectStatus, to coredomain.ProjectStatus, log *governancedomain.OperationLog) (int, error) {
+	affected := 0
+	for _, detail := range r.details {
+		if !mockProjectMatchesFilter(detail.Project, filter) || detail.Project.Status != from {
+			continue
+		}
+		detail.Project.Status = to
+		detail.Project.ReviewReason = ""
+		r.upsertSummary(detail)
+		affected++
+	}
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return affected, nil
+}
+
+func (r *mockProjectRepo) BulkDeleteWithLog(_ context.Context, filter coreapp.ProjectListFilter, log *governancedomain.OperationLog) (int, error) {
+	affected := 0
+	for projectID, detail := range r.details {
+		if !mockProjectMatchesFilter(detail.Project, filter) || detail.Project.Status == coredomain.ProjectStatusReviewing {
+			continue
+		}
+		delete(r.details, projectID)
+		affected++
+	}
+	if affected > 0 {
+		next := r.summaries[:0]
+		for _, summary := range r.summaries {
+			if _, ok := r.details[summary.Project.ID]; ok {
+				next = append(next, summary)
+			}
+		}
+		r.summaries = next
+	}
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return affected, nil
+}
+
+func (r *mockProjectRepo) ListAccesses(_ context.Context, projectID uint) ([]coredomain.ProjectAccess, error) {
+	detail := r.details[projectID]
+	if detail == nil {
+		return nil, coredomain.ErrProjectNotFound
+	}
+	if detail.Project.AccessType != coredomain.ProjectAccessPrivate {
+		return []coredomain.ProjectAccess{}, nil
+	}
+	return detail.Accesses, nil
+}
+
+func (r *mockProjectRepo) GrantAccessWithLog(_ context.Context, projectID, userID, grantedBy uint, log *governancedomain.OperationLog) (*coredomain.ProjectAccess, error) {
+	detail := r.details[projectID]
+	if detail == nil {
+		return nil, coredomain.ErrProjectNotFound
+	}
+	if detail.Project.AccessType != coredomain.ProjectAccessPrivate {
+		return nil, coredomain.ErrInvalidProject
+	}
+	for i := range detail.Accesses {
+		if detail.Accesses[i].UserID == userID {
+			detail.Accesses[i].GrantedBy = grantedBy
+			if log != nil {
+				r.logs = append(r.logs, log)
+			}
+			return &detail.Accesses[i], nil
+		}
+	}
+	access := coredomain.ProjectAccess{
+		ID:        uint(len(detail.Accesses) + 1),
+		ProjectID: projectID,
+		UserID:    userID,
+		GrantedBy: grantedBy,
+		CreatedAt: time.Now().UTC(),
+	}
+	detail.Accesses = append(detail.Accesses, access)
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return &detail.Accesses[len(detail.Accesses)-1], nil
+}
+
+func (r *mockProjectRepo) RevokeAccessWithLog(_ context.Context, projectID, userID uint, log *governancedomain.OperationLog) error {
+	detail := r.details[projectID]
+	if detail == nil {
+		return coredomain.ErrProjectNotFound
+	}
+	if detail.Project.AccessType != coredomain.ProjectAccessPrivate {
+		return coredomain.ErrInvalidProject
+	}
+	next := detail.Accesses[:0]
+	for _, access := range detail.Accesses {
+		if access.UserID != userID {
+			next = append(next, access)
+		}
+	}
+	detail.Accesses = next
+	if log != nil {
+		r.logs = append(r.logs, log)
+	}
+	return nil
+}
+
+func (r *mockProjectRepo) upsertSummary(detail *coredomain.ProjectDetail) {
+	summary := coreapp.ProjectSummary{
+		Project:       detail.Project,
+		Products:      detail.Products,
+		ProductCount:  len(detail.Products),
+		MailRuleCount: len(detail.MailRules),
+	}
+	for i := range r.summaries {
+		if r.summaries[i].Project.ID == detail.Project.ID {
+			r.summaries[i] = summary
+			return
+		}
+	}
+	r.summaries = append(r.summaries, summary)
+}
+
+func mockProjectMatchesFilter(project coredomain.Project, filter coreapp.ProjectListFilter) bool {
+	if len(filter.IDs) > 0 {
+		found := false
+		for _, id := range filter.IDs {
+			if id == project.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if filter.Status != "" && project.Status != filter.Status {
+		return false
+	}
+	if filter.AccessType != "" && project.AccessType != filter.AccessType {
+		return false
+	}
+	return true
+}
+
+func (r *mockProjectRepo) List(_ context.Context, _ coreapp.ProjectListFilter, offset, limit int) ([]coreapp.ProjectSummary, error) {
+	if offset >= len(r.summaries) {
+		return []coreapp.ProjectSummary{}, nil
+	}
+	end := offset + limit
+	if end > len(r.summaries) {
+		end = len(r.summaries)
+	}
+	return r.summaries[offset:end], nil
+}
+
+func (r *mockProjectRepo) Count(_ context.Context, _ coreapp.ProjectListFilter) (int64, error) {
+	return int64(len(r.summaries)), nil
+}
+
+func (r *mockProjectRepo) Facets(_ context.Context, _ coreapp.ProjectListFilter) (*coreapp.ProjectListFacets, error) {
+	facets := &coreapp.ProjectListFacets{}
+	facets.Status.All = int64(len(r.summaries))
+	facets.Access.All = int64(len(r.summaries))
+	facets.Match.All = int64(len(r.summaries))
+	facets.ProductType.All = int64(len(r.summaries))
+	for _, summary := range r.summaries {
+		switch summary.Project.Status {
+		case coredomain.ProjectStatusListed:
+			facets.Status.Listed++
+		case coredomain.ProjectStatusReviewing:
+			facets.Status.Reviewing++
+		case coredomain.ProjectStatusDelisted:
+			facets.Status.Delisted++
+		}
+		switch summary.Project.AccessType {
+		case coredomain.ProjectAccessPublic:
+			facets.Access.Public++
+		case coredomain.ProjectAccessPrivate:
+			facets.Access.Private++
+		}
+		if summary.Project.LooseMatch {
+			facets.Match.Loose++
+		} else {
+			facets.Match.Strict++
+		}
+		seenTypes := map[coredomain.ProductType]struct{}{}
+		for _, product := range summary.Products {
+			seenTypes[product.Type] = struct{}{}
+		}
+		if _, ok := seenTypes[coredomain.ProductTypeMicrosoft]; ok {
+			facets.ProductType.Microsoft++
+		}
+		if _, ok := seenTypes[coredomain.ProductTypeDomain]; ok {
+			facets.ProductType.Domain++
+		}
+	}
+	return facets, nil
+}
+
+func (r *mockProjectRepo) FindDetail(_ context.Context, projectID uint, _ uint, _ bool) (*coredomain.ProjectDetail, error) {
+	return r.details[projectID], nil
+}
+
 func (r *mockResourceRepo) CreateMicrosoft(_ context.Context, resource *coredomain.EmailResource, ms *coredomain.MicrosoftResource) error {
 	r.seq++
 	resource.ID = r.seq
@@ -1151,6 +1520,7 @@ func setupCoreTestModuleWithImportMocks() (*CoreModule, *mockResourceRepo, *mock
 	validationQueue := &mockValidationQueue{}
 	mailServerRepo := newMockMailServerRepo()
 	mailboxRepo := newMockGeneratedMailboxRepo()
+	projectRepo := newMockProjectRepo()
 	fileStore := newMockFileStore()
 
 	mod := &CoreModule{
@@ -1160,6 +1530,7 @@ func setupCoreTestModuleWithImportMocks() (*CoreModule, *mockResourceRepo, *mock
 		DomainUseCase:     coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
 		ServerUseCase:     coreapp.NewServerUseCase(mailServerRepo),
 		MailboxUseCase:    coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
+		ProjectUseCase:    coreapp.NewProjectUseCase(projectRepo),
 	}
 	return mod, resourceRepo, mailServerRepo, mailboxRepo, importQueue, importRepo, fileStore
 }
@@ -1244,6 +1615,15 @@ func (p *mockTXTParser) ParseMicrosoftImport(content string, strategy coredomain
 
 func setAuthContext(c *gin.Context, userID uint, roleLevel int) {
 	middleware.SetCurrentUser(c, userID, iamdomain.RoleLevel(roleLevel), "test@example.com", "test-session-id")
+}
+
+type mockPermissionChecker struct {
+	allowed bool
+	err     error
+}
+
+func (m mockPermissionChecker) Check(_ context.Context, _ uint, _ iamdomain.RoleLevel, _, _ string) (bool, error) {
+	return m.allowed, m.err
 }
 
 func multipartImportBody(t *testing.T, fileName string, content string) (*bytes.Buffer, string) {
@@ -2759,4 +3139,469 @@ func TestCoreHandler_DomainMailboxesDeletedDomainHidden(t *testing.T) {
 	h.GetDomainMailboxes(c)
 
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	repo.details[1] = projectDetailForAPITest()
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects/1", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "1"}}
+	setAuthContext(c, 2, int(iamdomain.RoleUser))
+
+	h.GetProject(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	products := body["products"].([]any)
+	product := products[0].(map[string]any)
+	require.NotContains(t, product, "codeSupplierPrice")
+	require.NotContains(t, product, "purchaseSupplierPrice")
+	require.NotContains(t, product, "mainWeight")
+	require.NotContains(t, product, "dotWeight")
+	require.NotContains(t, product, "plusWeight")
+	require.NotContains(t, body, "mailRules")
+}
+
+func TestCoreHandler_GetProjectDetailIncludesInternalProductFieldsForProjectAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	repo.details[1] = projectDetailForAPITest()
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod, mockPermissionChecker{allowed: true})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects/1", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "1"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.GetProject(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	products := body["products"].([]any)
+	product := products[0].(map[string]any)
+	require.Equal(t, "0.050000", product["codeSupplierPrice"])
+	require.Equal(t, "0.000000", product["purchaseSupplierPrice"])
+	require.Equal(t, float64(1), product["mainWeight"])
+	require.Len(t, body["mailRules"].([]any), 2)
+}
+
+func TestCoreHandler_GetProjectsScopeAllRequiresProjectReadPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	repo.summaries = []coreapp.ProjectSummary{
+		{
+			Project:       detail.Project,
+			Products:      detail.Products,
+			ProductCount:  len(detail.Products),
+			MailRuleCount: len(detail.MailRules),
+		},
+	}
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod, mockPermissionChecker{allowed: false})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects?scope=all", nil)
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	repo.summaries = []coreapp.ProjectSummary{
+		{
+			Project:       detail.Project,
+			Products:      detail.Products,
+			ProductCount:  len(detail.Products),
+			MailRuleCount: len(detail.MailRules),
+		},
+	}
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod, mockPermissionChecker{allowed: true})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects", nil)
+	setAuthContext(c, 1, int(iamdomain.RoleUser))
+
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	items := body["items"].([]any)
+	require.Len(t, items, 1)
+	item := items[0].(map[string]any)
+	products := item["products"].([]any)
+	require.Len(t, products, 1)
+	product := products[0].(map[string]any)
+	require.Equal(t, "microsoft", product["type"])
+	require.Equal(t, "0.100000", product["codePrice"])
+	require.Equal(t, "0.000000", product["purchasePrice"])
+	require.NotContains(t, product, "codeSupplierPrice")
+	require.NotContains(t, product, "mainWeight")
+	facets := body["facets"].(map[string]any)
+	statusFacets := facets["status"].(map[string]any)
+	require.Equal(t, float64(1), statusFacets["all"])
+	require.Equal(t, float64(1), statusFacets["listed"])
+	productTypeFacets := facets["productType"].(map[string]any)
+	require.Equal(t, float64(1), productTypeFacets["microsoft"])
+}
+
+func TestCoreHandler_ProjectOwnerCanSeeRejectReasonAndResubmit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	applicantID := uint(7)
+	detail.Project.ID = 8
+	detail.Project.Status = coredomain.ProjectStatusDelisted
+	detail.Project.ApplicantUserID = &applicantID
+	detail.Project.ReviewReason = "规则不够明确"
+	repo.details[8] = detail
+	repo.summaries = []coreapp.ProjectSummary{
+		{
+			Project:       detail.Project,
+			Products:      detail.Products,
+			ProductCount:  len(detail.Products),
+			MailRuleCount: len(detail.MailRules),
+		},
+	}
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects?scope=mine", nil)
+	setAuthContext(c, 7, int(iamdomain.RoleUser))
+
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var listBody map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listBody))
+	items := listBody["items"].([]any)
+	item := items[0].(map[string]any)
+	require.Equal(t, "规则不够明确", item["reviewReason"])
+	require.Equal(t, float64(7), item["applicantUserId"])
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/projects/8", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "8"}}
+	setAuthContext(c, 7, int(iamdomain.RoleUser))
+
+	h.GetProject(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var detailBody map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detailBody))
+	require.Len(t, detailBody["mailRules"].([]any), 2)
+
+	body := `{"name":"GitHub Updated","targetPlatform":"github.com","accessType":"public","looseMatch":true,"mailRules":[{"ruleType":"sender","pattern":"noreply@github.com","enabled":true},{"ruleType":"recipient","pattern":"exact","enabled":true}]}`
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/projects/8/resubmit", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "projectId", Value: "8"}}
+	setAuthContext(c, 7, int(iamdomain.RoleUser))
+
+	h.PostProjectResubmit(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resubmitBody map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resubmitBody))
+	project := resubmitBody["project"].(map[string]any)
+	require.Equal(t, "reviewing", project["status"])
+	require.Empty(t, project["reviewReason"])
+	require.Equal(t, "GitHub Updated", project["name"])
+}
+
+func TestCoreHandler_AdminProjectApproveMovesReviewingToListed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 9
+	detail.Project.Status = coredomain.ProjectStatusReviewing
+	repo.details[9] = detail
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/9/approve", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "9"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProjectApprove(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body ProjectDetailResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, string(coredomain.ProjectStatusListed), body.Project.Status)
+	require.Empty(t, body.Project.ReviewReason)
+}
+
+func TestCoreHandler_AdminProjectApproveWithConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 11
+	detail.Project.Status = coredomain.ProjectStatusReviewing
+	detail.Products = nil
+	repo.details[11] = detail
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	body := `{
+		"name":"GitHub Configured",
+		"targetPlatform":"github.com",
+		"accessType":"public",
+		"looseMatch":true,
+		"products":[{
+			"type":"microsoft",
+			"status":"enabled",
+			"codeEnabled":true,
+			"purchaseEnabled":false,
+			"codePrice":"0.100000",
+			"purchasePrice":"0",
+			"codeSupplierPrice":"0.050000",
+			"purchaseSupplierPrice":"0",
+			"codeWindowMinutes":10,
+			"activationWindowMinutes":60,
+			"warrantyMinutes":60,
+			"mainWeight":1
+		}],
+		"mailRules":[
+			{"ruleType":"sender","pattern":".*","enabled":true},
+			{"ruleType":"recipient","pattern":"exact","enabled":true}
+		]
+	}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/11/approve", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "projectId", Value: "11"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProjectApprove(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response ProjectDetailResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, string(coredomain.ProjectStatusListed), response.Project.Status)
+	require.Equal(t, "GitHub Configured", response.Project.Name)
+	require.Len(t, response.Products, 1)
+}
+
+func TestCoreHandler_AdminProjectUpdateRejectsReviewingProject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 12
+	detail.Project.Status = coredomain.ProjectStatusReviewing
+	repo.details[12] = detail
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	body := `{
+		"name":"GitHub Updated",
+		"targetPlatform":"github.com",
+		"accessType":"public",
+		"looseMatch":true,
+		"products":[{
+			"type":"microsoft",
+			"status":"enabled",
+			"codeEnabled":true,
+			"purchaseEnabled":false,
+			"codePrice":"0.100000",
+			"purchasePrice":"0",
+			"codeSupplierPrice":"0.050000",
+			"purchaseSupplierPrice":"0",
+			"codeWindowMinutes":10,
+			"activationWindowMinutes":60,
+			"warrantyMinutes":60,
+			"mainWeight":1
+		}],
+		"mailRules":[
+			{"ruleType":"sender","pattern":".*","enabled":true},
+			{"ruleType":"recipient","pattern":"exact","enabled":true}
+		]
+	}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("PUT", "/v1/admin/projects/12", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "projectId", Value: "12"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PutAdminProject(c)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_AdminProjectAccessGrantListAndRevoke(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 10
+	detail.Project.AccessType = coredomain.ProjectAccessPrivate
+	repo.details[10] = detail
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/10/access", strings.NewReader(`{"userId":7}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "projectId", Value: "10"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProjectAccess(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var access ProjectAccessResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &access))
+	require.Equal(t, uint(10), access.ProjectID)
+	require.Equal(t, uint(7), access.UserID)
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/admin/projects/10/access", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "10"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.GetAdminProjectAccess(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var list ProjectAccessListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	require.Equal(t, 1, list.Total)
+	require.Len(t, list.Items, 1)
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/v1/admin/projects/10/access/7", nil)
+	c.Params = gin.Params{{Key: "projectId", Value: "10"}, {Key: "userId", Value: "7"}}
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.DeleteAdminProjectAccess(c)
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Empty(t, repo.details[10].Accesses)
+}
+
+func TestCoreHandler_AdminProjectBulkSelectionShapeValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/delete", strings.NewReader(`{"selection":{"mode":"ids","projectIds":[]}}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProjectsDelete(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	files := newMockFileStore()
+	mod := &CoreModule{ProjectAssets: coreapp.NewProjectAssetUseCase(files)}
+	h := NewCoreHandler(mod)
+	body, contentType := multipartImportBody(t, "logo.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/project-logos", body)
+	c.Request.Header.Set("Content-Type", contentType)
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProjectLogo(c)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var upload ProjectLogoUploadResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &upload))
+	require.Contains(t, upload.LogoURL, "/v1/project-logos/")
+
+	logoKey := strings.TrimPrefix(upload.LogoURL, "/v1/project-logos/")
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", upload.LogoURL, nil)
+	c.Params = gin.Params{{Key: "logoKey", Value: logoKey}}
+	setAuthContext(c, 2, int(iamdomain.RoleUser))
+
+	h.GetProjectLogo(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	require.NotEmpty(t, w.Body.Bytes())
+}
+
+func projectDetailForAPITest() *coredomain.ProjectDetail {
+	now := time.Now().UTC()
+	return &coredomain.ProjectDetail{
+		Project: coredomain.Project{
+			ID:             1,
+			Name:           "GitHub",
+			TargetPlatform: "github.com",
+			Status:         coredomain.ProjectStatusListed,
+			AccessType:     coredomain.ProjectAccessPublic,
+			LooseMatch:     true,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		Products: []coredomain.Product{
+			{
+				ID:                      11,
+				ProjectID:               1,
+				Type:                    coredomain.ProductTypeMicrosoft,
+				Status:                  coredomain.ProductStatusEnabled,
+				CodeEnabled:             true,
+				PurchaseEnabled:         false,
+				CodePrice:               "0.100000",
+				PurchasePrice:           "0.000000",
+				CodeSupplierPrice:       "0.050000",
+				PurchaseSupplierPrice:   "0.000000",
+				CodeWindowMinutes:       10,
+				ActivationWindowMinutes: 60,
+				WarrantyMinutes:         60,
+				MainWeight:              1,
+			},
+		},
+		MailRules: []coredomain.MailRule{
+			{ID: 21, ProjectID: 1, RuleType: coredomain.MailRuleSender, Pattern: ".*", Enabled: true},
+			{ID: 22, ProjectID: 1, RuleType: coredomain.MailRuleRecipient, Pattern: "exact", Enabled: true},
+		},
+	}
 }

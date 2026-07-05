@@ -17,6 +17,8 @@ type CoreModule struct {
 	DomainUseCase     *coreapp.DomainUseCase
 	ServerUseCase     *coreapp.ServerUseCase
 	MailboxUseCase    *coreapp.DomainMailboxUseCase
+	ProjectUseCase    *coreapp.ProjectUseCase
+	ProjectAssets     *coreapp.ProjectAssetUseCase
 }
 
 // NewCoreModule wires up all Core module dependencies.
@@ -29,6 +31,7 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 	validationQueue := coreinfra.NewResourceValidationQueue(asynqClient)
 	mailServerRepo := coreinfra.NewMailServerRepo(db)
 	mailboxRepo := coreinfra.NewGeneratedMailboxRepo(db)
+	projectRepo := coreinfra.NewProjectRepo(db)
 
 	return &CoreModule{
 		ImportUseCase:     coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue, bindingRecorder),
@@ -37,5 +40,7 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 		DomainUseCase:     coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
 		ServerUseCase:     coreapp.NewServerUseCase(mailServerRepo),
 		MailboxUseCase:    coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
+		ProjectUseCase:    coreapp.NewProjectUseCase(projectRepo),
+		ProjectAssets:     coreapp.NewProjectAssetUseCase(files),
 	}, nil
 }

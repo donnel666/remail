@@ -59,6 +59,88 @@ type ValidateResourcesRequest struct {
 	Selection ResourceBulkSelectionRequest `json:"selection" binding:"required"`
 }
 
+// CreateProjectApplicationRequest creates a user project application.
+type CreateProjectApplicationRequest struct {
+	Name           string                   `json:"name" binding:"required"`
+	TargetPlatform string                   `json:"targetPlatform" binding:"required"`
+	LogoURL        string                   `json:"logoUrl,omitempty"`
+	Description    string                   `json:"description,omitempty"`
+	AccessType     string                   `json:"accessType,omitempty"`
+	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
+	MailRules      []ProjectMailRuleRequest `json:"mailRules,omitempty"`
+}
+
+// AdminCreateProjectRequest creates a complete listed project.
+type AdminCreateProjectRequest struct {
+	Name           string                   `json:"name" binding:"required"`
+	TargetPlatform string                   `json:"targetPlatform" binding:"required"`
+	LogoURL        string                   `json:"logoUrl,omitempty"`
+	Description    string                   `json:"description,omitempty"`
+	AccessType     string                   `json:"accessType,omitempty"`
+	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
+	Products       []ProjectProductRequest  `json:"products" binding:"required"`
+	MailRules      []ProjectMailRuleRequest `json:"mailRules" binding:"required"`
+}
+
+// AdminRejectProjectRequest rejects a reviewing project application.
+type AdminRejectProjectRequest struct {
+	ReviewReason string `json:"reviewReason" binding:"required"`
+}
+
+// ProjectBulkFilterRequest describes an admin project bulk command filter.
+type ProjectBulkFilterRequest struct {
+	Status         string     `json:"status,omitempty"`
+	AccessType     string     `json:"accessType,omitempty"`
+	LooseMatch     *bool      `json:"looseMatch,omitempty"`
+	ProductType    string     `json:"productType,omitempty"`
+	Search         string     `json:"search,omitempty"`
+	TargetPlatform string     `json:"targetPlatform,omitempty"`
+	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time `json:"createdTo,omitempty"`
+}
+
+// ProjectBulkSelectionRequest selects projects by IDs or by a filter.
+type ProjectBulkSelectionRequest struct {
+	Mode       string                   `json:"mode" binding:"required,oneof=ids filter"`
+	ProjectIDs []uint                   `json:"projectIds,omitempty"`
+	Filter     ProjectBulkFilterRequest `json:"filter,omitempty"`
+}
+
+// ProjectBulkCommandRequest is the request body for admin project bulk commands.
+type ProjectBulkCommandRequest struct {
+	Selection ProjectBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
+// GrantProjectAccessRequest grants a user access to a private project.
+type GrantProjectAccessRequest struct {
+	UserID uint `json:"userId" binding:"required"`
+}
+
+// ProjectProductRequest describes one project product under the Project aggregate.
+type ProjectProductRequest struct {
+	Type                    string `json:"type" binding:"required"`
+	Status                  string `json:"status,omitempty"`
+	CodeEnabled             bool   `json:"codeEnabled"`
+	PurchaseEnabled         bool   `json:"purchaseEnabled"`
+	CodePrice               string `json:"codePrice,omitempty"`
+	PurchasePrice           string `json:"purchasePrice,omitempty"`
+	CodeSupplierPrice       string `json:"codeSupplierPrice,omitempty"`
+	PurchaseSupplierPrice   string `json:"purchaseSupplierPrice,omitempty"`
+	CodeWindowMinutes       int    `json:"codeWindowMinutes,omitempty"`
+	ActivationWindowMinutes int    `json:"activationWindowMinutes,omitempty"`
+	WarrantyMinutes         int    `json:"warrantyMinutes,omitempty"`
+	MainWeight              int    `json:"mainWeight,omitempty"`
+	DotWeight               int    `json:"dotWeight,omitempty"`
+	PlusWeight              int    `json:"plusWeight,omitempty"`
+}
+
+// ProjectMailRuleRequest describes one mail matching rule.
+type ProjectMailRuleRequest struct {
+	RuleType string `json:"ruleType" binding:"required"`
+	Pattern  string `json:"pattern" binding:"required"`
+	Enabled  bool   `json:"enabled"`
+}
+
 // --- Response types ---
 
 // ResourceItemResponse is the API-safe resource list item.
@@ -202,4 +284,144 @@ type MailboxListResponse struct {
 	Total  int64                 `json:"total"`
 	Offset int                   `json:"offset"`
 	Limit  int                   `json:"limit"`
+}
+
+// ProjectItemResponse is a project list item safe for user/admin consoles.
+type ProjectItemResponse struct {
+	ID              uint                            `json:"id"`
+	Name            string                          `json:"name"`
+	TargetPlatform  string                          `json:"targetPlatform"`
+	LogoURL         string                          `json:"logoUrl,omitempty"`
+	Description     string                          `json:"description,omitempty"`
+	Status          string                          `json:"status"`
+	AccessType      string                          `json:"accessType"`
+	ApplicantUserID *uint                           `json:"applicantUserId,omitempty"`
+	ReviewReason    string                          `json:"reviewReason,omitempty"`
+	LooseMatch      bool                            `json:"looseMatch"`
+	ProductCount    int                             `json:"productCount"`
+	MailRuleCount   int                             `json:"mailRuleCount"`
+	Products        []ProjectProductSummaryResponse `json:"products,omitempty"`
+	CreatedAt       time.Time                       `json:"createdAt"`
+	UpdatedAt       time.Time                       `json:"updatedAt"`
+}
+
+// ProjectListResponse is the paginated project list response.
+type ProjectListResponse struct {
+	Items  []ProjectItemResponse      `json:"items"`
+	Total  int64                      `json:"total"`
+	Offset int                        `json:"offset"`
+	Limit  int                        `json:"limit"`
+	Facets *ProjectListFacetsResponse `json:"facets,omitempty"`
+}
+
+type ProjectListFacetsResponse struct {
+	Status      ProjectStatusFacetsResponse      `json:"status"`
+	Access      ProjectAccessFacetsResponse      `json:"access"`
+	Match       ProjectMatchFacetsResponse       `json:"match"`
+	ProductType ProjectProductTypeFacetsResponse `json:"productType"`
+}
+
+type ProjectStatusFacetsResponse struct {
+	All       int64 `json:"all"`
+	Listed    int64 `json:"listed"`
+	Reviewing int64 `json:"reviewing"`
+	Rejected  int64 `json:"rejected"`
+}
+
+type ProjectAccessFacetsResponse struct {
+	All     int64 `json:"all"`
+	Public  int64 `json:"public"`
+	Private int64 `json:"private"`
+}
+
+type ProjectMatchFacetsResponse struct {
+	All    int64 `json:"all"`
+	Loose  int64 `json:"loose"`
+	Strict int64 `json:"strict"`
+}
+
+type ProjectProductTypeFacetsResponse struct {
+	All       int64 `json:"all"`
+	Microsoft int64 `json:"microsoft"`
+	Domain    int64 `json:"domain"`
+}
+
+// ProjectProductResponse is a product view under a project.
+type ProjectProductResponse struct {
+	ID                      uint      `json:"id"`
+	ProjectID               uint      `json:"projectId"`
+	Type                    string    `json:"type"`
+	Status                  string    `json:"status"`
+	CodeEnabled             bool      `json:"codeEnabled"`
+	PurchaseEnabled         bool      `json:"purchaseEnabled"`
+	CodePrice               string    `json:"codePrice"`
+	PurchasePrice           string    `json:"purchasePrice"`
+	CodeSupplierPrice       string    `json:"codeSupplierPrice,omitempty"`
+	PurchaseSupplierPrice   string    `json:"purchaseSupplierPrice,omitempty"`
+	CodeWindowMinutes       int       `json:"codeWindowMinutes"`
+	ActivationWindowMinutes int       `json:"activationWindowMinutes"`
+	WarrantyMinutes         int       `json:"warrantyMinutes"`
+	MainWeight              *int      `json:"mainWeight,omitempty"`
+	DotWeight               *int      `json:"dotWeight,omitempty"`
+	PlusWeight              *int      `json:"plusWeight,omitempty"`
+	CreatedAt               time.Time `json:"createdAt"`
+	UpdatedAt               time.Time `json:"updatedAt"`
+}
+
+// ProjectProductSummaryResponse is a safe product summary embedded in project lists.
+type ProjectProductSummaryResponse struct {
+	ID                      uint   `json:"id"`
+	Type                    string `json:"type"`
+	Status                  string `json:"status"`
+	CodeEnabled             bool   `json:"codeEnabled"`
+	PurchaseEnabled         bool   `json:"purchaseEnabled"`
+	CodePrice               string `json:"codePrice"`
+	PurchasePrice           string `json:"purchasePrice"`
+	CodeWindowMinutes       int    `json:"codeWindowMinutes"`
+	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
+	WarrantyMinutes         int    `json:"warrantyMinutes"`
+}
+
+// ProjectMailRuleResponse is a mail matching rule view.
+type ProjectMailRuleResponse struct {
+	ID        uint      `json:"id"`
+	ProjectID uint      `json:"projectId"`
+	RuleType  string    `json:"ruleType"`
+	Pattern   string    `json:"pattern"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ProjectAccessResponse is a private-project authorization view for admins.
+type ProjectAccessResponse struct {
+	ID        uint      `json:"id"`
+	ProjectID uint      `json:"projectId"`
+	UserID    uint      `json:"userId"`
+	GrantedBy uint      `json:"grantedBy"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ProjectAccessListResponse returns private-project authorization rows.
+type ProjectAccessListResponse struct {
+	Items []ProjectAccessResponse `json:"items"`
+	Total int                     `json:"total"`
+}
+
+// ProjectDetailResponse returns the Project aggregate detail.
+type ProjectDetailResponse struct {
+	Project   ProjectItemResponse       `json:"project"`
+	Products  []ProjectProductResponse  `json:"products"`
+	MailRules []ProjectMailRuleResponse `json:"mailRules,omitempty"`
+	Accesses  []ProjectAccessResponse   `json:"accesses,omitempty"`
+}
+
+// ProjectBulkCommandResponse returns the number of projects affected by a bulk command.
+type ProjectBulkCommandResponse struct {
+	Affected int `json:"affected"`
+}
+
+// ProjectLogoUploadResponse returns the stable URL saved in project.logoUrl.
+type ProjectLogoUploadResponse struct {
+	LogoURL string `json:"logoUrl"`
 }

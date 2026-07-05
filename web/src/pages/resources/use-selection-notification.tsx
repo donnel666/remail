@@ -8,12 +8,15 @@ interface UseSelectionNotificationOptions {
   onCheck?: () => void;
   selectedCount: number;
   checkLoading?: boolean;
+  checkLabelKey?: string;
   onClear: () => void;
   onDelete?: () => void;
   onSell?: () => void;
   deleteLoading?: boolean;
+  deleteLabelKey?: string;
   selectionDescriptionKey?: string;
   sellLoading?: boolean;
+  sellLabelKey?: string;
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
@@ -21,12 +24,15 @@ export function useSelectionNotification({
   onCheck,
   selectedCount,
   checkLoading = false,
+  checkLabelKey = "Check",
   onClear,
   onDelete,
   onSell,
   deleteLoading = false,
+  deleteLabelKey = "Delete",
   selectionDescriptionKey = "Selected resources",
   sellLoading = false,
+  sellLabelKey = "Sell",
   t,
 }: UseSelectionNotificationOptions) {
   useEffect(() => {
@@ -45,7 +51,7 @@ export function useSelectionNotification({
                 theme="solid"
                 type="primary"
               >
-                {t("Check")}
+                {t(checkLabelKey)}
               </Button>
             ) : null}
             {onSell ? (
@@ -56,7 +62,7 @@ export function useSelectionNotification({
                 theme="solid"
                 type="secondary"
               >
-                {t("Sell")}
+                {t(sellLabelKey)}
               </Button>
             ) : null}
             {onDelete ? (
@@ -67,7 +73,7 @@ export function useSelectionNotification({
                 theme="solid"
                 type="danger"
               >
-                {t("Delete")}
+                {t(deleteLabelKey)}
               </Button>
             ) : null}
           </Space>
@@ -91,6 +97,8 @@ export function useSelectionNotification({
   }, [
     deleteLoading,
     checkLoading,
+    checkLabelKey,
+    deleteLabelKey,
     onCheck,
     onClear,
     onDelete,
@@ -98,6 +106,7 @@ export function useSelectionNotification({
     selectionDescriptionKey,
     selectedCount,
     sellLoading,
+    sellLabelKey,
     t,
   ]);
 

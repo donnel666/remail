@@ -4,6 +4,7 @@ import {
   Globe,
   Headphones,
   Network,
+  PackageOpen,
   Settings,
   Shield,
   Users,
@@ -16,10 +17,14 @@ export const ADMIN_ROLE_LEVEL = 80;
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
+    id: "workbench",
+    labelKey: "Workbench",
+    items: [{ path: "/dashboard", labelKey: "Workbench", icon: Zap }],
+  },
+  {
     id: "console",
     labelKey: "Console",
     items: [
-      { path: "/dashboard", labelKey: "Workbench", icon: Zap },
       { path: "/my-emails", labelKey: "Project Assets", icon: Shield },
       { path: "/resources", labelKey: "Microsoft Emails", icon: Database },
       { path: "/domains", labelKey: "Domain Emails", icon: Globe },
@@ -42,6 +47,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     items: [
       { path: "/admin/microsoft-emails", labelKey: "Admin Microsoft Emails", icon: Database },
       { path: "/admin/domain-emails", labelKey: "Admin Domain Emails", icon: Globe },
+      { path: "/admin/projects", labelKey: "Project Management", icon: PackageOpen },
       { path: "/admin/proxies", labelKey: "Proxy Management", icon: Network },
       { path: "/admin/users", labelKey: "User Management", icon: Users },
       { path: "/admin/settings", labelKey: "System Settings", icon: Settings },

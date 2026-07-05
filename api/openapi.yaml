@@ -1100,6 +1100,1105 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- Projects (P1-I4) ---
+  /v1/projects:
+    get:
+      operationId: getProjects
+      summary: List visible, owned or admin-visible projects
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [visible, mine, all]
+            default: visible
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [reviewing, listed, delisted]
+        - name: accessType
+          in: query
+          schema:
+            type: string
+            enum: [public, private]
+        - name: looseMatch
+          in: query
+          schema:
+            type: boolean
+        - name: productType
+          in: query
+          schema:
+            type: string
+            enum: [microsoft, domain]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: targetPlatform
+          in: query
+          schema:
+            type: string
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: postProject
+      summary: Create a user project application
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectApplicationRequest"
+      responses:
+        "201":
+          description: Project application created with reviewing status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate listed project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/projects/{projectId}:
+    get:
+      operationId: getProject
+      summary: Get project detail
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found or not visible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/projects/{projectId}/resubmit:
+    post:
+      operationId: postProjectResubmit
+      summary: Resubmit a rejected project application
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectApplicationRequest"
+      responses:
+        "200":
+          description: Project application resubmitted with reviewing status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found or not owned by current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not rejected or application is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/project-logos/{logoKey}:
+    get:
+      operationId: getProjectLogo
+      summary: Read a project logo file
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: logoKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project logo bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project logo not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: File storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects:
+    post:
+      operationId: postAdminProject
+      summary: Create a complete listed project as admin
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateProjectRequest"
+      responses:
+        "201":
+          description: Listed project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate listed project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid product or mail rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/relist:
+    post:
+      operationId: postAdminProjectsRelist
+      summary: Relist projects in bulk
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBulkCommandRequest"
+      responses:
+        "200":
+          description: Bulk relist result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBulkCommandResponse"
+        "400":
+          description: Invalid request body or selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project status or incomplete listed configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/delist:
+    post:
+      operationId: postAdminProjectsDelist
+      summary: Delist projects in bulk
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBulkCommandRequest"
+      responses:
+        "200":
+          description: Bulk delist result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBulkCommandResponse"
+        "400":
+          description: Invalid request body or selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/delete:
+    post:
+      operationId: postAdminProjectsDelete
+      summary: Delete non-reviewing projects in bulk
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBulkCommandRequest"
+      responses:
+        "200":
+          description: Bulk delete result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBulkCommandResponse"
+        "400":
+          description: Invalid request body or selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/project-logos:
+    post:
+      operationId: postAdminProjectLogo
+      summary: Upload a project logo
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Project logo uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLogoUploadResponse"
+        "400":
+          description: Invalid project logo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Unsupported or oversized project logo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: File storage temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}:
+    put:
+      operationId: putAdminProject
+      summary: Update a project as admin
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateProjectRequest"
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate listed project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid product or mail rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteAdminProject
+      summary: Delete a non-reviewing project as admin
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Project deleted
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Reviewing projects cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/access:
+    get:
+      operationId: getAdminProjectAccess
+      summary: List private project access grants
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project access grants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAccessListResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postAdminProjectAccess
+      summary: Grant private project access to a user
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantProjectAccessRequest"
+      responses:
+        "200":
+          description: Project access granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAccess"
+        "400":
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not private or user is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/access/{userId}:
+    delete:
+      operationId: deleteAdminProjectAccess
+      summary: Revoke private project access from a user
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Project access revoked
+        "400":
+          description: Invalid project ID or user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not private
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/approve:
+    post:
+      operationId: postAdminProjectApprove
+      summary: Approve a reviewing project application
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateProjectRequest"
+      responses:
+        "200":
+          description: Project approved and listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not reviewing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/reject:
+    post:
+      operationId: postAdminProjectReject
+      summary: Reject a reviewing project application
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRejectProjectRequest"
+      responses:
+        "200":
+          description: Project rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not reviewing or reject reason is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/duplicate:
+    post:
+      operationId: postAdminProjectDuplicate
+      summary: Mark a reviewing project application as duplicate
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRejectProjectRequest"
+      responses:
+        "200":
+          description: Project marked as duplicate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request body or project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not reviewing or duplicate reason is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/relist:
+    post:
+      operationId: postAdminProjectRelist
+      summary: Relist a delisted project
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project relisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate listed project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not delisted or is incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/delist:
+    post:
+      operationId: postAdminProjectDelist
+      summary: Delist a listed project
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project delisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Resources (P1-I2) ---
   /v1/resources:
     get:
@@ -3260,6 +4359,569 @@ components:
       properties:
         selection:
           $ref: "#/components/schemas/ResourceBulkSelection"
+      additionalProperties: false
+
+    CreateProjectApplicationRequest:
+      type: object
+      required:
+        - name
+        - targetPlatform
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        targetPlatform:
+          type: string
+          maxLength: 120
+        logoUrl:
+          type: string
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 1000
+        accessType:
+          type: string
+          enum: [public, private]
+          default: public
+        looseMatch:
+          type: boolean
+          default: true
+          description: true requires sender+recipient; false requires sender+recipient+subject+body.
+        mailRules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectMailRuleRequest"
+      additionalProperties: false
+
+    AdminCreateProjectRequest:
+      type: object
+      required:
+        - name
+        - targetPlatform
+        - products
+        - mailRules
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        targetPlatform:
+          type: string
+          maxLength: 120
+        logoUrl:
+          type: string
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 1000
+        accessType:
+          type: string
+          enum: [public, private]
+          default: public
+        looseMatch:
+          type: boolean
+          default: true
+          description: true requires sender+recipient; false requires sender+recipient+subject+body.
+        products:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ProjectProductRequest"
+        mailRules:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ProjectMailRuleRequest"
+      additionalProperties: false
+
+    AdminRejectProjectRequest:
+      type: object
+      required:
+        - reviewReason
+      properties:
+        reviewReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      additionalProperties: false
+
+    ProjectBulkFilter:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [reviewing, listed, delisted]
+        accessType:
+          type: string
+          enum: [public, private]
+        looseMatch:
+          type: boolean
+        productType:
+          type: string
+          enum: [microsoft, domain]
+        search:
+          type: string
+        targetPlatform:
+          type: string
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ProjectBulkSelection:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum: [ids, filter]
+        projectIds:
+          type: array
+          items:
+            type: integer
+        filter:
+          $ref: "#/components/schemas/ProjectBulkFilter"
+      additionalProperties: false
+
+    ProjectBulkCommandRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/ProjectBulkSelection"
+      additionalProperties: false
+
+    ProjectBulkCommandResponse:
+      type: object
+      required:
+        - affected
+      properties:
+        affected:
+          type: integer
+      additionalProperties: false
+
+    GrantProjectAccessRequest:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    ProjectLogoUploadResponse:
+      type: object
+      required:
+        - logoUrl
+      properties:
+        logoUrl:
+          type: string
+          maxLength: 500
+      additionalProperties: false
+
+    ProjectProductRequest:
+      type: object
+      required:
+        - type
+        - codeEnabled
+        - purchaseEnabled
+      properties:
+        type:
+          type: string
+          enum: [microsoft, domain]
+        status:
+          type: string
+          enum: [enabled, disabled]
+          default: enabled
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        codePrice:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        purchasePrice:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        codeSupplierPrice:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        purchaseSupplierPrice:
+          type: string
+          pattern: '^[0-9]+(\\.[0-9]{1,6})?$'
+        codeWindowMinutes:
+          type: integer
+          minimum: 0
+        activationWindowMinutes:
+          type: integer
+          minimum: 0
+        warrantyMinutes:
+          type: integer
+          minimum: 0
+        mainWeight:
+          type: integer
+          minimum: 0
+        dotWeight:
+          type: integer
+          minimum: 0
+        plusWeight:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    ProjectMailRuleRequest:
+      type: object
+      required:
+        - ruleType
+        - pattern
+        - enabled
+      properties:
+        ruleType:
+          type: string
+          enum: [sender, recipient, subject, body]
+        pattern:
+          type: string
+          maxLength: 500
+        enabled:
+          type: boolean
+      additionalProperties: false
+
+    ProjectListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/ProjectListFacets"
+      additionalProperties: false
+
+    ProjectListFacets:
+      type: object
+      required:
+        - status
+        - access
+        - match
+        - productType
+      properties:
+        status:
+          $ref: "#/components/schemas/ProjectStatusFacets"
+        access:
+          $ref: "#/components/schemas/ProjectAccessFacets"
+        match:
+          $ref: "#/components/schemas/ProjectMatchFacets"
+        productType:
+          $ref: "#/components/schemas/ProjectProductTypeFacets"
+      additionalProperties: false
+
+    ProjectStatusFacets:
+      type: object
+      required: [all, listed, reviewing, rejected]
+      properties:
+        all:
+          type: integer
+        listed:
+          type: integer
+        reviewing:
+          type: integer
+        rejected:
+          type: integer
+          description: Count of delisted projects shown to users as rejected applications.
+      additionalProperties: false
+
+    ProjectAccessFacets:
+      type: object
+      required: [all, public, private]
+      properties:
+        all:
+          type: integer
+        public:
+          type: integer
+        private:
+          type: integer
+      additionalProperties: false
+
+    ProjectMatchFacets:
+      type: object
+      required: [all, loose, strict]
+      properties:
+        all:
+          type: integer
+        loose:
+          type: integer
+        strict:
+          type: integer
+      additionalProperties: false
+
+    ProjectProductTypeFacets:
+      type: object
+      required: [all, microsoft, domain]
+      properties:
+        all:
+          type: integer
+        microsoft:
+          type: integer
+        domain:
+          type: integer
+      additionalProperties: false
+
+    ProjectItem:
+      type: object
+      required:
+        - id
+        - name
+        - targetPlatform
+        - status
+        - accessType
+        - looseMatch
+        - productCount
+        - mailRuleCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        targetPlatform:
+          type: string
+        logoUrl:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [reviewing, listed, delisted]
+        accessType:
+          type: string
+          enum: [public, private]
+        applicantUserId:
+          type: integer
+        reviewReason:
+          type: string
+        looseMatch:
+          type: boolean
+        productCount:
+          type: integer
+        mailRuleCount:
+          type: integer
+        products:
+          type: array
+          description: Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted.
+          items:
+            $ref: "#/components/schemas/ProjectProductSummary"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ProjectProductSummary:
+      type: object
+      required:
+        - id
+        - type
+        - status
+        - codeEnabled
+        - purchaseEnabled
+        - codePrice
+        - purchasePrice
+        - codeWindowMinutes
+        - activationWindowMinutes
+        - warrantyMinutes
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [microsoft, domain]
+        status:
+          type: string
+          enum: [enabled, disabled]
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        codePrice:
+          type: string
+        purchasePrice:
+          type: string
+        codeWindowMinutes:
+          type: integer
+        activationWindowMinutes:
+          type: integer
+        warrantyMinutes:
+          type: integer
+      additionalProperties: false
+
+    ProjectProduct:
+      type: object
+      required:
+        - id
+        - projectId
+        - type
+        - status
+        - codeEnabled
+        - purchaseEnabled
+        - codePrice
+        - purchasePrice
+        - codeWindowMinutes
+        - activationWindowMinutes
+        - warrantyMinutes
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        type:
+          type: string
+          enum: [microsoft, domain]
+        status:
+          type: string
+          enum: [enabled, disabled]
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        codePrice:
+          type: string
+        purchasePrice:
+          type: string
+        codeSupplierPrice:
+          type: string
+        purchaseSupplierPrice:
+          type: string
+        codeWindowMinutes:
+          type: integer
+        activationWindowMinutes:
+          type: integer
+        warrantyMinutes:
+          type: integer
+        mainWeight:
+          type: integer
+          description: Internal allocation weight; only returned to project admins.
+        dotWeight:
+          type: integer
+          description: Internal allocation weight; only returned to project admins.
+        plusWeight:
+          type: integer
+          description: Internal allocation weight; only returned to project admins.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ProjectMailRule:
+      type: object
+      required:
+        - id
+        - projectId
+        - ruleType
+        - pattern
+        - enabled
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        ruleType:
+          type: string
+          enum: [sender, recipient, subject, body]
+        pattern:
+          type: string
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ProjectAccess:
+      type: object
+      required:
+        - id
+        - projectId
+        - userId
+        - grantedBy
+        - createdAt
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        userId:
+          type: integer
+        grantedBy:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    ProjectAccessListResponse:
+      type: object
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectAccess"
+        total:
+          type: integer
+      additionalProperties: false
+
+    ProjectDetailResponse:
+      type: object
+      required:
+        - project
+        - products
+      properties:
+        project:
+          $ref: "#/components/schemas/ProjectItem"
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectProduct"
+        mailRules:
+          type: array
+          description: Returned to project admins and to the applicant while the project is an application; omitted for ordinary listed project detail.
+          items:
+            $ref: "#/components/schemas/ProjectMailRule"
+        accesses:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectAccess"
       additionalProperties: false
 
     ResourceValidationsResponse:

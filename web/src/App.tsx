@@ -48,6 +48,7 @@ const MyEmails = lazy(() => import("./pages/MyEmails"));
 const AfterSales = lazy(() => import("./pages/AfterSales"));
 const Resources = lazy(() => import("./pages/Resources"));
 const DomainEmails = lazy(() => import("./pages/DomainEmails"));
+const AdminProjects = lazy(() => import("./pages/AdminProjects"));
 const ProxyManagement = lazy(() => import("./pages/ProxyManagement"));
 const Invite = lazy(() => import("./pages/Invite"));
 const Recharge = lazy(() => import("./pages/Recharge"));
@@ -245,6 +246,7 @@ const routeTree = rootRoute.addChildren([
     path: "/admin/domain-emails",
     component: AdminDomainEmails,
   }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/projects", component: AdminProjects }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/proxies", component: ProxyManagement }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/users", component: UserManagement }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/settings", component: SystemSettings }),

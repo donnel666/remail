@@ -18,6 +18,24 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for AdminCreateProjectRequestAccessType.
+const (
+	AdminCreateProjectRequestAccessTypePrivate AdminCreateProjectRequestAccessType = "private"
+	AdminCreateProjectRequestAccessTypePublic  AdminCreateProjectRequestAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the AdminCreateProjectRequestAccessType enum.
+func (e AdminCreateProjectRequestAccessType) Valid() bool {
+	switch e {
+	case AdminCreateProjectRequestAccessTypePrivate:
+		return true
+	case AdminCreateProjectRequestAccessTypePublic:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckProxiesRequest0All.
 const (
 	CheckProxiesRequest0AllFalse CheckProxiesRequest0All = false
@@ -60,6 +78,24 @@ func (e CreateDomainRequestPurpose) Valid() bool {
 	case CreateDomainRequestPurposeBinding:
 		return true
 	case CreateDomainRequestPurposeNotSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateProjectApplicationRequestAccessType.
+const (
+	CreateProjectApplicationRequestAccessTypePrivate CreateProjectApplicationRequestAccessType = "private"
+	CreateProjectApplicationRequestAccessTypePublic  CreateProjectApplicationRequestAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the CreateProjectApplicationRequestAccessType enum.
+func (e CreateProjectApplicationRequestAccessType) Valid() bool {
+	switch e {
+	case CreateProjectApplicationRequestAccessTypePrivate:
+		return true
+	case CreateProjectApplicationRequestAccessTypePublic:
 		return true
 	default:
 		return false
@@ -201,6 +237,276 @@ func (e PermissionPolicyResponseEffect) Valid() bool {
 	case PermissionPolicyResponseEffectAllow:
 		return true
 	case PermissionPolicyResponseEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectBulkFilterAccessType.
+const (
+	ProjectBulkFilterAccessTypePrivate ProjectBulkFilterAccessType = "private"
+	ProjectBulkFilterAccessTypePublic  ProjectBulkFilterAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the ProjectBulkFilterAccessType enum.
+func (e ProjectBulkFilterAccessType) Valid() bool {
+	switch e {
+	case ProjectBulkFilterAccessTypePrivate:
+		return true
+	case ProjectBulkFilterAccessTypePublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectBulkFilterProductType.
+const (
+	ProjectBulkFilterProductTypeDomain    ProjectBulkFilterProductType = "domain"
+	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
+func (e ProjectBulkFilterProductType) Valid() bool {
+	switch e {
+	case ProjectBulkFilterProductTypeDomain:
+		return true
+	case ProjectBulkFilterProductTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectBulkFilterStatus.
+const (
+	ProjectBulkFilterStatusDelisted  ProjectBulkFilterStatus = "delisted"
+	ProjectBulkFilterStatusListed    ProjectBulkFilterStatus = "listed"
+	ProjectBulkFilterStatusReviewing ProjectBulkFilterStatus = "reviewing"
+)
+
+// Valid indicates whether the value is a known member of the ProjectBulkFilterStatus enum.
+func (e ProjectBulkFilterStatus) Valid() bool {
+	switch e {
+	case ProjectBulkFilterStatusDelisted:
+		return true
+	case ProjectBulkFilterStatusListed:
+		return true
+	case ProjectBulkFilterStatusReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectBulkSelectionMode.
+const (
+	ProjectBulkSelectionModeFilter ProjectBulkSelectionMode = "filter"
+	ProjectBulkSelectionModeIds    ProjectBulkSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the ProjectBulkSelectionMode enum.
+func (e ProjectBulkSelectionMode) Valid() bool {
+	switch e {
+	case ProjectBulkSelectionModeFilter:
+		return true
+	case ProjectBulkSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectItemAccessType.
+const (
+	ProjectItemAccessTypePrivate ProjectItemAccessType = "private"
+	ProjectItemAccessTypePublic  ProjectItemAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the ProjectItemAccessType enum.
+func (e ProjectItemAccessType) Valid() bool {
+	switch e {
+	case ProjectItemAccessTypePrivate:
+		return true
+	case ProjectItemAccessTypePublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectItemStatus.
+const (
+	ProjectItemStatusDelisted  ProjectItemStatus = "delisted"
+	ProjectItemStatusListed    ProjectItemStatus = "listed"
+	ProjectItemStatusReviewing ProjectItemStatus = "reviewing"
+)
+
+// Valid indicates whether the value is a known member of the ProjectItemStatus enum.
+func (e ProjectItemStatus) Valid() bool {
+	switch e {
+	case ProjectItemStatusDelisted:
+		return true
+	case ProjectItemStatusListed:
+		return true
+	case ProjectItemStatusReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectMailRuleRuleType.
+const (
+	ProjectMailRuleRuleTypeBody      ProjectMailRuleRuleType = "body"
+	ProjectMailRuleRuleTypeRecipient ProjectMailRuleRuleType = "recipient"
+	ProjectMailRuleRuleTypeSender    ProjectMailRuleRuleType = "sender"
+	ProjectMailRuleRuleTypeSubject   ProjectMailRuleRuleType = "subject"
+)
+
+// Valid indicates whether the value is a known member of the ProjectMailRuleRuleType enum.
+func (e ProjectMailRuleRuleType) Valid() bool {
+	switch e {
+	case ProjectMailRuleRuleTypeBody:
+		return true
+	case ProjectMailRuleRuleTypeRecipient:
+		return true
+	case ProjectMailRuleRuleTypeSender:
+		return true
+	case ProjectMailRuleRuleTypeSubject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectMailRuleRequestRuleType.
+const (
+	ProjectMailRuleRequestRuleTypeBody      ProjectMailRuleRequestRuleType = "body"
+	ProjectMailRuleRequestRuleTypeRecipient ProjectMailRuleRequestRuleType = "recipient"
+	ProjectMailRuleRequestRuleTypeSender    ProjectMailRuleRequestRuleType = "sender"
+	ProjectMailRuleRequestRuleTypeSubject   ProjectMailRuleRequestRuleType = "subject"
+)
+
+// Valid indicates whether the value is a known member of the ProjectMailRuleRequestRuleType enum.
+func (e ProjectMailRuleRequestRuleType) Valid() bool {
+	switch e {
+	case ProjectMailRuleRequestRuleTypeBody:
+		return true
+	case ProjectMailRuleRequestRuleTypeRecipient:
+		return true
+	case ProjectMailRuleRequestRuleTypeSender:
+		return true
+	case ProjectMailRuleRequestRuleTypeSubject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductStatus.
+const (
+	ProjectProductStatusDisabled ProjectProductStatus = "disabled"
+	ProjectProductStatusEnabled  ProjectProductStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductStatus enum.
+func (e ProjectProductStatus) Valid() bool {
+	switch e {
+	case ProjectProductStatusDisabled:
+		return true
+	case ProjectProductStatusEnabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductType.
+const (
+	ProjectProductTypeDomain    ProjectProductType = "domain"
+	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductType enum.
+func (e ProjectProductType) Valid() bool {
+	switch e {
+	case ProjectProductTypeDomain:
+		return true
+	case ProjectProductTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductRequestStatus.
+const (
+	ProjectProductRequestStatusDisabled ProjectProductRequestStatus = "disabled"
+	ProjectProductRequestStatusEnabled  ProjectProductRequestStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductRequestStatus enum.
+func (e ProjectProductRequestStatus) Valid() bool {
+	switch e {
+	case ProjectProductRequestStatusDisabled:
+		return true
+	case ProjectProductRequestStatusEnabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductRequestType.
+const (
+	ProjectProductRequestTypeDomain    ProjectProductRequestType = "domain"
+	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
+func (e ProjectProductRequestType) Valid() bool {
+	switch e {
+	case ProjectProductRequestTypeDomain:
+		return true
+	case ProjectProductRequestTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductSummaryStatus.
+const (
+	ProjectProductSummaryStatusDisabled ProjectProductSummaryStatus = "disabled"
+	ProjectProductSummaryStatusEnabled  ProjectProductSummaryStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductSummaryStatus enum.
+func (e ProjectProductSummaryStatus) Valid() bool {
+	switch e {
+	case ProjectProductSummaryStatusDisabled:
+		return true
+	case ProjectProductSummaryStatusEnabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectProductSummaryType.
+const (
+	ProjectProductSummaryTypeDomain    ProjectProductSummaryType = "domain"
+	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
+func (e ProjectProductSummaryType) Valid() bool {
+	switch e {
+	case ProjectProductSummaryTypeDomain:
+		return true
+	case ProjectProductSummaryTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -395,13 +701,13 @@ func (e ResourceBulkSelectionMode) Valid() bool {
 
 // Defines values for ResourceBulkSelection0Mode.
 const (
-	ResourceBulkSelection0ModeIds ResourceBulkSelection0Mode = "ids"
+	Ids ResourceBulkSelection0Mode = "ids"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkSelection0Mode enum.
 func (e ResourceBulkSelection0Mode) Valid() bool {
 	switch e {
-	case ResourceBulkSelection0ModeIds:
+	case Ids:
 		return true
 	default:
 		return false
@@ -488,22 +794,22 @@ func (e ResourceValidationResponseStatus) Valid() bool {
 
 // Defines values for SupplierApplicationResponseStatus.
 const (
-	Approved  SupplierApplicationResponseStatus = "approved"
-	Canceled  SupplierApplicationResponseStatus = "canceled"
-	Rejected  SupplierApplicationResponseStatus = "rejected"
-	Reviewing SupplierApplicationResponseStatus = "reviewing"
+	SupplierApplicationResponseStatusApproved  SupplierApplicationResponseStatus = "approved"
+	SupplierApplicationResponseStatusCanceled  SupplierApplicationResponseStatus = "canceled"
+	SupplierApplicationResponseStatusRejected  SupplierApplicationResponseStatus = "rejected"
+	SupplierApplicationResponseStatusReviewing SupplierApplicationResponseStatus = "reviewing"
 )
 
 // Valid indicates whether the value is a known member of the SupplierApplicationResponseStatus enum.
 func (e SupplierApplicationResponseStatus) Valid() bool {
 	switch e {
-	case Approved:
+	case SupplierApplicationResponseStatusApproved:
 		return true
-	case Canceled:
+	case SupplierApplicationResponseStatusCanceled:
 		return true
-	case Rejected:
+	case SupplierApplicationResponseStatusRejected:
 		return true
-	case Reviewing:
+	case SupplierApplicationResponseStatusReviewing:
 		return true
 	default:
 		return false
@@ -680,25 +986,103 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetProjectsParamsScope.
+const (
+	All     GetProjectsParamsScope = "all"
+	Mine    GetProjectsParamsScope = "mine"
+	Visible GetProjectsParamsScope = "visible"
+)
+
+// Valid indicates whether the value is a known member of the GetProjectsParamsScope enum.
+func (e GetProjectsParamsScope) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Mine:
+		return true
+	case Visible:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetProjectsParamsStatus.
+const (
+	GetProjectsParamsStatusDelisted  GetProjectsParamsStatus = "delisted"
+	GetProjectsParamsStatusListed    GetProjectsParamsStatus = "listed"
+	GetProjectsParamsStatusReviewing GetProjectsParamsStatus = "reviewing"
+)
+
+// Valid indicates whether the value is a known member of the GetProjectsParamsStatus enum.
+func (e GetProjectsParamsStatus) Valid() bool {
+	switch e {
+	case GetProjectsParamsStatusDelisted:
+		return true
+	case GetProjectsParamsStatusListed:
+		return true
+	case GetProjectsParamsStatusReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetProjectsParamsAccessType.
+const (
+	Private GetProjectsParamsAccessType = "private"
+	Public  GetProjectsParamsAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
+func (e GetProjectsParamsAccessType) Valid() bool {
+	switch e {
+	case Private:
+		return true
+	case Public:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetProjectsParamsProductType.
+const (
+	Domain    GetProjectsParamsProductType = "domain"
+	Microsoft GetProjectsParamsProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
+func (e GetProjectsParamsProductType) Valid() bool {
+	switch e {
+	case Domain:
+		return true
+	case Microsoft:
 		return true
 	default:
 		return false
@@ -742,6 +1126,28 @@ type AdminCreateInviteRequest struct {
 	Enabled  *bool      `json:"enabled,omitempty"`
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	MaxUse   int        `json:"maxUse"`
+}
+
+// AdminCreateProjectRequest defines model for AdminCreateProjectRequest.
+type AdminCreateProjectRequest struct {
+	AccessType  *AdminCreateProjectRequestAccessType `json:"accessType,omitempty"`
+	Description *string                              `json:"description,omitempty"`
+	LogoUrl     *string                              `json:"logoUrl,omitempty"`
+
+	// LooseMatch true requires sender+recipient; false requires sender+recipient+subject+body.
+	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
+	MailRules      []ProjectMailRuleRequest `json:"mailRules"`
+	Name           string                   `json:"name"`
+	Products       []ProjectProductRequest  `json:"products"`
+	TargetPlatform string                   `json:"targetPlatform"`
+}
+
+// AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
+type AdminCreateProjectRequestAccessType string
+
+// AdminRejectProjectRequest defines model for AdminRejectProjectRequest.
+type AdminRejectProjectRequest struct {
+	ReviewReason string `json:"reviewReason"`
 }
 
 // AdminRejectSupplierApplicationRequest defines model for AdminRejectSupplierApplicationRequest.
@@ -858,6 +1264,22 @@ type CreateMailServerRequest struct {
 	SpfRecord     *string `json:"spfRecord,omitempty"`
 }
 
+// CreateProjectApplicationRequest defines model for CreateProjectApplicationRequest.
+type CreateProjectApplicationRequest struct {
+	AccessType  *CreateProjectApplicationRequestAccessType `json:"accessType,omitempty"`
+	Description *string                                    `json:"description,omitempty"`
+	LogoUrl     *string                                    `json:"logoUrl,omitempty"`
+
+	// LooseMatch true requires sender+recipient; false requires sender+recipient+subject+body.
+	LooseMatch     *bool                     `json:"looseMatch,omitempty"`
+	MailRules      *[]ProjectMailRuleRequest `json:"mailRules,omitempty"`
+	Name           string                    `json:"name"`
+	TargetPlatform string                    `json:"targetPlatform"`
+}
+
+// CreateProjectApplicationRequestAccessType defines model for CreateProjectApplicationRequest.AccessType.
+type CreateProjectApplicationRequestAccessType string
+
 // CreateProxyRequest defines model for CreateProxyRequest.
 type CreateProxyRequest struct {
 	// ExpireAt Optional proxy expiration time. null or omitted means no expiration.
@@ -969,6 +1391,11 @@ type Error struct {
 
 	// RequestId Correlation ID for troubleshooting
 	RequestId string `json:"requestId"`
+}
+
+// GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
+type GrantProjectAccessRequest struct {
+	UserId int `json:"userId"`
 }
 
 // HealthResponse defines model for HealthResponse.
@@ -1121,6 +1548,254 @@ type PermissionPolicyResponse struct {
 
 // PermissionPolicyResponseEffect defines model for PermissionPolicyResponse.Effect.
 type PermissionPolicyResponseEffect string
+
+// ProjectAccess defines model for ProjectAccess.
+type ProjectAccess struct {
+	CreatedAt time.Time `json:"createdAt"`
+	GrantedBy int       `json:"grantedBy"`
+	Id        int       `json:"id"`
+	ProjectId int       `json:"projectId"`
+	UserId    int       `json:"userId"`
+}
+
+// ProjectAccessFacets defines model for ProjectAccessFacets.
+type ProjectAccessFacets struct {
+	All     int `json:"all"`
+	Private int `json:"private"`
+	Public  int `json:"public"`
+}
+
+// ProjectAccessListResponse defines model for ProjectAccessListResponse.
+type ProjectAccessListResponse struct {
+	Items []ProjectAccess `json:"items"`
+	Total int             `json:"total"`
+}
+
+// ProjectBulkCommandRequest defines model for ProjectBulkCommandRequest.
+type ProjectBulkCommandRequest struct {
+	Selection ProjectBulkSelection `json:"selection"`
+}
+
+// ProjectBulkCommandResponse defines model for ProjectBulkCommandResponse.
+type ProjectBulkCommandResponse struct {
+	Affected int `json:"affected"`
+}
+
+// ProjectBulkFilter defines model for ProjectBulkFilter.
+type ProjectBulkFilter struct {
+	AccessType     *ProjectBulkFilterAccessType  `json:"accessType,omitempty"`
+	CreatedFrom    *time.Time                    `json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time                    `json:"createdTo,omitempty"`
+	LooseMatch     *bool                         `json:"looseMatch,omitempty"`
+	ProductType    *ProjectBulkFilterProductType `json:"productType,omitempty"`
+	Search         *string                       `json:"search,omitempty"`
+	Status         *ProjectBulkFilterStatus      `json:"status,omitempty"`
+	TargetPlatform *string                       `json:"targetPlatform,omitempty"`
+}
+
+// ProjectBulkFilterAccessType defines model for ProjectBulkFilter.AccessType.
+type ProjectBulkFilterAccessType string
+
+// ProjectBulkFilterProductType defines model for ProjectBulkFilter.ProductType.
+type ProjectBulkFilterProductType string
+
+// ProjectBulkFilterStatus defines model for ProjectBulkFilter.Status.
+type ProjectBulkFilterStatus string
+
+// ProjectBulkSelection defines model for ProjectBulkSelection.
+type ProjectBulkSelection struct {
+	Filter     *ProjectBulkFilter       `json:"filter,omitempty"`
+	Mode       ProjectBulkSelectionMode `json:"mode"`
+	ProjectIds *[]int                   `json:"projectIds,omitempty"`
+}
+
+// ProjectBulkSelectionMode defines model for ProjectBulkSelection.Mode.
+type ProjectBulkSelectionMode string
+
+// ProjectDetailResponse defines model for ProjectDetailResponse.
+type ProjectDetailResponse struct {
+	Accesses *[]ProjectAccess `json:"accesses,omitempty"`
+
+	// MailRules Returned to project admins and to the applicant while the project is an application; omitted for ordinary listed project detail.
+	MailRules *[]ProjectMailRule `json:"mailRules,omitempty"`
+	Products  []ProjectProduct   `json:"products"`
+	Project   ProjectItem        `json:"project"`
+}
+
+// ProjectItem defines model for ProjectItem.
+type ProjectItem struct {
+	AccessType      ProjectItemAccessType `json:"accessType"`
+	ApplicantUserId *int                  `json:"applicantUserId,omitempty"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	Description     *string               `json:"description,omitempty"`
+	Id              int                   `json:"id"`
+	LogoUrl         *string               `json:"logoUrl,omitempty"`
+	LooseMatch      bool                  `json:"looseMatch"`
+	MailRuleCount   int                   `json:"mailRuleCount"`
+	Name            string                `json:"name"`
+	ProductCount    int                   `json:"productCount"`
+
+	// Products Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted.
+	Products       *[]ProjectProductSummary `json:"products,omitempty"`
+	ReviewReason   *string                  `json:"reviewReason,omitempty"`
+	Status         ProjectItemStatus        `json:"status"`
+	TargetPlatform string                   `json:"targetPlatform"`
+	UpdatedAt      time.Time                `json:"updatedAt"`
+}
+
+// ProjectItemAccessType defines model for ProjectItem.AccessType.
+type ProjectItemAccessType string
+
+// ProjectItemStatus defines model for ProjectItem.Status.
+type ProjectItemStatus string
+
+// ProjectListFacets defines model for ProjectListFacets.
+type ProjectListFacets struct {
+	Access      ProjectAccessFacets      `json:"access"`
+	Match       ProjectMatchFacets       `json:"match"`
+	ProductType ProjectProductTypeFacets `json:"productType"`
+	Status      ProjectStatusFacets      `json:"status"`
+}
+
+// ProjectListResponse defines model for ProjectListResponse.
+type ProjectListResponse struct {
+	Facets *ProjectListFacets `json:"facets,omitempty"`
+	Items  []ProjectItem      `json:"items"`
+	Limit  int                `json:"limit"`
+	Offset int                `json:"offset"`
+	Total  int                `json:"total"`
+}
+
+// ProjectLogoUploadResponse defines model for ProjectLogoUploadResponse.
+type ProjectLogoUploadResponse struct {
+	LogoUrl string `json:"logoUrl"`
+}
+
+// ProjectMailRule defines model for ProjectMailRule.
+type ProjectMailRule struct {
+	CreatedAt time.Time               `json:"createdAt"`
+	Enabled   bool                    `json:"enabled"`
+	Id        int                     `json:"id"`
+	Pattern   string                  `json:"pattern"`
+	ProjectId int                     `json:"projectId"`
+	RuleType  ProjectMailRuleRuleType `json:"ruleType"`
+	UpdatedAt time.Time               `json:"updatedAt"`
+}
+
+// ProjectMailRuleRuleType defines model for ProjectMailRule.RuleType.
+type ProjectMailRuleRuleType string
+
+// ProjectMailRuleRequest defines model for ProjectMailRuleRequest.
+type ProjectMailRuleRequest struct {
+	Enabled  bool                           `json:"enabled"`
+	Pattern  string                         `json:"pattern"`
+	RuleType ProjectMailRuleRequestRuleType `json:"ruleType"`
+}
+
+// ProjectMailRuleRequestRuleType defines model for ProjectMailRuleRequest.RuleType.
+type ProjectMailRuleRequestRuleType string
+
+// ProjectMatchFacets defines model for ProjectMatchFacets.
+type ProjectMatchFacets struct {
+	All    int `json:"all"`
+	Loose  int `json:"loose"`
+	Strict int `json:"strict"`
+}
+
+// ProjectProduct defines model for ProjectProduct.
+type ProjectProduct struct {
+	ActivationWindowMinutes int       `json:"activationWindowMinutes"`
+	CodeEnabled             bool      `json:"codeEnabled"`
+	CodePrice               string    `json:"codePrice"`
+	CodeSupplierPrice       *string   `json:"codeSupplierPrice,omitempty"`
+	CodeWindowMinutes       int       `json:"codeWindowMinutes"`
+	CreatedAt               time.Time `json:"createdAt"`
+
+	// DotWeight Internal allocation weight; only returned to project admins.
+	DotWeight *int `json:"dotWeight,omitempty"`
+	Id        int  `json:"id"`
+
+	// MainWeight Internal allocation weight; only returned to project admins.
+	MainWeight *int `json:"mainWeight,omitempty"`
+
+	// PlusWeight Internal allocation weight; only returned to project admins.
+	PlusWeight            *int                 `json:"plusWeight,omitempty"`
+	ProjectId             int                  `json:"projectId"`
+	PurchaseEnabled       bool                 `json:"purchaseEnabled"`
+	PurchasePrice         string               `json:"purchasePrice"`
+	PurchaseSupplierPrice *string              `json:"purchaseSupplierPrice,omitempty"`
+	Status                ProjectProductStatus `json:"status"`
+	Type                  ProjectProductType   `json:"type"`
+	UpdatedAt             time.Time            `json:"updatedAt"`
+	WarrantyMinutes       int                  `json:"warrantyMinutes"`
+}
+
+// ProjectProductStatus defines model for ProjectProduct.Status.
+type ProjectProductStatus string
+
+// ProjectProductType defines model for ProjectProduct.Type.
+type ProjectProductType string
+
+// ProjectProductRequest defines model for ProjectProductRequest.
+type ProjectProductRequest struct {
+	ActivationWindowMinutes *int                         `json:"activationWindowMinutes,omitempty"`
+	CodeEnabled             bool                         `json:"codeEnabled"`
+	CodePrice               *string                      `json:"codePrice,omitempty"`
+	CodeSupplierPrice       *string                      `json:"codeSupplierPrice,omitempty"`
+	CodeWindowMinutes       *int                         `json:"codeWindowMinutes,omitempty"`
+	DotWeight               *int                         `json:"dotWeight,omitempty"`
+	MainWeight              *int                         `json:"mainWeight,omitempty"`
+	PlusWeight              *int                         `json:"plusWeight,omitempty"`
+	PurchaseEnabled         bool                         `json:"purchaseEnabled"`
+	PurchasePrice           *string                      `json:"purchasePrice,omitempty"`
+	PurchaseSupplierPrice   *string                      `json:"purchaseSupplierPrice,omitempty"`
+	Status                  *ProjectProductRequestStatus `json:"status,omitempty"`
+	Type                    ProjectProductRequestType    `json:"type"`
+	WarrantyMinutes         *int                         `json:"warrantyMinutes,omitempty"`
+}
+
+// ProjectProductRequestStatus defines model for ProjectProductRequest.Status.
+type ProjectProductRequestStatus string
+
+// ProjectProductRequestType defines model for ProjectProductRequest.Type.
+type ProjectProductRequestType string
+
+// ProjectProductSummary defines model for ProjectProductSummary.
+type ProjectProductSummary struct {
+	ActivationWindowMinutes int                         `json:"activationWindowMinutes"`
+	CodeEnabled             bool                        `json:"codeEnabled"`
+	CodePrice               string                      `json:"codePrice"`
+	CodeWindowMinutes       int                         `json:"codeWindowMinutes"`
+	Id                      int                         `json:"id"`
+	PurchaseEnabled         bool                        `json:"purchaseEnabled"`
+	PurchasePrice           string                      `json:"purchasePrice"`
+	Status                  ProjectProductSummaryStatus `json:"status"`
+	Type                    ProjectProductSummaryType   `json:"type"`
+	WarrantyMinutes         int                         `json:"warrantyMinutes"`
+}
+
+// ProjectProductSummaryStatus defines model for ProjectProductSummary.Status.
+type ProjectProductSummaryStatus string
+
+// ProjectProductSummaryType defines model for ProjectProductSummary.Type.
+type ProjectProductSummaryType string
+
+// ProjectProductTypeFacets defines model for ProjectProductTypeFacets.
+type ProjectProductTypeFacets struct {
+	All       int `json:"all"`
+	Domain    int `json:"domain"`
+	Microsoft int `json:"microsoft"`
+}
+
+// ProjectStatusFacets defines model for ProjectStatusFacets.
+type ProjectStatusFacets struct {
+	All    int `json:"all"`
+	Listed int `json:"listed"`
+
+	// Rejected Count of delisted projects shown to users as rejected applications.
+	Rejected  int `json:"rejected"`
+	Reviewing int `json:"reviewing"`
+}
 
 // ProxyBindingItem defines model for ProxyBindingItem.
 type ProxyBindingItem struct {
@@ -1526,6 +2201,95 @@ type PatchAdminInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminProjectLogoMultipartBody defines parameters for PostAdminProjectLogo.
+type PostAdminProjectLogoMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
+// PostAdminProjectLogoParams defines parameters for PostAdminProjectLogo.
+type PostAdminProjectLogoParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectParams defines parameters for PostAdminProject.
+type PostAdminProjectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectsDeleteParams defines parameters for PostAdminProjectsDelete.
+type PostAdminProjectsDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectsDelistParams defines parameters for PostAdminProjectsDelist.
+type PostAdminProjectsDelistParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectsRelistParams defines parameters for PostAdminProjectsRelist.
+type PostAdminProjectsRelistParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminProjectParams defines parameters for DeleteAdminProject.
+type DeleteAdminProjectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PutAdminProjectParams defines parameters for PutAdminProject.
+type PutAdminProjectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectAccessParams defines parameters for PostAdminProjectAccess.
+type PostAdminProjectAccessParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminProjectAccessParams defines parameters for DeleteAdminProjectAccess.
+type DeleteAdminProjectAccessParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectApproveParams defines parameters for PostAdminProjectApprove.
+type PostAdminProjectApproveParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectDelistParams defines parameters for PostAdminProjectDelist.
+type PostAdminProjectDelistParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectDuplicateParams defines parameters for PostAdminProjectDuplicate.
+type PostAdminProjectDuplicateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectRejectParams defines parameters for PostAdminProjectReject.
+type PostAdminProjectRejectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectRelistParams defines parameters for PostAdminProjectRelist.
+type PostAdminProjectRelistParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminProxiesParams defines parameters for GetAdminProxies.
 type GetAdminProxiesParams struct {
 	Pool        *GetAdminProxiesParamsPool   `form:"pool,omitempty" json:"pool,omitempty"`
@@ -1691,6 +2455,45 @@ type PatchPasswordParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetProjectsParams defines parameters for GetProjects.
+type GetProjectsParams struct {
+	Scope          *GetProjectsParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
+	Status         *GetProjectsParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
+	AccessType     *GetProjectsParamsAccessType  `form:"accessType,omitempty" json:"accessType,omitempty"`
+	LooseMatch     *bool                         `form:"looseMatch,omitempty" json:"looseMatch,omitempty"`
+	ProductType    *GetProjectsParamsProductType `form:"productType,omitempty" json:"productType,omitempty"`
+	Search         *string                       `form:"search,omitempty" json:"search,omitempty"`
+	TargetPlatform *string                       `form:"targetPlatform,omitempty" json:"targetPlatform,omitempty"`
+	CreatedFrom    *time.Time                    `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time                    `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Offset         *int                          `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit          *int                          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetProjectsParamsScope defines parameters for GetProjects.
+type GetProjectsParamsScope string
+
+// GetProjectsParamsStatus defines parameters for GetProjects.
+type GetProjectsParamsStatus string
+
+// GetProjectsParamsAccessType defines parameters for GetProjects.
+type GetProjectsParamsAccessType string
+
+// GetProjectsParamsProductType defines parameters for GetProjects.
+type GetProjectsParamsProductType string
+
+// PostProjectParams defines parameters for PostProject.
+type PostProjectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostProjectResubmitParams defines parameters for PostProjectResubmit.
+type PostProjectResubmitParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostResourceValidationsParams defines parameters for PostResourceValidations.
 type PostResourceValidationsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -1798,6 +2601,36 @@ type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 // PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
 type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
 
+// PostAdminProjectLogoMultipartRequestBody defines body for PostAdminProjectLogo for multipart/form-data ContentType.
+type PostAdminProjectLogoMultipartRequestBody PostAdminProjectLogoMultipartBody
+
+// PostAdminProjectJSONRequestBody defines body for PostAdminProject for application/json ContentType.
+type PostAdminProjectJSONRequestBody = AdminCreateProjectRequest
+
+// PostAdminProjectsDeleteJSONRequestBody defines body for PostAdminProjectsDelete for application/json ContentType.
+type PostAdminProjectsDeleteJSONRequestBody = ProjectBulkCommandRequest
+
+// PostAdminProjectsDelistJSONRequestBody defines body for PostAdminProjectsDelist for application/json ContentType.
+type PostAdminProjectsDelistJSONRequestBody = ProjectBulkCommandRequest
+
+// PostAdminProjectsRelistJSONRequestBody defines body for PostAdminProjectsRelist for application/json ContentType.
+type PostAdminProjectsRelistJSONRequestBody = ProjectBulkCommandRequest
+
+// PutAdminProjectJSONRequestBody defines body for PutAdminProject for application/json ContentType.
+type PutAdminProjectJSONRequestBody = AdminCreateProjectRequest
+
+// PostAdminProjectAccessJSONRequestBody defines body for PostAdminProjectAccess for application/json ContentType.
+type PostAdminProjectAccessJSONRequestBody = GrantProjectAccessRequest
+
+// PostAdminProjectApproveJSONRequestBody defines body for PostAdminProjectApprove for application/json ContentType.
+type PostAdminProjectApproveJSONRequestBody = AdminCreateProjectRequest
+
+// PostAdminProjectDuplicateJSONRequestBody defines body for PostAdminProjectDuplicate for application/json ContentType.
+type PostAdminProjectDuplicateJSONRequestBody = AdminRejectProjectRequest
+
+// PostAdminProjectRejectJSONRequestBody defines body for PostAdminProjectReject for application/json ContentType.
+type PostAdminProjectRejectJSONRequestBody = AdminRejectProjectRequest
+
 // PostAdminProxyCheckBatchJSONRequestBody defines body for PostAdminProxyCheckBatch for application/json ContentType.
 type PostAdminProxyCheckBatchJSONRequestBody = CheckProxiesRequest
 
@@ -1842,6 +2675,12 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
+
+// PostProjectJSONRequestBody defines body for PostProject for application/json ContentType.
+type PostProjectJSONRequestBody = CreateProjectApplicationRequest
+
+// PostProjectResubmitJSONRequestBody defines body for PostProjectResubmit for application/json ContentType.
+type PostProjectResubmitJSONRequestBody = CreateProjectApplicationRequest
 
 // PostResourceValidationsJSONRequestBody defines body for PostResourceValidations for application/json ContentType.
 type PostResourceValidationsJSONRequestBody = ValidateResourcesRequest
@@ -2387,6 +3226,51 @@ type ServerInterface interface {
 	// List IAM permission catalog
 	// (GET /v1/admin/permissions)
 	GetAdminPermissions(c *gin.Context)
+	// Upload a project logo
+	// (POST /v1/admin/project-logos)
+	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
+	// Create a complete listed project as admin
+	// (POST /v1/admin/projects)
+	PostAdminProject(c *gin.Context, params PostAdminProjectParams)
+	// Delete non-reviewing projects in bulk
+	// (POST /v1/admin/projects/delete)
+	PostAdminProjectsDelete(c *gin.Context, params PostAdminProjectsDeleteParams)
+	// Delist projects in bulk
+	// (POST /v1/admin/projects/delist)
+	PostAdminProjectsDelist(c *gin.Context, params PostAdminProjectsDelistParams)
+	// Relist projects in bulk
+	// (POST /v1/admin/projects/relist)
+	PostAdminProjectsRelist(c *gin.Context, params PostAdminProjectsRelistParams)
+	// Delete a non-reviewing project as admin
+	// (DELETE /v1/admin/projects/{projectId})
+	DeleteAdminProject(c *gin.Context, projectId int, params DeleteAdminProjectParams)
+	// Update a project as admin
+	// (PUT /v1/admin/projects/{projectId})
+	PutAdminProject(c *gin.Context, projectId int, params PutAdminProjectParams)
+	// List private project access grants
+	// (GET /v1/admin/projects/{projectId}/access)
+	GetAdminProjectAccess(c *gin.Context, projectId int)
+	// Grant private project access to a user
+	// (POST /v1/admin/projects/{projectId}/access)
+	PostAdminProjectAccess(c *gin.Context, projectId int, params PostAdminProjectAccessParams)
+	// Revoke private project access from a user
+	// (DELETE /v1/admin/projects/{projectId}/access/{userId})
+	DeleteAdminProjectAccess(c *gin.Context, projectId int, userId int, params DeleteAdminProjectAccessParams)
+	// Approve a reviewing project application
+	// (POST /v1/admin/projects/{projectId}/approve)
+	PostAdminProjectApprove(c *gin.Context, projectId int, params PostAdminProjectApproveParams)
+	// Delist a listed project
+	// (POST /v1/admin/projects/{projectId}/delist)
+	PostAdminProjectDelist(c *gin.Context, projectId int, params PostAdminProjectDelistParams)
+	// Mark a reviewing project application as duplicate
+	// (POST /v1/admin/projects/{projectId}/duplicate)
+	PostAdminProjectDuplicate(c *gin.Context, projectId int, params PostAdminProjectDuplicateParams)
+	// Reject a reviewing project application
+	// (POST /v1/admin/projects/{projectId}/reject)
+	PostAdminProjectReject(c *gin.Context, projectId int, params PostAdminProjectRejectParams)
+	// Relist a delisted project
+	// (POST /v1/admin/projects/{projectId}/relist)
+	PostAdminProjectRelist(c *gin.Context, projectId int, params PostAdminProjectRelistParams)
 	// List proxy pool entries
 	// (GET /v1/admin/proxies)
 	GetAdminProxies(c *gin.Context, params GetAdminProxiesParams)
@@ -2468,6 +3352,21 @@ type ServerInterface interface {
 	// Request a password reset verification code
 	// (POST /v1/password/reset/request)
 	PostPasswordResetRequest(c *gin.Context)
+	// Read a project logo file
+	// (GET /v1/project-logos/{logoKey})
+	GetProjectLogo(c *gin.Context, logoKey string)
+	// List visible, owned or admin-visible projects
+	// (GET /v1/projects)
+	GetProjects(c *gin.Context, params GetProjectsParams)
+	// Create a user project application
+	// (POST /v1/projects)
+	PostProject(c *gin.Context, params PostProjectParams)
+	// Get project detail
+	// (GET /v1/projects/{projectId})
+	GetProject(c *gin.Context, projectId int)
+	// Resubmit a rejected project application
+	// (POST /v1/projects/{projectId}/resubmit)
+	PostProjectResubmit(c *gin.Context, projectId int, params PostProjectResubmitParams)
 	// Get resource import status
 	// (GET /v1/resource-imports/{importId})
 	GetResourceImport(c *gin.Context, importId int)
@@ -2734,6 +3633,753 @@ func (siw *ServerInterfaceWrapper) GetAdminPermissions(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminPermissions(c)
+}
+
+// PostAdminProjectLogo operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectLogo(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectLogoParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectLogo(c, params)
+}
+
+// PostAdminProject operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProject(c, params)
+}
+
+// PostAdminProjectsDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectsDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectsDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectsDelete(c, params)
+}
+
+// PostAdminProjectsDelist operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectsDelist(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectsDelistParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectsDelist(c, params)
+}
+
+// PostAdminProjectsRelist operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectsRelist(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectsRelistParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectsRelist(c, params)
+}
+
+// DeleteAdminProject operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminProjectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminProject(c, projectId, params)
+}
+
+// PutAdminProject operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminProjectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminProject(c, projectId, params)
+}
+
+// GetAdminProjectAccess operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProjectAccess(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProjectAccess(c, projectId)
+}
+
+// PostAdminProjectAccess operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectAccess(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectAccessParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectAccess(c, projectId, params)
+}
+
+// DeleteAdminProjectAccess operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminProjectAccess(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminProjectAccessParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminProjectAccess(c, projectId, userId, params)
+}
+
+// PostAdminProjectApprove operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectApprove(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectApproveParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectApprove(c, projectId, params)
+}
+
+// PostAdminProjectDelist operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectDelist(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectDelistParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectDelist(c, projectId, params)
+}
+
+// PostAdminProjectDuplicate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectDuplicate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectDuplicateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectDuplicate(c, projectId, params)
+}
+
+// PostAdminProjectReject operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectReject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectRejectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectReject(c, projectId, params)
+}
+
+// PostAdminProjectRelist operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectRelist(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectRelistParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectRelist(c, projectId, params)
 }
 
 // GetAdminProxies operation middleware
@@ -3943,6 +5589,268 @@ func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
 	siw.Handler.PostPasswordResetRequest(c)
 }
 
+// GetProjectLogo operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectLogo(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "logoKey" -------------
+	var logoKey string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "logoKey", c.Param("logoKey"), &logoKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter logoKey: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProjectLogo(c, logoKey)
+}
+
+// GetProjects operation middleware
+func (siw *ServerInterfaceWrapper) GetProjects(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetProjectsParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "accessType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "accessType", c.Request.URL.Query(), &params.AccessType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "looseMatch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "looseMatch", c.Request.URL.Query(), &params.LooseMatch, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter looseMatch: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "productType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "productType", c.Request.URL.Query(), &params.ProductType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter productType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "targetPlatform" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "targetPlatform", c.Request.URL.Query(), &params.TargetPlatform, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter targetPlatform: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProjects(c, params)
+}
+
+// PostProject operation middleware
+func (siw *ServerInterfaceWrapper) PostProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProjectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProject(c, params)
+}
+
+// GetProject operation middleware
+func (siw *ServerInterfaceWrapper) GetProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProject(c, projectId)
+}
+
+// PostProjectResubmit operation middleware
+func (siw *ServerInterfaceWrapper) PostProjectResubmit(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProjectResubmitParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProjectResubmit(c, projectId, params)
+}
+
 // GetResourceImport operation middleware
 func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
 
@@ -4675,6 +6583,21 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
 	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
+	router.POST(options.BaseURL+"/v1/admin/project-logos", wrapper.PostAdminProjectLogo)
+	router.POST(options.BaseURL+"/v1/admin/projects", wrapper.PostAdminProject)
+	router.POST(options.BaseURL+"/v1/admin/projects/delete", wrapper.PostAdminProjectsDelete)
+	router.POST(options.BaseURL+"/v1/admin/projects/delist", wrapper.PostAdminProjectsDelist)
+	router.POST(options.BaseURL+"/v1/admin/projects/relist", wrapper.PostAdminProjectsRelist)
+	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.DeleteAdminProject)
+	router.PUT(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.PutAdminProject)
+	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/access", wrapper.GetAdminProjectAccess)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/access", wrapper.PostAdminProjectAccess)
+	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId/access/:userId", wrapper.DeleteAdminProjectAccess)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/approve", wrapper.PostAdminProjectApprove)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/delist", wrapper.PostAdminProjectDelist)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/duplicate", wrapper.PostAdminProjectDuplicate)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/reject", wrapper.PostAdminProjectReject)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/relist", wrapper.PostAdminProjectRelist)
 	router.GET(options.BaseURL+"/v1/admin/proxies", wrapper.GetAdminProxies)
 	router.GET(options.BaseURL+"/v1/admin/proxies/bindings", wrapper.GetAdminProxyBindings)
 	router.POST(options.BaseURL+"/v1/admin/proxies/check", wrapper.PostAdminProxyCheckBatch)
@@ -4702,6 +6625,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.GET(options.BaseURL+"/v1/project-logos/:logoKey", wrapper.GetProjectLogo)
+	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
+	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)
+	router.GET(options.BaseURL+"/v1/projects/:projectId", wrapper.GetProject)
+	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
 	router.POST(options.BaseURL+"/v1/resource-validations", wrapper.PostResourceValidations)
 	router.GET(options.BaseURL+"/v1/resource-validations/:validationId", wrapper.GetResourceValidation)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	coreapp "github.com/donnel666/remail/internal/core/app"
@@ -17,14 +18,22 @@ import (
 // MaxImportBytes limits TXT import content to prevent memory exhaustion.
 const MaxImportBytes = 100 * 1024 * 1024 // 100 MB
 
+// MaxProjectLogoBytes limits project logo uploads to small web-safe images.
+const MaxProjectLogoBytes = 2 * 1024 * 1024 // 2 MB
+
 // CoreHandler holds the Core HTTP handlers.
 type CoreHandler struct {
-	module *CoreModule
+	module            *CoreModule
+	permissionChecker middleware.PermissionChecker
 }
 
 // NewCoreHandler creates a new Core handler.
-func NewCoreHandler(module *CoreModule) *CoreHandler {
-	return &CoreHandler{module: module}
+func NewCoreHandler(module *CoreModule, checkers ...middleware.PermissionChecker) *CoreHandler {
+	var checker middleware.PermissionChecker
+	if len(checkers) > 0 {
+		checker = checkers[0]
+	}
+	return &CoreHandler{module: module, permissionChecker: checker}
 }
 
 // --- Resources ---
@@ -488,6 +497,569 @@ func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
 	c.JSON(http.StatusOK, toValidationResponse(result))
 }
 
+// --- Projects ---
+
+// GET /v1/projects
+func (h *CoreHandler) GetProjects(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	offset, limit, ok := parsePagination(c)
+	if !ok {
+		return
+	}
+
+	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	scope := coreapp.ProjectListScope(c.DefaultQuery("scope", "visible"))
+	isAdmin := false
+	if roleLevel.IsAtLeast(iamdomain.RoleAdmin) && scope == coreapp.ProjectListScopeAll {
+		allowed, handled := h.checkProjectReadPermission(c, userID, roleLevel)
+		if handled {
+			return
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{
+				"message":   "Permission denied.",
+				"requestId": middleware.GetRequestID(c),
+			})
+			return
+		}
+		isAdmin = true
+	}
+	filter, ok := projectListFilterFromQuery(c, scope, userID, isAdmin)
+	if !ok {
+		return
+	}
+
+	result, err := h.module.ProjectUseCase.List(c.Request.Context(), filter, offset, limit)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	items := make([]ProjectItemResponse, len(result.Items))
+	for i := range result.Items {
+		items[i] = toProjectItemResponse(result.Items[i], isAdmin, userID)
+	}
+	c.JSON(http.StatusOK, ProjectListResponse{
+		Items:  items,
+		Total:  result.Total,
+		Offset: result.Offset,
+		Limit:  result.Limit,
+		Facets: toProjectListFacetsResponse(result.Facets),
+	})
+}
+
+// POST /v1/projects
+func (h *CoreHandler) PostProject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	var req CreateProjectApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, err := h.module.ProjectUseCase.Apply(
+		c.Request.Context(),
+		userID,
+		toAppProjectRequest(req),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, toProjectDetailResponse(detail, false, userID))
+}
+
+// GET /v1/projects/:projectId
+func (h *CoreHandler) GetProject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+
+	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	includeInternal := false
+	if roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
+		allowed, handled := h.checkProjectReadPermission(c, userID, roleLevel)
+		if handled {
+			return
+		}
+		includeInternal = allowed
+	}
+	detail, err := h.module.ProjectUseCase.Get(c.Request.Context(), projectID, userID, includeInternal)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, includeInternal, userID))
+}
+
+// POST /v1/projects/:projectId/resubmit
+func (h *CoreHandler) PostProjectResubmit(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+
+	var req CreateProjectApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, err := h.module.ProjectUseCase.Resubmit(
+		c.Request.Context(),
+		userID,
+		projectID,
+		toAppProjectRequest(req),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, false, userID))
+}
+
+// POST /v1/admin/projects
+func (h *CoreHandler) PostAdminProject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+
+	var req AdminCreateProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, err := h.module.ProjectUseCase.AdminCreateListed(
+		c.Request.Context(),
+		userID,
+		toAppProjectRequest(req),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, toProjectDetailResponse(detail, true, userID))
+}
+
+// PUT /v1/admin/projects/:projectId
+func (h *CoreHandler) PutAdminProject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+
+	var req AdminCreateProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, err := h.module.ProjectUseCase.AdminUpdate(
+		c.Request.Context(),
+		userID,
+		projectID,
+		toAppProjectRequest(req),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+}
+
+// POST /v1/admin/projects/:projectId/approve
+func (h *CoreHandler) PostAdminProjectApprove(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	if c.Request.ContentLength == 0 {
+		detail, err := h.module.ProjectUseCase.AdminApprove(c.Request.Context(), userID, projectID, middleware.GetRequestID(c), c.FullPath())
+		if err != nil {
+			writeCoreError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+		return
+	}
+
+	var req AdminCreateProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	detail, err := h.module.ProjectUseCase.AdminApproveWithConfig(
+		c.Request.Context(),
+		userID,
+		projectID,
+		toAppProjectRequest(req),
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+}
+
+// POST /v1/admin/projects/:projectId/reject
+func (h *CoreHandler) PostAdminProjectReject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+
+	var req AdminRejectProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	detail, err := h.module.ProjectUseCase.AdminReject(
+		c.Request.Context(),
+		userID,
+		projectID,
+		req.ReviewReason,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+}
+
+// POST /v1/admin/projects/:projectId/duplicate
+func (h *CoreHandler) PostAdminProjectDuplicate(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+
+	var req AdminRejectProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	detail, err := h.module.ProjectUseCase.AdminDuplicate(
+		c.Request.Context(),
+		userID,
+		projectID,
+		req.ReviewReason,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+}
+
+// POST /v1/admin/projects/:projectId/relist
+func (h *CoreHandler) PostAdminProjectRelist(c *gin.Context) {
+	h.adminProjectTransition(c, func(ctxUserID, projectID uint) (*coredomain.ProjectDetail, error) {
+		return h.module.ProjectUseCase.AdminRelist(c.Request.Context(), ctxUserID, projectID, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+// POST /v1/admin/projects/:projectId/delist
+func (h *CoreHandler) PostAdminProjectDelist(c *gin.Context) {
+	h.adminProjectTransition(c, func(ctxUserID, projectID uint) (*coredomain.ProjectDetail, error) {
+		return h.module.ProjectUseCase.AdminDelist(c.Request.Context(), ctxUserID, projectID, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+// DELETE /v1/admin/projects/:projectId
+func (h *CoreHandler) DeleteAdminProject(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	if err := h.module.ProjectUseCase.AdminDelete(c.Request.Context(), userID, projectID, middleware.GetRequestID(c), c.FullPath()); err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
+// GET /v1/admin/projects/:projectId/access
+func (h *CoreHandler) GetAdminProjectAccess(c *gin.Context) {
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	accesses, err := h.module.ProjectUseCase.AdminListAccesses(c.Request.Context(), projectID)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, ProjectAccessListResponse{
+		Items: toProjectAccessResponses(accesses),
+		Total: len(accesses),
+	})
+}
+
+// POST /v1/admin/projects/:projectId/access
+func (h *CoreHandler) PostAdminProjectAccess(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	var req GrantProjectAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	access, err := h.module.ProjectUseCase.AdminGrantAccess(
+		c.Request.Context(),
+		userID,
+		projectID,
+		req.UserID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectAccessResponse(*access))
+}
+
+// DELETE /v1/admin/projects/:projectId/access/:userId
+func (h *CoreHandler) DeleteAdminProjectAccess(c *gin.Context) {
+	operatorUserID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	targetUserID, ok := parseUintParam(c, "userId", "Invalid user ID.")
+	if !ok {
+		return
+	}
+	if err := h.module.ProjectUseCase.AdminRevokeAccess(
+		c.Request.Context(),
+		operatorUserID,
+		projectID,
+		targetUserID,
+		middleware.GetRequestID(c),
+		c.FullPath(),
+	); err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
+// POST /v1/admin/project-logos
+func (h *CoreHandler) PostAdminProjectLogo(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxProjectLogoBytes)
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid project logo.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid project logo.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	logoURL, err := h.module.ProjectAssets.SaveLogo(c.Request.Context(), header.Filename, content)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, ProjectLogoUploadResponse{LogoURL: logoURL})
+}
+
+// GET /v1/project-logos/:logoKey
+func (h *CoreHandler) GetProjectLogo(c *gin.Context) {
+	logo, err := h.module.ProjectAssets.ReadLogo(c.Request.Context(), c.Param("logoKey"))
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	contentType := strings.TrimSpace(logo.ContentType)
+	if contentType == "" {
+		contentType = http.DetectContentType(logo.Content)
+	}
+	c.Data(http.StatusOK, contentType, logo.Content)
+}
+
+func (h *CoreHandler) adminProjectTransition(
+	c *gin.Context,
+	action func(userID, projectID uint) (*coredomain.ProjectDetail, error),
+) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	projectID, ok := parseUintParam(c, "projectId", "Invalid project ID.")
+	if !ok {
+		return
+	}
+	detail, err := action(userID, projectID)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectDetailResponse(detail, true, userID))
+}
+
+// POST /v1/admin/projects/relist
+func (h *CoreHandler) PostAdminProjectsRelist(c *gin.Context) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+		return h.module.ProjectUseCase.AdminBulkRelist(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+// POST /v1/admin/projects/delist
+func (h *CoreHandler) PostAdminProjectsDelist(c *gin.Context) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+		return h.module.ProjectUseCase.AdminBulkDelist(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+// POST /v1/admin/projects/delete
+func (h *CoreHandler) PostAdminProjectsDelete(c *gin.Context) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+		return h.module.ProjectUseCase.AdminBulkDelete(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+func (h *CoreHandler) adminProjectBulkCommand(
+	c *gin.Context,
+	action func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error),
+) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	var req ProjectBulkCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if fields := validateProjectBulkSelectionRequest(req.Selection); len(fields) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    fields,
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	selection := toAppProjectBulkSelection(req.Selection)
+	result, err := action(userID, selection)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, ProjectBulkCommandResponse{Affected: result.Affected})
+}
+
 // --- Mail Servers ---
 
 // requireCurrentUserID verifies the request is authenticated and returns the current user ID.
@@ -523,6 +1095,25 @@ func requireSupplier(c *gin.Context) bool {
 	return true
 }
 
+func (h *CoreHandler) checkProjectReadPermission(c *gin.Context, userID uint, roleLevel iamdomain.RoleLevel) (bool, bool) {
+	if h.permissionChecker == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message":   "An unexpected error occurred.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false, true
+	}
+	allowed, err := h.permissionChecker.Check(c.Request.Context(), userID, roleLevel, "core:project", "read")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message":   "An unexpected error occurred.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false, true
+	}
+	return allowed, false
+}
+
 func toValidationResponse(result *coreapp.ValidationResultView) ResourceValidationResponse {
 	return ResourceValidationResponse{
 		ValidationID:  result.ValidationID,
@@ -532,6 +1123,332 @@ func toValidationResponse(result *coreapp.ValidationResultView) ResourceValidati
 		LastSafeError: result.LastSafeError,
 		CreatedAt:     result.CreatedAt,
 		UpdatedAt:     result.UpdatedAt,
+	}
+}
+
+func projectListFilterFromQuery(c *gin.Context, scope coreapp.ProjectListScope, userID uint, isAdmin bool) (coreapp.ProjectListFilter, bool) {
+	filter := coreapp.ProjectListFilter{
+		Scope:          scope,
+		UserID:         userID,
+		IsAdmin:        isAdmin,
+		Status:         coredomain.ProjectStatus(strings.TrimSpace(c.Query("status"))),
+		AccessType:     coredomain.ProjectAccessType(strings.TrimSpace(c.Query("accessType"))),
+		ProductType:    coredomain.ProductType(strings.TrimSpace(c.Query("productType"))),
+		Search:         c.Query("search"),
+		TargetPlatform: c.Query("targetPlatform"),
+	}
+	if value := strings.TrimSpace(c.Query("looseMatch")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message":   "Invalid query parameters.",
+				"requestId": middleware.GetRequestID(c),
+			})
+			return filter, false
+		}
+		filter.LooseMatch = &parsed
+	}
+	if value := strings.TrimSpace(c.Query("createdFrom")); value != "" {
+		parsed, ok := parseProjectTimeQuery(c, value)
+		if !ok {
+			return filter, false
+		}
+		filter.CreatedFrom = &parsed
+	}
+	if value := strings.TrimSpace(c.Query("createdTo")); value != "" {
+		parsed, ok := parseProjectTimeQuery(c, value)
+		if !ok {
+			return filter, false
+		}
+		filter.CreatedTo = &parsed
+	}
+	return filter, true
+}
+
+func parseProjectTimeQuery(c *gin.Context, value string) (time.Time, bool) {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+type projectRequestFields interface {
+	projectName() string
+	projectTargetPlatform() string
+	projectLogoURL() string
+	projectDescription() string
+	projectAccessType() string
+	projectLooseMatch() *bool
+	projectProducts() []ProjectProductRequest
+	projectMailRules() []ProjectMailRuleRequest
+}
+
+func (req CreateProjectApplicationRequest) projectName() string { return req.Name }
+func (req CreateProjectApplicationRequest) projectTargetPlatform() string {
+	return req.TargetPlatform
+}
+func (req CreateProjectApplicationRequest) projectLogoURL() string     { return req.LogoURL }
+func (req CreateProjectApplicationRequest) projectDescription() string { return req.Description }
+func (req CreateProjectApplicationRequest) projectAccessType() string  { return req.AccessType }
+func (req CreateProjectApplicationRequest) projectLooseMatch() *bool   { return req.LooseMatch }
+func (req CreateProjectApplicationRequest) projectProducts() []ProjectProductRequest {
+	return nil
+}
+func (req CreateProjectApplicationRequest) projectMailRules() []ProjectMailRuleRequest {
+	return req.MailRules
+}
+
+func (req AdminCreateProjectRequest) projectName() string { return req.Name }
+func (req AdminCreateProjectRequest) projectTargetPlatform() string {
+	return req.TargetPlatform
+}
+func (req AdminCreateProjectRequest) projectLogoURL() string     { return req.LogoURL }
+func (req AdminCreateProjectRequest) projectDescription() string { return req.Description }
+func (req AdminCreateProjectRequest) projectAccessType() string  { return req.AccessType }
+func (req AdminCreateProjectRequest) projectLooseMatch() *bool   { return req.LooseMatch }
+func (req AdminCreateProjectRequest) projectProducts() []ProjectProductRequest {
+	return req.Products
+}
+func (req AdminCreateProjectRequest) projectMailRules() []ProjectMailRuleRequest {
+	return req.MailRules
+}
+
+func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest {
+	looseMatch := true
+	if req.projectLooseMatch() != nil {
+		looseMatch = *req.projectLooseMatch()
+	}
+	requestProducts := req.projectProducts()
+	products := make([]coreapp.ProjectProductRequest, len(requestProducts))
+	for i := range requestProducts {
+		products[i] = coreapp.ProjectProductRequest{
+			Type:                    requestProducts[i].Type,
+			Status:                  requestProducts[i].Status,
+			CodeEnabled:             requestProducts[i].CodeEnabled,
+			PurchaseEnabled:         requestProducts[i].PurchaseEnabled,
+			CodePrice:               requestProducts[i].CodePrice,
+			PurchasePrice:           requestProducts[i].PurchasePrice,
+			CodeSupplierPrice:       requestProducts[i].CodeSupplierPrice,
+			PurchaseSupplierPrice:   requestProducts[i].PurchaseSupplierPrice,
+			CodeWindowMinutes:       requestProducts[i].CodeWindowMinutes,
+			ActivationWindowMinutes: requestProducts[i].ActivationWindowMinutes,
+			WarrantyMinutes:         requestProducts[i].WarrantyMinutes,
+			MainWeight:              requestProducts[i].MainWeight,
+			DotWeight:               requestProducts[i].DotWeight,
+			PlusWeight:              requestProducts[i].PlusWeight,
+		}
+	}
+	requestRules := req.projectMailRules()
+	rules := make([]coreapp.ProjectMailRuleRequest, len(requestRules))
+	for i := range requestRules {
+		rules[i] = coreapp.ProjectMailRuleRequest{
+			RuleType: requestRules[i].RuleType,
+			Pattern:  requestRules[i].Pattern,
+			Enabled:  requestRules[i].Enabled,
+		}
+	}
+	return coreapp.CreateProjectRequest{
+		Name:           req.projectName(),
+		TargetPlatform: req.projectTargetPlatform(),
+		LogoURL:        req.projectLogoURL(),
+		Description:    req.projectDescription(),
+		AccessType:     req.projectAccessType(),
+		LooseMatch:     looseMatch,
+		Products:       products,
+		MailRules:      rules,
+	}
+}
+
+func toAppProjectBulkSelection(req ProjectBulkSelectionRequest) coreapp.ProjectBulkSelection {
+	return coreapp.ProjectBulkSelection{
+		Mode:       coreapp.ProjectSelectionMode(req.Mode),
+		ProjectIDs: req.ProjectIDs,
+		Filter: coreapp.ProjectListFilter{
+			Scope:          coreapp.ProjectListScopeAll,
+			IsAdmin:        true,
+			Status:         coredomain.ProjectStatus(strings.TrimSpace(req.Filter.Status)),
+			AccessType:     coredomain.ProjectAccessType(strings.TrimSpace(req.Filter.AccessType)),
+			LooseMatch:     req.Filter.LooseMatch,
+			ProductType:    coredomain.ProductType(strings.TrimSpace(req.Filter.ProductType)),
+			Search:         req.Filter.Search,
+			TargetPlatform: req.Filter.TargetPlatform,
+			CreatedFrom:    req.Filter.CreatedFrom,
+			CreatedTo:      req.Filter.CreatedTo,
+		},
+	}
+}
+
+func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint) ProjectItemResponse {
+	project := summary.Project
+	item := ProjectItemResponse{
+		ID:             project.ID,
+		Name:           project.Name,
+		TargetPlatform: project.TargetPlatform,
+		LogoURL:        project.LogoURL,
+		Description:    project.Description,
+		Status:         string(project.Status),
+		AccessType:     string(project.AccessType),
+		LooseMatch:     project.LooseMatch,
+		ProductCount:   summary.ProductCount,
+		MailRuleCount:  summary.MailRuleCount,
+		Products:       toProjectProductSummaryResponses(summary.Products),
+		CreatedAt:      project.CreatedAt,
+		UpdatedAt:      project.UpdatedAt,
+	}
+	if includeInternal || isOwnProjectApplication(project, viewerUserID) {
+		item.ApplicantUserID = project.ApplicantUserID
+		item.ReviewReason = project.ReviewReason
+	}
+	return item
+}
+
+func isOwnProjectApplication(project coredomain.Project, viewerUserID uint) bool {
+	return viewerUserID != 0 &&
+		project.ApplicantUserID != nil &&
+		*project.ApplicantUserID == viewerUserID &&
+		project.Status != coredomain.ProjectStatusListed
+}
+
+func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectListFacetsResponse {
+	if facets == nil {
+		return nil
+	}
+	return &ProjectListFacetsResponse{
+		Status: ProjectStatusFacetsResponse{
+			All:       facets.Status.All,
+			Listed:    facets.Status.Listed,
+			Reviewing: facets.Status.Reviewing,
+			Rejected:  facets.Status.Delisted,
+		},
+		Access: ProjectAccessFacetsResponse{
+			All:     facets.Access.All,
+			Public:  facets.Access.Public,
+			Private: facets.Access.Private,
+		},
+		Match: ProjectMatchFacetsResponse{
+			All:    facets.Match.All,
+			Loose:  facets.Match.Loose,
+			Strict: facets.Match.Strict,
+		},
+		ProductType: ProjectProductTypeFacetsResponse{
+			All:       facets.ProductType.All,
+			Microsoft: facets.ProductType.Microsoft,
+			Domain:    facets.ProductType.Domain,
+		},
+	}
+}
+
+func toProjectProductSummaryResponses(products []coredomain.Product) []ProjectProductSummaryResponse {
+	if len(products) == 0 {
+		return nil
+	}
+	items := make([]ProjectProductSummaryResponse, len(products))
+	for i := range products {
+		product := products[i]
+		items[i] = ProjectProductSummaryResponse{
+			ID:                      product.ID,
+			Type:                    string(product.Type),
+			Status:                  string(product.Status),
+			CodeEnabled:             product.CodeEnabled,
+			PurchaseEnabled:         product.PurchaseEnabled,
+			CodePrice:               product.CodePrice,
+			PurchasePrice:           product.PurchasePrice,
+			CodeWindowMinutes:       product.CodeWindowMinutes,
+			ActivationWindowMinutes: product.ActivationWindowMinutes,
+			WarrantyMinutes:         product.WarrantyMinutes,
+		}
+	}
+	return items
+}
+
+func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal bool, viewerUserID uint) ProjectDetailResponse {
+	exposeApplicationFields := includeInternal || isOwnProjectApplication(detail.Project, viewerUserID)
+	item := toProjectItemResponse(coreapp.ProjectSummary{
+		Project:       detail.Project,
+		ProductCount:  len(detail.Products),
+		MailRuleCount: len(detail.MailRules),
+	}, includeInternal, viewerUserID)
+	products := make([]ProjectProductResponse, len(detail.Products))
+	for i := range detail.Products {
+		product := detail.Products[i]
+		products[i] = ProjectProductResponse{
+			ID:                      product.ID,
+			ProjectID:               product.ProjectID,
+			Type:                    string(product.Type),
+			Status:                  string(product.Status),
+			CodeEnabled:             product.CodeEnabled,
+			PurchaseEnabled:         product.PurchaseEnabled,
+			CodePrice:               product.CodePrice,
+			PurchasePrice:           product.PurchasePrice,
+			CodeWindowMinutes:       product.CodeWindowMinutes,
+			ActivationWindowMinutes: product.ActivationWindowMinutes,
+			WarrantyMinutes:         product.WarrantyMinutes,
+			CreatedAt:               product.CreatedAt,
+			UpdatedAt:               product.UpdatedAt,
+		}
+		if includeInternal {
+			products[i].CodeSupplierPrice = product.CodeSupplierPrice
+			products[i].PurchaseSupplierPrice = product.PurchaseSupplierPrice
+			products[i].MainWeight = intPtr(product.MainWeight)
+			products[i].DotWeight = intPtr(product.DotWeight)
+			products[i].PlusWeight = intPtr(product.PlusWeight)
+		}
+	}
+	var rules []ProjectMailRuleResponse
+	if exposeApplicationFields {
+		rules = make([]ProjectMailRuleResponse, len(detail.MailRules))
+		for i := range detail.MailRules {
+			rule := detail.MailRules[i]
+			rules[i] = ProjectMailRuleResponse{
+				ID:        rule.ID,
+				ProjectID: rule.ProjectID,
+				RuleType:  string(rule.RuleType),
+				Pattern:   rule.Pattern,
+				Enabled:   rule.Enabled,
+				CreatedAt: rule.CreatedAt,
+				UpdatedAt: rule.UpdatedAt,
+			}
+		}
+	}
+	accesses := []ProjectAccessResponse(nil)
+	if includeInternal {
+		accesses = toProjectAccessResponses(detail.Accesses)
+	}
+	return ProjectDetailResponse{
+		Project:   item,
+		Products:  products,
+		MailRules: rules,
+		Accesses:  accesses,
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func toProjectAccessResponses(accesses []coredomain.ProjectAccess) []ProjectAccessResponse {
+	if len(accesses) == 0 {
+		return nil
+	}
+	items := make([]ProjectAccessResponse, len(accesses))
+	for i := range accesses {
+		items[i] = toProjectAccessResponse(accesses[i])
+	}
+	return items
+}
+
+func toProjectAccessResponse(access coredomain.ProjectAccess) ProjectAccessResponse {
+	return ProjectAccessResponse{
+		ID:        access.ID,
+		ProjectID: access.ProjectID,
+		UserID:    access.UserID,
+		GrantedBy: access.GrantedBy,
+		CreatedAt: access.CreatedAt,
 	}
 }
 
@@ -806,6 +1723,30 @@ func validateBulkSelectionRequest(selection ResourceBulkSelectionRequest) map[st
 	return fields
 }
 
+func validateProjectBulkSelectionRequest(selection ProjectBulkSelectionRequest) map[string]string {
+	fields := make(map[string]string)
+	switch selection.Mode {
+	case "ids":
+		if len(selection.ProjectIDs) == 0 {
+			fields["selection.projectIds"] = "At least one project ID is required."
+		} else {
+			for _, projectID := range selection.ProjectIDs {
+				if projectID == 0 {
+					fields["selection.projectIds"] = "Project IDs must be positive."
+					break
+				}
+			}
+		}
+	case "filter":
+	default:
+		fields["selection.mode"] = "Selection mode must be ids or filter."
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
 // --- Helpers ---
 
 func parseResourceID(c *gin.Context) (uint, bool) {
@@ -927,6 +1868,41 @@ func writeCoreError(c *gin.Context, err error) {
 	case errors.Is(err, coredomain.ErrForbiddenResource):
 		c.JSON(http.StatusNotFound, gin.H{
 			"message":   "Resource not found.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrProjectNotFound):
+		c.JSON(http.StatusNotFound, gin.H{
+			"message":   "Project not found.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrForbiddenProject):
+		c.JSON(http.StatusNotFound, gin.H{
+			"message":   "Project not found.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrDuplicateProject):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "Project already exists.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidProject):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid project.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidProjectStatus):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid project status.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidProduct):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid project product.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrInvalidMailRule):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid project mail rule.",
 			"requestId": rid,
 		})
 	default:
