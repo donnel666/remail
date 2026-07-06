@@ -1,0 +1,468 @@
+package infra
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	billingapp "github.com/donnel666/remail/internal/billing/app"
+	"github.com/donnel666/remail/internal/billing/domain"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+var billingMySQLTestServer = testmysql.New("remail_billing_test")
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = billingMySQLTestServer.Close(context.Background())
+	os.Exit(code)
+}
+
+func newBillingMySQLTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	return billingMySQLTestServer.Database(t, billingMigrationsDir(t))
+}
+
+func billingMigrationsDir(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "../../..", "migrations"))
+}
+
+func TestBillingRepoRedeemCardMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "buyer@example.com")
+	repo := NewBillingRepo(db)
+
+	require.NoError(t, db.Create(&CardKeyModel{
+		Key:            "CARD-001",
+		Amount:         "25.50",
+		Status:         string(domain.CardKeyStatusEnabled),
+		MaxRedemptions: 1,
+	}).Error)
+
+	result, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             userID,
+		CardKey:            "CARD-001",
+		IdempotencyKey:     "idem-card-001",
+		RequestFingerprint: "fingerprint-card-001",
+		RequestID:          "req-card-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "25.50", result.Wallet.ConsumerBalance)
+	require.Equal(t, "25.50", result.Transaction.Amount)
+	require.Equal(t, domain.TransactionTypeCardRedeem, result.Transaction.TransactionType)
+	require.Equal(t, 1, result.Card.RedeemedCount)
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "25.50", summary.Wallet.ConsumerBalance)
+
+	replay, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             userID,
+		CardKey:            "CARD-001",
+		IdempotencyKey:     "idem-card-001",
+		RequestFingerprint: "fingerprint-card-001",
+		RequestID:          "req-card-001-retry",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, result.Transaction.TransactionNo, replay.Transaction.TransactionNo)
+	require.Equal(t, "25.50", replay.Wallet.ConsumerBalance)
+
+	_, err = repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             userID,
+		CardKey:            "CARD-001",
+		IdempotencyKey:     "idem-card-001",
+		RequestFingerprint: "different-fingerprint",
+		RequestID:          "req-card-001-conflict",
+		Now:                time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+
+	_, err = repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             userID,
+		CardKey:            "CARD-001",
+		IdempotencyKey:     "idem-card-002",
+		RequestFingerprint: "fingerprint-card-002",
+		RequestID:          "req-card-002",
+		Now:                time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, domain.ErrCardAlreadyRedeemed)
+
+	otherUserID := createBillingTestUser(t, db, "other-buyer@example.com")
+	_, err = repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             otherUserID,
+		CardKey:            "CARD-001",
+		IdempotencyKey:     "idem-card-003",
+		RequestFingerprint: "fingerprint-card-003",
+		RequestID:          "req-card-003",
+		Now:                time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, domain.ErrCardExhausted)
+}
+
+func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "adjust@example.com")
+	repo := NewBillingRepo(db)
+
+	credited, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "10.00",
+		Reason:             "manual credit",
+		TransactionType:    domain.TransactionTypeCredit,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-credit-001",
+		RequestFingerprint: "fingerprint-credit-001",
+		RequestID:          "req-credit-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "10.00", credited.Wallet.ConsumerBalance)
+
+	debited, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "4.50",
+		Reason:             "manual debit",
+		TransactionType:    domain.TransactionTypeDebit,
+		Direction:          domain.TransactionDirectionOut,
+		IdempotencyKey:     "idem-debit-001",
+		RequestFingerprint: "fingerprint-debit-001",
+		RequestID:          "req-debit-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "5.50", debited.Wallet.ConsumerBalance)
+
+	_, err = repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "6.00",
+		Reason:             "manual debit too much",
+		TransactionType:    domain.TransactionTypeDebit,
+		Direction:          domain.TransactionDirectionOut,
+		IdempotencyKey:     "idem-debit-002",
+		RequestFingerprint: "fingerprint-debit-002",
+		RequestID:          "req-debit-002",
+		Now:                time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientBalance)
+}
+
+func TestBillingRepoCreateCardsIdempotencyMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "card-admin@example.com")
+	repo := NewBillingRepo(db)
+
+	command := billingapp.CreateCardsCommand{
+		OwnerUserID:        userID,
+		IdempotencyKey:     "idem-create-cards",
+		RequestFingerprint: "fingerprint-create-cards",
+		Cards: []domain.CardKey{
+			{Key: "CREATE-CARD-001", Amount: "8.00", Status: domain.CardKeyStatusEnabled, MaxRedemptions: 1, CreatedByUserID: &userID},
+			{Key: "CREATE-CARD-002", Amount: "8.00", Status: domain.CardKeyStatusEnabled, MaxRedemptions: 1, CreatedByUserID: &userID},
+		},
+	}
+	created, err := repo.CreateCards(ctx, command)
+	require.NoError(t, err)
+	require.Len(t, created, 2)
+
+	replayed, err := repo.CreateCards(ctx, command)
+	require.NoError(t, err)
+	require.Len(t, replayed, 2)
+	require.Equal(t, created[0].Key, replayed[0].Key)
+	require.Equal(t, created[1].Key, replayed[1].Key)
+	require.Equal(t, created[0].Amount, replayed[0].Amount)
+	require.Equal(t, created[1].Amount, replayed[1].Amount)
+
+	conflictCommand := command
+	conflictCommand.RequestFingerprint = "different-fingerprint"
+	_, err = repo.CreateCards(ctx, conflictCommand)
+	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+
+	var cardCount int64
+	require.NoError(t, db.Model(&CardKeyModel{}).Where("created_by_user_id = ?", userID).Count(&cardCount).Error)
+	require.EqualValues(t, 2, cardCount)
+}
+
+func TestBillingRepoConcurrentCardRedemptionMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	repo := NewBillingRepo(db)
+
+	require.NoError(t, db.Create(&CardKeyModel{
+		Key:            "CARD-CONCURRENT",
+		Amount:         "3.00",
+		Status:         string(domain.CardKeyStatusEnabled),
+		MaxRedemptions: 1,
+	}).Error)
+
+	const workers = 32
+	userIDs := make([]uint, 0, workers)
+	for i := 0; i < workers; i++ {
+		userIDs = append(userIDs, createBillingTestUser(t, db, "card-worker-"+strconv.Itoa(i)+"@example.com"))
+	}
+
+	var successes int64
+	var unexpected atomic.Value
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i, userID := range userIDs {
+		go func(index int, userID uint) {
+			defer wg.Done()
+			_, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+				UserID:             userID,
+				CardKey:            "CARD-CONCURRENT",
+				IdempotencyKey:     "idem-card-concurrent-" + strconv.Itoa(index),
+				RequestFingerprint: "fingerprint-card-concurrent-" + strconv.Itoa(index),
+				RequestID:          "req-card-concurrent-" + strconv.Itoa(index),
+				Now:                time.Now().UTC(),
+			})
+			if err == nil {
+				atomic.AddInt64(&successes, 1)
+				return
+			}
+			if !errors.Is(err, domain.ErrCardExhausted) {
+				unexpected.Store(err)
+			}
+		}(i, userID)
+	}
+	wg.Wait()
+	require.Nil(t, unexpected.Load())
+	require.EqualValues(t, 1, successes)
+
+	var card CardKeyModel
+	require.NoError(t, db.First(&card, "card_key = ?", "CARD-CONCURRENT").Error)
+	require.Equal(t, 1, card.RedeemedCount)
+	var redemptions int64
+	require.NoError(t, db.Model(&CardKeyRedemptionModel{}).Where("card_key = ?", "CARD-CONCURRENT").Count(&redemptions).Error)
+	require.EqualValues(t, 1, redemptions)
+	var txCount int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("biz_type = ? AND biz_id = ?", "card_key", "CARD-CONCURRENT").Count(&txCount).Error)
+	require.EqualValues(t, 1, txCount)
+}
+
+func TestBillingRepoConcurrentDebitBalanceNonNegativeMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "debit-concurrent@example.com")
+	repo := NewBillingRepo(db)
+
+	_, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "10.00",
+		Reason:             "seed balance",
+		TransactionType:    domain.TransactionTypeCredit,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-debit-seed",
+		RequestFingerprint: "fingerprint-debit-seed",
+		RequestID:          "req-debit-seed",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	const workers = 40
+	var successes int64
+	var unexpected atomic.Value
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(index int) {
+			defer wg.Done()
+			_, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+				UserID:             userID,
+				Amount:             "1.00",
+				Reason:             "concurrent debit",
+				TransactionType:    domain.TransactionTypeDebit,
+				Direction:          domain.TransactionDirectionOut,
+				IdempotencyKey:     "idem-debit-concurrent-" + strconv.Itoa(index),
+				RequestFingerprint: "fingerprint-debit-concurrent-" + strconv.Itoa(index),
+				RequestID:          "req-debit-concurrent-" + strconv.Itoa(index),
+				Now:                time.Now().UTC(),
+			})
+			if err == nil {
+				atomic.AddInt64(&successes, 1)
+				return
+			}
+			if !errors.Is(err, domain.ErrInsufficientBalance) {
+				unexpected.Store(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	require.Nil(t, unexpected.Load())
+	require.EqualValues(t, 10, successes)
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "0.00", summary.Wallet.ConsumerBalance)
+	var debitTransactions int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).
+		Where("user_id = ? AND transaction_type = ? AND direction = ?", userID, domain.TransactionTypeDebit, domain.TransactionDirectionOut).
+		Count(&debitTransactions).Error)
+	require.EqualValues(t, 10, debitTransactions)
+}
+
+func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "wallet-explain@example.com")
+	repo := NewBillingRepo(db)
+
+	for _, tc := range []struct {
+		table string
+		index string
+	}{
+		{"wallet_transactions", "idx_wallet_transactions_user_created"},
+		{"wallet_transactions", "idx_wallet_transactions_biz"},
+		{"idempotency_keys", "idx_idempotency_owner_key_operation"},
+		{"recharges", "idx_recharges_user_created"},
+		{"recharges", "idx_recharges_status_created"},
+		{"card_keys", "idx_card_keys_status_expire"},
+		{"card_key_redemptions", "idx_card_redemptions_card_user"},
+	} {
+		requireIndexExists(t, db, tc.table, tc.index)
+	}
+
+	for i := 0; i < 5; i++ {
+		_, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+			UserID:             userID,
+			Amount:             "1.00",
+			Reason:             "explain seed",
+			TransactionType:    domain.TransactionTypeCredit,
+			Direction:          domain.TransactionDirectionIn,
+			IdempotencyKey:     "idem-explain-" + strconv.Itoa(i),
+			RequestFingerprint: "fingerprint-explain-" + strconv.Itoa(i),
+			RequestID:          "req-explain-" + strconv.Itoa(i),
+			Now:                time.Now().UTC(),
+		})
+		require.NoError(t, err)
+	}
+
+	requireExplainUsesIndex(
+		t,
+		db,
+		"idx_wallet_transactions_user_created",
+		"EXPLAIN SELECT * FROM wallet_transactions WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 20",
+		userID,
+	)
+}
+
+func TestBillingRepoTransactionRollbackMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "rollback@example.com")
+	repo := NewBillingRepo(db)
+	repo.operationLogs = failingOperationLogWriter{}
+
+	_, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "9.00",
+		Reason:             "rollback test",
+		TransactionType:    domain.TransactionTypeCredit,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-rollback-001",
+		RequestFingerprint: "fingerprint-rollback-001",
+		RequestID:          "req-rollback-001",
+		Now:                time.Now().UTC(),
+		OperationLog: &governancedomain.OperationLog{
+			OperatorUserID: userID,
+			OperationType:  "billing.wallet.credit",
+			ResourceType:   "billing",
+			ResourceID:     "rollback",
+			Path:           "/v1/admin/wallets/1/credit",
+			Result:         "success",
+			SafeSummary:    "Wallet adjusted.",
+			RequestID:      "req-rollback-001",
+		},
+	})
+	require.ErrorContains(t, err, "forced operation log failure")
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "0.00", summary.Wallet.ConsumerBalance)
+	var transactionCount int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).Where("user_id = ?", userID).Count(&transactionCount).Error)
+	require.EqualValues(t, 0, transactionCount)
+	var idempotencyCount int64
+	require.NoError(t, db.Model(&IdempotencyKeyModel{}).Where("owner_user_id = ? AND idempotency_key = ?", userID, "idem-rollback-001").Count(&idempotencyCount).Error)
+	require.EqualValues(t, 0, idempotencyCount)
+}
+
+type failingOperationLogWriter struct{}
+
+func (failingOperationLogWriter) CreateInTx(context.Context, *gorm.DB, *governancedomain.OperationLog) error {
+	return errors.New("forced operation log failure")
+}
+
+func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {
+	t.Helper()
+
+	var count int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+		tableName,
+		indexName,
+	).Scan(&count).Error)
+	require.Positive(t, count, "expected index %s on %s", indexName, tableName)
+}
+
+func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, query string, args ...any) {
+	t.Helper()
+
+	var rows []struct {
+		Key        sql.NullString `gorm:"column:key"`
+		Rows       sql.NullInt64  `gorm:"column:rows"`
+		AccessType sql.NullString `gorm:"column:type"`
+	}
+	require.NoError(t, db.Raw(query, args...).Scan(&rows).Error)
+	require.NotEmpty(t, rows, "expected EXPLAIN rows for %s", query)
+	seenKeys := make([]string, 0, len(rows))
+	usedExpectedKey := false
+	for _, row := range rows {
+		require.True(t, row.Key.Valid, "expected query to use an index: %s", query)
+		seenKeys = append(seenKeys, row.Key.String)
+		require.True(t, row.Rows.Valid, "expected query to expose row estimate: %s", query)
+		require.LessOrEqual(t, row.Rows.Int64, int64(20), "unexpected row estimate for %s using %s", query, row.Key.String)
+		require.NotEqual(t, "ALL", row.AccessType.String, "unexpected full table scan for %s", query)
+		if row.Key.String == expectedKey {
+			usedExpectedKey = true
+		}
+	}
+	require.True(t, usedExpectedKey, "expected query to use index %s, saw %v: %s", expectedKey, seenKeys, query)
+}
+
+func createBillingTestUser(t *testing.T, db *gorm.DB, email string) uint {
+	t.Helper()
+	type userModel struct {
+		ID           uint   `gorm:"primaryKey"`
+		Email        string `gorm:"column:email"`
+		PasswordHash string `gorm:"column:password_hash"`
+		Nickname     string `gorm:"column:nickname"`
+		RoleLevel    int    `gorm:"column:role_level"`
+	}
+	user := userModel{
+		Email:        email,
+		PasswordHash: "hash",
+		Nickname:     "Billing Test",
+		RoleLevel:    10,
+	}
+	require.NoError(t, db.Table("users").Create(&user).Error)
+	return user.ID
+}

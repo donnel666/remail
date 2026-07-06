@@ -126,6 +126,24 @@ func (e CandidateRefreshResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for CardKeyStatus.
+const (
+	CardKeyStatusDisabled CardKeyStatus = "disabled"
+	CardKeyStatusEnabled  CardKeyStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the CardKeyStatus enum.
+func (e CardKeyStatus) Valid() bool {
+	switch e {
+	case CardKeyStatusDisabled:
+		return true
+	case CardKeyStatusEnabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckProxiesRequest0All.
 const (
 	CheckProxiesRequest0AllFalse CheckProxiesRequest0All = false
@@ -732,6 +750,33 @@ func (e ProxyItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for RechargeItemStatus.
+const (
+	RechargeItemStatusCallback   RechargeItemStatus = "callback"
+	RechargeItemStatusCredited   RechargeItemStatus = "credited"
+	RechargeItemStatusFailed     RechargeItemStatus = "failed"
+	RechargeItemStatusPaying     RechargeItemStatus = "paying"
+	RechargeItemStatusReconciled RechargeItemStatus = "reconciled"
+)
+
+// Valid indicates whether the value is a known member of the RechargeItemStatus enum.
+func (e RechargeItemStatus) Valid() bool {
+	switch e {
+	case RechargeItemStatusCallback:
+		return true
+	case RechargeItemStatusCredited:
+		return true
+	case RechargeItemStatusFailed:
+		return true
+	case RechargeItemStatusPaying:
+		return true
+	case RechargeItemStatusReconciled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResourceBulkFilterPurpose.
 const (
 	ResourceBulkFilterPurposeBinding ResourceBulkFilterPurpose = "binding"
@@ -860,22 +905,22 @@ func (e ResourceValidationResponseResourceType) Valid() bool {
 
 // Defines values for ResourceValidationResponseStatus.
 const (
-	Failed    ResourceValidationResponseStatus = "failed"
-	Queued    ResourceValidationResponseStatus = "queued"
-	Running   ResourceValidationResponseStatus = "running"
-	Succeeded ResourceValidationResponseStatus = "succeeded"
+	ResourceValidationResponseStatusFailed    ResourceValidationResponseStatus = "failed"
+	ResourceValidationResponseStatusQueued    ResourceValidationResponseStatus = "queued"
+	ResourceValidationResponseStatusRunning   ResourceValidationResponseStatus = "running"
+	ResourceValidationResponseStatusSucceeded ResourceValidationResponseStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the ResourceValidationResponseStatus enum.
 func (e ResourceValidationResponseStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case ResourceValidationResponseStatusFailed:
 		return true
-	case Queued:
+	case ResourceValidationResponseStatusQueued:
 		return true
-	case Running:
+	case ResourceValidationResponseStatusRunning:
 		return true
-	case Succeeded:
+	case ResourceValidationResponseStatusSucceeded:
 		return true
 	default:
 		return false
@@ -939,6 +984,102 @@ func (e SupplierApplicationResponseStatus) Valid() bool {
 	case SupplierApplicationResponseStatusRejected:
 		return true
 	case SupplierApplicationResponseStatusReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransactionItemBalanceBucket.
+const (
+	Consumer          TransactionItemBalanceBucket = "consumer"
+	SupplierAvailable TransactionItemBalanceBucket = "supplier_available"
+	SupplierFrozen    TransactionItemBalanceBucket = "supplier_frozen"
+)
+
+// Valid indicates whether the value is a known member of the TransactionItemBalanceBucket enum.
+func (e TransactionItemBalanceBucket) Valid() bool {
+	switch e {
+	case Consumer:
+		return true
+	case SupplierAvailable:
+		return true
+	case SupplierFrozen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransactionItemDirection.
+const (
+	In  TransactionItemDirection = "in"
+	Out TransactionItemDirection = "out"
+)
+
+// Valid indicates whether the value is a known member of the TransactionItemDirection enum.
+func (e TransactionItemDirection) Valid() bool {
+	switch e {
+	case In:
+		return true
+	case Out:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransactionItemTransactionType.
+const (
+	CardRedeem       TransactionItemTransactionType = "card_redeem"
+	Credit           TransactionItemTransactionType = "credit"
+	Debit            TransactionItemTransactionType = "debit"
+	Freeze           TransactionItemTransactionType = "freeze"
+	ManualAdjustment TransactionItemTransactionType = "manual_adjustment"
+	Recharge         TransactionItemTransactionType = "recharge"
+	Refund           TransactionItemTransactionType = "refund"
+	Transfer         TransactionItemTransactionType = "transfer"
+	Withdrawal       TransactionItemTransactionType = "withdrawal"
+)
+
+// Valid indicates whether the value is a known member of the TransactionItemTransactionType enum.
+func (e TransactionItemTransactionType) Valid() bool {
+	switch e {
+	case CardRedeem:
+		return true
+	case Credit:
+		return true
+	case Debit:
+		return true
+	case Freeze:
+		return true
+	case ManualAdjustment:
+		return true
+	case Recharge:
+		return true
+	case Refund:
+		return true
+	case Transfer:
+		return true
+	case Withdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateCardRequestStatus.
+const (
+	UpdateCardRequestStatusDisabled UpdateCardRequestStatus = "disabled"
+	UpdateCardRequestStatusEnabled  UpdateCardRequestStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the UpdateCardRequestStatus enum.
+func (e UpdateCardRequestStatus) Valid() bool {
+	switch e {
+	case UpdateCardRequestStatusDisabled:
+		return true
+	case UpdateCardRequestStatusEnabled:
 		return true
 	default:
 		return false
@@ -1062,6 +1203,24 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 	case GetAdminAllocationParamsTypeDomain:
 		return true
 	case GetAdminAllocationParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminCardsParamsStatus.
+const (
+	GetAdminCardsParamsStatusDisabled GetAdminCardsParamsStatus = "disabled"
+	GetAdminCardsParamsStatusEnabled  GetAdminCardsParamsStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminCardsParamsStatus enum.
+func (e GetAdminCardsParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminCardsParamsStatusDisabled:
+		return true
+	case GetAdminCardsParamsStatusEnabled:
 		return true
 	default:
 		return false
@@ -1214,25 +1373,25 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
 		return true
 	default:
 		return false
@@ -1241,19 +1400,19 @@ func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsScope.
 const (
-	All     GetProjectsParamsScope = "all"
-	Mine    GetProjectsParamsScope = "mine"
-	Visible GetProjectsParamsScope = "visible"
+	GetProjectsParamsScopeAll     GetProjectsParamsScope = "all"
+	GetProjectsParamsScopeMine    GetProjectsParamsScope = "mine"
+	GetProjectsParamsScopeVisible GetProjectsParamsScope = "visible"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsScope enum.
 func (e GetProjectsParamsScope) Valid() bool {
 	switch e {
-	case All:
+	case GetProjectsParamsScopeAll:
 		return true
-	case Mine:
+	case GetProjectsParamsScopeMine:
 		return true
-	case Visible:
+	case GetProjectsParamsScopeVisible:
 		return true
 	default:
 		return false
@@ -1317,6 +1476,51 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	}
 }
 
+// Defines values for GetRechargesParamsScope.
+const (
+	GetRechargesParamsScopeAll  GetRechargesParamsScope = "all"
+	GetRechargesParamsScopeMine GetRechargesParamsScope = "mine"
+)
+
+// Valid indicates whether the value is a known member of the GetRechargesParamsScope enum.
+func (e GetRechargesParamsScope) Valid() bool {
+	switch e {
+	case GetRechargesParamsScopeAll:
+		return true
+	case GetRechargesParamsScopeMine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetRechargesParamsStatus.
+const (
+	Callback   GetRechargesParamsStatus = "callback"
+	Credited   GetRechargesParamsStatus = "credited"
+	Failed     GetRechargesParamsStatus = "failed"
+	Paying     GetRechargesParamsStatus = "paying"
+	Reconciled GetRechargesParamsStatus = "reconciled"
+)
+
+// Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
+func (e GetRechargesParamsStatus) Valid() bool {
+	switch e {
+	case Callback:
+		return true
+	case Credited:
+		return true
+	case Failed:
+		return true
+	case Paying:
+		return true
+	case Reconciled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
 	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
@@ -1335,6 +1539,24 @@ func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	}
 }
 
+// Defines values for GetWalletTransactionsParamsScope.
+const (
+	All  GetWalletTransactionsParamsScope = "all"
+	Mine GetWalletTransactionsParamsScope = "mine"
+)
+
+// Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
+func (e GetWalletTransactionsParamsScope) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Mine:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActivationRequest defines model for ActivationRequest.
 type ActivationRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -1346,6 +1568,12 @@ type ActivationRequest struct {
 type ActivationResponse struct {
 	// Needed Whether the system requires first-time activation
 	Needed bool `json:"needed"`
+}
+
+// AdminAdjustWalletRequest defines model for AdminAdjustWalletRequest.
+type AdminAdjustWalletRequest struct {
+	Amount string `json:"amount"`
+	Reason string `json:"reason"`
 }
 
 // AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
@@ -1465,6 +1693,30 @@ type CaptchaResponse struct {
 	Image string `json:"image"`
 }
 
+// CardKey defines model for CardKey.
+type CardKey struct {
+	Amount          string        `json:"amount"`
+	CardKey         string        `json:"cardKey"`
+	CreatedAt       time.Time     `json:"createdAt"`
+	CreatedByUserId *int          `json:"createdByUserId,omitempty"`
+	ExpireAt        *time.Time    `json:"expireAt"`
+	MaxRedemptions  int           `json:"maxRedemptions"`
+	RedeemedCount   int           `json:"redeemedCount"`
+	Status          CardKeyStatus `json:"status"`
+	UpdatedAt       time.Time     `json:"updatedAt"`
+}
+
+// CardKeyStatus defines model for CardKey.Status.
+type CardKeyStatus string
+
+// CardKeyListResponse defines model for CardKeyListResponse.
+type CardKeyListResponse struct {
+	Items  []CardKey `json:"items"`
+	Limit  int       `json:"limit"`
+	Offset int       `json:"offset"`
+	Total  int       `json:"total"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	NewPassword string `json:"newPassword"`
@@ -1512,6 +1764,21 @@ type CheckProxiesResponse struct {
 	// Queued Number of proxy checks accepted as durable check jobs. Filter mode creates one durable batch scheduler job while this value still reports the matched proxy count.
 	Queued    int `json:"queued"`
 	Requested int `json:"requested"`
+}
+
+// CreateCardsRequest defines model for CreateCardsRequest.
+type CreateCardsRequest struct {
+	Amount         string     `json:"amount"`
+	CardKeys       *[]string  `json:"cardKeys,omitempty"`
+	Count          *int       `json:"count,omitempty"`
+	ExpireAt       *time.Time `json:"expireAt,omitempty"`
+	MaxRedemptions *int       `json:"maxRedemptions,omitempty"`
+}
+
+// CreateCardsResponse defines model for CreateCardsResponse.
+type CreateCardsResponse struct {
+	Created int       `json:"created"`
+	Items   []CardKey `json:"items"`
 }
 
 // CreateDomainRequest defines model for CreateDomainRequest.
@@ -2240,6 +2507,42 @@ type ReadyzResponse struct {
 	Status       string            `json:"status"`
 }
 
+// RechargeItem defines model for RechargeItem.
+type RechargeItem struct {
+	CreatedAt     time.Time          `json:"createdAt"`
+	Id            int                `json:"id"`
+	PaymentAmount string             `json:"paymentAmount"`
+	PaymentMethod string             `json:"paymentMethod"`
+	RechargeNo    string             `json:"rechargeNo"`
+	RechargeQuota string             `json:"rechargeQuota"`
+	Status        RechargeItemStatus `json:"status"`
+	UpdatedAt     time.Time          `json:"updatedAt"`
+	UserId        int                `json:"userId"`
+}
+
+// RechargeItemStatus defines model for RechargeItem.Status.
+type RechargeItemStatus string
+
+// RechargeListResponse defines model for RechargeListResponse.
+type RechargeListResponse struct {
+	Items  []RechargeItem `json:"items"`
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
+	Total  int            `json:"total"`
+}
+
+// RedeemCardRequest defines model for RedeemCardRequest.
+type RedeemCardRequest struct {
+	CardKey string `json:"cardKey"`
+}
+
+// RedeemCardResponse defines model for RedeemCardResponse.
+type RedeemCardResponse struct {
+	Card        CardKey         `json:"card"`
+	Transaction TransactionItem `json:"transaction"`
+	Wallet      WalletResponse  `json:"wallet"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	Code       string              `json:"code"`
@@ -2491,6 +2794,48 @@ type SupplierApplicationResponse struct {
 // SupplierApplicationResponseStatus defines model for SupplierApplicationResponse.Status.
 type SupplierApplicationResponseStatus string
 
+// TransactionItem defines model for TransactionItem.
+type TransactionItem struct {
+	Amount          string                         `json:"amount"`
+	BalanceAfter    string                         `json:"balanceAfter"`
+	BalanceBefore   string                         `json:"balanceBefore"`
+	BalanceBucket   TransactionItemBalanceBucket   `json:"balanceBucket"`
+	BizId           string                         `json:"bizId"`
+	BizType         string                         `json:"bizType"`
+	CreatedAt       time.Time                      `json:"createdAt"`
+	Direction       TransactionItemDirection       `json:"direction"`
+	Id              int                            `json:"id"`
+	TransactionNo   string                         `json:"transactionNo"`
+	TransactionType TransactionItemTransactionType `json:"transactionType"`
+	UserId          int                            `json:"userId"`
+}
+
+// TransactionItemBalanceBucket defines model for TransactionItem.BalanceBucket.
+type TransactionItemBalanceBucket string
+
+// TransactionItemDirection defines model for TransactionItem.Direction.
+type TransactionItemDirection string
+
+// TransactionItemTransactionType defines model for TransactionItem.TransactionType.
+type TransactionItemTransactionType string
+
+// TransactionListResponse defines model for TransactionListResponse.
+type TransactionListResponse struct {
+	Items  []TransactionItem `json:"items"`
+	Limit  int               `json:"limit"`
+	Offset int               `json:"offset"`
+	Total  int               `json:"total"`
+}
+
+// UpdateCardRequest defines model for UpdateCardRequest.
+type UpdateCardRequest struct {
+	ExpireAt *time.Time               `json:"expireAt,omitempty"`
+	Status   *UpdateCardRequestStatus `json:"status,omitempty"`
+}
+
+// UpdateCardRequestStatus defines model for UpdateCardRequest.Status.
+type UpdateCardRequestStatus string
+
 // UpdateProxyRequest defines model for UpdateProxyRequest.
 type UpdateProxyRequest struct {
 	// ExpireAt Optional proxy expiration time. Send null to clear expiration.
@@ -2534,8 +2879,35 @@ type ValidateResourcesRequest struct {
 	Selection ResourceBulkSelection `json:"selection"`
 }
 
+// WalletAdjustmentResponse defines model for WalletAdjustmentResponse.
+type WalletAdjustmentResponse struct {
+	Transaction TransactionItem `json:"transaction"`
+	Wallet      WalletResponse  `json:"wallet"`
+}
+
+// WalletResponse defines model for WalletResponse.
+type WalletResponse struct {
+	// ConsumerBalance Consumer balance, fixed to 2 decimals.
+	ConsumerBalance string `json:"consumerBalance"`
+
+	// HistoricalSpend Consumer outflow total, fixed to 2 decimals.
+	HistoricalSpend string `json:"historicalSpend"`
+	OrderCount      int    `json:"orderCount"`
+
+	// SupplierAvailable Supplier available balance, fixed to 2 decimals.
+	SupplierAvailable string `json:"supplierAvailable"`
+
+	// SupplierFrozen Supplier frozen balance, fixed to 2 decimals.
+	SupplierFrozen string    `json:"supplierFrozen"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	UserId         int       `json:"userId"`
+}
+
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
+
+// IdempotencyKey defines model for IdempotencyKey.
+type IdempotencyKey = string
 
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
@@ -2568,6 +2940,32 @@ type GetAdminAllocationParams struct {
 
 // GetAdminAllocationParamsType defines parameters for GetAdminAllocation.
 type GetAdminAllocationParamsType string
+
+// GetAdminCardsParams defines parameters for GetAdminCards.
+type GetAdminCardsParams struct {
+	Search *string                    `form:"search,omitempty" json:"search,omitempty"`
+	Status *GetAdminCardsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Offset *int                       `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminCardsParamsStatus defines parameters for GetAdminCards.
+type GetAdminCardsParamsStatus string
+
+// PostAdminCardsParams defines parameters for PostAdminCards.
+type PostAdminCardsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PatchAdminCardParams defines parameters for PatchAdminCard.
+type PatchAdminCardParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
 
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
 type GetAdminInvitesParams struct {
@@ -2850,6 +3248,33 @@ type PostAdminRevokeSessionsParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminWalletCreditParams defines parameters for PostAdminWalletCredit.
+type PostAdminWalletCreditParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminWalletDebitParams defines parameters for PostAdminWalletDebit.
+type PostAdminWalletDebitParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostCardRedeemParams defines parameters for PostCardRedeem.
+type PostCardRedeemParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
 // PostDomainParams defines parameters for PostDomain.
 type PostDomainParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -2906,6 +3331,21 @@ type PostProjectResubmitParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
+
+// GetRechargesParams defines parameters for GetRecharges.
+type GetRechargesParams struct {
+	Scope  *GetRechargesParamsScope  `form:"scope,omitempty" json:"scope,omitempty"`
+	Search *string                   `form:"search,omitempty" json:"search,omitempty"`
+	Status *GetRechargesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Offset *int                      `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                      `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetRechargesParamsScope defines parameters for GetRecharges.
+type GetRechargesParamsScope string
+
+// GetRechargesParamsStatus defines parameters for GetRecharges.
+type GetRechargesParamsStatus string
 
 // PostResourceValidationsParams defines parameters for PostResourceValidations.
 type PostResourceValidationsParams struct {
@@ -3005,8 +3445,25 @@ type PostSupplierApplicationParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetWalletTransactionsParams defines parameters for GetWalletTransactions.
+type GetWalletTransactionsParams struct {
+	Scope  *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Search *string                           `form:"search,omitempty" json:"search,omitempty"`
+	Offset *int                              `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetWalletTransactionsParamsScope defines parameters for GetWalletTransactions.
+type GetWalletTransactionsParamsScope string
+
 // PostActivationJSONRequestBody defines body for PostActivation for application/json ContentType.
 type PostActivationJSONRequestBody = ActivationRequest
+
+// PostAdminCardsJSONRequestBody defines body for PostAdminCards for application/json ContentType.
+type PostAdminCardsJSONRequestBody = CreateCardsRequest
+
+// PatchAdminCardJSONRequestBody defines body for PatchAdminCard for application/json ContentType.
+type PatchAdminCardJSONRequestBody = UpdateCardRequest
 
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
@@ -3073,6 +3530,15 @@ type PatchAdminUserJSONRequestBody = AdminUpdateUserRequest
 
 // PutAdminUserPermissionsJSONRequestBody defines body for PutAdminUserPermissions for application/json ContentType.
 type PutAdminUserPermissionsJSONRequestBody = AdminUpdateUserPermissionsRequest
+
+// PostAdminWalletCreditJSONRequestBody defines body for PostAdminWalletCredit for application/json ContentType.
+type PostAdminWalletCreditJSONRequestBody = AdminAdjustWalletRequest
+
+// PostAdminWalletDebitJSONRequestBody defines body for PostAdminWalletDebit for application/json ContentType.
+type PostAdminWalletDebitJSONRequestBody = AdminAdjustWalletRequest
+
+// PostCardRedeemJSONRequestBody defines body for PostCardRedeem for application/json ContentType.
+type PostCardRedeemJSONRequestBody = RedeemCardRequest
 
 // PostDomainJSONRequestBody defines body for PostDomain for application/json ContentType.
 type PostDomainJSONRequestBody = CreateDomainRequest
@@ -3633,6 +4099,15 @@ type ServerInterface interface {
 	// Get one allocation record by table type and id
 	// (GET /v1/admin/allocations/{allocationId})
 	GetAdminAllocation(c *gin.Context, allocationId int, params GetAdminAllocationParams)
+	// List card keys
+	// (GET /v1/admin/cards)
+	GetAdminCards(c *gin.Context, params GetAdminCardsParams)
+	// Create card keys
+	// (POST /v1/admin/cards)
+	PostAdminCards(c *gin.Context, params PostAdminCardsParams)
+	// Enable or disable a card key
+	// (PATCH /v1/admin/cards/{cardKey})
+	PatchAdminCard(c *gin.Context, cardKey string, params PatchAdminCardParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -3759,9 +4234,18 @@ type ServerInterface interface {
 	// Force logout a user (revoke all sessions)
 	// (POST /v1/admin/users/{userId}/sessions/revoke)
 	PostAdminRevokeSessions(c *gin.Context, userId int, params PostAdminRevokeSessionsParams)
+	// Credit consumer balance manually
+	// (POST /v1/admin/wallets/{userId}/credit)
+	PostAdminWalletCredit(c *gin.Context, userId int, params PostAdminWalletCreditParams)
+	// Debit consumer balance manually
+	// (POST /v1/admin/wallets/{userId}/debit)
+	PostAdminWalletDebit(c *gin.Context, userId int, params PostAdminWalletDebitParams)
 	// Create a captcha challenge
 	// (POST /v1/captchas)
 	PostCaptcha(c *gin.Context)
+	// Redeem a card key into consumer balance
+	// (POST /v1/cards/redeem)
+	PostCardRedeem(c *gin.Context, params PostCardRedeemParams)
 	// Create a domain resource
 	// (POST /v1/domains)
 	PostDomain(c *gin.Context, params PostDomainParams)
@@ -3801,6 +4285,9 @@ type ServerInterface interface {
 	// Resubmit a rejected project application
 	// (POST /v1/projects/{projectId}/resubmit)
 	PostProjectResubmit(c *gin.Context, projectId int, params PostProjectResubmitParams)
+	// List recharge orders
+	// (GET /v1/recharges)
+	GetRecharges(c *gin.Context, params GetRechargesParams)
 	// Get resource import status
 	// (GET /v1/resource-imports/{importId})
 	GetResourceImport(c *gin.Context, importId int)
@@ -3855,6 +4342,12 @@ type ServerInterface interface {
 	// Register a new user
 	// (POST /v1/users)
 	PostRegister(c *gin.Context)
+	// Get current wallet
+	// (GET /v1/wallet)
+	GetWallet(c *gin.Context)
+	// List wallet transactions
+	// (GET /v1/wallet/transactions)
+	GetWalletTransactions(c *gin.Context, params GetWalletTransactionsParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -4039,6 +4532,180 @@ func (siw *ServerInterfaceWrapper) GetAdminAllocation(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminAllocation(c, allocationId, params)
+}
+
+// GetAdminCards operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminCards(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminCardsParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminCards(c, params)
+}
+
+// PostAdminCards operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminCards(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminCardsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminCards(c, params)
+}
+
+// PatchAdminCard operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminCard(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cardKey" -------------
+	var cardKey string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cardKey", c.Param("cardKey"), &cardKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cardKey: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminCardParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminCard(c, cardKey, params)
 }
 
 // GetAdminInvites operation middleware
@@ -6132,6 +6799,158 @@ func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
 	siw.Handler.PostAdminRevokeSessions(c, userId, params)
 }
 
+// PostAdminWalletCredit operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminWalletCredit(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminWalletCreditParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminWalletCredit(c, userId, params)
+}
+
+// PostAdminWalletDebit operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminWalletDebit(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminWalletDebitParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminWalletDebit(c, userId, params)
+}
+
 // PostCaptcha operation middleware
 func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
 
@@ -6143,6 +6962,73 @@ func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
 	}
 
 	siw.Handler.PostCaptcha(c)
+}
+
+// PostCardRedeem operation middleware
+func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostCardRedeemParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostCardRedeem(c, params)
 }
 
 // PostDomain operation middleware
@@ -6622,6 +7508,67 @@ func (siw *ServerInterfaceWrapper) PostProjectResubmit(c *gin.Context) {
 	}
 
 	siw.Handler.PostProjectResubmit(c, projectId, params)
+}
+
+// GetRecharges operation middleware
+func (siw *ServerInterfaceWrapper) GetRecharges(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRechargesParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetRecharges(c, params)
 }
 
 // GetResourceImport operation middleware
@@ -7321,6 +8268,74 @@ func (siw *ServerInterfaceWrapper) PostRegister(c *gin.Context) {
 	siw.Handler.PostRegister(c)
 }
 
+// GetWallet operation middleware
+func (siw *ServerInterfaceWrapper) GetWallet(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetWallet(c)
+}
+
+// GetWalletTransactions operation middleware
+func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWalletTransactionsParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetWalletTransactions(c, params)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -7354,6 +8369,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
 	router.GET(options.BaseURL+"/v1/admin/allocations", wrapper.GetAdminAllocations)
 	router.GET(options.BaseURL+"/v1/admin/allocations/:allocationId", wrapper.GetAdminAllocation)
+	router.GET(options.BaseURL+"/v1/admin/cards", wrapper.GetAdminCards)
+	router.POST(options.BaseURL+"/v1/admin/cards", wrapper.PostAdminCards)
+	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
@@ -7396,7 +8414,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
 	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
+	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
+	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
 	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
+	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
@@ -7410,6 +8431,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/projects/:projectId", wrapper.GetProject)
 	router.GET(options.BaseURL+"/v1/projects/:projectId/inventory", wrapper.GetProjectInventory)
 	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
+	router.GET(options.BaseURL+"/v1/recharges", wrapper.GetRecharges)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
 	router.POST(options.BaseURL+"/v1/resource-validations", wrapper.PostResourceValidations)
 	router.GET(options.BaseURL+"/v1/resource-validations/:validationId", wrapper.GetResourceValidation)
@@ -7428,4 +8450,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/supplier-applications", wrapper.PostSupplierApplication)
 	router.GET(options.BaseURL+"/v1/supplier-applications/current", wrapper.GetCurrentSupplierApplication)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
+	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
+	router.GET(options.BaseURL+"/v1/wallet/transactions", wrapper.GetWalletTransactions)
 }

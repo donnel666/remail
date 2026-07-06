@@ -3333,6 +3333,462 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- Billing Wallet ---
+  /v1/wallet:
+    get:
+      operationId: getWallet
+      summary: Get current wallet
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/wallet/transactions:
+    get:
+      operationId: getWalletTransactions
+      summary: List wallet transactions
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [mine, all]
+            default: mine
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Wallet transaction list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied for scope=all
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/recharges:
+    get:
+      operationId: getRecharges
+      summary: List recharge orders
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [mine, all]
+            default: mine
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [paying, callback, reconciled, credited, failed]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Recharge order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied for scope=all
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/cards/redeem:
+    post:
+      operationId: postCardRedeem
+      summary: Redeem a card key into consumer balance
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemCardRequest"
+      responses:
+        "200":
+          description: Card key redeemed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedeemCardResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid card key or card key cannot be redeemed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/{userId}/credit:
+    post:
+      operationId: postAdminWalletCredit
+      summary: Credit consumer balance manually
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAdjustWalletRequest"
+      responses:
+        "200":
+          description: Wallet credited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletAdjustmentResponse"
+        "400":
+          description: Invalid request or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid adjustment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/{userId}/debit:
+    post:
+      operationId: postAdminWalletDebit
+      summary: Debit consumer balance manually
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAdjustWalletRequest"
+      responses:
+        "200":
+          description: Wallet debited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletAdjustmentResponse"
+        "400":
+          description: Invalid request or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid adjustment or insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/cards:
+    get:
+      operationId: getAdminCards
+      summary: List card keys
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [enabled, disabled]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Card key list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardKeyListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: postAdminCards
+      summary: Create card keys
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCardsRequest"
+      responses:
+        "201":
+          description: Card keys created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCardsResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate card key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid card request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/cards/{cardKey}:
+    patch:
+      operationId: patchAdminCard
+      summary: Enable or disable a card key
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: cardKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCardRequest"
+      responses:
+        "200":
+          description: Card key updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardKey"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Card key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid card status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Proxy Pool ---
   /v1/admin/proxies:
     get:
@@ -3967,6 +4423,16 @@ components:
         type: string
       description: CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+
   securitySchemes:
     cookieAuth:
       type: apiKey
@@ -4021,6 +4487,318 @@ components:
           additionalProperties:
             type: string
             example: "Email format is invalid."
+      additionalProperties: false
+
+    WalletResponse:
+      type: object
+      required:
+        - userId
+        - consumerBalance
+        - supplierAvailable
+        - supplierFrozen
+        - historicalSpend
+        - orderCount
+        - updatedAt
+      properties:
+        userId:
+          type: integer
+        consumerBalance:
+          type: string
+          description: Consumer balance, fixed to 2 decimals.
+        supplierAvailable:
+          type: string
+          description: Supplier available balance, fixed to 2 decimals.
+        supplierFrozen:
+          type: string
+          description: Supplier frozen balance, fixed to 2 decimals.
+        historicalSpend:
+          type: string
+          description: Consumer outflow total, fixed to 2 decimals.
+        orderCount:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    TransactionItem:
+      type: object
+      required:
+        - id
+        - transactionNo
+        - userId
+        - transactionType
+        - balanceBucket
+        - direction
+        - amount
+        - balanceBefore
+        - balanceAfter
+        - bizType
+        - bizId
+        - createdAt
+      properties:
+        id:
+          type: integer
+        transactionNo:
+          type: string
+        userId:
+          type: integer
+        transactionType:
+          type: string
+          enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
+        balanceBucket:
+          type: string
+          enum: [consumer, supplier_available, supplier_frozen]
+        direction:
+          type: string
+          enum: [in, out]
+        amount:
+          type: string
+        balanceBefore:
+          type: string
+        balanceAfter:
+          type: string
+        bizType:
+          type: string
+        bizId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    TransactionListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransactionItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    RechargeItem:
+      type: object
+      required:
+        - id
+        - rechargeNo
+        - userId
+        - paymentMethod
+        - rechargeQuota
+        - paymentAmount
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        rechargeNo:
+          type: string
+        userId:
+          type: integer
+        paymentMethod:
+          type: string
+        rechargeQuota:
+          type: string
+        paymentAmount:
+          type: string
+        status:
+          type: string
+          enum: [paying, callback, reconciled, credited, failed]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    RechargeListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RechargeItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    RedeemCardRequest:
+      type: object
+      required:
+        - cardKey
+      properties:
+        cardKey:
+          type: string
+      additionalProperties: false
+
+    RedeemCardResponse:
+      type: object
+      required:
+        - wallet
+        - transaction
+        - card
+      properties:
+        wallet:
+          $ref: "#/components/schemas/WalletResponse"
+        transaction:
+          $ref: "#/components/schemas/TransactionItem"
+        card:
+          $ref: "#/components/schemas/CardKey"
+      additionalProperties: false
+
+    WalletAdjustmentResponse:
+      type: object
+      required:
+        - wallet
+        - transaction
+      properties:
+        wallet:
+          $ref: "#/components/schemas/WalletResponse"
+        transaction:
+          $ref: "#/components/schemas/TransactionItem"
+      additionalProperties: false
+
+    AdminAdjustWalletRequest:
+      type: object
+      required:
+        - amount
+        - reason
+      properties:
+        amount:
+          type: string
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 128
+      additionalProperties: false
+
+    CardKey:
+      type: object
+      required:
+        - cardKey
+        - amount
+        - status
+        - maxRedemptions
+        - redeemedCount
+        - expireAt
+        - createdAt
+        - updatedAt
+      properties:
+        cardKey:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [enabled, disabled]
+        maxRedemptions:
+          type: integer
+        redeemedCount:
+          type: integer
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdByUserId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    CardKeyListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardKey"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    CreateCardsRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          type: string
+        count:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        maxRedemptions:
+          type: integer
+          minimum: 1
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        cardKeys:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    CreateCardsResponse:
+      type: object
+      required:
+        - items
+        - created
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardKey"
+        created:
+          type: integer
+      additionalProperties: false
+
+    UpdateCardRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [enabled, disabled]
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
       additionalProperties: false
 
     # --- IAM Schemas ---

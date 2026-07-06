@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Avatar,
@@ -37,6 +37,14 @@ import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import {
+  getWallet,
+  listWalletTransactions,
+  redeemCard,
+  type TransactionItem,
+  type WalletResponse,
+} from "@/lib/wallet-api";
+import { IamApiError } from "@/lib/api-client";
 
 const { Text } = Typography;
 
@@ -58,16 +66,10 @@ interface PaymentMethod {
   type: "alipay";
 }
 
-const rechargeStats: BannerStat[] = [
-  { icon: <Wallet size={14} />, label: "Current Balance", value: "￥1,286.60" },
-  { icon: <TrendingUp size={14} />, label: "Historical Spend", value: "￥843.20" },
-  { icon: <BarChart2 size={14} />, label: "Order Count", value: "128" },
-];
-
 const referralStats: BannerStat[] = [
-  { icon: <TrendingUp size={14} />, label: "Pending Rewards", value: "￥68.00" },
-  { icon: <BarChart2 size={14} />, label: "Total Earned", value: "￥240.00" },
-  { icon: <Users size={14} />, label: "Invites", value: "12" },
+  { icon: <TrendingUp size={14} />, label: "Pending Rewards", value: "￥0.00" },
+  { icon: <BarChart2 size={14} />, label: "Total Earned", value: "￥0.00" },
+  { icon: <Users size={14} />, label: "Invites", value: "0" },
 ];
 
 const presetAmounts: PresetAmount[] = [
@@ -80,6 +82,22 @@ const presetAmounts: PresetAmount[] = [
 const paymentMethods: PaymentMethod[] = [
   { name: "Alipay", type: "alipay" },
 ];
+
+function formatCurrency(value: string | number | undefined) {
+  const numeric = Number(value ?? 0);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  return `￥${safeValue.toLocaleString("zh-CN", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}`;
+}
+
+function formatDateTime(value: string | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
 
 function StatBanner({
   action,
@@ -136,12 +154,54 @@ export default function Financial() {
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
+  const [wallet, setWallet] = useState<WalletResponse | null>(null);
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [redeeming, setRedeeming] = useState(false);
+  const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
   const amountFormApiRef = useRef<{
     setValue?: (field: "topUpCount", value: unknown) => void;
   } | null>(null);
   const redeemFormApiRef = useRef<{
     setValue?: (field: "redemptionCode", value: unknown) => void;
   } | null>(null);
+
+  const refreshWallet = useCallback(async () => {
+    setWalletLoading(true);
+    try {
+      setWallet(await getWallet());
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setWalletLoading(false);
+    }
+  }, [t]);
+
+  const refreshRecharges = useCallback(async () => {
+    setBillingLoading(true);
+    try {
+      const response = await listWalletTransactions(
+        { search: billingKeyword.trim() || undefined },
+        0,
+        100
+      );
+      setTransactions(response.items);
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [billingKeyword, t]);
+
+  useEffect(() => {
+    void refreshWallet();
+  }, [refreshWallet]);
+
+  useEffect(() => {
+    if (!billingOpen) return;
+    void refreshRecharges();
+  }, [billingOpen, refreshRecharges]);
 
   const handlePresetSelect = (preset: PresetAmount) => {
     setSelectedAmount(preset.value);
@@ -153,15 +213,77 @@ export default function Financial() {
     Toast.info(t(messageKey));
   };
 
-  const handleRedeem = () => {
+  const handleRedeem = async () => {
     if (!redemptionCode.trim()) {
       Toast.warning(t("Please enter redemption code."));
       return;
     }
-    Toast.success(t("Mock redemption submitted."));
-    setRedemptionCode("");
-    redeemFormApiRef.current?.setValue?.("redemptionCode", "");
+    if (redeeming) return;
+    setRedeeming(true);
+    const code = redemptionCode.trim();
+    if (!redeemAttemptRef.current || redeemAttemptRef.current.code !== code) {
+      redeemAttemptRef.current = {
+        code,
+        key:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      };
+    }
+    try {
+      await redeemCard(code, redeemAttemptRef.current.key);
+      Toast.success(t("Redemption completed."));
+      redeemAttemptRef.current = null;
+      setRedemptionCode("");
+      redeemFormApiRef.current?.setValue?.("redemptionCode", "");
+      await refreshWallet();
+      if (billingOpen) {
+        await refreshRecharges();
+      }
+    } catch (error) {
+      if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
+        redeemAttemptRef.current = null;
+      }
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setRedeeming(false);
+    }
   };
+
+  const rechargeStats = useMemo<BannerStat[]>(
+    () => [
+      {
+        icon: <Wallet size={14} />,
+        label: "Current Balance",
+        value: walletLoading ? "..." : formatCurrency(wallet?.consumerBalance),
+      },
+      {
+        icon: <TrendingUp size={14} />,
+        label: "Historical Spend",
+        value: walletLoading ? "..." : formatCurrency(wallet?.historicalSpend),
+      },
+      {
+        icon: <BarChart2 size={14} />,
+        label: "Order Count",
+        value: walletLoading ? "..." : String(wallet?.orderCount ?? 0),
+      },
+    ],
+    [wallet, walletLoading]
+  );
+
+  const billingData = useMemo(
+    () =>
+      transactions.map((item) => ({
+        ...item,
+        orderNo: item.transactionNo,
+        paymentMethod: item.transactionType === "card_redeem" ? "Redemption Code" : item.bizType,
+        rechargeQuotaText: formatCurrency(item.amount),
+        paymentAmountText: formatCurrency(item.amount),
+        status: item.direction === "in" ? "credited" : item.transactionType,
+        createdAtText: formatDateTime(item.createdAt),
+      })),
+    [transactions]
+  );
 
   const billingColumns = useMemo(
     () => [
@@ -176,22 +298,23 @@ export default function Financial() {
         title: t("Payment method"),
       },
       {
-        dataIndex: "rechargeQuota",
+        dataIndex: "rechargeQuotaText",
         key: "rechargeQuota",
         title: t("Recharge quota"),
       },
       {
-        dataIndex: "paymentAmount",
+        dataIndex: "paymentAmountText",
         key: "paymentAmount",
         title: t("Payment amount"),
       },
       {
         dataIndex: "status",
         key: "status",
+        render: (status: string) => <Tag>{t(status)}</Tag>,
         title: t("Status"),
       },
       {
-        dataIndex: "createdAt",
+        dataIndex: "createdAtText",
         key: "createdAt",
         title: t("Created At"),
       },
@@ -383,6 +506,7 @@ export default function Financial() {
                       style={{ width: "100%" }}
                       suffix={
                         <Button
+                          loading={redeeming}
                           onClick={handleRedeem}
                           theme="solid"
                           type="primary"
@@ -446,18 +570,18 @@ export default function Financial() {
                     {t("Referral Link")}
                   </span>
                 }
+                placeholder={t("This feature is not connected yet.")}
                 readOnly
                 suffix={
                   <Button
                     icon={<Copy size={14} />}
-                    onClick={() => Toast.success(t("Copied"))}
+                    onClick={() => handleMockOnly()}
                     theme="solid"
                     type="primary"
                   >
                     {t("Copy")}
                   </Button>
                 }
-                value="https://remail.aishop6.com/register?invite=DEMO2026"
               />
             </Card>
 
@@ -503,7 +627,7 @@ export default function Financial() {
         <div>
           <Table
             columns={billingColumns}
-            dataSource={[]}
+            dataSource={billingData}
             empty={
               <Empty
                 darkModeImage={
@@ -518,6 +642,7 @@ export default function Financial() {
                 style={{ padding: 30 }}
               />
             }
+            loading={billingLoading}
             pagination={false}
             rowKey="orderNo"
             size="small"

@@ -10,6 +10,7 @@ import (
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
+	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
@@ -99,6 +100,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
 		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
+
+		// Billing module (wallet, recharge ledger and card-key redemption)
+		billingMod := billingapi.NewBillingModule(p.DB)
+		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)
