@@ -1,5 +1,529 @@
-import { PlaceholderPage } from "./PlaceholderPage";
+import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  Avatar,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Space,
+  Tag,
+  Table,
+  Toast,
+  Typography,
+} from "@douyinfe/semi-ui";
+import { IconSearch } from "@douyinfe/semi-icons";
+import {
+  IllustrationNoResult,
+  IllustrationNoResultDark,
+} from "@douyinfe/semi-illustrations";
+import {
+  BarChart2,
+  Coins,
+  Copy,
+  CreditCard,
+  Gift,
+  Receipt,
+  Share2,
+  TrendingUp,
+  Users,
+  Wallet,
+  Zap,
+} from "lucide-react";
+import { SiAlipay } from "react-icons/si";
+import { useTranslation } from "react-i18next";
+
+import sampleProjectCover from "@/assets/cover-4.webp";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+
+const { Text } = Typography;
+
+interface BannerStat {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}
+
+interface PresetAmount {
+  amount: string;
+  badge?: string;
+  pay: string;
+  value: number;
+}
+
+interface PaymentMethod {
+  name: string;
+  type: "alipay";
+}
+
+const rechargeStats: BannerStat[] = [
+  { icon: <Wallet size={14} />, label: "Current Balance", value: "￥1,286.60" },
+  { icon: <TrendingUp size={14} />, label: "Historical Spend", value: "￥843.20" },
+  { icon: <BarChart2 size={14} />, label: "Order Count", value: "128" },
+];
+
+const referralStats: BannerStat[] = [
+  { icon: <TrendingUp size={14} />, label: "Pending Rewards", value: "￥68.00" },
+  { icon: <BarChart2 size={14} />, label: "Total Earned", value: "￥240.00" },
+  { icon: <Users size={14} />, label: "Invites", value: "12" },
+];
+
+const presetAmounts: PresetAmount[] = [
+  { amount: "100 ￥", pay: "￥13.70", value: 100 },
+  { amount: "200 ￥", pay: "￥27.40", value: 200 },
+  { amount: "300 ￥", pay: "￥41.10", value: 300 },
+  { amount: "500 ￥", pay: "￥68.49", value: 500 },
+];
+
+const paymentMethods: PaymentMethod[] = [
+  { name: "Alipay", type: "alipay" },
+];
+
+function StatBanner({
+  action,
+  stats,
+  title,
+  tone,
+}: {
+  action?: ReactNode;
+  stats: BannerStat[];
+  title: string;
+  tone: "orange" | "teal";
+}) {
+  const { t } = useTranslation();
+  const overlay =
+    tone === "orange"
+      ? "linear-gradient(105deg, rgba(160,72,18,0.96), rgba(234,121,37,0.82))"
+      : "linear-gradient(105deg, rgba(15,95,91,0.96), rgba(11,130,111,0.82))";
+
+  return (
+    <div
+      className="h-[130px] bg-cover bg-center text-white"
+      style={{
+        backgroundImage: `${overlay}, url(${sampleProjectCover})`,
+      }}
+    >
+      <div className="flex h-full flex-col justify-between p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-base font-semibold">{t(title)}</div>
+          {action}
+        </div>
+        <div className="grid grid-cols-3 gap-6">
+          {stats.map((stat) => (
+            <div className="min-w-0 text-center" key={stat.label}>
+              <div className="font-mono text-xl font-bold tabular-nums md:text-2xl">
+                {stat.value}
+              </div>
+              <div className="mt-2 flex min-w-0 items-center justify-center gap-1 text-xs text-white/85">
+                {stat.icon}
+                <span className="truncate">{t(stat.label)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Financial() {
-  return <PlaceholderPage titleKey="Wallet Management" />;
+  const { t } = useTranslation();
+  const isMobile = useIsMobile();
+  const [selectedAmount, setSelectedAmount] = useState(100);
+  const [customAmount, setCustomAmount] = useState("100");
+  const [redemptionCode, setRedemptionCode] = useState("");
+  const [billingOpen, setBillingOpen] = useState(false);
+  const [billingKeyword, setBillingKeyword] = useState("");
+  const amountFormApiRef = useRef<{
+    setValue?: (field: "topUpCount", value: unknown) => void;
+  } | null>(null);
+  const redeemFormApiRef = useRef<{
+    setValue?: (field: "redemptionCode", value: unknown) => void;
+  } | null>(null);
+
+  const handlePresetSelect = (preset: PresetAmount) => {
+    setSelectedAmount(preset.value);
+    setCustomAmount(String(preset.value));
+    amountFormApiRef.current?.setValue?.("topUpCount", preset.value);
+  };
+
+  const handleMockOnly = (messageKey = "This feature is not connected yet.") => {
+    Toast.info(t(messageKey));
+  };
+
+  const handleRedeem = () => {
+    if (!redemptionCode.trim()) {
+      Toast.warning(t("Please enter redemption code."));
+      return;
+    }
+    Toast.success(t("Mock redemption submitted."));
+    setRedemptionCode("");
+    redeemFormApiRef.current?.setValue?.("redemptionCode", "");
+  };
+
+  const billingColumns = useMemo(
+    () => [
+      {
+        dataIndex: "orderNo",
+        key: "orderNo",
+        title: t("Order No."),
+      },
+      {
+        dataIndex: "paymentMethod",
+        key: "paymentMethod",
+        title: t("Payment method"),
+      },
+      {
+        dataIndex: "rechargeQuota",
+        key: "rechargeQuota",
+        title: t("Recharge quota"),
+      },
+      {
+        dataIndex: "paymentAmount",
+        key: "paymentAmount",
+        title: t("Payment amount"),
+      },
+      {
+        dataIndex: "status",
+        key: "status",
+        title: t("Status"),
+      },
+      {
+        dataIndex: "createdAt",
+        key: "createdAt",
+        title: t("Created At"),
+      },
+    ],
+    [t]
+  );
+
+  return (
+    <>
+      <div className="mx-auto max-w-[1280px] px-2 pt-5">
+        <div className="grid gap-5 xl:grid-cols-2">
+          <div className="space-y-2">
+            <Card
+              bodyStyle={{ padding: 12 }}
+              className="!rounded-2xl border-0 shadow-sm"
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center">
+                  <Avatar
+                    className="mr-3 shadow-md"
+                    color="orange"
+                    size="small"
+                  >
+                    <CreditCard size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className="text-lg font-medium">
+                      {t("Account Recharge")}
+                    </Text>
+                    <div className="text-xs">
+                      {t("Multiple recharge methods, safe and convenient")}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  icon={<Receipt size={16} />}
+                  onClick={() => setBillingOpen(true)}
+                  theme="solid"
+                  type="primary"
+                >
+                  {t("Billing")}
+                </Button>
+              </div>
+
+              <Card
+                bodyStyle={{ padding: 8 }}
+                className="!rounded-xl w-full overflow-hidden"
+                cover={
+                  <StatBanner
+                    stats={rechargeStats}
+                    title="Account statistics"
+                    tone="orange"
+                  />
+                }
+              >
+                <Form
+                  getFormApi={(api) => {
+                    amountFormApiRef.current = api;
+                  }}
+                  initValues={{ topUpCount: Number(customAmount) || 0 }}
+                >
+                  <div className="grid gap-4 md:grid-cols-[213px_minmax(0,1fr)] md:gap-8">
+                    <Form.InputNumber
+                      extraText={
+                        <Text type="secondary">
+                          {t("Payable")}:{" "}
+                          <span style={{ color: "red" }}>
+                            {Number(selectedAmount || 0).toFixed(2)}
+                          </span>
+                        </Text>
+                      }
+                      field="topUpCount"
+                      label={t("Recharge Amount")}
+                      max={999999999}
+                      min={1}
+                      onChange={(value) => {
+                        const parsed = Number(value);
+                        setCustomAmount(Number.isFinite(parsed) ? String(parsed) : "");
+                        if (Number.isFinite(parsed) && parsed > 0) {
+                          setSelectedAmount(parsed);
+                        }
+                      }}
+                      precision={0}
+                      step={1}
+                      style={{ width: "100%" }}
+                    />
+                    <Form.Slot label={t("Payment Method")}>
+                      <Space wrap>
+                        {paymentMethods.map((method) => (
+                          <Button
+                            icon={<SiAlipay color="#1677FF" size={18} />}
+                            key={method.type}
+                            onClick={() => handleMockOnly()}
+                            theme="outline"
+                            type="tertiary"
+                          >
+                            {t(method.name)}
+                          </Button>
+                        ))}
+                      </Space>
+                    </Form.Slot>
+                  </div>
+
+                  <Form.Slot label={t("Select recharge amount")}>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                      {presetAmounts.map((preset) => {
+                        const selected = preset.value === selectedAmount;
+                        return (
+                          <div
+                            key={preset.value}
+                            onClick={() => handlePresetSelect(preset)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handlePresetSelect(preset);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            style={{
+                              cursor: "pointer",
+                              height: 116,
+                              width: "100%",
+                            }}
+                          >
+                            <Card
+                              bodyStyle={{ padding: 12 }}
+                              className="!rounded-xl h-full"
+                              style={{
+                                border: selected
+                                  ? "2px solid var(--semi-color-primary)"
+                                  : "1px solid var(--semi-color-border)",
+                                height: "100%",
+                                width: "100%",
+                              }}
+                            >
+                              <div className="text-center">
+                                <div className="mb-2 flex items-center justify-center gap-1 text-base font-semibold">
+                                  <Coins size={18} />
+                                  {preset.amount}
+                                  {preset.badge ? (
+                                    <Tag color="orange" size="small">
+                                      {t(preset.badge)}
+                                    </Tag>
+                                  ) : null}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {t("Pay")} {preset.pay}
+                                  {t("Pay saving suffix")}
+                                </div>
+                              </div>
+                            </Card>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Form.Slot>
+                </Form>
+              </Card>
+
+              <div className="mt-2">
+                <Card
+                  bodyStyle={{ padding: "6px 12px 12px" }}
+                  className="!rounded-xl w-full"
+                  title={
+                    <Text strong type="tertiary">
+                      {t("Redemption Code Recharge")}
+                    </Text>
+                  }
+                >
+                  <Form
+                    getFormApi={(api) => {
+                      redeemFormApiRef.current = api;
+                    }}
+                    initValues={{ redemptionCode }}
+                  >
+                    <Form.Input
+                      field="redemptionCode"
+                      noLabel
+                      onChange={(value) => setRedemptionCode(String(value))}
+                      placeholder={t("Enter redemption code")}
+                      prefix={
+                        <Gift
+                          className="text-muted-foreground"
+                          size={15}
+                        />
+                      }
+                      showClear
+                      style={{ width: "100%" }}
+                      suffix={
+                        <Button
+                          onClick={handleRedeem}
+                          theme="solid"
+                          type="primary"
+                        >
+                          {t("Redeem quota")}
+                        </Button>
+                      }
+                    />
+                  </Form>
+                </Card>
+              </div>
+            </Card>
+          </div>
+
+          <Card
+            bodyStyle={{ padding: 12 }}
+            className="!rounded-2xl flex h-full flex-col border-0 shadow-sm"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center">
+                <Avatar className="mr-3 shadow-md" color="green" size="small">
+                  <Share2 size={16} />
+                </Avatar>
+                <div>
+                  <Text className="text-lg font-medium">
+                    {t("Referral Rewards")}
+                  </Text>
+                  <div className="text-xs">
+                    {t("Invite friends for additional rewards")}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Card
+              bodyStyle={{ padding: 12 }}
+              className="!rounded-xl w-full overflow-hidden"
+              cover={
+                <StatBanner
+                  action={
+                    <Button
+                      disabled
+                      icon={<Zap size={12} />}
+                      size="small"
+                      theme="solid"
+                      type="primary"
+                    >
+                      {t("Transfer to Balance")}
+                    </Button>
+                  }
+                  stats={referralStats}
+                  title="Reward statistics"
+                  tone="teal"
+                />
+              }
+            >
+              <Input
+                className="!rounded-lg"
+                prefix={
+                  <span className="whitespace-nowrap pr-3 text-sm text-muted-foreground">
+                    {t("Referral Link")}
+                  </span>
+                }
+                readOnly
+                suffix={
+                  <Button
+                    icon={<Copy size={14} />}
+                    onClick={() => Toast.success(t("Copied"))}
+                    theme="solid"
+                    type="primary"
+                  >
+                    {t("Copy")}
+                  </Button>
+                }
+                value="https://remail.aishop6.com/register?invite=DEMO2026"
+              />
+            </Card>
+
+            <div className="mt-2">
+              <Card
+                className="!rounded-xl w-full"
+                title={<Text type="tertiary">{t("Reward Rules")}</Text>}
+              >
+                <div className="space-y-3 p-3 text-sm text-muted-foreground">
+                  {[
+                    "Invite friends to register and receive rewards after they recharge.",
+                    "Transfer rewards into consumer balance after backend connection.",
+                    "More invited active users bring more rewards.",
+                  ].map((item) => (
+                    <div className="flex gap-2" key={item}>
+                      <span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                      <span>{t(item)}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <Modal
+        footer={null}
+        onCancel={() => setBillingOpen(false)}
+        size={isMobile ? "full-width" : "large"}
+        title={t("Recharge Billing")}
+        visible={billingOpen}
+      >
+        <div className="mb-3">
+          <Input
+            onChange={(value) => setBillingKeyword(String(value))}
+            placeholder={t("Order No.")}
+            prefix={<IconSearch />}
+            showClear
+            value={billingKeyword}
+          />
+        </div>
+        <div>
+          <Table
+            columns={billingColumns}
+            dataSource={[]}
+            empty={
+              <Empty
+                darkModeImage={
+                  <IllustrationNoResultDark
+                    style={{ height: 150, width: 150 }}
+                  />
+                }
+                description={t("No recharge records")}
+                image={
+                  <IllustrationNoResult style={{ height: 150, width: 150 }} />
+                }
+                style={{ padding: 30 }}
+              />
+            }
+            pagination={false}
+            rowKey="orderNo"
+            size="small"
+          />
+        </div>
+      </Modal>
+    </>
+  );
 }
