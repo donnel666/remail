@@ -60,6 +60,7 @@ var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "iam:supplier_application", Actions: []string{"read", "operate"}},
 	{Resource: "core:project", Actions: []string{"read", "write", "operate"}},
 	{Resource: "proxy:proxy", Actions: []string{"read", "write", "operate"}},
+	{Resource: "alloc:allocation", Actions: []string{"read", "operate"}},
 }
 
 // ListUsers returns a paginated list of all users.

@@ -7,6 +7,12 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-01 | V1.1 | Codex | 补充 Microsoft 公开出售候选与 owner 自用私有候选分层；普通 user 资源不得进入公开供给池。 |
 | 2026-07-02 | V1.2 | Codex | 补充 P1-I2 Domain 状态命名改为 `normal/abnormal/disabled/deleted`；分配候选继续只接受 `purpose=sale + status=normal`。 |
+| 2026-07-06 | V1.3 | Codex | 补充 P1-I5 分桶锁定 LRU 分配算法、active generated unique key、分配查询和候选诊断边界；此为缺失算法细化，不改变分配状态机和 BC 归属。 |
+| 2026-07-06 | V1.4 | Codex | 补充 P1-I5 并发实现细节：候选列表只读、最终候选按主键短锁、事务外带抖动重试、别名复用索引和同步边界；此为实现约束补充，不改变分配状态机和 BC 归属。 |
+| 2026-07-06 | V1.5 | Codex | 补充候选刷新异步任务边界和数据库复合约束细节；此为矩阵 D20/D5 缺失实现约束补充，不改变分配算法、状态机或 BC 归属。 |
+| 2026-07-06 | V1.6 | Codex | 修正 P1-I5 候选读模型范围：Microsoft 与 Domain 都建候选表，候选刷新异步刷新两类候选；此为与实施计划一致的设计纠偏。 |
+| 2026-07-06 | V1.7 | Codex | 补充分配源表候选与候选读模型边界：P1-I5 分配以 Core 源表短锁重校验为准，候选读模型只做后台诊断和预热；此为实现边界补充，不改变分配不变式。 |
+| 2026-07-06 | V1.8 | Codex | 补充并纠正项目库存口径：库存按项目商品启用的分配形态计算；plus/domain 这类无限生成能力通过资源级日限量和按资源分散的 daily usage counter 形成库存；这会替代旧的“加号别名不计库存、不扣库存”口径，但不改变分配状态机。 |
 
 > 核心域。BC-ALLOC 只负责把订单绑定到一个邮箱使用权，不拥有资源验证、订单状态或钱包。
 
@@ -16,7 +22,7 @@
 
 | 拥有 | 不拥有 |
 |------|--------|
-| 微软候选读模型、微软分配、自建分配、一单一资源保护、释放 | 资源生命周期、项目审批、订单状态、钱包、服务凭证、邮件事实 |
+| Microsoft/Domain 候选读模型、微软分配、自建分配、一单一资源保护、释放 | 资源生命周期、项目审批、订单状态、钱包、服务凭证、邮件事实 |
 
 目标：
 
@@ -32,18 +38,19 @@
 
 ### 2.1 `RoutingCandidate`
 
-项目和 Microsoft 主资源之间的候选读模型。
+项目和可分配资源之间的候选读模型。P1-I5 使用两张候选表：`microsoft_routing_candidates` 与 `domain_routing_candidates`。候选表用于后台诊断和预热，不是库存扣减表。
 
 | 字段 | 含义 |
 |------|------|
 | `id` | 候选 ID |
+| `type` | `microsoft/domain` |
 | `projectId` | 项目 ID |
-| `resourceId` | Microsoft 资源 ID |
-| `emailAddress` | 主邮箱快照 |
-| `domainSuffix` | 邮箱后缀 |
-| `forSale` | 出售标记快照 |
-| `qualityScore` | 质量分 |
-| `status` | Core Microsoft 状态快照：`normal/abnormal/disabled`；候选刷新只保留 `normal` 可分配资源 |
+| `resourceId` | 资源 ID |
+| `address` | Microsoft 主邮箱或 Domain 域名快照 |
+| `domainSuffix` | Microsoft 邮箱后缀或 Domain 后缀 |
+| `forSale` | Microsoft 出售标记快照；Domain 候选固定代表 `purpose=sale` |
+| `qualityScore` | Microsoft 质量分；Domain 当前为 `0` |
+| `status` | Core 资源状态快照：`normal/abnormal/disabled`；候选刷新只保留 `normal` 可分配资源 |
 
 候选是读模型，不是库存扣减表。候选刷新时必须防御性校验资源 owner 仍具备 `supplier/admin/super_admin` 任一角色。
 
@@ -68,7 +75,7 @@ Microsoft 候选分为两类：
 | `explicitAliasId` | 显式别名 ID，可空 |
 | `dotAliasId` | 点别名 ID，可空 |
 | `plusAliasId` | 加号别名 ID，可空 |
-| `email` | 交付邮箱；主邮箱可为空，由资源主邮箱解析 |
+| `email` | 交付邮箱；主邮箱也必须冗余写入主邮箱地址，用于收件人索引和 MailMatch 快速定位 |
 | `status` | `allocated/released` |
 | `createdAt/releasedAt` | 时间 |
 
@@ -163,6 +170,83 @@ sequenceDiagram
     A-->>T: allocationId + deliveryEmail
 ```
 
+### 4.3 P1-I5 补充设计：分桶锁定 LRU 算法
+
+P1-I5 分配算法采用 Bucketed Locked LRU Allocation。目标是保持实现简单，同时避免并发下所有请求争抢同一批最旧资源：
+
+| 规则 | 说明 |
+|------|------|
+| 分桶 | 可分配资源按 `resourceId % 64` 写入 `allocBucket`。分配时用 `hash(orderNo, projectId, mailboxKind) % 64` 选择起始桶，先查起始桶，再少量查相邻桶，每个桶使用 4 条候选小窗口，最后全局 8 条候选兜底。 |
+| 锁定 | 资源候选列表查询保持只读，避免 MySQL 范围锁放大；真正尝试某个候选前，再按资源主键 `FOR UPDATE SKIP LOCKED` 短锁并重新校验 Core 源表条件。复用显式别名、点别名、加号别名和自建生成邮箱时也使用 `FOR UPDATE SKIP LOCKED` 锁定被复用实体。不使用 Redis 锁兜底。 |
+| 排序 | 候选按 `lastAllocatedAt ASC, qualityScore DESC, id ASC` 排序，优先使用长期未分配、质量更好的资源；不得使用 `ORDER BY RAND()`。 |
+| 唯一约束 | 并发正确性最终由 `OrderGuard` 和 allocation active generated unique key 兜底；锁只用于减少复用实体冲突。 |
+| 重试 | 同一短事务内遇到 active 唯一冲突时换下一个候选或下一个非零权重 mailbox；候选瞬时被并发事务占用时由事务外层短暂重查。事务内不得 sleep。MySQL `1213/1205` 死锁或锁等待超时由最外层短事务最多重试 8 次并带 jitter，避免并发请求同步重撞。超过窗口仍失败返回库存不足。 |
+
+`main/dot/plus` 权重只决定首选 mailbox 类型，不表示唯一可选类型。若首选类型因库存耗尽失败，分配器可按同一商品内其他非零权重类型继续尝试，避免有库存但误报无库存。权重选择必须基于 `orderNo + productId` 的确定性 hash，保证幂等重放不会漂移。
+
+公开出售候选和自用私有候选必须使用两条显式查询路径：
+
+| 路径 | 条件 |
+|------|------|
+| 公开出售 | `Microsoft.status=normal AND forSale=true`，且 owner 启用并具备 `supplier/admin/super_admin` 任一角色。 |
+| 自用私有 | `Microsoft.status=normal AND forSale=false AND ownerUserId=buyerUserId`；只能由 owner 自己分配，不进入公开池。 |
+
+`RoutingCandidate` 是 Microsoft/Domain 候选读模型和后台诊断能力，不是库存扣减表。分配可以使用候选读模型缩小范围，但必须在同一数据库事务内按资源主键重新校验 Core 源表中的资源状态、出售标记或用途、owner 启用状态和 owner 角色，避免 stale candidate 造成错误分配。Domain 候选表只保存 `purpose=sale + status=normal + mailServer=online + owner eligible` 的资源快照。
+
+P1-I5 当前分配实现使用 SourceCandidate 查询 Core 源表并在同一短事务内 `FOR UPDATE SKIP LOCKED` 重校验；`RoutingCandidate` 由异步刷新任务维护，仅用于后台库存诊断、预热和排障，不作为分配正确性的前置条件，也不作为库存扣减 authority。
+
+P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细，普通用户和下单页只需要看到项目与商品的总库存，不返回来源 breakdown。库存分两类：
+
+| 类型 | 库存口径 |
+|------|----------|
+| 主邮箱类 | `mainWeight > 0` 时计入可用主邮箱和可用显式别名。 |
+| 点别名 | `dotWeight > 0` 时按 `eligibleMicrosoftResourceCount * 10 - activeDotAllocationsForProject` 估算；分配生成点别名也最多生成 10 个，保证展示和实际一致。 |
+| 加号别名 | `plusWeight > 0` 时按 `SUM(microsoft.plusDailyLimit) - todayPlusUsage` 计算。 |
+| 自建生成邮箱 | Domain 商品启用时按 `SUM(domain.mailboxDailyLimit) - todayDomainMailboxUsage` 计算。 |
+
+`plusDailyLimit` 归 Microsoft 资源，`mailboxDailyLimit` 归 Domain 资源，默认都是 `10000`。这两个字段保护的是资源本身，不放在项目商品上；多个项目共享同一个资源时，一个项目的消耗会减少其他项目看到的共享可用量。
+
+日限量使用 `allocation_daily_usages` 记录每日用量，主键为 `(usageDate, resourceType, resourceId, usageKind)`。这是按资源分散的 counter，不允许设计为项目级或全局总库存行，避免所有请求竞争同一把锁。分配事务先锁源资源行，再锁同一资源当天的 usage row，检查 `usedCount < dailyLimit`，allocation 插入成功后同事务 `usedCount + 1`。释放 allocation 不回补 daily usage，因为 plus/domain 生成次数已经消耗。
+
+分配写路径必须在同一个短事务内完成：创建 `OrderGuard`、读取项目商品、锁定候选、选择或创建别名/生成邮箱、插入 allocation、更新 `lastAllocatedAt`。事务内禁止 Microsoft、SMTP、DNS、MinIO、Graph、IMAP 等外部网络调用。
+
+P1-I5 同步/异步边界：分配由订单同步调用，因为订单需要立即拿到 `allocationId + deliveryEmail` 才能签发服务凭证和进入后续读取流程。该同步事务只访问数据库，不做外部网络调用；候选刷新是后台诊断/预热能力，不是分配正确性的前置条件，HTTP 入口只创建持久任务并投递 Asynq，worker 异步执行读模型刷新。候选刷新任务单次执行，不依赖 Asynq 重试循环；dispatcher 必须把超过 lease 且已用完执行次数的 `running` job 标记为 `failed` 并记录 SystemLog，释放 active job 约束，避免管理员只能靠 SQL 修状态。后续 Trade 调用 BC-ALLOC 时必须复用同一个 `AllocationPort`，不得在 Trade 内复制分配 SQL。
+
+### 4.4 P1-I5 补充设计：active 唯一约束
+
+MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active key：
+
+| 表 | 约束 |
+|----|------|
+| `allocation_order_guards` | `orderNo` 主键；allocation 子表通过 `(orderNo, guardType)` 复合外键指向 `(orderNo, type)`，保证一个订单只能进入 Microsoft 或 Domain 其中一种分配。 |
+| `microsoft_allocations` | active main 对 `resourceId` 唯一；active explicit alias 对 `explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
+| `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一。 |
+
+补充约束：`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。以上是数据库兜底，不替代领域层校验。
+
+别名和自建生成邮箱复用查询必须有明确索引：
+
+| 表 | 索引目标 |
+|----|----------|
+| `explicit_aliases` | `resourceId + status + id` 支撑显式别名复用。 |
+| `dot_aliases` | `resourceId + status + id` 支撑点别名复用。 |
+| `plus_aliases` | `resourceId + status + id` 支撑加号别名复用。 |
+| `generated_mailboxes` | `resourceId + status + lastAllocatedAt + id` 支撑自建生成邮箱 LRU 复用。 |
+
+释放只把 allocation 从 `allocated` 改为 `released` 并写 `releasedAt`，不得删除 `OrderGuard`，不得修改资源状态、订单状态、钱包或服务凭证。
+
+### 4.5 P1-I5 补充设计：查询与诊断
+
+后台分配 API 只做查询、库存诊断和候选刷新，不提供手工创建、编辑或直接释放分配：
+
+| 能力 | 要求 |
+|------|------|
+| 按订单查询 | 先查 `OrderGuard` 决定 Microsoft/Domain，再查对应 allocation 表。 |
+| 按收件人查询 | `email + status` 必须有索引，供 MailMatch 先按 recipient 定位 active 分配，禁止全项目扫描。主邮箱分配也必须冗余写入交付邮箱，提升匹配性能。 |
+| 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存和每个商品的 `totalAvailable`，不返回来源 breakdown。 |
+| 库存诊断 | `GET /v1/admin/projects/{projectId}/inventory` 返回项目商品、Microsoft 可分配统计、Domain 可分配统计和 active 分配统计。 |
+| 候选刷新 | `POST /v1/admin/projects/{projectId}/candidates/refresh` 只创建 `allocation_candidate_refresh_jobs` 持久任务并返回 `202`；worker 异步刷新 Microsoft 与 Domain 候选读模型。分配正确性不得依赖刷新任务是否刚好完成。 |
+
 ---
 
 ## 5. 不变式
@@ -172,9 +256,9 @@ sequenceDiagram
 | INV-A1 | 一个订单只能有一条分配事实，跨分配表由 `OrderGuard` 兜底。 |
 | INV-A2 | 分配创建时必须校验项目已上架、商品启用、资源可用和 owner 资格。 |
 | INV-A3 | 分配释放只改分配状态，不改资源、别名、订单、钱包。 |
-| INV-A4 | 加号别名不计库存、不扣库存，但必须有可用 Microsoft 资源承载。 |
+| INV-A4 | 加号别名按 Microsoft 资源级 `plusDailyLimit` 形成每日库存，分配成功后扣减当天 `allocation_daily_usages`；释放不回补当天用量。 |
 | INV-A5 | 点别名、加号别名、自建生成邮箱必须优先复用。 |
-| INV-A6 | 分配结果必须返回交付邮箱；主邮箱分配可由 `resourceId` 解析邮箱地址。 |
+| INV-A6 | 分配结果必须返回交付邮箱；主邮箱分配也必须在 allocation 表冗余写入主邮箱地址。 |
 | INV-A7 | 不提供手工创建/编辑分配能力，避免绕过交易和钱包。 |
 
 ---
@@ -202,9 +286,10 @@ sequenceDiagram
 | `GET` | `/v1/admin/allocations` | 分配列表，按 `orderNo/projectId/resourceId/type/status/mailbox` 筛选。 |
 | `GET` | `/v1/admin/allocations/{allocationId}` | 分配详情，必须带 `type` 查询参数防止猜表。 |
 | `GET` | `/v1/admin/orders/{orderNo}/allocations` | 按订单查看分配。 |
+| `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目和商品库存总数；只返回总数，不返回来源 breakdown。 |
 | `GET` | `/v1/admin/projects/{projectId}/inventory` | 项目库存和可用性诊断。 |
-| `GET` | `/v1/admin/projects/{projectId}/candidates` | 路由候选读模型；支持 `type=microsoft`。 |
-| `POST` | `/v1/admin/projects/{projectId}/candidates/refresh` | 刷新候选读模型。 |
+| `GET` | `/v1/admin/projects/{projectId}/candidates` | 路由候选读模型；支持 `type=microsoft/domain`，不传则返回两类候选。 |
+| `POST` | `/v1/admin/projects/{projectId}/candidates/refresh` | 创建候选读模型刷新任务，返回 `202`。 |
 
 写接口成功返回 `200/202/204`，失败返回统一最小错误 JSON。
 
@@ -216,6 +301,6 @@ sequenceDiagram
 |-----|------|------|
 | ADR-ALLOC-1 | Microsoft 和自建分配拆表 | 两类策略完全不同，通用表会复杂化。 |
 | ADR-ALLOC-2 | 分配状态只保留 `allocated/released` | 一致性靠事务、唯一约束和订单状态机，不造中间状态。 |
-| ADR-ALLOC-3 | 自建不建候选表 | 自建运行时选择/生成即可，候选表收益低。 |
+| ADR-ALLOC-3 | Microsoft 和 Domain 都建候选读模型 | 候选诊断、后台库存可见性和刷新任务保持一致；候选表只做读模型，不替代分配事务内的源表校验。 |
 | ADR-ALLOC-4 | 分配不拥有可复用邮箱生命周期 | 别名池和自建生成邮箱归资源上下文。 |
 | ADR-ALLOC-5 | 后台只查不改分配策略 | 后台不能绕过交易创建分配。 |

@@ -257,7 +257,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
   # --- Current User ---
   /v1/me:
     get:
@@ -1287,6 +1286,46 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Project not found or not visible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/projects/{projectId}/inventory:
+    get:
+      operationId: getProjectInventory
+      summary: Get user-safe product inventory totals for a project
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project product inventory totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectInventoryTotalResponse"
+        "400":
+          description: Invalid project ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not available for allocation
           content:
             application/json:
               schema:
@@ -2965,6 +3004,330 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Domain resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Allocation Routing ---
+  /v1/admin/allocations:
+    get:
+      operationId: getAdminAllocations
+      summary: List allocation records for diagnostics
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [microsoft, domain]
+        - name: orderNo
+          in: query
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          schema:
+            type: integer
+        - name: resourceId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [allocated, released]
+        - name: mailbox
+          in: query
+          schema:
+            type: string
+            enum: [main, alias, dot, plus, domain]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Allocation list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllocationListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/allocations/{allocationId}:
+    get:
+      operationId: getAdminAllocation
+      summary: Get one allocation record by table type and id
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: allocationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [microsoft, domain]
+      responses:
+        "200":
+          description: Allocation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllocationItem"
+        "400":
+          description: Invalid path or query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Allocation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid allocation type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/orders/{orderNo}/allocations:
+    get:
+      operationId: getAdminOrderAllocation
+      summary: Get allocation by order number
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Allocation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllocationItem"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Allocation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/inventory:
+    get:
+      operationId: getAdminProjectInventory
+      summary: Get allocation inventory diagnostics for a project
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: buyerUserId
+          in: query
+          schema:
+            type: integer
+            description: Optional buyer id used to count owned private Microsoft candidates.
+      responses:
+        "200":
+          description: Project inventory diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectInventoryResponse"
+        "400":
+          description: Invalid path or query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project is not available for allocation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/candidates:
+    get:
+      operationId: getAdminProjectCandidates
+      summary: List routing candidates for a project
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [microsoft, domain]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Routing candidate list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingCandidateListResponse"
+        "400":
+          description: Invalid path or query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid candidate type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/projects/{projectId}/candidates/refresh:
+    post:
+      operationId: postAdminProjectCandidatesRefresh
+      summary: Refresh routing candidates for a project
+      tags:
+        - Allocation
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "202":
+          description: Candidate refresh job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateRefreshResponse"
+        "400":
+          description: Invalid path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -5378,6 +5741,287 @@ components:
           type: integer
         limit:
           type: integer
+      additionalProperties: false
+
+    AllocationItem:
+      type: object
+      required:
+        - type
+        - id
+        - orderNo
+        - projectId
+        - productId
+        - resourceId
+        - mailbox
+        - email
+        - status
+        - createdAt
+      properties:
+        type:
+          type: string
+          enum: [microsoft, domain]
+        id:
+          type: integer
+        orderNo:
+          type: string
+        projectId:
+          type: integer
+        productId:
+          type: integer
+        resourceId:
+          type: integer
+        mailbox:
+          type: string
+          enum: [main, alias, dot, plus, domain]
+        email:
+          type: string
+        status:
+          type: string
+          enum: [allocated, released]
+        createdAt:
+          type: string
+          format: date-time
+        releasedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    AllocationListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllocationItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    ProjectInventoryResponse:
+      type: object
+      required:
+        - projectId
+        - microsoft
+        - domain
+        - totalAvailable
+        - activeMicrosoftAllocations
+        - activeDomainAllocations
+      properties:
+        projectId:
+          type: integer
+        microsoft:
+          $ref: "#/components/schemas/MicrosoftInventory"
+        domain:
+          $ref: "#/components/schemas/DomainInventory"
+        totalAvailable:
+          type: integer
+        activeMicrosoftAllocations:
+          type: integer
+        activeDomainAllocations:
+          type: integer
+      additionalProperties: false
+
+    ProjectInventoryTotalResponse:
+      type: object
+      required:
+        - projectId
+        - totalAvailable
+        - products
+      properties:
+        projectId:
+          type: integer
+        totalAvailable:
+          type: integer
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectProductInventoryTotal"
+      additionalProperties: false
+
+    ProjectProductInventoryTotal:
+      type: object
+      required:
+        - productId
+        - totalAvailable
+      properties:
+        productId:
+          type: integer
+        totalAvailable:
+          type: integer
+      additionalProperties: false
+
+    MicrosoftInventory:
+      type: object
+      required:
+        - enabled
+        - mainEnabled
+        - dotEnabled
+        - plusEnabled
+        - eligibleResources
+        - mainAvailable
+        - explicitAliasAvailable
+        - dotCapacity
+        - activeDotAllocations
+        - dotAvailable
+        - plusDailyLimit
+        - plusDailyUsed
+        - plusDailyAvailable
+        - totalAvailable
+      properties:
+        enabled:
+          type: boolean
+        mainEnabled:
+          type: boolean
+        dotEnabled:
+          type: boolean
+        plusEnabled:
+          type: boolean
+        eligibleResources:
+          type: integer
+        mainAvailable:
+          type: integer
+        explicitAliasAvailable:
+          type: integer
+        dotCapacity:
+          type: integer
+        activeDotAllocations:
+          type: integer
+        dotAvailable:
+          type: integer
+        plusDailyLimit:
+          type: integer
+        plusDailyUsed:
+          type: integer
+        plusDailyAvailable:
+          type: integer
+        totalAvailable:
+          type: integer
+      additionalProperties: false
+
+    DomainInventory:
+      type: object
+      required:
+        - enabled
+        - eligibleResources
+        - mailboxDailyLimit
+        - mailboxDailyUsed
+        - mailboxDailyAvailable
+        - totalAvailable
+      properties:
+        enabled:
+          type: boolean
+        eligibleResources:
+          type: integer
+        mailboxDailyLimit:
+          type: integer
+        mailboxDailyUsed:
+          type: integer
+        mailboxDailyAvailable:
+          type: integer
+        totalAvailable:
+          type: integer
+      additionalProperties: false
+
+    RoutingCandidate:
+      type: object
+      required:
+        - id
+        - type
+        - projectId
+        - resourceId
+        - address
+        - domainSuffix
+        - forSale
+        - qualityScore
+        - status
+        - bucket
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [microsoft, domain]
+        projectId:
+          type: integer
+        resourceId:
+          type: integer
+        address:
+          type: string
+        domainSuffix:
+          type: string
+        forSale:
+          type: boolean
+        qualityScore:
+          type: integer
+        status:
+          type: string
+          enum: [normal, abnormal, disabled]
+        bucket:
+          type: integer
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    RoutingCandidateListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutingCandidate"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    CandidateRefreshResponse:
+      type: object
+      required:
+        - jobId
+        - projectId
+        - status
+        - created
+        - message
+      properties:
+        jobId:
+          type: integer
+        projectId:
+          type: integer
+        status:
+          type: string
+          enum: [pending, queued, running, succeeded, failed]
+        created:
+          type: boolean
+        message:
+          type: string
       additionalProperties: false
 
     ProxyBindingListResponse:

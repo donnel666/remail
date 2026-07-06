@@ -1,0 +1,32 @@
+package api
+
+import (
+	"github.com/donnel666/remail/api/middleware"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
+	"github.com/gin-gonic/gin"
+)
+
+func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
+	h := NewHandler(mod)
+	auth := rg.Group("")
+	auth.Use(middleware.LoadSession(fetcher))
+	auth.Use(middleware.AuthRequired())
+	auth.Use(middleware.CSRFRequired())
+	{
+		auth.GET("/projects/:projectId/inventory", h.GetUserProjectInventory)
+	}
+
+	admin := rg.Group("/admin")
+	admin.Use(middleware.LoadSession(fetcher))
+	admin.Use(middleware.AuthRequired())
+	admin.Use(middleware.CSRFRequired())
+	admin.Use(middleware.AdminRequired(iamdomain.RoleAdmin))
+	{
+		admin.GET("/allocations", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetAllocations)
+		admin.GET("/allocations/:allocationId", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetAllocation)
+		admin.GET("/orders/:orderNo/allocations", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetOrderAllocation)
+		admin.GET("/projects/:projectId/inventory", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetProjectInventory)
+		admin.GET("/projects/:projectId/candidates", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetProjectCandidates)
+		admin.POST("/projects/:projectId/candidates/refresh", middleware.PermissionRequired(checker, "alloc:allocation", "operate"), h.PostProjectCandidatesRefresh)
+	}
+}

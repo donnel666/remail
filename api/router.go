@@ -9,6 +9,7 @@ import (
 
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
+	allocapi "github.com/donnel666/remail/internal/alloc/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
@@ -93,6 +94,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
+
+		// Allocation module (admin diagnostics and Trade-facing application port)
+		allocMod := allocapi.NewModule(p.DB, p.Asynq)
+		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
+		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)

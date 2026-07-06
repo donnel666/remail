@@ -43,6 +43,13 @@ func (r *SystemLogRepo) Create(ctx context.Context, log *domain.SystemLog) error
 	return nil
 }
 
+func (r *SystemLogRepo) CreateInTx(ctx context.Context, tx *gorm.DB, log *domain.SystemLog) error {
+	if err := tx.WithContext(ctx).Create(systemLogModel(log)).Error; err != nil {
+		return fmt.Errorf("create system log: %w", err)
+	}
+	return nil
+}
+
 func systemLogModel(log *domain.SystemLog) *SystemLogModel {
 	return &SystemLogModel{
 		Level:     log.Level,

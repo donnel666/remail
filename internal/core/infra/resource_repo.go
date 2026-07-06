@@ -56,6 +56,8 @@ type MicrosoftResourceModel struct {
 	ForSale         bool       `gorm:"not null;default:false;column:for_sale"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'pending'"`
 	QualityScore    int        `gorm:"not null;default:0;column:quality_score"`
+	PlusDailyLimit  int        `gorm:"not null;default:10000;column:plus_daily_limit"`
+	AllocBucket     uint8      `gorm:"not null;default:0;column:alloc_bucket"`
 	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
@@ -79,6 +81,7 @@ func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 		ForSale:         m.ForSale,
 		Status:          domain.MicrosoftResourceStatus(m.Status),
 		QualityScore:    m.QualityScore,
+		PlusDailyLimit:  m.PlusDailyLimit,
 		LastSafeError:   m.LastSafeError,
 		LastAllocatedAt: m.LastAllocatedAt,
 		CreatedAt:       m.CreatedAt,
@@ -100,6 +103,8 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 		ForSale:         ms.ForSale,
 		Status:          string(ms.Status),
 		QualityScore:    ms.QualityScore,
+		PlusDailyLimit:  normalizeDailyLimit(ms.PlusDailyLimit, domain.DefaultPlusDailyLimit),
+		AllocBucket:     uint8(ms.ID % 64),
 		LastSafeError:   ms.LastSafeError,
 		LastAllocatedAt: ms.LastAllocatedAt,
 		CreatedAt:       ms.CreatedAt,
@@ -109,17 +114,19 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 
 // DomainResourceModel is the GORM model for the domain_resources table.
 type DomainResourceModel struct {
-	ID              uint       `gorm:"primaryKey"`
-	Domain          string     `gorm:"type:varchar(255);not null;uniqueIndex"`
-	DomainTLD       string     `gorm:"type:varchar(64);not null;default:'';column:domain_tld"`
-	OwnerUserID     uint       `gorm:"not null;column:owner_user_id"`
-	MailServerID    uint       `gorm:"not null;column:mail_server_id"`
-	Purpose         string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
-	Status          string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
-	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
-	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime"`
+	ID                uint       `gorm:"primaryKey"`
+	Domain            string     `gorm:"type:varchar(255);not null;uniqueIndex"`
+	DomainTLD         string     `gorm:"type:varchar(64);not null;default:'';column:domain_tld"`
+	OwnerUserID       uint       `gorm:"not null;column:owner_user_id"`
+	MailServerID      uint       `gorm:"not null;column:mail_server_id"`
+	Purpose           string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
+	Status            string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
+	LastSafeError     string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	MailboxDailyLimit int        `gorm:"not null;default:10000;column:mailbox_daily_limit"`
+	AllocBucket       uint8      `gorm:"not null;default:0;column:alloc_bucket"`
+	LastAllocatedAt   *time.Time `gorm:"column:last_allocated_at"`
+	CreatedAt         time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt         time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 func (DomainResourceModel) TableName() string {
@@ -128,15 +135,16 @@ func (DomainResourceModel) TableName() string {
 
 func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
 	return &domain.MailDomainResource{
-		ID:              m.ID,
-		Domain:          m.Domain,
-		MailServerID:    m.MailServerID,
-		Purpose:         domain.ResourcePurpose(m.Purpose),
-		Status:          domain.MailDomainStatus(m.Status),
-		LastSafeError:   m.LastSafeError,
-		LastAllocatedAt: m.LastAllocatedAt,
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
+		ID:                m.ID,
+		Domain:            m.Domain,
+		MailServerID:      m.MailServerID,
+		Purpose:           domain.ResourcePurpose(m.Purpose),
+		Status:            domain.MailDomainStatus(m.Status),
+		MailboxDailyLimit: m.MailboxDailyLimit,
+		LastSafeError:     m.LastSafeError,
+		LastAllocatedAt:   m.LastAllocatedAt,
+		CreatedAt:         m.CreatedAt,
+		UpdatedAt:         m.UpdatedAt,
 	}
 }
 
@@ -175,6 +183,13 @@ func microsoftEmailDomain(email string) string {
 		return ""
 	}
 	return normalized[index+1:]
+}
+
+func normalizeDailyLimit(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func uniqueMicrosoftEmails(emails []string) []string {
@@ -264,6 +279,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 
 		msModel := fromMicrosoftDomain(ms)
 		msModel.ID = root.ID
+		msModel.AllocBucket = uint8(root.ID % 64)
 		if err := tx.Create(msModel).Error; err != nil {
 			return fmt.Errorf("create microsoft resource: %w", err)
 		}
@@ -317,16 +333,18 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 			}
 
 			restored := &DomainResourceModel{
-				ID:            existing.ID,
-				OwnerUserID:   resource.OwnerUserID,
-				Domain:        dr.Domain,
-				DomainTLD:     domain.TLD(dr.Domain),
-				MailServerID:  dr.MailServerID,
-				Purpose:       string(dr.Purpose),
-				Status:        string(dr.Status),
-				LastSafeError: dr.LastSafeError,
-				CreatedAt:     existing.CreatedAt,
-				UpdatedAt:     now,
+				ID:                existing.ID,
+				OwnerUserID:       resource.OwnerUserID,
+				Domain:            dr.Domain,
+				DomainTLD:         domain.TLD(dr.Domain),
+				MailServerID:      dr.MailServerID,
+				Purpose:           string(dr.Purpose),
+				Status:            string(dr.Status),
+				LastSafeError:     dr.LastSafeError,
+				MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+				AllocBucket:       uint8(existing.ID % 64),
+				CreatedAt:         existing.CreatedAt,
+				UpdatedAt:         now,
 			}
 			if err := tx.Create(restored).Error; err != nil {
 				return fmt.Errorf("restore deleted domain resource: %w", err)
@@ -350,14 +368,16 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 		}
 
 		domainModel := &DomainResourceModel{
-			ID:            root.ID,
-			OwnerUserID:   root.OwnerUserID,
-			Domain:        dr.Domain,
-			DomainTLD:     domain.TLD(dr.Domain),
-			MailServerID:  dr.MailServerID,
-			Purpose:       string(dr.Purpose),
-			Status:        string(dr.Status),
-			LastSafeError: dr.LastSafeError,
+			ID:                root.ID,
+			OwnerUserID:       root.OwnerUserID,
+			Domain:            dr.Domain,
+			DomainTLD:         domain.TLD(dr.Domain),
+			MailServerID:      dr.MailServerID,
+			Purpose:           string(dr.Purpose),
+			Status:            string(dr.Status),
+			LastSafeError:     dr.LastSafeError,
+			MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+			AllocBucket:       uint8(root.ID % 64),
 		}
 		if err := tx.Create(domainModel).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -466,6 +486,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	for i := range ms {
 		msModels[i] = *fromMicrosoftDomain(&ms[i])
 		msModels[i].ID = rootModels[i].ID
+		msModels[i].AllocBucket = uint8(rootModels[i].ID % 64)
 	}
 	if err := tx.CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
 		if isDuplicateKeyError(err) {
@@ -762,6 +783,7 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 			"status":            string(resource.Status),
 			"quality_score":     resource.QualityScore,
 			"graph_available":   resource.GraphAvailable,
+			"plus_daily_limit":  normalizeDailyLimit(resource.PlusDailyLimit, domain.DefaultPlusDailyLimit),
 			"last_safe_error":   resource.LastSafeError,
 			"last_allocated_at": resource.LastAllocatedAt,
 			"updated_at":        time.Now(),
@@ -1746,14 +1768,15 @@ func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain
 		}
 		resource.Domain = domainName
 		updates := map[string]interface{}{
-			"domain":            domainName,
-			"domain_tld":        domain.TLD(domainName),
-			"mail_server_id":    resource.MailServerID,
-			"purpose":           string(resource.Purpose),
-			"status":            string(resource.Status),
-			"last_safe_error":   resource.LastSafeError,
-			"last_allocated_at": resource.LastAllocatedAt,
-			"updated_at":        time.Now(),
+			"domain":              domainName,
+			"domain_tld":          domain.TLD(domainName),
+			"mail_server_id":      resource.MailServerID,
+			"purpose":             string(resource.Purpose),
+			"status":              string(resource.Status),
+			"mailbox_daily_limit": normalizeDailyLimit(resource.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+			"last_safe_error":     resource.LastSafeError,
+			"last_allocated_at":   resource.LastAllocatedAt,
+			"updated_at":          time.Now(),
 		}
 		if err := tx.Model(&DomainResourceModel{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update domain resource: %w", err)

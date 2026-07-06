@@ -14,6 +14,11 @@ const (
 	ResourceTypeDomain    ResourceType = "domain"
 )
 
+const (
+	DefaultPlusDailyLimit    = 10000
+	DefaultMailboxDailyLimit = 10000
+)
+
 // MicrosoftResourceStatus represents the status of a Microsoft resource.
 type MicrosoftResourceStatus string
 
@@ -79,6 +84,7 @@ type MicrosoftResource struct {
 	ForSale         bool
 	Status          MicrosoftResourceStatus
 	QualityScore    int
+	PlusDailyLimit  int
 	LastSafeError   string // Sanitized diagnostic summary
 	LastAllocatedAt *time.Time
 	CreatedAt       time.Time
@@ -156,15 +162,16 @@ type MicrosoftImportLine struct {
 
 // MailDomainResource holds self-hosted domain-specific resource fields.
 type MailDomainResource struct {
-	ID              uint // Shared PK = EmailResource.ID
-	Domain          string
-	MailServerID    uint
-	Purpose         ResourcePurpose
-	Status          MailDomainStatus
-	LastSafeError   string // Sanitized diagnostic summary
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                uint // Shared PK = EmailResource.ID
+	Domain            string
+	MailServerID      uint
+	Purpose           ResourcePurpose
+	Status            MailDomainStatus
+	MailboxDailyLimit int
+	LastSafeError     string // Sanitized diagnostic summary
+	LastAllocatedAt   *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // IsValidDomainStatus returns true if the status is a valid state.

@@ -453,6 +453,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectId}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get user-safe product inventory totals for a project */
+        get: operations["getProjectInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{projectId}/resubmit": {
         parameters: {
             query?: never;
@@ -933,6 +950,108 @@ export interface paths {
         get: operations["getDomainMailboxes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List allocation records for diagnostics */
+        get: operations["getAdminAllocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/allocations/{allocationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one allocation record by table type and id */
+        get: operations["getAdminAllocation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/orders/{orderNo}/allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get allocation by order number */
+        get: operations["getAdminOrderAllocation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/projects/{projectId}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get allocation inventory diagnostics for a project */
+        get: operations["getAdminProjectInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/projects/{projectId}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List routing candidates for a project */
+        get: operations["getAdminProjectCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/projects/{projectId}/candidates/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh routing candidates for a project */
+        post: operations["postAdminProjectCandidatesRefresh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1834,6 +1953,105 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        AllocationItem: {
+            /** @enum {string} */
+            type: "microsoft" | "domain";
+            id: number;
+            orderNo: string;
+            projectId: number;
+            productId: number;
+            resourceId: number;
+            /** @enum {string} */
+            mailbox: "main" | "alias" | "dot" | "plus" | "domain";
+            email: string;
+            /** @enum {string} */
+            status: "allocated" | "released";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            releasedAt?: string | null;
+        };
+        AllocationListResponse: {
+            items: components["schemas"]["AllocationItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        ProjectInventoryResponse: {
+            projectId: number;
+            microsoft: components["schemas"]["MicrosoftInventory"];
+            domain: components["schemas"]["DomainInventory"];
+            totalAvailable: number;
+            activeMicrosoftAllocations: number;
+            activeDomainAllocations: number;
+        };
+        ProjectInventoryTotalResponse: {
+            projectId: number;
+            totalAvailable: number;
+            products: components["schemas"]["ProjectProductInventoryTotal"][];
+        };
+        ProjectProductInventoryTotal: {
+            productId: number;
+            totalAvailable: number;
+        };
+        MicrosoftInventory: {
+            enabled: boolean;
+            mainEnabled: boolean;
+            dotEnabled: boolean;
+            plusEnabled: boolean;
+            eligibleResources: number;
+            mainAvailable: number;
+            explicitAliasAvailable: number;
+            dotCapacity: number;
+            activeDotAllocations: number;
+            dotAvailable: number;
+            plusDailyLimit: number;
+            plusDailyUsed: number;
+            plusDailyAvailable: number;
+            totalAvailable: number;
+        };
+        DomainInventory: {
+            enabled: boolean;
+            eligibleResources: number;
+            mailboxDailyLimit: number;
+            mailboxDailyUsed: number;
+            mailboxDailyAvailable: number;
+            totalAvailable: number;
+        };
+        RoutingCandidate: {
+            id: number;
+            /** @enum {string} */
+            type: "microsoft" | "domain";
+            projectId: number;
+            resourceId: number;
+            address: string;
+            domainSuffix: string;
+            forSale: boolean;
+            qualityScore: number;
+            /** @enum {string} */
+            status: "normal" | "abnormal" | "disabled";
+            bucket: number;
+            /** Format: date-time */
+            lastAllocatedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        RoutingCandidateListResponse: {
+            items: components["schemas"]["RoutingCandidate"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        CandidateRefreshResponse: {
+            jobId: number;
+            projectId: number;
+            /** @enum {string} */
+            status: "pending" | "queued" | "running" | "succeeded" | "failed";
+            created: boolean;
+            message: string;
         };
         ProxyBindingListResponse: {
             items: components["schemas"]["ProxyBindingItem"][];
@@ -3493,6 +3711,55 @@ export interface operations {
             };
             /** @description Project not found or not visible */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getProjectInventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project product inventory totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectInventoryTotalResponse"];
+                };
+            };
+            /** @description Invalid project ID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project is not available for allocation */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5577,6 +5844,354 @@ export interface operations {
             };
             /** @description Domain resource not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminAllocations: {
+        parameters: {
+            query?: {
+                type?: "microsoft" | "domain";
+                orderNo?: string;
+                projectId?: number;
+                resourceId?: number;
+                status?: "allocated" | "released";
+                mailbox?: "main" | "alias" | "dot" | "plus" | "domain";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allocation list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationListResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminAllocation: {
+        parameters: {
+            query: {
+                type: "microsoft" | "domain";
+            };
+            header?: never;
+            path: {
+                allocationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allocation detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationItem"];
+                };
+            };
+            /** @description Invalid path or query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Allocation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid allocation type */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminOrderAllocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allocation detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationItem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Allocation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProjectInventory: {
+        parameters: {
+            query?: {
+                buyerUserId?: number;
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project inventory diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectInventoryResponse"];
+                };
+            };
+            /** @description Invalid path or query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project is not available for allocation */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminProjectCandidates: {
+        parameters: {
+            query?: {
+                type?: "microsoft" | "domain";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Routing candidate list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingCandidateListResponse"];
+                };
+            };
+            /** @description Invalid path or query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid candidate type */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProjectCandidatesRefresh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Candidate refresh job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRefreshResponse"];
+                };
+            };
+            /** @description Invalid path parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

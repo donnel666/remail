@@ -1,0 +1,79 @@
+package infra
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	"github.com/hibiken/asynq"
+)
+
+const (
+	TypeCandidateRefresh           = "alloc:candidate_refresh"
+	TypeCandidateRefreshDispatcher = "alloc:candidate_refresh_dispatcher"
+
+	allocationQueueName                   = "default"
+	candidateRefreshTaskTimeout           = 5 * time.Minute
+	candidateRefreshDispatcherTaskTimeout = 30 * time.Second
+)
+
+type CandidateRefreshQueue struct {
+	client *asynq.Client
+}
+
+func NewCandidateRefreshQueue(client *asynq.Client) *CandidateRefreshQueue {
+	return &CandidateRefreshQueue{client: client}
+}
+
+func (q *CandidateRefreshQueue) EnqueueCandidateRefresh(ctx context.Context, task allocapp.CandidateRefreshTask) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("candidate refresh queue is unavailable")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal candidate refresh task: %w", err)
+	}
+	asynqTask := asynq.NewTask(TypeCandidateRefresh, payload)
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynqTask,
+		asynq.Queue(allocationQueueName),
+		asynq.TaskID(fmt.Sprintf("%s:%d", TypeCandidateRefresh, task.JobID)),
+		asynq.MaxRetry(0),
+		asynq.Timeout(candidateRefreshTaskTimeout),
+	)
+	if err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		return fmt.Errorf("enqueue candidate refresh task: %w", err)
+	}
+	return nil
+}
+
+func (q *CandidateRefreshQueue) EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("candidate refresh dispatcher queue is unavailable")
+	}
+	asynqTask := asynq.NewTask(TypeCandidateRefreshDispatcher, nil)
+	options := []asynq.Option{
+		asynq.Queue(allocationQueueName),
+		asynq.TaskID(TypeCandidateRefreshDispatcher),
+		asynq.MaxRetry(0),
+		asynq.Timeout(candidateRefreshDispatcherTaskTimeout),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
+	if err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		return fmt.Errorf("enqueue candidate refresh dispatcher task: %w", err)
+	}
+	return nil
+}

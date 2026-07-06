@@ -36,6 +36,96 @@ func (e AdminCreateProjectRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for AllocationItemMailbox.
+const (
+	AllocationItemMailboxAlias  AllocationItemMailbox = "alias"
+	AllocationItemMailboxDomain AllocationItemMailbox = "domain"
+	AllocationItemMailboxDot    AllocationItemMailbox = "dot"
+	AllocationItemMailboxMain   AllocationItemMailbox = "main"
+	AllocationItemMailboxPlus   AllocationItemMailbox = "plus"
+)
+
+// Valid indicates whether the value is a known member of the AllocationItemMailbox enum.
+func (e AllocationItemMailbox) Valid() bool {
+	switch e {
+	case AllocationItemMailboxAlias:
+		return true
+	case AllocationItemMailboxDomain:
+		return true
+	case AllocationItemMailboxDot:
+		return true
+	case AllocationItemMailboxMain:
+		return true
+	case AllocationItemMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AllocationItemStatus.
+const (
+	AllocationItemStatusAllocated AllocationItemStatus = "allocated"
+	AllocationItemStatusReleased  AllocationItemStatus = "released"
+)
+
+// Valid indicates whether the value is a known member of the AllocationItemStatus enum.
+func (e AllocationItemStatus) Valid() bool {
+	switch e {
+	case AllocationItemStatusAllocated:
+		return true
+	case AllocationItemStatusReleased:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AllocationItemType.
+const (
+	AllocationItemTypeDomain    AllocationItemType = "domain"
+	AllocationItemTypeMicrosoft AllocationItemType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the AllocationItemType enum.
+func (e AllocationItemType) Valid() bool {
+	switch e {
+	case AllocationItemTypeDomain:
+		return true
+	case AllocationItemTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CandidateRefreshResponseStatus.
+const (
+	CandidateRefreshResponseStatusFailed    CandidateRefreshResponseStatus = "failed"
+	CandidateRefreshResponseStatusPending   CandidateRefreshResponseStatus = "pending"
+	CandidateRefreshResponseStatusQueued    CandidateRefreshResponseStatus = "queued"
+	CandidateRefreshResponseStatusRunning   CandidateRefreshResponseStatus = "running"
+	CandidateRefreshResponseStatusSucceeded CandidateRefreshResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the CandidateRefreshResponseStatus enum.
+func (e CandidateRefreshResponseStatus) Valid() bool {
+	switch e {
+	case CandidateRefreshResponseStatusFailed:
+		return true
+	case CandidateRefreshResponseStatusPending:
+		return true
+	case CandidateRefreshResponseStatusQueued:
+		return true
+	case CandidateRefreshResponseStatusRunning:
+		return true
+	case CandidateRefreshResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckProxiesRequest0All.
 const (
 	CheckProxiesRequest0AllFalse CheckProxiesRequest0All = false
@@ -770,22 +860,61 @@ func (e ResourceValidationResponseResourceType) Valid() bool {
 
 // Defines values for ResourceValidationResponseStatus.
 const (
-	ResourceValidationResponseStatusFailed    ResourceValidationResponseStatus = "failed"
-	ResourceValidationResponseStatusQueued    ResourceValidationResponseStatus = "queued"
-	ResourceValidationResponseStatusRunning   ResourceValidationResponseStatus = "running"
-	ResourceValidationResponseStatusSucceeded ResourceValidationResponseStatus = "succeeded"
+	Failed    ResourceValidationResponseStatus = "failed"
+	Queued    ResourceValidationResponseStatus = "queued"
+	Running   ResourceValidationResponseStatus = "running"
+	Succeeded ResourceValidationResponseStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the ResourceValidationResponseStatus enum.
 func (e ResourceValidationResponseStatus) Valid() bool {
 	switch e {
-	case ResourceValidationResponseStatusFailed:
+	case Failed:
 		return true
-	case ResourceValidationResponseStatusQueued:
+	case Queued:
 		return true
-	case ResourceValidationResponseStatusRunning:
+	case Running:
 		return true
-	case ResourceValidationResponseStatusSucceeded:
+	case Succeeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RoutingCandidateStatus.
+const (
+	RoutingCandidateStatusAbnormal RoutingCandidateStatus = "abnormal"
+	RoutingCandidateStatusDisabled RoutingCandidateStatus = "disabled"
+	RoutingCandidateStatusNormal   RoutingCandidateStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the RoutingCandidateStatus enum.
+func (e RoutingCandidateStatus) Valid() bool {
+	switch e {
+	case RoutingCandidateStatusAbnormal:
+		return true
+	case RoutingCandidateStatusDisabled:
+		return true
+	case RoutingCandidateStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RoutingCandidateType.
+const (
+	RoutingCandidateTypeDomain    RoutingCandidateType = "domain"
+	RoutingCandidateTypeMicrosoft RoutingCandidateType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the RoutingCandidateType enum.
+func (e RoutingCandidateType) Valid() bool {
+	switch e {
+	case RoutingCandidateTypeDomain:
+		return true
+	case RoutingCandidateTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -852,6 +981,105 @@ func (e UserResponseRole) Valid() bool {
 	case Supplier:
 		return true
 	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminAllocationsParamsType.
+const (
+	GetAdminAllocationsParamsTypeDomain    GetAdminAllocationsParamsType = "domain"
+	GetAdminAllocationsParamsTypeMicrosoft GetAdminAllocationsParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminAllocationsParamsType enum.
+func (e GetAdminAllocationsParamsType) Valid() bool {
+	switch e {
+	case GetAdminAllocationsParamsTypeDomain:
+		return true
+	case GetAdminAllocationsParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminAllocationsParamsStatus.
+const (
+	GetAdminAllocationsParamsStatusAllocated GetAdminAllocationsParamsStatus = "allocated"
+	GetAdminAllocationsParamsStatusReleased  GetAdminAllocationsParamsStatus = "released"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminAllocationsParamsStatus enum.
+func (e GetAdminAllocationsParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminAllocationsParamsStatusAllocated:
+		return true
+	case GetAdminAllocationsParamsStatusReleased:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminAllocationsParamsMailbox.
+const (
+	GetAdminAllocationsParamsMailboxAlias  GetAdminAllocationsParamsMailbox = "alias"
+	GetAdminAllocationsParamsMailboxDomain GetAdminAllocationsParamsMailbox = "domain"
+	GetAdminAllocationsParamsMailboxDot    GetAdminAllocationsParamsMailbox = "dot"
+	GetAdminAllocationsParamsMailboxMain   GetAdminAllocationsParamsMailbox = "main"
+	GetAdminAllocationsParamsMailboxPlus   GetAdminAllocationsParamsMailbox = "plus"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminAllocationsParamsMailbox enum.
+func (e GetAdminAllocationsParamsMailbox) Valid() bool {
+	switch e {
+	case GetAdminAllocationsParamsMailboxAlias:
+		return true
+	case GetAdminAllocationsParamsMailboxDomain:
+		return true
+	case GetAdminAllocationsParamsMailboxDot:
+		return true
+	case GetAdminAllocationsParamsMailboxMain:
+		return true
+	case GetAdminAllocationsParamsMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminAllocationParamsType.
+const (
+	GetAdminAllocationParamsTypeDomain    GetAdminAllocationParamsType = "domain"
+	GetAdminAllocationParamsTypeMicrosoft GetAdminAllocationParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminAllocationParamsType enum.
+func (e GetAdminAllocationParamsType) Valid() bool {
+	switch e {
+	case GetAdminAllocationParamsTypeDomain:
+		return true
+	case GetAdminAllocationParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProjectCandidatesParamsType.
+const (
+	GetAdminProjectCandidatesParamsTypeDomain    GetAdminProjectCandidatesParamsType = "domain"
+	GetAdminProjectCandidatesParamsTypeMicrosoft GetAdminProjectCandidatesParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProjectCandidatesParamsType enum.
+func (e GetAdminProjectCandidatesParamsType) Valid() bool {
+	switch e {
+	case GetAdminProjectCandidatesParamsTypeDomain:
+		return true
+	case GetAdminProjectCandidatesParamsTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -986,25 +1214,25 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
-	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
-	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
-	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	Checking GetAdminProxyStatsParamsStatus = "checking"
+	Disabled GetAdminProxyStatsParamsStatus = "disabled"
+	Expired  GetAdminProxyStatsParamsStatus = "expired"
+	Normal   GetAdminProxyStatsParamsStatus = "normal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsStatusAbnormal:
+	case Abnormal:
 		return true
-	case GetAdminProxyStatsParamsStatusChecking:
+	case Checking:
 		return true
-	case GetAdminProxyStatsParamsStatusDisabled:
+	case Disabled:
 		return true
-	case GetAdminProxyStatsParamsStatusExpired:
+	case Expired:
 		return true
-	case GetAdminProxyStatsParamsStatusNormal:
+	case Normal:
 		return true
 	default:
 		return false
@@ -1073,16 +1301,16 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetProjectsParamsProductType.
 const (
-	Domain    GetProjectsParamsProductType = "domain"
-	Microsoft GetProjectsParamsProductType = "microsoft"
+	GetProjectsParamsProductTypeDomain    GetProjectsParamsProductType = "domain"
+	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
 func (e GetProjectsParamsProductType) Valid() bool {
 	switch e {
-	case Domain:
+	case GetProjectsParamsProductTypeDomain:
 		return true
-	case Microsoft:
+	case GetProjectsParamsProductTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -1183,6 +1411,50 @@ type AdminUserListResponse struct {
 	Total  int            `json:"total"`
 	Users  []UserResponse `json:"users"`
 }
+
+// AllocationItem defines model for AllocationItem.
+type AllocationItem struct {
+	CreatedAt  time.Time             `json:"createdAt"`
+	Email      string                `json:"email"`
+	Id         int                   `json:"id"`
+	Mailbox    AllocationItemMailbox `json:"mailbox"`
+	OrderNo    string                `json:"orderNo"`
+	ProductId  int                   `json:"productId"`
+	ProjectId  int                   `json:"projectId"`
+	ReleasedAt *time.Time            `json:"releasedAt,omitempty"`
+	ResourceId int                   `json:"resourceId"`
+	Status     AllocationItemStatus  `json:"status"`
+	Type       AllocationItemType    `json:"type"`
+}
+
+// AllocationItemMailbox defines model for AllocationItem.Mailbox.
+type AllocationItemMailbox string
+
+// AllocationItemStatus defines model for AllocationItem.Status.
+type AllocationItemStatus string
+
+// AllocationItemType defines model for AllocationItem.Type.
+type AllocationItemType string
+
+// AllocationListResponse defines model for AllocationListResponse.
+type AllocationListResponse struct {
+	Items  []AllocationItem `json:"items"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+	Total  int              `json:"total"`
+}
+
+// CandidateRefreshResponse defines model for CandidateRefreshResponse.
+type CandidateRefreshResponse struct {
+	Created   bool                           `json:"created"`
+	JobId     int                            `json:"jobId"`
+	Message   string                         `json:"message"`
+	ProjectId int                            `json:"projectId"`
+	Status    CandidateRefreshResponseStatus `json:"status"`
+}
+
+// CandidateRefreshResponseStatus defines model for CandidateRefreshResponse.Status.
+type CandidateRefreshResponseStatus string
 
 // CaptchaResponse defines model for CaptchaResponse.
 type CaptchaResponse struct {
@@ -1358,6 +1630,16 @@ type DisableProxiesResponse struct {
 	Requested        int   `json:"requested"`
 }
 
+// DomainInventory defines model for DomainInventory.
+type DomainInventory struct {
+	EligibleResources     int  `json:"eligibleResources"`
+	Enabled               bool `json:"enabled"`
+	MailboxDailyAvailable int  `json:"mailboxDailyAvailable"`
+	MailboxDailyLimit     int  `json:"mailboxDailyLimit"`
+	MailboxDailyUsed      int  `json:"mailboxDailyUsed"`
+	TotalAvailable        int  `json:"totalAvailable"`
+}
+
 // DomainResourceDetail defines model for DomainResourceDetail.
 type DomainResourceDetail struct {
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -1493,6 +1775,24 @@ type MailboxListResponse struct {
 	Total  int           `json:"total"`
 }
 
+// MicrosoftInventory defines model for MicrosoftInventory.
+type MicrosoftInventory struct {
+	ActiveDotAllocations   int  `json:"activeDotAllocations"`
+	DotAvailable           int  `json:"dotAvailable"`
+	DotCapacity            int  `json:"dotCapacity"`
+	DotEnabled             bool `json:"dotEnabled"`
+	EligibleResources      int  `json:"eligibleResources"`
+	Enabled                bool `json:"enabled"`
+	ExplicitAliasAvailable int  `json:"explicitAliasAvailable"`
+	MainAvailable          int  `json:"mainAvailable"`
+	MainEnabled            bool `json:"mainEnabled"`
+	PlusDailyAvailable     int  `json:"plusDailyAvailable"`
+	PlusDailyLimit         int  `json:"plusDailyLimit"`
+	PlusDailyUsed          int  `json:"plusDailyUsed"`
+	PlusEnabled            bool `json:"plusEnabled"`
+	TotalAvailable         int  `json:"totalAvailable"`
+}
+
 // MicrosoftResourceDetail defines model for MicrosoftResourceDetail.
 type MicrosoftResourceDetail struct {
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -1625,6 +1925,23 @@ type ProjectDetailResponse struct {
 	Project   ProjectItem        `json:"project"`
 }
 
+// ProjectInventoryResponse defines model for ProjectInventoryResponse.
+type ProjectInventoryResponse struct {
+	ActiveDomainAllocations    int                `json:"activeDomainAllocations"`
+	ActiveMicrosoftAllocations int                `json:"activeMicrosoftAllocations"`
+	Domain                     DomainInventory    `json:"domain"`
+	Microsoft                  MicrosoftInventory `json:"microsoft"`
+	ProjectId                  int                `json:"projectId"`
+	TotalAvailable             int                `json:"totalAvailable"`
+}
+
+// ProjectInventoryTotalResponse defines model for ProjectInventoryTotalResponse.
+type ProjectInventoryTotalResponse struct {
+	Products       []ProjectProductInventoryTotal `json:"products"`
+	ProjectId      int                            `json:"projectId"`
+	TotalAvailable int                            `json:"totalAvailable"`
+}
+
 // ProjectItem defines model for ProjectItem.
 type ProjectItem struct {
 	AccessType      ProjectItemAccessType `json:"accessType"`
@@ -1738,6 +2055,12 @@ type ProjectProductStatus string
 
 // ProjectProductType defines model for ProjectProduct.Type.
 type ProjectProductType string
+
+// ProjectProductInventoryTotal defines model for ProjectProductInventoryTotal.
+type ProjectProductInventoryTotal struct {
+	ProductId      int `json:"productId"`
+	TotalAvailable int `json:"totalAvailable"`
+}
 
 // ProjectProductRequest defines model for ProjectProductRequest.
 type ProjectProductRequest struct {
@@ -2077,6 +2400,37 @@ type ResourceValidationsResponse struct {
 	Requested int `json:"requested"`
 }
 
+// RoutingCandidate defines model for RoutingCandidate.
+type RoutingCandidate struct {
+	Address         string                 `json:"address"`
+	Bucket          int                    `json:"bucket"`
+	CreatedAt       time.Time              `json:"createdAt"`
+	DomainSuffix    string                 `json:"domainSuffix"`
+	ForSale         bool                   `json:"forSale"`
+	Id              int                    `json:"id"`
+	LastAllocatedAt *time.Time             `json:"lastAllocatedAt,omitempty"`
+	ProjectId       int                    `json:"projectId"`
+	QualityScore    int                    `json:"qualityScore"`
+	ResourceId      int                    `json:"resourceId"`
+	Status          RoutingCandidateStatus `json:"status"`
+	Type            RoutingCandidateType   `json:"type"`
+	UpdatedAt       time.Time              `json:"updatedAt"`
+}
+
+// RoutingCandidateStatus defines model for RoutingCandidate.Status.
+type RoutingCandidateStatus string
+
+// RoutingCandidateType defines model for RoutingCandidate.Type.
+type RoutingCandidateType string
+
+// RoutingCandidateListResponse defines model for RoutingCandidateListResponse.
+type RoutingCandidateListResponse struct {
+	Items  []RoutingCandidate `json:"items"`
+	Limit  int                `json:"limit"`
+	Offset int                `json:"offset"`
+	Total  int                `json:"total"`
+}
+
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
 	CreatedAt     time.Time `json:"createdAt"`
@@ -2186,6 +2540,35 @@ type CsrfToken = string
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
 
+// GetAdminAllocationsParams defines parameters for GetAdminAllocations.
+type GetAdminAllocationsParams struct {
+	Type       *GetAdminAllocationsParamsType    `form:"type,omitempty" json:"type,omitempty"`
+	OrderNo    *string                           `form:"orderNo,omitempty" json:"orderNo,omitempty"`
+	ProjectId  *int                              `form:"projectId,omitempty" json:"projectId,omitempty"`
+	ResourceId *int                              `form:"resourceId,omitempty" json:"resourceId,omitempty"`
+	Status     *GetAdminAllocationsParamsStatus  `form:"status,omitempty" json:"status,omitempty"`
+	Mailbox    *GetAdminAllocationsParamsMailbox `form:"mailbox,omitempty" json:"mailbox,omitempty"`
+	Offset     *int                              `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit      *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminAllocationsParamsType defines parameters for GetAdminAllocations.
+type GetAdminAllocationsParamsType string
+
+// GetAdminAllocationsParamsStatus defines parameters for GetAdminAllocations.
+type GetAdminAllocationsParamsStatus string
+
+// GetAdminAllocationsParamsMailbox defines parameters for GetAdminAllocations.
+type GetAdminAllocationsParamsMailbox string
+
+// GetAdminAllocationParams defines parameters for GetAdminAllocation.
+type GetAdminAllocationParams struct {
+	Type GetAdminAllocationParamsType `form:"type" json:"type"`
+}
+
+// GetAdminAllocationParamsType defines parameters for GetAdminAllocation.
+type GetAdminAllocationParamsType string
+
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
 type GetAdminInvitesParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -2269,6 +2652,22 @@ type PostAdminProjectApproveParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminProjectCandidatesParams defines parameters for GetAdminProjectCandidates.
+type GetAdminProjectCandidatesParams struct {
+	Type   *GetAdminProjectCandidatesParamsType `form:"type,omitempty" json:"type,omitempty"`
+	Offset *int                                 `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminProjectCandidatesParamsType defines parameters for GetAdminProjectCandidates.
+type GetAdminProjectCandidatesParamsType string
+
+// PostAdminProjectCandidatesRefreshParams defines parameters for PostAdminProjectCandidatesRefresh.
+type PostAdminProjectCandidatesRefreshParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminProjectDelistParams defines parameters for PostAdminProjectDelist.
 type PostAdminProjectDelistParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -2279,6 +2678,11 @@ type PostAdminProjectDelistParams struct {
 type PostAdminProjectDuplicateParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminProjectInventoryParams defines parameters for GetAdminProjectInventory.
+type GetAdminProjectInventoryParams struct {
+	BuyerUserId *int `form:"buyerUserId,omitempty" json:"buyerUserId,omitempty"`
 }
 
 // PostAdminProjectRejectParams defines parameters for PostAdminProjectReject.
@@ -3223,6 +3627,12 @@ type ServerInterface interface {
 	// Activate system and create first super_admin
 	// (POST /v1/activation)
 	PostActivation(c *gin.Context)
+	// List allocation records for diagnostics
+	// (GET /v1/admin/allocations)
+	GetAdminAllocations(c *gin.Context, params GetAdminAllocationsParams)
+	// Get one allocation record by table type and id
+	// (GET /v1/admin/allocations/{allocationId})
+	GetAdminAllocation(c *gin.Context, allocationId int, params GetAdminAllocationParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -3232,6 +3642,9 @@ type ServerInterface interface {
 	// Update invite
 	// (PATCH /v1/admin/invites/{code})
 	PatchAdminInvite(c *gin.Context, code string, params PatchAdminInviteParams)
+	// Get allocation by order number
+	// (GET /v1/admin/orders/{orderNo}/allocations)
+	GetAdminOrderAllocation(c *gin.Context, orderNo string)
 	// List IAM permission catalog
 	// (GET /v1/admin/permissions)
 	GetAdminPermissions(c *gin.Context)
@@ -3268,12 +3681,21 @@ type ServerInterface interface {
 	// Approve a reviewing project application
 	// (POST /v1/admin/projects/{projectId}/approve)
 	PostAdminProjectApprove(c *gin.Context, projectId int, params PostAdminProjectApproveParams)
+	// List routing candidates for a project
+	// (GET /v1/admin/projects/{projectId}/candidates)
+	GetAdminProjectCandidates(c *gin.Context, projectId int, params GetAdminProjectCandidatesParams)
+	// Refresh routing candidates for a project
+	// (POST /v1/admin/projects/{projectId}/candidates/refresh)
+	PostAdminProjectCandidatesRefresh(c *gin.Context, projectId int, params PostAdminProjectCandidatesRefreshParams)
 	// Delist a listed project
 	// (POST /v1/admin/projects/{projectId}/delist)
 	PostAdminProjectDelist(c *gin.Context, projectId int, params PostAdminProjectDelistParams)
 	// Mark a reviewing project application as duplicate
 	// (POST /v1/admin/projects/{projectId}/duplicate)
 	PostAdminProjectDuplicate(c *gin.Context, projectId int, params PostAdminProjectDuplicateParams)
+	// Get allocation inventory diagnostics for a project
+	// (GET /v1/admin/projects/{projectId}/inventory)
+	GetAdminProjectInventory(c *gin.Context, projectId int, params GetAdminProjectInventoryParams)
 	// Reject a reviewing project application
 	// (POST /v1/admin/projects/{projectId}/reject)
 	PostAdminProjectReject(c *gin.Context, projectId int, params PostAdminProjectRejectParams)
@@ -3373,6 +3795,9 @@ type ServerInterface interface {
 	// Get project detail
 	// (GET /v1/projects/{projectId})
 	GetProject(c *gin.Context, projectId int)
+	// Get user-safe product inventory totals for a project
+	// (GET /v1/projects/{projectId}/inventory)
+	GetProjectInventory(c *gin.Context, projectId int)
 	// Resubmit a rejected project application
 	// (POST /v1/projects/{projectId}/resubmit)
 	PostProjectResubmit(c *gin.Context, projectId int, params PostProjectResubmitParams)
@@ -3491,6 +3916,129 @@ func (siw *ServerInterfaceWrapper) PostActivation(c *gin.Context) {
 	}
 
 	siw.Handler.PostActivation(c)
+}
+
+// GetAdminAllocations operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminAllocations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminAllocationsParams
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "orderNo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "orderNo", c.Request.URL.Query(), &params.OrderNo, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "projectId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "projectId", c.Request.URL.Query(), &params.ProjectId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "resourceId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "mailbox" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "mailbox", c.Request.URL.Query(), &params.Mailbox, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter mailbox: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminAllocations(c, params)
+}
+
+// GetAdminAllocation operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminAllocation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "allocationId" -------------
+	var allocationId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "allocationId", c.Param("allocationId"), &allocationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter allocationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminAllocationParams
+
+	// ------------- Required query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminAllocation(c, allocationId, params)
 }
 
 // GetAdminInvites operation middleware
@@ -3627,6 +4175,33 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminInvite(c, code, params)
+}
+
+// GetAdminOrderAllocation operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminOrderAllocation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminOrderAllocation(c, orderNo)
 }
 
 // GetAdminPermissions operation middleware
@@ -4175,6 +4750,114 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectApprove(c *gin.Context) {
 	siw.Handler.PostAdminProjectApprove(c, projectId, params)
 }
 
+// GetAdminProjectCandidates operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProjectCandidates(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProjectCandidatesParams
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProjectCandidates(c, projectId, params)
+}
+
+// PostAdminProjectCandidatesRefresh operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectCandidatesRefresh(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectCandidatesRefreshParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectCandidatesRefresh(c, projectId, params)
+}
+
 // PostAdminProjectDelist operation middleware
 func (siw *ServerInterfaceWrapper) PostAdminProjectDelist(c *gin.Context) {
 
@@ -4281,6 +4964,44 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectDuplicate(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProjectDuplicate(c, projectId, params)
+}
+
+// GetAdminProjectInventory operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProjectInventory(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProjectInventoryParams
+
+	// ------------- Optional query parameter "buyerUserId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "buyerUserId", c.Request.URL.Query(), &params.BuyerUserId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter buyerUserId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProjectInventory(c, projectId, params)
 }
 
 // PostAdminProjectReject operation middleware
@@ -5822,6 +6543,33 @@ func (siw *ServerInterfaceWrapper) GetProject(c *gin.Context) {
 	siw.Handler.GetProject(c, projectId)
 }
 
+// GetProjectInventory operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectInventory(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProjectInventory(c, projectId)
+}
+
 // PostProjectResubmit operation middleware
 func (siw *ServerInterfaceWrapper) PostProjectResubmit(c *gin.Context) {
 
@@ -6604,9 +7352,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/readyz", wrapper.Readyz)
 	router.GET(options.BaseURL+"/v1/activation", wrapper.GetActivation)
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
+	router.GET(options.BaseURL+"/v1/admin/allocations", wrapper.GetAdminAllocations)
+	router.GET(options.BaseURL+"/v1/admin/allocations/:allocationId", wrapper.GetAdminAllocation)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
+	router.GET(options.BaseURL+"/v1/admin/orders/:orderNo/allocations", wrapper.GetAdminOrderAllocation)
 	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
 	router.POST(options.BaseURL+"/v1/admin/project-logos", wrapper.PostAdminProjectLogo)
 	router.POST(options.BaseURL+"/v1/admin/projects", wrapper.PostAdminProject)
@@ -6619,8 +7370,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/access", wrapper.PostAdminProjectAccess)
 	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId/access/:userId", wrapper.DeleteAdminProjectAccess)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/approve", wrapper.PostAdminProjectApprove)
+	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/candidates", wrapper.GetAdminProjectCandidates)
+	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/candidates/refresh", wrapper.PostAdminProjectCandidatesRefresh)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/delist", wrapper.PostAdminProjectDelist)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/duplicate", wrapper.PostAdminProjectDuplicate)
+	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/inventory", wrapper.GetAdminProjectInventory)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/reject", wrapper.PostAdminProjectReject)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/relist", wrapper.PostAdminProjectRelist)
 	router.GET(options.BaseURL+"/v1/admin/proxies", wrapper.GetAdminProxies)
@@ -6654,6 +7408,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
 	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)
 	router.GET(options.BaseURL+"/v1/projects/:projectId", wrapper.GetProject)
+	router.GET(options.BaseURL+"/v1/projects/:projectId/inventory", wrapper.GetProjectInventory)
 	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
 	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
 	router.POST(options.BaseURL+"/v1/resource-validations", wrapper.PostResourceValidations)
