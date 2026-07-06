@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Button,
@@ -25,8 +25,13 @@ import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
+import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+import {
+  listAdminUsers,
+  type UserResponse,
+} from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   approveAdminProject,
@@ -38,21 +43,18 @@ import {
   delistAdminProjectsByFilter,
   delistAdminProjectsByIds,
   getProject,
-  grantAdminProjectAccess,
   listProjects,
-  listAdminProjectAccess,
   rejectAdminProject,
   relistAdminProject,
   relistAdminProjectsByFilter,
   relistAdminProjectsByIds,
-  revokeAdminProjectAccess,
   uploadAdminProjectLogo,
   type AdminCreateProjectRequest,
   type AdminUpdateProjectRequest,
-  type ProjectAccess,
   type ProjectDetailResponse,
   type ProjectItem,
   type ProjectListFilter,
+  type ProjectListResponse,
   type ProjectProductRequest,
   updateAdminProject,
 } from "@/lib/projects-api";
@@ -77,6 +79,8 @@ type ProjectProductTypeFilter = "all" | ProjectProductType;
 type ProjectMailRuleType = "sender" | "recipient" | "subject" | "body";
 type RecipientPattern = "exact" | "dot" | "plus";
 type ProjectEditorMode = "create" | "edit" | "approve";
+type ProjectListFacets = NonNullable<ProjectListResponse["facets"]>;
+type ProjectAccessUser = Pick<UserResponse, "email" | "id" | "nickname">;
 
 const recipientPatterns: RecipientPattern[] = ["exact", "dot", "plus"];
 
@@ -285,6 +289,48 @@ function detailToDraft(detail: ProjectDetailResponse | null): ProjectDraft {
     name: detail.project.name,
     products,
     targetPlatform: detail.project.targetPlatform,
+  };
+}
+
+function projectAccessUserIDs(detail: ProjectDetailResponse | null) {
+  return Array.from(
+    new Set(
+      (detail?.accesses ?? [])
+        .map((access) => access.userId)
+        .filter((userID) => Number.isInteger(userID) && userID > 0)
+    )
+  );
+}
+
+function projectAccessUsers(detail: ProjectDetailResponse | null): ProjectAccessUser[] {
+  return projectAccessUserIDs(detail).map((userID) => ({
+    email: "",
+    id: userID,
+    nickname: "",
+  }));
+}
+
+function normalizeAccessUserIDs(userIDs: number[]) {
+  return Array.from(
+    new Set(userIDs.filter((userID) => Number.isInteger(userID) && userID > 0))
+  );
+}
+
+function accessUserLabel(user: ProjectAccessUser) {
+  if (user.email && user.nickname) return `${user.email} · ${user.nickname}`;
+  return user.email || user.nickname || `#${user.id}`;
+}
+
+function withProjectAccessUserIDs(
+  payload: AdminCreateProjectRequest | AdminUpdateProjectRequest,
+  accessUserIDs: number[]
+) {
+  return {
+    ...payload,
+    accessUserIds:
+      payload.accessType === "private"
+        ? normalizeAccessUserIDs(accessUserIDs)
+        : [],
   };
 }
 
@@ -809,19 +855,66 @@ function ProjectEditorSheet({
   detail: ProjectDetailResponse | null;
   mode: ProjectEditorMode;
   onCancel: () => void;
-  onSubmit: (payload: AdminCreateProjectRequest | AdminUpdateProjectRequest) => Promise<void>;
+  onSubmit: (
+    payload: AdminCreateProjectRequest | AdminUpdateProjectRequest,
+    accessUserIDs: number[]
+  ) => Promise<void>;
   visible: boolean;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [draft, setDraft] = useState<ProjectDraft>(initialDraft);
+  const [accessUsers, setAccessUsers] = useState<ProjectAccessUser[]>([]);
+  const [accessSearchUsers, setAccessSearchUsers] = useState<ProjectAccessUser[]>([]);
+  const [accessSearchLoading, setAccessSearchLoading] = useState(false);
+  const [selectedAccessUserID, setSelectedAccessUserID] = useState<number | undefined>();
   const [logoGallery, setLogoGallery] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const accessHydrateSeqRef = useRef(0);
+  const accessSearchDebounceRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+  const accessSearchSeqRef = useRef(0);
+
+  const hydrateAccessUsers = useCallback(async (userIDs: number[]) => {
+    const ids = normalizeAccessUserIDs(userIDs);
+    if (ids.length === 0) return;
+    const seq = accessHydrateSeqRef.current + 1;
+    accessHydrateSeqRef.current = seq;
+    try {
+      const response = await listAdminUsers({
+        ids,
+        limit: ids.length,
+        offset: 0,
+      });
+      if (accessHydrateSeqRef.current !== seq) return;
+      const usersByID = new Map(
+        response.users.map((user) => [
+          user.id,
+          {
+            email: user.email,
+            id: user.id,
+            nickname: user.nickname,
+          } satisfies ProjectAccessUser,
+        ])
+      );
+      setAccessUsers(
+        ids.map((id) => usersByID.get(id) ?? { email: "", id, nickname: "" })
+      );
+    } catch (error) {
+      if (accessHydrateSeqRef.current === seq) {
+        Toast.error(getIamErrorMessage(t, error, "Users load failed."));
+      }
+    }
+  }, [t]);
 
   useEffect(() => {
+    accessHydrateSeqRef.current += 1;
     if (!visible) return;
     const nextDraft = mode === "create" ? initialDraft() : detailToDraft(detail);
+    const accessUserIDs = mode === "create" ? [] : projectAccessUserIDs(detail);
     setDraft(nextDraft);
+    setAccessUsers(mode === "create" ? [] : projectAccessUsers(detail));
+    setAccessSearchUsers([]);
+    setSelectedAccessUserID(undefined);
     setLogoGallery(
       Array.from(
         new Set(
@@ -829,7 +922,20 @@ function ProjectEditorSheet({
         )
       )
     );
-  }, [detail, mode, visible]);
+    if (accessUserIDs.length > 0) {
+      void hydrateAccessUsers(accessUserIDs);
+    }
+  }, [detail, hydrateAccessUsers, mode, visible]);
+
+  useEffect(() => {
+    return () => {
+      if (accessSearchDebounceRef.current) {
+        globalThis.clearTimeout(accessSearchDebounceRef.current);
+      }
+      accessHydrateSeqRef.current += 1;
+      accessSearchSeqRef.current += 1;
+    };
+  }, []);
 
   const setField = <K extends keyof ProjectDraft>(key: K, value: ProjectDraft[K]) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
@@ -847,13 +953,80 @@ function ProjectEditorSheet({
     });
   };
 
+  const searchAccessUsers = useCallback(async (keyword: string) => {
+    const seq = accessSearchSeqRef.current + 1;
+    accessSearchSeqRef.current = seq;
+    setAccessSearchLoading(true);
+    try {
+      const response = await listAdminUsers({
+        limit: 20,
+        offset: 0,
+        search: keyword.trim(),
+      });
+      if (accessSearchSeqRef.current !== seq) return;
+      setAccessSearchUsers(
+        response.users.map((user) => ({
+          email: user.email,
+          id: user.id,
+          nickname: user.nickname,
+        }))
+      );
+    } catch (error) {
+      if (accessSearchSeqRef.current === seq) {
+        Toast.error(getIamErrorMessage(t, error, "Users load failed."));
+      }
+    } finally {
+      if (accessSearchSeqRef.current === seq) {
+        setAccessSearchLoading(false);
+      }
+    }
+  }, [t]);
+
+  const debouncedSearchAccessUsers = useCallback((keyword: string) => {
+    if (accessSearchDebounceRef.current) {
+      globalThis.clearTimeout(accessSearchDebounceRef.current);
+    }
+    accessSearchDebounceRef.current = globalThis.setTimeout(() => {
+      void searchAccessUsers(keyword);
+    }, 250);
+  }, [searchAccessUsers]);
+
+  const addAccessUser = () => {
+    if (!selectedAccessUserID) {
+      Toast.error(t("Please select a user."));
+      return;
+    }
+    if (accessUsers.some((user) => user.id === selectedAccessUserID)) {
+      Toast.info(t("User is already authorized."));
+      return;
+    }
+    const selectedUser =
+      accessSearchUsers.find((user) => user.id === selectedAccessUserID) ??
+      ({
+        email: "",
+        id: selectedAccessUserID,
+        nickname: "",
+      } satisfies ProjectAccessUser);
+    setAccessUsers((previous) => [selectedUser, ...previous]);
+    setSelectedAccessUserID(undefined);
+  };
+
+  const removeAccessUser = (userID: number) => {
+    setAccessUsers((previous) => previous.filter((item) => item.id !== userID));
+  };
+
   const submit = async () => {
     const payload = buildProjectPayload(draft, t);
     if (!payload) return;
 
     setSubmitting(true);
     try {
-      await onSubmit(payload);
+      await onSubmit(
+        payload,
+        draft.accessType === "private"
+          ? normalizeAccessUserIDs(accessUsers.map((user) => user.id))
+          : []
+      );
     } finally {
       setSubmitting(false);
     }
@@ -949,6 +1122,87 @@ function ProjectEditorSheet({
             </div>
           </section>
 
+          {draft.accessType === "private" ? (
+            <section>
+              <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
+                {t("Authorized users")}
+              </div>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+                <Select
+                  emptyContent={t("No users found")}
+                  filter
+                  loading={accessSearchLoading}
+                  onChange={(value) => {
+                    const userID = Number(value);
+                    setSelectedAccessUserID(
+                      Number.isInteger(userID) && userID > 0 ? userID : undefined
+                    );
+                  }}
+                  onDropdownVisibleChange={(visible) => {
+                    if (visible && accessSearchUsers.length === 0) {
+                      void searchAccessUsers("");
+                    }
+                  }}
+                  onSearch={debouncedSearchAccessUsers}
+                  placeholder={t("Search user by email, nickname or ID")}
+                  remote
+                  searchPosition="dropdown"
+                  showClear
+                  style={{ flex: 1, width: "100%" }}
+                  value={selectedAccessUserID}
+                >
+                  {accessSearchUsers.map((user) => (
+                    <Select.Option
+                      key={user.id}
+                      label={accessUserLabel(user)}
+                      value={user.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-[var(--semi-color-text-0)]">
+                          {user.email || `#${user.id}`}
+                        </div>
+                        <div className="truncate text-xs text-[var(--semi-color-text-2)]">
+                          {user.nickname ? `${user.nickname} · #${user.id}` : `#${user.id}`}
+                        </div>
+                      </div>
+                    </Select.Option>
+                  ))}
+                </Select>
+                <Button onClick={addAccessUser} type="primary">
+                  {t("Grant access")}
+                </Button>
+              </div>
+              <div className="grid gap-2">
+                {accessUsers.length > 0 ? (
+                  accessUsers.map((user) => (
+                    <div
+                      className="flex items-center justify-between rounded-lg border border-[var(--semi-color-border)] p-3"
+                      key={user.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-[var(--semi-color-text-0)]">
+                          {user.email || `#${user.id}`}
+                        </div>
+                        <div className="truncate text-xs text-[var(--semi-color-text-2)]">
+                          {user.nickname ? `${user.nickname} · #${user.id}` : `#${user.id}`}
+                        </div>
+                      </div>
+                      <Button
+                        onClick={() => removeAccessUser(user.id)}
+                        size="small"
+                        type="danger"
+                      >
+                        {t("Revoke")}
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <Empty description={t("No authorized users")} style={{ padding: 24 }} />
+                )}
+              </div>
+            </section>
+          ) : null}
+
           <section>
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-[var(--semi-color-text-0)]">
@@ -1021,54 +1275,6 @@ function ProjectDetailSheet({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [accessItems, setAccessItems] = useState<ProjectAccess[]>([]);
-  const [grantUserID, setGrantUserID] = useState("");
-  const [accessOperating, setAccessOperating] = useState(false);
-
-  useEffect(() => {
-    setAccessItems(detail?.accesses ?? []);
-    setGrantUserID("");
-  }, [detail]);
-
-  const refreshAccesses = async () => {
-    if (!detail) return;
-    const response = await listAdminProjectAccess(detail.project.id);
-    setAccessItems(response.items ?? []);
-  };
-
-  const grantAccess = async () => {
-    if (!detail) return;
-    const userID = Number(grantUserID.trim());
-    if (!Number.isInteger(userID) || userID <= 0) {
-      Toast.error(t("Invalid user ID."));
-      return;
-    }
-    setAccessOperating(true);
-    try {
-      await grantAdminProjectAccess(detail.project.id, userID);
-      await refreshAccesses();
-      setGrantUserID("");
-      Toast.success(t("Project access granted."));
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Project operation failed."));
-    } finally {
-      setAccessOperating(false);
-    }
-  };
-
-  const revokeAccess = async (userID: number) => {
-    if (!detail) return;
-    setAccessOperating(true);
-    try {
-      await revokeAdminProjectAccess(detail.project.id, userID);
-      await refreshAccesses();
-      Toast.success(t("Project access revoked."));
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Project operation failed."));
-    } finally {
-      setAccessOperating(false);
-    }
-  };
 
   return (
     <SideSheet
@@ -1092,53 +1298,6 @@ function ProjectDetailSheet({
           <InfoItem label={t("Description")} value={detail.project.description || "-"} />
           {detail.project.reviewReason ? (
             <InfoItem label={t("Review reason")} value={detail.project.reviewReason} />
-          ) : null}
-
-          {detail.project.accessType === "private" ? (
-            <section>
-              <div className="mb-2 text-sm font-semibold">{t("Authorized users")}</div>
-              <div className="mb-3 flex gap-2">
-                <Input
-                  onChange={(value) => setGrantUserID(String(value))}
-                  placeholder={t("User ID")}
-                  value={grantUserID}
-                />
-                <Button
-                  loading={accessOperating}
-                  onClick={() => void grantAccess()}
-                  type="primary"
-                >
-                  {t("Grant access")}
-                </Button>
-              </div>
-              <div className="grid gap-2">
-                {accessItems.length > 0 ? (
-                  accessItems.map((access) => (
-                    <div
-                      className="flex items-center justify-between rounded-lg border border-[var(--semi-color-border)] p-3"
-                      key={`${access.projectId}-${access.userId}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="font-mono text-sm">#{access.userId}</div>
-                        <div className="text-xs text-[var(--semi-color-text-2)]">
-                          {t("Granted by")} #{access.grantedBy}
-                        </div>
-                      </div>
-                      <Button
-                        loading={accessOperating}
-                        onClick={() => void revokeAccess(access.userId)}
-                        size="small"
-                        type="danger"
-                      >
-                        {t("Revoke")}
-                      </Button>
-                    </div>
-                  ))
-                ) : (
-                  <Empty description={t("No authorized users")} style={{ padding: 24 }} />
-                )}
-              </div>
-            </section>
           ) : null}
 
           <section>
@@ -1211,6 +1370,7 @@ export default function AdminProjects() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [items, setItems] = useState<ProjectItem[]>([]);
+  const [facets, setFacets] = useState<ProjectListFacets | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -1253,6 +1413,62 @@ export default function AdminProjects() {
     (looseFilter !== "all" ? 1 : 0) +
     (productTypeFilter !== "all" ? 1 : 0);
 
+  const projectFilterStats = useMemo(() => {
+    const fallback = {
+      loose: {
+        all: items.length,
+        no: items.filter((item) => !item.looseMatch).length,
+        yes: items.filter((item) => item.looseMatch).length,
+      },
+      private: {
+        all: items.length,
+        no: items.filter((item) => item.accessType !== "private").length,
+        yes: items.filter((item) => item.accessType === "private").length,
+      },
+      productType: {
+        all: items.length,
+        domain: items.filter((item) =>
+          item.products?.some((product) => product.type === "domain")
+        ).length,
+        microsoft: items.filter((item) =>
+          item.products?.some((product) => product.type === "microsoft")
+        ).length,
+      },
+      status: {
+        all: items.length,
+        delisted: items.filter((item) => item.status === "delisted").length,
+        listed: items.filter((item) => item.status === "listed").length,
+        reviewing: items.filter((item) => item.status === "reviewing").length,
+      },
+    };
+
+    if (!facets) return fallback;
+
+    return {
+      loose: {
+        all: facets.match.all,
+        no: facets.match.strict,
+        yes: facets.match.loose,
+      },
+      private: {
+        all: facets.access.all,
+        no: facets.access.public,
+        yes: facets.access.private,
+      },
+      productType: {
+        all: facets.productType.all,
+        domain: facets.productType.domain,
+        microsoft: facets.productType.microsoft,
+      },
+      status: {
+        all: facets.status.all,
+        delisted: facets.status.rejected,
+        listed: facets.status.listed,
+        reviewing: facets.status.reviewing,
+      },
+    };
+  }, [facets, items]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -1262,6 +1478,7 @@ export default function AdminProjects() {
         pageSize
       );
       setItems(response.items);
+      setFacets(response.facets ?? null);
       setTotal(response.total);
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Projects load failed."));
@@ -1283,6 +1500,30 @@ export default function AdminProjects() {
     setProductTypeFilter("all");
     setSelectedKeys([]);
     setActivePage(1);
+  };
+
+  const applyStatusFilter = (value: ProjectStatusFilter) => {
+    setStatusFilter(value);
+    setActivePage(1);
+    setSelectedKeys([]);
+  };
+
+  const applyPrivateFilter = (value: BooleanFilter) => {
+    setPrivateFilter(value);
+    setActivePage(1);
+    setSelectedKeys([]);
+  };
+
+  const applyLooseFilter = (value: BooleanFilter) => {
+    setLooseFilter(value);
+    setActivePage(1);
+    setSelectedKeys([]);
+  };
+
+  const applyProductTypeFilter = (value: ProjectProductTypeFilter) => {
+    setProductTypeFilter(value);
+    setActivePage(1);
+    setSelectedKeys([]);
   };
 
   const openDetail = async (projectID: number) => {
@@ -1312,19 +1553,21 @@ export default function AdminProjects() {
   };
 
   const handleEditorSubmit = async (
-    payload: AdminCreateProjectRequest | AdminUpdateProjectRequest
+    payload: AdminCreateProjectRequest | AdminUpdateProjectRequest,
+    accessUserIDs: number[]
   ) => {
     try {
+      const projectPayload = withProjectAccessUserIDs(payload, accessUserIDs);
       if (editorMode === "create") {
-        await createAdminProject(payload);
+        await createAdminProject(projectPayload);
         Toast.success(t("Project created."));
         setActivePage(1);
       } else if (editorMode === "approve" && editorDetail) {
-        await approveAdminProject(editorDetail.project.id, payload);
+        await approveAdminProject(editorDetail.project.id, projectPayload);
         Toast.success(t("Project approved."));
         setSelectedKeys([]);
       } else if (editorDetail) {
-        await updateAdminProject(editorDetail.project.id, payload);
+        await updateAdminProject(editorDetail.project.id, projectPayload);
         Toast.success(t("Project updated."));
       }
       setEditorOpen(false);
@@ -1881,84 +2124,121 @@ export default function AdminProjects() {
         <Dropdown
           position="bottomRight"
           render={
-            <div className="w-[280px] space-y-3 p-3">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-2)]">
-                  {t("Status")}
-                </span>
-                <Select
-                  onChange={(value) => {
-                    setStatusFilter(String(value) as ProjectStatusFilter);
-                    setActivePage(1);
-                    setSelectedKeys([]);
-                  }}
-                  size="small"
-                  style={{ width: "100%" }}
-                  value={statusFilter}
-                >
-                  <Select.Option value="all">{t("All statuses")}</Select.Option>
-                  <Select.Option value="listed">{t("Listed")}</Select.Option>
-                  <Select.Option value="reviewing">{t("Reviewing")}</Select.Option>
-                  <Select.Option value="delisted">{t("Delisted")}</Select.Option>
-                </Select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-2)]">
-                  {t("Private")}
-                </span>
-                <Select
-                  onChange={(value) => {
-                    setPrivateFilter(String(value) as BooleanFilter);
-                    setActivePage(1);
-                    setSelectedKeys([]);
-                  }}
-                  size="small"
-                  style={{ width: "100%" }}
-                  value={privateFilter}
-                >
-                  <Select.Option value="all">{t("All")}</Select.Option>
-                  <Select.Option value="yes">{t("Yes")}</Select.Option>
-                  <Select.Option value="no">{t("No")}</Select.Option>
-                </Select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-2)]">
-                  {t("Loose")}
-                </span>
-                <Select
-                  onChange={(value) => {
-                    setLooseFilter(String(value) as BooleanFilter);
-                    setActivePage(1);
-                    setSelectedKeys([]);
-                  }}
-                  size="small"
-                  style={{ width: "100%" }}
-                  value={looseFilter}
-                >
-                  <Select.Option value="all">{t("All")}</Select.Option>
-                  <Select.Option value="yes">{t("Yes")}</Select.Option>
-                  <Select.Option value="no">{t("No")}</Select.Option>
-                </Select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-2)]">
-                  {t("Product type")}
-                </span>
-                <Select
-                  onChange={(value) => {
-                    setProductTypeFilter(String(value) as ProjectProductTypeFilter);
-                    setActivePage(1);
-                    setSelectedKeys([]);
-                  }}
-                  size="small"
-                  style={{ width: "100%" }}
-                  value={productTypeFilter}
-                >
-                  <Select.Option value="all">{t("All")}</Select.Option>
-                  <Select.Option value="microsoft">{t("Microsoft email")}</Select.Option>
-                  <Select.Option value="domain">{t("Domain email")}</Select.Option>
-                </Select>
-              </label>
+            <div className="w-[280px] p-2">
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Status")}
+              </div>
+              <div className="mb-2 space-y-1">
+                <StatisticFilterOption
+                  active={statusFilter === "all"}
+                  count={projectFilterStats.status.all}
+                  label={t("All")}
+                  onSelect={applyStatusFilter}
+                  value="all"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "listed"}
+                  count={projectFilterStats.status.listed}
+                  label={t("Listed")}
+                  onSelect={applyStatusFilter}
+                  value="listed"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "reviewing"}
+                  count={projectFilterStats.status.reviewing}
+                  label={t("Reviewing")}
+                  onSelect={applyStatusFilter}
+                  value="reviewing"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "delisted"}
+                  count={projectFilterStats.status.delisted}
+                  label={t("Delisted")}
+                  onSelect={applyStatusFilter}
+                  value="delisted"
+                />
+              </div>
+
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Private")}
+              </div>
+              <div className="mb-2 space-y-1">
+                <StatisticFilterOption
+                  active={privateFilter === "all"}
+                  count={projectFilterStats.private.all}
+                  label={t("All")}
+                  onSelect={applyPrivateFilter}
+                  value="all"
+                />
+                <StatisticFilterOption
+                  active={privateFilter === "yes"}
+                  count={projectFilterStats.private.yes}
+                  label={t("Yes")}
+                  onSelect={applyPrivateFilter}
+                  value="yes"
+                />
+                <StatisticFilterOption
+                  active={privateFilter === "no"}
+                  count={projectFilterStats.private.no}
+                  label={t("No")}
+                  onSelect={applyPrivateFilter}
+                  value="no"
+                />
+              </div>
+
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Loose")}
+              </div>
+              <div className="mb-2 space-y-1">
+                <StatisticFilterOption
+                  active={looseFilter === "all"}
+                  count={projectFilterStats.loose.all}
+                  label={t("All")}
+                  onSelect={applyLooseFilter}
+                  value="all"
+                />
+                <StatisticFilterOption
+                  active={looseFilter === "yes"}
+                  count={projectFilterStats.loose.yes}
+                  label={t("Yes")}
+                  onSelect={applyLooseFilter}
+                  value="yes"
+                />
+                <StatisticFilterOption
+                  active={looseFilter === "no"}
+                  count={projectFilterStats.loose.no}
+                  label={t("No")}
+                  onSelect={applyLooseFilter}
+                  value="no"
+                />
+              </div>
+
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Product type")}
+              </div>
+              <div className="space-y-1">
+                <StatisticFilterOption
+                  active={productTypeFilter === "all"}
+                  count={projectFilterStats.productType.all}
+                  label={t("All")}
+                  onSelect={applyProductTypeFilter}
+                  value="all"
+                />
+                <StatisticFilterOption
+                  active={productTypeFilter === "microsoft"}
+                  count={projectFilterStats.productType.microsoft}
+                  label={t("Microsoft email")}
+                  onSelect={applyProductTypeFilter}
+                  value="microsoft"
+                />
+                <StatisticFilterOption
+                  active={productTypeFilter === "domain"}
+                  count={projectFilterStats.productType.domain}
+                  label={t("Domain email")}
+                  onSelect={applyProductTypeFilter}
+                  value="domain"
+                />
+              </div>
             </div>
           }
           trigger="click"

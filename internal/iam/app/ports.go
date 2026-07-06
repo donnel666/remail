@@ -31,6 +31,12 @@ type UserRepository interface {
 	// Count returns the total number of users.
 	Count(ctx context.Context) (int64, error)
 
+	// ListByFilter returns a paginated slice of users matching admin filters.
+	ListByFilter(ctx context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error)
+
+	// CountByFilter returns the total number of users matching admin filters.
+	CountByFilter(ctx context.Context, filter domain.UserListFilter) (int64, error)
+
 	// FindByIDs returns users matching the given IDs.
 	FindByIDs(ctx context.Context, ids []uint) ([]domain.User, error)
 

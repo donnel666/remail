@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,11 @@ import (
 )
 
 var iamMySQLTestServer = testmysql.New("remail_iam_test")
+
+type iamExplainRow struct {
+	Type sql.NullString `gorm:"column:type"`
+	Key  sql.NullString `gorm:"column:key"`
+}
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -134,6 +140,52 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 		Where("operation_type = ? AND resource_type = ? AND resource_id = ? AND request_id = ?", "iam.user.update", "user", fmt.Sprintf("%d", user.ID), "req-user-update").
 		Count(&logCount).Error)
 	require.Equal(t, int64(1), logCount)
+}
+
+func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+
+	alpha := &domain.User{
+		Email:        "alpha-search@example.com",
+		PasswordHash: "hash",
+		Nickname:     "Project Alpha",
+		Enabled:      true,
+		RoleLevel:    domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), alpha))
+	beta := &domain.User{
+		Email:        "beta-search@example.com",
+		PasswordHash: "hash",
+		Nickname:     "Beta User",
+		Enabled:      true,
+		RoleLevel:    domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), beta))
+
+	users, err := repo.ListByFilter(context.Background(), domain.UserListFilter{Search: "alpha-search@example.com"}, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, alpha.Email, users[0].Email)
+
+	users, err = repo.ListByFilter(context.Background(), domain.UserListFilter{Search: "Project"}, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, alpha.Email, users[0].Email)
+
+	users, err = repo.ListByFilter(context.Background(), domain.UserListFilter{Search: fmt.Sprintf("%d", beta.ID)}, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, beta.Email, users[0].Email)
+
+	var plan []iamExplainRow
+	require.NoError(t, db.Raw(
+		"EXPLAIN SELECT id FROM users WHERE MATCH(email, nickname) AGAINST (? IN BOOLEAN MODE) LIMIT 20",
+		userSearchBooleanQuery("alpha-search@example.com"),
+	).Scan(&plan).Error)
+	require.NotEmpty(t, plan)
+	require.Equal(t, "fulltext", plan[0].Type.String)
+	require.Equal(t, "idx_users_search", plan[0].Key.String)
 }
 
 func TestPermissionServiceBaselineMySQL(t *testing.T) {

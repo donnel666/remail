@@ -66,6 +66,7 @@ func (r *mockProjectRepo) CreateWithLog(_ context.Context, detail *coredomain.Pr
 		detail.MailRules[i].ID = uint(i + 1)
 		detail.MailRules[i].ProjectID = detail.Project.ID
 	}
+	assignMockProjectAccesses(detail)
 	r.details[detail.Project.ID] = detail
 	r.summaries = append(r.summaries, coreapp.ProjectSummary{
 		Project:       detail.Project,
@@ -134,6 +135,7 @@ func (r *mockProjectRepo) UpdateWithLog(_ context.Context, detail *coredomain.Pr
 		detail.MailRules[i].ID = uint(i + 1)
 		detail.MailRules[i].ProjectID = detail.Project.ID
 	}
+	assignMockProjectAccesses(detail)
 	r.details[detail.Project.ID] = detail
 	r.upsertSummary(detail)
 	if log != nil {
@@ -162,6 +164,7 @@ func (r *mockProjectRepo) ApproveWithConfigAndLog(_ context.Context, detail *cor
 		detail.MailRules[i].ID = uint(i + 1)
 		detail.MailRules[i].ProjectID = detail.Project.ID
 	}
+	assignMockProjectAccesses(detail)
 	r.details[detail.Project.ID] = detail
 	r.upsertSummary(detail)
 	if log != nil {
@@ -327,6 +330,17 @@ func (r *mockProjectRepo) upsertSummary(detail *coredomain.ProjectDetail) {
 		}
 	}
 	r.summaries = append(r.summaries, summary)
+}
+
+func assignMockProjectAccesses(detail *coredomain.ProjectDetail) {
+	if detail.Project.AccessType != coredomain.ProjectAccessPrivate {
+		detail.Accesses = nil
+		return
+	}
+	for i := range detail.Accesses {
+		detail.Accesses[i].ID = uint(i + 1)
+		detail.Accesses[i].ProjectID = detail.Project.ID
+	}
 }
 
 func mockProjectMatchesFilter(project coredomain.Project, filter coreapp.ProjectListFilter) bool {
@@ -3414,6 +3428,55 @@ func TestCoreHandler_AdminProjectApproveWithConfig(t *testing.T) {
 	require.Equal(t, string(coredomain.ProjectStatusListed), response.Project.Status)
 	require.Equal(t, "GitHub Configured", response.Project.Name)
 	require.Len(t, response.Products, 1)
+}
+
+func TestCoreHandler_AdminProjectCreateWithPrivateAccessUsers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	body := `{
+		"name":"Private GitHub",
+		"targetPlatform":"github.com",
+		"accessType":"private",
+		"accessUserIds":[7,7,8],
+		"looseMatch":true,
+		"products":[{
+			"type":"microsoft",
+			"status":"enabled",
+			"codeEnabled":true,
+			"purchaseEnabled":false,
+			"codePrice":"0.100000",
+			"purchasePrice":"0",
+			"codeSupplierPrice":"0.050000",
+			"purchaseSupplierPrice":"0",
+			"codeWindowMinutes":10,
+			"activationWindowMinutes":60,
+			"warrantyMinutes":60,
+			"mainWeight":1
+		}],
+		"mailRules":[
+			{"ruleType":"sender","pattern":".*","enabled":true},
+			{"ruleType":"recipient","pattern":"exact","enabled":true}
+		]
+	}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+
+	h.PostAdminProject(c)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var response ProjectDetailResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, "private", response.Project.AccessType)
+	require.Len(t, response.Accesses, 2)
+	require.Equal(t, uint(7), response.Accesses[0].UserID)
+	require.Equal(t, uint(1), response.Accesses[0].GrantedBy)
 }
 
 func TestCoreHandler_AdminProjectUpdateRejectsReviewingProject(t *testing.T) {

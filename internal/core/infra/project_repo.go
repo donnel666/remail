@@ -262,6 +262,9 @@ func (r *ProjectRepo) CreateWithLog(ctx context.Context, detail *domain.ProjectD
 				detail.MailRules[i] = ruleModels[i].toDomain()
 			}
 		}
+		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
+			return err
+		}
 
 		if log != nil {
 			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -374,6 +377,9 @@ func (r *ProjectRepo) UpdateWithLog(ctx context.Context, detail *domain.ProjectD
 		if err := r.replaceProductsAndRules(ctx, tx, projectModel.ID, detail); err != nil {
 			return err
 		}
+		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
+			return err
+		}
 		if log != nil {
 			log.ResourceID = fmt.Sprintf("%d", projectModel.ID)
 			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -415,6 +421,9 @@ func (r *ProjectRepo) ApproveWithConfigAndLog(ctx context.Context, detail *domai
 		}
 		detail.Project = projectModel.toDomain()
 		if err := r.replaceProductsAndRules(ctx, tx, projectModel.ID, detail); err != nil {
+			return err
+		}
+		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
 			return err
 		}
 		if err := r.ensureProjectListable(ctx, tx, projectModel.ID); err != nil {
@@ -738,7 +747,7 @@ func (r *ProjectRepo) FindDetail(ctx context.Context, projectID uint, userID uin
 		return nil, err
 	}
 	accesses := []domain.ProjectAccess{}
-	if isAdmin {
+	if isAdmin && domain.ProjectAccessType(project.AccessType) == domain.ProjectAccessPrivate {
 		accesses, err = r.listAccesses(ctx, project.ID)
 		if err != nil {
 			return nil, err
@@ -974,6 +983,54 @@ func (r *ProjectRepo) replaceProductsAndRules(ctx context.Context, tx *gorm.DB, 
 		}
 	}
 	return nil
+}
+
+func (r *ProjectRepo) replaceProjectAccesses(ctx context.Context, tx *gorm.DB, projectID uint, detail *domain.ProjectDetail) error {
+	targetAccesses := uniqueProjectAccesses(detail.Accesses)
+	detail.Accesses = nil
+
+	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectAccessModel{}).Error; err != nil {
+		return fmt.Errorf("replace project accesses: %w", err)
+	}
+	if detail.Project.AccessType != domain.ProjectAccessPrivate || len(targetAccesses) == 0 {
+		return nil
+	}
+
+	models := make([]ProjectAccessModel, 0, len(targetAccesses))
+	for i := range targetAccesses {
+		models = append(models, ProjectAccessModel{
+			ProjectID: projectID,
+			UserID:    targetAccesses[i].UserID,
+			GrantedBy: targetAccesses[i].GrantedBy,
+		})
+	}
+	if err := tx.WithContext(ctx).Create(&models).Error; err != nil {
+		if isForeignKeyError(err) {
+			return domain.ErrInvalidProject
+		}
+		return fmt.Errorf("create replacement project accesses: %w", err)
+	}
+	detail.Accesses = make([]domain.ProjectAccess, len(models))
+	for i := range models {
+		detail.Accesses[i] = models[i].toDomain()
+	}
+	return nil
+}
+
+func uniqueProjectAccesses(accesses []domain.ProjectAccess) []domain.ProjectAccess {
+	seen := make(map[uint]struct{}, len(accesses))
+	result := make([]domain.ProjectAccess, 0, len(accesses))
+	for _, access := range accesses {
+		if access.UserID == 0 {
+			continue
+		}
+		if _, exists := seen[access.UserID]; exists {
+			continue
+		}
+		seen[access.UserID] = struct{}{}
+		result = append(result, access)
+	}
+	return result
 }
 
 func (r *ProjectRepo) ensureProjectListable(ctx context.Context, tx *gorm.DB, projectID uint) error {

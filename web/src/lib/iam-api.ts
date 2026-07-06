@@ -25,8 +25,17 @@ export type ActivationUserResponse = JsonResponse<
   201
 >;
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type AdminUserListResponse =
+  components["schemas"]["AdminUserListResponse"];
 export type RegisterResponse = JsonResponse<operations["postRegister"], 201>;
 export type MeResponse = JsonResponse<operations["getMe"], 200>;
+
+export interface AdminUserListFilter {
+  ids?: number[];
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
 
 export async function getActivation() {
   return unwrap<ActivationResponse>(await client.GET("/v1/activation"));
@@ -64,6 +73,14 @@ export async function logout() {
 
 export async function getMe() {
   return unwrap<MeResponse>(await client.GET("/v1/me"));
+}
+
+export async function listAdminUsers(filter: AdminUserListFilter = {}) {
+  return unwrap<AdminUserListResponse>(
+    await client.GET("/v1/admin/users", {
+      params: { query: filter },
+    })
+  );
 }
 
 export async function registerUser(payload: RegisterRequest) {

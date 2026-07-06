@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
 	"github.com/donnel666/remail/internal/iam/app"
@@ -339,8 +340,17 @@ func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
 	if !ok {
 		return
 	}
+	ids, ok := parseUintQueryList(c, "ids")
+	if !ok {
+		return
+	}
 
-	result, err := h.module.AdminUseCase.ListUsers(c.Request.Context(), offset, limit)
+	result, err := h.module.AdminUseCase.ListUsers(
+		c.Request.Context(),
+		domain.UserListFilter{IDs: ids, Search: c.Query("search")},
+		offset,
+		limit,
+	)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -655,6 +665,32 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 		return 0, 0, false
 	}
 	return offset, limit, true
+}
+
+func parseUintQueryList(c *gin.Context, name string) ([]uint, bool) {
+	values := c.QueryArray(name)
+	if len(values) == 0 {
+		return nil, true
+	}
+	var result []uint
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			value, err := strconv.ParseUint(part, 10, 64)
+			if err != nil || value == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"message":   "Invalid query parameters.",
+					"requestId": middleware.GetRequestID(c),
+				})
+				return nil, false
+			}
+			result = append(result, uint(value))
+		}
+	}
+	return result, true
 }
 
 // writeError maps domain errors to HTTP responses.

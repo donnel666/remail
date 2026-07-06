@@ -28,6 +28,7 @@ import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CardTable } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
+import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -73,39 +74,6 @@ const PROXY_IMPORT_FORMAT_HINT = [
   "socks5://user:password@host:port",
   "socks5h://user:password@host:port",
 ].join("\n");
-
-interface StatisticFilterOptionProps<T extends string> {
-  active: boolean;
-  count: number;
-  label: string;
-  onSelect: (value: T) => void;
-  value: T;
-}
-
-function StatisticFilterOption<T extends string>({
-  active,
-  count,
-  label,
-  onSelect,
-  value,
-}: StatisticFilterOptionProps<T>) {
-  return (
-    <button
-      className={`flex w-full items-center justify-between rounded-[10px] px-2 py-1.5 text-left text-sm transition-colors ${
-        active
-          ? "bg-[var(--semi-color-primary-light-default)] text-[var(--semi-color-primary)]"
-          : "text-[var(--semi-color-text-1)] hover:bg-[var(--semi-color-fill-0)]"
-      }`}
-      onClick={() => onSelect(value)}
-      type="button"
-    >
-      <span>{label}</span>
-      <Tag color={active ? "orange" : "grey"} shape="circle" size="small">
-        {count}
-      </Tag>
-    </button>
-  );
-}
 
 function renderProxyStatus(status: string, t: (key: string) => string, reason?: string) {
   const statusMap: Record<

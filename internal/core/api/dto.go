@@ -77,6 +77,7 @@ type AdminCreateProjectRequest struct {
 	LogoURL        string                   `json:"logoUrl,omitempty"`
 	Description    string                   `json:"description,omitempty"`
 	AccessType     string                   `json:"accessType,omitempty"`
+	AccessUserIDs  []uint                   `json:"accessUserIds,omitempty"`
 	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
 	Products       []ProjectProductRequest  `json:"products" binding:"required"`
 	MailRules      []ProjectMailRuleRequest `json:"mailRules" binding:"required"`

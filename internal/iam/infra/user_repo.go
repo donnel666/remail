@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
@@ -288,9 +292,63 @@ func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User
 	})
 }
 
+func applyUserListFilter(q *gorm.DB, filter domain.UserListFilter) *gorm.DB {
+	if len(filter.IDs) > 0 {
+		q = q.Where("id IN ?", filter.IDs)
+	}
+	search := strings.TrimSpace(filter.Search)
+	if search == "" {
+		return q
+	}
+	searchQuery := userSearchBooleanQuery(search)
+	numericID, numericErr := strconv.ParseUint(search, 10, 64)
+	if email, ok := exactEmailSearch(search); ok {
+		return q.Where("email = ?", email)
+	}
+	switch {
+	case numericErr == nil:
+		return q.Where("id = ?", numericID)
+	case searchQuery != "":
+		return q.Where("MATCH(email, nickname) AGAINST (? IN BOOLEAN MODE)", searchQuery)
+	default:
+		return q.Where("1 = 0")
+	}
+}
+
+func exactEmailSearch(search string) (string, bool) {
+	addr, err := mail.ParseAddress(search)
+	if err != nil || addr.Address == "" || !strings.EqualFold(addr.Address, search) {
+		return "", false
+	}
+	return strings.ToLower(addr.Address), true
+}
+
+func userSearchBooleanQuery(search string) string {
+	parts := strings.FieldsFunc(strings.ToLower(search), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if len([]rune(part)) < 3 {
+			continue
+		}
+		terms = append(terms, "+"+part+"*")
+	}
+	return strings.Join(terms, " ")
+}
+
 func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, error) {
+	return r.ListByFilter(ctx, domain.UserListFilter{}, offset, limit)
+}
+
+func (r *UserRepo) ListByFilter(ctx context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error) {
 	var models []UserModel
-	err := r.db.WithContext(ctx).Order("created_at DESC").Offset(offset).Limit(limit).Find(&models).Error
+	err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), filter).
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -302,8 +360,12 @@ func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, 
 }
 
 func (r *UserRepo) Count(ctx context.Context) (int64, error) {
+	return r.CountByFilter(ctx, domain.UserListFilter{})
+}
+
+func (r *UserRepo) CountByFilter(ctx context.Context, filter domain.UserListFilter) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&count).Error
+	err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), filter).Count(&count).Error
 	if err != nil {
 		return 0, fmt.Errorf("count users: %w", err)
 	}

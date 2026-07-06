@@ -7,6 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-06-30 | V1.1 | Codex | 补充 P1-I1 当前用户直接改密接口和验证码交互规则；不改变 IAM 角色、Casbin 和错误策略。 |
 | 2026-07-01 | V1.2 | Codex | 补充供应商申请流程；普通用户申请成为 supplier 只提升角色，不改变资源状态。 |
+| 2026-07-06 | V1.3 | Codex | 补充管理员用户查询筛选能力：`GET /v1/admin/users` 支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索，用于后台私有项目授权选择；不改变 IAM 角色、Casbin 和用户实体。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -197,7 +198,7 @@ canceled
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `GET` | `/v1/admin/users` | 用户查询。 |
+| `GET` | `/v1/admin/users` | 用户查询；支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索。 |
 | `PATCH` | `/v1/admin/users/{userId}` | 启停、基础资料、角色等级变更。 |
 | `POST` | `/v1/admin/users/{userId}/sessions/revoke` | 强制退出。 |
 | `GET` | `/v1/admin/permissions` | 权限目录。 |

@@ -24,6 +24,7 @@ func (r *fakeProjectRepo) CreateWithLog(_ context.Context, detail *domain.Projec
 		detail.MailRules[i].ID = uint(i + 1)
 		detail.MailRules[i].ProjectID = detail.Project.ID
 	}
+	assignProjectAccessesForTest(detail)
 	r.detail = detail
 	r.log = log
 	return nil
@@ -40,12 +41,14 @@ func (r *fakeProjectRepo) ResubmitWithLog(_ context.Context, _ uint, detail *dom
 }
 
 func (r *fakeProjectRepo) UpdateWithLog(_ context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error {
+	assignProjectAccessesForTest(detail)
 	r.detail = detail
 	r.log = log
 	return nil
 }
 
 func (r *fakeProjectRepo) ApproveWithConfigAndLog(_ context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error {
+	assignProjectAccessesForTest(detail)
 	r.detail = detail
 	r.log = log
 	return nil
@@ -111,6 +114,17 @@ func (r *fakeProjectRepo) FindDetail(_ context.Context, _ uint, _ uint, _ bool) 
 	return r.detail, nil
 }
 
+func assignProjectAccessesForTest(detail *domain.ProjectDetail) {
+	if detail.Project.AccessType != domain.ProjectAccessPrivate {
+		detail.Accesses = nil
+		return
+	}
+	for i := range detail.Accesses {
+		detail.Accesses[i].ID = uint(i + 1)
+		detail.Accesses[i].ProjectID = detail.Project.ID
+	}
+}
+
 func TestProjectUseCaseAdminCreateListedRejectsInvalidEnums(t *testing.T) {
 	uc := NewProjectUseCase(&fakeProjectRepo{})
 
@@ -160,6 +174,26 @@ func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.
 	require.Equal(t, "core.project.create", repo.log.OperationType)
 	require.Equal(t, "req-ok", repo.log.RequestID)
 	require.Equal(t, uint(9), repo.log.OperatorUserID)
+}
+
+func TestProjectUseCaseAdminCreateListedNormalizesPrivateAccesses(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+
+	req := validProjectCreateRequest()
+	req.AccessType = "private"
+	req.AccessUserIDs = []uint{2, 2, 3}
+	detail, err := uc.AdminCreateListed(context.Background(), 9, req, "req-access", "/v1/admin/projects")
+	require.NoError(t, err)
+	require.Equal(t, domain.ProjectAccessPrivate, detail.Project.AccessType)
+	require.Len(t, detail.Accesses, 2)
+	require.Equal(t, uint(2), detail.Accesses[0].UserID)
+	require.Equal(t, uint(9), detail.Accesses[0].GrantedBy)
+
+	req.AccessType = "public"
+	detail, err = uc.AdminCreateListed(context.Background(), 9, req, "req-public", "/v1/admin/projects")
+	require.NoError(t, err)
+	require.Empty(t, detail.Accesses)
 }
 
 func TestProjectUseCaseResubmitNormalizesApplicationAndLog(t *testing.T) {

@@ -1130,9 +1130,12 @@ type AdminCreateInviteRequest struct {
 
 // AdminCreateProjectRequest defines model for AdminCreateProjectRequest.
 type AdminCreateProjectRequest struct {
-	AccessType  *AdminCreateProjectRequestAccessType `json:"accessType,omitempty"`
-	Description *string                              `json:"description,omitempty"`
-	LogoUrl     *string                              `json:"logoUrl,omitempty"`
+	AccessType *AdminCreateProjectRequestAccessType `json:"accessType,omitempty"`
+
+	// AccessUserIds Admin-only full replacement set for private project access. Ignored and cleared when accessType is public.
+	AccessUserIds *[]int  `json:"accessUserIds,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	LogoUrl       *string `json:"logoUrl,omitempty"`
 
 	// LooseMatch true requires sender+recipient; false requires sender+recipient+subject+body.
 	LooseMatch     *bool                    `json:"looseMatch,omitempty"`
@@ -2417,6 +2420,12 @@ type PostAdminSupplierApplicationRejectParams struct {
 type GetAdminUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Ids Optional comma-separated or repeated user IDs for exact batch lookup.
+	Ids *[]int `form:"ids,omitempty" json:"ids,omitempty"`
+
+	// Search Unified fuzzy search across user email, nickname, and ID.
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
 }
 
 // PatchAdminUserParams defines parameters for PatchAdminUser.
@@ -5184,6 +5193,22 @@ func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ids" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "ids", c.Request.URL.Query(), &params.Ids, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ids: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
 		return
 	}
 

@@ -63,20 +63,32 @@ var permissionCatalog = []domain.PermissionCatalogItem{
 }
 
 // ListUsers returns a paginated list of all users.
-func (uc *AdminUseCase) ListUsers(ctx context.Context, offset, limit int) (*UserListResult, error) {
-	if limit <= 0 || limit > 100 {
+func (uc *AdminUseCase) ListUsers(ctx context.Context, filter domain.UserListFilter, offset, limit int) (*UserListResult, error) {
+	filter.IDs = uniqueUserIDs(filter.IDs)
+	maxLimit := 100
+	if len(filter.IDs) > 0 {
+		maxLimit = 1000
+	}
+	if limit <= 0 {
 		limit = 20
+	}
+	if limit > maxLimit {
+		limit = maxLimit
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	if len([]rune(filter.Search)) > 120 {
+		filter.Search = string([]rune(filter.Search)[:120])
+	}
 
-	total, err := uc.repo.Count(ctx)
+	total, err := uc.repo.CountByFilter(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("admin list users count: %w", err)
 	}
 
-	users, err := uc.repo.List(ctx, offset, limit)
+	users, err := uc.repo.ListByFilter(ctx, filter, offset, limit)
 	if err != nil {
 		return nil, fmt.Errorf("admin list users: %w", err)
 	}
@@ -87,6 +99,25 @@ func (uc *AdminUseCase) ListUsers(ctx context.Context, offset, limit int) (*User
 		Offset: offset,
 		Limit:  limit,
 	}, nil
+}
+
+func uniqueUserIDs(ids []uint) []uint {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[uint]struct{}, len(ids))
+	result := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
 }
 
 func (uc *AdminUseCase) ListPermissions(_ context.Context) []domain.PermissionCatalogItem {

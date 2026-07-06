@@ -167,6 +167,52 @@ func TestProjectRepoAccessGrantListAndRevokeMySQL(t *testing.T) {
 	require.Equal(t, int64(2), logCount)
 }
 
+func TestProjectRepoCompleteConfigReplacesAccessesMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewProjectRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+		1,
+		"admin-access-replace@test.local",
+		"hash",
+		80,
+		2,
+		"access-user-2@test.local",
+		"hash",
+		10,
+		3,
+		"access-user-3@test.local",
+		"hash",
+		10,
+	).Error)
+
+	detail := validListedProjectDetail("Private Access Replacement Project")
+	detail.Project.AccessType = domain.ProjectAccessPrivate
+	detail.Accesses = []domain.ProjectAccess{
+		{UserID: 2, GrantedBy: 1},
+		{UserID: 3, GrantedBy: 1},
+	}
+	require.NoError(t, repo.CreateWithLog(context.Background(), detail, projectTestLog("req-project-access-replace-create")))
+
+	accesses, err := repo.ListAccesses(context.Background(), detail.Project.ID)
+	require.NoError(t, err)
+	require.Len(t, accesses, 2)
+
+	publicDetail := validListedProjectDetail("Private Access Replacement Project")
+	publicDetail.Project.ID = detail.Project.ID
+	publicDetail.Project.AccessType = domain.ProjectAccessPublic
+	require.NoError(t, repo.UpdateWithLog(context.Background(), publicDetail, projectTestLog("req-project-access-replace-public")))
+
+	var accessCount int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM project_accesses WHERE project_id = ?", detail.Project.ID).Scan(&accessCount).Error)
+	require.Zero(t, accessCount)
+
+	adminDetail, err := repo.FindDetail(context.Background(), detail.Project.ID, 0, true)
+	require.NoError(t, err)
+	require.Empty(t, adminDetail.Accesses)
+}
+
 func TestProjectRepoVisiblePrivateProjectRequiresAccessMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewProjectRepo(db)

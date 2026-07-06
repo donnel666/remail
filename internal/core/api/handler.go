@@ -1183,6 +1183,7 @@ type projectRequestFields interface {
 	projectLogoURL() string
 	projectDescription() string
 	projectAccessType() string
+	projectAccessUserIDs() []uint
 	projectLooseMatch() *bool
 	projectProducts() []ProjectProductRequest
 	projectMailRules() []ProjectMailRuleRequest
@@ -1195,7 +1196,10 @@ func (req CreateProjectApplicationRequest) projectTargetPlatform() string {
 func (req CreateProjectApplicationRequest) projectLogoURL() string     { return req.LogoURL }
 func (req CreateProjectApplicationRequest) projectDescription() string { return req.Description }
 func (req CreateProjectApplicationRequest) projectAccessType() string  { return req.AccessType }
-func (req CreateProjectApplicationRequest) projectLooseMatch() *bool   { return req.LooseMatch }
+func (req CreateProjectApplicationRequest) projectAccessUserIDs() []uint {
+	return nil
+}
+func (req CreateProjectApplicationRequest) projectLooseMatch() *bool { return req.LooseMatch }
 func (req CreateProjectApplicationRequest) projectProducts() []ProjectProductRequest {
 	return nil
 }
@@ -1210,7 +1214,10 @@ func (req AdminCreateProjectRequest) projectTargetPlatform() string {
 func (req AdminCreateProjectRequest) projectLogoURL() string     { return req.LogoURL }
 func (req AdminCreateProjectRequest) projectDescription() string { return req.Description }
 func (req AdminCreateProjectRequest) projectAccessType() string  { return req.AccessType }
-func (req AdminCreateProjectRequest) projectLooseMatch() *bool   { return req.LooseMatch }
+func (req AdminCreateProjectRequest) projectAccessUserIDs() []uint {
+	return req.AccessUserIDs
+}
+func (req AdminCreateProjectRequest) projectLooseMatch() *bool { return req.LooseMatch }
 func (req AdminCreateProjectRequest) projectProducts() []ProjectProductRequest {
 	return req.Products
 }
@@ -1258,6 +1265,7 @@ func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest 
 		LogoURL:        req.projectLogoURL(),
 		Description:    req.projectDescription(),
 		AccessType:     req.projectAccessType(),
+		AccessUserIDs:  req.projectAccessUserIDs(),
 		LooseMatch:     looseMatch,
 		Products:       products,
 		MailRules:      rules,

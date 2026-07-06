@@ -1453,6 +1453,8 @@ export interface components {
              * @enum {string}
              */
             accessType: "public" | "private";
+            /** @description Admin-only full replacement set for private project access. Ignored and cleared when accessType is public. */
+            accessUserIds?: number[];
             /**
              * @description true requires sender+recipient; false requires sender+recipient+subject+body.
              * @default true
@@ -2578,6 +2580,10 @@ export interface operations {
             query?: {
                 offset?: number;
                 limit?: number;
+                /** @description Optional comma-separated or repeated user IDs for exact batch lookup. */
+                ids?: number[];
+                /** @description Unified fuzzy search across user email, nickname, and ID. */
+                search?: string;
             };
             header?: never;
             path?: never;

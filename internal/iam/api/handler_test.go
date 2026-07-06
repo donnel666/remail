@@ -228,10 +228,17 @@ func (r *mockUserRepo) CreateFirstUser(ctx context.Context, user *domain.User) e
 }
 
 func (r *mockUserRepo) List(_ context.Context, offset, limit int) ([]domain.User, error) {
+	return r.ListByFilter(context.Background(), domain.UserListFilter{}, offset, limit)
+}
+
+func (r *mockUserRepo) ListByFilter(_ context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []domain.User
 	for _, u := range r.users {
+		if !mockUserMatchesFilter(u, filter) {
+			continue
+		}
 		result = append(result, *u)
 	}
 	if offset >= len(result) {
@@ -245,9 +252,41 @@ func (r *mockUserRepo) List(_ context.Context, offset, limit int) ([]domain.User
 }
 
 func (r *mockUserRepo) Count(_ context.Context) (int64, error) {
+	return r.CountByFilter(context.Background(), domain.UserListFilter{})
+}
+
+func (r *mockUserRepo) CountByFilter(_ context.Context, filter domain.UserListFilter) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return int64(len(r.users)), nil
+	var count int64
+	for _, user := range r.users {
+		if mockUserMatchesFilter(user, filter) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func mockUserMatchesFilter(user *domain.User, filter domain.UserListFilter) bool {
+	if len(filter.IDs) > 0 {
+		found := false
+		for _, id := range filter.IDs {
+			if user.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	search := strings.ToLower(strings.TrimSpace(filter.Search))
+	if search == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(user.Email), search) ||
+		strings.Contains(strings.ToLower(user.Nickname), search) ||
+		strings.Contains(fmt.Sprintf("%d", user.ID), search)
 }
 
 func (r *mockUserRepo) FindByIDs(_ context.Context, ids []uint) ([]domain.User, error) {
@@ -996,6 +1035,51 @@ func TestAdminUsers_InvalidQuery(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "Invalid query parameters.")
+}
+
+func TestAdminUsers_SearchMatchesEmailNicknameAndID(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	alpha := seedUser(t, h, "alpha@example.com")
+	alpha.Nickname = "Project Alpha"
+	require.NoError(t, testRepo(h).Update(context.Background(), alpha))
+	beta := seedUser(t, h, "beta@example.com")
+	beta.Nickname = "Beta User"
+	require.NoError(t, testRepo(h).Update(context.Background(), beta))
+
+	search := func(query string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/v1/admin/users?limit=20&search="+query, nil)
+		addAuthenticatedRequest(req, "admin-session")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return w.Body.String()
+	}
+
+	assert.Contains(t, search("alpha%40example.com"), "alpha@example.com")
+	assert.NotContains(t, search("alpha%40example.com"), "beta@example.com")
+	assert.Contains(t, search("Project"), "alpha@example.com")
+	assert.NotContains(t, search("Project"), "beta@example.com")
+	assert.Contains(t, search(fmt.Sprintf("%d", beta.ID)), "beta@example.com")
+}
+
+func TestAdminUsers_IDsFilter(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	alpha := seedUser(t, h, "ids-alpha@example.com")
+	beta := seedUser(t, h, "ids-beta@example.com")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users?ids=%d", beta.ID), nil)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), alpha.Email)
+	assert.Contains(t, w.Body.String(), beta.Email)
 }
 
 func TestPatchAdminUserWritesOperationLog(t *testing.T) {

@@ -50,6 +50,11 @@ type User struct {
 	UpdatedAt    time.Time
 }
 
+type UserListFilter struct {
+	IDs    []uint
+	Search string
+}
+
 // IsActivationNeeded returns true when no users exist.
 // This is the gate for the first-activation flow (INV-I8).
 func IsActivationNeeded(userCount int64) bool {

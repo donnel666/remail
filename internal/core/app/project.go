@@ -130,6 +130,7 @@ type CreateProjectRequest struct {
 	LogoURL        string
 	Description    string
 	AccessType     string
+	AccessUserIDs  []uint
 	LooseMatch     bool
 	Products       []ProjectProductRequest
 	MailRules      []ProjectMailRuleRequest
@@ -270,11 +271,16 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err != nil {
 		return nil, err
 	}
+	accesses, err := normalizeProjectAccessRequests(project.AccessType, req.AccessUserIDs, operatorUserID)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
 		Project:   project,
 		Products:  products,
 		MailRules: rules,
+		Accesses:  accesses,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.create", "project", "new", "success", "Listed project created.")
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
@@ -300,11 +306,16 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err != nil {
 		return nil, err
 	}
+	accesses, err := normalizeProjectAccessRequests(project.AccessType, req.AccessUserIDs, operatorUserID)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
 		Project:   project,
 		Products:  products,
 		MailRules: rules,
+		Accesses:  accesses,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.update", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project updated.")
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
@@ -335,10 +346,15 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err != nil {
 		return nil, err
 	}
+	accesses, err := normalizeProjectAccessRequests(project.AccessType, req.AccessUserIDs, operatorUserID)
+	if err != nil {
+		return nil, err
+	}
 	detail := &domain.ProjectDetail{
 		Project:   project,
 		Products:  products,
 		MailRules: rules,
+		Accesses:  accesses,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.approve", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project approved with configuration.")
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
@@ -655,6 +671,28 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled b
 		return nil, domain.ErrInvalidProduct
 	}
 	return products, nil
+}
+
+func normalizeProjectAccessRequests(accessType domain.ProjectAccessType, userIDs []uint, grantedBy uint) ([]domain.ProjectAccess, error) {
+	if accessType != domain.ProjectAccessPrivate {
+		return nil, nil
+	}
+	seen := make(map[uint]struct{}, len(userIDs))
+	accesses := make([]domain.ProjectAccess, 0, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == 0 {
+			return nil, domain.ErrInvalidProject
+		}
+		if _, exists := seen[userID]; exists {
+			continue
+		}
+		seen[userID] = struct{}{}
+		accesses = append(accesses, domain.ProjectAccess{
+			UserID:    userID,
+			GrantedBy: grantedBy,
+		})
+	}
+	return accesses, nil
 }
 
 func normalizeMailRuleRequests(requests []ProjectMailRuleRequest, requireComplete bool, looseMatch bool) ([]domain.MailRule, error) {

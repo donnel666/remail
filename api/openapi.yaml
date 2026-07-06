@@ -497,6 +497,21 @@ paths:
           schema:
             type: integer
             default: 20
+        - name: ids
+          in: query
+          description: Optional comma-separated or repeated user IDs for exact batch lookup.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+              minimum: 1
+        - name: search
+          in: query
+          description: Unified fuzzy search across user email, nickname, and ID.
+          schema:
+            type: string
       responses:
         "200":
           description: Paginated user list
@@ -4417,6 +4432,12 @@ components:
           type: string
           enum: [public, private]
           default: public
+        accessUserIds:
+          type: array
+          description: Admin-only full replacement set for private project access. Ignored and cleared when accessType is public.
+          items:
+            type: integer
+            minimum: 1
         looseMatch:
           type: boolean
           default: true
