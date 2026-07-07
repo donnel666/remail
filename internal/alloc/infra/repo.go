@@ -558,25 +558,44 @@ FOR UPDATE SKIP LOCKED`, resourceID).Scan(&row).Error; err != nil {
 }
 
 func (r *Repo) FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*allocapp.AliasCandidate, error) {
-	var row allocapp.AliasCandidate
+	var candidate allocapp.AliasCandidate
 	err := r.dbFor(ctx).Raw(`
 SELECT ea.id AS id, ea.email AS email
 FROM explicit_aliases ea
-LEFT JOIN microsoft_allocations ma
-  ON ma.explicit_alias_id = ea.id
- AND ma.mailbox = 'alias'
- AND ma.status = 'allocated'
-WHERE ea.resource_id = ? AND ea.status = 'normal' AND ma.id IS NULL
+WHERE ea.resource_id = ?
+  AND ea.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM microsoft_allocations ma
+      WHERE ma.explicit_alias_id = ea.id
+        AND ma.mailbox = 'alias'
+        AND ma.status = 'allocated'
+  )
 ORDER BY ea.id ASC
-LIMIT 1
-FOR UPDATE SKIP LOCKED`, resourceID).Scan(&row).Error
+LIMIT 1`, resourceID).Scan(&candidate).Error
 	if err != nil {
 		return nil, fmt.Errorf("find reusable explicit alias: %w", err)
 	}
-	if row.ID == 0 {
+	if candidate.ID == 0 {
 		return nil, nil
 	}
-	return &row, nil
+
+	var locked allocapp.AliasCandidate
+	err = r.dbFor(ctx).Raw(`
+SELECT ea.id AS id, ea.email AS email
+FROM explicit_aliases ea
+WHERE ea.id = ?
+  AND ea.resource_id = ?
+  AND ea.status = 'normal'
+LIMIT 1
+FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error
+	if err != nil {
+		return nil, fmt.Errorf("lock reusable explicit alias: %w", err)
+	}
+	if locked.ID == 0 {
+		return nil, nil
+	}
+	return &locked, nil
 }
 
 func (r *Repo) FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
@@ -588,26 +607,45 @@ func (r *Repo) FindReusablePlusAlias(ctx context.Context, projectID uint, resour
 }
 
 func (r *Repo) findReusableProjectAlias(ctx context.Context, table, column, mailbox string, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
-	var row allocapp.AliasCandidate
+	var candidate allocapp.AliasCandidate
 	query := fmt.Sprintf(`
 SELECT a.id AS id, a.email AS email
 FROM %s a
-LEFT JOIN microsoft_allocations ma
-  ON ma.%s = a.id
- AND ma.project_id = ?
- AND ma.mailbox = ?
- AND ma.status = 'allocated'
-WHERE a.resource_id = ? AND a.status = 'normal' AND ma.id IS NULL
+WHERE a.resource_id = ?
+  AND a.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM microsoft_allocations ma
+      WHERE ma.%s = a.id
+        AND ma.project_id = ?
+        AND ma.mailbox = ?
+        AND ma.status = 'allocated'
+  )
 ORDER BY a.id ASC
-LIMIT 1
-FOR UPDATE SKIP LOCKED`, table, column)
-	if err := r.dbFor(ctx).Raw(query, projectID, mailbox, resourceID).Scan(&row).Error; err != nil {
+LIMIT 1`, table, column)
+	if err := r.dbFor(ctx).Raw(query, resourceID, projectID, mailbox).Scan(&candidate).Error; err != nil {
 		return nil, fmt.Errorf("find reusable %s alias: %w", mailbox, err)
 	}
-	if row.ID == 0 {
+	if candidate.ID == 0 {
 		return nil, nil
 	}
-	return &row, nil
+
+	var locked allocapp.AliasCandidate
+	lockQuery := fmt.Sprintf(`
+SELECT a.id AS id, a.email AS email
+FROM %s a
+WHERE a.id = ?
+  AND a.resource_id = ?
+  AND a.status = 'normal'
+LIMIT 1
+FOR UPDATE SKIP LOCKED`, table)
+	if err := r.dbFor(ctx).Raw(lockQuery, candidate.ID, resourceID).Scan(&locked).Error; err != nil {
+		return nil, fmt.Errorf("lock reusable %s alias: %w", mailbox, err)
+	}
+	if locked.ID == 0 {
+		return nil, nil
+	}
+	return &locked, nil
 }
 
 func (r *Repo) FindOrCreateDotAlias(ctx context.Context, resourceID uint, email string) (*allocapp.AliasCandidate, error) {
@@ -639,24 +677,42 @@ func (r *Repo) FindOrCreatePlusAlias(ctx context.Context, resourceID uint, email
 }
 
 func (r *Repo) FindReusableGeneratedMailbox(ctx context.Context, projectID uint, resourceID uint) (*allocapp.GeneratedMailboxCandidate, error) {
-	var row allocapp.GeneratedMailboxCandidate
+	var candidate allocapp.GeneratedMailboxCandidate
 	if err := r.dbFor(ctx).Raw(`
 SELECT gm.id AS id, gm.email AS email
 FROM generated_mailboxes gm
-LEFT JOIN domain_allocations da
-  ON da.mailbox_id = gm.id
- AND da.project_id = ?
- AND da.status = 'allocated'
-WHERE gm.resource_id = ? AND gm.status = 'normal' AND da.id IS NULL
+WHERE gm.resource_id = ?
+  AND gm.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM domain_allocations da
+      WHERE da.mailbox_id = gm.id
+        AND da.project_id = ?
+        AND da.status = 'allocated'
+  )
 ORDER BY gm.last_allocated_at ASC, gm.id ASC
-LIMIT 1
-FOR UPDATE SKIP LOCKED`, projectID, resourceID).Scan(&row).Error; err != nil {
+LIMIT 1`, resourceID, projectID).Scan(&candidate).Error; err != nil {
 		return nil, fmt.Errorf("find reusable generated mailbox: %w", err)
 	}
-	if row.ID == 0 {
+	if candidate.ID == 0 {
 		return nil, nil
 	}
-	return &row, nil
+
+	var locked allocapp.GeneratedMailboxCandidate
+	if err := r.dbFor(ctx).Raw(`
+SELECT gm.id AS id, gm.email AS email
+FROM generated_mailboxes gm
+WHERE gm.id = ?
+  AND gm.resource_id = ?
+  AND gm.status = 'normal'
+LIMIT 1
+FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error; err != nil {
+		return nil, fmt.Errorf("lock reusable generated mailbox: %w", err)
+	}
+	if locked.ID == 0 {
+		return nil, nil
+	}
+	return &locked, nil
 }
 
 func (r *Repo) FindOrCreateGeneratedMailbox(ctx context.Context, resourceID uint, ownerUserID uint, email string) (*allocapp.GeneratedMailboxCandidate, error) {
