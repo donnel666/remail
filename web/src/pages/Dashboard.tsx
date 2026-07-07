@@ -171,52 +171,54 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="workbench-layout">
-        <ProjectListPanel
-          onSearchChange={setProjectSearch}
-          onSelectProject={handleSelectProject}
-          projects={filteredProjects}
-          search={projectSearch}
-          selectedProjectId={selectedProjectId}
-          serviceMode={serviceMode}
-        />
+      <div className="workbench-responsive-shell">
+        <div className="workbench-layout">
+          <ProjectListPanel
+            onSearchChange={setProjectSearch}
+            onSelectProject={handleSelectProject}
+            projects={filteredProjects}
+            search={projectSearch}
+            selectedProjectId={selectedProjectId}
+            serviceMode={serviceMode}
+          />
 
-        <ProductPickerPanel
-          inventoryScope={inventoryScope}
-          onInventoryScopeChange={setInventoryScope}
-          onProductSearchChange={setProductSearch}
-          onSelectProduct={setSelectedProductId}
-          onServiceModeChange={(mode) => {
-            setServiceMode(mode);
-            setQuantity(1);
-          }}
-          productSearch={productSearch}
-          products={filteredProducts}
-          selectedProductId={selectedProductId}
-          selectedProject={selectedProject}
-          serviceMode={serviceMode}
-        />
+          <ProductPickerPanel
+            inventoryScope={inventoryScope}
+            onInventoryScopeChange={setInventoryScope}
+            onProductSearchChange={setProductSearch}
+            onSelectProduct={setSelectedProductId}
+            onServiceModeChange={(mode) => {
+              setServiceMode(mode);
+              setQuantity(1);
+            }}
+            productSearch={productSearch}
+            products={filteredProducts}
+            selectedProductId={selectedProductId}
+            selectedProject={selectedProject}
+            serviceMode={serviceMode}
+          />
 
-        <OrderPanel
-          inventoryScope={inventoryScope}
-          onCreateOrder={handleCreateOrder}
-          onFetchOrderMail={handleFetchOrderMail}
-          onOpenMailbox={setMailClientParams}
-          onQuantityChange={setQuantity}
-          onSearchChange={setOrderSearch}
-          onSelectOrder={(orderNo) =>
-            setSelectedOrderNo((current) => (current === orderNo ? "" : orderNo))
-          }
-          orderSearch={orderSearch}
-          orders={visibleOrders}
-          productsById={productsById}
-          projectsById={projectsById}
-          quantity={quantity}
-          selectedOrder={selectedOrder}
-          selectedProduct={selectedProduct}
-          selectedProject={selectedProject}
-          serviceMode={serviceMode}
-        />
+          <OrderPanel
+            inventoryScope={inventoryScope}
+            onCreateOrder={handleCreateOrder}
+            onFetchOrderMail={handleFetchOrderMail}
+            onOpenMailbox={setMailClientParams}
+            onQuantityChange={setQuantity}
+            onSearchChange={setOrderSearch}
+            onSelectOrder={(orderNo) =>
+              setSelectedOrderNo((current) => (current === orderNo ? "" : orderNo))
+            }
+            orderSearch={orderSearch}
+            orders={visibleOrders}
+            productsById={productsById}
+            projectsById={projectsById}
+            quantity={quantity}
+            selectedOrder={selectedOrder}
+            selectedProduct={selectedProduct}
+            selectedProject={selectedProject}
+            serviceMode={serviceMode}
+          />
+        </div>
       </div>
 
       <MailboxClientModal

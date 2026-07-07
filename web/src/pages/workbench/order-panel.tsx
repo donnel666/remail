@@ -284,15 +284,17 @@ export function OrderPanel({
                 size={30}
               />
             </div>
-            <div className="workbench-quick-meta">
-              <span>{inventoryScopeLabel(inventoryScope, t)}</span>
-              <span className="workbench-quick-stock">{stockText}</span>
-              <span>
-                {serviceMode === "code"
-                  ? `${selectedProduct?.codeWindowMinutes ?? 0}m`
-                  : `${selectedProduct?.warrantyHours ?? 0}h`}
-              </span>
-            </div>
+            <span className="workbench-quick-meta-pill">
+              {inventoryScopeLabel(inventoryScope, t)}
+            </span>
+            <span className="workbench-quick-meta-pill workbench-quick-stock">
+              {stockText}
+            </span>
+            <span className="workbench-quick-meta-pill">
+              {serviceMode === "code"
+                ? `${selectedProduct?.codeWindowMinutes ?? 0}m`
+                : `${selectedProduct?.warrantyHours ?? 0}h`}
+            </span>
             <strong className="workbench-quick-price">{formatMoney(totalPrice)}</strong>
             <Input
               min={1}
