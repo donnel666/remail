@@ -29,7 +29,7 @@ import {
   Share2,
   TrendingUp,
   Users,
-  Wallet,
+  Wallet as WalletIcon,
   Zap,
 } from "lucide-react";
 import { SiAlipay } from "react-icons/si";
@@ -177,7 +177,7 @@ function StatBanner({
   );
 }
 
-export default function Financial() {
+export default function Wallet() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [selectedAmount, setSelectedAmount] = useState(100);
@@ -342,7 +342,7 @@ export default function Financial() {
   const rechargeStats = useMemo<BannerStat[]>(
     () => [
       {
-        icon: <Wallet size={14} />,
+        icon: <WalletIcon size={14} />,
         label: "Current Balance",
         value: walletLoading ? "..." : formatCurrency(wallet?.consumerBalance),
       },

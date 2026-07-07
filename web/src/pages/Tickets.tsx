@@ -1,5 +1,5 @@
 import { PlaceholderPage } from "./PlaceholderPage";
 
-export default function AfterSales() {
+export default function Tickets() {
   return <PlaceholderPage titleKey="After-sales Tickets" />;
 }

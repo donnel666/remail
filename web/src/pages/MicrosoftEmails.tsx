@@ -94,7 +94,7 @@ function isEmailResource(item: EmailResource | null): item is EmailResource {
   return item !== null;
 }
 
-function useResources(t: TFunction) {
+function useMicrosoftResources(t: TFunction) {
   const [items, setItems] = useState<EmailResource[]>([]);
   const [loading, setLoading] = useState(true);
   const refreshSeqRef = useRef(0);
@@ -208,7 +208,7 @@ function useResources(t: TFunction) {
   };
 }
 
-export default function Resources() {
+export default function MicrosoftEmails() {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
@@ -221,7 +221,7 @@ export default function Resources() {
     markResourcesPublishedForSale,
     markResourcesPublishedByPredicate,
     invalidateRefresh,
-  } = useResources(t);
+  } = useMicrosoftResources(t);
   const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);

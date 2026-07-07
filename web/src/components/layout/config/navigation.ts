@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   ClipboardList,
   Database,
   Globe,
@@ -6,7 +7,6 @@ import {
   Network,
   PackageOpen,
   Settings,
-  Shield,
   Users,
   Wallet,
   Zap,
@@ -18,25 +18,25 @@ export const ADMIN_ROLE_LEVEL = 80;
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     id: "workbench",
-    labelKey: "Workbench",
+    labelKey: "Code Receiving",
     items: [{ path: "/dashboard", labelKey: "Workbench", icon: Zap }],
   },
   {
     id: "console",
     labelKey: "Console",
     items: [
-      { path: "/my-emails", labelKey: "Project Assets", icon: Shield },
-      { path: "/resources", labelKey: "Microsoft Emails", icon: Database },
+      { path: "/console", labelKey: "Data Dashboard", icon: BarChart3 },
+      { path: "/microsoft", labelKey: "Microsoft Emails", icon: Database },
       { path: "/domains", labelKey: "Domain Emails", icon: Globe },
       { path: "/orders", labelKey: "Order Records", icon: ClipboardList },
-      { path: "/after-sales", labelKey: "After-sales Tickets", icon: Headphones },
+      { path: "/tickets", labelKey: "After-sales Tickets", icon: Headphones },
     ],
   },
   {
     id: "personal-center",
     labelKey: "Personal Center",
     items: [
-      { path: "/financial", labelKey: "Wallet Management", icon: Wallet },
+      { path: "/wallet", labelKey: "Wallet Management", icon: Wallet },
       { path: "/account", labelKey: "Personal Settings", icon: Settings },
     ],
   },
@@ -45,8 +45,8 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     labelKey: "Administrator",
     minRoleLevel: ADMIN_ROLE_LEVEL,
     items: [
-      { path: "/admin/microsoft-emails", labelKey: "Admin Microsoft Emails", icon: Database },
-      { path: "/admin/domain-emails", labelKey: "Admin Domain Emails", icon: Globe },
+      { path: "/admin/microsoft", labelKey: "Admin Microsoft Emails", icon: Database },
+      { path: "/admin/domains", labelKey: "Admin Domain Emails", icon: Globe },
       { path: "/admin/projects", labelKey: "Project Management", icon: PackageOpen },
       { path: "/admin/proxies", labelKey: "Proxy Management", icon: Network },
       { path: "/admin/users", labelKey: "User Management", icon: Users },
@@ -84,7 +84,7 @@ export function getSidebarRouteRequiredRoleLevel(pathname: string) {
 
 export const TOP_NAV_ITEMS: TopNavItem[] = [
   { path: "/", labelKey: "Home" },
-  { path: "/dashboard", labelKey: "Console", activePaths: ROUTES_WITH_SIDEBAR },
+  { path: "/console", labelKey: "Console", activePaths: ROUTES_WITH_SIDEBAR },
   { path: "/projects", labelKey: "Project Square" },
   { path: "/api-docs", labelKey: "API Docs" },
   { path: "/qna", labelKey: "FAQ" },

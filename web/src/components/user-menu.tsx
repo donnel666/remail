@@ -67,7 +67,7 @@ export function UserMenu() {
           {t("API KEY")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          render={<Link to="/financial" />}
+          render={<Link to="/wallet" />}
           className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
           <Wallet className="size-4 text-muted-foreground" />

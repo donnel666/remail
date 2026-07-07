@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	referralInviteMaxUse     = 2147483647
-	referralInviteCodePrefix = "AFF"
+	referralInviteMaxUse           = 2147483647
+	referralInviteCodePrefix       = "AFF"
+	referralInviteRandomCodeLength = 10
 )
 
 type InviteUseCase struct {
@@ -58,10 +59,13 @@ func (uc *InviteUseCase) CurrentReferralInvite(ctx context.Context, userID uint)
 }
 
 func generateReferralInviteCode() (string, error) {
-	randomBytes, err := newCryptoBytes(10)
+	randomBytes, err := newCryptoBytes(7)
 	if err != nil {
 		return "", err
 	}
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(randomBytes)
-	return referralInviteCodePrefix + encoded, nil
+	if len(encoded) < referralInviteRandomCodeLength {
+		return "", fmt.Errorf("generate referral invite: encoded entropy too short")
+	}
+	return referralInviteCodePrefix + encoded[:referralInviteRandomCodeLength], nil
 }

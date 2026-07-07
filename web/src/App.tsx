@@ -30,6 +30,7 @@ import {
 } from "./components/layout/config/navigation";
 import { getActivation } from "./lib/iam-api";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { ForbiddenPage, NotFoundPage, ServerErrorPage } from "./pages/ErrorPages";
 
 const Home = lazy(() => import("./pages/Home"));
 const Activation = lazy(() => import("./pages/Activation"));
@@ -42,11 +43,11 @@ const Register = lazy(() => import("./pages/Register"));
 const PasswordReset = lazy(() => import("./pages/PasswordReset"));
 const Account = lazy(() => import("./pages/Account"));
 const ApiKeys = lazy(() => import("./pages/ApiKeys"));
-const Financial = lazy(() => import("./pages/Financial"));
+const ConsoleOverview = lazy(() => import("./pages/ConsoleOverview"));
+const Wallet = lazy(() => import("./pages/Wallet"));
 const Orders = lazy(() => import("./pages/Orders"));
-const MyEmails = lazy(() => import("./pages/MyEmails"));
-const AfterSales = lazy(() => import("./pages/AfterSales"));
-const Resources = lazy(() => import("./pages/Resources"));
+const Tickets = lazy(() => import("./pages/Tickets"));
+const MicrosoftEmails = lazy(() => import("./pages/MicrosoftEmails"));
 const DomainEmails = lazy(() => import("./pages/DomainEmails"));
 const AdminProjects = lazy(() => import("./pages/AdminProjects"));
 const ProxyManagement = lazy(() => import("./pages/ProxyManagement"));
@@ -157,7 +158,7 @@ function RouteGate({ children }: { children: ReactNode }) {
       currentUser &&
       currentUser.roleLevel < requiredRoleLevel
     ) {
-      void navigate({ to: "/dashboard", replace: true });
+      void navigate({ to: "/403", replace: true });
       return;
     }
 
@@ -192,20 +193,16 @@ function RouteGate({ children }: { children: ReactNode }) {
 
 const rootRoute = createRootRoute({
   component: () => (
-    <ThemeProvider>
-      <SemiLocaleWrapper>
-        <AuthProvider>
-          <RouteGate>
-            <AppShell>
-              <Suspense fallback={<Loading />}>
-                <Outlet />
-              </Suspense>
-            </AppShell>
-          </RouteGate>
-        </AuthProvider>
-      </SemiLocaleWrapper>
-    </ThemeProvider>
+    <RouteGate>
+      <AppShell>
+        <Suspense fallback={<Loading />}>
+          <Outlet />
+        </Suspense>
+      </AppShell>
+    </RouteGate>
   ),
+  notFoundComponent: NotFoundPage,
+  errorComponent: ({ reset }) => <ServerErrorPage onRetry={reset} />,
 });
 
 const routeTree = rootRoute.addChildren([
@@ -226,24 +223,31 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/apikeys", component: ApiKeys }),
   createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/qna", component: Qna }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/403", component: ForbiddenPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/404", component: NotFoundPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/500",
+    component: () => <ServerErrorPage onRetry={() => window.location.reload()} />,
+  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/console", component: ConsoleOverview }),
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: Dashboard }),
   createRoute({ getParentRoute: () => rootRoute, path: "/projects", component: Projects }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/financial", component: Financial }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/wallet", component: Wallet }),
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/my-emails", component: MyEmails }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/after-sales", component: AfterSales }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/resources", component: Resources }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/invite", component: Invite }),
   createRoute({ getParentRoute: () => rootRoute, path: "/recharge", component: Recharge }),
   createRoute({
     getParentRoute: () => rootRoute,
-    path: "/admin/microsoft-emails",
+    path: "/admin/microsoft",
     component: AdminMicrosoftEmails,
   }),
   createRoute({
     getParentRoute: () => rootRoute,
-    path: "/admin/domain-emails",
+    path: "/admin/domains",
     component: AdminDomainEmails,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/projects", component: AdminProjects }),
@@ -261,7 +265,15 @@ declare module "@tanstack/react-router" {
 }
 
 function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <ThemeProvider>
+      <SemiLocaleWrapper>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </SemiLocaleWrapper>
+    </ThemeProvider>
+  );
 }
 
 export default App;
