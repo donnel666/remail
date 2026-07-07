@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -114,6 +116,24 @@ func (CardKeyRedemptionModel) TableName() string {
 	return "card_key_redemptions"
 }
 
+type ReferralRewardModel struct {
+	ID                    uint       `gorm:"primaryKey;autoIncrement"`
+	InviterUserID         uint       `gorm:"not null;column:inviter_user_id"`
+	InviteeUserID         uint       `gorm:"not null;column:invitee_user_id"`
+	InviteCode            string     `gorm:"type:varchar(64);not null;column:invite_code"`
+	SourceTransactionID   uint       `gorm:"not null;column:source_transaction_id"`
+	TransferTransactionID *uint      `gorm:"column:transfer_transaction_id"`
+	SourceAmount          string     `gorm:"type:decimal(18,2);not null;column:source_amount"`
+	RewardAmount          string     `gorm:"type:decimal(18,2);not null;column:reward_amount"`
+	Status                string     `gorm:"type:varchar(32);not null;default:'available'"`
+	TransferredAt         *time.Time `gorm:"column:transferred_at"`
+	CreatedAt             time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (ReferralRewardModel) TableName() string {
+	return "referral_rewards"
+}
+
 type BillingRepo struct {
 	db            *gorm.DB
 	operationLogs operationLogWriter
@@ -159,6 +179,52 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 		Wallet:          walletModelToDomain(wallet),
 		HistoricalSpend: normalizedSpend,
 		OrderCount:      orderCount,
+	}, nil
+}
+
+func (r *BillingRepo) GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error) {
+	if userID == 0 {
+		return nil, domain.ErrInvalidFilter
+	}
+
+	var inviteCount int64
+	if err := r.db.WithContext(ctx).
+		Table("invite_uses AS iu").
+		Joins("JOIN invites AS i ON i.code = iu.invite_code").
+		Where("i.invite_kind = ? AND i.referral_owner_user_id = ?", "referral", userID).
+		Count(&inviteCount).Error; err != nil {
+		return nil, fmt.Errorf("count referral invites: %w", err)
+	}
+
+	var totalEarned string
+	if err := r.db.WithContext(ctx).
+		Model(&ReferralRewardModel{}).
+		Select("COALESCE(SUM(reward_amount), 0)").
+		Where("inviter_user_id = ?", userID).
+		Scan(&totalEarned).Error; err != nil {
+		return nil, fmt.Errorf("sum referral rewards: %w", err)
+	}
+	totalEarned, err := normalizeDBMoney(totalEarned)
+	if err != nil {
+		return nil, err
+	}
+	var pendingRewards string
+	if err := r.db.WithContext(ctx).
+		Model(&ReferralRewardModel{}).
+		Select("COALESCE(SUM(reward_amount), 0)").
+		Where("inviter_user_id = ? AND status = ?", userID, "available").
+		Scan(&pendingRewards).Error; err != nil {
+		return nil, fmt.Errorf("sum pending referral rewards: %w", err)
+	}
+	pendingRewards, err = normalizeDBMoney(pendingRewards)
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.ReferralSummary{
+		InviteCount:    inviteCount,
+		PendingRewards: pendingRewards,
+		TotalEarned:    totalEarned,
 	}, nil
 }
 
@@ -227,6 +293,33 @@ func (r *BillingRepo) RedeemCard(ctx context.Context, req billingapp.RedeemCardC
 		if replayed {
 			if err := json.Unmarshal(response, &result); err != nil {
 				return fmt.Errorf("decode idempotent card redemption: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (r *BillingRepo) TransferReferralRewards(ctx context.Context, req billingapp.TransferReferralRewardsCommand) (*billingapp.TransferReferralRewardsResult, error) {
+	var result billingapp.TransferReferralRewardsResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		response, replayed, err := r.withIdempotencyInTx(ctx, tx, req.UserID, "referrals.transfer", req.IdempotencyKey, req.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+			created, err := r.transferReferralRewardsInTx(ctx, writeTx, req)
+			if err != nil {
+				return nil, err
+			}
+			result = *created
+			return json.Marshal(created)
+		})
+		if err != nil {
+			return err
+		}
+		if replayed {
+			if err := json.Unmarshal(response, &result); err != nil {
+				return fmt.Errorf("decode idempotent referral transfer: %w", err)
 			}
 		}
 		return nil
@@ -461,10 +554,15 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 		return nil, domain.ErrCardExhausted
 	}
 
-	wallet, err := r.lockWalletInTx(ctx, tx, req.UserID)
+	referral, err := r.findReferralRelationInTx(ctx, tx, req.UserID)
 	if err != nil {
 		return nil, err
 	}
+	wallets, err := r.lockWalletsInTx(ctx, tx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	wallet := wallets[req.UserID]
 	result, err := r.createConsumerTransaction(ctx, tx, wallet, consumerTransactionRequest{
 		UserID:          req.UserID,
 		Amount:          card.Amount,
@@ -495,6 +593,9 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 			return nil, domain.ErrCardAlreadyRedeemed
 		}
 		return nil, fmt.Errorf("create card redemption: %w", err)
+	}
+	if err := r.settleReferralRewardInTx(ctx, tx, referral, result.Transaction); err != nil {
+		return nil, err
 	}
 	card.RedeemedCount++
 	return &billingapp.RedeemCardResult{
@@ -529,6 +630,135 @@ func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB
 	return result, nil
 }
 
+func (r *BillingRepo) transferReferralRewardsInTx(ctx context.Context, tx *gorm.DB, req billingapp.TransferReferralRewardsCommand) (*billingapp.TransferReferralRewardsResult, error) {
+	wallet, err := r.lockWalletInTx(ctx, tx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	var rewards []ReferralRewardModel
+	if err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("inviter_user_id = ? AND status = ?", req.UserID, "available").
+		Order("id ASC").
+		Find(&rewards).Error; err != nil {
+		return nil, fmt.Errorf("lock referral rewards: %w", err)
+	}
+	if len(rewards) == 0 {
+		return nil, domain.ErrNoReferralRewards
+	}
+
+	total := decimal.Zero
+	rewardIDs := make([]uint, 0, len(rewards))
+	for _, reward := range rewards {
+		amount, err := domain.ParseMoney(reward.RewardAmount)
+		if err != nil || !amount.IsPositive() {
+			return nil, domain.ErrInvalidAmount
+		}
+		total = total.Add(amount)
+		rewardIDs = append(rewardIDs, reward.ID)
+	}
+	amountString := domain.MoneyString(total)
+	result, err := r.createConsumerTransaction(ctx, tx, wallet, consumerTransactionRequest{
+		UserID:          req.UserID,
+		Amount:          amountString,
+		Direction:       domain.TransactionDirectionIn,
+		TransactionType: domain.TransactionTypeCredit,
+		BizType:         "referral_transfer",
+		BizID:           req.IdempotencyKey,
+		IdempotencyKey:  req.IdempotencyKey,
+		RequestID:       req.RequestID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	now := req.Now
+	updates := map[string]any{
+		"status":                  "transferred",
+		"transfer_transaction_id": result.Transaction.ID,
+		"transferred_at":          &now,
+	}
+	updated := tx.WithContext(ctx).
+		Model(&ReferralRewardModel{}).
+		Where("id IN ? AND status = ?", rewardIDs, "available").
+		Updates(updates)
+	if updated.Error != nil {
+		return nil, fmt.Errorf("mark referral rewards transferred: %w", updated.Error)
+	}
+	if updated.RowsAffected != int64(len(rewardIDs)) {
+		return nil, domain.ErrReferralRewardStateConflict
+	}
+
+	return &billingapp.TransferReferralRewardsResult{
+		Wallet:            result.Wallet,
+		Transaction:       result.Transaction,
+		TransferredAmount: amountString,
+		TransferredCount:  len(rewards),
+	}, nil
+}
+
+type referralRelation struct {
+	InviterUserID uint
+	InviteCode    string
+}
+
+func (r *BillingRepo) findReferralRelationInTx(ctx context.Context, tx *gorm.DB, inviteeUserID uint) (referralRelation, error) {
+	var relation referralRelation
+	if err := tx.WithContext(ctx).
+		Table("invite_uses AS iu").
+		Select("i.referral_owner_user_id AS inviter_user_id, iu.invite_code").
+		Joins("JOIN invites AS i ON i.code = iu.invite_code").
+		Where("iu.user_id = ? AND i.invite_kind = ? AND i.referral_owner_user_id IS NOT NULL", inviteeUserID, "referral").
+		Order("iu.used_at ASC, iu.id ASC").
+		Limit(1).
+		Scan(&relation).Error; err != nil {
+		return referralRelation{}, fmt.Errorf("find referral relation: %w", err)
+	}
+	if relation.InviterUserID == inviteeUserID {
+		return referralRelation{}, nil
+	}
+	return relation, nil
+}
+
+func (r *BillingRepo) settleReferralRewardInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	relation referralRelation,
+	source domain.Transaction,
+) error {
+	if relation.InviterUserID == 0 || relation.InviteCode == "" {
+		return nil
+	}
+
+	sourceAmount, err := domain.ParseMoney(source.Amount)
+	if err != nil || !sourceAmount.IsPositive() {
+		return domain.ErrInvalidAmount
+	}
+	rewardAmount := sourceAmount.Mul(decimal.NewFromInt(80)).Div(decimal.NewFromInt(100))
+	rewardAmountString := domain.MoneyString(rewardAmount)
+	if rewardAmountString == "0.00" {
+		return nil
+	}
+
+	reward := ReferralRewardModel{
+		InviterUserID:       relation.InviterUserID,
+		InviteeUserID:       source.UserID,
+		InviteCode:          relation.InviteCode,
+		SourceTransactionID: source.ID,
+		SourceAmount:        source.Amount,
+		RewardAmount:        rewardAmountString,
+		Status:              "available",
+	}
+	if err := tx.WithContext(ctx).Create(&reward).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return nil
+		}
+		return fmt.Errorf("create referral reward: %w", err)
+	}
+	return nil
+}
+
 func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID uint) (WalletModel, error) {
 	if userID == 0 {
 		return WalletModel{}, domain.ErrInvalidFilter
@@ -560,6 +790,32 @@ func (r *BillingRepo) lockWalletInTx(ctx context.Context, tx *gorm.DB, userID ui
 		return nil, fmt.Errorf("lock wallet: %w", err)
 	}
 	return &wallet, nil
+}
+
+func (r *BillingRepo) lockWalletsInTx(ctx context.Context, tx *gorm.DB, userIDs ...uint) (map[uint]*WalletModel, error) {
+	unique := make(map[uint]struct{}, len(userIDs))
+	ids := make([]uint, 0, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == 0 {
+			continue
+		}
+		if _, ok := unique[userID]; ok {
+			continue
+		}
+		unique[userID] = struct{}{}
+		ids = append(ids, userID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	wallets := make(map[uint]*WalletModel, len(ids))
+	for _, userID := range ids {
+		wallet, err := r.lockWalletInTx(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		wallets[userID] = wallet
+	}
+	return wallets, nil
 }
 
 type consumerTransactionRequest struct {
@@ -763,6 +1019,9 @@ func trimBizID(value string) string {
 }
 
 func isDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

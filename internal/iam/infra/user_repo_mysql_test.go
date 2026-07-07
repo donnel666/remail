@@ -306,6 +306,78 @@ func TestUserRepoCreateWithInviteConcurrentMySQL(t *testing.T) {
 	require.Equal(t, int64(1), inviteUseCount)
 }
 
+func TestUserRepoReferralInviteConstraintsMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+
+	owner := &domain.User{
+		Email:        "referral-owner@test.local",
+		PasswordHash: "hash",
+		Enabled:      true,
+		RoleLevel:    domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), owner))
+
+	err := db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFF-NO-OWNER",
+		domain.InviteKindReferral,
+		true,
+		100,
+		0,
+		owner.ID,
+		nil,
+	).Error
+	require.Error(t, err)
+
+	err = db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFF-MISSING-OWNER",
+		domain.InviteKindReferral,
+		true,
+		100,
+		0,
+		owner.ID,
+		99999999,
+	).Error
+	require.Error(t, err)
+
+	err = db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"ADMIN-WITH-OWNER",
+		domain.InviteKindAdmin,
+		true,
+		100,
+		0,
+		owner.ID,
+		owner.ID,
+	).Error
+	require.Error(t, err)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFF-OWNER-1",
+		domain.InviteKindReferral,
+		true,
+		100,
+		0,
+		owner.ID,
+		owner.ID,
+	).Error)
+
+	err = db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFF-OWNER-2",
+		domain.InviteKindReferral,
+		true,
+		100,
+		0,
+		owner.ID,
+		owner.ID,
+	).Error
+	require.Error(t, err)
+}
+
 func TestPermissionServiceReplacePoliciesReloadsMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 

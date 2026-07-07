@@ -12,6 +12,19 @@ type WalletResponse struct {
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
+type WalletReferralResponse struct {
+	InviteCount    int64  `json:"inviteCount"`
+	PendingRewards string `json:"pendingRewards"`
+	TotalEarned    string `json:"totalEarned"`
+}
+
+type WalletReferralTransferResponse struct {
+	Wallet            WalletResponse          `json:"wallet"`
+	Transaction       TransactionItemResponse `json:"transaction"`
+	TransferredAmount string                  `json:"transferredAmount"`
+	TransferredCount  int                     `json:"transferredCount"`
+}
+
 type TransactionItemResponse struct {
 	ID              uint      `json:"id"`
 	TransactionNo   string    `json:"transactionNo"`

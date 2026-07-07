@@ -9,6 +9,7 @@ import {
   Space,
   Tabs,
   Tag,
+  Tooltip,
   Toast,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
@@ -21,7 +22,10 @@ import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
-import { CardTable } from "@/components/semi/card-table";
+import {
+  CardTable,
+  DESKTOP_TABLE_SCROLL_Y,
+} from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
@@ -683,7 +687,7 @@ export default function DomainEmails() {
           key: "tld",
           title: t("TLD"),
           dataIndex: "domain",
-          width: "10%",
+          width: 110,
           render: (_: string, record: DomainResource) => (
             <Tag color="white" shape="circle">
               {record.domainTld}
@@ -694,7 +698,7 @@ export default function DomainEmails() {
           key: "domain",
           title: t("Domain"),
           dataIndex: "domain",
-          width: "29%",
+          width: 280,
           render: (text: string) => (
             <CopyableTableText copiedText={t("Copied")} text={text} />
           ),
@@ -702,14 +706,14 @@ export default function DomainEmails() {
         {
           title: t("Status"),
           dataIndex: "status",
-          width: "12%",
+          width: 120,
           render: (status: DomainStatus, record: DomainResource) =>
             renderDomainStatusTag(status, t, record.lastSafeError),
         },
         {
           title: t("Private only"),
           dataIndex: "usageScope",
-          width: "12%",
+          width: 120,
           render: (scope: UsageScope) => (
             <span
               className={`text-xs font-medium ${
@@ -725,7 +729,7 @@ export default function DomainEmails() {
         {
           title: t("Mailboxes"),
           dataIndex: "mailboxCount",
-          width: "10%",
+          width: 110,
           render: (count: number) => (
             <span className="tabular-nums font-medium text-[var(--semi-color-text-1)]">
               {count}
@@ -735,10 +739,10 @@ export default function DomainEmails() {
         {
           title: t("Action"),
           dataIndex: "operate",
-          width: "27%",
+          width: 190,
           fixed: "right",
           render: (_: unknown, record: DomainResource) => (
-            <Space wrap={false}>
+            <Space spacing={4} wrap={false}>
               <Button
                 disabled={record.usageScope !== "private"}
                 loading={publishingResourceID === record.id}
@@ -851,32 +855,53 @@ export default function DomainEmails() {
         >
           {t("Refresh")}
         </Button>
-        <Button
-          type="tertiary"
-          size="small"
-          className="flex-1 md:flex-initial"
-          onClick={confirmCheckAll}
+        <Tooltip
+          content={t("Check all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Check all")}
-        </Button>
-        <Button
-          type="tertiary"
-          size="small"
-          className="flex-1 md:flex-initial"
-          loading={publishingBatch}
-          onClick={() => void confirmSellAll()}
+          <Button
+            type="tertiary"
+            size="small"
+            className="flex-1 md:flex-initial"
+            onClick={confirmCheckAll}
+          >
+            {t("Check")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Sell all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Sell all")}
-        </Button>
-        <Button
-          type="danger"
-          size="small"
-          className="flex-1 md:flex-initial"
-          loading={deletingBatch}
-          onClick={confirmDeleteAll}
+          <Button
+            type="tertiary"
+            size="small"
+            className="flex-1 md:flex-initial"
+            loading={publishingBatch}
+            onClick={() => void confirmSellAll()}
+          >
+            {t("Sell")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Delete all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Delete all")}
-        </Button>
+          <Button
+            type="danger"
+            size="small"
+            className="flex-1 md:flex-initial"
+            loading={deletingBatch}
+            onClick={confirmDeleteAll}
+          >
+            {t("Delete")}
+          </Button>
+        </Tooltip>
         <CompactModeToggle
           compactMode={compactMode}
           setCompactMode={setCompactMode}
@@ -1055,7 +1080,7 @@ export default function DomainEmails() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max(100%, 980px)" }}
+          scroll={{ x: "max(100%, 990px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

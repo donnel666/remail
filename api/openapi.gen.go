@@ -1831,6 +1831,11 @@ type CreateProxyRequest struct {
 	Url string `json:"url"`
 }
 
+// CurrentInviteResponse defines model for CurrentInviteResponse.
+type CurrentInviteResponse struct {
+	InviteCode string `json:"inviteCode"`
+}
+
 // DeleteProxiesRequest defines model for DeleteProxiesRequest.
 type DeleteProxiesRequest struct {
 	// All Delete every proxy matching filter. When false or omitted, proxyIds mode is used.
@@ -2885,6 +2890,25 @@ type WalletAdjustmentResponse struct {
 	Wallet      WalletResponse  `json:"wallet"`
 }
 
+// WalletReferralResponse defines model for WalletReferralResponse.
+type WalletReferralResponse struct {
+	InviteCount int `json:"inviteCount"`
+
+	// PendingRewards Referral rewards not yet transferred, fixed to 2 decimals.
+	PendingRewards string `json:"pendingRewards"`
+
+	// TotalEarned Total historical referral rewards, fixed to 2 decimals.
+	TotalEarned string `json:"totalEarned"`
+}
+
+// WalletReferralTransferResponse defines model for WalletReferralTransferResponse.
+type WalletReferralTransferResponse struct {
+	Transaction       TransactionItem `json:"transaction"`
+	TransferredAmount string          `json:"transferredAmount"`
+	TransferredCount  int             `json:"transferredCount"`
+	Wallet            WalletResponse  `json:"wallet"`
+}
+
 // WalletResponse defines model for WalletResponse.
 type WalletResponse struct {
 	// ConsumerBalance Consumer balance, fixed to 2 decimals.
@@ -3287,6 +3311,12 @@ type GetDomainMailboxesParams struct {
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostMeInviteParams defines parameters for PostMeInvite.
+type PostMeInviteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PatchPasswordParams defines parameters for PatchPassword.
 type PatchPasswordParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -3441,6 +3471,15 @@ type DeleteSessionParams struct {
 
 // PostSupplierApplicationParams defines parameters for PostSupplierApplication.
 type PostSupplierApplicationParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostWalletReferralTransferParams defines parameters for PostWalletReferralTransfer.
+type PostWalletReferralTransferParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -4258,6 +4297,12 @@ type ServerInterface interface {
 	// Get current authenticated user profile
 	// (GET /v1/me)
 	GetMe(c *gin.Context)
+	// Get current user's referral invite code
+	// (GET /v1/me/invite)
+	GetMeInvite(c *gin.Context)
+	// Create or get current user's referral invite code
+	// (POST /v1/me/invite)
+	PostMeInvite(c *gin.Context, params PostMeInviteParams)
 	// Change current user's password
 	// (PATCH /v1/password)
 	PatchPassword(c *gin.Context, params PatchPasswordParams)
@@ -4345,6 +4390,12 @@ type ServerInterface interface {
 	// Get current wallet
 	// (GET /v1/wallet)
 	GetWallet(c *gin.Context)
+	// Get current wallet referral reward statistics
+	// (GET /v1/wallet/referrals)
+	GetWalletReferrals(c *gin.Context)
+	// Transfer available referral rewards to consumer balance
+	// (POST /v1/wallet/referrals/transfer)
+	PostWalletReferralTransfer(c *gin.Context, params PostWalletReferralTransferParams)
 	// List wallet transactions
 	// (GET /v1/wallet/transactions)
 	GetWalletTransactions(c *gin.Context, params GetWalletTransactionsParams)
@@ -7150,6 +7201,66 @@ func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 	siw.Handler.GetMe(c)
 }
 
+// GetMeInvite operation middleware
+func (siw *ServerInterfaceWrapper) GetMeInvite(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetMeInvite(c)
+}
+
+// PostMeInvite operation middleware
+func (siw *ServerInterfaceWrapper) PostMeInvite(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostMeInviteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostMeInvite(c, params)
+}
+
 // PatchPassword operation middleware
 func (siw *ServerInterfaceWrapper) PatchPassword(c *gin.Context) {
 
@@ -8283,6 +8394,88 @@ func (siw *ServerInterfaceWrapper) GetWallet(c *gin.Context) {
 	siw.Handler.GetWallet(c)
 }
 
+// GetWalletReferrals operation middleware
+func (siw *ServerInterfaceWrapper) GetWalletReferrals(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetWalletReferrals(c)
+}
+
+// PostWalletReferralTransfer operation middleware
+func (siw *ServerInterfaceWrapper) PostWalletReferralTransfer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostWalletReferralTransferParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostWalletReferralTransfer(c, params)
+}
+
 // GetWalletTransactions operation middleware
 func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
 
@@ -8422,6 +8615,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
+	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
+	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
@@ -8451,5 +8646,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/supplier-applications/current", wrapper.GetCurrentSupplierApplication)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
+	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)
+	router.POST(options.BaseURL+"/v1/wallet/referrals/transfer", wrapper.PostWalletReferralTransfer)
 	router.GET(options.BaseURL+"/v1/wallet/transactions", wrapper.GetWalletTransactions)
 }

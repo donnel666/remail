@@ -202,6 +202,7 @@ func (uc *AdminUseCase) CreateInvite(ctx context.Context, operatorUserID uint, r
 	}
 	invite := &domain.Invite{
 		Code:     code,
+		Kind:     domain.InviteKindAdmin,
 		Enabled:  req.Enabled,
 		MaxUse:   req.MaxUse,
 		Used:     0,
@@ -220,7 +221,7 @@ func (uc *AdminUseCase) UpdateInvite(ctx context.Context, operatorUserID uint, r
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "failure", "Invite update failed."))
 		return nil, fmt.Errorf("admin find invite: %w", err)
 	}
-	if invite == nil {
+	if invite == nil || invite.Kind != domain.InviteKindAdmin {
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "failure", "Invite update failed."))
 		return nil, domain.ErrInviteNotFound
 	}

@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-07 | V1.1 | Codex | 补充用户邀请返佣结算规则；作为充值入账后的 Billing 事实，不改变钱包额度桶策略。 |
 
 > 支撑域。BC-BILLING 只保证资金事实正确，不理解订单为什么扣款、退款或结算。
 
@@ -55,6 +56,7 @@
 | `Recharge` | `paying/callback/reconciled/credited/failed` |
 | `CardKey` | `enabled/disabled`，带次数和过期时间 |
 | `CardKeyRedemption` | 卡密兑换事实 |
+| `ReferralReward` | 被邀请人首次充值触发的一次性返佣事实 |
 | `Settlement` | `frozen/credited/cancelled` |
 | `Withdrawal` | `reviewing/approved/transferred/rejected/cancelled/failed` |
 | `PaymentChannel` | 支付渠道配置 |
@@ -120,6 +122,18 @@ stateDiagram-v2
 | INV-B8 | 状态更新必须带 expected status，冲突返回 `409 Conflict`。 |
 | INV-B9 | 资金写动作必须幂等，同幂等键不同指纹返回 `409 Conflict`。 |
 | INV-B10 | 卡密和 API Key 这类需重复展示凭据按原值保存，普通日志禁敏。 |
+| INV-B11 | 邀请返佣只在被邀请人首次充值成功时结算一次，奖励金额为本次充值金额的 80%，必须同事务写返佣事实；划转到消费余额时再同事务锁钱包、写流水、更新奖励状态。 |
+
+邀请返佣补充设计：
+
+| 规则 | 说明 |
+|------|------|
+| 触发点 | 当前阶段卡密兑换成功视为一次充值成功；后续在线充值查账入账成功后复用同一结算入口。 |
+| 奖励对象 | 只奖励 `referral` 类型邀请码的创建人，后台 `admin` 邀请码不触发返佣。 |
+| 入账桶 | 返佣结算先进入可划转返佣额度，不属于钱包第四个额度桶；用户划转后进入 `consumer` 消费额度，流水使用 `transactionType=credit`、`bizType=referral_transfer`。 |
+| 一次性 | `referral_rewards.invitee_user_id` 唯一约束保证一个被邀请人只奖励一次。 |
+| 并发 | 充值时先插入唯一返佣事实；划转时后端批量锁定当前用户 `available` 返佣行并创建一条合并入账流水，前端不得循环处理。 |
+| 前端统计 | `/v1/wallet/referrals` 返回邀请人数、待划转奖励和历史收益。 |
 
 ---
 
@@ -140,6 +154,8 @@ stateDiagram-v2
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `GET` | `/v1/wallet` | 当前主体钱包。 |
+| `GET` | `/v1/wallet/referrals` | 当前主体邀请返佣统计。 |
+| `POST` | `/v1/wallet/referrals/transfer` | 将当前主体可划转返佣批量划转到消费余额，必须带幂等键。 |
 | `GET` | `/v1/wallet/transactions` | 钱包流水；支持 `scope=mine/all`。 |
 | `POST` | `/v1/recharges` | 创建充值单。 |
 | `GET` | `/v1/recharges` | 充值单列表；支持 `scope=mine/all`。 |

@@ -239,6 +239,46 @@ func (h *IAMHandler) GetMe(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(user)})
 }
 
+// GET /v1/me/invite
+func (h *IAMHandler) GetMeInvite(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   domain.ErrAuthenticationRequired.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	invite, err := h.module.InviteUseCase.GetReferralInvite(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, CurrentInviteResponse{InviteCode: invite.Code})
+}
+
+// POST /v1/me/invite
+func (h *IAMHandler) PostMeInvite(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   domain.ErrAuthenticationRequired.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	invite, err := h.module.InviteUseCase.CurrentReferralInvite(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, CurrentInviteResponse{InviteCode: invite.Code})
+}
+
 // --- Password Change ---
 
 // PATCH /v1/password

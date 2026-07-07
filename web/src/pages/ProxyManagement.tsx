@@ -25,7 +25,10 @@ import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
-import { CardTable } from "@/components/semi/card-table";
+import {
+  CardTable,
+  DESKTOP_TABLE_SCROLL_Y,
+} from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
@@ -1164,7 +1167,7 @@ export default function ProxyManagement() {
           key: "country",
           title: t("Country"),
           dataIndex: "country",
-          width: "6%",
+          width: 96,
           render: (_: string, record: ProxyItem) => (
             <Tag color="white" shape="circle">
               {countryOf(record)}
@@ -1175,7 +1178,7 @@ export default function ProxyManagement() {
           key: "url",
           title: t("Proxy URL"),
           dataIndex: "url",
-          width: "21%",
+          width: 280,
           render: (text: string) => (
             <CopyableTableText
               copiedText={t("Copied")}
@@ -1188,7 +1191,7 @@ export default function ProxyManagement() {
           key: "systemProxy",
           title: t("System proxy"),
           dataIndex: "pool",
-          width: "8%",
+          width: 120,
           render: (pool: string) => (
             <Tag color={pool === "system" ? "green" : "grey"} shape="circle">
               {pool === "system" ? t("Yes") : t("No")}
@@ -1199,7 +1202,7 @@ export default function ProxyManagement() {
           key: "ipv6",
           title: "IPV6",
           dataIndex: "ipVersion",
-          width: "6%",
+          width: 80,
           render: (ipVersion: string) => (
             <Tag color={ipVersion === "ipv6" ? "green" : "grey"} shape="circle">
               {ipVersion === "ipv6" ? t("Yes") : t("No")}
@@ -1210,7 +1213,7 @@ export default function ProxyManagement() {
           key: "outboundIp",
           title: t("Outbound IP"),
           dataIndex: "outboundIp",
-          width: "10%",
+          width: 140,
           render: (text: string) => (
             <span className="break-all">{text || "-"}</span>
           ),
@@ -1219,7 +1222,7 @@ export default function ProxyManagement() {
           key: "latency",
           title: t("Latency"),
           dataIndex: "latencyMs",
-          width: "6%",
+          width: 100,
           render: (value: number) =>
             value > 0 ? (
               <span className="tabular-nums">{value} ms</span>
@@ -1231,7 +1234,7 @@ export default function ProxyManagement() {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: "8%",
+          width: 100,
           render: (status: string, record: ProxyItem) =>
             renderProxyStatus(status, t, record.lastSafeError),
         },
@@ -1239,7 +1242,7 @@ export default function ProxyManagement() {
           key: "expireAt",
           title: t("Expire at"),
           dataIndex: "expireAt",
-          width: "10%",
+          width: 150,
           render: (value: string) => (
             <span className="remail-table-cell-ellipsis">
               {formatDateTime(value)}
@@ -1250,7 +1253,7 @@ export default function ProxyManagement() {
           key: "errors",
           title: t("Errors"),
           dataIndex: "errors",
-          width: "5%",
+          width: 80,
           render: (value: number) => (
             <span className="tabular-nums">{value}</span>
           ),
@@ -1259,10 +1262,10 @@ export default function ProxyManagement() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: "20%",
+          width: 240,
           fixed: "right",
           render: (_: unknown, record: ProxyItem) => (
-            <Space wrap={false}>
+            <Space spacing={4} wrap={false}>
               <Button
                 type="tertiary"
                 size="small"
@@ -1384,33 +1387,54 @@ export default function ProxyManagement() {
         >
           {t("Refresh")}
         </Button>
-        <Button
-          type="tertiary"
-          size="small"
-          className="flex-1 md:flex-initial"
-          onClick={() => void handleCheckFiltered()}
+        <Tooltip
+          content={t("Check all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Check all")}
-        </Button>
-        <Button
-          type={allFilteredDisabled ? "tertiary" : "danger"}
-          size="small"
-          className="flex-1 md:flex-initial"
-          disabled={!hasToggleCandidates}
-          loading={togglingAllDisabled}
-          onClick={handleToggleFilteredDisabled}
+          <Button
+            type="tertiary"
+            size="small"
+            className="flex-1 md:flex-initial"
+            onClick={() => void handleCheckFiltered()}
+          >
+            {t("Check")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={allFilteredDisabled ? t("Enable all") : t("Disable all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {allFilteredDisabled ? t("Enable all") : t("Disable all")}
-        </Button>
-        <Button
-          type="danger"
-          size="small"
-          className="flex-1 md:flex-initial"
-          loading={deletingBatch}
-          onClick={handleDeleteFiltered}
+          <Button
+            type={allFilteredDisabled ? "tertiary" : "danger"}
+            size="small"
+            className="flex-1 md:flex-initial"
+            disabled={!hasToggleCandidates}
+            loading={togglingAllDisabled}
+            onClick={handleToggleFilteredDisabled}
+          >
+            {allFilteredDisabled ? t("Enable") : t("Disable")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Delete all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Delete all")}
-        </Button>
+          <Button
+            type="danger"
+            size="small"
+            className="flex-1 md:flex-initial"
+            loading={deletingBatch}
+            onClick={handleDeleteFiltered}
+          >
+            {t("Delete")}
+          </Button>
+        </Tooltip>
         <CompactModeToggle
           compactMode={compactMode}
           setCompactMode={setCompactMode}
@@ -1685,7 +1709,7 @@ export default function ProxyManagement() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max(100%, 1320px)" }}
+          scroll={{ x: "max(100%, 1446px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

@@ -356,7 +356,7 @@ body[theme-mode="dark"] .semi-always-light,
 
 .table-scroll-card .semi-card-body {
   flex: 1 1 auto;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .remail-stable-table .semi-table {
@@ -366,6 +366,10 @@ body[theme-mode="dark"] .semi-always-light,
 .remail-stable-table .semi-table-row-head,
 .remail-stable-table .semi-table-row-cell {
   overflow: hidden;
+}
+
+.remail-stable-table .semi-table-row-head {
+  white-space: nowrap;
 }
 
 .remail-table-cell-ellipsis {
@@ -1132,10 +1136,13 @@ body[theme-mode="dark"] .semi-always-light,
   .semi-typography {
   color: inherit !important;
 }
-
 @media (max-width: 767px) {
   .table-scroll-card {
     height: calc(100vh - 77px);
     max-height: calc(100vh - 77px);
+  }
+
+  .table-scroll-card .semi-card-body {
+    overflow-y: auto;
   }
 }

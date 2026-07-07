@@ -36,6 +36,50 @@ func (h *BillingHandler) GetWallet(c *gin.Context) {
 	c.JSON(http.StatusOK, walletResponse(*summary))
 }
 
+func (h *BillingHandler) GetWalletReferrals(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	summary, err := h.module.WalletUseCase.GetReferralSummary(c.Request.Context(), userID)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, WalletReferralResponse{
+		InviteCount:    summary.InviteCount,
+		PendingRewards: summary.PendingRewards,
+		TotalEarned:    summary.TotalEarned,
+	})
+}
+
+func (h *BillingHandler) PostWalletReferralTransfer(c *gin.Context) {
+	userID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	result, err := h.module.WalletUseCase.TransferReferralRewards(c.Request.Context(), billingapp.TransferReferralRewardsRequest{
+		UserID:         userID,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c),
+	})
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	summary, err := h.module.WalletUseCase.GetWallet(c.Request.Context(), userID)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, WalletReferralTransferResponse{
+		Wallet:            walletResponse(*summary),
+		Transaction:       transactionResponse(result.Transaction),
+		TransferredAmount: result.TransferredAmount,
+		TransferredCount:  result.TransferredCount,
+	})
+}
+
 func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {
 	offset, limit, ok := parsePagination(c)
 	if !ok {
@@ -489,6 +533,10 @@ func writeBillingError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency-Key conflicts with a different request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidFilter):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid filter.", "requestId": requestID})
+	case errors.Is(err, domain.ErrNoReferralRewards):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "No referral rewards available.", "requestId": requestID})
+	case errors.Is(err, domain.ErrReferralRewardStateConflict):
+		c.JSON(http.StatusConflict, gin.H{"message": "Current reward status does not allow this operation.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})
 	}

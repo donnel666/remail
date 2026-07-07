@@ -116,6 +116,10 @@ type UserResponse struct {
 	LastLoginAt *time.Time `json:"lastLoginAt,omitempty"`
 }
 
+type CurrentInviteResponse struct {
+	InviteCode string `json:"inviteCode"`
+}
+
 // LoginResponse is the response for POST /v1/sessions.
 type LoginResponse struct {
 	User UserResponse `json:"user"`

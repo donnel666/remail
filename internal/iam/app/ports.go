@@ -59,6 +59,8 @@ type InviteRepository interface {
 	CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error
 	UpdateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, log *governancedomain.OperationLog) error
 	FindInviteByCode(ctx context.Context, code string) (*domain.Invite, error)
+	FindReferralInviteByOwner(ctx context.Context, userID uint) (*domain.Invite, error)
+	GetOrCreateReferralInvite(ctx context.Context, userID uint, code string, maxUse int) (*domain.Invite, error)
 }
 
 // SupplierApplicationRepository defines supplier permission application persistence.

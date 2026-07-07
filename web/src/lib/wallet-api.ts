@@ -2,6 +2,10 @@ import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
 
 export type WalletResponse = components["schemas"]["WalletResponse"];
+export type WalletReferralResponse =
+  components["schemas"]["WalletReferralResponse"];
+export type WalletReferralTransferResponse =
+  components["schemas"]["WalletReferralTransferResponse"];
 export type RechargeItem = components["schemas"]["RechargeItem"];
 export type RechargeListResponse = components["schemas"]["RechargeListResponse"];
 export type RedeemCardResponse = components["schemas"]["RedeemCardResponse"];
@@ -23,6 +27,25 @@ function idempotencyKey() {
 
 export async function getWallet() {
   return unwrap<WalletResponse>(await client.GET("/v1/wallet"));
+}
+
+export async function getWalletReferrals() {
+  return unwrap<WalletReferralResponse>(
+    await client.GET("/v1/wallet/referrals")
+  );
+}
+
+export async function transferReferralRewards(key = idempotencyKey()) {
+  return unwrap<WalletReferralTransferResponse>(
+    await client.POST("/v1/wallet/referrals/transfer", {
+      params: {
+        header: {
+          ...csrfHeader(),
+          "Idempotency-Key": key,
+        },
+      },
+    })
+  );
 }
 
 export async function listRecharges(

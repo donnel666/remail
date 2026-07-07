@@ -116,6 +116,234 @@ func TestBillingRepoRedeemCardMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrCardExhausted)
 }
 
+func TestBillingRepoReferralRewardOnFirstCardRedemptionMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	inviterID := createBillingTestUser(t, db, "inviter@example.com")
+	inviteeID := createBillingTestUser(t, db, "invitee@example.com")
+	secondInviteeID := createBillingTestUser(t, db, "invitee-two@example.com")
+	repo := NewBillingRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFFTEST000000001",
+		"referral",
+		true,
+		100,
+		1,
+		inviterID,
+		inviterID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO invite_uses(invite_code, user_id) VALUES (?, ?)",
+		"AFFTEST000000001",
+		inviteeID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO invite_uses(invite_code, user_id) VALUES (?, ?)",
+		"AFFTEST000000001",
+		secondInviteeID,
+	).Error)
+	require.NoError(t, db.Create(&[]CardKeyModel{
+		{Key: "CARD-REF-001", Amount: "100.00", Status: string(domain.CardKeyStatusEnabled), MaxRedemptions: 1},
+		{Key: "CARD-REF-002", Amount: "50.00", Status: string(domain.CardKeyStatusEnabled), MaxRedemptions: 1},
+		{Key: "CARD-REF-003", Amount: "25.00", Status: string(domain.CardKeyStatusEnabled), MaxRedemptions: 1},
+	}).Error)
+
+	first, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             inviteeID,
+		CardKey:            "CARD-REF-001",
+		IdempotencyKey:     "idem-ref-card-001",
+		RequestFingerprint: "fingerprint-ref-card-001",
+		RequestID:          "req-ref-card-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "100.00", first.Wallet.ConsumerBalance)
+
+	inviterWallet, err := repo.GetOrCreateWalletSummary(ctx, inviterID)
+	require.NoError(t, err)
+	require.Equal(t, "0.00", inviterWallet.Wallet.ConsumerBalance)
+	referrals, err := repo.GetReferralSummary(ctx, inviterID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, referrals.InviteCount)
+	require.Equal(t, "80.00", referrals.TotalEarned)
+	require.Equal(t, "80.00", referrals.PendingRewards)
+
+	second, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             inviteeID,
+		CardKey:            "CARD-REF-002",
+		IdempotencyKey:     "idem-ref-card-002",
+		RequestFingerprint: "fingerprint-ref-card-002",
+		RequestID:          "req-ref-card-002",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "150.00", second.Wallet.ConsumerBalance)
+
+	inviterWallet, err = repo.GetOrCreateWalletSummary(ctx, inviterID)
+	require.NoError(t, err)
+	require.Equal(t, "0.00", inviterWallet.Wallet.ConsumerBalance)
+
+	var rewardCount int64
+	require.NoError(t, db.Model(&ReferralRewardModel{}).Where("invitee_user_id = ?", inviteeID).Count(&rewardCount).Error)
+	require.EqualValues(t, 1, rewardCount)
+
+	third, err := repo.RedeemCard(ctx, billingapp.RedeemCardCommand{
+		UserID:             secondInviteeID,
+		CardKey:            "CARD-REF-003",
+		IdempotencyKey:     "idem-ref-card-003",
+		RequestFingerprint: "fingerprint-ref-card-003",
+		RequestID:          "req-ref-card-003",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "25.00", third.Wallet.ConsumerBalance)
+
+	transfer, err := repo.TransferReferralRewards(ctx, billingapp.TransferReferralRewardsCommand{
+		UserID:             inviterID,
+		IdempotencyKey:     "idem-ref-transfer-001",
+		RequestFingerprint: "fingerprint-ref-transfer-001",
+		RequestID:          "req-ref-transfer-001",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "100.00", transfer.TransferredAmount)
+	require.Equal(t, 2, transfer.TransferredCount)
+	require.Equal(t, "100.00", transfer.Wallet.ConsumerBalance)
+
+	referrals, err = repo.GetReferralSummary(ctx, inviterID)
+	require.NoError(t, err)
+	require.Equal(t, "100.00", referrals.TotalEarned)
+	require.Equal(t, "0.00", referrals.PendingRewards)
+
+	var transferredRewards []ReferralRewardModel
+	require.NoError(t, db.Model(&ReferralRewardModel{}).
+		Where("inviter_user_id = ? AND status = ?", inviterID, "transferred").
+		Order("id ASC").
+		Find(&transferredRewards).Error)
+	require.Len(t, transferredRewards, 2)
+	require.NotNil(t, transferredRewards[0].TransferTransactionID)
+	require.NotNil(t, transferredRewards[1].TransferTransactionID)
+	require.Equal(t, *transferredRewards[0].TransferTransactionID, *transferredRewards[1].TransferTransactionID)
+
+	var transferTransactions int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).
+		Where("user_id = ? AND biz_type = ?", inviterID, "referral_transfer").
+		Count(&transferTransactions).Error)
+	require.EqualValues(t, 1, transferTransactions)
+}
+
+func TestBillingRepoReferralRewardConstraintsMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	inviterID := createBillingTestUser(t, db, "constraint-inviter@example.com")
+	inviteeID := createBillingTestUser(t, db, "constraint-invitee@example.com")
+	otherID := createBillingTestUser(t, db, "constraint-other@example.com")
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"AFFCONSTRAINT001",
+		"referral",
+		true,
+		100,
+		1,
+		inviterID,
+		inviterID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO invites(code, invite_kind, enabled, max_use, used, created_by_user_id, referral_owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"ADMINCONSTRAINT",
+		"admin",
+		true,
+		100,
+		0,
+		inviterID,
+		nil,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO invite_uses(invite_code, user_id) VALUES (?, ?)",
+		"AFFCONSTRAINT001",
+		inviteeID,
+	).Error)
+
+	source := WalletTransactionModel{
+		TransactionNo:   "TX-CONSTRAINT-SOURCE",
+		UserID:          inviteeID,
+		TransactionType: string(domain.TransactionTypeCardRedeem),
+		BalanceBucket:   string(domain.BalanceBucketConsumer),
+		Direction:       string(domain.TransactionDirectionIn),
+		Amount:          "10.00",
+		BalanceBefore:   "0.00",
+		BalanceAfter:    "10.00",
+		BizType:         "card_redeem",
+		BizID:           "constraint-source",
+	}
+	require.NoError(t, db.Create(&source).Error)
+	transfer := WalletTransactionModel{
+		TransactionNo:   "TX-CONSTRAINT-TRANSFER",
+		UserID:          inviterID,
+		TransactionType: string(domain.TransactionTypeCredit),
+		BalanceBucket:   string(domain.BalanceBucketConsumer),
+		Direction:       string(domain.TransactionDirectionIn),
+		Amount:          "8.00",
+		BalanceBefore:   "0.00",
+		BalanceAfter:    "8.00",
+		BizType:         "referral_transfer",
+		BizID:           "constraint-transfer",
+	}
+	require.NoError(t, db.Create(&transfer).Error)
+
+	require.Error(t, db.Create(&ReferralRewardModel{
+		InviterUserID:       inviterID,
+		InviteeUserID:       inviteeID,
+		InviteCode:          "ADMINCONSTRAINT",
+		SourceTransactionID: source.ID,
+		SourceAmount:        "10.00",
+		RewardAmount:        "8.00",
+		Status:              "available",
+	}).Error)
+	require.Error(t, db.Create(&ReferralRewardModel{
+		InviterUserID:       otherID,
+		InviteeUserID:       inviteeID,
+		InviteCode:          "AFFCONSTRAINT001",
+		SourceTransactionID: source.ID,
+		SourceAmount:        "10.00",
+		RewardAmount:        "8.00",
+		Status:              "available",
+	}).Error)
+	require.Error(t, db.Create(&ReferralRewardModel{
+		InviterUserID:       inviterID,
+		InviteeUserID:       otherID,
+		InviteCode:          "AFFCONSTRAINT001",
+		SourceTransactionID: source.ID,
+		SourceAmount:        "10.00",
+		RewardAmount:        "8.00",
+		Status:              "available",
+	}).Error)
+	require.Error(t, db.Create(&ReferralRewardModel{
+		InviterUserID:       inviterID,
+		InviteeUserID:       inviteeID,
+		InviteCode:          "AFFCONSTRAINT001",
+		SourceTransactionID: source.ID,
+		SourceAmount:        "10.00",
+		RewardAmount:        "8.00",
+		Status:              "transferred",
+	}).Error)
+
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&ReferralRewardModel{
+		InviterUserID:         inviterID,
+		InviteeUserID:         inviteeID,
+		InviteCode:            "AFFCONSTRAINT001",
+		SourceTransactionID:   source.ID,
+		TransferTransactionID: &transfer.ID,
+		SourceAmount:          "10.00",
+		RewardAmount:          "8.00",
+		Status:                "transferred",
+		TransferredAt:         &now,
+	}).Error)
+}
+
 func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()
@@ -336,6 +564,11 @@ func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {
 		{"recharges", "idx_recharges_status_created"},
 		{"card_keys", "idx_card_keys_status_expire"},
 		{"card_key_redemptions", "idx_card_redemptions_card_user"},
+		{"invites", "idx_invites_code_referral_owner"},
+		{"referral_rewards", "idx_referral_rewards_invitee"},
+		{"referral_rewards", "idx_referral_rewards_inviter_created"},
+		{"referral_rewards", "idx_referral_rewards_inviter_status"},
+		{"referral_rewards", "idx_referral_rewards_transfer_transaction"},
 	} {
 		requireIndexExists(t, db, tc.table, tc.index)
 	}

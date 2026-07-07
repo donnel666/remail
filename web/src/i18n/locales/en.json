@@ -593,6 +593,7 @@
   "Total Earned": "Total Earned",
   "Invites": "Invites",
   "Copy": "Copy",
+  "Copy failed.": "Copy failed.",
   "Current Balance": "Current Balance",
   "Historical Spend": "Historical Spend",
   "Order Count": "Order Count",
@@ -609,10 +610,13 @@
   "Pay saving suffix": ", save ￥0.00",
   "Invite friends for additional rewards": "Invite friends for additional rewards",
   "Transfer to Balance": "Transfer to Balance",
+  "Transfer completed.": "Transfer completed.",
+  "No referral rewards available.": "No referral rewards available.",
   "Reward statistics": "Reward statistics",
   "Referral Link": "Referral Link",
+  "Referral link is loading.": "Referral link is loading.",
   "Reward Rules": "Reward Rules",
   "Invite friends to register and receive rewards after they recharge.": "Invite friends to register and receive rewards after they recharge.",
-  "Transfer rewards into consumer balance after backend connection.": "Transfer rewards into consumer balance after backend connection.",
+  "Transfer rewards into consumer balance after settlement.": "Transfer rewards into consumer balance after settlement.",
   "More invited active users bring more rewards.": "More invited active users bring more rewards."
 }

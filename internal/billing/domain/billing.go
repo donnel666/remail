@@ -68,6 +68,12 @@ type WalletSummary struct {
 	OrderCount      int64
 }
 
+type ReferralSummary struct {
+	InviteCount    int64
+	PendingRewards string
+	TotalEarned    string
+}
+
 type Transaction struct {
 	ID              uint
 	TransactionNo   string

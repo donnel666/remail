@@ -158,6 +158,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get current user's referral invite code */
+        get: operations["getMeInvite"];
+        put?: never;
+        /** Create or get current user's referral invite code */
+        post: operations["postMeInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/supplier-applications": {
         parameters: {
             query?: never;
@@ -1075,6 +1093,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get current wallet referral reward statistics */
+        get: operations["getWalletReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/referrals/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transfer available referral rewards to consumer balance */
+        post: operations["postWalletReferralTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/transactions": {
         parameters: {
             query?: never;
@@ -1427,6 +1479,19 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        WalletReferralResponse: {
+            inviteCount: number;
+            /** @description Referral rewards not yet transferred, fixed to 2 decimals. */
+            pendingRewards: string;
+            /** @description Total historical referral rewards, fixed to 2 decimals. */
+            totalEarned: string;
+        };
+        WalletReferralTransferResponse: {
+            wallet: components["schemas"]["WalletResponse"];
+            transaction: components["schemas"]["TransactionItem"];
+            transferredAmount: string;
+            transferredCount: number;
+        };
         TransactionItem: {
             id: number;
             transactionNo: string;
@@ -1657,6 +1722,9 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        CurrentInviteResponse: {
+            inviteCode: string;
         };
         InviteListResponse: {
             invites: components["schemas"]["InviteResponse"][];
@@ -2783,6 +2851,85 @@ export interface operations {
             };
             /** @description Authentication required */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMeInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current referral invite code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentInviteResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Referral invite not created */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postMeInvite: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current referral invite code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentInviteResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6473,6 +6620,96 @@ export interface operations {
             };
             /** @description Authentication required */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getWalletReferrals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Referral reward statistics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalletReferralResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postWalletReferralTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Referral rewards transferred */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalletReferralTransferResponse"];
+                };
+            };
+            /** @description Idempotency key required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict or reward state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No referral rewards available */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

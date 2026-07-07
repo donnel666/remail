@@ -286,6 +286,62 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/me/invite:
+    get:
+      operationId: getMeInvite
+      summary: Get current user's referral invite code
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current referral invite code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentInviteResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Referral invite not created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postMeInvite
+      summary: Create or get current user's referral invite code
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Current referral invite code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentInviteResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/supplier-applications:
     post:
       operationId: postSupplierApplication
@@ -3356,6 +3412,71 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/wallet/referrals:
+    get:
+      operationId: getWalletReferrals
+      summary: Get current wallet referral reward statistics
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Referral reward statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletReferralResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/wallet/referrals/transfer:
+    post:
+      operationId: postWalletReferralTransfer
+      summary: Transfer available referral rewards to consumer balance
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Referral rewards transferred
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletReferralTransferResponse"
+        "400":
+          description: Idempotency key required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict or reward state conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: No referral rewards available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/wallet/transactions:
     get:
       operationId: getWalletTransactions
@@ -4521,6 +4642,41 @@ components:
           format: date-time
       additionalProperties: false
 
+    WalletReferralResponse:
+      type: object
+      required:
+        - inviteCount
+        - pendingRewards
+        - totalEarned
+      properties:
+        inviteCount:
+          type: integer
+        pendingRewards:
+          type: string
+          description: Referral rewards not yet transferred, fixed to 2 decimals.
+        totalEarned:
+          type: string
+          description: Total historical referral rewards, fixed to 2 decimals.
+      additionalProperties: false
+
+    WalletReferralTransferResponse:
+      type: object
+      required:
+        - wallet
+        - transaction
+        - transferredAmount
+        - transferredCount
+      properties:
+        wallet:
+          $ref: "#/components/schemas/WalletResponse"
+        transaction:
+          $ref: "#/components/schemas/TransactionItem"
+        transferredAmount:
+          type: string
+        transferredCount:
+          type: integer
+      additionalProperties: false
+
     TransactionItem:
       type: object
       required:
@@ -5173,6 +5329,15 @@ components:
         updatedAt:
           type: string
           format: date-time
+      additionalProperties: false
+
+    CurrentInviteResponse:
+      type: object
+      required:
+        - inviteCode
+      properties:
+        inviteCode:
+          type: string
       additionalProperties: false
 
     InviteListResponse:

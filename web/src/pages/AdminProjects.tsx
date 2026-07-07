@@ -13,6 +13,7 @@ import {
   Space,
   Tag,
   TextArea,
+  Tooltip,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
@@ -23,7 +24,10 @@ import { useTranslation } from "react-i18next";
 import sampleProjectCover from "@/assets/cover-4.webp";
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
-import { CardTable } from "@/components/semi/card-table";
+import {
+  CardTable,
+  DESKTOP_TABLE_SCROLL_Y,
+} from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -1850,8 +1854,8 @@ export default function AdminProjects() {
         {
           dataIndex: "id",
           key: "id",
-          title: t("Project ID"),
-          width: "5%",
+          title: "ID",
+          width: 72,
           render: (_: unknown, record: ProjectItem) => (
             <span className="font-mono text-[var(--semi-color-text-1)]">#{record.id}</span>
           ),
@@ -1860,7 +1864,7 @@ export default function AdminProjects() {
           dataIndex: "logoUrl",
           key: "logoUrl",
           title: t("Logo"),
-          width: "5%",
+          width: 76,
           render: (_: unknown, record: ProjectItem) => {
             const initial = (record.name || "-").trim().slice(0, 1).toUpperCase() || "-";
 
@@ -1885,7 +1889,7 @@ export default function AdminProjects() {
           dataIndex: "name",
           key: "name",
           title: t("Project name"),
-          width: "24%",
+          width: 280,
           render: (_: unknown, record: ProjectItem) => (
             <div className="min-w-0">
               <div className="truncate font-medium text-[var(--semi-color-text-0)]">
@@ -1901,28 +1905,28 @@ export default function AdminProjects() {
           dataIndex: "status",
           key: "status",
           title: t("Status"),
-          width: "8%",
+          width: 110,
           render: (value: unknown) => statusTag(String(value), t),
         },
         {
           dataIndex: "accessType",
           key: "accessType",
           title: t("Private"),
-          width: "7%",
+          width: 90,
           render: (value: unknown) => booleanTag(String(value) === "private", t),
         },
         {
           dataIndex: "looseMatch",
           key: "looseMatch",
           title: t("Loose"),
-          width: "7%",
+          width: 90,
           render: (value: unknown) => booleanTag(Boolean(value), t),
         },
         {
           dataIndex: "products",
           key: "products",
           title: t("Products"),
-          width: "11%",
+          width: 150,
           render: (_: unknown, record: ProjectItem) => (
             <Space spacing={4} wrap>
               {(record.products ?? []).map((product) => (
@@ -1937,7 +1941,7 @@ export default function AdminProjects() {
           dataIndex: "mailRuleCount",
           key: "mailRuleCount",
           title: t("Rules"),
-          width: "6%",
+          width: 90,
           render: (value: unknown) => <span className="font-mono">{String(value)}</span>,
         },
         {
@@ -2063,55 +2067,76 @@ export default function AdminProjects() {
         >
           {t("Refresh")}
         </Button>
-        <Button
-          className="flex-1 md:flex-initial"
-          loading={bulkOperating === "relist"}
-          onClick={() =>
-            confirmBulk(
-              "relist",
-              "Confirm relist all",
-              "Confirm relist all matching projects content",
-              () => relistAdminProjectsByFilter(listFilter)
-            )
-          }
-          size="small"
-          type="tertiary"
+        <Tooltip
+          content={t("Relist all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Relist all")}
-        </Button>
-        <Button
-          className="flex-1 md:flex-initial"
-          loading={bulkOperating === "delist"}
-          onClick={() =>
-            confirmBulk(
-              "delist",
-              "Confirm delist all",
-              "Confirm delist all matching projects content",
-              () => delistAdminProjectsByFilter(listFilter)
-            )
-          }
-          size="small"
-          type="tertiary"
-        >
-          {t("Delist all")}
-        </Button>
-        {statusFilter !== "reviewing" ? (
           <Button
             className="flex-1 md:flex-initial"
-            loading={bulkOperating === "delete"}
+            loading={bulkOperating === "relist"}
             onClick={() =>
               confirmBulk(
-                "delete",
-                "Confirm delete all",
-                "Confirm delete all matching projects content",
-                () => deleteAdminProjectsByFilter(listFilter)
+                "relist",
+                "Confirm relist all",
+                "Confirm relist all matching projects content",
+                () => relistAdminProjectsByFilter(listFilter)
               )
             }
             size="small"
-            type="danger"
+            type="tertiary"
           >
-            {t("Delete all")}
+            {t("Relist")}
           </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Delist all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
+        >
+          <Button
+            className="flex-1 md:flex-initial"
+            loading={bulkOperating === "delist"}
+            onClick={() =>
+              confirmBulk(
+                "delist",
+                "Confirm delist all",
+                "Confirm delist all matching projects content",
+                () => delistAdminProjectsByFilter(listFilter)
+              )
+            }
+            size="small"
+            type="tertiary"
+          >
+            {t("Delist")}
+          </Button>
+        </Tooltip>
+        {statusFilter !== "reviewing" ? (
+          <Tooltip
+            content={t("Delete all")}
+            mouseEnterDelay={0}
+            mouseLeaveDelay={0.05}
+            position="top"
+          >
+            <Button
+              className="flex-1 md:flex-initial"
+              loading={bulkOperating === "delete"}
+              onClick={() =>
+                confirmBulk(
+                  "delete",
+                  "Confirm delete all",
+                  "Confirm delete all matching projects content",
+                  () => deleteAdminProjectsByFilter(listFilter)
+                )
+              }
+              size="small"
+              type="danger"
+            >
+              {t("Delete")}
+            </Button>
+          </Tooltip>
         ) : null}
         <CompactModeToggle
           compactMode={compactMode}
@@ -2351,7 +2376,7 @@ export default function AdminProjects() {
           pagination={false}
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max(100%, 1320px)" }}
+          scroll={{ x: "max(100%, 1268px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

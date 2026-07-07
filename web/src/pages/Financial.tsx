@@ -39,11 +39,15 @@ import sampleProjectCover from "@/assets/cover-4.webp";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import {
   getWallet,
+  getWalletReferrals,
   listWalletTransactions,
   redeemCard,
+  transferReferralRewards,
   type TransactionItem,
+  type WalletReferralResponse,
   type WalletResponse,
 } from "@/lib/wallet-api";
+import { createMyInvite, getMyInvite } from "@/lib/iam-api";
 import { IamApiError } from "@/lib/api-client";
 
 const { Text } = Typography;
@@ -65,12 +69,6 @@ interface PaymentMethod {
   name: string;
   type: "alipay";
 }
-
-const referralStats: BannerStat[] = [
-  { icon: <TrendingUp size={14} />, label: "Pending Rewards", value: "￥0.00" },
-  { icon: <BarChart2 size={14} />, label: "Total Earned", value: "￥0.00" },
-  { icon: <Users size={14} />, label: "Invites", value: "0" },
-];
 
 const presetAmounts: PresetAmount[] = [
   { amount: "100 ￥", pay: "￥13.70", value: 100 },
@@ -97,6 +95,39 @@ function formatDateTime(value: string | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function buildReferralLink(inviteCode: string | undefined) {
+  const code = inviteCode?.trim();
+  if (!code || typeof window === "undefined") return "";
+  return `${window.location.origin}/register?aff=${encodeURIComponent(code)}`;
+}
+
+async function copyText(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+async function getOrCreateReferralInvite() {
+  try {
+    return await getMyInvite();
+  } catch (error) {
+    if (error instanceof IamApiError && error.status === 404) {
+      return createMyInvite();
+    }
+    throw error;
+  }
 }
 
 function StatBanner({
@@ -155,8 +186,12 @@ export default function Financial() {
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
+  const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
+  const [referralLink, setReferralLink] = useState("");
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [walletLoading, setWalletLoading] = useState(false);
+  const [referralLoading, setReferralLoading] = useState(false);
+  const [transferringRewards, setTransferringRewards] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
@@ -175,6 +210,22 @@ export default function Financial() {
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
     } finally {
       setWalletLoading(false);
+    }
+  }, [t]);
+
+  const refreshReferrals = useCallback(async () => {
+    setReferralLoading(true);
+    try {
+      const [stats, invite] = await Promise.all([
+        getWalletReferrals(),
+        getOrCreateReferralInvite(),
+      ]);
+      setReferrals(stats);
+      setReferralLink(buildReferralLink(invite.inviteCode));
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setReferralLoading(false);
     }
   }, [t]);
 
@@ -199,6 +250,10 @@ export default function Financial() {
   }, [refreshWallet]);
 
   useEffect(() => {
+    void refreshReferrals();
+  }, [refreshReferrals]);
+
+  useEffect(() => {
     if (!billingOpen) return;
     void refreshRecharges();
   }, [billingOpen, refreshRecharges]);
@@ -211,6 +266,39 @@ export default function Financial() {
 
   const handleMockOnly = (messageKey = "This feature is not connected yet.") => {
     Toast.info(t(messageKey));
+  };
+
+  const handleCopyReferral = async () => {
+    if (!referralLink) return;
+    try {
+      await copyText(referralLink);
+      Toast.success(t("Copied"));
+    } catch {
+      Toast.error(t("Copy failed."));
+    }
+  };
+
+  const handleTransferRewards = async () => {
+    if (transferringRewards) return;
+    const pending = Number(referrals?.pendingRewards ?? 0);
+    if (!Number.isFinite(pending) || pending <= 0) {
+      Toast.info(t("No referral rewards available."));
+      return;
+    }
+    setTransferringRewards(true);
+    try {
+      await transferReferralRewards();
+      Toast.success(t("Transfer completed."));
+      await refreshWallet();
+      await refreshReferrals();
+      if (billingOpen) {
+        await refreshRecharges();
+      }
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      setTransferringRewards(false);
+    }
   };
 
   const handleRedeem = async () => {
@@ -237,6 +325,7 @@ export default function Financial() {
       setRedemptionCode("");
       redeemFormApiRef.current?.setValue?.("redemptionCode", "");
       await refreshWallet();
+      await refreshReferrals();
       if (billingOpen) {
         await refreshRecharges();
       }
@@ -269,6 +358,27 @@ export default function Financial() {
       },
     ],
     [wallet, walletLoading]
+  );
+
+  const referralStats = useMemo<BannerStat[]>(
+    () => [
+      {
+        icon: <TrendingUp size={14} />,
+        label: "Pending Rewards",
+        value: referralLoading ? "..." : formatCurrency(referrals?.pendingRewards),
+      },
+      {
+        icon: <BarChart2 size={14} />,
+        label: "Total Earned",
+        value: referralLoading ? "..." : formatCurrency(referrals?.totalEarned),
+      },
+      {
+        icon: <Users size={14} />,
+        label: "Invites",
+        value: referralLoading ? "..." : String(referrals?.inviteCount ?? 0),
+      },
+    ],
+    [referralLoading, referrals]
   );
 
   const billingData = useMemo(
@@ -548,8 +658,10 @@ export default function Financial() {
                 <StatBanner
                   action={
                     <Button
-                      disabled
+                      disabled={Number(referrals?.pendingRewards ?? 0) <= 0}
                       icon={<Zap size={12} />}
+                      loading={transferringRewards}
+                      onClick={handleTransferRewards}
                       size="small"
                       theme="solid"
                       type="primary"
@@ -570,12 +682,15 @@ export default function Financial() {
                     {t("Referral Link")}
                   </span>
                 }
-                placeholder={t("This feature is not connected yet.")}
+                placeholder={t("Referral link is loading.")}
                 readOnly
+                value={referralLink}
                 suffix={
                   <Button
+                    disabled={!referralLink}
                     icon={<Copy size={14} />}
-                    onClick={() => handleMockOnly()}
+                    loading={referralLoading}
+                    onClick={handleCopyReferral}
                     theme="solid"
                     type="primary"
                   >
@@ -593,7 +708,7 @@ export default function Financial() {
                 <div className="space-y-3 p-3 text-sm text-muted-foreground">
                   {[
                     "Invite friends to register and receive rewards after they recharge.",
-                    "Transfer rewards into consumer balance after backend connection.",
+                    "Transfer rewards into consumer balance after settlement.",
                     "More invited active users bring more rewards.",
                   ].map((item) => (
                     <div className="flex gap-2" key={item}>

@@ -593,6 +593,7 @@
   "Total Earned": "总收益",
   "Invites": "邀请人数",
   "Copy": "复制",
+  "Copy failed.": "复制失败。",
   "Current Balance": "当前余额",
   "Historical Spend": "历史消耗",
   "Order Count": "请求次数",
@@ -609,10 +610,13 @@
   "Pay saving suffix": "，节省 ￥0.00",
   "Invite friends for additional rewards": "邀请好友获得额外奖励",
   "Transfer to Balance": "划转到余额",
+  "Transfer completed.": "划转成功。",
+  "No referral rewards available.": "暂无可划转邀请奖励。",
   "Reward statistics": "收益统计",
   "Referral Link": "邀请链接",
+  "Referral link is loading.": "邀请链接加载中。",
   "Reward Rules": "奖励说明",
   "Invite friends to register and receive rewards after they recharge.": "邀请好友注册，好友充值后您可获得相应奖励。",
-  "Transfer rewards into consumer balance after backend connection.": "通过划转功能将奖励额度转入到您的账户余额中。",
+  "Transfer rewards into consumer balance after settlement.": "返佣结算后可划转到您的消费余额。",
   "More invited active users bring more rewards.": "邀请的活跃好友越多，获得的奖励越多。"
 }

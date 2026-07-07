@@ -23,6 +23,8 @@ type TableColumn<T extends RowData> = {
   [key: string]: unknown;
 };
 
+export const DESKTOP_TABLE_SCROLL_Y = "max(280px, calc(100vh - 352px))";
+
 interface CardTableProps<T extends RowData> {
   columns: TableColumn<T>[];
   dataSource?: T[];

@@ -8,6 +8,7 @@
 | 2026-06-30 | V1.1 | Codex | 补充 P1-I1 当前用户直接改密接口和验证码交互规则；不改变 IAM 角色、Casbin 和错误策略。 |
 | 2026-07-01 | V1.2 | Codex | 补充供应商申请流程；普通用户申请成为 supplier 只提升角色，不改变资源状态。 |
 | 2026-07-06 | V1.3 | Codex | 补充管理员用户查询筛选能力：`GET /v1/admin/users` 支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索，用于后台私有项目授权选择；不改变 IAM 角色、Casbin 和用户实体。 |
+| 2026-07-07 | V1.4 | Codex | 补充用户侧 aff 邀请链接能力；复用邀请码消费事务，不改变后台邀请码策略；GET 只读、POST 创建或获取，保持 safe method 语义。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -165,6 +166,17 @@ eft = allow/deny
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `PATCH` | `/v1/password` | 当前登录用户修改密码；补足 P1-I1 “改密”验收项，成功后仍按原规则递增 `tokenVersion` 并清理旧 Session。 |
+| `GET` | `/v1/me/invite` | 当前用户读取自己的 aff 邀请码；未创建时返回 `404 Resource not found.`。 |
+| `POST` | `/v1/me/invite` | 当前用户创建或获取自己的 aff 邀请码；前端拼接为 `/register?aff={code}`。 |
+
+用户 aff 邀请补充设计：
+
+| 规则 | 说明 |
+|------|------|
+| 关系归属 | IAM 只拥有邀请码和 `InviteUse` 使用事实，不处理返佣金额。 |
+| 类型隔离 | `Invite` 增加 `inviteKind=admin/referral`；后台邀请码列表和操作只处理 `admin`，用户 aff 链接只生成 `referral`。 |
+| 注册入口 | 前端使用 `aff` URL 参数，但后端注册仍提交 `inviteCode`，不把外部 URL 命名扩散到领域模型。 |
+| 并发约束 | 每个用户最多一个 `referral` 邀请码，由数据库唯一约束兜底；邀请码消费仍按 INV-I6 原子递增。 |
 
 验证码补充设计：
 

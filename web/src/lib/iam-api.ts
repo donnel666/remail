@@ -27,6 +27,8 @@ export type ActivationUserResponse = JsonResponse<
 export type LoginResponse = components["schemas"]["LoginResponse"];
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
+export type CurrentInviteResponse =
+  components["schemas"]["CurrentInviteResponse"];
 export type RegisterResponse = JsonResponse<operations["postRegister"], 201>;
 export type MeResponse = JsonResponse<operations["getMe"], 200>;
 
@@ -73,6 +75,18 @@ export async function logout() {
 
 export async function getMe() {
   return unwrap<MeResponse>(await client.GET("/v1/me"));
+}
+
+export async function getMyInvite() {
+  return unwrap<CurrentInviteResponse>(await client.GET("/v1/me/invite"));
+}
+
+export async function createMyInvite() {
+  return unwrap<CurrentInviteResponse>(
+    await client.POST("/v1/me/invite", {
+      params: { header: csrfHeader() },
+    })
+  );
 }
 
 export async function listAdminUsers(filter: AdminUserListFilter = {}) {

@@ -82,6 +82,29 @@ func TestBillingCardRedeemRequiresIdempotencyAndUsesSafeError(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "not found")
 }
 
+func TestBillingWalletReferralsRoute(t *testing.T) {
+	db := newBillingAPITestDB(t)
+	userID := createBillingAPIUser(t, db, "referral-route@example.com", iamdomain.RoleUser)
+	router := newBillingAPIRouter(db, map[string]sessionFixture{
+		"user-session": {userID: userID, role: iamdomain.RoleUser, email: "referral-route@example.com"},
+	}, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/wallet/referrals", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "user-session"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.JSONEq(t, `{"inviteCount":0,"pendingRewards":"0.00","totalEarned":"0.00"}`, w.Body.String())
+
+	w = httptest.NewRecorder()
+	req = authenticatedJSONRequest(http.MethodPost, "/v1/wallet/referrals/transfer", "user-session", ``)
+	req.Header.Set("Idempotency-Key", "idem-empty-referral-transfer")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "No referral rewards available.")
+}
+
 func TestBillingAdminWalletCreditWritesOperationLog(t *testing.T) {
 	db := newBillingAPITestDB(t)
 	targetUserID := createBillingAPIUser(t, db, "target@example.com", iamdomain.RoleUser)

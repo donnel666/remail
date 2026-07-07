@@ -9,6 +9,7 @@ import {
   Space,
   Tabs,
   Tag,
+  Tooltip,
   Toast,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
@@ -22,7 +23,10 @@ import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
-import { CardTable } from "@/components/semi/card-table";
+import {
+  CardTable,
+  DESKTOP_TABLE_SCROLL_Y,
+} from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
@@ -769,7 +773,7 @@ export default function Resources() {
           key: "suffix",
           title: t("Suffix"),
           dataIndex: "emailAddress",
-          width: "11%",
+          width: 120,
           render: (_: string, record: EmailResource) => (
             <Tag color="white" shape="circle">
               {getSuffix(record.emailAddress)}
@@ -780,7 +784,7 @@ export default function Resources() {
           key: "email",
           title: t("Email"),
           dataIndex: "emailAddress",
-          width: "27%",
+          width: 280,
           render: (text: string) => (
             <CopyableTableText copiedText={t("Copied")} text={text} />
           ),
@@ -789,7 +793,7 @@ export default function Resources() {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
-          width: "11%",
+          width: 120,
           render: (status: ResourceStatus, record: EmailResource) =>
             renderStatusTag(status, t, record.lastSafeError),
         },
@@ -797,7 +801,7 @@ export default function Resources() {
           key: "private",
           title: t("Private"),
           dataIndex: "usageScope",
-          width: "9%",
+          width: 100,
           render: (scope: UsageScope) => (
             <Tag color={scope === "private" ? "green" : "grey"} shape="circle">
               {scope === "private" ? t("Yes") : t("No")}
@@ -808,7 +812,7 @@ export default function Resources() {
           key: "longLived",
           title: t("Long-lived"),
           dataIndex: "lifetimeType",
-          width: "10%",
+          width: 120,
           render: (value: LifetimeType) => (
             <Tag
               color={value === "long_lived" ? "green" : "grey"}
@@ -822,7 +826,7 @@ export default function Resources() {
           key: "graph",
           title: t("Graph"),
           dataIndex: "graphAvailable",
-          width: "8%",
+          width: 90,
           render: (value: boolean) => (
             <Tag color={value ? "green" : "grey"} shape="circle">
               {value ? t("Yes") : t("No")}
@@ -833,10 +837,10 @@ export default function Resources() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: "24%",
+          width: 190,
           fixed: "right",
           render: (_: unknown, record: EmailResource) => (
-            <Space wrap={false}>
+            <Space spacing={4} wrap={false}>
               <Button
                 type="tertiary"
                 size="small"
@@ -952,32 +956,53 @@ export default function Resources() {
         >
           {t("Refresh")}
         </Button>
-        <Button
-          type="tertiary"
-          size="small"
-          className="flex-1 md:flex-initial"
-          onClick={confirmCheckAll}
+        <Tooltip
+          content={t("Check all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Check all")}
-        </Button>
-        <Button
-          type="tertiary"
-          size="small"
-          className="flex-1 md:flex-initial"
-          loading={publishingBatch}
-          onClick={() => void confirmSellAll()}
+          <Button
+            type="tertiary"
+            size="small"
+            className="flex-1 md:flex-initial"
+            onClick={confirmCheckAll}
+          >
+            {t("Check")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Sell all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Sell all")}
-        </Button>
-        <Button
-          type="danger"
-          size="small"
-          className="flex-1 md:flex-initial"
-          loading={deletingBatch}
-          onClick={confirmDeleteAll}
+          <Button
+            type="tertiary"
+            size="small"
+            className="flex-1 md:flex-initial"
+            loading={publishingBatch}
+            onClick={() => void confirmSellAll()}
+          >
+            {t("Sell")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Delete all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
         >
-          {t("Delete all")}
-        </Button>
+          <Button
+            type="danger"
+            size="small"
+            className="flex-1 md:flex-initial"
+            loading={deletingBatch}
+            onClick={confirmDeleteAll}
+          >
+            {t("Delete")}
+          </Button>
+        </Tooltip>
         <CompactModeToggle
           compactMode={compactMode}
           setCompactMode={setCompactMode}
@@ -1217,7 +1242,7 @@ export default function Resources() {
           className="overflow-hidden rounded-xl"
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={compactMode ? undefined : { x: "max(100%, 980px)" }}
+          scroll={{ x: "max(100%, 1080px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

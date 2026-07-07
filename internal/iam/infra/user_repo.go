@@ -13,7 +13,9 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserModel is the GORM model for the users table.
@@ -33,11 +35,13 @@ type UserModel struct {
 
 type InviteModel struct {
 	Code            string     `gorm:"primaryKey;type:varchar(64)"`
+	Kind            string     `gorm:"type:varchar(32);not null;default:'admin';column:invite_kind"`
 	Enabled         bool       `gorm:"not null;default:true"`
 	MaxUse          int        `gorm:"not null;column:max_use"`
 	Used            int        `gorm:"not null;default:0"`
 	ExpireAt        *time.Time `gorm:"column:expire_at"`
 	CreatedByUserID *uint      `gorm:"column:created_by_user_id"`
+	ReferralOwnerID *uint      `gorm:"column:referral_owner_user_id"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime"`
 }
@@ -111,23 +115,31 @@ func fromDomain(u *domain.User) *UserModel {
 
 func inviteToDomain(m *InviteModel) *domain.Invite {
 	return &domain.Invite{
-		Code:      m.Code,
-		Enabled:   m.Enabled,
-		MaxUse:    m.MaxUse,
-		Used:      m.Used,
-		ExpireAt:  m.ExpireAt,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		Code:            m.Code,
+		Kind:            domain.InviteKind(m.Kind),
+		Enabled:         m.Enabled,
+		MaxUse:          m.MaxUse,
+		Used:            m.Used,
+		ExpireAt:        m.ExpireAt,
+		CreatedByUserID: m.CreatedByUserID,
+		CreatedAt:       m.CreatedAt,
+		UpdatedAt:       m.UpdatedAt,
 	}
 }
 
 func inviteFromDomain(invite *domain.Invite) *InviteModel {
+	kind := invite.Kind
+	if kind == "" {
+		kind = domain.InviteKindAdmin
+	}
 	return &InviteModel{
-		Code:     invite.Code,
-		Enabled:  invite.Enabled,
-		MaxUse:   invite.MaxUse,
-		Used:     invite.Used,
-		ExpireAt: invite.ExpireAt,
+		Code:            invite.Code,
+		Kind:            string(kind),
+		Enabled:         invite.Enabled,
+		MaxUse:          invite.MaxUse,
+		Used:            invite.Used,
+		ExpireAt:        invite.ExpireAt,
+		CreatedByUserID: invite.CreatedByUserID,
 	}
 }
 
@@ -390,7 +402,12 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 
 func (r *UserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain.Invite, error) {
 	var models []InviteModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Offset(offset).Limit(limit).Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("invite_kind = ?", domain.InviteKindAdmin).
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list invites: %w", err)
 	}
 	invites := make([]domain.Invite, len(models))
@@ -402,7 +419,10 @@ func (r *UserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain
 
 func (r *UserRepo) CountInvites(ctx context.Context) (int64, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).Model(&InviteModel{}).Count(&count).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Model(&InviteModel{}).
+		Where("invite_kind = ?", domain.InviteKindAdmin).
+		Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("count invites: %w", err)
 	}
 	return count, nil
@@ -420,9 +440,24 @@ func (r *UserRepo) FindInviteByCode(ctx context.Context, code string) (*domain.I
 	return inviteToDomain(&model), nil
 }
 
+func (r *UserRepo) FindReferralInviteByOwner(ctx context.Context, userID uint) (*domain.Invite, error) {
+	var model InviteModel
+	err := r.db.WithContext(ctx).
+		Where("invite_kind = ? AND referral_owner_user_id = ?", domain.InviteKindReferral, userID).
+		First(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find referral invite: %w", err)
+	}
+	return inviteToDomain(&model), nil
+}
+
 func (r *UserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := inviteFromDomain(invite)
+		model.Kind = string(domain.InviteKindAdmin)
 		model.CreatedByUserID = &createdByUserID
 		if err := tx.Create(model).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -442,7 +477,10 @@ func (r *UserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *dom
 func (r *UserRepo) UpdateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := inviteFromDomain(invite)
-		if err := tx.Model(&InviteModel{}).Where("code = ?", invite.Code).Select("enabled", "max_use", "expire_at").Updates(model).Error; err != nil {
+		if err := tx.Model(&InviteModel{}).
+			Where("code = ? AND invite_kind = ?", invite.Code, domain.InviteKindAdmin).
+			Select("enabled", "max_use", "expire_at").
+			Updates(model).Error; err != nil {
 			return fmt.Errorf("update invite: %w", err)
 		}
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -450,4 +488,61 @@ func (r *UserRepo) UpdateInviteWithOperationLog(ctx context.Context, invite *dom
 		}
 		return nil
 	})
+}
+
+func (r *UserRepo) GetOrCreateReferralInvite(ctx context.Context, userID uint, code string, maxUse int) (*domain.Invite, error) {
+	var invite domain.Invite
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user UserModel
+		if err := tx.WithContext(ctx).
+			Select("id").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrUserNotFound
+			}
+			return fmt.Errorf("lock referral invite owner: %w", err)
+		}
+
+		var existing InviteModel
+		err := tx.WithContext(ctx).
+			Where("invite_kind = ? AND referral_owner_user_id = ?", domain.InviteKindReferral, userID).
+			First(&existing).Error
+		if err == nil {
+			invite = *inviteToDomain(&existing)
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("find referral invite: %w", err)
+		}
+
+		model := InviteModel{
+			Code:            strings.TrimSpace(code),
+			Kind:            string(domain.InviteKindReferral),
+			Enabled:         true,
+			MaxUse:          maxUse,
+			CreatedByUserID: &userID,
+			ReferralOwnerID: &userID,
+		}
+		if err := tx.WithContext(ctx).Create(&model).Error; err != nil {
+			if isIAMDuplicateKeyError(err) {
+				return domain.ErrInviteAlreadyExists
+			}
+			return fmt.Errorf("create referral invite: %w", err)
+		}
+		invite = *inviteToDomain(&model)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func isIAMDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

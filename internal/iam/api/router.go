@@ -75,6 +75,8 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	auth.Use(middleware.CSRFRequired())
 	{
 		auth.GET("/me", h.GetMe)
+		auth.GET("/me/invite", h.GetMeInvite)
+		auth.POST("/me/invite", h.PostMeInvite)
 		auth.DELETE("/sessions/current", h.DeleteSession)
 		auth.PATCH("/password", h.PatchPassword)
 		auth.POST("/supplier-applications", h.PostSupplierApplication)

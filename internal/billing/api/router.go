@@ -15,6 +15,8 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 	auth.Use(middleware.CSRFRequired())
 	{
 		auth.GET("/wallet", h.GetWallet)
+		auth.GET("/wallet/referrals", h.GetWalletReferrals)
+		auth.POST("/wallet/referrals/transfer", h.PostWalletReferralTransfer)
 		auth.GET("/wallet/transactions", h.GetWalletTransactions)
 		auth.GET("/recharges", h.GetRecharges)
 		auth.POST("/cards/redeem", h.PostCardRedeem)

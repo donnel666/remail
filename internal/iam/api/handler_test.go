@@ -355,6 +355,48 @@ func (r *mockUserRepo) FindInviteByCode(_ context.Context, code string) (*domain
 	return &cp, nil
 }
 
+func (r *mockUserRepo) FindReferralInviteByOwner(_ context.Context, userID uint) (*domain.Invite, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, invite := range r.invites {
+		if invite.Kind == domain.InviteKindReferral && invite.CreatedByUserID != nil && *invite.CreatedByUserID == userID {
+			cp := *invite
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *mockUserRepo) GetOrCreateReferralInvite(_ context.Context, userID uint, code string, maxUse int) (*domain.Invite, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.users[userID]; !ok {
+		return nil, domain.ErrUserNotFound
+	}
+	for _, invite := range r.invites {
+		if invite.Kind == domain.InviteKindReferral && invite.CreatedByUserID != nil && *invite.CreatedByUserID == userID {
+			cp := *invite
+			return &cp, nil
+		}
+	}
+	if _, exists := r.invites[code]; exists {
+		return nil, domain.ErrInviteAlreadyExists
+	}
+	now := time.Now()
+	invite := &domain.Invite{
+		Code:            code,
+		Kind:            domain.InviteKindReferral,
+		Enabled:         true,
+		MaxUse:          maxUse,
+		CreatedByUserID: &userID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	r.invites[code] = invite
+	cp := *invite
+	return &cp, nil
+}
+
 func (r *mockUserRepo) ListUserPermissionPolicies(_ context.Context, userID uint) ([]domain.PermissionPolicy, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -583,6 +625,7 @@ func newTestHandler() *IAMHandler {
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
 		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, userRepo, userRepo.operationLogs),
+		InviteUseCase:              app.NewInviteUseCase(userRepo),
 		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(userRepo, userRepo),
 		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
 		EmailCodeUseCase:           emailCodeUseCase,
@@ -1421,6 +1464,44 @@ func TestSupplierApplicationSubmitAndCurrent(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "already under review")
+}
+
+func TestGetMeInviteReturnsStableReferralCode(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUserSession(t, h, "aff-user@test.com", "user-session")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/v1/me/invite", nil)
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/me/invite", nil)
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"inviteCode":"AFF`)
+	first := w.Body.String()
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/v1/me/invite", nil)
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, first, w.Body.String())
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/me/invite", nil)
+	addAuthenticatedRequest(req, "user-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, first, w.Body.String())
 }
 
 func TestAdminApproveSupplierApplicationPromotesUser(t *testing.T) {

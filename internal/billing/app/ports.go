@@ -15,6 +15,8 @@ import (
 
 type WalletRepository interface {
 	GetOrCreateWalletSummary(ctx context.Context, userID uint) (*domain.WalletSummary, error)
+	GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error)
+	TransferReferralRewards(ctx context.Context, req TransferReferralRewardsCommand) (*TransferReferralRewardsResult, error)
 	ListTransactions(ctx context.Context, filter TransactionListFilter, offset, limit int) ([]domain.Transaction, error)
 	CountTransactions(ctx context.Context, filter TransactionListFilter) (int64, error)
 	ListRecharges(ctx context.Context, filter RechargeListFilter, offset, limit int) ([]domain.Recharge, error)
@@ -48,6 +50,27 @@ type RedeemCardRequest struct {
 	CardKey        string
 	IdempotencyKey string
 	RequestID      string
+}
+
+type TransferReferralRewardsRequest struct {
+	UserID         uint
+	IdempotencyKey string
+	RequestID      string
+}
+
+type TransferReferralRewardsCommand struct {
+	UserID             uint
+	IdempotencyKey     string
+	RequestFingerprint string
+	RequestID          string
+	Now                time.Time
+}
+
+type TransferReferralRewardsResult struct {
+	Wallet            domain.Wallet
+	Transaction       domain.Transaction
+	TransferredAmount string
+	TransferredCount  int
 }
 
 type RedeemCardCommand struct {
@@ -145,6 +168,31 @@ func (uc *WalletUseCase) GetWallet(ctx context.Context, userID uint) (*domain.Wa
 		return nil, domain.ErrInvalidFilter
 	}
 	return uc.repo.GetOrCreateWalletSummary(ctx, userID)
+}
+
+func (uc *WalletUseCase) GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error) {
+	if userID == 0 {
+		return nil, domain.ErrInvalidFilter
+	}
+	return uc.repo.GetReferralSummary(ctx, userID)
+}
+
+func (uc *WalletUseCase) TransferReferralRewards(ctx context.Context, req TransferReferralRewardsRequest) (*TransferReferralRewardsResult, error) {
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if req.UserID == 0 {
+		return nil, domain.ErrInvalidFilter
+	}
+	if idempotencyKey == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	fingerprint := fingerprint("referrals.transfer", req.UserID)
+	return uc.repo.TransferReferralRewards(ctx, TransferReferralRewardsCommand{
+		UserID:             req.UserID,
+		IdempotencyKey:     idempotencyKey,
+		RequestFingerprint: fingerprint,
+		RequestID:          strings.TrimSpace(req.RequestID),
+		Now:                uc.now(),
+	})
 }
 
 func (uc *WalletUseCase) ListTransactions(ctx context.Context, filter TransactionListFilter, offset, limit int) (*TransactionListResult, error) {
