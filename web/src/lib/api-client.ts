@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "./openapi/schema";
+import { notifyAuthRequired } from "./auth-flow";
 
 export type JsonResponse<
   Operation extends { responses: Record<number, unknown> },
@@ -15,6 +16,16 @@ export type ApiErrorBody = Partial<components["schemas"]["Error"]>;
 const csrfCookieName = "csrf_token";
 const csrfHeaderName = "X-CSRF-Token";
 export const apiRequestTimeoutMs = 600_000;
+const authRequiredIgnoredPaths = new Set([
+  "/v1/activation",
+  "/v1/captchas",
+  "/v1/email/code",
+  "/v1/me",
+  "/v1/password/reset",
+  "/v1/password/reset/request",
+  "/v1/sessions",
+  "/v1/users",
+]);
 
 function withTimeoutSignal(input: Request, timeoutMs: number) {
   const controller = new AbortController();
@@ -82,8 +93,26 @@ function normalizeErrorBody(error: unknown): ApiErrorBody {
   return { message: String(error) };
 }
 
+function responsePath(response: Response) {
+  try {
+    return new URL(response.url, window.location.origin).pathname;
+  } catch {
+    return "";
+  }
+}
+
+function shouldNotifyAuthRequired(response: Response) {
+  return (
+    response.status === 401 &&
+    !authRequiredIgnoredPaths.has(responsePath(response))
+  );
+}
+
 export async function unwrap<T>(result: ApiResult<T>): Promise<T> {
   if (!result.response.ok) {
+    if (shouldNotifyAuthRequired(result.response)) {
+      notifyAuthRequired();
+    }
     throw new IamApiError(
       result.response.status,
       normalizeErrorBody(result.error)

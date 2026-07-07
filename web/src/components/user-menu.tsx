@@ -54,31 +54,31 @@ export function UserMenu() {
         <DropdownMenuSeparator className="mx-0 bg-border" />
         <DropdownMenuItem
           render={<Link to="/account" />}
-          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+          className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
-          <UserRound className="size-4 text-muted-foreground" />
+          <UserRound className="size-4 shrink-0 text-muted-foreground" />
           {t("Personal Settings")}
         </DropdownMenuItem>
         <DropdownMenuItem
           render={<Link to="/apikeys" />}
-          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+          className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
-          <KeyRound className="size-4 text-muted-foreground" />
+          <KeyRound className="size-4 shrink-0 text-muted-foreground" />
           {t("API KEY")}
         </DropdownMenuItem>
         <DropdownMenuItem
           render={<Link to="/wallet" />}
-          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+          className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
-          <Wallet className="size-4 text-muted-foreground" />
+          <Wallet className="size-4 shrink-0 text-muted-foreground" />
           {t("Wallet Management")}
         </DropdownMenuItem>
         <DropdownMenuSeparator className="mx-0 bg-border" />
         <DropdownMenuItem
           onClick={() => void logout()}
-          className="h-9 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
+          className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
-          <LogOut className="size-4 text-muted-foreground" />
+          <LogOut className="size-4 shrink-0 text-muted-foreground" />
           {t("Exit")}
         </DropdownMenuItem>
       </DropdownMenuContent>

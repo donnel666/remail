@@ -95,6 +95,8 @@ type ProxyRepo struct {
 
 const transactionRetryAttempts = 3
 
+var errRetryProxyAcquire = errors.New("retry proxy acquire")
+
 func NewProxyRepo(db *gorm.DB) *ProxyRepo {
 	return &ProxyRepo{
 		db:            db,
@@ -797,38 +799,31 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 				return nil
 			}
 			binding := &ProxyBindingModel{
-				BindKey:   key,
-				ProxyID:   proxy.ID,
-				IPVersion: string(proxy.IPVersion),
-				ExpireAt:  bindingExpireAt,
+				BindKey:    key,
+				ProxyID:    proxy.ID,
+				IPVersion:  string(proxy.IPVersion),
+				ExpireAt:   bindingExpireAt,
+				LastUsedAt: &now,
 			}
-			if err := tx.Create(binding).Error; err != nil {
-				if isDuplicateKeyError(err) {
-					bound, findErr := findBoundResourceProxy(ctx, tx, key, ipVersion, now)
-					if findErr != nil {
-						return findErr
-					}
-					if bound != nil {
-						selected = bound
-						return nil
-					}
-					covered, coverErr := coverInvalidBinding(ctx, tx, key, proxy, bindingExpireAt, now)
-					if coverErr != nil {
-						return coverErr
-					}
-					if covered {
-						proxy.LastUsedAt = &now
-						selected = proxy
-						return nil
-					}
-				}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "bind_key"},
+					{Name: "ip_version"},
+				},
+				DoUpdates: clause.Assignments(map[string]any{
+					"last_used_at": now,
+				}),
+			}).Create(binding).Error; err != nil {
 				return fmt.Errorf("create proxy binding: %w", err)
 			}
-			if err := touchProxyUsed(ctx, tx, proxy.ID, now); err != nil {
+			bound, err := findExactBoundResourceProxy(ctx, tx, key, proxy.IPVersion, now)
+			if err != nil {
 				return err
 			}
-			proxy.LastUsedAt = &now
-			selected = proxy
+			if bound == nil {
+				return errRetryProxyAcquire
+			}
+			selected = bound
 			return nil
 		})
 	})
@@ -942,7 +937,7 @@ func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVers
 	} else {
 		query = query.Where("b.ip_version = ?", string(ipVersion))
 	}
-	err := query.Clauses(clause.Locking{Strength: "UPDATE"}).
+	err := query.
 		Order("b.last_used_at DESC, b.id DESC").
 		First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -951,16 +946,47 @@ func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVers
 	if err != nil {
 		return nil, fmt.Errorf("find bound proxy: %w", err)
 	}
-
 	var model ProxyModel
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "id = ?", binding.ProxyID).Error; err != nil {
+	if err := tx.WithContext(ctx).First(&model, "id = ?", binding.ProxyID).Error; err != nil {
 		return nil, fmt.Errorf("find bound proxy model: %w", err)
 	}
-	if err := tx.Model(&ProxyBindingModel{}).Where("id = ?", binding.ID).Update("last_used_at", now).Error; err != nil {
-		return nil, fmt.Errorf("touch proxy binding: %w", err)
+	if !binding.ExpireAt.After(now) || !bindingMatchesIPVersion(binding, ipVersion) || !usableResourceProxyModel(model, now) {
+		return nil, nil
 	}
-	if err := touchProxyUsed(ctx, tx, model.ID, now); err != nil {
-		return nil, err
+	result := tx.Model(&ProxyBindingModel{}).
+		Where("id = ? AND expire_at > ?", binding.ID, now).
+		Update("last_used_at", now)
+	if result.Error != nil {
+		return nil, fmt.Errorf("touch proxy binding: %w", result.Error)
+	}
+	proxy := proxyFromModel(model)
+	proxy.LastUsedAt = &now
+	return &proxy, nil
+}
+
+func findExactBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error) {
+	var binding ProxyBindingModel
+	err := tx.WithContext(ctx).
+		Where("bind_key = ? AND ip_version = ?", key, string(ipVersion)).
+		First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find exact bound proxy: %w", err)
+	}
+	var model ProxyModel
+	if err := tx.WithContext(ctx).First(&model, "id = ?", binding.ProxyID).Error; err != nil {
+		return nil, fmt.Errorf("find exact bound proxy model: %w", err)
+	}
+	if !binding.ExpireAt.After(now) || !usableResourceProxyModel(model, now) {
+		return nil, nil
+	}
+	result := tx.Model(&ProxyBindingModel{}).
+		Where("id = ? AND expire_at > ?", binding.ID, now).
+		Update("last_used_at", now)
+	if result.Error != nil {
+		return nil, fmt.Errorf("touch exact proxy binding: %w", result.Error)
 	}
 	proxy := proxyFromModel(model)
 	proxy.LastUsedAt = &now
@@ -980,13 +1006,27 @@ func coverInvalidBinding(ctx context.Context, tx *gorm.DB, key string, proxy *do
 			string(domain.ProxyStatusNormal),
 			now,
 		).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("lock coverable proxy binding: %w", err)
+	}
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&binding, "id = ?", binding.ID).Error; err != nil {
+		return false, fmt.Errorf("lock coverable proxy binding: %w", err)
+	}
+	if binding.IPVersion != string(proxy.IPVersion) {
+		return false, nil
+	}
+	if binding.ExpireAt.After(now) {
+		var current ProxyModel
+		if err := tx.WithContext(ctx).First(&current, "id = ?", binding.ProxyID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, fmt.Errorf("load current proxy binding model: %w", err)
+		}
+		if usableResourceProxyModel(current, now) {
+			return false, nil
+		}
 	}
 	if err := tx.WithContext(ctx).
 		Model(&ProxyBindingModel{}).
@@ -1019,6 +1059,20 @@ func selectResourceProxy(ctx context.Context, tx *gorm.DB, ipVersion domain.Prox
 	return &proxy, nil
 }
 
+func bindingMatchesIPVersion(binding ProxyBindingModel, ipVersion domain.ProxyIPVersion) bool {
+	return ipVersion == domain.ProxyIPAuto || binding.IPVersion == string(ipVersion)
+}
+
+func usableResourceProxyModel(model ProxyModel, now time.Time) bool {
+	if model.ID == 0 {
+		return false
+	}
+	if model.Pool != string(domain.ProxyPoolResource) || model.Status != string(domain.ProxyStatusNormal) {
+		return false
+	}
+	return model.ExpireAt == nil || model.ExpireAt.After(now)
+}
+
 func buildSelectResourceProxySQL(ipVersion domain.ProxyIPVersion, now time.Time) (string, []any) {
 	sql := `
 SELECT p.*
@@ -1039,13 +1093,11 @@ WHERE p.pool = ? AND p.status = ? AND (p.expire_at IS NULL OR p.expire_at > ?)`
 		args = append(args, string(ipVersion))
 	}
 	sql += `
-ORDER BY p.errors ASC,
-         COALESCE(b.active_bindings, 0) ASC,
-         CASE WHEN p.latency_ms > 0 THEN p.latency_ms ELSE 2147483647 END ASC,
-         COALESCE(p.last_used_at, '1970-01-01') ASC,
-         p.id ASC
-LIMIT 1
-FOR UPDATE`
+	ORDER BY p.errors ASC,
+	         COALESCE(b.active_bindings, 0) ASC,
+	         CASE WHEN p.latency_ms > 0 THEN p.latency_ms ELSE 2147483647 END ASC,
+	         p.id ASC
+	LIMIT 1`
 	return sql, args
 }
 
@@ -1369,14 +1421,6 @@ func proxyIDsFromUint(items []uint) []uint {
 	return ids
 }
 
-func isDuplicateKeyError(err error) bool {
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return true
-	}
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
-}
-
 func proxyURLHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -1403,11 +1447,19 @@ func escapeLikePrefix(value string) string {
 	return replacer.Replace(strings.TrimSpace(value)) + "%"
 }
 
+func isDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
 func withTransactionRetry(fn func() error) error {
 	var err error
 	for attempt := 0; attempt < transactionRetryAttempts; attempt++ {
 		err = fn()
-		if err == nil || !isRetryableTransactionError(err) {
+		if err == nil || (!errors.Is(err, errRetryProxyAcquire) && !isRetryableTransactionError(err)) {
 			return err
 		}
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)

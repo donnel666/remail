@@ -860,9 +860,7 @@ func setAuthCookies(c *gin.Context, sessionID, csrfToken string, maxAge int, sec
 }
 
 func clearAuthCookies(c *gin.Context, secure bool) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", secure, true)
-	c.SetCookie(middleware.CSRFCookieName, "", -1, "/", "", secure, false)
+	middleware.ClearAuthCookies(c, secure)
 }
 
 func newCSRFToken() (string, error) {

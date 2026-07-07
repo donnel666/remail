@@ -13,6 +13,7 @@ import {
   type LoginRequest,
   type UserResponse,
 } from "@/lib/iam-api";
+import { AUTH_REQUIRED_EVENT, clearBrowserAuthState } from "@/lib/auth-flow";
 
 export interface CurrentUser {
   id: number;
@@ -65,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCurrentUser(nextUser);
       return nextUser;
     } catch {
+      clearBrowserAuthState();
       setCurrentUser(null);
       return null;
     }
@@ -82,6 +84,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refreshCurrentUser]);
 
+  useEffect(() => {
+    const handleAuthRequired = () => {
+      clearBrowserAuthState({ notice: true });
+      setCurrentUser(null);
+    };
+
+    window.addEventListener(AUTH_REQUIRED_EVENT, handleAuthRequired);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, handleAuthRequired);
+    };
+  }, []);
+
   const login = useCallback(async (payload: LoginRequest) => {
     const response = await loginRequest(payload);
     const nextUser = toCurrentUser(response.user);
@@ -93,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await logoutRequest();
     } finally {
+      clearBrowserAuthState();
       setCurrentUser(null);
     }
   }, []);

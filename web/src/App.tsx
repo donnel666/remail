@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "./context/theme-provider";
 import { AuthProvider, useAuth } from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
+import { AUTH_REQUIRED_EVENT } from "./lib/auth-flow";
 import AppShell from "./components/layout/AppShell";
 import {
   ROUTES_WITH_SIDEBAR,
@@ -179,6 +180,18 @@ function RouteGate({ children }: { children: ReactNode }) {
     pathname,
     requiredRoleLevel,
   ]);
+
+  useEffect(() => {
+    const handleAuthRequired = () => {
+      if (pathname === "/login" || pathname === "/activation") return;
+      void navigate({ to: "/login", replace: true });
+    };
+
+    window.addEventListener(AUTH_REQUIRED_EVENT, handleAuthRequired);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, handleAuthRequired);
+    };
+  }, [navigate, pathname]);
 
   let content = children;
   if (activationNeeded === null || (authLoading && isProtectedRoute)) {

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
@@ -50,6 +51,7 @@ func LoadSession(fetcher SessionFetcher) gin.HandlerFunc {
 
 		userID, roleLevel, email, ok := fetcher.FetchSession(c.Request.Context(), sid)
 		if !ok {
+			clearRequestAuthCookies(c)
 			c.Next()
 			return
 		}
@@ -65,6 +67,7 @@ func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		_, ok := GetCurrentUserID(c)
 		if !ok {
+			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"message":   "Authentication is required.",
 				"requestId": GetRequestID(c),
@@ -81,6 +84,7 @@ func AdminRequired(minLevel domain.RoleLevel) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleLevel, ok := GetCurrentRoleLevel(c)
 		if !ok {
+			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"message":   "Authentication is required.",
 				"requestId": GetRequestID(c),
@@ -105,6 +109,7 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 	return func(c *gin.Context) {
 		userID, ok := GetCurrentUserID(c)
 		if !ok {
+			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"message":   "Authentication is required.",
 				"requestId": GetRequestID(c),
@@ -114,6 +119,7 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 
 		roleLevel, ok := GetCurrentRoleLevel(c)
 		if !ok {
+			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"message":   "Authentication is required.",
 				"requestId": GetRequestID(c),
@@ -139,6 +145,24 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 
 		c.Next()
 	}
+}
+
+func ClearAuthCookies(c *gin.Context, secure bool) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(SessionCookieName, "", -1, "/", "", secure, true)
+	c.SetCookie(CSRFCookieName, "", -1, "/", "", secure, false)
+}
+
+func clearRequestAuthCookies(c *gin.Context) {
+	ClearAuthCookies(c, requestIsSecure(c))
+}
+
+func requestIsSecure(c *gin.Context) bool {
+	if c.Request != nil && c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") ||
+		strings.EqualFold(c.GetHeader("X-Forwarded-Ssl"), "on")
 }
 
 // SetCurrentUser stores authenticated user info in the gin context.
