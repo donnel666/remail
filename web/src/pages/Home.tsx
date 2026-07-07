@@ -1,6 +1,8 @@
-import { Typography, Toast } from "@douyinfe/semi-ui";
+import { Typography } from "@douyinfe/semi-ui";
 import { Globe, Lock, Shield, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
+
+import { createCopyableConfig } from "@/components/semi/copyable-config";
 
 const FEATURES = [
   {
@@ -154,10 +156,7 @@ export default function Home() {
               <Text
                 className="relative ml-auto inline-flex items-center text-white/30 transition-colors hover:text-[var(--brand-light)]"
                 aria-label={t("Copy API example")}
-                copyable={{
-                  content: curlRaw,
-                  onCopy: () => Toast.success(t("Copied")),
-                }}
+                copyable={createCopyableConfig(curlRaw, t("Copied"))}
               >
                 <span className="sr-only">{t("Copy API example")}</span>
               </Text>

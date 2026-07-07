@@ -1,4 +1,7 @@
-import { Toast, Typography } from "@douyinfe/semi-ui";
+import { Typography } from "@douyinfe/semi-ui";
+
+import { createCopyableConfig } from "./copyable-config";
+import { OverflowTooltip } from "./overflow-tooltip";
 
 const { Text } = Typography;
 
@@ -16,12 +19,14 @@ export function CopyableTableText({
   return (
     <span className="remail-copyable-table-text">
       <Text
-        copyable={{
-          content: copyContent ?? text,
-          onCopy: () => Toast.success(copiedText),
-        }}
+        copyable={createCopyableConfig(copyContent ?? text, copiedText)}
       >
-        <span className="remail-copyable-table-text-content">{text}</span>
+        <OverflowTooltip
+          className="remail-copyable-table-text-content"
+          content={text}
+        >
+          {text}
+        </OverflowTooltip>
       </Text>
     </span>
   );

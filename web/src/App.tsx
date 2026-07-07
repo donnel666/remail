@@ -36,6 +36,7 @@ const Home = lazy(() => import("./pages/Home"));
 const Activation = lazy(() => import("./pages/Activation"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Projects = lazy(() => import("./pages/Projects"));
+const Pickup = lazy(() => import("./pages/Pickup"));
 const ApiDocs = lazy(() => import("./pages/ApiDocs"));
 const Qna = lazy(() => import("./pages/Qna"));
 const Login = lazy(() => import("./pages/Login"));
@@ -232,6 +233,7 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/console", component: ConsoleOverview }),
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: Dashboard }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/pickup", component: Pickup }),
   createRoute({ getParentRoute: () => rootRoute, path: "/projects", component: Projects }),
   createRoute({ getParentRoute: () => rootRoute, path: "/wallet", component: Wallet }),
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),

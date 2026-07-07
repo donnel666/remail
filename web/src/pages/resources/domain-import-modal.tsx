@@ -9,6 +9,7 @@ import {
 } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { createDomainResource } from "@/lib/resources-api";
 
@@ -86,10 +87,7 @@ export function ImportDomainModal({
           </div>
           <div className="flex items-center gap-2">
             <Text
-              copyable={{
-                content: MX_TARGET,
-                onCopy: () => Toast.success(t("Copied")),
-              }}
+              copyable={createCopyableConfig(MX_TARGET, t("Copied"))}
               className="rounded bg-[var(--semi-color-fill-1)] px-2 py-1 font-mono text-sm text-[var(--semi-color-primary)]"
             >
               {MX_TARGET}
