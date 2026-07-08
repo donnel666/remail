@@ -182,15 +182,16 @@ type CandidateRefreshQueue interface {
 
 type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
+	HasParentTx(ctx context.Context) bool
 
 	FindExistingAllocation(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error)
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint) (*ProductAllocationConfig, error)
 
-	ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int) ([]MicrosoftCandidate, error)
-	ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int) ([]DomainCandidate, error)
-	LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope) (*MicrosoftCandidate, error)
-	LockDomainCandidate(ctx context.Context, resourceID uint) (*DomainCandidate, error)
+	ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
+	LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
+	LockDomainCandidate(ctx context.Context, resourceID uint, emailSuffix string) (*DomainCandidate, error)
 
 	FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)

@@ -3389,6 +3389,443 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- OpenAPI Credentials ---
+  /v1/apikeys:
+    post:
+      operationId: postApiKey
+      summary: Create an API key for the current user
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyCreateRequest"
+      responses:
+        "201":
+          description: API key created. The plain key is only returned on create/detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid API key request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: getApiKeys
+      summary: List API keys for the current user
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: API key list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/apikeys/{keyId}:
+    get:
+      operationId: getApiKey
+      summary: Get one API key
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: API key detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyResponse"
+        "400":
+          description: Invalid path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: patchApiKey
+      summary: Update one API key
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyPatchRequest"
+      responses:
+        "200":
+          description: API key updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyResponse"
+        "400":
+          description: Invalid request body or path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid API key request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # --- Trade Orders ---
+  /v1/orders:
+    post:
+      operationId: postOrder
+      summary: Create one order through console or API key
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/OptionalCsrfToken"
+        - name: serviceMode
+          in: query
+          schema:
+            type: string
+            enum: [purchase, code]
+            default: purchase
+        - name: supply
+          in: query
+          schema:
+            type: string
+            enum: [private_first, public_only]
+            default: private_first
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created and activated with allocation and service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "200":
+          description: Idempotent replay of an existing order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Insufficient balance, insufficient inventory, or unavailable project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: getOrders
+      summary: List orders
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [mine, all]
+            default: mine
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_payment, paid, active, completed, refunded, failed, closed]
+        - name: serviceMode
+          in: query
+          schema:
+            type: string
+            enum: [purchase, code]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/orders/{orderNo}:
+    get:
+      operationId: getOrder
+      summary: Get one order
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/orders/{orderNo}/events:
+    get:
+      operationId: getOrderEvents
+      summary: List order events
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Order event list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderEventListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/orders/{orderNo}/archive:
+    post:
+      operationId: postOrderArchive
+      summary: Archive a terminal order
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OptionalCsrfToken"
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Order cannot be archived in current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Billing Wallet ---
   /v1/wallet:
     get:
@@ -4544,6 +4981,14 @@ components:
         type: string
       description: CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 
+    OptionalCsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      schema:
+        type: string
+      description: CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -4560,6 +5005,11 @@ components:
       in: cookie
       name: sid
       description: HttpOnly session cookie set after login
+
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: User API key in the Authorization header, for example `Bearer ak_...`; SDK clients may also use `X-API-Key`.
 
   schemas:
     HealthResponse:
@@ -4608,6 +5058,292 @@ components:
           additionalProperties:
             type: string
             example: "Email format is invalid."
+      additionalProperties: false
+
+    APIKeyCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        rateLimitPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Defaults to 60 when omitted.
+        concurrencyLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Defaults to 5 when omitted.
+      additionalProperties: false
+
+    APIKeyPatchRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        enabled:
+          type: boolean
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        rateLimitPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        concurrencyLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+
+    APIKeyResponse:
+      type: object
+      required:
+        - id
+        - name
+        - keyPrefix
+        - enabled
+        - rateLimitPerMinute
+        - concurrencyLimit
+        - activeRequests
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        keyPrefix:
+          type: string
+        keyPlain:
+          type: string
+          description: Plain API key, only returned immediately after creation or on detail view.
+        enabled:
+          type: boolean
+        rateLimitPerMinute:
+          type: integer
+        concurrencyLimit:
+          type: integer
+        activeRequests:
+          type: integer
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    APIKeyListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIKeyResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    CreateOrderRequest:
+      type: object
+      required:
+        - projectId
+        - productId
+      properties:
+        projectId:
+          type: integer
+        productId:
+          type: integer
+        emailSuffix:
+          type: string
+          description: Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+      additionalProperties: false
+
+    OrderResponse:
+      type: object
+      required:
+        - id
+        - orderNo
+        - userId
+        - projectId
+        - projectProductId
+        - productType
+        - serviceMode
+        - supplyPolicy
+        - status
+        - payAmount
+        - refundAmount
+        - deliveryEmail
+        - clientChannel
+        - serviceCleanupStatus
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        orderNo:
+          type: string
+        userId:
+          type: integer
+        projectId:
+          type: integer
+        projectProductId:
+          type: integer
+        productType:
+          type: string
+          enum: [microsoft, domain]
+        serviceMode:
+          type: string
+          enum: [code, purchase]
+        supplyPolicy:
+          type: string
+          enum: [private_first, public_only]
+        status:
+          type: string
+          enum: [pending_payment, paid, active, completed, refunded, failed, closed]
+        payAmount:
+          type: string
+        refundAmount:
+          type: string
+        allocationType:
+          type: string
+          enum: [microsoft, domain]
+        allocationId:
+          type: integer
+        deliveryEmail:
+          type: string
+        receiveStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        receiveUntil:
+          type: string
+          format: date-time
+          nullable: true
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        afterSaleUntil:
+          type: string
+          format: date-time
+          nullable: true
+        clientChannel:
+          type: string
+          enum: [console, api_key]
+        apiKeyId:
+          type: integer
+          nullable: true
+        serviceCleanupStatus:
+          type: string
+        serviceToken:
+          type: string
+          description: Service credential used by pickup URLs and later mail-result APIs.
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    OrderListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    OrderEventResponse:
+      type: object
+      required:
+        - eventNo
+        - orderNo
+        - eventType
+        - operatorType
+        - createdAt
+      properties:
+        eventNo:
+          type: string
+        orderNo:
+          type: string
+        eventType:
+          type: string
+        fromStatus:
+          type: string
+        toStatus:
+          type: string
+        operatorType:
+          type: string
+          enum: [user, admin, system, openapi]
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    OrderEventListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderEventResponse"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
       additionalProperties: false
 
     WalletResponse:
@@ -6075,6 +6811,7 @@ components:
         - codeWindowMinutes
         - activationWindowMinutes
         - warrantyMinutes
+        - totalAvailable
       properties:
         id:
           type: integer
@@ -6098,6 +6835,10 @@ components:
           type: integer
         warrantyMinutes:
           type: integer
+        totalAvailable:
+          type: integer
+          format: int64
+          description: User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
       additionalProperties: false
 
     ProjectProduct:

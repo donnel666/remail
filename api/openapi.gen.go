@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
@@ -309,6 +310,153 @@ func (e ImportStatusResponseStatus) Valid() bool {
 	case ImportStatusResponseStatusImported:
 		return true
 	case ImportStatusResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderEventResponseOperatorType.
+const (
+	OrderEventResponseOperatorTypeAdmin   OrderEventResponseOperatorType = "admin"
+	OrderEventResponseOperatorTypeOpenapi OrderEventResponseOperatorType = "openapi"
+	OrderEventResponseOperatorTypeSystem  OrderEventResponseOperatorType = "system"
+	OrderEventResponseOperatorTypeUser    OrderEventResponseOperatorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the OrderEventResponseOperatorType enum.
+func (e OrderEventResponseOperatorType) Valid() bool {
+	switch e {
+	case OrderEventResponseOperatorTypeAdmin:
+		return true
+	case OrderEventResponseOperatorTypeOpenapi:
+		return true
+	case OrderEventResponseOperatorTypeSystem:
+		return true
+	case OrderEventResponseOperatorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseAllocationType.
+const (
+	OrderResponseAllocationTypeDomain    OrderResponseAllocationType = "domain"
+	OrderResponseAllocationTypeMicrosoft OrderResponseAllocationType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseAllocationType enum.
+func (e OrderResponseAllocationType) Valid() bool {
+	switch e {
+	case OrderResponseAllocationTypeDomain:
+		return true
+	case OrderResponseAllocationTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseClientChannel.
+const (
+	ApiKey  OrderResponseClientChannel = "api_key"
+	Console OrderResponseClientChannel = "console"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseClientChannel enum.
+func (e OrderResponseClientChannel) Valid() bool {
+	switch e {
+	case ApiKey:
+		return true
+	case Console:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseProductType.
+const (
+	OrderResponseProductTypeDomain    OrderResponseProductType = "domain"
+	OrderResponseProductTypeMicrosoft OrderResponseProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseProductType enum.
+func (e OrderResponseProductType) Valid() bool {
+	switch e {
+	case OrderResponseProductTypeDomain:
+		return true
+	case OrderResponseProductTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseServiceMode.
+const (
+	OrderResponseServiceModeCode     OrderResponseServiceMode = "code"
+	OrderResponseServiceModePurchase OrderResponseServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseServiceMode enum.
+func (e OrderResponseServiceMode) Valid() bool {
+	switch e {
+	case OrderResponseServiceModeCode:
+		return true
+	case OrderResponseServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseStatus.
+const (
+	OrderResponseStatusActive         OrderResponseStatus = "active"
+	OrderResponseStatusClosed         OrderResponseStatus = "closed"
+	OrderResponseStatusCompleted      OrderResponseStatus = "completed"
+	OrderResponseStatusFailed         OrderResponseStatus = "failed"
+	OrderResponseStatusPaid           OrderResponseStatus = "paid"
+	OrderResponseStatusPendingPayment OrderResponseStatus = "pending_payment"
+	OrderResponseStatusRefunded       OrderResponseStatus = "refunded"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseStatus enum.
+func (e OrderResponseStatus) Valid() bool {
+	switch e {
+	case OrderResponseStatusActive:
+		return true
+	case OrderResponseStatusClosed:
+		return true
+	case OrderResponseStatusCompleted:
+		return true
+	case OrderResponseStatusFailed:
+		return true
+	case OrderResponseStatusPaid:
+		return true
+	case OrderResponseStatusPendingPayment:
+		return true
+	case OrderResponseStatusRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseSupplyPolicy.
+const (
+	OrderResponseSupplyPolicyPrivateFirst OrderResponseSupplyPolicy = "private_first"
+	OrderResponseSupplyPolicyPublicOnly   OrderResponseSupplyPolicy = "public_only"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseSupplyPolicy enum.
+func (e OrderResponseSupplyPolicy) Valid() bool {
+	switch e {
+	case OrderResponseSupplyPolicyPrivateFirst:
+		return true
+	case OrderResponseSupplyPolicyPublicOnly:
 		return true
 	default:
 		return false
@@ -1334,16 +1482,16 @@ func (e GetAdminProxyBindingsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsPool.
 const (
-	Resource GetAdminProxyStatsParamsPool = "resource"
-	System   GetAdminProxyStatsParamsPool = "system"
+	GetAdminProxyStatsParamsPoolResource GetAdminProxyStatsParamsPool = "resource"
+	GetAdminProxyStatsParamsPoolSystem   GetAdminProxyStatsParamsPool = "system"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
 func (e GetAdminProxyStatsParamsPool) Valid() bool {
 	switch e {
-	case Resource:
+	case GetAdminProxyStatsParamsPoolResource:
 		return true
-	case System:
+	case GetAdminProxyStatsParamsPoolSystem:
 		return true
 	default:
 		return false
@@ -1392,6 +1540,111 @@ func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	case GetAdminProxyStatsParamsStatusExpired:
 		return true
 	case GetAdminProxyStatsParamsStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOrdersParamsScope.
+const (
+	GetOrdersParamsScopeAll  GetOrdersParamsScope = "all"
+	GetOrdersParamsScopeMine GetOrdersParamsScope = "mine"
+)
+
+// Valid indicates whether the value is a known member of the GetOrdersParamsScope enum.
+func (e GetOrdersParamsScope) Valid() bool {
+	switch e {
+	case GetOrdersParamsScopeAll:
+		return true
+	case GetOrdersParamsScopeMine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOrdersParamsStatus.
+const (
+	GetOrdersParamsStatusActive         GetOrdersParamsStatus = "active"
+	GetOrdersParamsStatusClosed         GetOrdersParamsStatus = "closed"
+	GetOrdersParamsStatusCompleted      GetOrdersParamsStatus = "completed"
+	GetOrdersParamsStatusFailed         GetOrdersParamsStatus = "failed"
+	GetOrdersParamsStatusPaid           GetOrdersParamsStatus = "paid"
+	GetOrdersParamsStatusPendingPayment GetOrdersParamsStatus = "pending_payment"
+	GetOrdersParamsStatusRefunded       GetOrdersParamsStatus = "refunded"
+)
+
+// Valid indicates whether the value is a known member of the GetOrdersParamsStatus enum.
+func (e GetOrdersParamsStatus) Valid() bool {
+	switch e {
+	case GetOrdersParamsStatusActive:
+		return true
+	case GetOrdersParamsStatusClosed:
+		return true
+	case GetOrdersParamsStatusCompleted:
+		return true
+	case GetOrdersParamsStatusFailed:
+		return true
+	case GetOrdersParamsStatusPaid:
+		return true
+	case GetOrdersParamsStatusPendingPayment:
+		return true
+	case GetOrdersParamsStatusRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOrdersParamsServiceMode.
+const (
+	GetOrdersParamsServiceModeCode     GetOrdersParamsServiceMode = "code"
+	GetOrdersParamsServiceModePurchase GetOrdersParamsServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the GetOrdersParamsServiceMode enum.
+func (e GetOrdersParamsServiceMode) Valid() bool {
+	switch e {
+	case GetOrdersParamsServiceModeCode:
+		return true
+	case GetOrdersParamsServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOrderParamsServiceMode.
+const (
+	Code     PostOrderParamsServiceMode = "code"
+	Purchase PostOrderParamsServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the PostOrderParamsServiceMode enum.
+func (e PostOrderParamsServiceMode) Valid() bool {
+	switch e {
+	case Code:
+		return true
+	case Purchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOrderParamsSupply.
+const (
+	PostOrderParamsSupplyPrivateFirst PostOrderParamsSupply = "private_first"
+	PostOrderParamsSupplyPublicOnly   PostOrderParamsSupply = "public_only"
+)
+
+// Valid indicates whether the value is a known member of the PostOrderParamsSupply enum.
+func (e PostOrderParamsSupply) Valid() bool {
+	switch e {
+	case PostOrderParamsSupplyPrivateFirst:
+		return true
+	case PostOrderParamsSupplyPublicOnly:
 		return true
 	default:
 		return false
@@ -1541,20 +1794,66 @@ func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsScope.
 const (
-	All  GetWalletTransactionsParamsScope = "all"
-	Mine GetWalletTransactionsParamsScope = "mine"
+	GetWalletTransactionsParamsScopeAll  GetWalletTransactionsParamsScope = "all"
+	GetWalletTransactionsParamsScopeMine GetWalletTransactionsParamsScope = "mine"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
 func (e GetWalletTransactionsParamsScope) Valid() bool {
 	switch e {
-	case All:
+	case GetWalletTransactionsParamsScopeAll:
 		return true
-	case Mine:
+	case GetWalletTransactionsParamsScopeMine:
 		return true
 	default:
 		return false
 	}
+}
+
+// APIKeyCreateRequest defines model for APIKeyCreateRequest.
+type APIKeyCreateRequest struct {
+	// ConcurrencyLimit Defaults to 5 when omitted.
+	ConcurrencyLimit *int       `json:"concurrencyLimit,omitempty"`
+	ExpireAt         *time.Time `json:"expireAt,omitempty"`
+	Name             *string    `json:"name,omitempty"`
+
+	// RateLimitPerMinute Defaults to 60 when omitted.
+	RateLimitPerMinute *int `json:"rateLimitPerMinute,omitempty"`
+}
+
+// APIKeyListResponse defines model for APIKeyListResponse.
+type APIKeyListResponse struct {
+	Items  []APIKeyResponse `json:"items"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+	Total  int              `json:"total"`
+}
+
+// APIKeyPatchRequest defines model for APIKeyPatchRequest.
+type APIKeyPatchRequest struct {
+	ConcurrencyLimit   *int       `json:"concurrencyLimit,omitempty"`
+	Enabled            *bool      `json:"enabled,omitempty"`
+	ExpireAt           *time.Time `json:"expireAt,omitempty"`
+	Name               *string    `json:"name,omitempty"`
+	RateLimitPerMinute *int       `json:"rateLimitPerMinute,omitempty"`
+}
+
+// APIKeyResponse defines model for APIKeyResponse.
+type APIKeyResponse struct {
+	ActiveRequests   int        `json:"activeRequests"`
+	ConcurrencyLimit int        `json:"concurrencyLimit"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	Enabled          bool       `json:"enabled"`
+	ExpireAt         *time.Time `json:"expireAt,omitempty"`
+	Id               int        `json:"id"`
+
+	// KeyPlain Plain API key, only returned immediately after creation or on detail view.
+	KeyPlain           *string    `json:"keyPlain,omitempty"`
+	KeyPrefix          string     `json:"keyPrefix"`
+	LastUsedAt         *time.Time `json:"lastUsedAt,omitempty"`
+	Name               string     `json:"name"`
+	RateLimitPerMinute int        `json:"rateLimitPerMinute"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 // ActivationRequest defines model for ActivationRequest.
@@ -1804,6 +2103,14 @@ type CreateMailServerRequest struct {
 	PtrRecord     *string `json:"ptrRecord,omitempty"`
 	ServerAddress string  `json:"serverAddress"`
 	SpfRecord     *string `json:"spfRecord,omitempty"`
+}
+
+// CreateOrderRequest defines model for CreateOrderRequest.
+type CreateOrderRequest struct {
+	// EmailSuffix Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+	EmailSuffix *string `json:"emailSuffix,omitempty"`
+	ProductId   int     `json:"productId"`
+	ProjectId   int     `json:"projectId"`
 }
 
 // CreateProjectApplicationRequest defines model for CreateProjectApplicationRequest.
@@ -2078,6 +2385,86 @@ type MicrosoftResourceDetail struct {
 	QualityScore    int        `json:"qualityScore"`
 	Status          string     `json:"status"`
 }
+
+// OrderEventListResponse defines model for OrderEventListResponse.
+type OrderEventListResponse struct {
+	Items  []OrderEventResponse `json:"items"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+	Total  int                  `json:"total"`
+}
+
+// OrderEventResponse defines model for OrderEventResponse.
+type OrderEventResponse struct {
+	CreatedAt    time.Time                      `json:"createdAt"`
+	EventNo      string                         `json:"eventNo"`
+	EventType    string                         `json:"eventType"`
+	FromStatus   *string                        `json:"fromStatus,omitempty"`
+	OperatorType OrderEventResponseOperatorType `json:"operatorType"`
+	OrderNo      string                         `json:"orderNo"`
+	Reason       *string                        `json:"reason,omitempty"`
+	ToStatus     *string                        `json:"toStatus,omitempty"`
+}
+
+// OrderEventResponseOperatorType defines model for OrderEventResponse.OperatorType.
+type OrderEventResponseOperatorType string
+
+// OrderListResponse defines model for OrderListResponse.
+type OrderListResponse struct {
+	Items  []OrderResponse `json:"items"`
+	Limit  int             `json:"limit"`
+	Offset int             `json:"offset"`
+	Total  int             `json:"total"`
+}
+
+// OrderResponse defines model for OrderResponse.
+type OrderResponse struct {
+	ActivatedAt          *time.Time                   `json:"activatedAt,omitempty"`
+	AfterSaleUntil       *time.Time                   `json:"afterSaleUntil,omitempty"`
+	AllocationId         *int                         `json:"allocationId,omitempty"`
+	AllocationType       *OrderResponseAllocationType `json:"allocationType,omitempty"`
+	ApiKeyId             *int                         `json:"apiKeyId,omitempty"`
+	ArchivedAt           *time.Time                   `json:"archivedAt,omitempty"`
+	ClientChannel        OrderResponseClientChannel   `json:"clientChannel"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	DeliveryEmail        string                       `json:"deliveryEmail"`
+	Id                   int                          `json:"id"`
+	OrderNo              string                       `json:"orderNo"`
+	PayAmount            string                       `json:"payAmount"`
+	ProductType          OrderResponseProductType     `json:"productType"`
+	ProjectId            int                          `json:"projectId"`
+	ProjectProductId     int                          `json:"projectProductId"`
+	ReceiveStartedAt     *time.Time                   `json:"receiveStartedAt,omitempty"`
+	ReceiveUntil         *time.Time                   `json:"receiveUntil,omitempty"`
+	RefundAmount         string                       `json:"refundAmount"`
+	ServiceCleanupStatus string                       `json:"serviceCleanupStatus"`
+	ServiceMode          OrderResponseServiceMode     `json:"serviceMode"`
+
+	// ServiceToken Service credential used by pickup URLs and later mail-result APIs.
+	ServiceToken *string                   `json:"serviceToken,omitempty"`
+	Status       OrderResponseStatus       `json:"status"`
+	SupplyPolicy OrderResponseSupplyPolicy `json:"supplyPolicy"`
+	UpdatedAt    time.Time                 `json:"updatedAt"`
+	UserId       int                       `json:"userId"`
+}
+
+// OrderResponseAllocationType defines model for OrderResponse.AllocationType.
+type OrderResponseAllocationType string
+
+// OrderResponseClientChannel defines model for OrderResponse.ClientChannel.
+type OrderResponseClientChannel string
+
+// OrderResponseProductType defines model for OrderResponse.ProductType.
+type OrderResponseProductType string
+
+// OrderResponseServiceMode defines model for OrderResponse.ServiceMode.
+type OrderResponseServiceMode string
+
+// OrderResponseStatus defines model for OrderResponse.Status.
+type OrderResponseStatus string
+
+// OrderResponseSupplyPolicy defines model for OrderResponse.SupplyPolicy.
+type OrderResponseSupplyPolicy string
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
@@ -2368,8 +2755,11 @@ type ProjectProductSummary struct {
 	PurchaseEnabled         bool                        `json:"purchaseEnabled"`
 	PurchasePrice           string                      `json:"purchasePrice"`
 	Status                  ProjectProductSummaryStatus `json:"status"`
-	Type                    ProjectProductSummaryType   `json:"type"`
-	WarrantyMinutes         int                         `json:"warrantyMinutes"`
+
+	// TotalAvailable User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
+	TotalAvailable  int64                     `json:"totalAvailable"`
+	Type            ProjectProductSummaryType `json:"type"`
+	WarrantyMinutes int                       `json:"warrantyMinutes"`
 }
 
 // ProjectProductSummaryStatus defines model for ProjectProductSummary.Status.
@@ -2933,6 +3323,12 @@ type CsrfToken = string
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
+// OptionalCsrfToken defines model for OptionalCsrfToken.
+type OptionalCsrfToken = string
+
+// bearerAuthContextKey is the context key for bearerAuth security scheme
+type bearerAuthContextKey string
+
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
 
@@ -3290,6 +3686,27 @@ type PostAdminWalletDebitParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
 
+// GetApiKeysParams defines parameters for GetApiKeys.
+type GetApiKeysParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostApiKeyParams defines parameters for PostApiKey.
+type PostApiKeyParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchApiKeyParams defines parameters for PatchApiKey.
+type PatchApiKeyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostCardRedeemParams defines parameters for PostCardRedeem.
 type PostCardRedeemParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -3315,6 +3732,55 @@ type GetDomainMailboxesParams struct {
 type PostMeInviteParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetOrdersParams defines parameters for GetOrders.
+type GetOrdersParams struct {
+	Scope       *GetOrdersParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
+	Status      *GetOrdersParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
+	ServiceMode *GetOrdersParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
+	Search      *string                     `form:"search,omitempty" json:"search,omitempty"`
+	Offset      *int                        `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit       *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetOrdersParamsScope defines parameters for GetOrders.
+type GetOrdersParamsScope string
+
+// GetOrdersParamsStatus defines parameters for GetOrders.
+type GetOrdersParamsStatus string
+
+// GetOrdersParamsServiceMode defines parameters for GetOrders.
+type GetOrdersParamsServiceMode string
+
+// PostOrderParams defines parameters for PostOrder.
+type PostOrderParams struct {
+	ServiceMode *PostOrderParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
+	Supply      *PostOrderParamsSupply      `form:"supply,omitempty" json:"supply,omitempty"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// PostOrderParamsServiceMode defines parameters for PostOrder.
+type PostOrderParamsServiceMode string
+
+// PostOrderParamsSupply defines parameters for PostOrder.
+type PostOrderParamsSupply string
+
+// PostOrderArchiveParams defines parameters for PostOrderArchive.
+type PostOrderArchiveParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// GetOrderEventsParams defines parameters for GetOrderEvents.
+type GetOrderEventsParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // PatchPasswordParams defines parameters for PatchPassword.
@@ -3576,6 +4042,12 @@ type PostAdminWalletCreditJSONRequestBody = AdminAdjustWalletRequest
 // PostAdminWalletDebitJSONRequestBody defines body for PostAdminWalletDebit for application/json ContentType.
 type PostAdminWalletDebitJSONRequestBody = AdminAdjustWalletRequest
 
+// PostApiKeyJSONRequestBody defines body for PostApiKey for application/json ContentType.
+type PostApiKeyJSONRequestBody = APIKeyCreateRequest
+
+// PatchApiKeyJSONRequestBody defines body for PatchApiKey for application/json ContentType.
+type PatchApiKeyJSONRequestBody = APIKeyPatchRequest
+
 // PostCardRedeemJSONRequestBody defines body for PostCardRedeem for application/json ContentType.
 type PostCardRedeemJSONRequestBody = RedeemCardRequest
 
@@ -3584,6 +4056,9 @@ type PostDomainJSONRequestBody = CreateDomainRequest
 
 // PostEmailCodeJSONRequestBody defines body for PostEmailCode for application/json ContentType.
 type PostEmailCodeJSONRequestBody = EmailCodeRequest
+
+// PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
+type PostOrderJSONRequestBody = CreateOrderRequest
 
 // PatchPasswordJSONRequestBody defines body for PatchPassword for application/json ContentType.
 type PatchPasswordJSONRequestBody = ChangePasswordRequest
@@ -4279,6 +4754,18 @@ type ServerInterface interface {
 	// Debit consumer balance manually
 	// (POST /v1/admin/wallets/{userId}/debit)
 	PostAdminWalletDebit(c *gin.Context, userId int, params PostAdminWalletDebitParams)
+	// List API keys for the current user
+	// (GET /v1/apikeys)
+	GetApiKeys(c *gin.Context, params GetApiKeysParams)
+	// Create an API key for the current user
+	// (POST /v1/apikeys)
+	PostApiKey(c *gin.Context, params PostApiKeyParams)
+	// Get one API key
+	// (GET /v1/apikeys/{keyId})
+	GetApiKey(c *gin.Context, keyId int)
+	// Update one API key
+	// (PATCH /v1/apikeys/{keyId})
+	PatchApiKey(c *gin.Context, keyId int, params PatchApiKeyParams)
 	// Create a captcha challenge
 	// (POST /v1/captchas)
 	PostCaptcha(c *gin.Context)
@@ -4303,6 +4790,21 @@ type ServerInterface interface {
 	// Create or get current user's referral invite code
 	// (POST /v1/me/invite)
 	PostMeInvite(c *gin.Context, params PostMeInviteParams)
+	// List orders
+	// (GET /v1/orders)
+	GetOrders(c *gin.Context, params GetOrdersParams)
+	// Create one order through console or API key
+	// (POST /v1/orders)
+	PostOrder(c *gin.Context, params PostOrderParams)
+	// Get one order
+	// (GET /v1/orders/{orderNo})
+	GetOrder(c *gin.Context, orderNo string)
+	// Archive a terminal order
+	// (POST /v1/orders/{orderNo}/archive)
+	PostOrderArchive(c *gin.Context, orderNo string, params PostOrderArchiveParams)
+	// List order events
+	// (GET /v1/orders/{orderNo}/events)
+	GetOrderEvents(c *gin.Context, orderNo string, params GetOrderEventsParams)
 	// Change current user's password
 	// (PATCH /v1/password)
 	PatchPassword(c *gin.Context, params PatchPasswordParams)
@@ -7002,6 +7504,191 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletDebit(c *gin.Context) {
 	siw.Handler.PostAdminWalletDebit(c, userId, params)
 }
 
+// GetApiKeys operation middleware
+func (siw *ServerInterfaceWrapper) GetApiKeys(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetApiKeysParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApiKeys(c, params)
+}
+
+// PostApiKey operation middleware
+func (siw *ServerInterfaceWrapper) PostApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostApiKey(c, params)
+}
+
+// GetApiKey operation middleware
+func (siw *ServerInterfaceWrapper) GetApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApiKey(c, keyId)
+}
+
+// PatchApiKey operation middleware
+func (siw *ServerInterfaceWrapper) PatchApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchApiKey(c, keyId, params)
+}
+
 // PostCaptcha operation middleware
 func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
 
@@ -7259,6 +7946,285 @@ func (siw *ServerInterfaceWrapper) PostMeInvite(c *gin.Context) {
 	}
 
 	siw.Handler.PostMeInvite(c, params)
+}
+
+// GetOrders operation middleware
+func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOrdersParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "serviceMode" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "serviceMode", c.Request.URL.Query(), &params.ServiceMode, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter serviceMode: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOrders(c, params)
+}
+
+// PostOrder operation middleware
+func (siw *ServerInterfaceWrapper) PostOrder(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOrderParams
+
+	// ------------- Optional query parameter "serviceMode" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "serviceMode", c.Request.URL.Query(), &params.ServiceMode, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter serviceMode: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "supply" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "supply", c.Request.URL.Query(), &params.Supply, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter supply: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken OptionalCsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = &XCSRFToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOrder(c, params)
+}
+
+// GetOrder operation middleware
+func (siw *ServerInterfaceWrapper) GetOrder(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOrder(c, orderNo)
+}
+
+// PostOrderArchive operation middleware
+func (siw *ServerInterfaceWrapper) PostOrderArchive(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOrderArchiveParams
+
+	headers := c.Request.Header
+
+	// ------------- Optional header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken OptionalCsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = &XCSRFToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOrderArchive(c, orderNo, params)
+}
+
+// GetOrderEvents operation middleware
+func (siw *ServerInterfaceWrapper) GetOrderEvents(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOrderEventsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOrderEvents(c, orderNo, params)
 }
 
 // PatchPassword operation middleware
@@ -8609,6 +9575,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
+	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
+	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
+	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
+	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
 	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
@@ -8617,6 +9587,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
+	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
+	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
+	router.GET(options.BaseURL+"/v1/orders/:orderNo", wrapper.GetOrder)
+	router.POST(options.BaseURL+"/v1/orders/:orderNo/archive", wrapper.PostOrderArchive)
+	router.GET(options.BaseURL+"/v1/orders/:orderNo/events", wrapper.GetOrderEvents)
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)

@@ -19,6 +19,7 @@ type CoreModule struct {
 	MailboxUseCase    *coreapp.DomainMailboxUseCase
 	ProjectUseCase    *coreapp.ProjectUseCase
 	ProjectAssets     *coreapp.ProjectAssetUseCase
+	ProductInventory  ProductInventoryProvider
 }
 
 // NewCoreModule wires up all Core module dependencies.

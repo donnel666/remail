@@ -33,8 +33,18 @@ func NewRepo(db *gorm.DB) *Repo {
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if _, ok := platform.GormTxFromContext(ctx); ok {
-		return fn(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		name := fmt.Sprintf("alloc_sp_%d", rand.Uint64())
+		if err := tx.WithContext(ctx).SavePoint(name).Error; err != nil {
+			return fmt.Errorf("create allocation savepoint: %w", err)
+		}
+		if err := fn(ctx); err != nil {
+			if rollbackErr := tx.WithContext(ctx).RollbackTo(name).Error; rollbackErr != nil {
+				return fmt.Errorf("rollback allocation savepoint: %w: %v", err, rollbackErr)
+			}
+			return err
+		}
+		return nil
 	}
 	var err error
 	for attempt := 0; attempt < 8; attempt++ {
@@ -47,6 +57,11 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 		time.Sleep(deadlockBackoff(attempt))
 	}
 	return err
+}
+
+func (r *Repo) HasParentTx(ctx context.Context) bool {
+	_, ok := platform.GormTxFromContext(ctx)
+	return ok
 }
 
 func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
@@ -413,9 +428,13 @@ LIMIT 1`, productID, buyerUserID).Scan(&item).Error
 	}, nil
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int) ([]allocapp.MicrosoftCandidate, error) {
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
 	args := []any{}
 	where := []string{"ms.status = 'normal'"}
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		where = append(where, "ms.email_domain = ?")
+		args = append(args, suffix)
+	}
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "ms.for_sale = FALSE", "er.owner_user_id = ?")
@@ -445,7 +464,7 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int) ([]allocapp.DomainCandidate, error) {
+func (r *Repo) ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
 	args := []any{}
 	where := []string{
 		"dr.purpose = 'sale'",
@@ -453,6 +472,10 @@ func (r *Repo) ListDomainSourceCandidates(ctx context.Context, bucket *uint8, li
 		"ms.status = 'online'",
 		"u.enabled = TRUE",
 		"u.role_level IN (20, 80, 100)",
+	}
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		where = append(where, "dr.domain = ?")
+		args = append(args, suffix)
 	}
 	if bucket != nil {
 		where = append(where, "dr.alloc_bucket = ?")
@@ -475,11 +498,15 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope) (*allocapp.MicrosoftCandidate, error) {
+func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
 	args := []any{resourceID}
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
+	}
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		where = append(where, "ms.email_domain = ?")
+		args = append(args, suffix)
 	}
 	switch scope {
 	case domain.SupplyScopeOwned:
@@ -524,31 +551,40 @@ FOR UPDATE SKIP LOCKED`
 	return &row, nil
 }
 
-func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint) (*allocapp.DomainCandidate, error) {
+func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, emailSuffix string) (*allocapp.DomainCandidate, error) {
+	args := []any{resourceID}
+	where := []string{
+		"dr.id = ?",
+		"dr.purpose = 'sale'",
+		"dr.status = 'normal'",
+		`EXISTS (
+	      SELECT 1
+	      FROM mail_servers ms
+	      WHERE ms.id = dr.mail_server_id
+	        AND ms.status = 'online'
+	  )`,
+		`EXISTS (
+	      SELECT 1
+	      FROM email_resources er
+	      JOIN users u ON u.id = er.owner_user_id
+	      WHERE er.id = dr.id
+	        AND er.type = 'domain'
+	        AND u.enabled = TRUE
+	        AND u.role_level IN (20, 80, 100)
+	  )`,
+	}
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		where = append(where, "dr.domain = ?")
+		args = append(args, suffix)
+	}
 	var row allocapp.DomainCandidate
-	if err := r.dbFor(ctx).Raw(`
-SELECT dr.id AS resource_id, dr.owner_user_id AS owner_user_id, dr.domain AS domain, dr.mailbox_daily_limit AS mailbox_daily_limit
-FROM domain_resources dr
-WHERE dr.id = ?
-  AND dr.purpose = 'sale'
-  AND dr.status = 'normal'
-  AND EXISTS (
-      SELECT 1
-      FROM mail_servers ms
-      WHERE ms.id = dr.mail_server_id
-        AND ms.status = 'online'
-  )
-  AND EXISTS (
-      SELECT 1
-      FROM email_resources er
-      JOIN users u ON u.id = er.owner_user_id
-      WHERE er.id = dr.id
-        AND er.type = 'domain'
-        AND u.enabled = TRUE
-        AND u.role_level IN (20, 80, 100)
-  )
-LIMIT 1
-FOR UPDATE SKIP LOCKED`, resourceID).Scan(&row).Error; err != nil {
+	query := `
+	SELECT dr.id AS resource_id, dr.owner_user_id AS owner_user_id, dr.domain AS domain, dr.mailbox_daily_limit AS mailbox_daily_limit
+	FROM domain_resources dr
+	WHERE ` + strings.Join(where, " AND ") + `
+	LIMIT 1
+	FOR UPDATE SKIP LOCKED`
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&row).Error; err != nil {
 		return nil, fmt.Errorf("lock domain allocation candidate: %w", err)
 	}
 	if row.ResourceID == 0 {
@@ -1895,6 +1931,11 @@ func microsoftInventoryScopeSQL(buyerUserID uint) (string, []any) {
 		return publicScope, nil
 	}
 	return "(" + publicScope + " OR (ms.for_sale = FALSE AND er.owner_user_id = ?))", []any{buyerUserID}
+}
+
+func normalizeCandidateSuffix(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.TrimPrefix(value, "@")
 }
 
 func nonNegative(value int64) int64 {

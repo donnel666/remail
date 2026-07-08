@@ -30,6 +30,7 @@ export interface WorkbenchProject {
 
 export interface WorkbenchProduct {
   activationWindowMinutes: number;
+  codeEnabled: boolean;
   codeInventory: number;
   codePrice: number;
   codeWindowMinutes: number;
@@ -37,6 +38,7 @@ export interface WorkbenchProduct {
   label: string;
   productType: ProductType;
   projectId: string;
+  purchaseEnabled: boolean;
   purchaseInventory: number;
   purchasePrice: number;
   suffix: string;

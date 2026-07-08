@@ -381,6 +381,7 @@ type ProjectProductSummaryResponse struct {
 	CodeWindowMinutes       int    `json:"codeWindowMinutes"`
 	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
 	WarrantyMinutes         int    `json:"warrantyMinutes"`
+	TotalAvailable          int64  `json:"totalAvailable"`
 }
 
 // ProjectMailRuleResponse is a mail matching rule view.

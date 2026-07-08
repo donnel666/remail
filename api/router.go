@@ -17,8 +17,10 @@ import (
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
+	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 )
@@ -94,16 +96,25 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		}
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
-		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
 		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
+		coreMod.ProductInventory = allocMod.UseCase
+		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB)
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
+
+		// OpenAPI credentials and order service tokens.
+		openapiMod := openapiapi.NewModule(p.DB)
+		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher)
+
+		// Trade module (unified console/API Key checkout and order query).
+		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
+		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, openapiMod)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)

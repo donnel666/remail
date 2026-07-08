@@ -16,6 +16,7 @@ type AllocateCommand struct {
 	BuyerUserID      uint
 	ProjectProductID uint
 	SupplyScope      domain.SupplyScope
+	EmailSuffix      string
 }
 
 type UseCase struct {
@@ -34,6 +35,7 @@ func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
 func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.UnifiedAllocation, error) {
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
 	cmd.SupplyScope = domain.NormalizeSupplyScope(cmd.SupplyScope)
+	cmd.EmailSuffix = normalizeEmailSuffix(cmd.EmailSuffix)
 	if cmd.OrderNo == "" || cmd.BuyerUserID == 0 || cmd.ProjectProductID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -86,7 +88,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 		if err == nil || (!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict)) {
 			break
 		}
-		if attempt < candidateRetryCount-1 {
+		if attempt < candidateRetryCount-1 && !uc.repo.HasParentTx(ctx) {
 			time.Sleep(candidateRetryDelay)
 		}
 	}
@@ -349,7 +351,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 	if bucket == nil {
 		limit = globalCandidateWindow
 	}
-	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit)
+	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
 		return nil, false, err
 	}
@@ -370,7 +372,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope)
+	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +529,7 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 	if bucket == nil {
 		limit = globalCandidateWindow
 	}
-	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, bucket, limit)
+	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
 		return nil, false, err
 	}
@@ -548,7 +550,7 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID)
+	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -704,6 +706,11 @@ func dotAliasVariants(email string) []string {
 
 func allocationUsageDate(value time.Time) string {
 	return value.UTC().Format("2006-01-02")
+}
+
+func normalizeEmailSuffix(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.TrimPrefix(value, "@")
 }
 
 func plusAliasVariants(email string, projectID uint, orderNo string) []string {

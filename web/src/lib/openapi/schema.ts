@@ -1076,6 +1076,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/apikeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List API keys for the current user */
+        get: operations["getApiKeys"];
+        put?: never;
+        /** Create an API key for the current user */
+        post: operations["postApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/apikeys/{keyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one API key */
+        get: operations["getApiKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update one API key */
+        patch: operations["patchApiKey"];
+        trace?: never;
+    };
+    "/v1/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List orders */
+        get: operations["getOrders"];
+        put?: never;
+        /** Create one order through console or API key */
+        post: operations["postOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one order */
+        get: operations["getOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderNo}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List order events */
+        get: operations["getOrderEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderNo}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive a terminal order */
+        post: operations["postOrderArchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet": {
         parameters: {
             query?: never;
@@ -1464,6 +1569,119 @@ export interface components {
             fields?: {
                 [key: string]: string;
             };
+        };
+        APIKeyCreateRequest: {
+            name?: string;
+            /** Format: date-time */
+            expireAt?: string | null;
+            /** @description Defaults to 60 when omitted. */
+            rateLimitPerMinute?: number;
+            /** @description Defaults to 5 when omitted. */
+            concurrencyLimit?: number;
+        };
+        APIKeyPatchRequest: {
+            name?: string;
+            enabled?: boolean;
+            /** Format: date-time */
+            expireAt?: string | null;
+            rateLimitPerMinute?: number;
+            concurrencyLimit?: number;
+        };
+        APIKeyResponse: {
+            id: number;
+            name: string;
+            keyPrefix: string;
+            /** @description Plain API key, only returned immediately after creation or on detail view. */
+            keyPlain?: string;
+            enabled: boolean;
+            rateLimitPerMinute: number;
+            concurrencyLimit: number;
+            activeRequests: number;
+            /** Format: date-time */
+            expireAt?: string | null;
+            /** Format: date-time */
+            lastUsedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        APIKeyListResponse: {
+            items: components["schemas"]["APIKeyResponse"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        CreateOrderRequest: {
+            projectId: number;
+            productId: number;
+            /** @description Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source. */
+            emailSuffix?: string;
+        };
+        OrderResponse: {
+            id: number;
+            orderNo: string;
+            userId: number;
+            projectId: number;
+            projectProductId: number;
+            /** @enum {string} */
+            productType: "microsoft" | "domain";
+            /** @enum {string} */
+            serviceMode: "code" | "purchase";
+            /** @enum {string} */
+            supplyPolicy: "private_first" | "public_only";
+            /** @enum {string} */
+            status: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
+            payAmount: string;
+            refundAmount: string;
+            /** @enum {string} */
+            allocationType?: "microsoft" | "domain";
+            allocationId?: number;
+            deliveryEmail: string;
+            /** Format: date-time */
+            receiveStartedAt?: string | null;
+            /** Format: date-time */
+            receiveUntil?: string | null;
+            /** Format: date-time */
+            activatedAt?: string | null;
+            /** Format: date-time */
+            afterSaleUntil?: string | null;
+            /** @enum {string} */
+            clientChannel: "console" | "api_key";
+            apiKeyId?: number | null;
+            serviceCleanupStatus: string;
+            /** @description Service credential used by pickup URLs and later mail-result APIs. */
+            serviceToken?: string;
+            /** Format: date-time */
+            archivedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        OrderListResponse: {
+            items: components["schemas"]["OrderResponse"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        OrderEventResponse: {
+            eventNo: string;
+            orderNo: string;
+            eventType: string;
+            fromStatus?: string;
+            toStatus?: string;
+            /** @enum {string} */
+            operatorType: "user" | "admin" | "system" | "openapi";
+            reason?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderEventListResponse: {
+            items: components["schemas"]["OrderEventResponse"][];
+            total: number;
+            offset: number;
+            limit: number;
         };
         WalletResponse: {
             userId: number;
@@ -2033,6 +2251,11 @@ export interface components {
             codeWindowMinutes: number;
             activationWindowMinutes: number;
             warrantyMinutes: number;
+            /**
+             * Format: int64
+             * @description User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
+             */
+            totalAvailable: number;
         };
         ProjectProduct: {
             id: number;
@@ -2503,6 +2726,8 @@ export interface components {
     parameters: {
         /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
         CsrfToken: string;
+        /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+        OptionalCsrfToken: string;
         /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
         IdempotencyKey: string;
     };
@@ -6591,6 +6816,501 @@ export interface operations {
             };
             /** @description Permission denied */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getApiKeys: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API key list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postApiKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["APIKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description API key created. The plain key is only returned on create/detail. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyResponse"];
+                };
+            };
+            /** @description Invalid request body or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid API key request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API key detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyResponse"];
+                };
+            };
+            /** @description Invalid path parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchApiKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                keyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["APIKeyPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description API key updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyResponse"];
+                };
+            };
+            /** @description Invalid request body or path parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid API key request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getOrders: {
+        parameters: {
+            query?: {
+                scope?: "mine" | "all";
+                status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
+                serviceMode?: "purchase" | "code";
+                search?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderListResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postOrder: {
+        parameters: {
+            query?: {
+                serviceMode?: "purchase" | "code";
+                supply?: "private_first" | "public_only";
+            };
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of an existing order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderResponse"];
+                };
+            };
+            /** @description Order created and activated with allocation and service token. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderResponse"];
+                };
+            };
+            /** @description Invalid request body or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient balance, insufficient inventory, or unavailable project */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getOrderEvents: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orderNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order event list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderEventListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postOrderArchive: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
+            };
+            path: {
+                orderNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order archived */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order cannot be archived in current state */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

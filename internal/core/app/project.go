@@ -8,6 +8,7 @@ import (
 
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -153,6 +154,17 @@ type ProjectProductRequest struct {
 	PlusWeight              int
 }
 
+type OrderingQuote struct {
+	ProjectID               uint
+	ProductID               uint
+	ProductType             domain.ProductType
+	PayAmount               string
+	SupplierAmount          string
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+}
+
 type ProjectMailRuleRequest struct {
 	RuleType string
 	Pattern  string
@@ -207,6 +219,77 @@ func (uc *ProjectUseCase) Get(ctx context.Context, projectID uint, userID uint, 
 		return nil, domain.ErrProjectNotFound
 	}
 	return detail, nil
+}
+
+func (uc *ProjectUseCase) GetOrderingQuote(ctx context.Context, projectID uint, productID uint, buyerUserID uint, serviceMode string) (*OrderingQuote, error) {
+	if projectID == 0 || productID == 0 || buyerUserID == 0 {
+		return nil, domain.ErrInvalidProject
+	}
+	mode := strings.ToLower(strings.TrimSpace(serviceMode))
+	if mode != "code" && mode != "purchase" {
+		return nil, domain.ErrInvalidProduct
+	}
+	detail, err := uc.Get(ctx, projectID, buyerUserID, false)
+	if err != nil {
+		return nil, err
+	}
+	if detail == nil {
+		return nil, domain.ErrForbiddenProject
+	}
+	if detail.Project.Status != domain.ProjectStatusListed {
+		return nil, domain.ErrInvalidProjectStatus
+	}
+
+	var product *domain.Product
+	for i := range detail.Products {
+		if detail.Products[i].ID == productID {
+			product = &detail.Products[i]
+			break
+		}
+	}
+	if product == nil || product.ProjectID != projectID || product.Status != domain.ProductStatusEnabled {
+		return nil, domain.ErrInvalidProduct
+	}
+
+	quote := &OrderingQuote{
+		ProjectID:               projectID,
+		ProductID:               product.ID,
+		ProductType:             product.Type,
+		CodeWindowMinutes:       product.CodeWindowMinutes,
+		ActivationWindowMinutes: product.ActivationWindowMinutes,
+		WarrantyMinutes:         product.WarrantyMinutes,
+	}
+	switch mode {
+	case "code":
+		if !product.CodeEnabled || product.CodeWindowMinutes <= 0 {
+			return nil, domain.ErrInvalidProduct
+		}
+		payAmount, err := normalizeOrderingAmount(product.CodePrice, true)
+		if err != nil {
+			return nil, err
+		}
+		supplierAmount, err := normalizeOrderingAmount(product.CodeSupplierPrice, false)
+		if err != nil {
+			return nil, err
+		}
+		quote.PayAmount = payAmount
+		quote.SupplierAmount = supplierAmount
+	case "purchase":
+		if !product.PurchaseEnabled || product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0 {
+			return nil, domain.ErrInvalidProduct
+		}
+		payAmount, err := normalizeOrderingAmount(product.PurchasePrice, true)
+		if err != nil {
+			return nil, err
+		}
+		supplierAmount, err := normalizeOrderingAmount(product.PurchaseSupplierPrice, false)
+		if err != nil {
+			return nil, err
+		}
+		quote.PayAmount = payAmount
+		quote.SupplierAmount = supplierAmount
+	}
+	return quote, nil
 }
 
 func (uc *ProjectUseCase) Apply(ctx context.Context, applicantUserID uint, req CreateProjectRequest, requestID, path string) (*domain.ProjectDetail, error) {
@@ -749,6 +832,17 @@ func requiredMailRuleTypes(looseMatch bool) []domain.MailRuleType {
 		return []domain.MailRuleType{domain.MailRuleSender, domain.MailRuleRecipient}
 	}
 	return []domain.MailRuleType{domain.MailRuleSender, domain.MailRuleRecipient, domain.MailRuleSubject, domain.MailRuleBody}
+}
+
+func normalizeOrderingAmount(value string, requirePositive bool) (string, error) {
+	amount, err := decimal.NewFromString(strings.TrimSpace(value))
+	if err != nil || amount.IsNegative() {
+		return "", domain.ErrInvalidProduct
+	}
+	if requirePositive && !amount.IsPositive() {
+		return "", domain.ErrInvalidProduct
+	}
+	return amount.StringFixedBank(2), nil
 }
 
 func projectOperationLog(operatorUserID uint, requestID, path, operationType, resourceType, resourceID, result, summary string) *governancedomain.OperationLog {

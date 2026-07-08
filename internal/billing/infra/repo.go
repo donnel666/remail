@@ -14,6 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -144,6 +145,26 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
 	}
+}
+
+func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db := tx.WithContext(ctx)
+		name := "billing_sp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		if err := db.SavePoint(name).Error; err != nil {
+			return fmt.Errorf("create billing savepoint: %w", err)
+		}
+		if err := fn(ctx, db); err != nil {
+			if rollbackErr := db.RollbackTo(name).Error; rollbackErr != nil {
+				return fmt.Errorf("rollback billing savepoint: %w: %v", err, rollbackErr)
+			}
+			return err
+		}
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(platform.WithGormTx(ctx, tx), tx)
+	})
 }
 
 type operationLogWriter interface {
@@ -332,13 +353,13 @@ func (r *BillingRepo) TransferReferralRewards(ctx context.Context, req billingap
 
 func (r *BillingRepo) AdjustConsumerBalance(ctx context.Context, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
 	var result billingapp.AdjustBalanceResult
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		response, replayed, err := r.withIdempotencyInTx(ctx, tx, req.UserID, "wallet.adjust", req.IdempotencyKey, req.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
-			created, err := r.adjustConsumerBalanceInTx(ctx, writeTx, req)
+	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		response, replayed, err := r.withIdempotencyInTx(txCtx, tx, req.UserID, "wallet.adjust", req.IdempotencyKey, req.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+			created, err := r.adjustConsumerBalanceInTx(txCtx, writeTx, req)
 			if err != nil {
 				return nil, err
 			}
-			if err := r.createOperationLogInTx(ctx, writeTx, req.OperationLog); err != nil {
+			if err := r.createOperationLogInTx(txCtx, writeTx, req.OperationLog); err != nil {
 				return nil, err
 			}
 			result = *created

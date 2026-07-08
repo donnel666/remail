@@ -22,6 +22,8 @@ export type ProjectMailRuleRequest =
 export type ProjectProduct = components["schemas"]["ProjectProduct"];
 export type ProjectProductSummary =
   components["schemas"]["ProjectProductSummary"];
+export type ProjectInventoryTotalResponse =
+  components["schemas"]["ProjectInventoryTotalResponse"];
 export type ProjectProductRequest =
   components["schemas"]["ProjectProductRequest"];
 
@@ -87,6 +89,14 @@ export async function listProjects(
 export async function getProject(projectId: number) {
   return unwrap<ProjectDetailResponse>(
     await client.GET("/v1/projects/{projectId}", {
+      params: { path: { projectId } },
+    })
+  );
+}
+
+export async function getProjectInventory(projectId: number) {
+  return unwrap<ProjectInventoryTotalResponse>(
+    await client.GET("/v1/projects/{projectId}/inventory", {
       params: { path: { projectId } },
     })
   );

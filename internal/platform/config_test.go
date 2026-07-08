@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,17 +8,11 @@ import (
 )
 
 func TestConfigLoadDefaults(t *testing.T) {
-	// Set required env vars
-	os.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
-	os.Setenv("MINIO_ACCESS_KEY", "testkey")
-	os.Setenv("MINIO_SECRET_KEY", "testsecret")
-	os.Setenv("SESSION_SECRET", "testsecret")
-	defer func() {
-		os.Unsetenv("MYSQL_DSN")
-		os.Unsetenv("MINIO_ACCESS_KEY")
-		os.Unsetenv("MINIO_SECRET_KEY")
-		os.Unsetenv("SESSION_SECRET")
-	}()
+	clearConfigEnv(t)
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -53,7 +46,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 }
 
 func TestConfigValidateMissingFields(t *testing.T) {
-	os.Clearenv()
+	clearConfigEnv(t)
 
 	_, err := Load()
 	require.Error(t, err)
@@ -61,6 +54,7 @@ func TestConfigValidateMissingFields(t *testing.T) {
 }
 
 func TestConfigValidateRelayRequiresAddr(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
 	t.Setenv("MINIO_ACCESS_KEY", "testkey")
 	t.Setenv("MINIO_SECRET_KEY", "testsecret")
@@ -73,6 +67,7 @@ func TestConfigValidateRelayRequiresAddr(t *testing.T) {
 }
 
 func TestConfigLoadDKIM(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
 	t.Setenv("MINIO_ACCESS_KEY", "testkey")
 	t.Setenv("MINIO_SECRET_KEY", "testsecret")
@@ -96,6 +91,7 @@ func TestConfigLoadDKIM(t *testing.T) {
 }
 
 func TestConfigRejectsAmbiguousDKIMPrivateKeySource(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
 	t.Setenv("MINIO_ACCESS_KEY", "testkey")
 	t.Setenv("MINIO_SECRET_KEY", "testsecret")
@@ -108,4 +104,59 @@ func TestConfigRejectsAmbiguousDKIMPrivateKeySource(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot both be set")
+}
+
+func clearConfigEnv(t *testing.T) {
+	t.Helper()
+
+	keys := []string{
+		"SERVER_ADDR",
+		"SERVER_TIMEOUT",
+		"MYSQL_DSN",
+		"REDIS_ADDR",
+		"REDIS_PASSWORD",
+		"REDIS_DB",
+		"MINIO_ENDPOINT",
+		"MINIO_ACCESS_KEY",
+		"MINIO_SECRET_KEY",
+		"MINIO_USE_SSL",
+		"MINIO_BUCKET",
+		"MIGRATIONS_DIR",
+		"SESSION_SECRET",
+		"SESSION_MAX_AGE",
+		"SESSION_SECURE",
+		"LOG_LEVEL",
+		"LOG_FORMAT",
+		"SMTP_MODE",
+		"SMTP_ADDR",
+		"SMTP_USERNAME",
+		"SMTP_PASSWORD",
+		"SMTP_FROM",
+		"SMTP_DOMAIN",
+		"SMTP_HELO_DOMAIN",
+		"SMTP_DKIM_ENABLED",
+		"SMTP_DKIM_DOMAIN",
+		"SMTP_DKIM_SELECTOR",
+		"SMTP_DKIM_ALGORITHM",
+		"SMTP_DKIM_IDENTITY",
+		"SMTP_DKIM_PRIVATE_KEY",
+		"SMTP_DKIM_PRIVATE_KEY_FILE",
+		"SMTP_INBOUND_ENABLED",
+		"SMTP_INBOUND_ADDR",
+		"SMTP_INBOUND_DOMAIN",
+		"SMTP_INBOUND_MAX_MESSAGE_BYTES",
+		"SMTP_INBOUND_MAX_RECIPIENTS",
+		"SMTP_INBOUND_READ_TIMEOUT",
+		"SMTP_INBOUND_WRITE_TIMEOUT",
+		"PPROF_ADDR",
+		"SLOW_REQUEST_THRESHOLD",
+		"SLOW_SQL_THRESHOLD",
+		"PPROF_CPU_THRESHOLD",
+		"PPROF_CPU_PROFILE_DIR",
+		"PPROF_CPU_PROFILE_DURATION",
+		"PPROF_CPU_CHECK_INTERVAL",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
 }

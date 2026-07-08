@@ -1,11 +1,10 @@
-import { Button, Empty } from "@douyinfe/semi-ui";
+import { Button, Empty, Toast } from "@douyinfe/semi-ui";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Mail } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MailboxClient } from "./workbench/mailbox-client";
-import { mockOrders } from "./workbench/mock-data";
 
 export default function Pickup() {
   const { t } = useTranslation();
@@ -18,13 +17,6 @@ export default function Pickup() {
   );
   const email = params.get("email")?.trim() ?? "";
   const token = params.get("token")?.trim() ?? "";
-  const order = useMemo(
-    () =>
-      mockOrders.find(
-        (item) => item.deliveryEmail === email && item.token === token
-      ),
-    [email, token]
-  );
 
   if (!email || !token) {
     return (
@@ -45,8 +37,10 @@ export default function Pickup() {
     <div className="pickup-page">
       <MailboxClient
         email={email}
-        messages={order?.messages ?? []}
-        onFetch={() => undefined}
+        messages={[]}
+        onFetch={() => {
+          Toast.info(t("Feature is not implemented yet."));
+        }}
       />
     </div>
   );

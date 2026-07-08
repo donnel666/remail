@@ -224,23 +224,23 @@ function OrderAccordionItem({
 }
 
 export function OrderPanel({
+  creating = false,
   inventoryScope,
   onCreateOrder,
   onFetchOrderMail,
   onOpenMailbox,
-  onQuantityChange,
   onSearchChange,
   onSelectOrder,
   orders,
   orderSearch,
   productsById,
   projectsById,
-  quantity,
   selectedOrder,
   selectedProduct,
   selectedProject,
   serviceMode,
 }: {
+  creating?: boolean;
   inventoryScope: InventoryScope;
   onCreateOrder: () => void;
   onFetchOrderMail: (
@@ -248,14 +248,12 @@ export function OrderPanel({
     source: FetchSource
   ) => void | Promise<void>;
   onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
-  onQuantityChange: (value: number) => void;
   onSearchChange: (value: string) => void;
   onSelectOrder: (orderNo: string) => void;
   orders: WorkbenchOrder[];
   orderSearch: string;
   productsById: Map<string, WorkbenchProduct>;
   projectsById: Map<string, WorkbenchProject>;
-  quantity: number;
   selectedOrder?: WorkbenchOrder;
   selectedProduct?: WorkbenchProduct;
   selectedProject?: WorkbenchProject;
@@ -263,7 +261,7 @@ export function OrderPanel({
 }) {
   const { t } = useTranslation();
   const totalPrice = selectedProduct
-    ? getPrice(selectedProduct, serviceMode, quantity)
+    ? getPrice(selectedProduct, serviceMode, 1)
     : 0;
   const inventory = selectedProduct ? getInventory(selectedProduct, serviceMode) : 0;
   const stockText = `${t("Stock")} ${inventory}`;
@@ -297,19 +295,17 @@ export function OrderPanel({
             </span>
             <strong className="workbench-quick-price">{formatMoney(totalPrice)}</strong>
             <Input
+              disabled
               min={1}
-              onChange={(value) => {
-                const parsed = Number.parseInt(String(value), 10);
-                onQuantityChange(Number.isFinite(parsed) ? Math.max(1, parsed) : 1);
-              }}
               style={{ width: "100%" }}
               type="number"
-              value={String(quantity)}
+              value="1"
             />
             <Button
               className="workbench-create-order-button"
-              disabled={!selectedProject || !selectedProduct || inventory <= 0}
+              disabled={!selectedProject || !selectedProduct || inventory <= 0 || creating}
               icon={serviceMode === "code" ? <Zap size={16} /> : <ShoppingCart size={16} />}
+              loading={creating}
               onClick={onCreateOrder}
               theme="solid"
               type="primary"
