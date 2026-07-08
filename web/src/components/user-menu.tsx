@@ -60,7 +60,7 @@ export function UserMenu() {
           {t("Personal Settings")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          render={<Link to="/apikeys" />}
+          render={<Link to="/account" />}
           className="h-9 gap-2.5 rounded-none px-3 text-sm text-foreground hover:bg-surface-sunken"
         >
           <KeyRound className="size-4 shrink-0 text-muted-foreground" />

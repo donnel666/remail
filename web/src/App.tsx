@@ -45,7 +45,6 @@ const pageLoaders = {
   register: () => import("./pages/Register"),
   passwordReset: () => import("./pages/PasswordReset"),
   account: () => import("./pages/Account"),
-  apiKeys: () => import("./pages/ApiKeys"),
   consoleOverview: () => import("./pages/ConsoleOverview"),
   wallet: () => import("./pages/Wallet"),
   orders: () => import("./pages/Orders"),
@@ -69,7 +68,6 @@ const Login = lazy(pageLoaders.login);
 const Register = lazy(pageLoaders.register);
 const PasswordReset = lazy(pageLoaders.passwordReset);
 const Account = lazy(pageLoaders.account);
-const ApiKeys = lazy(pageLoaders.apiKeys);
 const ConsoleOverview = lazy(pageLoaders.consoleOverview);
 const Wallet = lazy(pageLoaders.wallet);
 const Orders = lazy(pageLoaders.orders);
@@ -99,7 +97,6 @@ const routePreloadPriority = [
   "invite",
   "recharge",
   "account",
-  "apiKeys",
   "orders",
   "tickets",
   "apiDocs",
@@ -120,6 +117,7 @@ type RoutePreloadWindow = Window &
   };
 
 function scheduleRouteModulePreload() {
+  if (import.meta.env.DEV) return;
   if (routeModulesPreloadStarted || typeof window === "undefined") return;
   routeModulesPreloadStarted = true;
   const browserWindow = window as RoutePreloadWindow;
@@ -213,7 +211,7 @@ function SemiLocaleWrapper({ children }: { children: ReactNode }) {
   return <LocaleProvider locale={locale}>{children}</LocaleProvider>;
 }
 
-const EXTRA_PROTECTED_ROUTES = ["/apikeys", "/invite", "/recharge"];
+const EXTRA_PROTECTED_ROUTES = ["/invite", "/recharge"];
 const PROTECTED_ROUTES = Array.from(
   new Set([...ROUTES_WITH_SIDEBAR, ...EXTRA_PROTECTED_ROUTES])
 );
@@ -361,7 +359,6 @@ const routeTree = rootRoute.addChildren([
     component: PasswordReset,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/account", component: Account }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/apikeys", component: ApiKeys }),
   createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/qna", component: Qna }),
   createRoute({ getParentRoute: () => rootRoute, path: "/403", component: ForbiddenPage }),

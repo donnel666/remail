@@ -1,24 +1,126 @@
+import {
+  IconDelete,
+  IconGithubLogo,
+  IconLock,
+  IconMail,
+} from "@douyinfe/semi-icons";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Divider,
+  Space,
+  Tabs,
+  Tag,
+  Toast,
+  Typography,
+} from "@douyinfe/semi-ui";
 import { useNavigate } from "@tanstack/react-router";
-import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import {
+  BarChart2,
+  Coins,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAuth } from "@/context/auth-provider";
+
+import coverImage from "@/assets/cover-4.webp";
+import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
-import { getIamErrorMessage } from "@/lib/iam-errors";
 import { changePassword } from "@/lib/iam-api";
+import { getIamErrorMessage } from "@/lib/iam-errors";
+
+import { ApiKeyPanel } from "./account/api-key-panel";
+import { ChangePasswordDialog } from "./account/change-password-dialog";
+import { SettingItem } from "./account/setting-item";
+
+const { Text } = Typography;
+
+const mockAccountOverview = {
+  balance: "￥9.99",
+  historicalSpend: "￥345.01",
+  requestCount: "56642",
+  userGroup: "default",
+};
+
+function getRoleLabel(role?: CurrentUser["role"]) {
+  if (!role) return "Unknown";
+  const roleLabels: Record<CurrentUser["role"], string> = {
+    user: "User",
+    supplier: "Supplier",
+    admin: "Admin",
+    super_admin: "Super Admin",
+  };
+  return roleLabels[role];
+}
+
+function getAvatarText(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) return "RM";
+  return normalized.slice(0, 2).toUpperCase();
+}
 
 export default function Account() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentUser, logout } = useAuth();
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const displayName = currentUser?.nickname || currentUser?.name || "-";
+  const roleLabel = t(getRoleLabel(currentUser?.role));
+
+  const profileStats = useMemo(
+    () => [
+      {
+        icon: <Coins size={16} />,
+        label: "Historical Spend",
+        value: mockAccountOverview.historicalSpend,
+      },
+      {
+        icon: <BarChart2 size={16} />,
+        label: "Request Count",
+        value: mockAccountOverview.requestCount,
+      },
+      {
+        icon: <Users size={16} />,
+        label: "User Group",
+        value: mockAccountOverview.userGroup,
+      },
+    ],
+    []
+  );
+
+  const resetPasswordForm = () => {
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setError("");
+  };
+
+  const closeChangePasswordModal = () => {
+    if (submitting) return;
+    setShowChangePasswordModal(false);
+    resetPasswordForm();
+  };
+
+  const handleChangePassword = async () => {
+    if (!oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
+      setError(t("Please complete password fields."));
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError(t("Password must be at least 6 characters."));
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError(t("Passwords do not match."));
       return;
@@ -26,10 +128,12 @@ export default function Account() {
 
     setSubmitting(true);
     setError("");
-
     try {
       await changePassword({ oldPassword, newPassword });
-      sessionStorage.setItem(LOGIN_NOTICE_KEY, "Password changed. Please log in again.");
+      sessionStorage.setItem(
+        LOGIN_NOTICE_KEY,
+        "Password changed. Please log in again."
+      );
       await logout();
       void navigate({ to: "/login", replace: true });
     } catch (nextError) {
@@ -39,118 +143,203 @@ export default function Account() {
     }
   };
 
+  const handleMockOnly = () => {
+    Toast.info(t("This feature is not connected yet."));
+  };
+
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
-          {t("Account")}
-        </h1>
-        <p className="mt-1 text-sm text-[var(--ink-muted)]">
-          {t("Manage your profile and password.")}
-        </p>
-      </div>
+    <div className="account-page">
+      <Card
+        bodyStyle={{ padding: 12 }}
+        className="account-hero-card !rounded-2xl overflow-hidden"
+        cover={
+          <div
+            className="account-hero-cover"
+            style={{
+              backgroundImage: `linear-gradient(0deg, rgba(96, 45, 13, 0.80), rgba(96, 45, 13, 0.80)), url(${coverImage})`,
+            }}
+          >
+            <div className="account-hero-content">
+              <Avatar
+                className="account-hero-avatar"
+                color="orange"
+                size="large"
+              >
+                {getAvatarText(displayName)}
+              </Avatar>
+              <div className="account-hero-main">
+                <OverflowTooltip content={displayName}>
+                  <h1>{displayName}</h1>
+                </OverflowTooltip>
+                <div className="account-hero-tags">
+                  <Tag shape="circle" size="large" style={{ color: "white" }}>
+                    {roleLabel}
+                  </Tag>
+                  <Tag shape="circle" size="large" style={{ color: "white" }}>
+                    ID: {currentUser?.id ?? "-"}
+                  </Tag>
+                </div>
+              </div>
+            </div>
+          </div>
+        }
+      >
+        <div className="account-hero-body">
+          <Badge count={t("Current Balance")} position="rightTop" type="danger">
+            <div className="account-hero-balance">
+              {mockAccountOverview.balance}
+            </div>
+          </Badge>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-        <section className="rounded-xl border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-subtle text-brand">
-              <ShieldCheck className="size-5" />
-            </span>
+          <Card
+            bodyStyle={{ padding: "12px 16px" }}
+            className="account-hero-stat-card !rounded-xl"
+          >
+            <div className="account-hero-stats">
+              {profileStats.map((stat, index) => (
+                <div className="account-hero-stat" key={stat.label}>
+                  {index !== 0 ? <Divider layout="vertical" /> : null}
+                  <div className="account-hero-stat-content">
+                    {stat.icon}
+                    <Text size="small" type="tertiary">
+                      {t(stat.label)}
+                    </Text>
+                    <Text size="small" strong type="tertiary">
+                      <OverflowTooltip content={stat.value}>{stat.value}</OverflowTooltip>
+                    </Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </Card>
+
+      <div className="account-content-grid">
+        <Card className="account-management-card !rounded-2xl">
+          <div className="account-card-header">
+            <Avatar className="mr-3 shadow-md" color="teal" size="small">
+              <UserPlus size={16} />
+            </Avatar>
             <div>
-              <h2 className="text-base font-semibold text-[var(--ink-primary)]">
-                {t("Profile")}
-              </h2>
-              <p className="text-sm text-[var(--ink-muted)]">{t("Current session user")}</p>
+              <Text className="text-lg font-medium">{t("Account Management")}</Text>
+              <div className="text-xs text-[var(--semi-color-text-2)]">
+                {t("Account binding, security settings and identity verification.")}
+              </div>
             </div>
           </div>
 
-          <dl className="space-y-3 text-sm">
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-[var(--ink-muted)]">{t("Email")}</dt>
-              <dd className="truncate font-medium text-[var(--ink-primary)]">
-                {currentUser?.email}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-[var(--ink-muted)]">{t("Nickname")}</dt>
-              <dd className="truncate font-medium text-[var(--ink-primary)]">
-                {currentUser?.nickname || currentUser?.name}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-[var(--ink-muted)]">{t("Role")}</dt>
-              <dd className="font-medium text-[var(--ink-primary)]">{currentUser?.role}</dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-[var(--ink-muted)]">{t("Role level")}</dt>
-              <dd className="font-mono-data font-medium text-[var(--ink-primary)]">
-                {currentUser?.roleLevel}
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <section className="rounded-xl border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-subtle text-brand">
-              <KeyRound className="size-5" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-[var(--ink-primary)]">
-                {t("Change password")}
-              </h2>
-              <p className="text-sm text-[var(--ink-muted)]">
-                {t("All sessions will be invalidated after password change.")}
-              </p>
-            </div>
-          </div>
-
-          {error ? (
-            <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
-              {error}
-            </div>
-          ) : null}
-
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            <input
-              type="password"
-              value={oldPassword}
-              onChange={(event) => setOldPassword(event.target.value)}
-              placeholder={t("Current password")}
-              className="input-antd w-full"
-              autoComplete="current-password"
-              required
-            />
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              placeholder={t("New password")}
-              className="input-antd w-full"
-              autoComplete="new-password"
-              minLength={6}
-              required
-            />
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder={t("Confirm password")}
-              className="input-antd w-full"
-              autoComplete="new-password"
-              minLength={6}
-              required
-            />
-            <button
-              className="flex h-10 w-full items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-start)] to-[var(--brand-end)] text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={submitting}
+          <Tabs defaultActiveKey="binding" type="card">
+            <Tabs.TabPane
+              itemKey="binding"
+              tab={
+                <div className="account-tab-title">
+                  <UserPlus size={16} />
+                  {t("Account Binding")}
+                </div>
+              }
             >
-              {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-              {t("Save password")}
-            </button>
-          </form>
-        </section>
+              <div className="account-tab-body">
+                <div className="account-binding-grid">
+                  <SettingItem
+                    action={
+                      <Button
+                        onClick={handleMockOnly}
+                        size="small"
+                        theme="outline"
+                        type="primary"
+                      >
+                        {t("Change Binding")}
+                      </Button>
+                    }
+                    description={
+                      <OverflowTooltip content={currentUser?.email || "-"}>
+                        {currentUser?.email || "-"}
+                      </OverflowTooltip>
+                    }
+                    icon={<IconMail />}
+                    iconTone="orange"
+                    title={t("Email")}
+                  />
+                  <SettingItem
+                    action={
+                      <Button disabled size="small" theme="outline" type="tertiary">
+                        {t("Not enabled")}
+                      </Button>
+                    }
+                    description={t("Unbound")}
+                    icon={<IconGithubLogo />}
+                    title="GitHub"
+                  />
+                </div>
+              </div>
+            </Tabs.TabPane>
+
+            <Tabs.TabPane
+              itemKey="security"
+              tab={
+                <div className="account-tab-title">
+                  <ShieldCheck size={16} />
+                  {t("Security Settings")}
+                </div>
+              }
+            >
+              <div className="account-tab-body">
+                <Space className="w-full" vertical>
+                  <SettingItem
+                    action={
+                      <Button
+                        icon={<IconLock />}
+                        onClick={() => setShowChangePasswordModal(true)}
+                        theme="solid"
+                        type="primary"
+                      >
+                        {t("Change password")}
+                      </Button>
+                    }
+                    description={t("Regularly changing your password improves account security.")}
+                    icon={<IconLock />}
+                    iconTone="orange"
+                    title={t("Password Management")}
+                  />
+                  <SettingItem
+                    action={
+                      <Button
+                        icon={<IconDelete />}
+                        onClick={handleMockOnly}
+                        theme="outline"
+                        type="danger"
+                      >
+                        {t("Delete Account")}
+                      </Button>
+                    }
+                    description={t("This operation cannot be undone.")}
+                    icon={<IconDelete />}
+                    iconTone="orange"
+                    title={t("Delete Account")}
+                  />
+                </Space>
+              </div>
+            </Tabs.TabPane>
+          </Tabs>
+        </Card>
+
+        <ApiKeyPanel />
       </div>
+
+      <ChangePasswordDialog
+        confirmPassword={confirmPassword}
+        error={error}
+        newPassword={newPassword}
+        oldPassword={oldPassword}
+        onCancel={closeChangePasswordModal}
+        onConfirm={handleChangePassword}
+        onConfirmPasswordChange={setConfirmPassword}
+        onNewPasswordChange={setNewPassword}
+        onOldPasswordChange={setOldPassword}
+        open={showChangePasswordModal}
+        submitting={submitting}
+      />
     </div>
   );
 }
