@@ -183,6 +183,24 @@ func (r *Repo) ListAPIKeys(ctx context.Context, userID uint, offset, limit int) 
 	return items, total, nil
 }
 
+func (r *Repo) GetAPIKeyUsage(ctx context.Context, userID uint) (*openapiapp.APIKeyUsage, error) {
+	var usage struct {
+		RequestCount int64
+		KeyCount     int64
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&APIKeyModel{}).
+		Select("COALESCE(SUM(quota_used), 0) AS request_count, COUNT(*) AS key_count").
+		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Scan(&usage).Error; err != nil {
+		return nil, fmt.Errorf("sum api key usage: %w", err)
+	}
+	return &openapiapp.APIKeyUsage{
+		RequestCount: usage.RequestCount,
+		KeyCount:     usage.KeyCount,
+	}, nil
+}
+
 func (r *Repo) FindAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error) {
 	var model APIKeyModel
 	if err := r.db.WithContext(ctx).First(&model, "id = ? AND user_id = ? AND deleted_at IS NULL", keyID, userID).Error; err != nil {

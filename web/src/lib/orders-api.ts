@@ -1,5 +1,6 @@
 import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import { notifyWalletUpdated } from "./wallet-events";
 
 export type CreateOrderRequest = components["schemas"]["CreateOrderRequest"];
 export type OrderResponse = components["schemas"]["OrderResponse"];
@@ -13,7 +14,7 @@ export async function createOrder(
     supply: "private_first" | "public_only";
   }
 ) {
-  return unwrap<OrderResponse>(
+  const response = await unwrap<OrderResponse>(
     await client.POST("/v1/orders", {
       body: payload,
       params: {
@@ -28,6 +29,8 @@ export async function createOrder(
       },
     })
   );
+  notifyWalletUpdated();
+  return response;
 }
 
 export async function listOrders(filter: {

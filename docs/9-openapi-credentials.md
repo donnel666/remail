@@ -53,12 +53,13 @@ API Key 限制补充设计：
 | 主体 | Header/Cookie | 说明 |
 |------|---------------|------|
 | Session | HttpOnly Cookie | 控制台用户。 |
-| API Key | `Authorization: Bearer ak_...` 或 `X-API-Key` | SDK/脚本，以 `userId` 身份调用允许开放的接口。 |
+| API Key | `Authorization: Bearer rk-...` 或 `X-API-Key` | SDK/脚本，以 `userId` 身份调用允许开放的接口。 |
 
 中间件职责：
 
 ```text
 识别凭证
+按提交的完整 API Key 明文与数据库保存值做等值校验，rk- 只是生成前缀，不作为鉴权策略分支
 校验用户启用/凭证启用/过期
 校验该接口是否允许该 principalType
 限流和并发占用
@@ -102,6 +103,7 @@ API Key 限制补充设计：
 |------|-----|------|
 | `POST` | `/v1/apikeys` | 创建 API Key，必须幂等，返回明文。 |
 | `GET` | `/v1/apikeys` | 当前用户 API Key 列表，返回明文，用于个人设置页直接复制。 |
+| `GET` | `/v1/apikey-usage` | 当前用户 API Key 使用聚合，只返回请求次数和 Key 数量，不返回明文。 |
 | `GET` | `/v1/apikeys/{keyId}` | 授权详情，返回明文。 |
 | `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、额度、过期时间。 |
 | `DELETE` | `/v1/apikeys/{keyId}` | 软删除 API Key；列表/详情/鉴权不可再使用，历史订单事实保留外键引用。 |

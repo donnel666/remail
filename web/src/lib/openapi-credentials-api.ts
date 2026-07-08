@@ -10,6 +10,7 @@ export type APIKeyCreateRequest = components["schemas"]["APIKeyCreateRequest"];
 export type APIKeyPatchRequest = components["schemas"]["APIKeyPatchRequest"];
 export type APIKeyResponse = components["schemas"]["APIKeyResponse"];
 export type APIKeyListResponse = components["schemas"]["APIKeyListResponse"];
+export type APIKeyUsageResponse = components["schemas"]["APIKeyUsageResponse"];
 export type DeleteAPIKeyResponse = JsonResponse<operations["deleteApiKey"], 204>;
 
 export interface APIKeyListFilter {
@@ -23,6 +24,10 @@ export async function listAPIKeys(filter: APIKeyListFilter = {}) {
       params: { query: filter },
     })
   );
+}
+
+export async function getAPIKeyUsage() {
+  return unwrap<APIKeyUsageResponse>(await client.GET("/v1/apikey-usage"));
 }
 
 export async function createAPIKey(payload: APIKeyCreateRequest) {

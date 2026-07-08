@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	apiKeyPrefix             = "ak_"
+	apiKeyPrefix             = "rk-"
 	orderTokenPrefix         = "st_"
 	defaultAPIKeyConcurrency = 5
 	maxRateLimitPerMinute    = 10000
@@ -23,6 +23,7 @@ const (
 type Repository interface {
 	CreateAPIKey(ctx context.Context, cmd CreateAPIKeyCommand) (*domain.APIKey, bool, error)
 	ListAPIKeys(ctx context.Context, userID uint, offset, limit int) ([]domain.APIKey, int64, error)
+	GetAPIKeyUsage(ctx context.Context, userID uint) (*APIKeyUsage, error)
 	FindAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error)
 	UpdateAPIKey(ctx context.Context, cmd UpdateAPIKeyCommand) (*domain.APIKey, error)
 	DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error
@@ -95,6 +96,11 @@ type UpdateAPIKeyCommand struct {
 type APIKeyAuthResult struct {
 	UserID   uint
 	APIKeyID uint
+}
+
+type APIKeyUsage struct {
+	RequestCount int64
+	KeyCount     int64
 }
 
 type CreateAPILogCommand struct {
@@ -191,6 +197,13 @@ func (uc *UseCase) ListAPIKeys(ctx context.Context, userID uint, offset, limit i
 	return uc.repo.ListAPIKeys(ctx, userID, offset, limit)
 }
 
+func (uc *UseCase) GetAPIKeyUsage(ctx context.Context, userID uint) (*APIKeyUsage, error) {
+	if userID == 0 {
+		return nil, domain.ErrInvalidCredentialFilter
+	}
+	return uc.repo.GetAPIKeyUsage(ctx, userID)
+}
+
 func (uc *UseCase) GetAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error) {
 	if userID == 0 || keyID == 0 {
 		return nil, domain.ErrInvalidAPIKey
@@ -227,7 +240,7 @@ func (uc *UseCase) DeleteAPIKey(ctx context.Context, userID uint, keyID uint) er
 
 func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKeyAuthResult, error) {
 	plain = strings.TrimSpace(plain)
-	if !strings.HasPrefix(plain, apiKeyPrefix) {
+	if plain == "" {
 		return nil, domain.ErrInvalidAPIKey
 	}
 	key, err := uc.repo.AcquireAPIKeyRequest(ctx, plain, uc.now())

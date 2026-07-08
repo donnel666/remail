@@ -34,10 +34,6 @@ func LoadAPIKey(useCase *openapiapp.UseCase) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
 			return
 		}
-		if authHeaderPresent && !strings.HasPrefix(plain, "ak_") {
-			c.Next()
-			return
-		}
 		result, err := useCase.BeginAPIKeyRequest(c.Request.Context(), plain)
 		if err != nil {
 			writeAuthError(c, err)

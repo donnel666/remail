@@ -46,3 +46,8 @@ type KeyListResponse struct {
 	Offset int           `json:"offset"`
 	Limit  int           `json:"limit"`
 }
+
+type KeyUsageResponse struct {
+	RequestCount int64 `json:"requestCount"`
+	KeyCount     int64 `json:"keyCount"`
+}

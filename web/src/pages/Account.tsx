@@ -24,7 +24,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import coverImage from "@/assets/cover-4.webp";
@@ -33,19 +33,14 @@ import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
 import { changePassword } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { getAPIKeyUsage } from "@/lib/openapi-credentials-api";
+import { getWallet, type WalletResponse } from "@/lib/wallet-api";
 
 import { ApiKeyPanel } from "./account/api-key-panel";
 import { ChangePasswordDialog } from "./account/change-password-dialog";
 import { SettingItem } from "./account/setting-item";
 
 const { Text } = Typography;
-
-const mockAccountOverview = {
-  balance: "￥9.99",
-  historicalSpend: "￥345.01",
-  requestCount: "56642",
-  userGroup: "default",
-};
 
 function getRoleLabel(role?: CurrentUser["role"]) {
   if (!role) return "Unknown";
@@ -64,10 +59,28 @@ function getAvatarText(value?: string) {
   return normalized.slice(0, 2).toUpperCase();
 }
 
+function formatCurrency(value: string | number | null | undefined) {
+  if (value == null) return "-";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "-";
+  return `￥${numeric.toLocaleString("zh-CN", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}`;
+}
+
+function formatInteger(value: number | null) {
+  if (value == null) return "-";
+  return value.toLocaleString("zh-CN");
+}
+
 export default function Account() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentUser, logout } = useAuth();
+  const [wallet, setWallet] = useState<WalletResponse | null>(null);
+  const [requestCount, setRequestCount] = useState<number | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -77,26 +90,52 @@ export default function Account() {
 
   const displayName = currentUser?.nickname || currentUser?.name || "-";
   const roleLabel = t(getRoleLabel(currentUser?.role));
+  const userGroupLabel = useMemo(() => {
+    const group = currentUser?.userGroup;
+    if (!group) return "-";
+    if (group.code === "normal") return t("Normal User Group");
+    return group.name || group.code || "-";
+  }, [currentUser?.userGroup, t]);
+
+  const refreshAccountOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    try {
+      const [walletResponse, nextRequestCount] = await Promise.all([
+        getWallet(),
+        getAPIKeyUsage().then((usage) => usage.requestCount),
+      ]);
+      setWallet(walletResponse);
+      setRequestCount(nextRequestCount);
+    } catch (nextError) {
+      Toast.error(getIamErrorMessage(t, nextError, "Request failed."));
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void refreshAccountOverview();
+  }, [refreshAccountOverview]);
 
   const profileStats = useMemo(
     () => [
       {
         icon: <Coins size={16} />,
         label: "Historical Spend",
-        value: mockAccountOverview.historicalSpend,
+        value: overviewLoading ? "..." : formatCurrency(wallet?.historicalSpend),
       },
       {
         icon: <BarChart2 size={16} />,
         label: "Request Count",
-        value: mockAccountOverview.requestCount,
+        value: overviewLoading ? "..." : formatInteger(requestCount),
       },
       {
         icon: <Users size={16} />,
         label: "User Group",
-        value: mockAccountOverview.userGroup,
+        value: userGroupLabel,
       },
     ],
-    []
+    [overviewLoading, requestCount, userGroupLabel, wallet?.historicalSpend]
   );
 
   const resetPasswordForm = () => {
@@ -144,7 +183,7 @@ export default function Account() {
   };
 
   const handleMockOnly = () => {
-    Toast.info(t("This feature is not connected yet."));
+    Toast.info(t("Feature is not implemented yet."));
   };
 
   return (
@@ -187,7 +226,7 @@ export default function Account() {
         <div className="account-hero-body">
           <Badge count={t("Current Balance")} position="rightTop" type="danger">
             <div className="account-hero-balance">
-              {mockAccountOverview.balance}
+              {overviewLoading ? "..." : formatCurrency(wallet?.consumerBalance)}
             </div>
           </Badge>
 

@@ -15,6 +15,7 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 	{
 		auth.POST("/apikeys", h.PostAPIKey)
 		auth.GET("/apikeys", h.GetAPIKeys)
+		auth.GET("/apikey-usage", h.GetAPIKeyUsage)
 		auth.GET("/apikeys/:keyId", h.GetAPIKey)
 		auth.PATCH("/apikeys/:keyId", h.PatchAPIKey)
 		auth.DELETE("/apikeys/:keyId", h.DeleteAPIKey)

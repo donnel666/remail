@@ -1,5 +1,6 @@
 import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import { notifyWalletUpdated } from "./wallet-events";
 
 export type WalletResponse = components["schemas"]["WalletResponse"];
 export type WalletReferralResponse =
@@ -36,7 +37,7 @@ export async function getWalletReferrals() {
 }
 
 export async function transferReferralRewards(key = idempotencyKey()) {
-  return unwrap<WalletReferralTransferResponse>(
+  const response = await unwrap<WalletReferralTransferResponse>(
     await client.POST("/v1/wallet/referrals/transfer", {
       params: {
         header: {
@@ -46,6 +47,8 @@ export async function transferReferralRewards(key = idempotencyKey()) {
       },
     })
   );
+  notifyWalletUpdated();
+  return response;
 }
 
 export async function listRecharges(
@@ -85,7 +88,7 @@ export async function listWalletTransactions(
 }
 
 export async function redeemCard(cardKey: string, key = idempotencyKey()) {
-  return unwrap<RedeemCardResponse>(
+  const response = await unwrap<RedeemCardResponse>(
     await client.POST("/v1/cards/redeem", {
       body: { cardKey },
       params: {
@@ -96,4 +99,6 @@ export async function redeemCard(cardKey: string, key = idempotencyKey()) {
       },
     })
   );
+  notifyWalletUpdated();
+  return response;
 }

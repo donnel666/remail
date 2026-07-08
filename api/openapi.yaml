@@ -3390,6 +3390,29 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   # --- OpenAPI Credentials ---
+  /v1/apikey-usage:
+    get:
+      operationId: getApiKeyUsage
+      summary: Get current user's API key usage summary
+      description: Returns aggregate API key usage for account overview without returning API key plaintext.
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: API key usage summary. Plain API keys are not returned by this endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyUsageResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/apikeys:
     post:
       operationId: postApiKey
@@ -5087,7 +5110,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: User API key in the Authorization header, for example `Bearer ak_...`; SDK clients may also use `X-API-Key`.
+      description: User API key in the Authorization header, for example `Bearer rk-...`; SDK clients may also use `X-API-Key`.
 
   schemas:
     HealthResponse:
@@ -5272,6 +5295,22 @@ components:
           type: integer
         limit:
           type: integer
+      additionalProperties: false
+
+    APIKeyUsageResponse:
+      type: object
+      required:
+        - requestCount
+        - keyCount
+      properties:
+        requestCount:
+          type: integer
+          format: int64
+          description: Total accepted API key request count across current non-deleted API keys.
+        keyCount:
+          type: integer
+          format: int64
+          description: Current non-deleted API key count.
       additionalProperties: false
 
     CreateOrderRequest:

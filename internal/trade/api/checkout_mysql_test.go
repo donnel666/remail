@@ -170,7 +170,7 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 		RequestID:      "req-apikey-trade",
 	})
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(key.KeyPlain, "ak_"))
+	require.True(t, strings.HasPrefix(key.KeyPlain, "rk-"))
 
 	router := gin.New()
 	router.Use(middleware.RequestID())
@@ -526,6 +526,11 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
 	var quotaUsed int64
 	require.NoError(t, db.Table("api_keys").Select("quota_used").Where("id = ?", concurrentKey.ID).Scan(&quotaUsed).Error)
 	require.EqualValues(t, 1, quotaUsed)
+
+	usage, err := openapiMod.UseCase.GetAPIKeyUsage(context.Background(), 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, usage.KeyCount)
+	require.EqualValues(t, 4, usage.RequestCount)
 }
 
 func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
@@ -576,8 +581,8 @@ func TestOrderAPIKeyOwnerConstraintMySQL(t *testing.T) {
 	var apiKeyID uint
 	require.NoError(t, db.Exec(`
 INSERT INTO api_keys(user_id, name, key_prefix, key_plain, rate_limit_per_minute, concurrency_limit)
-VALUES (3, 'other-owner', 'ak_other_owner', 'ak_other_owner_plain', 60, 5)`).Error)
-	require.NoError(t, db.Table("api_keys").Select("id").Where("key_plain = ?", "ak_other_owner_plain").Scan(&apiKeyID).Error)
+VALUES (3, 'other-owner', 'rk-other-owner', 'rk-other-owner-plain', 60, 5)`).Error)
+	require.NoError(t, db.Table("api_keys").Select("id").Where("key_plain = ?", "rk-other-owner-plain").Scan(&apiKeyID).Error)
 	require.NotZero(t, apiKeyID)
 
 	err := db.Exec(`

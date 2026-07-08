@@ -66,6 +66,22 @@ func (h *Handler) GetAPIKeys(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	usage, err := h.mod.UseCase.GetAPIKeyUsage(c.Request.Context(), userID)
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, KeyUsageResponse{
+		RequestCount: usage.RequestCount,
+		KeyCount:     usage.KeyCount,
+	})
+}
+
 func (h *Handler) GetAPIKey(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {

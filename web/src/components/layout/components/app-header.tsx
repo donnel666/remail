@@ -6,6 +6,7 @@ import { LanguageMenu } from "@/components/language-menu";
 import { NotificationPopover } from "@/components/notification-popover";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { UserMenu } from "@/components/user-menu";
+import { HeaderWalletShortcut } from "@/components/header-wallet-shortcut";
 import { TOP_NAV_ITEMS } from "../config/navigation";
 import type { TopNavItem } from "../types";
 import { HeaderLogo } from "./header-logo";
@@ -54,6 +55,9 @@ export function AppHeader() {
         </div>
 
         <div className="ml-2 flex shrink-0 items-center gap-2 md:gap-3">
+          {currentUser ? (
+            <HeaderWalletShortcut userGroup={currentUser.userGroup} />
+          ) : null}
           <NotificationPopover />
           <ThemeSwitch />
           <LanguageMenu />

@@ -1076,6 +1076,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/apikey-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get current user's API key usage summary
+         * @description Returns aggregate API key usage for account overview without returning API key plaintext.
+         */
+        get: operations["getApiKeyUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/apikeys": {
         parameters: {
             query?: never;
@@ -1645,6 +1665,18 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        APIKeyUsageResponse: {
+            /**
+             * Format: int64
+             * @description Total accepted API key request count across current non-deleted API keys.
+             */
+            requestCount: number;
+            /**
+             * Format: int64
+             * @description Current non-deleted API key count.
+             */
+            keyCount: number;
         };
         CreateOrderRequest: {
             projectId: number;
@@ -6885,6 +6917,35 @@ export interface operations {
             };
             /** @description Permission denied */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getApiKeyUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API key usage summary. Plain API keys are not returned by this endpoint. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyUsageResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

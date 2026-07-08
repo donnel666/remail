@@ -1887,6 +1887,15 @@ type APIKeyResponse struct {
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
+// APIKeyUsageResponse defines model for APIKeyUsageResponse.
+type APIKeyUsageResponse struct {
+	// KeyCount Current non-deleted API key count.
+	KeyCount int64 `json:"keyCount"`
+
+	// RequestCount Total accepted API key request count across current non-deleted API keys.
+	RequestCount int64 `json:"requestCount"`
+}
+
 // ActivationRequest defines model for ActivationRequest.
 type ActivationRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -4836,6 +4845,9 @@ type ServerInterface interface {
 	// Debit consumer balance manually
 	// (POST /v1/admin/wallets/{userId}/debit)
 	PostAdminWalletDebit(c *gin.Context, userId int, params PostAdminWalletDebitParams)
+	// Get current user's API key usage summary
+	// (GET /v1/apikey-usage)
+	GetApiKeyUsage(c *gin.Context)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
@@ -7592,6 +7604,21 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletDebit(c *gin.Context) {
 	siw.Handler.PostAdminWalletDebit(c, userId, params)
 }
 
+// GetApiKeyUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetApiKeyUsage(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApiKeyUsage(c)
+}
+
 // GetApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) GetApiKeys(c *gin.Context) {
 
@@ -9752,6 +9779,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
+	router.GET(options.BaseURL+"/v1/apikey-usage", wrapper.GetApiKeyUsage)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
 	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
