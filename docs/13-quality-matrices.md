@@ -35,7 +35,7 @@
 | D4 | 状态机 | 合法/非法/终态/重试清楚 | status 字符串随便改 | 为临时步骤造状态 | 状态图和测试 |
 | D5 | SQL 约束 | 关键不变式有唯一/外键/CHECK/条件更新 | 全靠代码判断 | 为所有字段造复杂约束 | migration SQL |
 | D6 | API 复用 | 控制台和 SDK 共用接口 | 用户/后台/SDK 三套重复 | 为了 REST 拆过多命令资源 | OpenAPI |
-| D7 | 鉴权主体 | Session/API Key/OrderToken 边界清楚 | 靠前端隐藏按钮 | 每个接口手写重复鉴权 | 中间件设计 |
+| D7 | 鉴权主体 | Session/API Key 边界清楚；pickup 的 `email + token` 是资源钥匙，不进入通用主体模型 | 靠前端隐藏按钮 | 每个接口手写重复鉴权 | 中间件设计 |
 | D8 | 权限模型 | 特权用户继承普通用户能力，Casbin 只做策略 | 管理员另写一套用户接口 | 业务状态写进 Casbin | 权限矩阵 |
 | D9 | 错误信息 | 有业务语义且安全 | 全部 invalid parameter | 暴露账号存在性/SQL/上游细节 | 错误样例 |
 | D10 | 幂等 | 创建、扣款、退款、分配、重置、拉取幂等 | 重复请求重复写事实 | 查询也做幂等 | 幂等键/唯一约束 |
@@ -102,7 +102,7 @@
 | T6 | 并发 | 钱包扣款、分配抢占、卡密兑换、提现冻结、API Key 下单 | 并发集成测试 |
 | T7 | Go 事务 | 同一用例所有写仓储绑定同一 tx，错误/panic 回滚，外部失败不留坏账/坏状态 | 集成测试 |
 | T8 | 性能 | 关键查询无明显 N+1、索引命中、P95 有记录 | EXPLAIN/压测 |
-| T9 | 权限 | Session/API Key/OrderToken/Casbin/scope | HTTP 测试 |
+| T9 | 权限 | Session/API Key/Casbin/scope，以及 pickup `email + token` 资源钥匙边界 | HTTP 测试 |
 | T10 | 日志 | 高风险 OperationLog、上游失败 SystemLog、禁敏 | 日志断言 |
 | T11 | 外部失败 | Microsoft ACL、支付、SMTP、MinIO、Redis 失败 | adapter 测试 |
 | T12 | E2E | 最短上线主线和关键失败闭环 | E2E 报告 |

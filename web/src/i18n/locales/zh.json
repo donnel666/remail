@@ -652,6 +652,7 @@
   "Delivery email": "交付邮箱",
   "Copy email": "复制邮箱",
   "Service Token": "服务凭证",
+  "Service credential is unavailable.": "服务凭证不可用。",
   "Last fetched": "最近收件",
   "Service window": "服务窗口",
   "Latest verification code": "最新验证码",

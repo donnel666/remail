@@ -1,14 +1,18 @@
 package infra
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
+	stdmail "net/mail"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +46,9 @@ type MicrosoftMailFetchRequest struct {
 	RefreshToken string
 	AccessToken  string
 	ProxyURL     string
+	SinceAt      time.Time
+	UntilAt      time.Time
+	MaxMessages  int
 }
 
 type MicrosoftMailFetchResult struct {
@@ -77,6 +84,9 @@ type MicrosoftFetchedMessage struct {
 	To                string
 	ReceivedAt        time.Time
 	Preview           string
+	Body              string
+	RawSource         string
+	ProviderPayload   string
 	Protocol          string
 	HasAttachments    bool
 }
@@ -92,11 +102,17 @@ type graphMessage struct {
 	InternetMessageID string              `json:"internetMessageId"`
 	Subject           string              `json:"subject"`
 	BodyPreview       string              `json:"bodyPreview"`
+	Body              graphMessageBody    `json:"body"`
 	From              *graphRecipient     `json:"from"`
 	ToRecipients      []graphRecipient    `json:"toRecipients"`
 	ReceivedDateTime  string              `json:"receivedDateTime"`
 	HasAttachments    bool                `json:"hasAttachments"`
 	Error             *graphErrorEnvelope `json:"error"`
+}
+
+type graphMessageBody struct {
+	ContentType string `json:"contentType"`
+	Content     string `json:"content"`
 }
 
 type graphRecipient struct {
@@ -207,7 +223,7 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		FolderCounts: map[string]int{},
 	}
 	for _, folder := range defaultMicrosoftMailFolders {
-		messages, err := fetchGraphFolderMessages(ctx, session, accessToken, folder)
+		messages, err := fetchGraphFolderMessages(ctx, session, accessToken, folder, req)
 		if err != nil {
 			category, message, proxyFailure := classifyMicrosoftGraphFailure(err)
 			return microsoftMailFetchFailure(category, message, proxyFailure), nil
@@ -219,17 +235,13 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	sort.SliceStable(result.Messages, func(i, j int) bool {
 		return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
 	})
+	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+	result.MessageCount = len(result.Messages)
 	return result, nil
 }
 
-func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder) ([]MicrosoftFetchedMessage, error) {
-	selectFields := "$select=id,internetMessageId,subject,bodyPreview,from,toRecipients,receivedDateTime,hasAttachments"
-	nextURL := fmt.Sprintf("%s/me/mailFolders/%s/messages?$top=%d&$orderby=receivedDateTime%%20desc&%s",
-		microsoftGraphAPIBase,
-		url.PathEscape(folder.ID),
-		microsoftGraphMessagePageTop,
-		selectFields,
-	)
+func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
+	nextURL := graphFolderMessagesURL(folder, req)
 	headers := map[string]string{
 		"Authorization":    "Bearer " + accessToken,
 		"Accept":           "application/json",
@@ -254,9 +266,39 @@ func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, acces
 		for _, message := range page.Value {
 			messages = append(messages, normalizeGraphFetchedMessage(message, folder))
 		}
+		if req.MaxMessages > 0 && len(messages) >= req.MaxMessages {
+			break
+		}
 		nextURL = strings.TrimSpace(page.NextLink)
 	}
-	return messages, nil
+	return limitMicrosoftMessages(messages, req.MaxMessages), nil
+}
+
+func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) string {
+	values := url.Values{}
+	top := microsoftGraphMessagePageTop
+	if req.MaxMessages > 0 && req.MaxMessages < top {
+		top = req.MaxMessages
+	}
+	values.Set("$top", strconv.Itoa(top))
+	values.Set("$orderby", "receivedDateTime desc")
+	values.Set("$select", "id,internetMessageId,subject,bodyPreview,body,from,toRecipients,receivedDateTime,hasAttachments")
+	filter := microsoftGraphReceivedFilter(req.SinceAt, req.UntilAt)
+	if filter != "" {
+		values.Set("$filter", filter)
+	}
+	return fmt.Sprintf("%s/me/mailFolders/%s/messages?%s", microsoftGraphAPIBase, url.PathEscape(folder.ID), values.Encode())
+}
+
+func microsoftGraphReceivedFilter(sinceAt, untilAt time.Time) string {
+	parts := make([]string, 0, 2)
+	if !sinceAt.IsZero() {
+		parts = append(parts, "receivedDateTime ge "+sinceAt.UTC().Format(time.RFC3339Nano))
+	}
+	if !untilAt.IsZero() {
+		parts = append(parts, "receivedDateTime le "+untilAt.UTC().Format(time.RFC3339Nano))
+	}
+	return strings.Join(parts, " and ")
 }
 
 func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, req MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error) {
@@ -312,18 +354,25 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		if count == 0 {
 			continue
 		}
-		seqSet := imap.SeqSet{}
-		seqSet.AddRange(1, selectData.NumMessages)
+		seqSet, err := recentIMAPSeqSet(ctx, client, selectData.NumMessages, req.SinceAt, req.MaxMessages)
+		if err != nil || len(seqSet) == 0 {
+			continue
+		}
+		bodySection := &imap.FetchItemBodySection{Peek: true}
 		rows, err := client.Fetch(seqSet, &imap.FetchOptions{
 			Envelope:     true,
 			InternalDate: true,
 			UID:          true,
+			BodySection:  []*imap.FetchItemBodySection{bodySection},
 		}).Collect()
 		if err != nil {
 			continue
 		}
 		for _, row := range rows {
-			result.Messages = append(result.Messages, normalizeIMAPFetchedMessage(row, folder))
+			message := normalizeIMAPFetchedMessage(row, folder, bodySection)
+			if inMicrosoftFetchWindow(message.ReceivedAt, req.SinceAt, req.UntilAt) {
+				result.Messages = append(result.Messages, message)
+			}
 		}
 	}
 	_ = client.Logout().Wait()
@@ -333,7 +382,37 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	sort.SliceStable(result.Messages, func(i, j int) bool {
 		return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
 	})
+	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+	result.MessageCount = len(result.Messages)
 	return result, nil
+}
+
+func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint32, sinceAt time.Time, maxMessages int) (imap.SeqSet, error) {
+	if total == 0 {
+		return nil, nil
+	}
+	var nums []uint32
+	if !sinceAt.IsZero() {
+		data, err := client.Search(&imap.SearchCriteria{Since: sinceAt.UTC()}, nil).Wait()
+		if err != nil {
+			return nil, err
+		}
+		nums = data.AllSeqNums()
+	}
+	if len(nums) == 0 {
+		start := uint32(1)
+		if maxMessages > 0 && int(total) > maxMessages {
+			start = total - uint32(maxMessages) + 1
+		}
+		seqSet := imap.SeqSet{}
+		seqSet.AddRange(start, total)
+		return seqSet, ctx.Err()
+	}
+	if maxMessages > 0 && len(nums) > maxMessages {
+		nums = nums[len(nums)-maxMessages:]
+	}
+	seqSet := imap.SeqSetNum(nums...)
+	return seqSet, ctx.Err()
 }
 
 func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {
@@ -488,6 +567,14 @@ func normalizeMailFetchRequest(req MicrosoftMailFetchRequest) MicrosoftMailFetch
 
 func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFolder) MicrosoftFetchedMessage {
 	receivedAt, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.ReceivedDateTime))
+	body := strings.TrimSpace(message.Body.Content)
+	if strings.EqualFold(message.Body.ContentType, "html") {
+		body = stripHTMLForMSACL(body)
+	}
+	if body == "" {
+		body = strings.TrimSpace(message.BodyPreview)
+	}
+	providerPayload, _ := json.Marshal(message)
 	return MicrosoftFetchedMessage{
 		ID:                strings.TrimSpace(message.ID),
 		InternetMessageID: strings.TrimSpace(message.InternetMessageID),
@@ -498,6 +585,8 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 		To:                formatGraphRecipientList(message.ToRecipients),
 		ReceivedAt:        receivedAt,
 		Preview:           strings.TrimSpace(message.BodyPreview),
+		Body:              body,
+		ProviderPayload:   string(providerPayload),
 		Protocol:          "graph",
 		HasAttachments:    message.HasAttachments,
 	}
@@ -510,7 +599,7 @@ func derefGraphRecipient(recipient *graphRecipient) graphRecipient {
 	return *recipient
 }
 
-func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder MicrosoftMailFolder) MicrosoftFetchedMessage {
+func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder MicrosoftMailFolder, bodySection *imap.FetchItemBodySection) MicrosoftFetchedMessage {
 	if row == nil {
 		return MicrosoftFetchedMessage{FolderID: folder.ID, FolderLabel: folder.Label, Protocol: "imap"}
 	}
@@ -530,7 +619,71 @@ func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder Micr
 			message.ReceivedAt = row.Envelope.Date
 		}
 	}
+	if bodySection != nil {
+		applyIMAPBody(&message, row.FindBodySection(bodySection))
+	}
 	return message
+}
+
+func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte) {
+	if message == nil || len(raw) == 0 {
+		return
+	}
+	msg, err := stdmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		message.RawSource = string(raw)
+		message.Body = strings.TrimSpace(string(raw))
+		message.Preview = bodyPreview(message.Body)
+		return
+	}
+	message.RawSource = string(raw)
+	decoder := new(mime.WordDecoder)
+	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
+		message.Subject = subject
+	}
+	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
+		message.From = from
+	}
+	if to := decodeMIMEHeader(decoder, msg.Header.Get("To")); to != "" {
+		message.To = to
+	}
+	if messageID := strings.Trim(strings.TrimSpace(msg.Header.Get("Message-Id")), "<>"); messageID != "" {
+		message.InternetMessageID = messageID
+	}
+	body, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
+	message.Body = strings.TrimSpace(body)
+	message.Preview = bodyPreview(message.Body)
+}
+
+func inMicrosoftFetchWindow(receivedAt, sinceAt, untilAt time.Time) bool {
+	if receivedAt.IsZero() {
+		return true
+	}
+	if !sinceAt.IsZero() && receivedAt.Before(sinceAt) {
+		return false
+	}
+	if !untilAt.IsZero() && receivedAt.After(untilAt) {
+		return false
+	}
+	return true
+}
+
+func limitMicrosoftMessages(messages []MicrosoftFetchedMessage, limit int) []MicrosoftFetchedMessage {
+	if limit <= 0 {
+		return messages
+	}
+	if len(messages) <= limit {
+		return messages
+	}
+	return messages[:limit]
+}
+
+func bodyPreview(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(value) <= 1000 {
+		return value
+	}
+	return value[:1000]
 }
 
 func formatGraphRecipientList(recipients []graphRecipient) string {

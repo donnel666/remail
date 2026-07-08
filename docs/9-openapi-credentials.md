@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：OrderToken 作为 pickup 服务凭证事实，不再作为通用 Bearer 鉴权主体。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -17,7 +18,7 @@
 | 凭证 | 绑定 | 用途 |
 |------|------|------|
 | `ApiKey` | `userId` | 让 SDK/脚本以用户身份调用被开放的统一业务 API。 |
-| `OrderToken` | `orderNo` | 订单服务 Bearer Token，只能读取绑定订单的邮件/验证码。 |
+| `OrderToken` | `orderNo` | 订单服务凭证事实；外部只通过 `pickup(email + token)` 读取绑定订单的邮件/验证码。 |
 
 重要决策：SDK 不需要后端另做一套接口。API Key 通过鉴权中间件调用同一批 `/v1/**` 业务 API；OpenAPI 文档标记哪些操作允许 API Key。
 
@@ -37,13 +38,12 @@ API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普
 
 ## 3. 鉴权中间件
 
-统一业务 API 支持多主体：
+统一业务 API 支持登录态和 API Key 两类主体。OrderToken 不进入通用鉴权中间件，避免把取件能力扩散成第二套用户权限模型。
 
 | 主体 | Header/Cookie | 说明 |
 |------|---------------|------|
 | Session | HttpOnly Cookie | 控制台用户。 |
 | API Key | `Authorization: Bearer ak_...` 或 `X-API-Key` | SDK/脚本，以 `userId` 身份调用允许开放的接口。 |
-| OrderToken | `Authorization: Bearer st_...` | 只能访问绑定 `orderNo` 的服务结果接口。 |
 
 中间件职责：
 
@@ -66,7 +66,7 @@ API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普
 | INV-O1 | API Key 只能代表所属用户，不授予管理员特权。 |
 | INV-O2 | API Key 能调用哪些接口由 OpenAPI 标记和中间件控制，不能默认开放全部接口。 |
 | INV-O3 | API Key 下单必须带幂等键，同 Key + 同幂等键不产生第二个订单。 |
-| INV-O4 | OrderToken 只能访问绑定 `orderNo` 的邮件/验证码/服务凭证详情。 |
+| INV-O4 | OrderToken 只能通过 pickup handler 校验；校验成功后只读取绑定 `orderNo` 且与 `email` 匹配的服务结果。 |
 | INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
 | INV-O6 | 购买邮箱正常服务长期有效，Token 不因质保到期自动过期。 |
 | INV-O7 | API Key 和 Token 明文不得进入普通日志和错误响应。 |
@@ -79,7 +79,7 @@ API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普
 | Port | 方向 | 职责 |
 |------|------|------|
 | `OrderTokenPort` | 入站自 BC-TRADE | 签发、禁用、重置订单服务凭证。 |
-| `AuthPort` | 入站自 HTTP 中间件 | 校验 API Key 或 OrderToken。 |
+| `AuthPort` | 入站自 HTTP 中间件 | 校验 API Key。 |
 | `ReadPort` | 出站到 BC-MAILMATCH | 服务凭证读取订单邮件/验证码。 |
 
 ---
@@ -117,8 +117,12 @@ SDK 可调用接口示例：
 | `POST` | `/v1/orders` | API Key 下单。 |
 | `GET` | `/v1/orders` | API Key 查询自己的订单。 |
 | `GET` | `/v1/orders/{orderNo}` | API Key 查询自己的订单详情。 |
-| `GET` | `/v1/orders/{orderNo}/messages` | API Key 或 OrderToken 读取邮件。 |
-| `GET` | `/v1/orders/{orderNo}/code` | API Key 或 OrderToken 读取验证码。 |
+
+取件接口：
+
+| 方法 | URI | 说明 |
+|------|-----|------|
+| `GET` | `/v1/pickup?email={email}&token={token}` | 资源钥匙读取邮件 6 元素；内部按 singleflight 提交异步收件任务。 |
 
 ---
 
@@ -128,6 +132,6 @@ SDK 可调用接口示例：
 |-----|------|------|
 | ADR-OAPI-1 | SDK 复用统一业务 API | 避免 `/open` 和控制台接口重复开发。 |
 | ADR-OAPI-2 | API Key 是用户自动化身份 | 业务规则仍由对应业务域判断。 |
-| ADR-OAPI-3 | OrderToken 绑定 `orderNo` | 持有者只能读取该订单服务结果。 |
+| ADR-OAPI-3 | OrderToken 绑定 `orderNo` | 持有者通过 pickup 读取该订单服务结果，不作为通用 Bearer principal。 |
 | ADR-OAPI-4 | 凭据原值保存 | 授权接口需要重复展示明文。 |
 | ADR-OAPI-5 | 限流/并发在中间件完成 | 业务域只处理已通过入口保护的命令。 |

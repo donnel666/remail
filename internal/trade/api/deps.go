@@ -144,6 +144,10 @@ func (a orderTokenAdapter) FindOrderTokenByOrder(ctx context.Context, orderNo st
 	return &tradeapp.OrderToken{TokenPlain: token.TokenPlain, ExpireAt: token.ExpireAt}, nil
 }
 
+func (a orderTokenAdapter) ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error {
+	return a.tokens.ExtendOrderToken(ctx, orderNo, expireAt)
+}
+
 func (a orderTokenAdapter) DisableOrderToken(ctx context.Context, orderNo string, reason string) error {
 	return a.tokens.DisableOrderToken(ctx, orderNo, reason)
 }

@@ -66,7 +66,7 @@ export function maskSecret(value: string, head = 3, tail = 4) {
 export function buildPickupUrl(email: string, token: string) {
   const origin =
     typeof window === "undefined" ? "" : window.location.origin;
-  return `${origin}/pickup#email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
+  return `${origin}/pickup?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
 }
 
 export function serviceModeLabel(mode: ServiceMode, t: (key: string) => string) {

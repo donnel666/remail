@@ -3826,6 +3826,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/pickup:
+    get:
+      operationId: getPickupMessages
+      summary: Read mail messages with service email and token
+      tags:
+        - MailMatch
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Token scoped mail messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderMailResponse"
+        "400":
+          description: Missing email or token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or expired credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Order is not available for mail reading
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Billing Wallet ---
   /v1/wallet:
     get:
@@ -5344,6 +5387,68 @@ components:
           type: integer
         limit:
           type: integer
+      additionalProperties: false
+
+    MailContentResponse:
+      type: object
+      required:
+        - sender
+        - recipient
+        - receivedAt
+        - subject
+        - body
+      properties:
+        sender:
+          type: string
+        recipient:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+        subject:
+          type: string
+        body:
+          type: string
+        verificationCode:
+          type: string
+      additionalProperties: false
+
+    FetchStateResponse:
+      type: object
+      required:
+        - lastStatus
+      properties:
+        lastJobId:
+          type: integer
+        lastStatus:
+          type: string
+        lastSubmittedAt:
+          type: string
+          format: date-time
+        lastSuccessAt:
+          type: string
+          format: date-time
+        lastReceivedAt:
+          type: string
+          format: date-time
+        nextFetchAllowedAt:
+          type: string
+          format: date-time
+        lastSafeError:
+          type: string
+      additionalProperties: false
+
+    OrderMailResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailContentResponse"
+        fetch:
+          $ref: "#/components/schemas/FetchStateResponse"
       additionalProperties: false
 
     WalletResponse:

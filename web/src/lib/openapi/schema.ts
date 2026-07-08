@@ -1181,6 +1181,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pickup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read mail messages with service email and token */
+        get: operations["getPickupMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet": {
         parameters: {
             query?: never;
@@ -1682,6 +1699,32 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+        };
+        MailContentResponse: {
+            sender: string;
+            recipient: string;
+            /** Format: date-time */
+            receivedAt: string;
+            subject: string;
+            body: string;
+            verificationCode?: string;
+        };
+        FetchStateResponse: {
+            lastJobId?: number;
+            lastStatus: string;
+            /** Format: date-time */
+            lastSubmittedAt?: string;
+            /** Format: date-time */
+            lastSuccessAt?: string;
+            /** Format: date-time */
+            lastReceivedAt?: string;
+            /** Format: date-time */
+            nextFetchAllowedAt?: string;
+            lastSafeError?: string;
+        };
+        OrderMailResponse: {
+            items: components["schemas"]["MailContentResponse"][];
+            fetch?: components["schemas"]["FetchStateResponse"];
         };
         WalletResponse: {
             userId: number;
@@ -7310,6 +7353,56 @@ export interface operations {
                 };
             };
             /** @description Order cannot be archived in current state */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPickupMessages: {
+        parameters: {
+            query: {
+                email: string;
+                token: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token scoped mail messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderMailResponse"];
+                };
+            };
+            /** @description Missing email or token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid or expired credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order is not available for mail reading */
             422: {
                 headers: {
                     [name: string]: unknown;

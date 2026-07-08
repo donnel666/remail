@@ -356,6 +356,18 @@ func (r *Repo) FindOrderTokenByOrder(ctx context.Context, orderNo string) (*doma
 	return &token, nil
 }
 
+func (r *Repo) FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error) {
+	var model OrderTokenModel
+	if err := r.dbFor(ctx).First(&model, "token_plain = ?", strings.TrimSpace(tokenPlain)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find order token by plain: %w", err)
+	}
+	token := orderTokenModelToDomain(model)
+	return &token, nil
+}
+
 func (r *Repo) DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "Order service disabled."
@@ -370,6 +382,22 @@ func (r *Repo) DisableOrderToken(ctx context.Context, orderNo string, reason str
 		})
 	if result.Error != nil {
 		return fmt.Errorf("disable order token: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *Repo) ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error {
+	result := r.dbFor(ctx).
+		Model(&OrderTokenModel{}).
+		Where("order_no = ? AND enabled = ?", strings.TrimSpace(orderNo), true).
+		Updates(map[string]any{
+			"expire_at": gorm.Expr("CASE WHEN expire_at IS NULL OR expire_at < ? THEN ? ELSE expire_at END", expireAt.UTC(), expireAt.UTC()),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("extend order token: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrInvalidOrderToken
 	}
 	return nil
 }

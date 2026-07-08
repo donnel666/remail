@@ -371,6 +371,53 @@ func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAd
 	return items, total, nil
 }
 
+func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error) {
+	var model OrderModel
+	changed := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		tx := r.dbFor(txCtx)
+		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
+			return err
+		}
+		if domain.ServiceMode(model.ServiceMode) != domain.ServiceModeCode {
+			return nil
+		}
+		current := domain.OrderStatus(model.Status)
+		if current == domain.OrderStatusCompleted {
+			return nil
+		}
+		if current != domain.OrderStatusActive {
+			return nil
+		}
+		previous := current
+		result := tx.Model(&OrderModel{}).
+			Where("order_no = ? AND service_mode = ? AND status = ?", orderNo, string(domain.ServiceModeCode), string(domain.OrderStatusActive)).
+			Updates(map[string]any{
+				"status":           string(domain.OrderStatusCompleted),
+				"receive_until":    readUntil.UTC(),
+				"after_sale_until": readUntil.UTC(),
+				"version":          gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("complete code order: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrderStateConflict
+		}
+		if err := tx.First(&model, "order_no = ?", orderNo).Error; err != nil {
+			return fmt.Errorf("reload completed code order: %w", err)
+		}
+		changed = true
+		reason := "Code matched at " + matchedAt.UTC().Format(time.RFC3339)
+		return r.appendEvent(txCtx, tx, orderNo, "order.completed", &previous, ptrStatus(domain.OrderStatusCompleted), domain.OperatorTypeSystem, reason)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	order := orderModelToDomain(model)
+	return &order, changed, nil
+}
+
 func (r *Repo) lockOrderByIdempotency(ctx context.Context, tx *gorm.DB, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey string, fingerprint string, out *OrderModel) error {
 	subject := idempotencySubject(channel, userID, apiKeyID)
 	if err := tx.WithContext(ctx).

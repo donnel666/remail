@@ -10,6 +10,10 @@ import {
   type OrderResponse,
 } from "@/lib/orders-api";
 import {
+  readPickupMail,
+  type OrderMailResponse,
+} from "@/lib/mailmatch-api";
+import {
   listProjects,
   type ProjectItem,
   type ProjectProductSummary,
@@ -25,6 +29,7 @@ import type {
   ServiceMode,
   ServiceState,
   WorkbenchOrder,
+  WorkbenchMessage,
   WorkbenchProduct,
   WorkbenchProject,
 } from "./workbench/types";
@@ -128,6 +133,23 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     status: order.status,
     token: order.serviceToken ?? "",
   };
+}
+
+function toWorkbenchMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
+  return items.map((item, index) => {
+    const body = item.body ?? "";
+    const preview = body.replace(/\s+/g, " ").trim().slice(0, 180);
+    return {
+      body,
+      id: `${item.receivedAt}-${index}-${item.sender}-${item.subject}`,
+      preview,
+      receivedAt: item.receivedAt,
+      sender: item.sender,
+      status: item.verificationCode ? "matched" : "received",
+      subject: item.subject || "(No subject)",
+      verificationCode: item.verificationCode,
+    };
+  });
 }
 
 function orderServiceState(order: OrderResponse): ServiceState {
@@ -339,8 +361,41 @@ export default function Dashboard() {
     }
   }
 
-  function handleFetchOrderMail(_order: WorkbenchOrder, _source: FetchSource) {
-    Toast.info(t("Feature is not implemented yet."));
+  async function handleFetchOrderMail(order: WorkbenchOrder, source: FetchSource) {
+    try {
+      let target = order;
+      if (!target.token) {
+        target = await loadOrderDetail(order.orderNo);
+      }
+      if (!target.deliveryEmail || !target.token) {
+        Toast.error(t("Service credential is unavailable."));
+        return;
+      }
+      void source;
+      const result = await readPickupMail(target.deliveryEmail, target.token);
+      const messages = toWorkbenchMessages(result.items);
+      const latestCode = messages.find((item) => item.verificationCode)?.verificationCode;
+      const lastFetchedAt =
+        result.fetch?.lastReceivedAt ??
+        result.fetch?.lastSuccessAt ??
+        result.fetch?.lastSubmittedAt ??
+        new Date().toISOString();
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.orderNo === target.orderNo
+            ? {
+                ...item,
+                messages,
+                lastFetchedAt,
+                verificationCode: latestCode,
+                serviceState: latestCode ? "code_received" : item.serviceState,
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+    }
   }
 
   function handleSelectOrder(orderNo: string) {
@@ -363,6 +418,10 @@ export default function Dashboard() {
   }) {
     if (params.token) {
       setMailClientParams(params);
+      const order = orders.find((item) => item.orderNo === params.orderNo);
+      if (order) {
+        void handleFetchOrderMail(order, "auto");
+      }
       return;
     }
     void loadOrderDetail(params.orderNo)
@@ -372,6 +431,7 @@ export default function Dashboard() {
           orderNo: order.orderNo,
           token: order.token,
         });
+        void handleFetchOrderMail(order, "auto");
       })
       .catch((err) =>
         Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")))

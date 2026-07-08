@@ -14,6 +14,7 @@ import (
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
+	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -115,6 +116,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, openapiMod)
+
+		// MailMatch module (order-scoped message cache, async fetch and matching).
+		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, openapiMod.UseCase)
+		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
+		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)

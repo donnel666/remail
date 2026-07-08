@@ -140,7 +140,7 @@ web-supplier
 | 细粒度权限 | Casbin v2 + GORM adapter |
 | 数据归属 | 业务表 `userId/supplierId/ownerUserId` + scope 查询 |
 | API Key | Header Bearer 或 `X-API-Key` |
-| OrderToken | Bearer Token |
+| OrderToken | 服务凭证事实；P1-I8 起外部只通过 `pickup(email + token)` 使用 |
 
 权限判断分两层：
 

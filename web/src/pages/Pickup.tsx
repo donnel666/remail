@@ -1,22 +1,67 @@
 import { Button, Empty, Toast } from "@douyinfe/semi-ui";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Mail } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  readPickupMail,
+  type OrderMailResponse,
+} from "@/lib/mailmatch-api";
+
 import { MailboxClient } from "./workbench/mailbox-client";
+import type { FetchSource, WorkbenchMessage } from "./workbench/types";
+
+function toPickupMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
+  return items.map((item, index) => {
+    const body = item.body ?? "";
+    return {
+      body,
+      id: `${item.receivedAt}-${index}-${item.sender}-${item.subject}`,
+      preview: body.replace(/\s+/g, " ").trim().slice(0, 180),
+      receivedAt: item.receivedAt,
+      sender: item.sender,
+      status: item.verificationCode ? "matched" : "received",
+      subject: item.subject || "(No subject)",
+      verificationCode: item.verificationCode,
+    };
+  });
+}
 
 export default function Pickup() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const rawHash = typeof window === "undefined" ? "" : window.location.hash;
+  const rawSearch = typeof window === "undefined" ? "" : window.location.search;
   const params = useMemo(
-    () => new URLSearchParams(rawHash.replace(/^#/, "")),
-    [rawHash, location.pathname]
+    () => {
+      const searchParams = new URLSearchParams(rawSearch);
+      if (searchParams.has("email") || searchParams.has("token")) {
+        return searchParams;
+      }
+      return new URLSearchParams(rawHash.replace(/^#/, ""));
+    },
+    [rawHash, rawSearch, location.pathname]
   );
   const email = params.get("email")?.trim() ?? "";
   const token = params.get("token")?.trim() ?? "";
+  const [messages, setMessages] = useState<WorkbenchMessage[]>([]);
+
+  async function loadPickup(source: FetchSource) {
+    if (!email || !token) return;
+    try {
+      void source;
+      const result = await readPickupMail(email, token);
+      setMessages(toPickupMessages(result.items));
+    } catch (err) {
+      Toast.error(err instanceof Error ? err.message : t("An unexpected error occurred."));
+    }
+  }
+
+  useEffect(() => {
+    void loadPickup("auto");
+  }, [email, token]);
 
   if (!email || !token) {
     return (
@@ -37,10 +82,8 @@ export default function Pickup() {
     <div className="pickup-page">
       <MailboxClient
         email={email}
-        messages={[]}
-        onFetch={() => {
-          Toast.info(t("Feature is not implemented yet."));
-        }}
+        messages={messages}
+        onFetch={loadPickup}
       />
     </div>
   );

@@ -130,7 +130,7 @@ graph TD
 | 术语 | 代码 | 上下文 | 定义 |
 |------|------|--------|------|
 | 单控制台 | Console | 全局 | 一个 React 前端承载用户、供应商、管理员能力，通过 RBAC 菜单和数据 scope 控制。 |
-| 统一业务 API | Unified API | 全局 | 控制台和 SDK 共用的 API；由 Session/API Key/OrderToken 鉴权中间件决定主体能力。 |
+| 统一业务 API | Unified API | 全局 | 控制台和 SDK 共用的 API；由 Session/API Key 鉴权中间件决定主体能力。P1-I8 补充：取件使用 `pickup(email + token)` 资源钥匙，不进入通用主体模型。 |
 | 管理 API | Admin API | 全局 | 特权页面和高风险后台命令，保留 `/v1/admin/**`，必须走权限和操作日志。 |
 | SDK | SDK | 全局 | SDK 不要求后端另做一套接口，只从同一份 OpenAPI 选择允许 API Key 调用的操作生成。 |
 | 邮箱资源根 | `EmailResource` | BC-CORE | 统一资源身份，资源类型创建后不可变。 |
@@ -156,7 +156,7 @@ graph TD
 
 | 接口族 | 路径 | 调用者 | 设计原则 |
 |--------|------|--------|----------|
-| 统一业务 API | `/v1/**` | Session/API Key/OrderToken | 控制台和 SDK 共用；API Key 能调用哪些接口由中间件和 OpenAPI 标记控制。 |
+| 统一业务 API | `/v1/**` | Session/API Key；pickup 使用 `email + token` 资源钥匙 | 控制台和 SDK 共用；API Key 能调用哪些接口由中间件和 OpenAPI 标记控制。P1-I8 补充：取件只走 pickup，不把 OrderToken 扩展为通用主体。 |
 | 管理 API | `/v1/admin/**` | admin/super_admin | 特权页面和高风险写动作；服务端固定写 OperationLog。 |
 | 内部接口 | `/v1/internal/**` | 内部组件 | 必须使用内部 Token，不进入公开 OpenAPI；Microsoft ACL 是进程内模块调用，不走内部接口。 |
 
@@ -166,8 +166,7 @@ graph TD
 POST /v1/orders
 GET /v1/orders?scope=mine
 GET /v1/orders?scope=all
-GET /v1/orders/{orderNo}/messages
-POST /v1/orders/{orderNo}/fetch
+GET /v1/pickup?email={email}&token={token}
 GET /v1/projects?scope=visible
 GET /v1/projects?scope=mine
 GET /v1/projects?scope=all

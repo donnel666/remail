@@ -2257,6 +2257,17 @@ type Error struct {
 	RequestId string `json:"requestId"`
 }
 
+// FetchStateResponse defines model for FetchStateResponse.
+type FetchStateResponse struct {
+	LastJobId          *int       `json:"lastJobId,omitempty"`
+	LastReceivedAt     *time.Time `json:"lastReceivedAt,omitempty"`
+	LastSafeError      *string    `json:"lastSafeError,omitempty"`
+	LastStatus         string     `json:"lastStatus"`
+	LastSubmittedAt    *time.Time `json:"lastSubmittedAt,omitempty"`
+	LastSuccessAt      *time.Time `json:"lastSuccessAt,omitempty"`
+	NextFetchAllowedAt *time.Time `json:"nextFetchAllowedAt,omitempty"`
+}
+
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
 	UserId int `json:"userId"`
@@ -2337,6 +2348,16 @@ type LoginResponse struct {
 	User UserResponse `json:"user"`
 }
 
+// MailContentResponse defines model for MailContentResponse.
+type MailContentResponse struct {
+	Body             string    `json:"body"`
+	ReceivedAt       time.Time `json:"receivedAt"`
+	Recipient        string    `json:"recipient"`
+	Sender           string    `json:"sender"`
+	Subject          string    `json:"subject"`
+	VerificationCode *string   `json:"verificationCode,omitempty"`
+}
+
 // MailboxItem defines model for MailboxItem.
 type MailboxItem struct {
 	CreatedAt       time.Time  `json:"createdAt"`
@@ -2415,6 +2436,12 @@ type OrderListResponse struct {
 	Limit  int             `json:"limit"`
 	Offset int             `json:"offset"`
 	Total  int             `json:"total"`
+}
+
+// OrderMailResponse defines model for OrderMailResponse.
+type OrderMailResponse struct {
+	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
+	Items []MailContentResponse `json:"items"`
 }
 
 // OrderResponse defines model for OrderResponse.
@@ -3789,6 +3816,12 @@ type PatchPasswordParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetPickupMessagesParams defines parameters for GetPickupMessages.
+type GetPickupMessagesParams struct {
+	Email string `form:"email" json:"email"`
+	Token string `form:"token" json:"token"`
+}
+
 // GetProjectsParams defines parameters for GetProjects.
 type GetProjectsParams struct {
 	Scope          *GetProjectsParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
@@ -4814,6 +4847,9 @@ type ServerInterface interface {
 	// Request a password reset verification code
 	// (POST /v1/password/reset/request)
 	PostPasswordResetRequest(c *gin.Context)
+	// Read mail messages with service email and token
+	// (GET /v1/pickup)
+	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
 	// Read a project logo file
 	// (GET /v1/project-logos/{logoKey})
 	GetProjectLogo(c *gin.Context, logoKey string)
@@ -8298,6 +8334,41 @@ func (siw *ServerInterfaceWrapper) PostPasswordResetRequest(c *gin.Context) {
 	siw.Handler.PostPasswordResetRequest(c)
 }
 
+// GetPickupMessages operation middleware
+func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPickupMessagesParams
+
+	// ------------- Required query parameter "email" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "email", c.Request.URL.Query(), &params.Email, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter email: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "token", c.Request.URL.Query(), &params.Token, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetPickupMessages(c, params)
+}
+
 // GetProjectLogo operation middleware
 func (siw *ServerInterfaceWrapper) GetProjectLogo(c *gin.Context) {
 
@@ -9595,6 +9666,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/password", wrapper.PatchPassword)
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
+	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
 	router.GET(options.BaseURL+"/v1/project-logos/:logoKey", wrapper.GetProjectLogo)
 	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
 	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)

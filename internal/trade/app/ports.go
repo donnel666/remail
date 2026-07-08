@@ -77,6 +77,7 @@ type OrderToken struct {
 type OrderTokenPort interface {
 	IssueOrderToken(ctx context.Context, orderNo string, expireAt *time.Time) (*OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*OrderToken, error)
+	ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error
 	DisableOrderToken(ctx context.Context, orderNo string, reason string) error
 }
 
@@ -90,6 +91,7 @@ type Repository interface {
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
 	ListOrders(ctx context.Context, filter OrderListFilter, offset, limit int) ([]domain.Order, int64, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
+	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
 }
 
 type CreatePendingOrderCommand struct {
@@ -152,6 +154,11 @@ type CheckoutResult struct {
 	Order        domain.Order
 	ServiceToken string
 	Created      bool
+}
+
+type MatchCodeResultRequest struct {
+	OrderNo   string
+	MatchedAt time.Time
 }
 
 type UseCase struct {
@@ -298,6 +305,28 @@ func (uc *UseCase) ListEvents(ctx context.Context, orderNo string, userID uint, 
 
 func (uc *UseCase) Archive(ctx context.Context, orderNo string, userID uint) (*domain.Order, error) {
 	return uc.repo.Archive(ctx, strings.TrimSpace(orderNo), userID, uc.now())
+}
+
+func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultRequest) error {
+	orderNo := strings.TrimSpace(req.OrderNo)
+	if orderNo == "" {
+		return domain.ErrInvalidOrderRequest
+	}
+	matchedAt := req.MatchedAt.UTC()
+	if matchedAt.IsZero() {
+		matchedAt = uc.now()
+	}
+	readUntil := matchedAt.Add(time.Hour)
+	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		_, changed, err := uc.repo.CompleteCodeOrder(txCtx, orderNo, matchedAt, readUntil)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		return uc.tokens.ExtendOrderToken(txCtx, orderNo, readUntil)
+	})
 }
 
 func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote OrderingQuote, emailSuffix string, requestID string) (*CheckoutResult, error) {

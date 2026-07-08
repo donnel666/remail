@@ -31,6 +31,8 @@ type Repository interface {
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*domain.OrderToken, error)
+	FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error)
+	ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error
 	DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error
 
 	CreateAPILog(ctx context.Context, cmd CreateAPILogCommand) error
@@ -243,12 +245,42 @@ func (uc *UseCase) FindOrderTokenByOrder(ctx context.Context, orderNo string) (*
 	return uc.repo.FindOrderTokenByOrder(ctx, orderNo)
 }
 
+func (uc *UseCase) FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error) {
+	tokenPlain = strings.TrimSpace(tokenPlain)
+	if tokenPlain == "" || !strings.HasPrefix(tokenPlain, orderTokenPrefix) {
+		return nil, domain.ErrInvalidOrderToken
+	}
+	token, err := uc.repo.FindOrderTokenByPlain(ctx, tokenPlain)
+	if err != nil {
+		return nil, err
+	}
+	if token == nil {
+		return nil, domain.ErrInvalidOrderToken
+	}
+	now := uc.now()
+	if !token.Enabled {
+		return nil, domain.ErrOrderTokenDisabled
+	}
+	if token.ExpireAt != nil && !token.ExpireAt.After(now) {
+		return nil, domain.ErrOrderTokenExpired
+	}
+	return token, nil
+}
+
 func (uc *UseCase) DisableOrderToken(ctx context.Context, orderNo string, reason string) error {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
 		return domain.ErrInvalidOrderToken
 	}
 	return uc.repo.DisableOrderToken(ctx, orderNo, strings.TrimSpace(reason), uc.now())
+}
+
+func (uc *UseCase) ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" || expireAt.IsZero() {
+		return domain.ErrInvalidOrderToken
+	}
+	return uc.repo.ExtendOrderToken(ctx, orderNo, expireAt.UTC())
 }
 
 func (uc *UseCase) LogAPIRequest(ctx context.Context, req LogAPIRequestRequest) error {

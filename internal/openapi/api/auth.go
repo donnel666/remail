@@ -34,6 +34,10 @@ func LoadAPIKey(useCase *openapiapp.UseCase) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
 			return
 		}
+		if authHeaderPresent && !strings.HasPrefix(plain, "ak_") {
+			c.Next()
+			return
+		}
 		result, err := useCase.BeginAPIKeyRequest(c.Request.Context(), plain)
 		if err != nil {
 			writeAuthError(c, err)
@@ -95,7 +99,7 @@ func RequirePrincipalAllowed() gin.HandlerFunc {
 func CSRFRequiredForSession() gin.HandlerFunc {
 	csrf := middleware.CSRFRequired()
 	return func(c *gin.Context) {
-		if channel, ok := CurrentClientChannel(c); ok && channel == ClientChannelAPIKey {
+		if channel, ok := CurrentClientChannel(c); ok && channel != ClientChannelConsole {
 			c.Next()
 			return
 		}
@@ -105,7 +109,7 @@ func CSRFRequiredForSession() gin.HandlerFunc {
 
 func SessionOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if channel, ok := CurrentClientChannel(c); ok && channel == ClientChannelAPIKey {
+		if channel, ok := CurrentClientChannel(c); ok && channel != ClientChannelConsole {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"message": "Permission denied.", "requestId": middleware.GetRequestID(c)})
 			return
 		}
@@ -155,6 +159,13 @@ func writeAuthError(c *gin.Context, err error) {
 }
 
 func apiKeyCredential(c *gin.Context) (plain string, authHeaderPresent bool, validAuthHeader bool) {
+	if plain, present, valid := bearerCredential(c); present {
+		return plain, true, valid
+	}
+	return strings.TrimSpace(c.GetHeader("X-API-Key")), false, true
+}
+
+func bearerCredential(c *gin.Context) (plain string, present bool, valid bool) {
 	auth := strings.TrimSpace(c.GetHeader("Authorization"))
 	if auth != "" {
 		parts := strings.Fields(auth)
@@ -163,7 +174,7 @@ func apiKeyCredential(c *gin.Context) (plain string, authHeaderPresent bool, val
 		}
 		return strings.TrimSpace(parts[1]), true, true
 	}
-	return strings.TrimSpace(c.GetHeader("X-API-Key")), false, true
+	return "", false, true
 }
 
 func apiLogPath(c *gin.Context) string {
