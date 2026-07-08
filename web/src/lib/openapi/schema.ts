@@ -107,7 +107,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/sessions": {
+    "/v1/login": {
         parameters: {
             query?: never;
             header?: never;

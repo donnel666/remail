@@ -165,7 +165,7 @@ func (h *IAMHandler) PostPasswordReset(c *gin.Context) {
 
 // --- Login / Logout ---
 
-// POST /v1/sessions
+// POST /v1/login
 func (h *IAMHandler) PostLogin(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

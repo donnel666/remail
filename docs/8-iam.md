@@ -109,7 +109,7 @@ eft = allow/deny
 
 | 场景 | 规则 |
 |------|------|
-| 登录 | `POST /v1/sessions`，成功设置 HttpOnly Cookie，返回当前用户概要。 |
+| 登录 | `POST /v1/login`，成功设置 HttpOnly Cookie，返回当前用户概要。 |
 | 登出 | `DELETE /v1/sessions/current`。 |
 | 当前用户 | `GET /v1/me`。 |
 | 改密码 | 成功后递增 `tokenVersion`，清理旧 Session。 |
@@ -161,7 +161,7 @@ eft = allow/deny
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `POST` | `/v1/sessions` | 登录。 |
+| `POST` | `/v1/login` | 登录。 |
 | `DELETE` | `/v1/sessions/current` | 登出。 |
 | `GET` | `/v1/me` | 当前用户。 |
 | `POST` | `/v1/captchas` | 创建图形验证码。 |

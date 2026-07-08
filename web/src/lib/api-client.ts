@@ -20,11 +20,11 @@ const authRequiredIgnoredPaths = new Set([
   "/v1/activation",
   "/v1/captchas",
   "/v1/email/code",
+  "/v1/login",
   "/v1/me",
   "/v1/password/reset",
   "/v1/password/reset/request",
   "/v1/pickup",
-  "/v1/sessions",
   "/v1/users",
 ]);
 

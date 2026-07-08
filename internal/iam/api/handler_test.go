@@ -956,7 +956,7 @@ func TestPostLogin_WithoutCaptcha(t *testing.T) {
 	// Login without captcha should fail binding validation (400)
 	body := `{"email":"admin@test.com","password":"Admin123!"}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -981,7 +981,7 @@ func TestPostLogin_WrongPassword(t *testing.T) {
 	// Login with wrong password (correct captcha)
 	loginBody := `{"email":"admin@test.com","password":"wrong","captchaId":"` + captchaID + `","captchaAnswer":"4321"}`
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
+	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
@@ -1005,7 +1005,7 @@ func TestPostLogin_WrongCaptcha(t *testing.T) {
 	captchaID := seedCaptcha(t, h, "1234")
 	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"wrong"}`
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
+	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
@@ -1027,7 +1027,7 @@ func TestPostLogin_NormalizesEmail(t *testing.T) {
 	captchaID := seedCaptcha(t, h, "1234")
 	loginBody := `{"email":"ADMIN@TEST.COM","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
+	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
@@ -1053,7 +1053,7 @@ func TestPostLogin_Success(t *testing.T) {
 	// Login with correct password and known captcha
 	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("POST", "/v1/sessions", strings.NewReader(loginBody))
+	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 

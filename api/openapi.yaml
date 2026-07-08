@@ -194,8 +194,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  # --- Sessions (Login/Logout) ---
-  /v1/sessions:
+  # --- Login / Sessions ---
+  /v1/login:
     post:
       operationId: postLogin
       summary: Login and create a session

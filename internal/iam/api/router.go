@@ -64,7 +64,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	rg.POST("/captchas", h.PostCaptcha)
 	rg.POST("/email/code", h.PostEmailCode)
 	rg.POST("/users", h.PostRegister)
-	rg.POST("/sessions", h.PostLogin)
+	rg.POST("/login", h.PostLogin)
 	rg.POST("/password/reset/request", h.PostPasswordResetRequest)
 	rg.POST("/password/reset", h.PostPasswordReset)
 

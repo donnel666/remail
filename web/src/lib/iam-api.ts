@@ -61,7 +61,7 @@ export async function sendEmailCode(payload: EmailCodeRequest) {
 
 export async function login(payload: LoginRequest) {
   return unwrap<LoginResponse>(
-    await client.POST("/v1/sessions", { body: payload })
+    await client.POST("/v1/login", { body: payload })
   );
 }
 

@@ -15,7 +15,7 @@ type ActivationRequest struct {
 	Nickname string `json:"nickname" binding:"omitempty,max=100"`
 }
 
-// LoginRequest is the request body for POST /v1/sessions.
+// LoginRequest is the request body for POST /v1/login.
 // Captcha is required to prevent brute-force attacks.
 type LoginRequest struct {
 	Email         string `json:"email" binding:"required,email"`
@@ -130,7 +130,7 @@ type CurrentInviteResponse struct {
 	InviteCode string `json:"inviteCode"`
 }
 
-// LoginResponse is the response for POST /v1/sessions.
+// LoginResponse is the response for POST /v1/login.
 type LoginResponse struct {
 	User UserResponse `json:"user"`
 }

@@ -4139,6 +4139,9 @@ type PostDomainJSONRequestBody = CreateDomainRequest
 // PostEmailCodeJSONRequestBody defines body for PostEmailCode for application/json ContentType.
 type PostEmailCodeJSONRequestBody = EmailCodeRequest
 
+// PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
+type PostLoginJSONRequestBody = LoginRequest
+
 // PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
 type PostOrderJSONRequestBody = CreateOrderRequest
 
@@ -4171,9 +4174,6 @@ type PostResourcePublishBatchJSONRequestBody = PublishResourcesRequest
 
 // PostServerJSONRequestBody defines body for PostServer for application/json ContentType.
 type PostServerJSONRequestBody = CreateMailServerRequest
-
-// PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
-type PostLoginJSONRequestBody = LoginRequest
 
 // PostSupplierApplicationJSONRequestBody defines body for PostSupplierApplication for application/json ContentType.
 type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
@@ -4866,6 +4866,9 @@ type ServerInterface interface {
 	// Send an email verification code
 	// (POST /v1/email/code)
 	PostEmailCode(c *gin.Context)
+	// Login and create a session
+	// (POST /v1/login)
+	PostLogin(c *gin.Context)
 	// Get current authenticated user profile
 	// (GET /v1/me)
 	GetMe(c *gin.Context)
@@ -4962,9 +4965,6 @@ type ServerInterface interface {
 	// Create a mail server
 	// (POST /v1/servers)
 	PostServer(c *gin.Context, params PostServerParams)
-	// Login and create a session
-	// (POST /v1/sessions)
-	PostLogin(c *gin.Context)
 	// Logout and delete current session
 	// (DELETE /v1/sessions/current)
 	DeleteSession(c *gin.Context, params DeleteSessionParams)
@@ -8015,6 +8015,19 @@ func (siw *ServerInterfaceWrapper) PostEmailCode(c *gin.Context) {
 	siw.Handler.PostEmailCode(c)
 }
 
+// PostLogin operation middleware
+func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostLogin(c)
+}
+
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 
@@ -9391,19 +9404,6 @@ func (siw *ServerInterfaceWrapper) PostServer(c *gin.Context) {
 	siw.Handler.PostServer(c, params)
 }
 
-// PostLogin operation middleware
-func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostLogin(c)
-}
-
 // DeleteSession operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSession(c *gin.Context) {
 
@@ -9762,6 +9762,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
+	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
@@ -9794,7 +9795,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/resources/:resourceId/validate", wrapper.PostResourceValidate)
 	router.GET(options.BaseURL+"/v1/servers", wrapper.GetServers)
 	router.POST(options.BaseURL+"/v1/servers", wrapper.PostServer)
-	router.POST(options.BaseURL+"/v1/sessions", wrapper.PostLogin)
 	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
 	router.POST(options.BaseURL+"/v1/supplier-applications", wrapper.PostSupplierApplication)
 	router.GET(options.BaseURL+"/v1/supplier-applications/current", wrapper.GetCurrentSupplierApplication)
