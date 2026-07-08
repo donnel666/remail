@@ -81,6 +81,15 @@ export default defineConfig({
   output: {
     distPath: { root: "dist" },
   },
+  performance: {
+    chunkSplit: {
+      forceSplitting: {
+        "lib-react": /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+        "lib-semi": /node_modules[\\/]@douyinfe[\\/]/,
+        "lib-icons": /node_modules[\\/](?:lucide-react|react-icons)[\\/]/,
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

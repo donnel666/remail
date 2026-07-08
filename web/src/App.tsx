@@ -33,28 +33,155 @@ import { getActivation } from "./lib/iam-api";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { ForbiddenPage, NotFoundPage, ServerErrorPage } from "./pages/ErrorPages";
 
-const Home = lazy(() => import("./pages/Home"));
-const Activation = lazy(() => import("./pages/Activation"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Projects = lazy(() => import("./pages/Projects"));
-const Pickup = lazy(() => import("./pages/Pickup"));
-const ApiDocs = lazy(() => import("./pages/ApiDocs"));
-const Qna = lazy(() => import("./pages/Qna"));
-const Login = lazy(() => import("./pages/Login"));
-const Register = lazy(() => import("./pages/Register"));
-const PasswordReset = lazy(() => import("./pages/PasswordReset"));
-const Account = lazy(() => import("./pages/Account"));
-const ApiKeys = lazy(() => import("./pages/ApiKeys"));
-const ConsoleOverview = lazy(() => import("./pages/ConsoleOverview"));
-const Wallet = lazy(() => import("./pages/Wallet"));
-const Orders = lazy(() => import("./pages/Orders"));
-const Tickets = lazy(() => import("./pages/Tickets"));
-const MicrosoftEmails = lazy(() => import("./pages/MicrosoftEmails"));
-const DomainEmails = lazy(() => import("./pages/DomainEmails"));
-const AdminProjects = lazy(() => import("./pages/AdminProjects"));
-const ProxyManagement = lazy(() => import("./pages/ProxyManagement"));
-const Invite = lazy(() => import("./pages/Invite"));
-const Recharge = lazy(() => import("./pages/Recharge"));
+const pageLoaders = {
+  home: () => import("./pages/Home"),
+  activation: () => import("./pages/Activation"),
+  dashboard: () => import("./pages/Dashboard"),
+  projects: () => import("./pages/Projects"),
+  pickup: () => import("./pages/Pickup"),
+  apiDocs: () => import("./pages/ApiDocs"),
+  qna: () => import("./pages/Qna"),
+  login: () => import("./pages/Login"),
+  register: () => import("./pages/Register"),
+  passwordReset: () => import("./pages/PasswordReset"),
+  account: () => import("./pages/Account"),
+  apiKeys: () => import("./pages/ApiKeys"),
+  consoleOverview: () => import("./pages/ConsoleOverview"),
+  wallet: () => import("./pages/Wallet"),
+  orders: () => import("./pages/Orders"),
+  tickets: () => import("./pages/Tickets"),
+  microsoftEmails: () => import("./pages/MicrosoftEmails"),
+  domainEmails: () => import("./pages/DomainEmails"),
+  adminProjects: () => import("./pages/AdminProjects"),
+  proxyManagement: () => import("./pages/ProxyManagement"),
+  invite: () => import("./pages/Invite"),
+  recharge: () => import("./pages/Recharge"),
+};
+
+const Home = lazy(pageLoaders.home);
+const Activation = lazy(pageLoaders.activation);
+const Dashboard = lazy(pageLoaders.dashboard);
+const Projects = lazy(pageLoaders.projects);
+const Pickup = lazy(pageLoaders.pickup);
+const ApiDocs = lazy(pageLoaders.apiDocs);
+const Qna = lazy(pageLoaders.qna);
+const Login = lazy(pageLoaders.login);
+const Register = lazy(pageLoaders.register);
+const PasswordReset = lazy(pageLoaders.passwordReset);
+const Account = lazy(pageLoaders.account);
+const ApiKeys = lazy(pageLoaders.apiKeys);
+const ConsoleOverview = lazy(pageLoaders.consoleOverview);
+const Wallet = lazy(pageLoaders.wallet);
+const Orders = lazy(pageLoaders.orders);
+const Tickets = lazy(pageLoaders.tickets);
+const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
+const DomainEmails = lazy(pageLoaders.domainEmails);
+const AdminProjects = lazy(pageLoaders.adminProjects);
+const ProxyManagement = lazy(pageLoaders.proxyManagement);
+const Invite = lazy(pageLoaders.invite);
+const Recharge = lazy(pageLoaders.recharge);
+
+const ROUTE_PRELOAD_BATCH_SIZE = 4;
+const ROUTE_PRELOAD_BATCH_DELAY_MS = 200;
+let routeModulesPreloadStarted = false;
+type PageLoaderKey = keyof typeof pageLoaders;
+
+const routePreloadPriority = [
+  "dashboard",
+  "pickup",
+  "projects",
+  "wallet",
+  "microsoftEmails",
+  "domainEmails",
+  "adminProjects",
+  "proxyManagement",
+  "consoleOverview",
+  "invite",
+  "recharge",
+  "account",
+  "apiKeys",
+  "orders",
+  "tickets",
+  "apiDocs",
+  "qna",
+  "login",
+  "register",
+  "passwordReset",
+  "activation",
+  "home",
+] satisfies PageLoaderKey[];
+
+type RoutePreloadWindow = Window &
+  typeof globalThis & {
+    requestIdleCallback?: (
+      callback: IdleRequestCallback,
+      options?: IdleRequestOptions
+    ) => number;
+  };
+
+function scheduleRouteModulePreload() {
+  if (routeModulesPreloadStarted || typeof window === "undefined") return;
+  routeModulesPreloadStarted = true;
+  const browserWindow = window as RoutePreloadWindow;
+
+  const runWhenVisible = (callback: () => void) => {
+    if (document.visibilityState !== "hidden") {
+      callback();
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") return;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      callback();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+  };
+
+  let cursor = 0;
+  const loadNextBatch = () => {
+    if (document.visibilityState === "hidden") {
+      runWhenVisible(loadNextBatch);
+      return;
+    }
+
+    const batch = routePreloadPriority.slice(
+      cursor,
+      cursor + ROUTE_PRELOAD_BATCH_SIZE
+    );
+    cursor += batch.length;
+    if (batch.length === 0) return;
+
+    void Promise.allSettled(batch.map((key) => pageLoaders[key]())).finally(() => {
+      if (cursor < routePreloadPriority.length) {
+        browserWindow.setTimeout(loadNextBatch, ROUTE_PRELOAD_BATCH_DELAY_MS);
+      }
+    });
+  };
+
+  const startPreload = () => {
+    if (browserWindow.requestIdleCallback) {
+      browserWindow.requestIdleCallback(() => loadNextBatch(), {
+        timeout: 2000,
+      });
+      return;
+    }
+
+    browserWindow.setTimeout(loadNextBatch, 800);
+  };
+
+  if (document.readyState === "complete") {
+    browserWindow.setTimeout(startPreload, 400);
+    return;
+  }
+
+  browserWindow.addEventListener(
+    "load",
+    () => browserWindow.setTimeout(startPreload, 400),
+    { once: true }
+  );
+}
 
 function AdminMicrosoftEmails() {
   return <PlaceholderPage titleKey="Admin Microsoft Emails" />;
@@ -280,6 +407,10 @@ declare module "@tanstack/react-router" {
 }
 
 function App() {
+  useEffect(() => {
+    scheduleRouteModulePreload();
+  }, []);
+
   return (
     <ThemeProvider>
       <SemiLocaleWrapper>
