@@ -48,7 +48,8 @@ func (uc *ActivationUseCase) Activate(ctx context.Context, email, password, nick
 		PasswordHash: hash,
 		Nickname:     strings.TrimSpace(nickname),
 		Enabled:      true,
-		RoleLevel:    domain.RoleSuperAdmin,
+		Role:         domain.RoleSuperAdmin,
+		UserGroupID:  1,
 		TokenVersion: 0,
 	}
 

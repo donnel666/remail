@@ -688,13 +688,13 @@ func createBillingTestUser(t *testing.T, db *gorm.DB, email string) uint {
 		Email        string `gorm:"column:email"`
 		PasswordHash string `gorm:"column:password_hash"`
 		Nickname     string `gorm:"column:nickname"`
-		RoleLevel    int    `gorm:"column:role_level"`
+		Role         string `gorm:"column:role"`
 	}
 	user := userModel{
 		Email:        email,
 		PasswordHash: "hash",
 		Nickname:     "Billing Test",
-		RoleLevel:    10,
+		Role:         "user",
 	}
 	require.NoError(t, db.Table("users").Create(&user).Error)
 	return user.ID

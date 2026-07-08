@@ -180,7 +180,7 @@ func TestBillingAdminCardUpdateNotFoundUsesAdminError(t *testing.T) {
 
 type sessionFixture struct {
 	userID uint
-	role   iamdomain.RoleLevel
+	role   iamdomain.Role
 	email  string
 }
 
@@ -188,7 +188,7 @@ type fakeSessionFetcher struct {
 	sessions map[string]sessionFixture
 }
 
-func (f fakeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.RoleLevel, string, bool) {
+func (f fakeSessionFetcher) FetchSession(_ context.Context, sessionID string) (uint, iamdomain.Role, string, bool) {
 	session, ok := f.sessions[sessionID]
 	return session.userID, session.role, session.email, ok
 }
@@ -197,7 +197,7 @@ type fakePermissionChecker struct {
 	allowed bool
 }
 
-func (f fakePermissionChecker) Check(context.Context, uint, iamdomain.RoleLevel, string, string) (bool, error) {
+func (f fakePermissionChecker) Check(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
 	return f.allowed, nil
 }
 
@@ -218,20 +218,20 @@ func authenticatedJSONRequest(method, target, sessionID, body string) *http.Requ
 	return req
 }
 
-func createBillingAPIUser(t *testing.T, db *gorm.DB, email string, role iamdomain.RoleLevel) uint {
+func createBillingAPIUser(t *testing.T, db *gorm.DB, email string, role iamdomain.Role) uint {
 	t.Helper()
 	type userModel struct {
 		ID           uint   `gorm:"primaryKey"`
 		Email        string `gorm:"column:email"`
 		PasswordHash string `gorm:"column:password_hash"`
 		Nickname     string `gorm:"column:nickname"`
-		RoleLevel    int    `gorm:"column:role_level"`
+		Role         string `gorm:"column:role"`
 	}
 	user := userModel{
 		Email:        email,
 		PasswordHash: "hash",
 		Nickname:     "Billing API Test",
-		RoleLevel:    int(role),
+		Role:         role.String(),
 	}
 	require.NoError(t, db.Table("users").Create(&user).Error)
 	return user.ID

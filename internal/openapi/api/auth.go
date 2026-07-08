@@ -149,7 +149,7 @@ func writeAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, openapidomain.ErrAPIKeyDisabled), errors.Is(err, openapidomain.ErrAPIKeyExpired), errors.Is(err, openapidomain.ErrAPIKeyNotFound), errors.Is(err, openapidomain.ErrInvalidAPIKey):
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": requestID})
-	case errors.Is(err, openapidomain.ErrAPIKeyRateLimited):
+	case errors.Is(err, openapidomain.ErrAPIKeyRateLimited), errors.Is(err, openapidomain.ErrAPIKeyQuotaExceeded):
 		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": requestID})
 	case errors.Is(err, openapidomain.ErrAPIKeyConcurrencyLimit):
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Credential concurrency limit reached.", "requestId": requestID})

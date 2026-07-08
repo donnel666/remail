@@ -20,7 +20,7 @@ func NewRegistrationUseCase(repo UserRepository, hasher Hasher, codeStore EmailC
 	return &RegistrationUseCase{repo: repo, hasher: hasher, codeStore: codeStore}
 }
 
-// Register creates a new user with the "user" role (level 10).
+// Register creates a new user with the "user" RBAC role and default user group.
 // It requires a valid email verification code for the submitted email.
 func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, nickname, code, inviteCode string) (*domain.User, error) {
 	normalizedEmail := normalizeEmail(email)
@@ -48,7 +48,8 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 		PasswordHash: hash,
 		Nickname:     strings.TrimSpace(nickname),
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
+		UserGroupID:  1,
 		TokenVersion: 0,
 	}
 

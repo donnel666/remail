@@ -49,7 +49,7 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 	})
 
 	t.Run("non admin forbidden", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations", true)
 		require.Equal(t, http.StatusForbidden, resp.Code)
 	})
@@ -106,15 +106,15 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 
 type fakeSessionFetcher struct {
 	ok   bool
-	role iamdomain.RoleLevel
+	role iamdomain.Role
 }
 
-func (f fakeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.RoleLevel, string, bool) {
+func (f fakeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
 	if !f.ok {
-		return 0, 0, "", false
+		return 0, "", "", false
 	}
 	role := f.role
-	if role == 0 {
+	if role == "" {
 		role = iamdomain.RoleAdmin
 	}
 	return 1, role, "admin@test.local", true
@@ -125,7 +125,7 @@ type fakePermissionChecker struct {
 	err     error
 }
 
-func (f fakePermissionChecker) Check(context.Context, uint, iamdomain.RoleLevel, string, string) (bool, error) {
+func (f fakePermissionChecker) Check(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
 	return f.allowed, f.err
 }
 
@@ -154,8 +154,8 @@ func performAllocAPIRequest(router *gin.Engine, method string, path string, auth
 func seedAllocationAPITestProject(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-	INSERT INTO users(id, email, password_hash, nickname, enabled, role_level) VALUES
-	    (1, 'admin@test.local', 'hash', 'admin', TRUE, 80)`).Error)
+	INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+	    (1, 'admin@test.local', 'hash', 'admin', TRUE, 'admin')`).Error)
 	require.NoError(t, db.Exec(`
 	INSERT INTO projects(id, name, target_platform, status, access_type)
 	VALUES (10, 'Alloc API Project', 'alloc', 'listed', 'public')`).Error)

@@ -7,7 +7,7 @@ import "time"
 type Session struct {
 	ID           string
 	UserID       uint
-	RoleLevel    RoleLevel
+	Role         Role
 	Email        string
 	TokenVersion int
 	CreatedAt    time.Time

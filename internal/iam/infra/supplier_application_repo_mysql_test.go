@@ -13,11 +13,11 @@ func TestSupplierApplicationRepoRejectsConcurrentReviewingApplicationsMySQL(t *t
 	repo := NewSupplierApplicationRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"user@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	first := &domain.SupplierApplication{

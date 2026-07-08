@@ -40,6 +40,11 @@ type UserRepository interface {
 	// FindByIDs returns users matching the given IDs.
 	FindByIDs(ctx context.Context, ids []uint) ([]domain.User, error)
 
+	ListUserGroups(ctx context.Context) ([]domain.UserGroup, error)
+	FindUserGroupByID(ctx context.Context, id uint) (*domain.UserGroup, error)
+	CreateUserGroup(ctx context.Context, group *domain.UserGroup) error
+	UpdateUserGroup(ctx context.Context, group *domain.UserGroup) error
+
 	// CreateFirstUser creates the first user in a serialized transaction.
 	// Uses SELECT ... FOR UPDATE to prevent concurrent activation from creating
 	// multiple super_admin users (docs/8-iam.md:88, INV-I8).
@@ -137,6 +142,6 @@ type Hasher interface {
 
 // PermissionChecker checks fine-grained admin permissions.
 type PermissionChecker interface {
-	Check(ctx context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error)
+	Check(ctx context.Context, userID uint, role domain.Role, resource, action string) (bool, error)
 	Reload(ctx context.Context) error
 }

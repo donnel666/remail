@@ -21,16 +21,28 @@ import (
 // UserModel is the GORM model for the users table.
 // This is the infra-layer representation, not exposed outside the package.
 type UserModel struct {
-	ID           uint       `gorm:"primaryKey;autoIncrement"`
-	Email        string     `gorm:"type:varchar(255);uniqueIndex;not null"`
-	PasswordHash string     `gorm:"type:varchar(255);not null;column:password_hash"`
-	Nickname     string     `gorm:"type:varchar(100);not null;default:''"`
-	Enabled      bool       `gorm:"not null;default:true"`
-	RoleLevel    int        `gorm:"not null;default:10;column:role_level"`
-	TokenVersion int        `gorm:"not null;default:0;column:token_version"`
-	LastLoginAt  *time.Time `gorm:"column:last_login_at"`
-	CreatedAt    time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt    time.Time  `gorm:"not null;autoUpdateTime"`
+	ID           uint           `gorm:"primaryKey;autoIncrement"`
+	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null"`
+	PasswordHash string         `gorm:"type:varchar(255);not null;column:password_hash"`
+	Nickname     string         `gorm:"type:varchar(100);not null;default:''"`
+	Enabled      bool           `gorm:"not null;default:true"`
+	Role         string         `gorm:"type:varchar(32);not null;default:'user'"`
+	UserGroupID  uint           `gorm:"not null;default:1;column:user_group_id"`
+	UserGroup    UserGroupModel `gorm:"foreignKey:UserGroupID"`
+	TokenVersion int            `gorm:"not null;default:0;column:token_version"`
+	LastLoginAt  *time.Time     `gorm:"column:last_login_at"`
+	CreatedAt    time.Time      `gorm:"not null;autoCreateTime"`
+	UpdatedAt    time.Time      `gorm:"not null;autoUpdateTime"`
+}
+
+type UserGroupModel struct {
+	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	Code        string    `gorm:"type:varchar(64);uniqueIndex;not null"`
+	Name        string    `gorm:"type:varchar(100);not null"`
+	Description string    `gorm:"type:varchar(500);not null;default:''"`
+	Enabled     bool      `gorm:"not null;default:true"`
+	CreatedAt   time.Time `gorm:"not null;autoCreateTime"`
+	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime"`
 }
 
 type InviteModel struct {
@@ -81,6 +93,10 @@ func (UserModel) TableName() string {
 	return "users"
 }
 
+func (UserGroupModel) TableName() string {
+	return "user_groups"
+}
+
 // toDomain converts the GORM model to a domain entity.
 func (m *UserModel) toDomain() *domain.User {
 	return &domain.User{
@@ -89,7 +105,17 @@ func (m *UserModel) toDomain() *domain.User {
 		PasswordHash: m.PasswordHash,
 		Nickname:     m.Nickname,
 		Enabled:      m.Enabled,
-		RoleLevel:    domain.RoleLevel(m.RoleLevel),
+		Role:         domain.Role(m.Role),
+		UserGroupID:  m.UserGroupID,
+		UserGroup: domain.UserGroup{
+			ID:          m.UserGroup.ID,
+			Code:        m.UserGroup.Code,
+			Name:        m.UserGroup.Name,
+			Description: m.UserGroup.Description,
+			Enabled:     m.UserGroup.Enabled,
+			CreatedAt:   m.UserGroup.CreatedAt,
+			UpdatedAt:   m.UserGroup.UpdatedAt,
+		},
 		TokenVersion: m.TokenVersion,
 		LastLoginAt:  m.LastLoginAt,
 		CreatedAt:    m.CreatedAt,
@@ -99,18 +125,51 @@ func (m *UserModel) toDomain() *domain.User {
 
 // fromDomain converts a domain entity to a GORM model.
 func fromDomain(u *domain.User) *UserModel {
+	role := u.Role
+	if role == "" {
+		role = domain.RoleUser
+	}
+	userGroupID := u.UserGroupID
+	if userGroupID == 0 {
+		userGroupID = 1
+	}
 	return &UserModel{
 		ID:           u.ID,
 		Email:        u.Email,
 		PasswordHash: u.PasswordHash,
 		Nickname:     u.Nickname,
 		Enabled:      u.Enabled,
-		RoleLevel:    int(u.RoleLevel),
+		Role:         role.String(),
+		UserGroupID:  userGroupID,
 		TokenVersion: u.TokenVersion,
 		LastLoginAt:  u.LastLoginAt,
 		CreatedAt:    u.CreatedAt,
 		UpdatedAt:    u.UpdatedAt,
 	}
+}
+
+func userGroupToDomain(m UserGroupModel) domain.UserGroup {
+	return domain.UserGroup{
+		ID:          m.ID,
+		Code:        m.Code,
+		Name:        m.Name,
+		Description: m.Description,
+		Enabled:     m.Enabled,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
+}
+
+func (r *UserRepo) loadUserGroup(ctx context.Context, user *domain.User) error {
+	if user == nil || user.UserGroupID == 0 {
+		return nil
+	}
+	var model UserGroupModel
+	if err := r.db.WithContext(ctx).First(&model, user.UserGroupID).Error; err != nil {
+		return fmt.Errorf("load user group: %w", err)
+	}
+	user.UserGroup = userGroupToDomain(model)
+	return nil
 }
 
 func inviteToDomain(m *InviteModel) *domain.Invite {
@@ -164,13 +223,15 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 		return fmt.Errorf("create user: %w", err)
 	}
 	user.ID = model.ID
+	user.UserGroupID = model.UserGroupID
 	user.CreatedAt = model.CreatedAt
 	user.UpdatedAt = model.UpdatedAt
+	_ = r.loadUserGroup(ctx, user)
 	return nil
 }
 
 func (r *UserRepo) CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var invite InviteModel
 		if err := tx.Raw("SELECT * FROM invites WHERE code = ? FOR UPDATE", inviteCode).Scan(&invite).Error; err != nil {
 			return fmt.Errorf("lock invite: %w", err)
@@ -194,10 +255,18 @@ func (r *UserRepo) CreateWithInvite(ctx context.Context, user *domain.User, invi
 		}
 
 		user.ID = model.ID
+		user.UserGroupID = model.UserGroupID
 		user.CreatedAt = model.CreatedAt
 		user.UpdatedAt = model.UpdatedAt
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if err := r.loadUserGroup(ctx, user); err != nil {
+		return err
+	}
+	return nil
 }
 
 // CreateFirstUser creates the first user in a serialized transaction.
@@ -209,7 +278,7 @@ func (r *UserRepo) CreateWithInvite(ctx context.Context, user *domain.User, invi
 // Returns ErrActivationAlreadyDone if a user already exists.
 // Returns ErrEmailAlreadyExists on email conflict.
 func (r *UserRepo) CreateFirstUser(ctx context.Context, user *domain.User) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Lock the guard row — this is a proven row in InnoDB, so FOR UPDATE
 		// actually serializes concurrent transactions (unlike locking an empty
 		// users table where there are no rows to lock).
@@ -250,15 +319,23 @@ func (r *UserRepo) CreateFirstUser(ctx context.Context, user *domain.User) error
 		}
 
 		user.ID = model.ID
+		user.UserGroupID = model.UserGroupID
 		user.CreatedAt = model.CreatedAt
 		user.UpdatedAt = model.UpdatedAt
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if err := r.loadUserGroup(ctx, user); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	var model UserModel
-	err := r.db.WithContext(ctx).Where("email = ?", email).First(&model).Error
+	err := r.db.WithContext(ctx).Preload("UserGroup").Where("email = ?", email).First(&model).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -270,7 +347,7 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 
 func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
 	var model UserModel
-	err := r.db.WithContext(ctx).First(&model, id).Error
+	err := r.db.WithContext(ctx).Preload("UserGroup").First(&model, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -356,7 +433,7 @@ func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, 
 
 func (r *UserRepo) ListByFilter(ctx context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error) {
 	var models []UserModel
-	err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), filter).
+	err := applyUserListFilter(r.db.WithContext(ctx).Preload("UserGroup").Model(&UserModel{}), filter).
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
@@ -389,7 +466,7 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 		return nil, nil
 	}
 	var models []UserModel
-	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&models).Error
+	err := r.db.WithContext(ctx).Preload("UserGroup").Where("id IN ?", ids).Find(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("find users by ids: %w", err)
 	}
@@ -398,6 +475,74 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 		users[i] = *m.toDomain()
 	}
 	return users, nil
+}
+
+func (r *UserRepo) ListUserGroups(ctx context.Context) ([]domain.UserGroup, error) {
+	var models []UserGroupModel
+	if err := r.db.WithContext(ctx).Order("id ASC").Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list user groups: %w", err)
+	}
+	groups := make([]domain.UserGroup, len(models))
+	for i := range models {
+		groups[i] = userGroupToDomain(models[i])
+	}
+	return groups, nil
+}
+
+func (r *UserRepo) FindUserGroupByID(ctx context.Context, id uint) (*domain.UserGroup, error) {
+	var model UserGroupModel
+	if err := r.db.WithContext(ctx).First(&model, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find user group: %w", err)
+	}
+	group := userGroupToDomain(model)
+	return &group, nil
+}
+
+func (r *UserRepo) CreateUserGroup(ctx context.Context, group *domain.UserGroup) error {
+	model := UserGroupModel{
+		Code:        strings.TrimSpace(group.Code),
+		Name:        strings.TrimSpace(group.Name),
+		Description: strings.TrimSpace(group.Description),
+		Enabled:     group.Enabled,
+	}
+	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
+		if isIAMDuplicateKeyError(err) {
+			return domain.ErrInvalidUserGroup
+		}
+		return fmt.Errorf("create user group: %w", err)
+	}
+	*group = userGroupToDomain(model)
+	return nil
+}
+
+func (r *UserRepo) UpdateUserGroup(ctx context.Context, group *domain.UserGroup) error {
+	model := UserGroupModel{
+		ID:          group.ID,
+		Code:        group.Code,
+		Name:        strings.TrimSpace(group.Name),
+		Description: strings.TrimSpace(group.Description),
+		Enabled:     group.Enabled,
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&UserGroupModel{}).
+		Where("id = ?", group.ID).
+		Select("name", "description", "enabled").
+		Updates(model).Error; err != nil {
+		return fmt.Errorf("update user group: %w", err)
+	}
+	return r.loadUserGroupModel(ctx, group)
+}
+
+func (r *UserRepo) loadUserGroupModel(ctx context.Context, group *domain.UserGroup) error {
+	var model UserGroupModel
+	if err := r.db.WithContext(ctx).First(&model, group.ID).Error; err != nil {
+		return fmt.Errorf("reload user group: %w", err)
+	}
+	*group = userGroupToDomain(model)
+	return nil
 }
 
 func (r *UserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain.Invite, error) {

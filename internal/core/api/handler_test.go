@@ -1627,8 +1627,8 @@ func (p *mockTXTParser) ParseMicrosoftImport(content string, strategy coredomain
 	return result, failures, nil
 }
 
-func setAuthContext(c *gin.Context, userID uint, roleLevel int) {
-	middleware.SetCurrentUser(c, userID, iamdomain.RoleLevel(roleLevel), "test@example.com", "test-session-id")
+func setAuthContext(c *gin.Context, userID uint, role iamdomain.Role) {
+	middleware.SetCurrentUser(c, userID, role, "test@example.com", "test-session-id")
 }
 
 type mockPermissionChecker struct {
@@ -1636,7 +1636,7 @@ type mockPermissionChecker struct {
 	err     error
 }
 
-func (m mockPermissionChecker) Check(_ context.Context, _ uint, _ iamdomain.RoleLevel, _, _ string) (bool, error) {
+func (m mockPermissionChecker) Check(_ context.Context, _ uint, _ iamdomain.Role, _, _ string) (bool, error) {
 	return m.allowed, m.err
 }
 
@@ -1798,7 +1798,7 @@ func TestCoreHandler_RequiresSupplierRoleForPrivilegedResourceCommands(t *testin
 				c.Request.Header.Set("Content-Type", "application/json")
 			}
 			c.Params = tt.params
-			setAuthContext(c, 1, 10) // roleLevel=user (10), below supplier (20)
+			setAuthContext(c, 1, iamdomain.RoleUser) // role=user (10), below supplier (20)
 
 			tt.call(h, c)
 
@@ -1820,7 +1820,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 10) // regular users can import private Microsoft resources
+	setAuthContext(c, 1, iamdomain.RoleUser) // regular users can import private Microsoft resources
 
 	h.PostResourceImport(c)
 
@@ -1867,7 +1867,7 @@ func TestCoreHandler_ImportInvalidFormatDefaultSkips(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceImport(c)
 
@@ -1894,7 +1894,7 @@ func TestCoreHandler_ImportInvalidFormatAbortFails(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceImport(c)
 
@@ -1927,7 +1927,7 @@ func TestCoreHandler_ImportDuplicateDefaultSkips(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceImport(c)
 
@@ -1966,7 +1966,7 @@ func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.GetResourceDetail(c)
 
@@ -1997,7 +1997,7 @@ func TestCoreHandler_ResourceDetail_NonOwnerDenied(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 2, 10)
+	setAuthContext(c, 2, iamdomain.RoleUser)
 
 	h.GetResourceDetail(c)
 
@@ -2020,7 +2020,7 @@ func TestCoreHandler_ValidateQueuesAsyncJob(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/1/validate", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceValidate(c)
 
@@ -2052,7 +2052,7 @@ func TestCoreHandler_ValidateBatchQueuesAsyncJobs(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resource-validations", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceValidations(c)
 
@@ -2362,7 +2362,7 @@ func TestCoreHandler_ResourceListIncludesStatusFields(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources", nil)
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.GetResources(c)
 
@@ -2451,7 +2451,7 @@ func TestCoreHandler_ResourceListScopeAllFallsBackToOwnedForNonAdmin(t *testing.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/resources?scope=all", nil)
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.GetResources(c)
 
@@ -2484,7 +2484,7 @@ func TestCoreHandler_PublishMicrosoftResource(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/1/publish", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.PostResourcePublish(c)
 
@@ -2536,7 +2536,7 @@ func TestCoreHandler_PublishMicrosoftResourcesBatch(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/publish", strings.NewReader(`{"selection":{"mode":"ids","resourceIds":[1,2]}}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.PostResourcePublishBatch(c)
 
@@ -2586,7 +2586,7 @@ func TestCoreHandler_PublishResourcesBatchRejectsBindingWithoutPartialPublish(t 
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/publish", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.PostResourcePublishBatch(c)
 
@@ -2620,7 +2620,7 @@ func TestCoreHandler_PublishResourcesByFilterOmitsResourceIDs(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/publish", strings.NewReader(`{"selection":{"mode":"filter","filter":{"resourceType":"microsoft","status":"normal","longLived":true}}}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.PostResourcePublishBatch(c)
 
@@ -2639,49 +2639,49 @@ func TestCoreHandler_BulkSelectionShapeValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name      string
-		method    string
-		path      string
-		body      string
-		roleLevel int
-		call      func(*CoreHandler, *gin.Context)
-		field     string
+		name   string
+		method string
+		path   string
+		body   string
+		role   iamdomain.Role
+		call   func(*CoreHandler, *gin.Context)
+		field  string
 	}{
 		{
-			name:      "publish ids requires ids",
-			method:    "POST",
-			path:      "/v1/resources/publish",
-			body:      `{"selection":{"mode":"ids"}}`,
-			roleLevel: 20,
-			call:      (*CoreHandler).PostResourcePublishBatch,
-			field:     "selection.resourceIds",
+			name:   "publish ids requires ids",
+			method: "POST",
+			path:   "/v1/resources/publish",
+			body:   `{"selection":{"mode":"ids"}}`,
+			role:   iamdomain.RoleSupplier,
+			call:   (*CoreHandler).PostResourcePublishBatch,
+			field:  "selection.resourceIds",
 		},
 		{
-			name:      "publish filter requires resource type",
-			method:    "POST",
-			path:      "/v1/resources/publish",
-			body:      `{"selection":{"mode":"filter","filter":{"status":"normal"}}}`,
-			roleLevel: 20,
-			call:      (*CoreHandler).PostResourcePublishBatch,
-			field:     "selection.filter.resourceType",
+			name:   "publish filter requires resource type",
+			method: "POST",
+			path:   "/v1/resources/publish",
+			body:   `{"selection":{"mode":"filter","filter":{"status":"normal"}}}`,
+			role:   iamdomain.RoleSupplier,
+			call:   (*CoreHandler).PostResourcePublishBatch,
+			field:  "selection.filter.resourceType",
 		},
 		{
-			name:      "delete ids requires ids",
-			method:    "POST",
-			path:      "/v1/resources/delete",
-			body:      `{"selection":{"mode":"ids"}}`,
-			roleLevel: 10,
-			call:      (*CoreHandler).PostResourceDeleteBatch,
-			field:     "selection.resourceIds",
+			name:   "delete ids requires ids",
+			method: "POST",
+			path:   "/v1/resources/delete",
+			body:   `{"selection":{"mode":"ids"}}`,
+			role:   iamdomain.RoleUser,
+			call:   (*CoreHandler).PostResourceDeleteBatch,
+			field:  "selection.resourceIds",
 		},
 		{
-			name:      "delete ids rejects zero",
-			method:    "POST",
-			path:      "/v1/resources/delete",
-			body:      `{"selection":{"mode":"ids","resourceIds":[0]}}`,
-			roleLevel: 10,
-			call:      (*CoreHandler).PostResourceDeleteBatch,
-			field:     "selection.resourceIds",
+			name:   "delete ids rejects zero",
+			method: "POST",
+			path:   "/v1/resources/delete",
+			body:   `{"selection":{"mode":"ids","resourceIds":[0]}}`,
+			role:   iamdomain.RoleUser,
+			call:   (*CoreHandler).PostResourceDeleteBatch,
+			field:  "selection.resourceIds",
 		},
 	}
 
@@ -2694,7 +2694,7 @@ func TestCoreHandler_BulkSelectionShapeValidation(t *testing.T) {
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			c.Request.Header.Set("Content-Type", "application/json")
-			setAuthContext(c, 1, tt.roleLevel)
+			setAuthContext(c, 1, tt.role)
 
 			tt.call(h, c)
 
@@ -2724,7 +2724,7 @@ func TestCoreHandler_PublishMicrosoftResourceNonOwnerDenied(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/1/publish", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 2, 20)
+	setAuthContext(c, 2, iamdomain.RoleSupplier)
 
 	h.PostResourcePublish(c)
 
@@ -2752,7 +2752,7 @@ func TestCoreHandler_DeletePrivateMicrosoftResource(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.DeleteResource(c)
 
@@ -2799,7 +2799,7 @@ func TestCoreHandler_DeleteResourcesBatchDeletesPrivateMixedResources(t *testing
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/delete", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceDeleteBatch(c)
 
@@ -2844,7 +2844,7 @@ func TestCoreHandler_DeleteResourcesBatchNonOwnerDeniedWithoutPartialDelete(t *t
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/delete", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceDeleteBatch(c)
 
@@ -2878,7 +2878,7 @@ func TestCoreHandler_DeleteResourcesByFilterOmitsResourceIDs(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/delete", strings.NewReader(`{"selection":{"mode":"filter","filter":{"resourceType":"domain","status":"normal"}}}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostResourceDeleteBatch(c)
 
@@ -2912,7 +2912,7 @@ func TestCoreHandler_DeletePublishedMicrosoftResourceDenied(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.DeleteResource(c)
 
@@ -2935,7 +2935,7 @@ func TestCoreHandler_DeleteMicrosoftResourceNonOwnerDenied(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/v1/resources/1", nil)
 	c.Params = []gin.Param{{Key: "resourceId", Value: "1"}}
-	setAuthContext(c, 2, 10)
+	setAuthContext(c, 2, iamdomain.RoleUser)
 
 	h.DeleteResource(c)
 
@@ -2954,7 +2954,7 @@ func TestCoreHandler_CreateDomainDefaultsToLocalInboundServer(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/domains", strings.NewReader(`{"domain":"Example.COM"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostDomain(c)
 
@@ -2984,7 +2984,7 @@ func TestCoreHandler_CreateDomainHidesForeignMailServerID(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/domains", strings.NewReader(`{"domain":"example.com","mailServerId":1}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostDomain(c)
 
@@ -3003,7 +3003,7 @@ func TestCoreHandler_CreateDomainRejectsDirectSalePurpose(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/domains", strings.NewReader(`{"domain":"example.com","purpose":"sale"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 20)
+	setAuthContext(c, 1, iamdomain.RoleSupplier)
 
 	h.PostDomain(c)
 
@@ -3020,7 +3020,7 @@ func TestCoreHandler_CreateDomainRejectsInvalidDomain(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/domains", strings.NewReader(`{"domain":"https://example.com/path"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.PostDomain(c)
 
@@ -3048,7 +3048,7 @@ func TestCoreHandler_CreateDomainAllowsAdminBinding(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/domains", strings.NewReader(`{"domain":"binding.example.com","purpose":"binding"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, 80)
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostDomain(c)
 
@@ -3090,7 +3090,7 @@ func TestCoreHandler_DomainMailboxesOwnerAccess(t *testing.T) {
 	ownerCtx, _ := gin.CreateTestContext(ownerW)
 	ownerCtx.Request = httptest.NewRequest("GET", "/v1/domains/1/mailboxes", nil)
 	ownerCtx.Params = []gin.Param{{Key: "domainId", Value: "1"}}
-	setAuthContext(ownerCtx, 1, 10)
+	setAuthContext(ownerCtx, 1, iamdomain.RoleUser)
 
 	h.GetDomainMailboxes(ownerCtx)
 
@@ -3110,7 +3110,7 @@ func TestCoreHandler_DomainMailboxesOwnerAccess(t *testing.T) {
 	otherCtx, _ := gin.CreateTestContext(otherW)
 	otherCtx.Request = httptest.NewRequest("GET", "/v1/domains/1/mailboxes", nil)
 	otherCtx.Params = []gin.Param{{Key: "domainId", Value: "1"}}
-	setAuthContext(otherCtx, 2, 20)
+	setAuthContext(otherCtx, 2, iamdomain.RoleSupplier)
 
 	h.GetDomainMailboxes(otherCtx)
 
@@ -3148,7 +3148,7 @@ func TestCoreHandler_DomainMailboxesDeletedDomainHidden(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/domains/1/mailboxes", nil)
 	c.Params = []gin.Param{{Key: "domainId", Value: "1"}}
-	setAuthContext(c, 1, 10)
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.GetDomainMailboxes(c)
 
@@ -3167,7 +3167,7 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects/1", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "1"}}
-	setAuthContext(c, 2, int(iamdomain.RoleUser))
+	setAuthContext(c, 2, iamdomain.RoleUser)
 
 	h.GetProject(c)
 
@@ -3196,7 +3196,7 @@ func TestCoreHandler_GetProjectDetailIncludesInternalProductFieldsForProjectAdmi
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects/1", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "1"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.GetProject(c)
 
@@ -3230,7 +3230,7 @@ func TestCoreHandler_GetProjectsScopeAllRequiresProjectReadPermission(t *testing
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects?scope=all", nil)
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.GetProjects(c)
 
@@ -3256,7 +3256,7 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects", nil)
-	setAuthContext(c, 1, int(iamdomain.RoleUser))
+	setAuthContext(c, 1, iamdomain.RoleUser)
 
 	h.GetProjects(c)
 
@@ -3307,7 +3307,7 @@ func TestCoreHandler_ProjectOwnerCanSeeRejectReasonAndResubmit(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects?scope=mine", nil)
-	setAuthContext(c, 7, int(iamdomain.RoleUser))
+	setAuthContext(c, 7, iamdomain.RoleUser)
 
 	h.GetProjects(c)
 
@@ -3323,7 +3323,7 @@ func TestCoreHandler_ProjectOwnerCanSeeRejectReasonAndResubmit(t *testing.T) {
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/projects/8", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "8"}}
-	setAuthContext(c, 7, int(iamdomain.RoleUser))
+	setAuthContext(c, 7, iamdomain.RoleUser)
 
 	h.GetProject(c)
 
@@ -3338,7 +3338,7 @@ func TestCoreHandler_ProjectOwnerCanSeeRejectReasonAndResubmit(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/projects/8/resubmit", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Params = gin.Params{{Key: "projectId", Value: "8"}}
-	setAuthContext(c, 7, int(iamdomain.RoleUser))
+	setAuthContext(c, 7, iamdomain.RoleUser)
 
 	h.PostProjectResubmit(c)
 
@@ -3366,7 +3366,7 @@ func TestCoreHandler_AdminProjectApproveMovesReviewingToListed(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/9/approve", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "9"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectApprove(c)
 
@@ -3418,7 +3418,7 @@ func TestCoreHandler_AdminProjectApproveWithConfig(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/11/approve", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Params = gin.Params{{Key: "projectId", Value: "11"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectApprove(c)
 
@@ -3466,7 +3466,7 @@ func TestCoreHandler_AdminProjectCreateWithPrivateAccessUsers(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/admin/projects", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProject(c)
 
@@ -3519,7 +3519,7 @@ func TestCoreHandler_AdminProjectUpdateRejectsReviewingProject(t *testing.T) {
 	c.Request = httptest.NewRequest("PUT", "/v1/admin/projects/12", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Params = gin.Params{{Key: "projectId", Value: "12"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PutAdminProject(c)
 
@@ -3542,7 +3542,7 @@ func TestCoreHandler_AdminProjectAccessGrantListAndRevoke(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/10/access", strings.NewReader(`{"userId":7}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Params = gin.Params{{Key: "projectId", Value: "10"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectAccess(c)
 
@@ -3556,7 +3556,7 @@ func TestCoreHandler_AdminProjectAccessGrantListAndRevoke(t *testing.T) {
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/v1/admin/projects/10/access", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "10"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.GetAdminProjectAccess(c)
 
@@ -3570,7 +3570,7 @@ func TestCoreHandler_AdminProjectAccessGrantListAndRevoke(t *testing.T) {
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/v1/admin/projects/10/access/7", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "10"}, {Key: "userId", Value: "7"}}
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.DeleteAdminProjectAccess(c)
 
@@ -3589,7 +3589,7 @@ func TestCoreHandler_AdminProjectBulkSelectionShapeValidation(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/delete", strings.NewReader(`{"selection":{"mode":"ids","projectIds":[]}}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectsDelete(c)
 
@@ -3608,7 +3608,7 @@ func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/admin/project-logos", body)
 	c.Request.Header.Set("Content-Type", contentType)
-	setAuthContext(c, 1, int(iamdomain.RoleAdmin))
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
 	h.PostAdminProjectLogo(c)
 
@@ -3622,7 +3622,7 @@ func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", upload.LogoURL, nil)
 	c.Params = gin.Params{{Key: "logoKey", Value: logoKey}}
-	setAuthContext(c, 2, int(iamdomain.RoleUser))
+	setAuthContext(c, 2, iamdomain.RoleUser)
 
 	h.GetProjectLogo(c)
 

@@ -4,34 +4,29 @@ import (
 	"testing"
 )
 
-func TestRoleLevel_IsAtLeast(t *testing.T) {
-	tests := []struct {
-		name  string
-		level RoleLevel
-		min   RoleLevel
-		want  bool
-	}{
-		{"user >= user", RoleUser, RoleUser, true},
-		{"user >= supplier", RoleUser, RoleSupplier, false},
-		{"user >= admin", RoleUser, RoleAdmin, false},
-		{"user >= super_admin", RoleUser, RoleSuperAdmin, false},
-		{"supplier >= user", RoleSupplier, RoleUser, true},
-		{"supplier >= supplier", RoleSupplier, RoleSupplier, true},
-		{"supplier >= admin", RoleSupplier, RoleAdmin, false},
-		{"admin >= user", RoleAdmin, RoleUser, true},
-		{"admin >= supplier", RoleAdmin, RoleSupplier, true},
-		{"admin >= admin", RoleAdmin, RoleAdmin, true},
-		{"admin >= super_admin", RoleAdmin, RoleSuperAdmin, false},
-		{"super_admin >= user", RoleSuperAdmin, RoleUser, true},
-		{"super_admin >= admin", RoleSuperAdmin, RoleAdmin, true},
-		{"super_admin >= super_admin", RoleSuperAdmin, RoleSuperAdmin, true},
+func TestRoleHelpers(t *testing.T) {
+	if !RoleAdmin.HasAdminAccess() || !RoleSuperAdmin.HasAdminAccess() {
+		t.Fatal("admin roles must have admin access")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.level.IsAtLeast(tt.min); got != tt.want {
-				t.Errorf("RoleLevel(%d).IsAtLeast(%d) = %v, want %v", tt.level, tt.min, got, tt.want)
-			}
-		})
+	if RoleUser.HasAdminAccess() || RoleSupplier.HasAdminAccess() {
+		t.Fatal("user and supplier must not have admin access")
+	}
+	if !RoleSupplier.HasSupplierAccess() || !RoleAdmin.HasSupplierAccess() || !RoleSuperAdmin.HasSupplierAccess() {
+		t.Fatal("supplier, admin, and super_admin must have supplier access")
+	}
+	if RoleUser.HasSupplierAccess() {
+		t.Fatal("user must not have supplier access")
+	}
+}
+
+func TestRoleValidation(t *testing.T) {
+	for _, role := range []Role{RoleUser, RoleSupplier, RoleAdmin, RoleSuperAdmin} {
+		if !role.IsValid() {
+			t.Fatalf("role %q should be valid", role)
+		}
+	}
+	if Role("owner").IsValid() {
+		t.Fatal("unknown role should be invalid")
 	}
 }
 

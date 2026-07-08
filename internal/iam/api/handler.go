@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -63,7 +64,7 @@ func (h *IAMHandler) PostActivation(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"user": toUserResponse(user)})
+	c.JSON(http.StatusCreated, gin.H{"user": h.userResponseWithPermissions(c.Request.Context(), user)})
 }
 
 // --- Captcha ---
@@ -190,7 +191,7 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 
 	setAuthCookies(c, result.Session.ID, csrfToken, h.sessionMaxAge, h.sessionSecure)
 
-	c.JSON(http.StatusOK, LoginResponse{User: toUserResponse(result.User)})
+	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
 }
 
 // DELETE /v1/sessions/current
@@ -236,7 +237,7 @@ func (h *IAMHandler) GetMe(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(user)})
+	c.JSON(http.StatusOK, gin.H{"user": h.userResponseWithPermissions(c.Request.Context(), user)})
 }
 
 // GET /v1/me/invite
@@ -411,6 +412,77 @@ func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
 
 func (h *IAMHandler) GetAdminPermissions(c *gin.Context) {
 	c.JSON(http.StatusOK, toPermissionCatalogResponse(h.module.AdminUseCase.ListPermissions(c.Request.Context())))
+}
+
+func (h *IAMHandler) GetAdminUserGroups(c *gin.Context) {
+	groups, err := h.module.AdminUseCase.ListUserGroups(c.Request.Context())
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	resp := make([]UserGroupResponse, len(groups))
+	for i := range groups {
+		resp[i] = toUserGroupResponse(groups[i])
+	}
+	c.JSON(http.StatusOK, AdminUserGroupListResponse{Groups: resp})
+}
+
+func (h *IAMHandler) PostAdminUserGroup(c *gin.Context) {
+	var req AdminCreateUserGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	group, err := h.module.AdminUseCase.CreateUserGroup(c.Request.Context(), app.CreateUserGroupRequest{
+		Code:        req.Code,
+		Name:        req.Name,
+		Description: req.Description,
+		Enabled:     enabled,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"group": toUserGroupResponse(*group)})
+}
+
+func (h *IAMHandler) PatchAdminUserGroup(c *gin.Context) {
+	groupIDStr := c.Param("groupId")
+	groupID, err := strconv.ParseUint(groupIDStr, 10, 64)
+	if err != nil || groupID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid user group ID.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	var req AdminUpdateUserGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	group, err := h.module.AdminUseCase.UpdateUserGroup(c.Request.Context(), uint(groupID), app.UpdateUserGroupRequest{
+		Name:        req.Name,
+		Description: req.Description,
+		Enabled:     req.Enabled,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"group": toUserGroupResponse(*group)})
 }
 
 func (h *IAMHandler) GetAdminUserPermissions(c *gin.Context) {
@@ -620,13 +692,13 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 		return
 	}
 
-	var roleLevel *domain.RoleLevel
-	if req.RoleLevel != nil {
-		rl := domain.RoleLevel(*req.RoleLevel)
-		roleLevel = &rl
+	var role *domain.Role
+	if req.Role != nil {
+		parsedRole := domain.Role(strings.TrimSpace(*req.Role))
+		role = &parsedRole
 	}
 
-	updateReq := &app.UpdateUserRequest{Enabled: req.Enabled, RoleLevel: roleLevel}
+	updateReq := &app.UpdateUserRequest{Enabled: req.Enabled, Role: role, UserGroupID: req.UserGroupID}
 
 	operatorID, _ := middleware.GetCurrentUserID(c)
 	user, err := h.module.AdminUseCase.UpdateUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), uint(targetUserID), updateReq)
@@ -733,6 +805,26 @@ func parseUintQueryList(c *gin.Context, name string) ([]uint, bool) {
 	return result, true
 }
 
+func (h *IAMHandler) userResponseWithPermissions(ctx context.Context, user *domain.User) UserResponse {
+	resp := toUserResponse(user)
+	if user == nil || h == nil || h.module == nil || h.module.PermissionChecker == nil || h.module.AdminUseCase == nil {
+		return resp
+	}
+	catalog := h.module.AdminUseCase.ListPermissions(ctx)
+	permissions := make([]string, 0)
+	for _, item := range catalog {
+		for _, action := range item.Actions {
+			allowed, err := h.module.PermissionChecker.Check(ctx, user.ID, user.Role, item.Resource, action)
+			if err != nil || !allowed {
+				continue
+			}
+			permissions = append(permissions, item.Resource+":"+action)
+		}
+	}
+	resp.Permissions = permissions
+	return resp
+}
+
 // writeError maps domain errors to HTTP responses.
 func writeError(c *gin.Context, err error) {
 	rid := middleware.GetRequestID(c)
@@ -783,9 +875,14 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Resource not found.",
 			"requestId": rid,
 		})
-	case errors.Is(err, domain.ErrInvalidRoleLevel):
+	case errors.Is(err, domain.ErrInvalidRole):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message":   "Invalid role level.",
+			"message":   "Invalid role.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrInvalidUserGroup):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Invalid user group.",
 			"requestId": rid,
 		})
 	case errors.Is(err, maildomain.ErrOutboundIdempotencyConflict):

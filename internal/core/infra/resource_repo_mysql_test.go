@@ -44,15 +44,15 @@ func TestResourceSchemaConstraintsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 		2,
 		"other@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, status) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
@@ -272,11 +272,11 @@ func TestMailServerRepoGetOrCreateDefaultInboundConcurrentMySQL(t *testing.T) {
 	repo := NewMailServerRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	const workers = 8
@@ -329,11 +329,11 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 	importRepo := NewResourceImportRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	importRecord := &domain.ResourceImport{
@@ -376,15 +376,15 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 	importRepo := NewResourceImportRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 		2,
 		"new-owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -472,11 +472,11 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftC
 	importRepo := NewResourceImportRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -536,11 +536,11 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 	importRepo := NewResourceImportRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	importRecord := &domain.ResourceImport{
@@ -586,11 +586,11 @@ func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, status) VALUES (?, ?, ?, ?)",
@@ -693,11 +693,11 @@ func TestResourceRepoUpdateMicrosoftWithLogPreservesCredentialsMySQL(t *testing.
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{
@@ -750,11 +750,11 @@ func TestResourceRepoPublishMicrosoftWithLogIsIdempotentMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -803,11 +803,11 @@ func TestResourceRepoPublishResourcesBatchWithLogIsConcurrentIdempotentMySQL(t *
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -875,11 +875,11 @@ func TestResourceRepoPublishResourcesBatchWithLogPublishesMixedResourcesAndRolls
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
@@ -980,11 +980,11 @@ func TestResourceRepoDeletePrivateMicrosoftWithLogMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -1038,11 +1038,11 @@ func TestResourceRepoDeletePublishedMicrosoftDeniedMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -1084,11 +1084,11 @@ func TestResourceRepoPublishDeletedMicrosoftDeniedMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
@@ -1138,15 +1138,15 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 		2,
 		"new-owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
@@ -1251,11 +1251,11 @@ func TestResourceRepoDeleteResourcesBatchWithLogDeletesMixedPrivateAndSkipsPubli
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
@@ -1359,11 +1359,11 @@ func TestResourceRepoBulkFilterMutationsMySQL(t *testing.T) {
 	repo := NewResourceRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
@@ -1565,11 +1565,11 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	ctx := context.Background()
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	normal := &domain.MicrosoftResource{
@@ -1632,15 +1632,15 @@ func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCr
 	ctx := context.Background()
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 		2,
 		"other@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 
 	owned := &domain.MicrosoftResource{
@@ -1678,11 +1678,11 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 	ctx := context.Background()
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"owner@test.local",
 		"hash",
-		20,
+		"supplier",
 	).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",

@@ -159,7 +159,7 @@ func (r *SupplierApplicationRepo) ApproveSupplierApplicationWithUserAndLog(ctx c
 		if err := tx.Model(&UserModel{}).
 			Where("id = ?", user.ID).
 			Updates(map[string]interface{}{
-				"role_level": int(user.RoleLevel),
+				"role":       user.Role.String(),
 				"updated_at": time.Now().UTC(),
 			}).Error; err != nil {
 			return fmt.Errorf("promote supplier application user: %w", err)

@@ -9,6 +9,7 @@
 | 2026-07-01 | V1.2 | Codex | 补充供应商申请流程；普通用户申请成为 supplier 只提升角色，不改变资源状态。 |
 | 2026-07-06 | V1.3 | Codex | 补充管理员用户查询筛选能力：`GET /v1/admin/users` 支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索，用于后台私有项目授权选择；不改变 IAM 角色、Casbin 和用户实体。 |
 | 2026-07-07 | V1.4 | Codex | 补充用户侧 aff 邀请链接能力；复用邀请码消费事务，不改变后台邀请码策略；GET 只读、POST 创建或获取，保持 safe method 语义。 |
+| 2026-07-08 | V1.5 | Codex | 强制纠偏：移除旧数字权限等级，改为 RBAC `role` + Casbin 权限；新增 `userGroup` 作为权益分组，不参与后台授权。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -18,7 +19,7 @@
 
 | 拥有 | 不拥有 |
 |------|--------|
-| 用户、登录会话、角色等级、Casbin 权限策略、邀请码、首次激活 | 钱包、订单、资源、项目业务状态 |
+| 用户、登录会话、RBAC 角色、权益分组、Casbin 权限策略、邀请码、首次激活 | 钱包、订单、资源、项目业务状态 |
 
 参考 `new-api`：特权用户拥有非特权用户的全部能力，只增加特权页面和命令。
 
@@ -28,7 +29,8 @@
 
 | 实体 | 关键字段 |
 |------|----------|
-| `User` | `email`、`passwordHash`、`enabled`、`roleLevel`、`tokenVersion`、`lastLoginAt` |
+| `User` | `email`、`passwordHash`、`enabled`、`role`、`userGroupId`、`tokenVersion`、`lastLoginAt` |
+| `UserGroup` | `code`、`name`、`description`、`enabled` |
 | `Invite` | `code`、`enabled`、`maxUse/used`、`expireAt` |
 | `InviteUse` | 邀请码使用事实 |
 | `ThirdPartyIdentity` | 第三方账号绑定 |
@@ -36,16 +38,25 @@
 | `CasbinRule` | Casbin policy 存储 |
 | `SupplierApplication` | 普通用户申请 supplier 权限的审核记录 |
 
-角色等级：
+RBAC 角色：
 
-| 角色 | 等级 | 能力 |
-|------|------|------|
-| `user` | 10 | 普通用户能力。 |
-| `supplier` | 20 | 拥有 user 全部能力，增加供应商页面。 |
-| `admin` | 80 | 拥有 user 全部能力，增加后台运营页面。 |
-| `super_admin` | 100 | 拥有 admin 全部能力，增加系统敏感页面。 |
+| 角色 | 能力 |
+|------|------|
+| `user` | 普通用户能力。 |
+| `supplier` | 拥有 user 全部能力，增加供应商页面。 |
+| `admin` | 拥有 user 全部能力，后台运营能力由 Casbin seed 策略授予。 |
+| `super_admin` | 拥有 admin 全部能力，系统敏感能力由 Casbin seed 策略授予。 |
 
 `supplier` 和 `admin` 都是特权身份，但数据归属不同。管理员能查看/处理全局数据，不表示拥有供应商收入。
+
+用户分组：
+
+| 分组 | 说明 |
+|------|------|
+| `normal` | 默认权益分组。 |
+| `VIP1/VIP2/...` | 后续用于额度、折扣、资源权益等业务策略。 |
+
+`UserGroup` 只表达权益分组，不表达后台访问权限；后台访问权限只能由 `role` + Casbin policy 决定。
 
 ---
 
@@ -73,9 +84,9 @@ eft = allow/deny
 授权流程：
 
 ```text
-1. 先校验登录态/API Key/OrderToken 是否有效
-2. 再按 roleLevel 判断基础访问，例如 user 页面、admin 页面
-3. 对特权命令调用 Casbin 检查 permission
+1. 先校验登录态/API Key 等入口凭证是否有效；pickup 的 `email + token` 只在取件入口校验
+2. 菜单、后台页面和特权命令调用 Casbin 检查 permission
+3. 需要区分业务身份时读取 RBAC `role`，例如 supplier 是否允许发布资源
 4. 最后由业务服务检查数据归属和状态机
 ```
 
@@ -125,7 +136,7 @@ eft = allow/deny
 | INV-I1 | `email` 全局唯一。 |
 | INV-I2 | 登录和 API Key 访问要求 `User.enabled=true`。 |
 | INV-I3 | 禁用、改密、强制退出必须递增 `tokenVersion` 并清理会话。 |
-| INV-I4 | `roleLevel` 只表达基础特权等级，细粒度后台权限由 Casbin 表达。 |
+| INV-I4 | 不存在数字权限等级；后台权限由 RBAC `role` + Casbin policy 表达，权益由 `UserGroup` 表达。 |
 | INV-I5 | 特权用户拥有普通用户基础能力，不能要求管理员使用另一套用户接口。 |
 | INV-I6 | 邀请码使用必须原子递增，不能并发突破次数。 |
 | INV-I7 | 权限变更必须写 OperationLog，并刷新 Casbin enforcer/cache。 |
@@ -139,7 +150,7 @@ eft = allow/deny
 | Port | 方向 | 职责 |
 |------|------|------|
 | `PermissionPort` | 入站自全域 | 判断用户是否具备某权限。 |
-| `UserPort` | 入站自全域 | 查询用户启用状态和角色等级。 |
+| `UserPort` | 入站自全域 | 查询用户启用状态、RBAC 角色和权益分组。 |
 | `SessionPort` | 入站自管理命令 | 清理用户会话和权限缓存。 |
 
 ---
@@ -204,14 +215,17 @@ rejected
 canceled
 ```
 
-普通用户点击资源“出售”时，如果没有 `reviewing` 申请，则提交申请理由；如果已有 `reviewing` 申请，则前端提示“供应商申请正在审核中”。管理员审批通过后将申请人 `roleLevel` 提升为 `supplier`。审批通过不改变任何 Microsoft 资源的 `forSale`，用户仍需在资源页主动发布出售。
+普通用户点击资源“出售”时，如果没有 `reviewing` 申请，则提交申请理由；如果已有 `reviewing` 申请，则前端提示“供应商申请正在审核中”。管理员审批通过后将申请人 RBAC `role` 设置为 `supplier`。审批通过不改变任何 Microsoft 资源的 `forSale`，用户仍需在资源页主动发布出售。
 
 后台：
 
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `GET` | `/v1/admin/users` | 用户查询；支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索。 |
-| `PATCH` | `/v1/admin/users/{userId}` | 启停、基础资料、角色等级变更。 |
+| `PATCH` | `/v1/admin/users/{userId}` | 启停、RBAC 角色、权益分组变更。 |
+| `GET` | `/v1/admin/user-groups` | 用户权益分组列表。 |
+| `POST` | `/v1/admin/user-groups` | 创建用户权益分组。 |
+| `PATCH` | `/v1/admin/user-groups/{groupId}` | 更新用户权益分组名称、描述和启停状态。 |
 | `POST` | `/v1/admin/users/{userId}/sessions/revoke` | 强制退出。 |
 | `GET` | `/v1/admin/permissions` | 权限目录。 |
 | `GET` | `/v1/admin/users/{userId}/permissions` | 用户权限矩阵。 |
@@ -229,7 +243,7 @@ canceled
 
 | ADR | 决策 | 理由 |
 |-----|------|------|
-| ADR-IAM-1 | 单一用户表 + 角色等级 | 管理员和供应商不是另一类账号。 |
+| ADR-IAM-1 | 单一用户表 + RBAC 角色 | 管理员和供应商不是另一类账号。 |
 | ADR-IAM-2 | 引入 Casbin | 管理权限矩阵和用户覆盖用成熟库，避免自研。 |
 | ADR-IAM-3 | Casbin 不做数据归属 | 项目授权、订单归属、钱包归属是业务规则，应由业务域控制。 |
 | ADR-IAM-4 | 特权继承低权限能力 | 符合 `new-api` 思路，减少重复用户/管理员接口。 |

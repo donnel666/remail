@@ -440,7 +440,7 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID ui
 		where = append(where, "ms.for_sale = FALSE", "er.owner_user_id = ?")
 		args = append(args, buyerUserID)
 	default:
-		where = append(where, "ms.for_sale = TRUE", "u.enabled = TRUE", "u.role_level IN (20, 80, 100)")
+		where = append(where, "ms.for_sale = TRUE", "u.enabled = TRUE", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
 	if bucket != nil {
 		where = append(where, "ms.alloc_bucket = ?")
@@ -471,7 +471,7 @@ func (r *Repo) ListDomainSourceCandidates(ctx context.Context, bucket *uint8, li
 		"dr.status = 'normal'",
 		"ms.status = 'online'",
 		"u.enabled = TRUE",
-		"u.role_level IN (20, 80, 100)",
+		"u.role IN ('supplier', 'admin', 'super_admin')",
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "dr.domain = ?")
@@ -531,7 +531,7 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, buye
                 WHERE er.id = ms.id
                   AND er.type = 'microsoft'
                   AND u.enabled = TRUE
-                  AND u.role_level IN (20, 80, 100)
+                  AND u.role IN ('supplier', 'admin', 'super_admin')
             )`,
 		)
 	}
@@ -570,7 +570,7 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, emailSu
 	      WHERE er.id = dr.id
 	        AND er.type = 'domain'
 	        AND u.enabled = TRUE
-	        AND u.role_level IN (20, 80, 100)
+	        AND u.role IN ('supplier', 'admin', 'super_admin')
 	  )`,
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
@@ -1155,7 +1155,7 @@ FROM domain_resources dr
 JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
 JOIN mail_servers ms ON ms.id = dr.mail_server_id
 JOIN users u ON u.id = er.owner_user_id
-WHERE dr.purpose = 'sale' AND dr.status = 'normal' AND ms.status = 'online' AND u.enabled = TRUE AND u.role_level IN (20, 80, 100)`); err != nil {
+WHERE dr.purpose = 'sale' AND dr.status = 'normal' AND ms.status = 'online' AND u.enabled = TRUE AND u.role IN ('supplier', 'admin', 'super_admin')`); err != nil {
 			return nil, err
 		}
 		stats.Domain.EligibleResources = capacity.EligibleResources
@@ -1174,7 +1174,7 @@ WHERE adu.usage_date = ?
   AND dr.status = 'normal'
   AND ms.status = 'online'
   AND u.enabled = TRUE
-  AND u.role_level IN (20, 80, 100)`, today); err != nil {
+  AND u.role IN ('supplier', 'admin', 'super_admin')`, today); err != nil {
 			return nil, err
 		}
 		stats.Domain.MailboxDailyAvailable = nonNegative(stats.Domain.MailboxDailyLimit - stats.Domain.MailboxDailyUsed)
@@ -1301,7 +1301,7 @@ WHERE rc.project_id = ?
       OR ms.status <> 'normal'
       OR ms.for_sale <> TRUE
       OR u.enabled <> TRUE
-      OR u.role_level NOT IN (20, 80, 100)
+      OR u.role NOT IN ('supplier', 'admin', 'super_admin')
   )`, projectID).Error; err != nil {
 		return 0, fmt.Errorf("delete stale microsoft candidates: %w", err)
 	}
@@ -1325,7 +1325,7 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
   AND ms.for_sale = TRUE
   AND u.enabled = TRUE
-  AND u.role_level IN (20, 80, 100)
+  AND u.role IN ('supplier', 'admin', 'super_admin')
 ON DUPLICATE KEY UPDATE
     email_address = VALUES(email_address),
     domain_suffix = VALUES(domain_suffix),
@@ -1373,7 +1373,7 @@ WHERE dc.project_id = ?
       OR dr.status <> 'normal'
       OR ms.status <> 'online'
       OR u.enabled <> TRUE
-      OR u.role_level NOT IN (20, 80, 100)
+      OR u.role NOT IN ('supplier', 'admin', 'super_admin')
   )`, projectID).Error; err != nil {
 		return 0, fmt.Errorf("delete stale domain candidates: %w", err)
 	}
@@ -1398,7 +1398,7 @@ WHERE dr.purpose = 'sale'
   AND dr.status = 'normal'
   AND ms.status = 'online'
   AND u.enabled = TRUE
-  AND u.role_level IN (20, 80, 100)
+  AND u.role IN ('supplier', 'admin', 'super_admin')
 ON DUPLICATE KEY UPDATE
     domain = VALUES(domain),
     domain_tld = VALUES(domain_tld),
@@ -1926,7 +1926,7 @@ func isValidDailyUsageKind(kind domain.DailyUsageKind) bool {
 }
 
 func microsoftInventoryScopeSQL(buyerUserID uint) (string, []any) {
-	publicScope := "(ms.for_sale = TRUE AND u.enabled = TRUE AND u.role_level IN (20, 80, 100))"
+	publicScope := "(ms.for_sale = TRUE AND u.enabled = TRUE AND u.role IN ('supplier', 'admin', 'super_admin'))"
 	if buyerUserID == 0 {
 		return publicScope, nil
 	}

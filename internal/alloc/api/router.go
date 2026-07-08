@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/donnel666/remail/api/middleware"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,7 +19,6 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	admin.Use(middleware.AdminRequired(iamdomain.RoleAdmin))
 	{
 		admin.GET("/allocations", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetAllocations)
 		admin.GET("/allocations/:allocationId", middleware.PermissionRequired(checker, "alloc:allocation", "read"), h.GetAllocation)

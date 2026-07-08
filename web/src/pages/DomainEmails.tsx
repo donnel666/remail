@@ -71,10 +71,9 @@ import { useSelectionNotification } from "./resources/use-selection-notification
 
 type StatusFilter = "all" | "normal" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
-const supplierRoleLevel = 20;
 
-function hasSupplierRole(roleLevel?: number | null) {
-  return (roleLevel ?? 0) >= supplierRoleLevel;
+function hasSupplierRole(role?: string | null) {
+  return role === "supplier" || role === "admin" || role === "super_admin";
 }
 
 function matchesStatusFilter(status: DomainStatus, filter: StatusFilter) {
@@ -158,7 +157,7 @@ export default function DomainEmails() {
   const refreshSeqRef = useRef(0);
   const locallyDeletedResourceIDsRef = useRef(new Set<number>());
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
-  const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
+  const canPublishForSale = hasSupplierRole(currentUser?.role);
 
   const refresh = useCallback(async () => {
     const refreshSeq = refreshSeqRef.current + 1;
@@ -397,7 +396,7 @@ export default function DomainEmails() {
     if (canPublishForSale) return true;
 
     const latestUser = await refreshCurrentUser();
-    if (hasSupplierRole(latestUser?.roleLevel)) return true;
+    if (hasSupplierRole(latestUser?.role)) return true;
 
     await promptSupplierApplication();
     return false;

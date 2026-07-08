@@ -36,7 +36,7 @@ func userSessionsKey(userID uint) string {
 // sessionData is the JSON structure stored in Redis.
 type sessionData struct {
 	UserID       uint   `json:"userId"`
-	RoleLevel    int    `json:"roleLevel"`
+	Role         string `json:"role"`
 	Email        string `json:"email"`
 	TokenVersion int    `json:"tokenVersion"`
 }
@@ -44,7 +44,7 @@ type sessionData struct {
 func (s *SessionStore) Create(ctx context.Context, session *domain.Session, ttlSeconds int) error {
 	data := sessionData{
 		UserID:       session.UserID,
-		RoleLevel:    int(session.RoleLevel),
+		Role:         session.Role.String(),
 		Email:        session.Email,
 		TokenVersion: session.TokenVersion,
 	}
@@ -82,7 +82,7 @@ func (s *SessionStore) Get(ctx context.Context, sessionID string) (*domain.Sessi
 	return &domain.Session{
 		ID:           sessionID,
 		UserID:       data.UserID,
-		RoleLevel:    domain.RoleLevel(data.RoleLevel),
+		Role:         domain.Role(data.Role),
 		Email:        data.Email,
 		TokenVersion: data.TokenVersion,
 	}, nil

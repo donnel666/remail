@@ -48,7 +48,7 @@ func (uc *SupplierApplicationUseCase) Submit(ctx context.Context, userID uint, r
 	if user == nil {
 		return nil, domain.ErrUserNotFound
 	}
-	if user.RoleLevel.IsAtLeast(domain.RoleSupplier) {
+	if user.Role.HasSupplierAccess() {
 		return nil, domain.ErrInvalidSupplierApplicationStatus
 	}
 
@@ -115,8 +115,8 @@ func (uc *SupplierApplicationUseCase) Approve(ctx context.Context, operatorUserI
 	if user == nil {
 		return nil, domain.ErrUserNotFound
 	}
-	if !user.RoleLevel.IsAtLeast(domain.RoleSupplier) {
-		user.RoleLevel = domain.RoleSupplier
+	if !user.Role.HasSupplierAccess() {
+		user.Role = domain.RoleSupplier
 	}
 
 	now := time.Now().UTC()

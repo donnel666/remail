@@ -55,9 +55,9 @@ func NewPermissionService(db *gorm.DB) (*PermissionService, error) {
 }
 
 // Check returns whether a user has the requested resource/action permission.
-func (s *PermissionService) Check(_ context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error) {
+func (s *PermissionService) Check(_ context.Context, userID uint, role domain.Role, resource, action string) (bool, error) {
 	userSub := fmt.Sprintf("user:%d", userID)
-	roleSub := "role:" + roleLevel.Name()
+	roleSub := "role:" + role.String()
 	allowed, err := s.enforcer.Enforce(userSub, roleSub, resource, action)
 	if err != nil {
 		return false, fmt.Errorf("casbin enforce: %w", err)

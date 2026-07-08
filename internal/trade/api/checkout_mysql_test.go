@@ -175,8 +175,8 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.RequestID())
 	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.RoleLevel, string, bool) {
-		return 0, 0, "", false
+	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
+		return 0, "", "", false
 	}), openapiMod)
 
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
@@ -251,6 +251,64 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, apiLogs[2].HTTPStatus)
 	require.Equal(t, "/v1/orders/:orderNo/archive", apiLogs[3].Path)
 	require.Equal(t, http.StatusForbidden, apiLogs[3].HTTPStatus)
+}
+
+func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	openapiMod := openapiapi.NewModule(db)
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:           2,
+		Name:             "delete-keeps-facts",
+		ConcurrencyLimit: 5,
+		IdempotencyKey:   "apikey-idem-delete-keeps-facts",
+		RequestID:        "req-apikey-delete-keeps-facts",
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	v1 := router.Group("/v1")
+	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
+		return 0, "", "", false
+	}), openapiMod)
+
+	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/v1/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req.Header.Set("X-API-Key", key.KeyPlain)
+	req.Header.Set("Idempotency-Key", "route-order-idem-delete-keeps-facts")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	require.NoError(t, openapiMod.UseCase.DeleteAPIKey(context.Background(), 2, key.ID))
+
+	keys, total, err := openapiMod.UseCase.ListAPIKeys(context.Background(), 2, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total)
+	require.Empty(t, keys)
+
+	_, err = openapiMod.UseCase.GetAPIKey(context.Background(), 2, key.ID)
+	require.ErrorIs(t, err, openapidomain.ErrAPIKeyNotFound)
+
+	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
+	require.ErrorIs(t, err, openapidomain.ErrAPIKeyNotFound)
+
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("api_key_id = ?", key.ID).Count(&orderCount).Error)
+	require.EqualValues(t, 1, orderCount)
+
+	var stored struct {
+		DeletedAt *time.Time
+		Enabled   bool
+	}
+	require.NoError(t, db.Table("api_keys").Select("deleted_at, enabled").Where("id = ?", key.ID).Take(&stored).Error)
+	require.NotNil(t, stored.DeletedAt)
+	require.False(t, stored.Enabled)
 }
 
 func TestCheckoutEmailSuffixFiltersAllocationSourceMySQL(t *testing.T) {
@@ -339,14 +397,15 @@ VALUES ('st_failed_tok', 'st_failed_token_plain', 'OR_FAILED_TOKEN', TRUE, ?, ?,
 func TestAPIKeyRequestLimitsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role_level) VALUES
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 10)`).Error)
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user')`).Error)
 
 	openapiMod := openapiapi.NewModule(db)
+	rateLimit := 1
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
 		UserID:             2,
 		Name:               "limited",
-		RateLimitPerMinute: 1,
+		RateLimitPerMinute: &rateLimit,
 		ConcurrencyLimit:   1,
 		IdempotencyKey:     "apikey-idem-limited",
 		RequestID:          "req-apikey-limited",
@@ -368,6 +427,107 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role_level) VALUE
 	require.Equal(t, 0, activeRequests)
 }
 
+func TestAPIKeyQuotaAndNullableLimitsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (2, 'quota-user@test.local', 'hash', 'quota-user', TRUE, 'user')`).Error)
+
+	openapiMod := openapiapi.NewModule(db)
+	rateLimit := 10
+	quotaLimit := int64(2)
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:             2,
+		Name:               "quota-limited",
+		RateLimitPerMinute: &rateLimit,
+		ConcurrencyLimit:   5,
+		QuotaLimit:         &quotaLimit,
+		IdempotencyKey:     "apikey-idem-quota-limited",
+		RequestID:          "req-apikey-quota-limited",
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
+		require.NoError(t, err)
+		require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID))
+	}
+	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
+	require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
+
+	updated, err := openapiMod.UseCase.UpdateAPIKey(context.Background(), openapiapp.UpdateAPIKeyRequest{
+		UserID:             2,
+		KeyID:              key.ID,
+		RateLimitSet:       true,
+		RateLimitPerMinute: nil,
+		QuotaSet:           true,
+		QuotaLimit:         nil,
+	})
+	require.NoError(t, err)
+	require.Nil(t, updated.RateLimitPerMinute)
+	require.Nil(t, updated.QuotaLimit)
+
+	var nullable struct {
+		RateLimitPerMinute *int
+		QuotaLimit         *int64
+	}
+	require.NoError(t, db.Table("api_keys").
+		Select("rate_limit_per_minute, quota_limit").
+		Where("id = ?", key.ID).
+		Take(&nullable).Error)
+	require.Nil(t, nullable.RateLimitPerMinute)
+	require.Nil(t, nullable.QuotaLimit)
+
+	acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
+	require.NoError(t, err)
+	require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID))
+
+	oneShotQuota := int64(1)
+	concurrentKey, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:           2,
+		Name:             "quota-concurrent",
+		ConcurrencyLimit: 20,
+		QuotaLimit:       &oneShotQuota,
+		IdempotencyKey:   "apikey-idem-quota-concurrent",
+		RequestID:        "req-apikey-quota-concurrent",
+	})
+	require.NoError(t, err)
+
+	const attempts = 8
+	errs := make(chan error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), concurrentKey.KeyPlain)
+			if err == nil {
+				_ = openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.APIKeyID)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	quotaExceeded := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
+		quotaExceeded++
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, attempts-1, quotaExceeded)
+
+	var quotaUsed int64
+	require.NoError(t, db.Table("api_keys").Select("quota_used").Where("id = ?", concurrentKey.ID).Scan(&quotaUsed).Error)
+	require.EqualValues(t, 1, quotaUsed)
+}
+
 func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
@@ -387,8 +547,8 @@ func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.RequestID())
 	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.RoleLevel, string, bool) {
-		return 0, 0, "", false
+	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
+		return 0, "", "", false
 	}), openapiMod)
 
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
@@ -444,10 +604,11 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	creditBuyer(t, db, 2, "10.00")
 
 	openapiMod := openapiapi.NewModule(db)
+	rateLimit := 1000
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
 		UserID:             2,
 		Name:               "sdk-concurrent",
-		RateLimitPerMinute: 1000,
+		RateLimitPerMinute: &rateLimit,
 		ConcurrencyLimit:   50,
 		IdempotencyKey:     "apikey-idem-concurrent",
 		RequestID:          "req-apikey-concurrent",
@@ -456,8 +617,8 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 
 	router := gin.New()
 	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.RoleLevel, string, bool) {
-		return 0, 0, "", false
+	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
+		return 0, "", "", false
 	}), openapiMod)
 
 	const requests = 8
@@ -533,10 +694,10 @@ func creditBuyer(t *testing.T, db *gorm.DB, userID uint, amount string) {
 func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role_level) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 20),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 10),
-    (3, 'regular@test.local', 'hash', 'regular', TRUE, 10)`).Error)
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'Trade Project', 'trade', 'listed', 'public', TRUE)`).Error)

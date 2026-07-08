@@ -389,12 +389,12 @@ func (h *BillingHandler) canReadAll(c *gin.Context, resource string) bool {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
 		return false
 	}
-	roleLevel, ok := middleware.GetCurrentRoleLevel(c)
+	role, ok := middleware.GetCurrentRole(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
 		return false
 	}
-	allowed, err := h.checker.Check(c.Request.Context(), userID, roleLevel, resource, "read")
+	allowed, err := h.checker.Check(c.Request.Context(), userID, role, resource, "read")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": middleware.GetRequestID(c)})
 		return false

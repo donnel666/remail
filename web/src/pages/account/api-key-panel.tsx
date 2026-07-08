@@ -20,11 +20,19 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  createAPIKey,
+  deleteAPIKey,
+  listAPIKeys,
+  updateAPIKey,
+  type APIKeyResponse,
+} from "@/lib/openapi-credentials-api";
 
 const { Text } = Typography;
 
@@ -32,7 +40,7 @@ interface ApiKeyRecord {
   createdAt: string;
   enabled: boolean;
   expiresAt: string | null;
-  id: string;
+  id: number;
   lastUsedAt: string;
   name: string;
   quota: number | null;
@@ -41,42 +49,41 @@ interface ApiKeyRecord {
   token: string;
 }
 
-const mockApiKeys: ApiKeyRecord[] = [
-  {
-    createdAt: "2026-07-03 14:22",
-    enabled: true,
-    expiresAt: "2026-10-01",
-    id: "ak_mock_console",
-    lastUsedAt: "2026-07-08 09:41",
-    name: "Console Client",
-    quota: 10000,
-    quotaUsed: 2376,
-    rpmLimit: 120,
-    token: "sk-x6eaR8cT9pQw4nVy2LmK7uB3sZfXVt",
-  },
-  {
-    createdAt: "2026-06-28 18:10",
-    enabled: false,
-    expiresAt: null,
-    id: "ak_mock_worker",
-    lastUsedAt: "-",
-    name: "Worker Script",
-    quota: null,
-    quotaUsed: 0,
-    rpmLimit: null,
-    token: "sk-p9mN4qYx7aLs2dVb6HrT8cKe3uWzQ1",
-  },
-];
-
 function maskApiKey(value: string) {
   if (value.length <= 18) return value;
   return `${value.slice(0, 7)}**********${value.slice(-4)}`;
 }
 
-function createMockApiKeyToken() {
-  return `sk-${Math.random().toString(36).slice(2, 14)}${Math.random()
-    .toString(36)
-    .slice(2, 24)}`;
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function toDateInput(value?: string | null) {
+  if (!value) return null;
+  return value.slice(0, 10);
+}
+
+function toExpireAt(value: string | null) {
+  if (!value) return null;
+  return new Date(`${value}T23:59:59`).toISOString();
+}
+
+function toApiKeyRecord(item: APIKeyResponse): ApiKeyRecord {
+  return {
+    createdAt: formatDateTime(item.createdAt),
+    enabled: item.enabled,
+    expiresAt: toDateInput(item.expireAt),
+    id: item.id,
+    lastUsedAt: formatDateTime(item.lastUsedAt),
+    name: item.name || item.keyPrefix,
+    quota: item.quotaLimit ?? null,
+    quotaUsed: item.quotaUsed,
+    rpmLimit: item.rateLimitPerMinute ?? null,
+    token: item.keyPlain || item.keyPrefix,
+  };
 }
 
 function getRemainingDays(expiresAt: string | null) {
@@ -109,13 +116,31 @@ function normalizeDatePickerValue(value: unknown) {
 
 export function ApiKeyPanel() {
   const { t } = useTranslation();
-  const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>(mockApiKeys);
+  const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
   const [editingApiKey, setEditingApiKey] = useState<ApiKeyRecord | null>(null);
   const [apiKeyName, setApiKeyName] = useState("");
   const [apiKeyExpiresAt, setApiKeyExpiresAt] = useState<string | null>(null);
   const [apiKeyQuota, setApiKeyQuota] = useState<number | null>(null);
   const [apiKeyRpmLimit, setApiKeyRpmLimit] = useState<number | null>(null);
+
+  const refreshAPIKeys = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await listAPIKeys({ limit: 100, offset: 0 });
+      setApiKeys(response.items.map(toApiKeyRecord));
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Failed to load API keys."));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void refreshAPIKeys();
+  }, [refreshAPIKeys]);
 
   const openCreateApiKey = () => {
     setEditingApiKey(null);
@@ -144,58 +169,57 @@ export function ApiKeyPanel() {
     setApiKeyRpmLimit(null);
   };
 
-  const saveApiKey = () => {
+  const saveApiKey = async () => {
     const nextName = apiKeyName.trim();
     if (!nextName) {
       Toast.warning(t("Please enter API key name."));
       return;
     }
 
-    if (editingApiKey) {
-      setApiKeys((items) =>
-        items.map((item) =>
-          item.id === editingApiKey.id
-            ? {
-                ...item,
-                expiresAt: apiKeyExpiresAt,
-                name: nextName,
-                quota: apiKeyQuota,
-                rpmLimit: apiKeyRpmLimit,
-              }
-            : item
-        )
-      );
-      Toast.success(t("API key updated."));
-    } else {
-      setApiKeys((items) => [
-        {
-          createdAt: new Date().toLocaleString(),
-          enabled: true,
-          expiresAt: apiKeyExpiresAt,
-          id: `ak_mock_${Date.now()}`,
-          lastUsedAt: "-",
+    setSaving(true);
+    try {
+      if (editingApiKey) {
+        const updated = await updateAPIKey(editingApiKey.id, {
+          expireAt: toExpireAt(apiKeyExpiresAt),
           name: nextName,
-          quota: apiKeyQuota,
-          quotaUsed: 0,
-          rpmLimit: apiKeyRpmLimit,
-          token: createMockApiKeyToken(),
-        },
-        ...items,
-      ]);
-      Toast.success(t("API key created."));
+          quotaLimit: apiKeyQuota,
+          rateLimitPerMinute: apiKeyRpmLimit,
+        });
+        setApiKeys((items) =>
+          items.map((item) =>
+            item.id === editingApiKey.id ? toApiKeyRecord(updated) : item
+          )
+        );
+        Toast.success(t("API key updated."));
+      } else {
+        const created = await createAPIKey({
+          expireAt: toExpireAt(apiKeyExpiresAt),
+          name: nextName,
+          quotaLimit: apiKeyQuota,
+          rateLimitPerMinute: apiKeyRpmLimit,
+        });
+        setApiKeys((items) => [toApiKeyRecord(created), ...items]);
+        Toast.success(t("API key created."));
+      }
+      closeApiKeyModal();
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "API key operation failed."));
+    } finally {
+      setSaving(false);
     }
-
-    closeApiKeyModal();
   };
 
-  const toggleApiKeyEnabled = (record: ApiKeyRecord) => {
+  const toggleApiKeyEnabled = async (record: ApiKeyRecord) => {
     const nextEnabled = !record.enabled;
-    setApiKeys((items) =>
-      items.map((item) =>
-        item.id === record.id ? { ...item, enabled: nextEnabled } : item
-      )
-    );
-    Toast.success(t(nextEnabled ? "API key enabled." : "API key disabled."));
+    try {
+      const updated = await updateAPIKey(record.id, { enabled: nextEnabled });
+      setApiKeys((items) =>
+        items.map((item) => (item.id === record.id ? toApiKeyRecord(updated) : item))
+      );
+      Toast.success(t(nextEnabled ? "API key enabled." : "API key disabled."));
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "API key operation failed."));
+    }
   };
 
   const deleteApiKey = (record: ApiKeyRecord) => {
@@ -203,9 +227,14 @@ export function ApiKeyPanel() {
       cancelText: t("Cancel"),
       content: t("Confirm delete API key content", { name: record.name }),
       okText: t("Delete"),
-      onOk: () => {
-        setApiKeys((items) => items.filter((item) => item.id !== record.id));
-        Toast.success(t("API key deleted."));
+      onOk: async () => {
+        try {
+          await deleteAPIKey(record.id);
+          setApiKeys((items) => items.filter((item) => item.id !== record.id));
+          Toast.success(t("API key deleted."));
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "API key operation failed."));
+        }
       },
       title: t("Confirm delete"),
     });
@@ -237,7 +266,11 @@ export function ApiKeyPanel() {
         </div>
 
         <div className="account-api-body">
-          {apiKeys.length === 0 ? (
+          {loading ? (
+            <div className="account-api-empty">
+              <Text type="tertiary">{t("Loading")}</Text>
+            </div>
+          ) : apiKeys.length === 0 ? (
             <div className="account-api-empty">
               <div className="account-setting-icon is-orange">
                 <IconKey />
@@ -369,6 +402,7 @@ export function ApiKeyPanel() {
         className="account-api-key-modal"
         onCancel={closeApiKeyModal}
         onOk={saveApiKey}
+        confirmLoading={saving}
         size="small"
         title={editingApiKey ? t("Edit API key") : t("Create API key")}
         visible={apiKeyModalOpen}

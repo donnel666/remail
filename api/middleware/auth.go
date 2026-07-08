@@ -12,7 +12,7 @@ import (
 // context keys for storing authenticated user info
 const (
 	contextKeyUserID    = "iam_user_id"
-	contextKeyRoleLevel = "iam_role_level"
+	contextKeyRole      = "iam_role"
 	contextKeyEmail     = "iam_email"
 	contextKeySessionID = "iam_session_id"
 )
@@ -21,20 +21,20 @@ const (
 // Implementations should do a Redis lookup and return the session data.
 type SessionFetcher interface {
 	// FetchSession retrieves session data. Returns ok=false if invalid/expired.
-	FetchSession(ctx context.Context, sessionID string) (userID uint, roleLevel domain.RoleLevel, email string, ok bool)
+	FetchSession(ctx context.Context, sessionID string) (userID uint, role domain.Role, email string, ok bool)
 }
 
 // SessionFetcherFunc is a function adapter for SessionFetcher.
-type SessionFetcherFunc func(ctx context.Context, sessionID string) (uint, domain.RoleLevel, string, bool)
+type SessionFetcherFunc func(ctx context.Context, sessionID string) (uint, domain.Role, string, bool)
 
 // FetchSession implements SessionFetcher.
-func (f SessionFetcherFunc) FetchSession(ctx context.Context, sessionID string) (uint, domain.RoleLevel, string, bool) {
+func (f SessionFetcherFunc) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool) {
 	return f(ctx, sessionID)
 }
 
 // PermissionChecker checks fine-grained permissions for authenticated users.
 type PermissionChecker interface {
-	Check(ctx context.Context, userID uint, roleLevel domain.RoleLevel, resource, action string) (bool, error)
+	Check(ctx context.Context, userID uint, role domain.Role, resource, action string) (bool, error)
 }
 
 // LoadSession returns a middleware that reads the "sid" cookie and populates
@@ -49,14 +49,14 @@ func LoadSession(fetcher SessionFetcher) gin.HandlerFunc {
 			return
 		}
 
-		userID, roleLevel, email, ok := fetcher.FetchSession(c.Request.Context(), sid)
+		userID, role, email, ok := fetcher.FetchSession(c.Request.Context(), sid)
 		if !ok {
 			clearRequestAuthCookies(c)
 			c.Next()
 			return
 		}
 
-		SetCurrentUser(c, userID, roleLevel, email, sid)
+		SetCurrentUser(c, userID, role, email, sid)
 		c.Next()
 	}
 }
@@ -78,11 +78,11 @@ func AuthRequired() gin.HandlerFunc {
 	}
 }
 
-// AdminRequired returns a middleware that requires roleLevel >= minLevel.
-// Must be used after LoadSession + AuthRequired.
-func AdminRequired(minLevel domain.RoleLevel) gin.HandlerFunc {
+// RoleRequired returns a middleware that requires one of the given RBAC roles.
+// Prefer PermissionRequired for resource-level authorization.
+func RoleRequired(allowedRoles ...domain.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		roleLevel, ok := GetCurrentRoleLevel(c)
+		role, ok := GetCurrentRole(c)
 		if !ok {
 			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -92,7 +92,14 @@ func AdminRequired(minLevel domain.RoleLevel) gin.HandlerFunc {
 			return
 		}
 
-		if !roleLevel.IsAtLeast(minLevel) {
+		allowed := false
+		for _, allowedRole := range allowedRoles {
+			if role == allowedRole {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"message":   "Permission denied.",
 				"requestId": GetRequestID(c),
@@ -117,7 +124,7 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 			return
 		}
 
-		roleLevel, ok := GetCurrentRoleLevel(c)
+		role, ok := GetCurrentRole(c)
 		if !ok {
 			clearRequestAuthCookies(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -127,7 +134,7 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 			return
 		}
 
-		allowed, err := checker.Check(c.Request.Context(), userID, roleLevel, resource, action)
+		allowed, err := checker.Check(c.Request.Context(), userID, role, resource, action)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"message":   "An unexpected error occurred.",
@@ -166,9 +173,9 @@ func requestIsSecure(c *gin.Context) bool {
 }
 
 // SetCurrentUser stores authenticated user info in the gin context.
-func SetCurrentUser(c *gin.Context, userID uint, roleLevel domain.RoleLevel, email, sessionID string) {
+func SetCurrentUser(c *gin.Context, userID uint, role domain.Role, email, sessionID string) {
 	c.Set(contextKeyUserID, userID)
-	c.Set(contextKeyRoleLevel, int(roleLevel))
+	c.Set(contextKeyRole, role)
 	c.Set(contextKeyEmail, email)
 	c.Set(contextKeySessionID, sessionID)
 }
@@ -183,17 +190,21 @@ func GetCurrentUserID(c *gin.Context) (uint, bool) {
 	return id, ok
 }
 
-// GetCurrentRoleLevel returns the authenticated user's role level.
-func GetCurrentRoleLevel(c *gin.Context) (domain.RoleLevel, bool) {
-	v, exists := c.Get(contextKeyRoleLevel)
+// GetCurrentRole returns the authenticated user's RBAC role.
+func GetCurrentRole(c *gin.Context) (domain.Role, bool) {
+	v, exists := c.Get(contextKeyRole)
 	if !exists {
-		return 0, false
+		return "", false
 	}
-	level, ok := v.(int)
+	role, ok := v.(domain.Role)
+	if ok {
+		return role, true
+	}
+	roleString, ok := v.(string)
 	if !ok {
-		return 0, false
+		return "", false
 	}
-	return domain.RoleLevel(level), true
+	return domain.Role(roleString), true
 }
 
 // GetCurrentEmail returns the authenticated user's email.

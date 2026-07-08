@@ -13,8 +13,10 @@ type APIKey struct {
 	KeyPrefix          string
 	KeyPlain           string
 	Enabled            bool
-	RateLimitPerMinute int
+	RateLimitPerMinute *int
 	ConcurrencyLimit   int
+	QuotaLimit         *int64
+	QuotaUsed          int64
 	ActiveRequests     int
 	ExpireAt           *time.Time
 	LastUsedAt         *time.Time
@@ -42,6 +44,7 @@ var (
 	ErrAPIKeyExpired           = errors.New("openapi: api key expired")
 	ErrAPIKeyForbidden         = errors.New("openapi: api key forbidden")
 	ErrAPIKeyRateLimited       = errors.New("openapi: api key rate limited")
+	ErrAPIKeyQuotaExceeded     = errors.New("openapi: api key quota exceeded")
 	ErrAPIKeyConcurrencyLimit  = errors.New("openapi: api key concurrency limit reached")
 	ErrInvalidOrderToken       = errors.New("openapi: invalid order token")
 	ErrOrderTokenDisabled      = errors.New("openapi: order token disabled")

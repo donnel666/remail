@@ -37,6 +37,30 @@ func (e AdminCreateProjectRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for AdminUpdateUserRequestRole.
+const (
+	AdminUpdateUserRequestRoleAdmin      AdminUpdateUserRequestRole = "admin"
+	AdminUpdateUserRequestRoleSuperAdmin AdminUpdateUserRequestRole = "super_admin"
+	AdminUpdateUserRequestRoleSupplier   AdminUpdateUserRequestRole = "supplier"
+	AdminUpdateUserRequestRoleUser       AdminUpdateUserRequestRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminUpdateUserRequestRole enum.
+func (e AdminUpdateUserRequestRole) Valid() bool {
+	switch e {
+	case AdminUpdateUserRequestRoleAdmin:
+		return true
+	case AdminUpdateUserRequestRoleSuperAdmin:
+		return true
+	case AdminUpdateUserRequestRoleSupplier:
+		return true
+	case AdminUpdateUserRequestRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AllocationItemMailbox.
 const (
 	AllocationItemMailboxAlias  AllocationItemMailbox = "alias"
@@ -1482,16 +1506,16 @@ func (e GetAdminProxyBindingsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsPool.
 const (
-	GetAdminProxyStatsParamsPoolResource GetAdminProxyStatsParamsPool = "resource"
-	GetAdminProxyStatsParamsPoolSystem   GetAdminProxyStatsParamsPool = "system"
+	Resource GetAdminProxyStatsParamsPool = "resource"
+	System   GetAdminProxyStatsParamsPool = "system"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
 func (e GetAdminProxyStatsParamsPool) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsPoolResource:
+	case Resource:
 		return true
-	case GetAdminProxyStatsParamsPoolSystem:
+	case System:
 		return true
 	default:
 		return false
@@ -1817,7 +1841,10 @@ type APIKeyCreateRequest struct {
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Name             *string    `json:"name,omitempty"`
 
-	// RateLimitPerMinute Defaults to 60 when omitted.
+	// QuotaLimit Empty means unlimited total requests.
+	QuotaLimit *int64 `json:"quotaLimit,omitempty"`
+
+	// RateLimitPerMinute Empty means unlimited requests per minute.
 	RateLimitPerMinute *int `json:"rateLimitPerMinute,omitempty"`
 }
 
@@ -1835,6 +1862,7 @@ type APIKeyPatchRequest struct {
 	Enabled            *bool      `json:"enabled,omitempty"`
 	ExpireAt           *time.Time `json:"expireAt,omitempty"`
 	Name               *string    `json:"name,omitempty"`
+	QuotaLimit         *int64     `json:"quotaLimit,omitempty"`
 	RateLimitPerMinute *int       `json:"rateLimitPerMinute,omitempty"`
 }
 
@@ -1852,7 +1880,10 @@ type APIKeyResponse struct {
 	KeyPrefix          string     `json:"keyPrefix"`
 	LastUsedAt         *time.Time `json:"lastUsedAt,omitempty"`
 	Name               string     `json:"name"`
-	RateLimitPerMinute int        `json:"rateLimitPerMinute"`
+	QuotaLimit         *int64     `json:"quotaLimit,omitempty"`
+	QuotaUsed          int64      `json:"quotaUsed"`
+	RateLimitPerMinute *int       `json:"rateLimitPerMinute"`
+	RemainingQuota     *int64     `json:"remainingQuota,omitempty"`
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
@@ -1927,9 +1958,13 @@ type AdminUpdateUserPermissionsRequest struct {
 
 // AdminUpdateUserRequest defines model for AdminUpdateUserRequest.
 type AdminUpdateUserRequest struct {
-	Enabled   *bool `json:"enabled,omitempty"`
-	RoleLevel *int  `json:"roleLevel,omitempty"`
+	Enabled     *bool                       `json:"enabled,omitempty"`
+	Role        *AdminUpdateUserRequestRole `json:"role,omitempty"`
+	UserGroupId *int                        `json:"userGroupId,omitempty"`
 }
+
+// AdminUpdateUserRequestRole defines model for AdminUpdateUserRequest.Role.
+type AdminUpdateUserRequestRole string
 
 // AdminUserListResponse defines model for AdminUserListResponse.
 type AdminUserListResponse struct {
@@ -3273,6 +3308,15 @@ type UpdateProxyRequest struct {
 // UpdateProxyRequestStatus Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
 type UpdateProxyRequestStatus string
 
+// UserGroupResponse defines model for UserGroupResponse.
+type UserGroupResponse struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Id          int    `json:"id"`
+	Name        string `json:"name"`
+}
+
 // UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
 type UserPermissionPoliciesResponse struct {
 	Policies []PermissionPolicyResponse `json:"policies"`
@@ -3280,17 +3324,16 @@ type UserPermissionPoliciesResponse struct {
 
 // UserResponse defines model for UserResponse.
 type UserResponse struct {
-	CreatedAt   time.Time        `json:"createdAt"`
-	Email       string           `json:"email"`
-	Enabled     bool             `json:"enabled"`
-	Id          int              `json:"id"`
-	LastLoginAt *time.Time       `json:"lastLoginAt,omitempty"`
-	Nickname    string           `json:"nickname"`
-	Role        UserResponseRole `json:"role"`
-
-	// RoleLevel Numeric role level: 10=user, 20=supplier, 80=admin, 100=super_admin
-	RoleLevel int       `json:"roleLevel"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	Email       string            `json:"email"`
+	Enabled     bool              `json:"enabled"`
+	Id          int               `json:"id"`
+	LastLoginAt *time.Time        `json:"lastLoginAt,omitempty"`
+	Nickname    string            `json:"nickname"`
+	Permissions *[]string         `json:"permissions,omitempty"`
+	Role        UserResponseRole  `json:"role"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+	UserGroup   UserGroupResponse `json:"userGroup"`
 }
 
 // UserResponseRole defines model for UserResponse.Role.
@@ -3724,6 +3767,12 @@ type PostApiKeyParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteApiKeyParams defines parameters for DeleteApiKey.
+type DeleteApiKeyParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -4793,6 +4842,9 @@ type ServerInterface interface {
 	// Create an API key for the current user
 	// (POST /v1/apikeys)
 	PostApiKey(c *gin.Context, params PostApiKeyParams)
+	// Delete one API key
+	// (DELETE /v1/apikeys/{keyId})
+	DeleteApiKey(c *gin.Context, keyId int, params DeleteApiKeyParams)
 	// Get one API key
 	// (GET /v1/apikeys/{keyId})
 	GetApiKey(c *gin.Context, keyId int)
@@ -7644,6 +7696,60 @@ func (siw *ServerInterfaceWrapper) PostApiKey(c *gin.Context) {
 	siw.Handler.PostApiKey(c, params)
 }
 
+// DeleteApiKey operation middleware
+func (siw *ServerInterfaceWrapper) DeleteApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteApiKey(c, keyId, params)
+}
+
 // GetApiKey operation middleware
 func (siw *ServerInterfaceWrapper) GetApiKey(c *gin.Context) {
 
@@ -9648,6 +9754,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
+	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
 	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)

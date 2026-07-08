@@ -1,18 +1,38 @@
 -- +goose Up
 
+CREATE TABLE user_groups (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(64) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500) NOT NULL DEFAULT '',
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE INDEX idx_user_groups_code (code),
+    CONSTRAINT chk_user_groups_code CHECK (code <> ''),
+    CONSTRAINT chk_user_groups_name CHECK (name <> '')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO user_groups (id, code, name, description, enabled)
+VALUES (1, 'normal', '普通用户', '默认权益分组', 1);
+
 CREATE TABLE users (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     email       VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     nickname    VARCHAR(100) NOT NULL DEFAULT '',
     enabled     TINYINT(1) NOT NULL DEFAULT 1,
-    role_level  INT NOT NULL DEFAULT 10 COMMENT '10=user 20=supplier 80=admin 100=super_admin',
+    role        VARCHAR(32) NOT NULL DEFAULT 'user' COMMENT 'RBAC role: user|supplier|admin|super_admin',
+    user_group_id BIGINT UNSIGNED NOT NULL DEFAULT 1,
     token_version INT NOT NULL DEFAULT 0 COMMENT 'increment to invalidate all sessions',
     last_login_at DATETIME NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE INDEX idx_users_email (email),
-    CONSTRAINT chk_users_role_level CHECK (role_level IN (10, 20, 80, 100))
+    INDEX idx_users_role (role),
+    INDEX idx_users_user_group (user_group_id),
+    CONSTRAINT fk_users_user_group FOREIGN KEY (user_group_id) REFERENCES user_groups(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_users_role CHECK (role IN ('user', 'supplier', 'admin', 'super_admin'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE system_guard (
@@ -87,6 +107,8 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:admin', 'iam:user', 'read', 'allow'),
     ('p', 'role:admin', 'iam:user', 'write', 'allow'),
     ('p', 'role:admin', 'iam:user', 'operate', 'allow'),
+    ('p', 'role:admin', 'iam:user_group', 'read', 'allow'),
+    ('p', 'role:admin', 'iam:user_group', 'write', 'allow'),
     ('p', 'role:admin', 'iam:permission', 'read', 'allow'),
     ('p', 'role:admin', 'iam:permission', 'write', 'allow'),
     ('p', 'role:admin', 'iam:invite', 'read', 'allow'),
@@ -94,16 +116,24 @@ INSERT INTO casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p', 'role:admin', 'iam:invite', 'operate', 'allow'),
     ('p', 'role:admin', 'iam:supplier_application', 'read', 'allow'),
     ('p', 'role:admin', 'iam:supplier_application', 'operate', 'allow'),
+    ('p', 'role:admin', 'core:resource', 'read', 'allow'),
+    ('p', 'role:admin', 'core:resource', 'write', 'allow'),
+    ('p', 'role:admin', 'core:resource', 'operate', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:user', 'operate', 'allow'),
+    ('p', 'role:super_admin', 'iam:user_group', 'read', 'allow'),
+    ('p', 'role:super_admin', 'iam:user_group', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:permission', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:permission', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'read', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'write', 'allow'),
     ('p', 'role:super_admin', 'iam:invite', 'operate', 'allow'),
     ('p', 'role:super_admin', 'iam:supplier_application', 'read', 'allow'),
-    ('p', 'role:super_admin', 'iam:supplier_application', 'operate', 'allow');
+    ('p', 'role:super_admin', 'iam:supplier_application', 'operate', 'allow'),
+    ('p', 'role:super_admin', 'core:resource', 'read', 'allow'),
+    ('p', 'role:super_admin', 'core:resource', 'write', 'allow'),
+    ('p', 'role:super_admin', 'core:resource', 'operate', 'allow');
 
 CREATE TABLE supplier_applications (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -150,3 +180,4 @@ DROP TABLE IF EXISTS invite_uses;
 DROP TABLE IF EXISTS invites;
 DROP TABLE IF EXISTS system_guard;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS user_groups;

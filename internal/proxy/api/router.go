@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/donnel666/remail/api/middleware"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +12,6 @@ func RegisterProxyRoutes(rg *gin.RouterGroup, mod *ProxyModule, fetcher middlewa
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	admin.Use(middleware.AdminRequired(iamdomain.RoleAdmin))
 	{
 		admin.GET("/proxies", middleware.PermissionRequired(checker, "proxy:proxy", "read"), h.GetProxies)
 		admin.GET("/proxies/stats", middleware.PermissionRequired(checker, "proxy:proxy", "read"), h.GetProxyStats)

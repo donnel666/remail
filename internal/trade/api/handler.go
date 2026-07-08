@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
@@ -79,8 +78,8 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	role, _ := middleware.GetCurrentRoleLevel(c)
-	isAdmin := role.IsAtLeast(iamdomain.RoleAdmin)
+	role, _ := middleware.GetCurrentRole(c)
+	isAdmin := role.HasAdminAccess()
 	items, total, err := h.mod.UseCase.ListOrders(c.Request.Context(), tradeapp.OrderListFilter{
 		UserID:      userID,
 		IsAdmin:     isAdmin,
@@ -105,8 +104,8 @@ func (h *Handler) GetOrder(c *gin.Context) {
 	if !ok {
 		return
 	}
-	role, _ := middleware.GetCurrentRoleLevel(c)
-	result, err := h.mod.UseCase.GetOrder(c.Request.Context(), c.Param("orderNo"), userID, role.IsAtLeast(iamdomain.RoleAdmin))
+	role, _ := middleware.GetCurrentRole(c)
+	result, err := h.mod.UseCase.GetOrder(c.Request.Context(), c.Param("orderNo"), userID, role.HasAdminAccess())
 	if err != nil {
 		writeTradeError(c, err)
 		return
@@ -120,8 +119,8 @@ func (h *Handler) GetOrderEvents(c *gin.Context) {
 		return
 	}
 	offset, limit := parseOffsetLimit(c)
-	role, _ := middleware.GetCurrentRoleLevel(c)
-	items, total, err := h.mod.UseCase.ListEvents(c.Request.Context(), c.Param("orderNo"), userID, role.IsAtLeast(iamdomain.RoleAdmin), offset, limit)
+	role, _ := middleware.GetCurrentRole(c)
+	items, total, err := h.mod.UseCase.ListEvents(c.Request.Context(), c.Param("orderNo"), userID, role.HasAdminAccess(), offset, limit)
 	if err != nil {
 		writeTradeError(c, err)
 		return

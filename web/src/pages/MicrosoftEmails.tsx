@@ -74,10 +74,9 @@ import { useSelectionNotification } from "./resources/use-selection-notification
 
 type StatusFilter = "all" | "normal" | "pending" | "abnormal" | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
-const supplierRoleLevel = 20;
 
-function hasSupplierRole(roleLevel?: number | null) {
-  return (roleLevel ?? 0) >= supplierRoleLevel;
+function hasSupplierRole(role?: string | null) {
+  return role === "supplier" || role === "admin" || role === "super_admin";
 }
 
 function matchesStatusFilter(status: ResourceStatus, filter: StatusFilter) {
@@ -245,7 +244,7 @@ export default function MicrosoftEmails() {
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
-  const canPublishForSale = hasSupplierRole(currentUser?.roleLevel);
+  const canPublishForSale = hasSupplierRole(currentUser?.role);
 
   const suffixCounts = useMemo(() => getSuffixCounts(items), [items]);
   const suffixSet = useMemo(
@@ -490,7 +489,7 @@ export default function MicrosoftEmails() {
     if (canPublishForSale) return true;
 
     const latestUser = await refreshCurrentUser();
-    if (hasSupplierRole(latestUser?.roleLevel)) return true;
+    if (hasSupplierRole(latestUser?.role)) return true;
 
     await promptSupplierApplication();
     return false;

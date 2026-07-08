@@ -60,8 +60,8 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 
 	// Non-admin users can only see their own resources
 	if scope == "all" {
-		roleLevel, ok := middleware.GetCurrentRoleLevel(c)
-		if !ok || !roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
+		role, ok := middleware.GetCurrentRole(c)
+		if !ok || !role.HasAdminAccess() {
 			scope = "owned"
 		}
 	}
@@ -422,12 +422,12 @@ func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 		return
 	}
 
-	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	role, _ := middleware.GetCurrentRole(c)
 	result, err := h.module.ValidationUseCase.Create(
 		c.Request.Context(),
 		resourceID,
 		userID,
-		roleLevel.IsAtLeast(iamdomain.RoleAdmin),
+		role.HasAdminAccess(),
 		middleware.GetRequestID(c),
 		c.FullPath(),
 	)
@@ -493,8 +493,8 @@ func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
 		return
 	}
 
-	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
-	result, err := h.module.ValidationUseCase.Get(c.Request.Context(), validationID, userID, roleLevel.IsAtLeast(iamdomain.RoleAdmin))
+	role, _ := middleware.GetCurrentRole(c)
+	result, err := h.module.ValidationUseCase.Get(c.Request.Context(), validationID, userID, role.HasAdminAccess())
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -516,11 +516,11 @@ func (h *CoreHandler) GetProjects(c *gin.Context) {
 		return
 	}
 
-	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	role, _ := middleware.GetCurrentRole(c)
 	scope := coreapp.ProjectListScope(c.DefaultQuery("scope", "visible"))
 	isAdmin := false
-	if roleLevel.IsAtLeast(iamdomain.RoleAdmin) && scope == coreapp.ProjectListScopeAll {
-		allowed, handled := h.checkProjectReadPermission(c, userID, roleLevel)
+	if role.HasAdminAccess() && scope == coreapp.ProjectListScopeAll {
+		allowed, handled := h.checkProjectReadPermission(c, userID, role)
 		if handled {
 			return
 		}
@@ -621,10 +621,10 @@ func (h *CoreHandler) GetProject(c *gin.Context) {
 		return
 	}
 
-	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
+	role, _ := middleware.GetCurrentRole(c)
 	includeInternal := false
-	if roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
-		allowed, handled := h.checkProjectReadPermission(c, userID, roleLevel)
+	if role.HasAdminAccess() {
+		allowed, handled := h.checkProjectReadPermission(c, userID, role)
 		if handled {
 			return
 		}
@@ -1104,7 +1104,7 @@ func requireCurrentUserID(c *gin.Context) (uint, bool) {
 
 // requireSupplier verifies the user has at least supplier role.
 func requireSupplier(c *gin.Context) bool {
-	roleLevel, ok := middleware.GetCurrentRoleLevel(c)
+	role, ok := middleware.GetCurrentRole(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message":   "Authentication is required.",
@@ -1112,7 +1112,7 @@ func requireSupplier(c *gin.Context) bool {
 		})
 		return false
 	}
-	if !roleLevel.IsAtLeast(iamdomain.RoleSupplier) {
+	if !role.HasSupplierAccess() {
 		c.JSON(http.StatusForbidden, gin.H{
 			"message":   "Permission denied.",
 			"requestId": middleware.GetRequestID(c),
@@ -1122,7 +1122,7 @@ func requireSupplier(c *gin.Context) bool {
 	return true
 }
 
-func (h *CoreHandler) checkProjectReadPermission(c *gin.Context, userID uint, roleLevel iamdomain.RoleLevel) (bool, bool) {
+func (h *CoreHandler) checkProjectReadPermission(c *gin.Context, userID uint, role iamdomain.Role) (bool, bool) {
 	if h.permissionChecker == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message":   "An unexpected error occurred.",
@@ -1130,7 +1130,7 @@ func (h *CoreHandler) checkProjectReadPermission(c *gin.Context, userID uint, ro
 		})
 		return false, true
 	}
-	allowed, err := h.permissionChecker.Check(c.Request.Context(), userID, roleLevel, "core:project", "read")
+	allowed, err := h.permissionChecker.Check(c.Request.Context(), userID, role, "core:project", "read")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message":   "An unexpected error occurred.",
@@ -1510,8 +1510,8 @@ func (h *CoreHandler) GetServers(c *gin.Context) {
 	}
 
 	if scope == "all" {
-		roleLevel, ok := middleware.GetCurrentRoleLevel(c)
-		if !ok || !roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
+		role, ok := middleware.GetCurrentRole(c)
+		if !ok || !role.HasAdminAccess() {
 			scope = "owned"
 		}
 	}
@@ -1618,7 +1618,7 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 	if purpose == "" {
 		purpose = string(coredomain.PurposeNotSale)
 	}
-	roleLevel, ok := middleware.GetCurrentRoleLevel(c)
+	role, ok := middleware.GetCurrentRole(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message":   "Authentication is required.",
@@ -1632,7 +1632,7 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 		writeCoreError(c, coredomain.ErrInvalidPurpose)
 		return
 	case coredomain.PurposeBinding:
-		if !roleLevel.IsAtLeast(iamdomain.RoleAdmin) {
+		if !role.HasAdminAccess() {
 			c.JSON(http.StatusForbidden, gin.H{
 				"message":   "Permission denied.",
 				"requestId": middleware.GetRequestID(c),
@@ -1645,7 +1645,7 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 		Domain:       req.Domain,
 		MailServerID: req.MailServerID,
 		Purpose:      purpose,
-		AllowBinding: roleLevel.IsAtLeast(iamdomain.RoleAdmin),
+		AllowBinding: role.HasAdminAccess(),
 	}
 
 	result, err := h.module.DomainUseCase.Create(c.Request.Context(), userID, appReq)
@@ -1671,8 +1671,8 @@ func (h *CoreHandler) GetDomainMailboxes(c *gin.Context) {
 		return
 	}
 
-	roleLevel, _ := middleware.GetCurrentRoleLevel(c)
-	isAdmin := roleLevel.IsAtLeast(iamdomain.RoleAdmin)
+	role, _ := middleware.GetCurrentRole(c)
+	isAdmin := role.HasAdminAccess()
 
 	domainIDStr := c.Param("domainId")
 	domainID, err := strconv.ParseUint(domainIDStr, 10, 64)

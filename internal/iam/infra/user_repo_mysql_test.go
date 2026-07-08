@@ -62,7 +62,7 @@ func TestUserRepoCreateFirstUserConcurrentMySQL(t *testing.T) {
 				Email:        fmt.Sprintf("admin-%d@test.local", i),
 				PasswordHash: "hash",
 				Enabled:      true,
-				RoleLevel:    domain.RoleSuperAdmin,
+				Role:         domain.RoleSuperAdmin,
 			})
 		}(i)
 	}
@@ -92,11 +92,11 @@ func TestUserRepoCreateFirstUserConcurrentMySQL(t *testing.T) {
 	require.Equal(t, int64(1), count)
 }
 
-func TestUserRepoRoleLevelCheckMySQL(t *testing.T) {
+func TestUserRepoRoleCheckMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 
 	err := db.Exec(
-		"INSERT INTO users(email, password_hash, role_level) VALUES (?, ?, ?)",
+		"INSERT INTO users(email, password_hash, role) VALUES (?, ?, ?)",
 		"bad-role@test.local",
 		"hash",
 		30,
@@ -113,7 +113,7 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 		Email:        "user@test.local",
 		PasswordHash: "hash",
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), user))
 
@@ -151,7 +151,7 @@ func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 		PasswordHash: "hash",
 		Nickname:     "Project Alpha",
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), alpha))
 	beta := &domain.User{
@@ -159,7 +159,7 @@ func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 		PasswordHash: "hash",
 		Nickname:     "Beta User",
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), beta))
 
@@ -272,7 +272,7 @@ func TestUserRepoCreateWithInviteConcurrentMySQL(t *testing.T) {
 				Email:        fmt.Sprintf("invite-user-%d@test.local", i),
 				PasswordHash: "hash",
 				Enabled:      true,
-				RoleLevel:    domain.RoleUser,
+				Role:         domain.RoleUser,
 			}, "INVITE-1")
 		}(i)
 	}
@@ -314,7 +314,7 @@ func TestUserRepoReferralInviteConstraintsMySQL(t *testing.T) {
 		Email:        "referral-owner@test.local",
 		PasswordHash: "hash",
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), owner))
 

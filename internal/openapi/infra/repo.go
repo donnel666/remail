@@ -24,8 +24,11 @@ type APIKeyModel struct {
 	KeyPrefix          string     `gorm:"type:varchar(32);not null;column:key_prefix"`
 	KeyPlain           string     `gorm:"type:varchar(255);not null;column:key_plain"`
 	Enabled            bool       `gorm:"not null;default:true"`
-	RateLimitPerMinute int        `gorm:"not null;column:rate_limit_per_minute"`
+	DeletedAt          *time.Time `gorm:"column:deleted_at"`
+	RateLimitPerMinute *int       `gorm:"column:rate_limit_per_minute"`
 	ConcurrencyLimit   int        `gorm:"not null;column:concurrency_limit"`
+	QuotaLimit         *int64     `gorm:"column:quota_limit"`
+	QuotaUsed          int64      `gorm:"not null;column:quota_used"`
 	ActiveRequests     int        `gorm:"not null;column:active_requests"`
 	WindowStartedAt    *time.Time `gorm:"column:window_started_at"`
 	WindowRequestCount int        `gorm:"not null;column:window_request_count"`
@@ -130,6 +133,7 @@ func (r *Repo) CreateAPIKey(ctx context.Context, cmd openapiapp.CreateAPIKeyComm
 				Enabled:            true,
 				RateLimitPerMinute: cmd.RateLimitPerMinute,
 				ConcurrencyLimit:   cmd.ConcurrencyLimit,
+				QuotaLimit:         cmd.QuotaLimit,
 				ExpireAt:           cmd.ExpireAt,
 			}
 			if err := writeTx.WithContext(ctx).Create(&model).Error; err != nil {
@@ -160,12 +164,12 @@ func (r *Repo) CreateAPIKey(ctx context.Context, cmd openapiapp.CreateAPIKeyComm
 
 func (r *Repo) ListAPIKeys(ctx context.Context, userID uint, offset, limit int) ([]domain.APIKey, int64, error) {
 	var total int64
-	if err := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("user_id = ? AND deleted_at IS NULL", userID).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count api keys: %w", err)
 	}
 	var models []APIKeyModel
 	if err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(limit).
@@ -181,7 +185,7 @@ func (r *Repo) ListAPIKeys(ctx context.Context, userID uint, offset, limit int) 
 
 func (r *Repo) FindAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error) {
 	var model APIKeyModel
-	if err := r.db.WithContext(ctx).First(&model, "id = ? AND user_id = ?", keyID, userID).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&model, "id = ? AND user_id = ? AND deleted_at IS NULL", keyID, userID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrAPIKeyNotFound
 		}
@@ -202,16 +206,26 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 	if cmd.ExpireSet {
 		updates["expire_at"] = cmd.ExpireAt
 	}
-	if cmd.RateLimitPerMinute != nil {
-		updates["rate_limit_per_minute"] = *cmd.RateLimitPerMinute
+	if cmd.RateLimitSet {
+		if cmd.RateLimitPerMinute == nil {
+			updates["rate_limit_per_minute"] = nil
+		} else {
+			updates["rate_limit_per_minute"] = *cmd.RateLimitPerMinute
+		}
 	}
 	if cmd.ConcurrencyLimit != nil {
 		updates["concurrency_limit"] = *cmd.ConcurrencyLimit
 	}
+	if cmd.QuotaSet {
+		updates["quota_limit"] = cmd.QuotaLimit
+	}
 	if len(updates) > 0 {
-		query := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("id = ? AND user_id = ?", cmd.KeyID, cmd.UserID)
+		query := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("id = ? AND user_id = ? AND deleted_at IS NULL", cmd.KeyID, cmd.UserID)
 		if cmd.ConcurrencyLimit != nil {
 			query = query.Where("active_requests <= ?", *cmd.ConcurrencyLimit)
+		}
+		if cmd.QuotaSet && cmd.QuotaLimit != nil {
+			query = query.Where("quota_used <= ?", *cmd.QuotaLimit)
 		}
 		result := query.Updates(updates)
 		if result.Error != nil {
@@ -225,10 +239,30 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 			if cmd.ConcurrencyLimit != nil && existing.ActiveRequests > *cmd.ConcurrencyLimit {
 				return nil, domain.ErrAPIKeyConcurrencyLimit
 			}
+			if cmd.QuotaSet && cmd.QuotaLimit != nil && existing.QuotaUsed > *cmd.QuotaLimit {
+				return nil, domain.ErrAPIKeyQuotaExceeded
+			}
 			return existing, nil
 		}
 	}
 	return r.FindAPIKey(ctx, cmd.UserID, cmd.KeyID)
+}
+
+func (r *Repo) DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error {
+	result := r.db.WithContext(ctx).Model(&APIKeyModel{}).
+		Where("id = ? AND user_id = ? AND deleted_at IS NULL", keyID, userID).
+		Updates(map[string]any{
+			"enabled":         false,
+			"active_requests": 0,
+			"deleted_at":      deletedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("delete api key: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrAPIKeyNotFound
+	}
+	return nil
 }
 
 func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.Time) (*domain.APIKey, error) {
@@ -236,7 +270,7 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.WithContext(ctx).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&model, "key_plain = ?", strings.TrimSpace(plain)).Error; err != nil {
+			First(&model, "key_plain = ? AND deleted_at IS NULL", strings.TrimSpace(plain)).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrAPIKeyNotFound
 			}
@@ -273,13 +307,17 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 			windowStartedAt = &now
 			windowRequestCount = 0
 		}
-		if windowRequestCount >= model.RateLimitPerMinute {
+		if model.RateLimitPerMinute != nil && windowRequestCount >= *model.RateLimitPerMinute {
 			return domain.ErrAPIKeyRateLimited
+		}
+		if model.QuotaLimit != nil && model.QuotaUsed >= *model.QuotaLimit {
+			return domain.ErrAPIKeyQuotaExceeded
 		}
 		result := tx.WithContext(ctx).Model(&APIKeyModel{}).
 			Where("id = ?", model.ID).
 			Updates(map[string]any{
 				"active_requests":      model.ActiveRequests + 1,
+				"quota_used":           model.QuotaUsed + 1,
 				"window_started_at":    windowStartedAt,
 				"window_request_count": windowRequestCount + 1,
 				"last_used_at":         now,
@@ -291,6 +329,7 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 			return domain.ErrAPIKeyNotFound
 		}
 		model.ActiveRequests++
+		model.QuotaUsed++
 		model.WindowStartedAt = windowStartedAt
 		model.WindowRequestCount = windowRequestCount + 1
 		model.LastUsedAt = &now
@@ -475,6 +514,8 @@ func apiKeyModelToDomain(model APIKeyModel) domain.APIKey {
 		Enabled:            model.Enabled,
 		RateLimitPerMinute: model.RateLimitPerMinute,
 		ConcurrencyLimit:   model.ConcurrencyLimit,
+		QuotaLimit:         model.QuotaLimit,
+		QuotaUsed:          model.QuotaUsed,
 		ActiveRequests:     model.ActiveRequests,
 		ExpireAt:           model.ExpireAt,
 		LastUsedAt:         model.LastUsedAt,

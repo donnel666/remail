@@ -37,6 +37,7 @@ func (h *Handler) PostAPIKey(c *gin.Context) {
 		ExpireAt:           req.ExpireAt,
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		ConcurrencyLimit:   req.ConcurrencyLimit,
+		QuotaLimit:         req.QuotaLimit,
 		IdempotencyKey:     c.GetHeader("Idempotency-Key"),
 		RequestID:          middleware.GetRequestID(c),
 	})
@@ -60,7 +61,7 @@ func (h *Handler) GetAPIKeys(c *gin.Context) {
 	}
 	resp := KeyListResponse{Items: make([]KeyResponse, len(items)), Total: total, Offset: offset, Limit: limit}
 	for i := range items {
-		resp.Items[i] = apiKeyResponse(items[i], false)
+		resp.Items[i] = apiKeyResponse(items[i], true)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -80,6 +81,22 @@ func (h *Handler) GetAPIKey(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, apiKeyResponse(*item, true))
+}
+
+func (h *Handler) DeleteAPIKey(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	keyID, ok := parseUintParam(c, "keyId")
+	if !ok {
+		return
+	}
+	if err := h.mod.UseCase.DeleteAPIKey(c.Request.Context(), userID, keyID); err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) PatchAPIKey(c *gin.Context) {
@@ -109,6 +126,12 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 	if _, exists := raw["expireAt"]; exists {
 		req.ExpireSet = true
 	}
+	if _, exists := raw["rateLimitPerMinute"]; exists {
+		req.RateLimitSet = true
+	}
+	if _, exists := raw["quotaLimit"]; exists {
+		req.QuotaSet = true
+	}
 	item, err := h.mod.UseCase.UpdateAPIKey(c.Request.Context(), openapiapp.UpdateAPIKeyRequest{
 		UserID:             userID,
 		KeyID:              keyID,
@@ -117,7 +140,10 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 		ExpireAt:           req.ExpireAt,
 		ExpireSet:          req.ExpireSet || req.ExpireAt != nil,
 		RateLimitPerMinute: req.RateLimitPerMinute,
+		RateLimitSet:       req.RateLimitSet,
 		ConcurrencyLimit:   req.ConcurrencyLimit,
+		QuotaLimit:         req.QuotaLimit,
+		QuotaSet:           req.QuotaSet,
 	})
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -165,6 +191,9 @@ func apiKeyResponse(item domain.APIKey, includePlain bool) KeyResponse {
 		Enabled:            item.Enabled,
 		RateLimitPerMinute: item.RateLimitPerMinute,
 		ConcurrencyLimit:   item.ConcurrencyLimit,
+		QuotaLimit:         item.QuotaLimit,
+		QuotaUsed:          item.QuotaUsed,
+		RemainingQuota:     remainingAPIKeyQuota(item),
 		ActiveRequests:     item.ActiveRequests,
 		ExpireAt:           item.ExpireAt,
 		LastUsedAt:         item.LastUsedAt,
@@ -190,9 +219,22 @@ func writeOpenAPIError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid API key request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrAPIKeyRateLimited):
 		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": requestID})
+	case errors.Is(err, domain.ErrAPIKeyQuotaExceeded):
+		c.JSON(http.StatusTooManyRequests, gin.H{"message": "API key quota exceeded.", "requestId": requestID})
 	case errors.Is(err, domain.ErrAPIKeyConcurrencyLimit):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Credential concurrency limit reached.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})
 	}
+}
+
+func remainingAPIKeyQuota(item domain.APIKey) *int64 {
+	if item.QuotaLimit == nil {
+		return nil
+	}
+	remaining := *item.QuotaLimit - item.QuotaUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	return &remaining
 }

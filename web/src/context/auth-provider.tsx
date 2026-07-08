@@ -21,7 +21,8 @@ export interface CurrentUser {
   nickname: string;
   name: string;
   role: UserResponse["role"];
-  roleLevel: number;
+  userGroup: UserResponse["userGroup"];
+  permissions: string[];
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -47,12 +48,32 @@ function toCurrentUser(user: UserResponse): CurrentUser {
     nickname,
     name,
     role: user.role,
-    roleLevel: user.roleLevel,
+    userGroup: user.userGroup,
+    permissions: user.permissions ?? [],
     enabled: user.enabled,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     lastLoginAt: user.lastLoginAt,
   };
+}
+
+export function permissionKey(resource: string, action: string) {
+  return `${resource}:${action}`;
+}
+
+export function hasPermission(
+  user: Pick<CurrentUser, "permissions"> | null | undefined,
+  resource: string,
+  action: string
+) {
+  return hasPermissionKey(user, permissionKey(resource, action));
+}
+
+export function hasPermissionKey(
+  user: Pick<CurrentUser, "permissions"> | null | undefined,
+  key: string
+) {
+  return Boolean(user?.permissions.includes(key));
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

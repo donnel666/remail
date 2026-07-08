@@ -1105,7 +1105,11 @@ export interface paths {
         get: operations["getApiKey"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete one API key
+         * @description Soft-delete one API key from account management. Historical order facts remain linked to the retained API key row.
+         */
+        delete: operations["deleteApiKey"];
         options?: never;
         head?: never;
         /** Update one API key */
@@ -1591,18 +1595,25 @@ export interface components {
             name?: string;
             /** Format: date-time */
             expireAt?: string | null;
-            /** @description Defaults to 60 when omitted. */
-            rateLimitPerMinute?: number;
+            /** @description Empty means unlimited requests per minute. */
+            rateLimitPerMinute?: number | null;
             /** @description Defaults to 5 when omitted. */
             concurrencyLimit?: number;
+            /**
+             * Format: int64
+             * @description Empty means unlimited total requests.
+             */
+            quotaLimit?: number | null;
         };
         APIKeyPatchRequest: {
             name?: string;
             enabled?: boolean;
             /** Format: date-time */
             expireAt?: string | null;
-            rateLimitPerMinute?: number;
+            rateLimitPerMinute?: number | null;
             concurrencyLimit?: number;
+            /** Format: int64 */
+            quotaLimit?: number | null;
         };
         APIKeyResponse: {
             id: number;
@@ -1611,8 +1622,14 @@ export interface components {
             /** @description Plain API key, only returned immediately after creation or on detail view. */
             keyPlain?: string;
             enabled: boolean;
-            rateLimitPerMinute: number;
+            rateLimitPerMinute: number | null;
             concurrencyLimit: number;
+            /** Format: int64 */
+            quotaLimit?: number | null;
+            /** Format: int64 */
+            quotaUsed: number;
+            /** Format: int64 */
+            remainingQuota?: number | null;
             activeRequests: number;
             /** Format: date-time */
             expireAt?: string | null;
@@ -1914,8 +1931,8 @@ export interface components {
             nickname: string;
             /** @enum {string} */
             role: "user" | "supplier" | "admin" | "super_admin";
-            /** @description Numeric role level: 10=user, 20=supplier, 80=admin, 100=super_admin */
-            roleLevel: number;
+            userGroup: components["schemas"]["UserGroupResponse"];
+            permissions?: string[];
             enabled: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -1924,9 +1941,18 @@ export interface components {
             /** Format: date-time */
             lastLoginAt?: string | null;
         };
+        UserGroupResponse: {
+            id: number;
+            code: string;
+            name: string;
+            description: string;
+            enabled: boolean;
+        };
         AdminUpdateUserRequest: {
             enabled?: boolean;
-            roleLevel?: number;
+            /** @enum {string} */
+            role?: "user" | "supplier" | "admin" | "super_admin";
+            userGroupId?: number;
         };
         PermissionCatalogResponse: {
             permissions: components["schemas"]["PermissionCatalogItemResponse"][];
@@ -6880,7 +6906,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description API key list */
+            /** @description API key list. The plain key is returned for account API key management. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6918,7 +6944,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description API key created. The plain key is only returned on create/detail. */
+            /** @description API key created. The plain key is returned for account API key management. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -6984,6 +7010,56 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["APIKeyResponse"];
                 };
+            };
+            /** @description Invalid path parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteApiKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                keyId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API key deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Invalid path parameters */
             400: {

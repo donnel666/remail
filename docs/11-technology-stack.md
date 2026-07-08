@@ -136,7 +136,7 @@ web-supplier
 | 控制台登录态 | HttpOnly Cookie Session |
 | Session 存储 | Redis，必要时 DB 会话表兜底 |
 | CSRF | SameSite Cookie + CSRF Token |
-| 角色等级 | `user < supplier < admin < super_admin`，特权用户天然拥有低权限用户基础能力 |
+| RBAC 角色继承 | `user < supplier < admin < super_admin`，特权用户天然拥有低权限用户基础能力 |
 | 细粒度权限 | Casbin v2 + GORM adapter |
 | 数据归属 | 业务表 `userId/supplierId/ownerUserId` + scope 查询 |
 | API Key | Header Bearer 或 `X-API-Key` |

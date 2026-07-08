@@ -60,8 +60,9 @@ type PasswordResetRequest struct {
 
 // AdminUpdateUserRequest is the request body for PATCH /v1/admin/users/:userId.
 type AdminUpdateUserRequest struct {
-	Enabled   *bool `json:"enabled,omitempty"`
-	RoleLevel *int  `json:"roleLevel,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+	Role        *string `json:"role,omitempty"`
+	UserGroupID *uint   `json:"userGroupId,omitempty"`
 }
 
 type PermissionPolicyRequest struct {
@@ -105,15 +106,24 @@ type ActivationResponse struct {
 // UserResponse is the public representation of a user.
 // Never exposes passwordHash or tokenVersion.
 type UserResponse struct {
-	ID          uint       `json:"id"`
-	Email       string     `json:"email"`
-	Nickname    string     `json:"nickname"`
-	Role        string     `json:"role"`
-	RoleLevel   int        `json:"roleLevel"`
-	Enabled     bool       `json:"enabled"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	LastLoginAt *time.Time `json:"lastLoginAt,omitempty"`
+	ID          uint              `json:"id"`
+	Email       string            `json:"email"`
+	Nickname    string            `json:"nickname"`
+	Role        string            `json:"role"`
+	UserGroup   UserGroupResponse `json:"userGroup"`
+	Permissions []string          `json:"permissions,omitempty"`
+	Enabled     bool              `json:"enabled"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+	LastLoginAt *time.Time        `json:"lastLoginAt,omitempty"`
+}
+
+type UserGroupResponse struct {
+	ID          uint   `json:"id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type CurrentInviteResponse struct {
@@ -137,6 +147,23 @@ type AdminUserListResponse struct {
 	Total  int64          `json:"total"`
 	Offset int            `json:"offset"`
 	Limit  int            `json:"limit"`
+}
+
+type AdminUserGroupListResponse struct {
+	Groups []UserGroupResponse `json:"groups"`
+}
+
+type AdminCreateUserGroupRequest struct {
+	Code        string `json:"code" binding:"required,max=64"`
+	Name        string `json:"name" binding:"required,max=100"`
+	Description string `json:"description" binding:"omitempty,max=500"`
+	Enabled     *bool  `json:"enabled,omitempty"`
+}
+
+type AdminUpdateUserGroupRequest struct {
+	Name        *string `json:"name,omitempty" binding:"omitempty,max=100"`
+	Description *string `json:"description,omitempty" binding:"omitempty,max=500"`
+	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 type PermissionCatalogResponse struct {
@@ -200,23 +227,31 @@ type SupplierApplicationListResponse struct {
 
 // --- Helpers ---
 
-// roleName returns the human-readable role name for a role level.
-func roleName(level domain.RoleLevel) string {
-	return level.Name()
-}
-
 // toUserResponse converts a domain User to a safe API response.
 func toUserResponse(u *domain.User) UserResponse {
 	return UserResponse{
 		ID:          u.ID,
 		Email:       u.Email,
 		Nickname:    u.Nickname,
-		Role:        roleName(u.RoleLevel),
-		RoleLevel:   int(u.RoleLevel),
+		Role:        u.Role.String(),
+		UserGroup:   toUserGroupResponse(u.UserGroup),
 		Enabled:     u.Enabled,
 		CreatedAt:   u.CreatedAt,
 		UpdatedAt:   u.UpdatedAt,
 		LastLoginAt: u.LastLoginAt,
+	}
+}
+
+func toUserGroupResponse(group domain.UserGroup) UserGroupResponse {
+	if group.ID == 0 {
+		return UserGroupResponse{ID: 1, Code: "normal", Name: "普通用户", Description: "默认权益分组", Enabled: true}
+	}
+	return UserGroupResponse{
+		ID:          group.ID,
+		Code:        group.Code,
+		Name:        group.Name,
+		Description: group.Description,
+		Enabled:     group.Enabled,
 	}
 }
 

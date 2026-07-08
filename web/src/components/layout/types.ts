@@ -10,12 +10,12 @@ export interface SidebarNavItem {
   path: string;
   labelKey: string;
   icon: LucideIcon;
-  minRoleLevel?: number;
+  requiredPermission?: string;
 }
 
 export interface SidebarNavGroup {
   id: string;
   labelKey: string;
   items: SidebarNavItem[];
-  minRoleLevel?: number;
+  requiredPermission?: string;
 }

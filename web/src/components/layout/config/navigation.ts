@@ -11,9 +11,8 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
+import { permissionKey } from "@/context/auth-provider";
 import type { SidebarNavGroup, SidebarNavItem, TopNavItem } from "../types";
-
-export const ADMIN_ROLE_LEVEL = 80;
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
@@ -43,14 +42,43 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     id: "admin",
     labelKey: "Administrator",
-    minRoleLevel: ADMIN_ROLE_LEVEL,
     items: [
-      { path: "/admin/microsoft", labelKey: "Admin Microsoft Emails", icon: Database },
-      { path: "/admin/domains", labelKey: "Admin Domain Emails", icon: Globe },
-      { path: "/admin/projects", labelKey: "Project Management", icon: PackageOpen },
-      { path: "/admin/proxies", labelKey: "Proxy Management", icon: Network },
-      { path: "/admin/users", labelKey: "User Management", icon: Users },
-      { path: "/admin/settings", labelKey: "System Settings", icon: Settings },
+      {
+        path: "/admin/microsoft",
+        labelKey: "Admin Microsoft Emails",
+        icon: Database,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
+        path: "/admin/domains",
+        labelKey: "Admin Domain Emails",
+        icon: Globe,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
+        path: "/admin/projects",
+        labelKey: "Project Management",
+        icon: PackageOpen,
+        requiredPermission: permissionKey("core:project", "read"),
+      },
+      {
+        path: "/admin/proxies",
+        labelKey: "Proxy Management",
+        icon: Network,
+        requiredPermission: permissionKey("proxy:proxy", "read"),
+      },
+      {
+        path: "/admin/users",
+        labelKey: "User Management",
+        icon: Users,
+        requiredPermission: permissionKey("iam:user", "read"),
+      },
+      {
+        path: "/admin/settings",
+        labelKey: "System Settings",
+        icon: Settings,
+        requiredPermission: permissionKey("iam:permission", "read"),
+      },
     ],
   },
 ];
@@ -58,28 +86,32 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
 export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) =>
   group.items.map((item) => ({
     ...item,
-    minRoleLevel: item.minRoleLevel ?? group.minRoleLevel,
+    requiredPermission: item.requiredPermission ?? group.requiredPermission,
   }))
 );
 
 export const ROUTES_WITH_SIDEBAR = SIDEBAR_NAV_ITEMS.map((item) => item.path);
 export const CHROMELESS_ROUTES: string[] = ["/activation"];
 
-export function getVisibleSidebarNavGroups(roleLevel: number): SidebarNavGroup[] {
+export function getVisibleSidebarNavGroups(permissions: string[]): SidebarNavGroup[] {
+  const permissionSet = new Set(permissions);
   return SIDEBAR_NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter(
-      (item) => roleLevel >= (item.minRoleLevel ?? group.minRoleLevel ?? 0)
+      (item) => {
+        const requiredPermission = item.requiredPermission ?? group.requiredPermission;
+        return !requiredPermission || permissionSet.has(requiredPermission);
+      }
     ),
   })).filter((group) => group.items.length > 0);
 }
 
-export function getSidebarRouteRequiredRoleLevel(pathname: string) {
+export function getSidebarRouteRequiredPermission(pathname: string) {
   const matched = SIDEBAR_NAV_ITEMS.find(
     (item) => pathname === item.path || pathname.startsWith(`${item.path}/`)
   );
 
-  return matched?.minRoleLevel ?? 0;
+  return matched?.requiredPermission ?? null;
 }
 
 export const TOP_NAV_ITEMS: TopNavItem[] = [

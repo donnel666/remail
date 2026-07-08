@@ -10,7 +10,7 @@ import (
 
 // sessionFetcher resolves a session by looking up Redis and then verifying
 // the user's current state from the DB. This ensures that disabled users,
-// tokenVersion bumps, and roleLevel changes are caught on every request
+// tokenVersion bumps, and role changes are caught on every request
 // (docs/8-iam.md:122 — INV-I3: disable/force-logout must invalidate sessions).
 type sessionFetcher struct {
 	sessionStore interface {
@@ -33,24 +33,24 @@ func NewSessionFetcher(
 	return &sessionFetcher{sessionStore: store, userRepo: repo}
 }
 
-func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (uint, domain.RoleLevel, string, bool) {
+func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (uint, domain.Role, string, bool) {
 	sess, err := f.sessionStore.Get(ctx, sessionID)
 	if err != nil || sess == nil {
-		return 0, 0, "", false
+		return 0, "", "", false
 	}
 
 	// Re-verify against the DB on every request:
 	// - If the user was disabled, reject (INV-I2).
 	// - If TokenVersion was bumped (password change / force logout), reject (INV-I3).
-	// - Use the current roleLevel from DB, not the cached snapshot from Redis,
+	// - Use the current role from DB, not the cached snapshot from Redis,
 	//   so role changes take effect immediately (docs/8-iam.md:123).
 	user, err := f.userRepo.FindByID(ctx, sess.UserID)
 	if err != nil || user == nil || !user.Enabled || user.TokenVersion != sess.TokenVersion {
-		return 0, 0, "", false
+		return 0, "", "", false
 	}
 
 	// Use current user data from DB, not the session snapshot
-	return sess.UserID, user.RoleLevel, user.Email, true
+	return sess.UserID, user.Role, user.Email, true
 }
 
 // RegisterIAMRoutes registers all IAM routes on the given router group.
@@ -83,16 +83,18 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 		auth.GET("/supplier-applications/current", h.GetCurrentSupplierApplication)
 	}
 
-	// Admin routes require both the role baseline and Casbin command permission.
+	// Admin routes are authorized by Casbin RBAC permissions.
 	admin := rg.Group("/admin")
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	admin.Use(middleware.AdminRequired(domain.RoleAdmin))
 	{
 		admin.GET("/users", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUsers)
 		admin.PATCH("/users/:userId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "write"), h.PatchAdminUser)
 		admin.POST("/users/:userId/sessions/revoke", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminRevokeSessions)
+		admin.GET("/user-groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "read"), h.GetAdminUserGroups)
+		admin.POST("/user-groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PostAdminUserGroup)
+		admin.PATCH("/user-groups/:groupId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PatchAdminUserGroup)
 		admin.GET("/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "read"), h.GetAdminPermissions)
 		admin.GET("/users/:userId/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "read"), h.GetAdminUserPermissions)
 		admin.PUT("/users/:userId/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "write"), h.PutAdminUserPermissions)

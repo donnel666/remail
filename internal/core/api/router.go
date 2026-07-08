@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/donnel666/remail/api/middleware"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
 )
 
@@ -51,7 +50,6 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	admin.Use(middleware.AdminRequired(iamdomain.RoleAdmin))
 	{
 		admin.POST("/projects", middleware.PermissionRequired(checker, "core:project", "write"), h.PostAdminProject)
 		admin.POST("/projects/relist", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsRelist)

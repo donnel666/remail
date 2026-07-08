@@ -17,11 +17,11 @@ func TestProjectRepoCreateWithLogEnforcesListedNameUniqueMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	first := validListedProjectDetail("Unique Listed Project")
@@ -45,11 +45,11 @@ func TestProjectRepoCreateWithLogRollsBackOnDuplicateProductTypeMySQL(t *testing
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	detail := validListedProjectDetail("Duplicate Product Type Project")
@@ -72,11 +72,11 @@ func TestProjectRepoListSearchUsesFullTextIndexMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	github := validListedProjectDetail("GitHub Codes")
@@ -111,11 +111,11 @@ func TestProjectRepoListOrderUsesUpdatedIndexMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 	require.NoError(t, repo.CreateWithLog(context.Background(), validListedProjectDetail("Ordered Project"), projectTestLog("req-project-order")))
 
@@ -133,15 +133,15 @@ func TestProjectRepoAccessGrantListAndRevokeMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 		2,
 		"user@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	detail := validListedProjectDetail("Private Access Project")
@@ -172,19 +172,19 @@ func TestProjectRepoCompleteConfigReplacesAccessesMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"admin-access-replace@test.local",
 		"hash",
-		80,
+		"admin",
 		2,
 		"access-user-2@test.local",
 		"hash",
-		10,
+		"user",
 		3,
 		"access-user-3@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	detail := validListedProjectDetail("Private Access Replacement Project")
@@ -218,15 +218,15 @@ func TestProjectRepoVisiblePrivateProjectRequiresAccessMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 		2,
 		"applicant@test.local",
 		"hash",
-		10,
+		"user",
 	).Error)
 
 	applicantID := uint(2)
@@ -273,11 +273,11 @@ func TestProjectRepoApproveWithConfigMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	reviewing := validListedProjectDetail("Reviewing Project")
@@ -302,11 +302,11 @@ func TestProjectRepoUpdateWithLogRejectsReviewingProjectMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	reviewing := validListedProjectDetail("Reviewing Update Guard Project")
@@ -324,11 +324,11 @@ func TestProjectRepoFacetsMySQL(t *testing.T) {
 	repo := NewProjectRepo(db)
 
 	require.NoError(t, db.Exec(
-		"INSERT INTO users(id, email, password_hash, role_level) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
 		1,
 		"admin@test.local",
 		"hash",
-		80,
+		"admin",
 	).Error)
 
 	listed := validListedProjectDetail("Facet Listed Project")

@@ -72,7 +72,7 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, c
 	session := &domain.Session{
 		ID:           sessionID,
 		UserID:       user.ID,
-		RoleLevel:    user.RoleLevel,
+		Role:         user.Role,
 		Email:        user.Email,
 		TokenVersion: user.TokenVersion,
 		CreatedAt:    now,

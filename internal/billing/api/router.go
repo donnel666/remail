@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/donnel666/remail/api/middleware"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,7 +25,6 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
-	admin.Use(middleware.AdminRequired(iamdomain.RoleAdmin))
 	{
 		admin.POST("/wallets/:userId/credit", middleware.PermissionRequired(checker, "billing:wallet", "write"), h.PostAdminWalletCredit)
 		admin.POST("/wallets/:userId/debit", middleware.PermissionRequired(checker, "billing:wallet", "write"), h.PostAdminWalletDebit)

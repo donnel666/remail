@@ -11,10 +11,10 @@ export function Sidebar() {
   const location = useLocation();
   const { currentUser } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const roleLevel = currentUser?.roleLevel ?? 0;
+  const permissions = currentUser?.permissions ?? [];
   const visibleGroups = useMemo(
-    () => getVisibleSidebarNavGroups(roleLevel),
-    [roleLevel]
+    () => getVisibleSidebarNavGroups(permissions),
+    [permissions]
   );
 
   return (

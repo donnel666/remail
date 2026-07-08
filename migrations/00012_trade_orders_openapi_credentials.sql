@@ -7,8 +7,11 @@ CREATE TABLE api_keys (
     key_prefix VARCHAR(32) NOT NULL,
     key_plain VARCHAR(255) NOT NULL,
     enabled TINYINT(1) NOT NULL DEFAULT 1,
-    rate_limit_per_minute INT NOT NULL DEFAULT 60,
+    deleted_at DATETIME NULL,
+    rate_limit_per_minute INT NULL,
     concurrency_limit INT NOT NULL DEFAULT 5,
+    quota_limit BIGINT UNSIGNED NULL,
+    quota_used BIGINT UNSIGNED NOT NULL DEFAULT 0,
     active_requests INT NOT NULL DEFAULT 0,
     window_started_at DATETIME NULL,
     window_request_count INT NOT NULL DEFAULT 0,
@@ -19,13 +22,16 @@ CREATE TABLE api_keys (
     UNIQUE INDEX idx_api_keys_prefix (key_prefix),
     UNIQUE INDEX idx_api_keys_plain (key_plain),
     UNIQUE INDEX idx_api_keys_id_user (id, user_id),
-    INDEX idx_api_keys_user_created (user_id, created_at, id),
+    INDEX idx_api_keys_user_deleted_created (user_id, deleted_at, created_at, id),
     INDEX idx_api_keys_enabled_expire (enabled, expire_at),
     CONSTRAINT fk_api_keys_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT chk_api_keys_prefix CHECK (key_prefix <> '' AND key_plain <> ''),
     CONSTRAINT chk_api_keys_limits CHECK (
-        rate_limit_per_minute > 0
+        (rate_limit_per_minute IS NULL OR rate_limit_per_minute > 0)
         AND concurrency_limit > 0
+        AND (quota_limit IS NULL OR quota_limit > 0)
+        AND quota_used >= 0
+        AND (quota_limit IS NULL OR quota_used <= quota_limit)
         AND active_requests >= 0
         AND active_requests <= concurrency_limit
         AND window_request_count >= 0

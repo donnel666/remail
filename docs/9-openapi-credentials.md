@@ -6,6 +6,7 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：OrderToken 作为 pickup 服务凭证事实，不再作为通用 Bearer 鉴权主体。 |
+| 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、不限 RPM 和软删除语义。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -28,11 +29,20 @@
 
 | 实体 | 字段 |
 |------|------|
-| `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`rateLimit`、`concurrency`、`expireAt`、`lastUsedAt` |
+| `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`rateLimit`、`concurrency`、`quotaLimit/quotaUsed`、`expireAt`、`lastUsedAt` |
 | `OrderToken` | `tokenId`、`tokenPrefix`、`plain`、`orderNo`、`enabled`、`expireAt`、`disabledAt`、`disabledReason` |
 | `ApiLog` | `principalType`、`principalId`、`path`、`method`、`idempotencyKey`、`httpStatus`、`durationMs`、`requestId` |
 
-API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普通列表、普通日志、错误响应、导出文件禁敏。
+API Key 和 OrderToken 按原值保存；授权凭证管理接口可重复查看明文。普通日志、错误响应、导出文件禁敏；非凭证管理列表默认只显示前缀。
+
+API Key 限制补充设计：
+
+| 字段 | 规则 |
+|------|------|
+| `rateLimit` | `null` 表示不限制 RPM；正整数表示每分钟请求上限。 |
+| `concurrency` | 正整数，省略时使用系统默认并发上限。 |
+| `quotaLimit` | `null` 表示不限制总请求额度；正整数表示该 Key 可消费的总请求次数。 |
+| `quotaUsed` | 鉴权通过并进入业务入口前原子递增；不得超过 `quotaLimit`。 |
 
 ---
 
@@ -91,9 +101,10 @@ API Key 和 OrderToken 按原值保存；授权接口可重复查看明文。普
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `POST` | `/v1/apikeys` | 创建 API Key，必须幂等，返回明文。 |
-| `GET` | `/v1/apikeys` | 当前用户 API Key 列表，不返回明文。 |
+| `GET` | `/v1/apikeys` | 当前用户 API Key 列表，返回明文，用于个人设置页直接复制。 |
 | `GET` | `/v1/apikeys/{keyId}` | 授权详情，返回明文。 |
-| `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、过期时间。 |
+| `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、额度、过期时间。 |
+| `DELETE` | `/v1/apikeys/{keyId}` | 软删除 API Key；列表/详情/鉴权不可再使用，历史订单事实保留外键引用。 |
 | `GET` | `/v1/orders/{orderNo}/token` | 查看订单服务凭证详情，授权时返回明文。 |
 | `POST` | `/v1/orders/{orderNo}/token/reset` | 重置服务凭证，必须幂等，返回新明文。 |
 

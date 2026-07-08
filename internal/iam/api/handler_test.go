@@ -29,6 +29,7 @@ type mockUserRepo struct {
 	users                map[uint]*domain.User
 	byID                 map[string]uint
 	invites              map[string]*domain.Invite
+	userGroups           map[uint]*domain.UserGroup
 	supplierApplications map[uint]*domain.SupplierApplication
 	policies             map[uint][]domain.PermissionPolicy
 	operationLogs        *mockOperationLogPort
@@ -39,13 +40,61 @@ type mockUserRepo struct {
 
 func newMockUserRepo() *mockUserRepo {
 	return &mockUserRepo{
-		users:                make(map[uint]*domain.User),
-		byID:                 make(map[string]uint),
-		invites:              make(map[string]*domain.Invite),
+		users:   make(map[uint]*domain.User),
+		byID:    make(map[string]uint),
+		invites: make(map[string]*domain.Invite),
+		userGroups: map[uint]*domain.UserGroup{
+			1: {ID: 1, Code: "normal", Name: "普通用户", Description: "默认权益分组", Enabled: true},
+		},
 		supplierApplications: make(map[uint]*domain.SupplierApplication),
 		policies:             make(map[uint][]domain.PermissionPolicy),
 		operationLogs:        &mockOperationLogPort{},
 	}
+}
+
+func (r *mockUserRepo) ListUserGroups(_ context.Context) ([]domain.UserGroup, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	groups := make([]domain.UserGroup, 0, len(r.userGroups))
+	for _, group := range r.userGroups {
+		groups = append(groups, *group)
+	}
+	return groups, nil
+}
+
+func (r *mockUserRepo) FindUserGroupByID(_ context.Context, id uint) (*domain.UserGroup, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	group, ok := r.userGroups[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *group
+	return &cp, nil
+}
+
+func (r *mockUserRepo) CreateUserGroup(_ context.Context, group *domain.UserGroup) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seq++
+	group.ID = r.seq
+	group.CreatedAt = time.Now()
+	group.UpdatedAt = group.CreatedAt
+	cp := *group
+	r.userGroups[group.ID] = &cp
+	return nil
+}
+
+func (r *mockUserRepo) UpdateUserGroup(_ context.Context, group *domain.UserGroup) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.userGroups[group.ID]; !ok {
+		return domain.ErrInvalidUserGroup
+	}
+	group.UpdatedAt = time.Now()
+	cp := *group
+	r.userGroups[group.ID] = &cp
+	return nil
 }
 
 func (r *mockUserRepo) CreateSupplierApplicationReviewing(_ context.Context, application *domain.SupplierApplication) error {
@@ -542,7 +591,7 @@ func (c *mockCaptchaStore) Delete(_ context.Context, captchaID string) error {
 
 type allowPermissionChecker struct{}
 
-func (c allowPermissionChecker) Check(_ context.Context, _ uint, _ domain.RoleLevel, _, _ string) (bool, error) {
+func (c allowPermissionChecker) Check(_ context.Context, _ uint, _ domain.Role, _, _ string) (bool, error) {
 	return true, nil
 }
 
@@ -688,7 +737,7 @@ func seedAdminSession(t *testing.T, h *IAMHandler, sessionID string) *domain.Use
 	require.NoError(t, h.module.SessionStore.Create(context.Background(), &domain.Session{
 		ID:           sessionID,
 		UserID:       admin.ID,
-		RoleLevel:    admin.RoleLevel,
+		Role:         admin.Role,
 		Email:        admin.Email,
 		TokenVersion: admin.TokenVersion,
 	}, 3600))
@@ -710,7 +759,7 @@ func seedUser(t *testing.T, h *IAMHandler, email string) *domain.User {
 		Email:        email,
 		PasswordHash: hash,
 		Enabled:      true,
-		RoleLevel:    domain.RoleUser,
+		Role:         domain.RoleUser,
 	}
 	require.NoError(t, testRepo(h).Create(context.Background(), user))
 	return user
@@ -722,7 +771,7 @@ func seedUserSession(t *testing.T, h *IAMHandler, email, sessionID string) *doma
 	require.NoError(t, h.module.SessionStore.Create(context.Background(), &domain.Session{
 		ID:           sessionID,
 		UserID:       user.ID,
-		RoleLevel:    user.RoleLevel,
+		Role:         user.Role,
 		Email:        user.Email,
 		TokenVersion: user.TokenVersion,
 	}, 3600))
@@ -1066,7 +1115,7 @@ func TestAdminUsers_InvalidQuery(t *testing.T) {
 	assert.NoError(t, h.module.SessionStore.Create(context.Background(), &domain.Session{
 		ID:           "admin-session",
 		UserID:       admin.ID,
-		RoleLevel:    admin.RoleLevel,
+		Role:         admin.Role,
 		Email:        admin.Email,
 		TokenVersion: admin.TokenVersion,
 	}, 3600))
@@ -1188,7 +1237,7 @@ func TestPatchAdminUserSameValuesWritesUnchangedOperationLog(t *testing.T) {
 	target := seedUser(t, h, "user@test.com")
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{"enabled":true,"roleLevel":10}`))
+	req, _ := http.NewRequest("PATCH", fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{"enabled":true,"role":"user"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "req-admin-same-values")
 	addAuthenticatedRequest(req, "admin-session")
@@ -1219,7 +1268,7 @@ func TestPostAdminRevokeSessionsWritesOperationLog(t *testing.T) {
 	require.NoError(t, h.module.SessionStore.Create(context.Background(), &domain.Session{
 		ID:           "target-session",
 		UserID:       target.ID,
-		RoleLevel:    target.RoleLevel,
+		Role:         target.Role,
 		Email:        target.Email,
 		TokenVersion: target.TokenVersion,
 	}, 3600))
@@ -1525,7 +1574,7 @@ func TestAdminApproveSupplierApplicationPromotesUser(t *testing.T) {
 	updated, err := testRepo(h).FindByID(context.Background(), user.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updated)
-	require.Equal(t, domain.RoleSupplier, updated.RoleLevel)
+	require.Equal(t, domain.RoleSupplier, updated.Role)
 
 	log := testRepo(h).lastLog()
 	require.NotNil(t, log)

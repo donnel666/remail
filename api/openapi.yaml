@@ -3409,7 +3409,7 @@ paths:
               $ref: "#/components/schemas/APIKeyCreateRequest"
       responses:
         "201":
-          description: API key created. The plain key is only returned on create/detail.
+          description: API key created. The plain key is returned for account API key management.
           content:
             application/json:
               schema:
@@ -3458,7 +3458,7 @@ paths:
             default: 20
       responses:
         "200":
-          description: API key list
+          description: API key list. The plain key is returned for account API key management.
           content:
             application/json:
               schema:
@@ -3560,7 +3560,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
+    delete:
+      operationId: deleteApiKey
+      summary: Delete one API key
+      description: Soft-delete one API key from account management. Historical order facts remain linked to the retained API key row.
+      tags:
+        - OpenAPI
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: API key deleted
+        "400":
+          description: Invalid path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   # --- Trade Orders ---
   /v1/orders:
     post:
@@ -5117,12 +5152,19 @@ components:
           type: integer
           minimum: 1
           maximum: 10000
-          description: Defaults to 60 when omitted.
+          nullable: true
+          description: Empty means unlimited requests per minute.
         concurrencyLimit:
           type: integer
           minimum: 1
           maximum: 100
           description: Defaults to 5 when omitted.
+        quotaLimit:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: Empty means unlimited total requests.
       additionalProperties: false
 
     APIKeyPatchRequest:
@@ -5141,10 +5183,16 @@ components:
           type: integer
           minimum: 1
           maximum: 10000
+          nullable: true
         concurrencyLimit:
           type: integer
           minimum: 1
           maximum: 100
+        quotaLimit:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
       additionalProperties: false
 
     APIKeyResponse:
@@ -5156,6 +5204,7 @@ components:
         - enabled
         - rateLimitPerMinute
         - concurrencyLimit
+        - quotaUsed
         - activeRequests
         - createdAt
         - updatedAt
@@ -5173,8 +5222,20 @@ components:
           type: boolean
         rateLimitPerMinute:
           type: integer
+          nullable: true
         concurrencyLimit:
           type: integer
+        quotaLimit:
+          type: integer
+          format: int64
+          nullable: true
+        quotaUsed:
+          type: integer
+          format: int64
+        remainingQuota:
+          type: integer
+          format: int64
+          nullable: true
         activeRequests:
           type: integer
         expireAt:
@@ -5960,7 +6021,7 @@ components:
         - email
         - nickname
         - role
-        - roleLevel
+        - userGroup
         - enabled
         - createdAt
         - updatedAt
@@ -5978,10 +6039,12 @@ components:
             - supplier
             - admin
             - super_admin
-        roleLevel:
-          type: integer
-          description: |
-            Numeric role level: 10=user, 20=supplier, 80=admin, 100=super_admin
+        userGroup:
+          $ref: '#/components/schemas/UserGroupResponse'
+        permissions:
+          type: array
+          items:
+            type: string
         enabled:
           type: boolean
         createdAt:
@@ -5996,15 +6059,41 @@ components:
           nullable: true
       additionalProperties: false
 
+    UserGroupResponse:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - description
+        - enabled
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+      additionalProperties: false
+
     AdminUpdateUserRequest:
       type: object
       properties:
         enabled:
           type: boolean
-        roleLevel:
+        role:
+          type: string
+          enum:
+            - user
+            - supplier
+            - admin
+            - super_admin
+        userGroupId:
           type: integer
-          minimum: 10
-          maximum: 100
       additionalProperties: false
 
     PermissionCatalogResponse:

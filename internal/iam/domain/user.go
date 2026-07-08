@@ -2,37 +2,49 @@ package domain
 
 import "time"
 
-// RoleLevel defines the user's role hierarchy.
-// Privileged users inherit lower-level capabilities.
-// See ADR-IAM-1 and ADR-IAM-4.
-type RoleLevel int
+// Role is the user's RBAC role assignment.
+// Entitlements such as quota, discounts, and limits are modeled separately by UserGroup.
+type Role string
 
 const (
-	RoleUser       RoleLevel = 10  // Normal user
-	RoleSupplier   RoleLevel = 20  // Inherits user, adds supplier pages
-	RoleAdmin      RoleLevel = 80  // Inherits user, adds admin pages
-	RoleSuperAdmin RoleLevel = 100 // Inherits admin, adds system-sensitive pages
+	RoleUser       Role = "user"
+	RoleSupplier   Role = "supplier"
+	RoleAdmin      Role = "admin"
+	RoleSuperAdmin Role = "super_admin"
 )
 
-// IsAtLeast returns true if the role level is at least the given minimum.
-func (r RoleLevel) IsAtLeast(minimum RoleLevel) bool {
-	return r >= minimum
+func (r Role) String() string {
+	if r == "" {
+		return string(RoleUser)
+	}
+	return string(r)
 }
 
-// Name returns the stable role name used by API responses and permission policy.
-func (r RoleLevel) Name() string {
+func (r Role) IsValid() bool {
 	switch r {
-	case RoleSuperAdmin:
-		return "super_admin"
-	case RoleAdmin:
-		return "admin"
-	case RoleSupplier:
-		return "supplier"
-	case RoleUser:
-		return "user"
+	case RoleUser, RoleSupplier, RoleAdmin, RoleSuperAdmin:
+		return true
 	default:
-		return "unknown"
+		return false
 	}
+}
+
+func (r Role) HasAdminAccess() bool {
+	return r == RoleAdmin || r == RoleSuperAdmin
+}
+
+func (r Role) HasSupplierAccess() bool {
+	return r == RoleSupplier || r == RoleAdmin || r == RoleSuperAdmin
+}
+
+type UserGroup struct {
+	ID          uint
+	Code        string
+	Name        string
+	Description string
+	Enabled     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // User represents a platform user (admin, supplier, or regular user).
@@ -43,7 +55,9 @@ type User struct {
 	PasswordHash string
 	Nickname     string
 	Enabled      bool
-	RoleLevel    RoleLevel
+	Role         Role
+	UserGroupID  uint
+	UserGroup    UserGroup
 	TokenVersion int
 	LastLoginAt  *time.Time
 	CreatedAt    time.Time

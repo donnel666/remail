@@ -21,13 +21,13 @@ import zhCN from "@douyinfe/semi-ui/lib/es/locale/source/zh_CN";
 import enGB from "@douyinfe/semi-ui/lib/es/locale/source/en_GB";
 import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "./context/theme-provider";
-import { AuthProvider, useAuth } from "./context/auth-provider";
+import { AuthProvider, hasPermissionKey, useAuth } from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
 import { AUTH_REQUIRED_EVENT } from "./lib/auth-flow";
 import AppShell from "./components/layout/AppShell";
 import {
   ROUTES_WITH_SIDEBAR,
-  getSidebarRouteRequiredRoleLevel,
+  getSidebarRouteRequiredPermission,
 } from "./components/layout/config/navigation";
 import { getActivation } from "./lib/iam-api";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
@@ -231,8 +231,8 @@ function RouteGate({ children }: { children: ReactNode }) {
     () => PROTECTED_ROUTES.some((route) => matchesRoute(pathname, route)),
     [pathname]
   );
-  const requiredRoleLevel = useMemo(
-    () => getSidebarRouteRequiredRoleLevel(pathname),
+  const requiredPermission = useMemo(
+    () => getSidebarRouteRequiredPermission(pathname),
     [pathname]
   );
 
@@ -283,7 +283,8 @@ function RouteGate({ children }: { children: ReactNode }) {
       !activationNeeded &&
       !authLoading &&
       currentUser &&
-      currentUser.roleLevel < requiredRoleLevel
+      requiredPermission &&
+      !hasPermissionKey(currentUser, requiredPermission)
     ) {
       void navigate({ to: "/403", replace: true });
       return;
@@ -303,7 +304,7 @@ function RouteGate({ children }: { children: ReactNode }) {
     isProtectedRoute,
     navigate,
     pathname,
-    requiredRoleLevel,
+    requiredPermission,
   ]);
 
   useEffect(() => {

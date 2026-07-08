@@ -716,10 +716,10 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 func seedAllocBase(t *testing.T, db *gorm.DB, productType string, mainWeight, dotWeight, plusWeight int) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role_level) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 20),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 10),
-    (3, 'regular@test.local', 'hash', 'regular', TRUE, 10)`).Error)
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'Alloc Project', 'alloc', 'listed', 'public', TRUE)`).Error)

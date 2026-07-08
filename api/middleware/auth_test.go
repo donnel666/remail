@@ -14,7 +14,7 @@ import (
 func TestAuthRequiredClearsInvalidSessionCookies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(LoadSession(SessionFetcherFunc(func(context.Context, string) (uint, domain.RoleLevel, string, bool) {
+	router.Use(LoadSession(SessionFetcherFunc(func(context.Context, string) (uint, domain.Role, string, bool) {
 		return 0, domain.RoleUser, "", false
 	})))
 	router.Use(AuthRequired())

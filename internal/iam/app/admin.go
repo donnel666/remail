@@ -53,11 +53,26 @@ type UpdateInviteRequest struct {
 	ExpireAt *time.Time
 }
 
+type CreateUserGroupRequest struct {
+	Code        string
+	Name        string
+	Description string
+	Enabled     bool
+}
+
+type UpdateUserGroupRequest struct {
+	Name        *string
+	Description *string
+	Enabled     *bool
+}
+
 var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "iam:user", Actions: []string{"read", "write", "operate"}},
+	{Resource: "iam:user_group", Actions: []string{"read", "write"}},
 	{Resource: "iam:permission", Actions: []string{"read", "write"}},
 	{Resource: "iam:invite", Actions: []string{"read", "write", "operate"}},
 	{Resource: "iam:supplier_application", Actions: []string{"read", "operate"}},
+	{Resource: "core:resource", Actions: []string{"read", "write", "operate"}},
 	{Resource: "core:project", Actions: []string{"read", "write", "operate"}},
 	{Resource: "proxy:proxy", Actions: []string{"read", "write", "operate"}},
 	{Resource: "alloc:allocation", Actions: []string{"read", "operate"}},
@@ -123,6 +138,53 @@ func uniqueUserIDs(ids []uint) []uint {
 
 func (uc *AdminUseCase) ListPermissions(_ context.Context) []domain.PermissionCatalogItem {
 	return permissionCatalog
+}
+
+func (uc *AdminUseCase) ListUserGroups(ctx context.Context) ([]domain.UserGroup, error) {
+	return uc.repo.ListUserGroups(ctx)
+}
+
+func (uc *AdminUseCase) CreateUserGroup(ctx context.Context, req CreateUserGroupRequest) (*domain.UserGroup, error) {
+	group := &domain.UserGroup{
+		Code:        strings.TrimSpace(req.Code),
+		Name:        strings.TrimSpace(req.Name),
+		Description: strings.TrimSpace(req.Description),
+		Enabled:     req.Enabled,
+	}
+	if group.Code == "" || group.Name == "" {
+		return nil, domain.ErrInvalidUserGroup
+	}
+	if err := uc.repo.CreateUserGroup(ctx, group); err != nil {
+		return nil, err
+	}
+	return group, nil
+}
+
+func (uc *AdminUseCase) UpdateUserGroup(ctx context.Context, groupID uint, req UpdateUserGroupRequest) (*domain.UserGroup, error) {
+	group, err := uc.repo.FindUserGroupByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, domain.ErrInvalidUserGroup
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, domain.ErrInvalidUserGroup
+		}
+		group.Name = name
+	}
+	if req.Description != nil {
+		group.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.Enabled != nil {
+		group.Enabled = *req.Enabled
+	}
+	if err := uc.repo.UpdateUserGroup(ctx, group); err != nil {
+		return nil, err
+	}
+	return group, nil
 }
 
 func (uc *AdminUseCase) GetUserPermissions(ctx context.Context, targetUserID uint) ([]domain.PermissionPolicy, error) {
@@ -247,11 +309,12 @@ func (uc *AdminUseCase) UpdateInvite(ctx context.Context, operatorUserID uint, r
 
 // UpdateUserRequest contains the fields that can be updated by an admin.
 type UpdateUserRequest struct {
-	Enabled   *bool             `json:"enabled,omitempty"`
-	RoleLevel *domain.RoleLevel `json:"roleLevel,omitempty"`
+	Enabled     *bool        `json:"enabled,omitempty"`
+	Role        *domain.Role `json:"role,omitempty"`
+	UserGroupID *uint        `json:"userGroupId,omitempty"`
 }
 
-// UpdateUser updates a user's profile (enabled, roleLevel).
+// UpdateUser updates a user's access role and entitlement group.
 // If the user is disabled, increments tokenVersion and clears sessions (INV-I3).
 func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, req *UpdateUserRequest) (*domain.User, error) {
 	user, err := uc.repo.FindByID(ctx, targetUserID)
@@ -277,14 +340,31 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		}
 	}
 
-	if req.RoleLevel != nil {
-		rl := *req.RoleLevel
-		if !isValidRoleLevel(rl) {
+	if req.Role != nil {
+		role := *req.Role
+		if !role.IsValid() {
 			_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
-			return nil, domain.ErrInvalidRoleLevel
+			return nil, domain.ErrInvalidRole
 		}
-		if user.RoleLevel != rl {
-			user.RoleLevel = rl
+		if user.Role != role {
+			user.Role = role
+			changed = true
+		}
+	}
+
+	if req.UserGroupID != nil {
+		group, err := uc.repo.FindUserGroupByID(ctx, *req.UserGroupID)
+		if err != nil {
+			_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
+			return nil, fmt.Errorf("admin update find user group: %w", err)
+		}
+		if group == nil || !group.Enabled {
+			_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
+			return nil, domain.ErrInvalidUserGroup
+		}
+		if user.UserGroupID != group.ID {
+			user.UserGroupID = group.ID
+			user.UserGroup = *group
 			changed = true
 		}
 	}
@@ -333,16 +413,6 @@ func (uc *AdminUseCase) ForceLogout(ctx context.Context, operatorUserID uint, re
 	_ = uc.sessions.DeleteByUserID(ctx, targetUserID)
 
 	return nil
-}
-
-// isValidRoleLevel checks if the given role level is one of the defined values.
-func isValidRoleLevel(rl domain.RoleLevel) bool {
-	switch rl {
-	case domain.RoleUser, domain.RoleSupplier, domain.RoleAdmin, domain.RoleSuperAdmin:
-		return true
-	default:
-		return false
-	}
 }
 
 func validPermissionPolicy(policy domain.PermissionPolicy) bool {
