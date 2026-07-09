@@ -2796,6 +2796,41 @@ body[theme-mode="dark"] .semi-always-light,
   position: relative;
 }
 
+.api-docs-swagger .swagger-ui .swagger-idempotency-input {
+  display: flex;
+  max-width: 520px;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-input input {
+  min-width: 0;
+  flex: 1;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-generate {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--semi-color-text-1);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-generate:hover {
+  border-color: rgba(255, 122, 0, 0.38);
+  background: rgba(255, 122, 0, 0.06);
+  color: #b45309;
+}
+
 .api-docs-swagger .swagger-ui .swagger-api-key-action-row {
   display: flex;
   margin: 8px 0 12px;

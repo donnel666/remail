@@ -32,6 +32,7 @@ import {
 import { getActivation } from "./lib/iam-api";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { ForbiddenPage, NotFoundPage, ServerErrorPage } from "./pages/ErrorPages";
+import { preloadApiDocsAssets } from "./pages/api-docs/assets";
 
 const pageLoaders = {
   home: () => import("./pages/Home"),
@@ -82,12 +83,14 @@ const Recharge = lazy(pageLoaders.recharge);
 const ROUTE_PRELOAD_BATCH_SIZE = 4;
 const ROUTE_PRELOAD_BATCH_DELAY_MS = 200;
 let routeModulesPreloadStarted = false;
+let apiDocsPreloadStarted = false;
 type PageLoaderKey = keyof typeof pageLoaders;
 
 const routePreloadPriority = [
   "dashboard",
-  "pickup",
   "projects",
+  "apiDocs",
+  "pickup",
   "wallet",
   "microsoftEmails",
   "domainEmails",
@@ -99,7 +102,6 @@ const routePreloadPriority = [
   "account",
   "orders",
   "tickets",
-  "apiDocs",
   "qna",
   "login",
   "register",
@@ -177,6 +179,30 @@ function scheduleRouteModulePreload() {
   browserWindow.addEventListener(
     "load",
     () => browserWindow.setTimeout(startPreload, 400),
+    { once: true }
+  );
+}
+
+function scheduleApiDocsPreload() {
+  if (apiDocsPreloadStarted || typeof window === "undefined") return;
+  apiDocsPreloadStarted = true;
+  const browserWindow = window as RoutePreloadWindow;
+
+  const preload = () => {
+    preloadApiDocsAssets();
+    void pageLoaders.apiDocs().catch((error: unknown) => {
+      console.warn("Failed to preload API docs page", error);
+    });
+  };
+
+  if (document.readyState === "complete") {
+    browserWindow.setTimeout(preload, 400);
+    return;
+  }
+
+  browserWindow.addEventListener(
+    "load",
+    () => browserWindow.setTimeout(preload, 400),
     { once: true }
   );
 }
@@ -406,6 +432,7 @@ declare module "@tanstack/react-router" {
 
 function App() {
   useEffect(() => {
+    scheduleApiDocsPreload();
     scheduleRouteModulePreload();
   }, []);
 

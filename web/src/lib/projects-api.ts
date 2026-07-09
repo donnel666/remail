@@ -313,7 +313,7 @@ export async function uploadAdminProjectLogo(file: File) {
   const formData = new FormData();
   formData.append("file", file);
   return unwrap<components["schemas"]["ProjectLogoUploadResponse"]>(
-    await client.POST("/v1/admin/project-logos", {
+    await client.POST("/v1/admin/projects/logos", {
       body: formData as never,
       bodySerializer: (body) => body,
       params: { header: csrfHeader() },

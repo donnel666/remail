@@ -26,7 +26,7 @@ func registerOpenRoutes(
 	billingHandler := billingapi.NewBillingHandler(billingMod, checker)
 	tradeHandler := tradeapi.NewHandler(tradeMod)
 
-	open.GET("/api-key/profile", openHandler.GetAPIKeyProfile)
+	open.GET("/apikey/profile", openHandler.GetAPIKeyProfile)
 
 	open.GET("/projects", coreHandler.GetProjects)
 	open.GET("/projects/:projectId", coreHandler.GetProject)
@@ -44,10 +44,10 @@ func registerOpenRoutes(
 	open.GET("/resources/:resourceId", coreHandler.GetResourceDetail)
 	open.DELETE("/resources/:resourceId", coreHandler.DeleteResource)
 	open.POST("/resources/:resourceId/validate", coreHandler.PostResourceValidate)
-	open.POST("/resource-imports", coreHandler.PostResourceImport)
-	open.GET("/resource-imports/:importId", coreHandler.GetResourceImport)
-	open.POST("/resource-validations", coreHandler.PostResourceValidations)
-	open.GET("/resource-validations/:validationId", coreHandler.GetResourceValidation)
+	open.POST("/resources/imports", coreHandler.PostResourceImport)
+	open.GET("/resources/imports/:importId", coreHandler.GetResourceImport)
+	open.POST("/resources/validations", coreHandler.PostResourceValidations)
+	open.GET("/resources/validations/:validationId", coreHandler.GetResourceValidation)
 	open.GET("/servers", coreHandler.GetServers)
 	open.POST("/servers", coreHandler.PostServer)
 	open.POST("/domains", coreHandler.PostDomain)

@@ -32,6 +32,7 @@ import {
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -596,13 +597,10 @@ function EditProxyModal({
 export default function ProxyManagement() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const refreshSeqRef = useRef(0);
-  const [items, setItems] = useState<ProxyItem[]>([]);
-  const [totalItems, setTotalItems] = useState(0);
   const [proxyStats, setProxyStats] = useState<ProxyStatsResponse | null>(null);
   const [currentProxyStats, setCurrentProxyStats] =
     useState<ProxyStatsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [operationLoading, setOperationLoading] = useState(false);
   const [checkingIDs, setCheckingIDs] = useState<Set<number>>(new Set());
   const [updatingID, setUpdatingID] = useState<number | null>(null);
   const [deletingBatch, setDeletingBatch] = useState(false);
@@ -656,78 +654,31 @@ export default function ProxyManagement() {
     [listFilter]
   );
 
-  const refresh = useCallback(async (
-    options: {
-      clearSelection?: boolean;
-      refreshStats?: boolean;
-      showLoading?: boolean;
-    } = {}
-  ) => {
-    const {
-      clearSelection = true,
-      refreshStats: shouldRefreshStats = true,
-      showLoading = true,
-    } = options;
-    const refreshSeq = refreshSeqRef.current + 1;
-    refreshSeqRef.current = refreshSeq;
-    const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
+  const loadProxyBlock = useCallback(
+    async (offset: number, limit: number) => {
+      const response = await listAdminProxies(listFilter, offset, limit);
+      return { items: response.items, total: response.total };
+    },
+    [listFilter]
+  );
 
-    if (showLoading) setLoading(true);
-    try {
-      const offset = (activePage - 1) * pageSize;
-      const [response, statsResponse, currentStatsResponse] =
-        await Promise.all([
-          listAdminProxies(listFilter, offset, pageSize),
-          shouldRefreshStats
-            ? getAdminProxyStats(statsFilter)
-            : Promise.resolve(null),
-          shouldRefreshStats
-            ? getAdminProxyStats(listFilter)
-            : Promise.resolve(null),
-        ]);
-      if (!isCurrentRefresh()) return;
-      setItems(response.items);
-      setTotalItems(response.total);
-      if (statsResponse) setProxyStats(statsResponse);
-      if (currentStatsResponse) setCurrentProxyStats(currentStatsResponse);
-      if (clearSelection) setSelectedKeys([]);
-    } catch (error) {
-      if (isCurrentRefresh()) {
-        Toast.error(getIamErrorMessage(t, error, "Proxies load failed."));
-      }
-    } finally {
-      if (isCurrentRefresh() && showLoading) setLoading(false);
-    }
-  }, [activePage, listFilter, pageSize, statsFilter, t]);
-
-  const previousRefreshQueryRef = useRef<{
-    activePage: number;
-    listFilter: ProxyListFilter;
-    pageSize: number;
-    statsFilter: ProxyListFilter;
-  } | null>(null);
-
-  useEffect(() => {
-    const previous = previousRefreshQueryRef.current;
-    const onlyPageChanged =
-      previous !== null &&
-      previous.activePage !== activePage &&
-      previous.pageSize === pageSize &&
-      previous.listFilter === listFilter &&
-      previous.statsFilter === statsFilter;
-
-    previousRefreshQueryRef.current = {
-      activePage,
-      listFilter,
-      pageSize,
-      statsFilter,
-    };
-
-    void refresh({
-      refreshStats: !onlyPageChanged,
-      showLoading: !onlyPageChanged,
-    });
-  }, [activePage, listFilter, pageSize, refresh, statsFilter]);
+  const {
+    adjustTotal,
+    loadedItems: items,
+    loading,
+    pagedItems,
+    refresh: refreshProxyList,
+    total: totalItems,
+    updateLoadedItems,
+  } = useBlockPagedList<ProxyItem>({
+    activePage,
+    filterKey: JSON.stringify(listFilter),
+    loadBlock: loadProxyBlock,
+    onError: (error) => {
+      Toast.error(getIamErrorMessage(t, error, "Proxies load failed."));
+    },
+    pageSize,
+  });
 
   const countryCounts = useMemo(
     () => getCountryCounts(proxyStats),
@@ -765,31 +716,30 @@ export default function ProxyManagement() {
 
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = Math.min(activePage, totalPages);
-  const pagedItems = items;
 
   useEffect(() => {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
 
   const updateProxyItem = useCallback((next: ProxyItem) => {
-    setItems((previous) => {
+    updateLoadedItems((previous) => {
       const exists = previous.some((item) => item.id === next.id);
-      if (!exists) return [next, ...previous];
+      if (!exists) return previous;
       return previous.map((item) => (item.id === next.id ? next : item));
     });
-  }, []);
+  }, [updateLoadedItems]);
 
   const removeProxyItems = useCallback((ids: number[]) => {
     if (ids.length === 0) return;
     const removedIDs = new Set(ids);
-    setItems((previous) =>
+    updateLoadedItems((previous) =>
       previous.filter((item) => !removedIDs.has(item.id))
     );
     setSelectedKeys((previous) =>
       previous.filter((id) => !removedIDs.has(id))
     );
-    setTotalItems((previous) => Math.max(previous - removedIDs.size, 0));
-  }, []);
+    adjustTotal(-removedIDs.size);
+  }, [adjustTotal, updateLoadedItems]);
 
   const refreshStats = useCallback(async () => {
     try {
@@ -803,6 +753,28 @@ export default function ProxyManagement() {
       // Stats are secondary; the next page refresh will retry.
     }
   }, [listFilter, statsFilter]);
+
+  useEffect(() => {
+    void refreshStats();
+  }, [refreshStats]);
+
+  const refresh = useCallback(
+    async (
+      options: {
+        clearSelection?: boolean;
+        refreshStats?: boolean;
+      } = {}
+    ) => {
+      const { clearSelection = true, refreshStats: shouldRefreshStats = true } =
+        options;
+      if (shouldRefreshStats) {
+        await refreshStats();
+      }
+      await refreshProxyList();
+      if (clearSelection) setSelectedKeys([]);
+    },
+    [refreshProxyList, refreshStats]
+  );
 
   const reconcileProxyItem = useCallback(
     (next: ProxyItem) => {
@@ -818,14 +790,11 @@ export default function ProxyManagement() {
 
   const updateProxyItems = useCallback((nextItems: ProxyItem[]) => {
     if (nextItems.length === 0) return;
-    setItems((previous) => {
-      const byID = new Map(previous.map((item) => [item.id, item]));
-      for (const item of nextItems) {
-        byID.set(item.id, item);
-      }
-      return Array.from(byID.values());
+    updateLoadedItems((previous) => {
+      const byID = new Map(nextItems.map((item) => [item.id, item]));
+      return previous.map((item) => byID.get(item.id) ?? item);
     });
-  }, []);
+  }, [updateLoadedItems]);
 
   const handleCheckProxy = useCallback(
     async (proxyID: number, notify = true) => {
@@ -856,7 +825,7 @@ export default function ProxyManagement() {
       Toast.info(t("No proxies to check."));
       return;
     }
-    setLoading(true);
+    setOperationLoading(true);
     try {
       const response = await checkAdminProxiesByFilter(proxyBulkFilter);
       updateProxyItems(response.items);
@@ -869,7 +838,7 @@ export default function ProxyManagement() {
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Proxy check failed."));
     } finally {
-      setLoading(false);
+      setOperationLoading(false);
     }
   }, [proxyBulkFilter, refresh, t, totalItems, updateProxyItems]);
 
@@ -918,17 +887,17 @@ export default function ProxyManagement() {
       }
       const response = await deleteAdminProxies(proxyIDs);
       const deletedIDs = new Set(response.deletedProxyIds ?? proxyIDs);
-      setItems((previous) =>
+      updateLoadedItems((previous) =>
         previous.filter((item) => !deletedIDs.has(item.id))
       );
       setSelectedKeys((previous) =>
         previous.filter((id) => !deletedIDs.has(id))
       );
-      setTotalItems((previous) => Math.max(previous - response.deleted, 0));
+      adjustTotal(-response.deleted);
       void refreshStats();
       Toast.success(t("Proxies deleted.", { count: response.deleted }));
     },
-    [refreshStats, t]
+    [adjustTotal, refreshStats, t, updateLoadedItems]
   );
 
   const handleDeleteSelected = useCallback(() => {
@@ -974,11 +943,10 @@ export default function ProxyManagement() {
         setDeletingBatch(true);
         try {
           const response = await deleteAdminProxiesByFilter(proxyBulkFilter);
-          setItems([]);
-          setTotalItems(0);
           setSelectedKeys([]);
           setActivePage(1);
           await refreshStats();
+          await refreshProxyList();
           Toast.success(t("Proxies deleted.", { count: response.deleted }));
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
@@ -987,7 +955,7 @@ export default function ProxyManagement() {
         }
       },
     });
-  }, [proxyBulkFilter, refreshStats, t, totalItems]);
+  }, [proxyBulkFilter, refreshProxyList, refreshStats, t, totalItems]);
 
   const handleToggleFilteredDisabled = useCallback(() => {
     if (!hasToggleCandidates) {
@@ -1397,6 +1365,7 @@ export default function ProxyManagement() {
             type="tertiary"
             size="small"
             className="flex-1 md:flex-initial"
+            loading={operationLoading}
             onClick={() => void handleCheckFiltered()}
           >
             {t("Check")}

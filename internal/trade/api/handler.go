@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
@@ -67,7 +66,10 @@ func (h *Handler) GetOrders(c *gin.Context) {
 	if !ok {
 		return
 	}
-	offset, limit := parseOffsetLimit(c)
+	offset, limit, ok := parseOffsetLimit(c)
+	if !ok {
+		return
+	}
 	status, ok := parseOrderStatus(c.Query("status"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
@@ -118,7 +120,10 @@ func (h *Handler) GetOrderEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	offset, limit := parseOffsetLimit(c)
+	offset, limit, ok := parseOffsetLimit(c)
+	if !ok {
+		return
+	}
 	role, _ := middleware.GetCurrentRole(c)
 	items, total, err := h.mod.UseCase.ListEvents(c.Request.Context(), c.Param("orderNo"), userID, role.HasAdminAccess(), offset, limit)
 	if err != nil {
@@ -154,16 +159,11 @@ func currentUserID(c *gin.Context) (uint, bool) {
 	return userID, true
 }
 
-func parseOffsetLimit(c *gin.Context) (int, int) {
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	return offset, limit
+func parseOffsetLimit(c *gin.Context) (int, int, bool) {
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
 }
 
 func parseOrderStatus(raw string) (domain.OrderStatus, bool) {

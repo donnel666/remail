@@ -81,7 +81,7 @@ func (uc *ProjectAssetUseCase) ReadLogo(ctx context.Context, encodedKey string) 
 }
 
 func projectLogoURL(objectKey string) string {
-	return "/v1/project-logos/" + base64.RawURLEncoding.EncodeToString([]byte(objectKey))
+	return "/v1/projects/logos/" + base64.RawURLEncoding.EncodeToString([]byte(objectKey))
 }
 
 func projectLogoContentType(content []byte, fileName string) (string, string, bool) {

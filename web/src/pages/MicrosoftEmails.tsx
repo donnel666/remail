@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -18,7 +18,6 @@ import {
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
 import { Layers, SlidersHorizontal } from "lucide-react";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -31,6 +30,7 @@ import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useAuth } from "@/context/auth-provider";
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -43,10 +43,12 @@ import {
   publishMicrosoftResource,
   publishMicrosoftResourcesByFilter,
   publishMicrosoftResourcesBatch,
-  validateMicrosoftResourcesBatch,
-  validateMicrosoftResourcesByFilter,
-  type ResourceBulkFilter,
-} from "@/lib/resources-api";
+	  validateMicrosoftResourcesBatch,
+	  validateMicrosoftResourcesByFilter,
+	  type ResourceBulkFilter,
+	  type ResourceListResponse,
+	  type ResourceListFilter,
+	} from "@/lib/resources-api";
 
 import { ImportMicrosoftEmailsModal } from "./resources/import-microsoft-emails-modal";
 import {
@@ -54,7 +56,6 @@ import {
   createDateRangePresets,
   createdFromISOString,
   createdToISOString,
-  matchesCreatedAtRange,
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
@@ -79,148 +80,14 @@ function hasSupplierRole(role?: string | null) {
   return role === "supplier" || role === "admin" || role === "super_admin";
 }
 
-function matchesStatusFilter(status: ResourceStatus, filter: StatusFilter) {
-  if (filter === "all") return true;
-  return status === filter;
-}
-
-function matchesBooleanFilter(value: boolean, filter: BooleanFilter) {
-  if (filter === "all") return true;
-  return filter === "yes" ? value : !value;
-}
-
 function isEmailResource(item: EmailResource | null): item is EmailResource {
   return item !== null;
-}
-
-function useMicrosoftResources(t: TFunction) {
-  const [items, setItems] = useState<EmailResource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const refreshSeqRef = useRef(0);
-  const locallyDeletedResourceIDsRef = useRef(new Set<number>());
-
-  const refresh = useCallback(async () => {
-    const refreshSeq = refreshSeqRef.current + 1;
-    refreshSeqRef.current = refreshSeq;
-    const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
-
-    locallyDeletedResourceIDsRef.current.clear();
-    setLoading(true);
-    setItems([]);
-    try {
-      let hasRenderedFirstPage = false;
-      await listOwnedMicrosoftResources({
-        onPage: (pageItems) => {
-          if (!isCurrentRefresh()) return;
-          const resources = pageItems
-            .map(toEmailResource)
-            .filter(isEmailResource)
-            .filter(
-              (resource) =>
-                !locallyDeletedResourceIDsRef.current.has(resource.id)
-            );
-          if (resources.length === 0) return;
-          setItems((previous) => [...previous, ...resources]);
-          if (!hasRenderedFirstPage) {
-            hasRenderedFirstPage = true;
-            setLoading(false);
-          }
-        },
-      });
-    } catch (error) {
-      if (isCurrentRefresh()) {
-        Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
-      }
-    } finally {
-      if (isCurrentRefresh()) {
-        setLoading(false);
-      }
-    }
-  }, [t]);
-
-  const invalidateRefresh = useCallback(() => {
-    refreshSeqRef.current += 1;
-  }, []);
-
-  const removeResource = useCallback((resourceID: number) => {
-    locallyDeletedResourceIDsRef.current.add(resourceID);
-    setItems((previous) =>
-      previous.filter((resource) => resource.id !== resourceID)
-    );
-  }, []);
-
-  const removeResourcesByPredicate = useCallback(
-    (predicate: (resource: EmailResource) => boolean) => {
-      setItems((previous) => {
-        const next: EmailResource[] = [];
-        for (const resource of previous) {
-          if (predicate(resource)) {
-            locallyDeletedResourceIDsRef.current.add(resource.id);
-            continue;
-          }
-          next.push(resource);
-        }
-        return next;
-      });
-    },
-    []
-  );
-
-  const markResourcesPublishedForSale = useCallback((resourceIDs: number[]) => {
-    const ids = new Set(resourceIDs);
-    if (ids.size === 0) return;
-    setItems((previous) =>
-      previous.map((resource) =>
-        ids.has(resource.id)
-          ? { ...resource, forSale: true, usageScope: "public_sale" }
-          : resource
-      )
-    );
-  }, []);
-
-  const markResourcesPublishedByPredicate = useCallback(
-    (predicate: (resource: EmailResource) => boolean) => {
-      setItems((previous) =>
-        previous.map((resource) =>
-          predicate(resource)
-            ? { ...resource, forSale: true, usageScope: "public_sale" }
-            : resource
-        )
-      );
-    },
-    []
-  );
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  return {
-    items,
-    loading,
-    refresh,
-    removeResource,
-    removeResourcesByPredicate,
-    markResourcesPublishedForSale,
-    markResourcesPublishedByPredicate,
-    invalidateRefresh,
-  };
 }
 
 export default function MicrosoftEmails() {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
-  const {
-    items,
-    loading,
-    refresh,
-    removeResource,
-    removeResourcesByPredicate,
-    markResourcesPublishedForSale,
-    markResourcesPublishedByPredicate,
-    invalidateRefresh,
-  } = useMicrosoftResources(t);
   const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -232,9 +99,11 @@ export default function MicrosoftEmails() {
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
-  const [activePage, setActivePage] = useState(1);
-  const [pageSize, setPageSize] = useSharedPageSize();
+	  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+	  const [activePage, setActivePage] = useState(1);
+	  const [pageSize, setPageSize] = useSharedPageSize();
+	  const [resourceFacets, setResourceFacets] =
+	    useState<ResourceListResponse["facets"] | null>(null);
   const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
     null
   );
@@ -246,114 +115,15 @@ export default function MicrosoftEmails() {
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.role);
 
-  const suffixCounts = useMemo(() => getSuffixCounts(items), [items]);
-  const suffixSet = useMemo(
-    () => new Set(suffixCounts.map(([suffix]) => suffix)),
-    [suffixCounts]
-  );
-
-  const resourceStats = useMemo(
-    () => ({
-      longLived: {
-        all: items.length,
-        no: items.filter((item) => item.lifetimeType !== "long_lived").length,
-        yes: items.filter((item) => item.lifetimeType === "long_lived").length,
-      },
-      graph: {
-        all: items.length,
-        no: items.filter((item) => !item.graphAvailable).length,
-        yes: items.filter((item) => item.graphAvailable).length,
-      },
-      private: {
-        all: items.length,
-        no: items.filter((item) => item.usageScope !== "private").length,
-        yes: items.filter((item) => item.usageScope === "private").length,
-      },
-      status: {
-        all: items.length,
-        abnormal: items.filter((item) => item.status === "abnormal").length,
-        disabled: items.filter((item) => item.status === "disabled").length,
-        normal: items.filter((item) => isNormal(item.status)).length,
-        pending: items.filter((item) => item.status === "pending").length,
-      },
-    }),
-    [items]
-  );
-
-  const activeStatisticFilterCount =
-    Number(statusFilter !== "all") +
-    Number(privateFilter !== "all") +
-    Number(longLivedFilter !== "all") +
-    Number(graphFilter !== "all");
-
-  useEffect(() => {
-    if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
-      setActiveSuffix("all");
-    }
-  }, [activeSuffix, suffixSet]);
-
-  const matchesCurrentFilters = useCallback((item: EmailResource) => {
-    const keyword = searchKeyword.trim().toLowerCase();
-    const suffix = getSuffix(item.emailAddress);
-    const suffixMatched = activeSuffix === "all" || suffix === activeSuffix;
-    const statusMatched = matchesStatusFilter(item.status, statusFilter);
-    const privateMatched = matchesBooleanFilter(
-      item.usageScope === "private",
-      privateFilter
-    );
-    const longLivedMatched = matchesBooleanFilter(
-      item.lifetimeType === "long_lived",
-      longLivedFilter
-    );
-    const graphMatched = matchesBooleanFilter(
-      item.graphAvailable,
-      graphFilter
-    );
-    const keywordMatched =
-      keyword.length === 0 ||
-      item.emailAddress.toLowerCase().includes(keyword) ||
-      item.emailType.toLowerCase().includes(keyword) ||
-      suffix.includes(keyword);
-    const createdAtMatched = matchesCreatedAtRange(
-      item.createdAt,
-      createdAtRange
-    );
-
-    return (
-      suffixMatched &&
-      statusMatched &&
-      privateMatched &&
-      longLivedMatched &&
-      graphMatched &&
-      keywordMatched &&
-      createdAtMatched
-    );
-  }, [
-    activeSuffix,
-    createdAtRange,
-    graphFilter,
-    longLivedFilter,
-    privateFilter,
-    searchKeyword,
-    statusFilter,
-  ]);
-
-  const filteredItems = useMemo(
-    () => items.filter(matchesCurrentFilters),
-    [items, matchesCurrentFilters]
-  );
-
-  const microsoftBulkFilter = useMemo<ResourceBulkFilter>(() => {
-    const filter: ResourceBulkFilter = { resourceType: "microsoft" };
+  const microsoftListFilter = useMemo<ResourceListFilter>(() => {
+    const filter: ResourceListFilter = {};
     const search = searchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
     if (activeSuffix !== "all") filter.suffix = activeSuffix;
     if (statusFilter !== "all") filter.status = statusFilter;
-    if (privateFilter !== "all") {
-      filter.forSale = privateFilter === "no";
-    }
+    if (privateFilter !== "all") filter.forSale = privateFilter === "no";
     if (longLivedFilter !== "all") {
       filter.longLived = longLivedFilter === "yes";
     }
@@ -373,12 +143,109 @@ export default function MicrosoftEmails() {
     statusFilter,
   ]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-  const safePage = Math.min(activePage, totalPages);
-  const pagedItems = filteredItems.slice(
-    (safePage - 1) * pageSize,
-    safePage * pageSize
+  const loadMicrosoftBlock = useCallback(
+    async (offset: number, limit: number) => {
+	      const response = await listOwnedMicrosoftResources(
+	        microsoftListFilter,
+	        offset,
+	        limit
+	      );
+	      setResourceFacets(response.facets ?? null);
+	      return {
+	        items: response.items.map(toEmailResource).filter(isEmailResource),
+	        total: response.total,
+	      };
+    },
+    [microsoftListFilter]
   );
+
+  const {
+    adjustTotal,
+    loadedItems: items,
+    loading,
+    pagedItems,
+    refresh,
+    total,
+    updateLoadedItems,
+  } = useBlockPagedList<EmailResource>({
+    activePage,
+    filterKey: JSON.stringify(microsoftListFilter),
+    loadBlock: loadMicrosoftBlock,
+    onError: (error) => {
+      Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+    },
+	    pageSize,
+	  });
+
+	  useEffect(() => {
+	    setResourceFacets(null);
+	  }, [microsoftListFilter]);
+
+	  const suffixCounts = useMemo(
+	    () =>
+	      resourceFacets?.suffixes?.map(
+	        (item) => [item.key, item.count] as [string, number]
+	      ) ?? getSuffixCounts(items),
+	    [items, resourceFacets]
+	  );
+  const suffixSet = useMemo(
+    () => new Set(suffixCounts.map(([suffix]) => suffix)),
+    [suffixCounts]
+  );
+
+	  const resourceStats = useMemo(() => {
+	    if (resourceFacets) {
+	      return {
+	        longLived: resourceFacets.longLived,
+	        graph: resourceFacets.graphAvailable,
+	        private: resourceFacets.private,
+	        status: resourceFacets.status,
+	      };
+	    }
+	    return {
+	      longLived: {
+	        all: total,
+	        no: items.filter((item) => item.lifetimeType !== "long_lived").length,
+	        yes: items.filter((item) => item.lifetimeType === "long_lived").length,
+	      },
+	      graph: {
+	        all: total,
+	        no: items.filter((item) => !item.graphAvailable).length,
+	        yes: items.filter((item) => item.graphAvailable).length,
+	      },
+	      private: {
+	        all: total,
+	        no: items.filter((item) => item.usageScope !== "private").length,
+	        yes: items.filter((item) => item.usageScope === "private").length,
+	      },
+	      status: {
+	        all: total,
+	        abnormal: items.filter((item) => item.status === "abnormal").length,
+	        disabled: items.filter((item) => item.status === "disabled").length,
+	        normal: items.filter((item) => isNormal(item.status)).length,
+	        pending: items.filter((item) => item.status === "pending").length,
+	      },
+	    };
+	  }, [items, resourceFacets, total]);
+
+  const activeStatisticFilterCount =
+    Number(statusFilter !== "all") +
+    Number(privateFilter !== "all") +
+    Number(longLivedFilter !== "all") +
+    Number(graphFilter !== "all");
+
+  useEffect(() => {
+    if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
+      setActiveSuffix("all");
+    }
+  }, [activeSuffix, suffixSet]);
+
+  const microsoftBulkFilter = useMemo<ResourceBulkFilter>(() => {
+    return { ...microsoftListFilter, resourceType: "microsoft" };
+  }, [microsoftListFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(activePage, totalPages);
 
   useEffect(() => {
     if (safePage !== activePage) setActivePage(safePage);
@@ -454,7 +321,7 @@ export default function MicrosoftEmails() {
   }, [t]);
 
   const queueFilteredResourceChecks = useCallback(async () => {
-    if (filteredItems.length === 0) {
+    if (total === 0) {
       Toast.info(t("No resources to check."));
       return;
     }
@@ -470,7 +337,7 @@ export default function MicrosoftEmails() {
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
     }
-  }, [filteredItems.length, microsoftBulkFilter, t]);
+  }, [microsoftBulkFilter, t, total]);
 
   const promptSupplierApplication = useCallback(async () => {
     try {
@@ -512,7 +379,13 @@ export default function MicrosoftEmails() {
         try {
           await publishMicrosoftResource(record.id);
           Toast.success(t("Resource published for sale."));
-          markResourcesPublishedForSale([record.id]);
+          updateLoadedItems((previous) =>
+            previous.map((resource) =>
+              resource.id === record.id
+                ? { ...resource, forSale: true, usageScope: "public_sale" }
+                : resource
+            )
+          );
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Publish failed."));
         } finally {
@@ -520,7 +393,7 @@ export default function MicrosoftEmails() {
         }
       },
     });
-  }, [ensureCanPublishForSale, markResourcesPublishedForSale, t]);
+  }, [ensureCanPublishForSale, t, updateLoadedItems]);
 
   const selectedPrivateResourceIds = useMemo(() => {
     const selectedIDSet = new Set(selectedKeys);
@@ -565,12 +438,8 @@ export default function MicrosoftEmails() {
             Toast.success(
               t("Resources published for sale.", { count: response.published })
             );
-            invalidateRefresh();
-            markResourcesPublishedByPredicate(
-              (item) =>
-                item.usageScope === "private" && matchesCurrentFilters(item)
-            );
             setSelectedKeys([]);
+            await refresh();
           }
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Publish failed."));
@@ -581,11 +450,9 @@ export default function MicrosoftEmails() {
     });
   }, [
     ensureCanPublishForSale,
-    invalidateRefresh,
-    markResourcesPublishedByPredicate,
-    matchesCurrentFilters,
     microsoftBulkFilter,
     privateFilter,
+    refresh,
     t,
   ]);
 
@@ -613,7 +480,14 @@ export default function MicrosoftEmails() {
           Toast.success(
             t("Resources published for sale.", { count: response.published })
           );
-          markResourcesPublishedForSale(response.publishedResourceIds ?? []);
+          const published = new Set(response.publishedResourceIds ?? []);
+          updateLoadedItems((previous) =>
+            previous.map((resource) =>
+              published.has(resource.id)
+                ? { ...resource, forSale: true, usageScope: "public_sale" }
+                : resource
+            )
+          );
           setSelectedKeys([]);
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Publish failed."));
@@ -624,9 +498,9 @@ export default function MicrosoftEmails() {
     });
   }, [
     ensureCanPublishForSale,
-    markResourcesPublishedForSale,
     selectedPrivateResourceIds,
     t,
+    updateLoadedItems,
   ]);
 
   const sellSelected = useCallback(() => {
@@ -643,7 +517,10 @@ export default function MicrosoftEmails() {
     try {
       const response = await deleteMicrosoftResourcesBatch(resourceIds, {
         onDeleted: (resourceId) => {
-          removeResource(resourceId);
+          updateLoadedItems((previous) =>
+            previous.filter((resource) => resource.id !== resourceId)
+          );
+          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((selectedId) => selectedId !== resourceId)
           );
@@ -655,7 +532,7 @@ export default function MicrosoftEmails() {
     } finally {
       setDeletingBatch(false);
     }
-  }, [removeResource, t]);
+  }, [adjustTotal, t, updateLoadedItems]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedPrivateResourceIds.length === 0) {
@@ -694,13 +571,9 @@ export default function MicrosoftEmails() {
           if (response.deleted === 0) {
             Toast.info(t("No private resources to delete."));
           } else {
-            invalidateRefresh();
-            removeResourcesByPredicate(
-              (item) =>
-                item.usageScope === "private" && matchesCurrentFilters(item)
-            );
             setSelectedKeys([]);
             Toast.success(t("Resources deleted.", { count: response.deleted }));
+            await refresh();
           }
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
@@ -710,11 +583,9 @@ export default function MicrosoftEmails() {
       },
     });
   }, [
-    matchesCurrentFilters,
     microsoftBulkFilter,
     privateFilter,
-    invalidateRefresh,
-    removeResourcesByPredicate,
+    refresh,
     t,
   ]);
 
@@ -741,7 +612,10 @@ export default function MicrosoftEmails() {
         try {
           await deleteMicrosoftResource(record.id);
           Toast.success(t("Resource deleted."));
-          removeResource(record.id);
+          updateLoadedItems((previous) =>
+            previous.filter((resource) => resource.id !== record.id)
+          );
+          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
@@ -752,7 +626,7 @@ export default function MicrosoftEmails() {
         }
       },
     });
-  }, [removeResource, t]);
+  }, [adjustTotal, t, updateLoadedItems]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
@@ -909,7 +783,7 @@ export default function MicrosoftEmails() {
           <span className="flex items-center gap-2">
             {t("All")}
             <Tag color={activeSuffix === "all" ? "red" : "grey"} shape="circle">
-              {items.length}
+              {total}
             </Tag>
           </span>
         }
@@ -1209,7 +1083,7 @@ export default function MicrosoftEmails() {
       setActivePage(1);
     },
     pageSize,
-    total: filteredItems.length,
+    total,
     t,
   });
 

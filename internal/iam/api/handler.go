@@ -318,7 +318,7 @@ func (h *IAMHandler) PatchPassword(c *gin.Context) {
 
 // --- Supplier Applications ---
 
-// POST /v1/supplier-applications
+// POST /v1/suppliers/applications
 func (h *IAMHandler) PostSupplierApplication(c *gin.Context) {
 	userID, ok := middleware.GetCurrentUserID(c)
 	if !ok {
@@ -349,7 +349,7 @@ func (h *IAMHandler) PostSupplierApplication(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"application": resp})
 }
 
-// GET /v1/supplier-applications/current
+// GET /v1/suppliers/applications/current
 func (h *IAMHandler) GetCurrentSupplierApplication(c *gin.Context) {
 	userID, ok := middleware.GetCurrentUserID(c)
 	if !ok {
@@ -760,23 +760,10 @@ func parseSupplierApplicationIDParam(c *gin.Context) (uint, bool) {
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message":   "Invalid query parameters.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return 0, 0, false
-	}
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message":   "Invalid query parameters.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return 0, 0, false
-	}
-	return offset, limit, true
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     1000,
+	})
 }
 
 func parseUintQueryList(c *gin.Context, name string) ([]uint, bool) {

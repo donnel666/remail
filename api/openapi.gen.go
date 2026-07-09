@@ -1798,6 +1798,48 @@ func (e GetRechargesParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for GetResourcesParamsType.
+const (
+	GetResourcesParamsTypeAll       GetResourcesParamsType = "all"
+	GetResourcesParamsTypeDomain    GetResourcesParamsType = "domain"
+	GetResourcesParamsTypeMicrosoft GetResourcesParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetResourcesParamsType enum.
+func (e GetResourcesParamsType) Valid() bool {
+	switch e {
+	case GetResourcesParamsTypeAll:
+		return true
+	case GetResourcesParamsTypeDomain:
+		return true
+	case GetResourcesParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetResourcesParamsPurpose.
+const (
+	Binding GetResourcesParamsPurpose = "binding"
+	NotSale GetResourcesParamsPurpose = "not_sale"
+	Sale    GetResourcesParamsPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the GetResourcesParamsPurpose enum.
+func (e GetResourcesParamsPurpose) Valid() bool {
+	switch e {
+	case Binding:
+		return true
+	case NotSale:
+		return true
+	case Sale:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
 	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
@@ -1818,16 +1860,16 @@ func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsScope.
 const (
-	GetWalletTransactionsParamsScopeAll  GetWalletTransactionsParamsScope = "all"
-	GetWalletTransactionsParamsScopeMine GetWalletTransactionsParamsScope = "mine"
+	All  GetWalletTransactionsParamsScope = "all"
+	Mine GetWalletTransactionsParamsScope = "mine"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
 func (e GetWalletTransactionsParamsScope) Valid() bool {
 	switch e {
-	case GetWalletTransactionsParamsScopeAll:
+	case All:
 		return true
-	case GetWalletTransactionsParamsScopeMine:
+	case Mine:
 		return true
 	default:
 		return false
@@ -3018,6 +3060,13 @@ type RegisterRequest struct {
 	Password   string              `json:"password"`
 }
 
+// ResourceBooleanFacets defines model for ResourceBooleanFacets.
+type ResourceBooleanFacets struct {
+	All int `json:"all"`
+	No  int `json:"no"`
+	Yes int `json:"yes"`
+}
+
 // ResourceBulkFilter defines model for ResourceBulkFilter.
 type ResourceBulkFilter struct {
 	// CreatedFrom Inclusive resource creation lower bound. The frontend must send ISO date-time.
@@ -3089,6 +3138,15 @@ type ResourceBulkSelection1 struct {
 // ResourceBulkSelection1Mode defines model for ResourceBulkSelection.1.Mode.
 type ResourceBulkSelection1Mode string
 
+// ResourceFacetCounts defines model for ResourceFacetCounts.
+type ResourceFacetCounts struct {
+	Abnormal int `json:"abnormal"`
+	All      int `json:"all"`
+	Disabled int `json:"disabled"`
+	Normal   int `json:"normal"`
+	Pending  int `json:"pending"`
+}
+
 // ResourceItem defines model for ResourceItem.
 type ResourceItem struct {
 	CreatedAt time.Time `json:"createdAt"`
@@ -3133,12 +3191,29 @@ type ResourceItem struct {
 // ResourceItemPurpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
 type ResourceItemPurpose string
 
+// ResourceKeyFacet defines model for ResourceKeyFacet.
+type ResourceKeyFacet struct {
+	Count int    `json:"count"`
+	Key   string `json:"key"`
+}
+
+// ResourceListFacets defines model for ResourceListFacets.
+type ResourceListFacets struct {
+	GraphAvailable ResourceBooleanFacets `json:"graphAvailable"`
+	LongLived      ResourceBooleanFacets `json:"longLived"`
+	Private        ResourceBooleanFacets `json:"private"`
+	Status         ResourceFacetCounts   `json:"status"`
+	Suffixes       []ResourceKeyFacet    `json:"suffixes"`
+	Tlds           []ResourceKeyFacet    `json:"tlds"`
+}
+
 // ResourceListResponse defines model for ResourceListResponse.
 type ResourceListResponse struct {
-	Items  []ResourceItem `json:"items"`
-	Limit  int            `json:"limit"`
-	Offset int            `json:"offset"`
-	Total  int            `json:"total"`
+	Facets *ResourceListFacets `json:"facets,omitempty"`
+	Items  []ResourceItem      `json:"items"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
+	Total  int                 `json:"total"`
 }
 
 // ResourceValidationResponse defines model for ResourceValidationResponse.
@@ -3484,17 +3559,6 @@ type PatchAdminInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// PostAdminProjectLogoMultipartBody defines parameters for PostAdminProjectLogo.
-type PostAdminProjectLogoMultipartBody struct {
-	File openapi_types.File `json:"file"`
-}
-
-// PostAdminProjectLogoParams defines parameters for PostAdminProjectLogo.
-type PostAdminProjectLogoParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // PostAdminProjectParams defines parameters for PostAdminProject.
 type PostAdminProjectParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -3509,6 +3573,17 @@ type PostAdminProjectsDeleteParams struct {
 
 // PostAdminProjectsDelistParams defines parameters for PostAdminProjectsDelist.
 type PostAdminProjectsDelistParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminProjectLogoMultipartBody defines parameters for PostAdminProjectLogo.
+type PostAdminProjectLogoMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
+// PostAdminProjectLogoParams defines parameters for PostAdminProjectLogo.
+type PostAdminProjectLogoParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -3934,19 +4009,47 @@ type GetRechargesParamsScope string
 // GetRechargesParamsStatus defines parameters for GetRecharges.
 type GetRechargesParamsStatus string
 
-// PostResourceValidationsParams defines parameters for PostResourceValidations.
-type PostResourceValidationsParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // GetResourcesParams defines parameters for GetResources.
 type GetResourcesParams struct {
-	Scope  *string `form:"scope,omitempty" json:"scope,omitempty"`
-	Type   *string `form:"type,omitempty" json:"type,omitempty"`
-	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Scope *string                 `form:"scope,omitempty" json:"scope,omitempty"`
+	Type  *GetResourcesParamsType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Search Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+
+	// Suffix Exact Microsoft suffix such as @outlook.com.
+	Suffix *string `form:"suffix,omitempty" json:"suffix,omitempty"`
+
+	// Tld Exact domain suffix such as .com.
+	Tld    *string `form:"tld,omitempty" json:"tld,omitempty"`
+	Status *string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Purpose Domain resource purpose filter.
+	Purpose *GetResourcesParamsPurpose `form:"purpose,omitempty" json:"purpose,omitempty"`
+
+	// ForSale Microsoft public supply filter. false is private; true is public sale.
+	ForSale *bool `form:"forSale,omitempty" json:"forSale,omitempty"`
+
+	// LongLived Microsoft long-lived filter.
+	LongLived *bool `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// GraphAvailable Microsoft Graph availability filter.
+	GraphAvailable *bool `form:"graphAvailable,omitempty" json:"graphAvailable,omitempty"`
+
+	// CreatedFrom Inclusive resource creation lower bound.
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+
+	// CreatedTo Inclusive resource creation upper bound.
+	CreatedTo *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Offset    *int       `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit     *int       `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetResourcesParamsType defines parameters for GetResources.
+type GetResourcesParamsType string
+
+// GetResourcesParamsPurpose defines parameters for GetResources.
+type GetResourcesParamsPurpose string
 
 // PostResourceDeleteBatchParams defines parameters for PostResourceDeleteBatch.
 type PostResourceDeleteBatchParams struct {
@@ -3975,6 +4078,12 @@ type PostResourceImportMultipartBodyErrorStrategy string
 
 // PostResourcePublishBatchParams defines parameters for PostResourcePublishBatch.
 type PostResourcePublishBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostResourceValidationsParams defines parameters for PostResourceValidations.
+type PostResourceValidationsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -4067,9 +4176,6 @@ type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 // PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
 type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
 
-// PostAdminProjectLogoMultipartRequestBody defines body for PostAdminProjectLogo for multipart/form-data ContentType.
-type PostAdminProjectLogoMultipartRequestBody PostAdminProjectLogoMultipartBody
-
 // PostAdminProjectJSONRequestBody defines body for PostAdminProject for application/json ContentType.
 type PostAdminProjectJSONRequestBody = AdminCreateProjectRequest
 
@@ -4078,6 +4184,9 @@ type PostAdminProjectsDeleteJSONRequestBody = ProjectBulkCommandRequest
 
 // PostAdminProjectsDelistJSONRequestBody defines body for PostAdminProjectsDelist for application/json ContentType.
 type PostAdminProjectsDelistJSONRequestBody = ProjectBulkCommandRequest
+
+// PostAdminProjectLogoMultipartRequestBody defines body for PostAdminProjectLogo for multipart/form-data ContentType.
+type PostAdminProjectLogoMultipartRequestBody PostAdminProjectLogoMultipartBody
 
 // PostAdminProjectsRelistJSONRequestBody defines body for PostAdminProjectsRelist for application/json ContentType.
 type PostAdminProjectsRelistJSONRequestBody = ProjectBulkCommandRequest
@@ -4169,9 +4278,6 @@ type PostProjectJSONRequestBody = CreateProjectApplicationRequest
 // PostProjectResubmitJSONRequestBody defines body for PostProjectResubmit for application/json ContentType.
 type PostProjectResubmitJSONRequestBody = CreateProjectApplicationRequest
 
-// PostResourceValidationsJSONRequestBody defines body for PostResourceValidations for application/json ContentType.
-type PostResourceValidationsJSONRequestBody = ValidateResourcesRequest
-
 // PostResourceDeleteBatchJSONRequestBody defines body for PostResourceDeleteBatch for application/json ContentType.
 type PostResourceDeleteBatchJSONRequestBody = DeleteResourcesRequest
 
@@ -4180,6 +4286,9 @@ type PostResourceImportMultipartRequestBody PostResourceImportMultipartBody
 
 // PostResourcePublishBatchJSONRequestBody defines body for PostResourcePublishBatch for application/json ContentType.
 type PostResourcePublishBatchJSONRequestBody = PublishResourcesRequest
+
+// PostResourceValidationsJSONRequestBody defines body for PostResourceValidations for application/json ContentType.
+type PostResourceValidationsJSONRequestBody = ValidateResourcesRequest
 
 // PostServerJSONRequestBody defines body for PostServer for application/json ContentType.
 type PostServerJSONRequestBody = CreateMailServerRequest
@@ -4728,9 +4837,6 @@ type ServerInterface interface {
 	// List IAM permission catalog
 	// (GET /v1/admin/permissions)
 	GetAdminPermissions(c *gin.Context)
-	// Upload a project logo
-	// (POST /v1/admin/project-logos)
-	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
 	// Create a complete listed project as admin
 	// (POST /v1/admin/projects)
 	PostAdminProject(c *gin.Context, params PostAdminProjectParams)
@@ -4740,6 +4846,9 @@ type ServerInterface interface {
 	// Delist projects in bulk
 	// (POST /v1/admin/projects/delist)
 	PostAdminProjectsDelist(c *gin.Context, params PostAdminProjectsDelistParams)
+	// Upload a project logo
+	// (POST /v1/admin/projects/logos)
+	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
 	// Relist projects in bulk
 	// (POST /v1/admin/projects/relist)
 	PostAdminProjectsRelist(c *gin.Context, params PostAdminProjectsRelistParams)
@@ -4816,13 +4925,13 @@ type ServerInterface interface {
 	// (POST /v1/admin/proxies/{proxyId}/check)
 	PostAdminProxyCheck(c *gin.Context, proxyId int, params PostAdminProxyCheckParams)
 	// List supplier applications
-	// (GET /v1/admin/supplier-applications)
+	// (GET /v1/admin/suppliers/applications)
 	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
 	// Approve supplier application
-	// (POST /v1/admin/supplier-applications/{applicationId}/approve)
+	// (POST /v1/admin/suppliers/applications/{applicationId}/approve)
 	PostAdminSupplierApplicationApprove(c *gin.Context, applicationId int, params PostAdminSupplierApplicationApproveParams)
 	// Reject supplier application
-	// (POST /v1/admin/supplier-applications/{applicationId}/reject)
+	// (POST /v1/admin/suppliers/applications/{applicationId}/reject)
 	PostAdminSupplierApplicationReject(c *gin.Context, applicationId int, params PostAdminSupplierApplicationRejectParams)
 	// List all users (admin only)
 	// (GET /v1/admin/users)
@@ -4845,15 +4954,15 @@ type ServerInterface interface {
 	// Debit consumer balance manually
 	// (POST /v1/admin/wallets/{userId}/debit)
 	PostAdminWalletDebit(c *gin.Context, userId int, params PostAdminWalletDebitParams)
-	// Get current user's API key usage summary
-	// (GET /v1/apikey-usage)
-	GetApiKeyUsage(c *gin.Context)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
 	// Create an API key for the current user
 	// (POST /v1/apikeys)
 	PostApiKey(c *gin.Context, params PostApiKeyParams)
+	// Get current user's API key usage summary
+	// (GET /v1/apikeys/usage)
+	GetApiKeyUsage(c *gin.Context)
 	// Delete one API key
 	// (DELETE /v1/apikeys/{keyId})
 	DeleteApiKey(c *gin.Context, keyId int, params DeleteApiKeyParams)
@@ -4917,15 +5026,15 @@ type ServerInterface interface {
 	// Read mail messages with service email and token
 	// (GET /v1/pickup)
 	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
-	// Read a project logo file
-	// (GET /v1/project-logos/{logoKey})
-	GetProjectLogo(c *gin.Context, logoKey string)
 	// List visible, owned or admin-visible projects
 	// (GET /v1/projects)
 	GetProjects(c *gin.Context, params GetProjectsParams)
 	// Create a user project application
 	// (POST /v1/projects)
 	PostProject(c *gin.Context, params PostProjectParams)
+	// Read a project logo file
+	// (GET /v1/projects/logos/{logoKey})
+	GetProjectLogo(c *gin.Context, logoKey string)
 	// Get project detail
 	// (GET /v1/projects/{projectId})
 	GetProject(c *gin.Context, projectId int)
@@ -4938,15 +5047,6 @@ type ServerInterface interface {
 	// List recharge orders
 	// (GET /v1/recharges)
 	GetRecharges(c *gin.Context, params GetRechargesParams)
-	// Get resource import status
-	// (GET /v1/resource-imports/{importId})
-	GetResourceImport(c *gin.Context, importId int)
-	// Queue asynchronous resource validations in batch
-	// (POST /v1/resource-validations)
-	PostResourceValidations(c *gin.Context, params PostResourceValidationsParams)
-	// Get resource validation status
-	// (GET /v1/resource-validations/{validationId})
-	GetResourceValidation(c *gin.Context, validationId int)
 	// List email resources
 	// (GET /v1/resources)
 	GetResources(c *gin.Context, params GetResourcesParams)
@@ -4956,9 +5056,18 @@ type ServerInterface interface {
 	// Import Microsoft resources from TXT
 	// (POST /v1/resources/imports)
 	PostResourceImport(c *gin.Context, params PostResourceImportParams)
+	// Get resource import status
+	// (GET /v1/resources/imports/{importId})
+	GetResourceImport(c *gin.Context, importId int)
 	// Publish owned resources to public supply
 	// (POST /v1/resources/publish)
 	PostResourcePublishBatch(c *gin.Context, params PostResourcePublishBatchParams)
+	// Queue asynchronous resource validations in batch
+	// (POST /v1/resources/validations)
+	PostResourceValidations(c *gin.Context, params PostResourceValidationsParams)
+	// Get resource validation status
+	// (GET /v1/resources/validations/{validationId})
+	GetResourceValidation(c *gin.Context, validationId int)
 	// Delete an owned private resource
 	// (DELETE /v1/resources/{resourceId})
 	DeleteResource(c *gin.Context, resourceId int, params DeleteResourceParams)
@@ -4981,10 +5090,10 @@ type ServerInterface interface {
 	// (DELETE /v1/sessions/current)
 	DeleteSession(c *gin.Context, params DeleteSessionParams)
 	// Submit current user's supplier application
-	// (POST /v1/supplier-applications)
+	// (POST /v1/suppliers/applications)
 	PostSupplierApplication(c *gin.Context, params PostSupplierApplicationParams)
 	// Get current user's latest supplier application
-	// (GET /v1/supplier-applications/current)
+	// (GET /v1/suppliers/applications/current)
 	GetCurrentSupplierApplication(c *gin.Context)
 	// Register a new user
 	// (POST /v1/users)
@@ -5539,51 +5648,6 @@ func (siw *ServerInterfaceWrapper) GetAdminPermissions(c *gin.Context) {
 	siw.Handler.GetAdminPermissions(c)
 }
 
-// PostAdminProjectLogo operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminProjectLogo(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminProjectLogoParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostAdminProjectLogo(c, params)
-}
-
 // PostAdminProject operation middleware
 func (siw *ServerInterfaceWrapper) PostAdminProject(c *gin.Context) {
 
@@ -5717,6 +5781,51 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectsDelist(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProjectsDelist(c, params)
+}
+
+// PostAdminProjectLogo operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectLogo(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectLogoParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectLogo(c, params)
 }
 
 // PostAdminProjectsRelist operation middleware
@@ -7604,21 +7713,6 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletDebit(c *gin.Context) {
 	siw.Handler.PostAdminWalletDebit(c, userId, params)
 }
 
-// GetApiKeyUsage operation middleware
-func (siw *ServerInterfaceWrapper) GetApiKeyUsage(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetApiKeyUsage(c)
-}
-
 // GetApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) GetApiKeys(c *gin.Context) {
 
@@ -7721,6 +7815,21 @@ func (siw *ServerInterfaceWrapper) PostApiKey(c *gin.Context) {
 	}
 
 	siw.Handler.PostApiKey(c, params)
+}
+
+// GetApiKeyUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetApiKeyUsage(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApiKeyUsage(c)
 }
 
 // DeleteApiKey operation middleware
@@ -8515,33 +8624,6 @@ func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
 	siw.Handler.GetPickupMessages(c, params)
 }
 
-// GetProjectLogo operation middleware
-func (siw *ServerInterfaceWrapper) GetProjectLogo(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "logoKey" -------------
-	var logoKey string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "logoKey", c.Param("logoKey"), &logoKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter logoKey: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetProjectLogo(c, logoKey)
-}
-
 // GetProjects operation middleware
 func (siw *ServerInterfaceWrapper) GetProjects(c *gin.Context) {
 
@@ -8694,6 +8776,33 @@ func (siw *ServerInterfaceWrapper) PostProject(c *gin.Context) {
 	}
 
 	siw.Handler.PostProject(c, params)
+}
+
+// GetProjectLogo operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectLogo(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "logoKey" -------------
+	var logoKey string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "logoKey", c.Param("logoKey"), &logoKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter logoKey: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProjectLogo(c, logoKey)
 }
 
 // GetProject operation middleware
@@ -8865,105 +8974,6 @@ func (siw *ServerInterfaceWrapper) GetRecharges(c *gin.Context) {
 	siw.Handler.GetRecharges(c, params)
 }
 
-// GetResourceImport operation middleware
-func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "importId" -------------
-	var importId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetResourceImport(c, importId)
-}
-
-// PostResourceValidations operation middleware
-func (siw *ServerInterfaceWrapper) PostResourceValidations(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostResourceValidationsParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostResourceValidations(c, params)
-}
-
-// GetResourceValidation operation middleware
-func (siw *ServerInterfaceWrapper) GetResourceValidation(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "validationId" -------------
-	var validationId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "validationId", c.Param("validationId"), &validationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter validationId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetResourceValidation(c, validationId)
-}
-
 // GetResources operation middleware
 func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 
@@ -8988,6 +8998,86 @@ func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "tld" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tld", c.Request.URL.Query(), &params.Tld, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter tld: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "purpose" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "purpose", c.Request.URL.Query(), &params.Purpose, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter purpose: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "graphAvailable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "graphAvailable", c.Request.URL.Query(), &params.GraphAvailable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter graphAvailable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -9107,6 +9197,33 @@ func (siw *ServerInterfaceWrapper) PostResourceImport(c *gin.Context) {
 	siw.Handler.PostResourceImport(c, params)
 }
 
+// GetResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResourceImport(c, importId)
+}
+
 // PostResourcePublishBatch operation middleware
 func (siw *ServerInterfaceWrapper) PostResourcePublishBatch(c *gin.Context) {
 
@@ -9150,6 +9267,78 @@ func (siw *ServerInterfaceWrapper) PostResourcePublishBatch(c *gin.Context) {
 	}
 
 	siw.Handler.PostResourcePublishBatch(c, params)
+}
+
+// PostResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostResourceValidations(c, params)
+}
+
+// GetResourceValidation operation middleware
+func (siw *ServerInterfaceWrapper) GetResourceValidation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "validationId" -------------
+	var validationId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "validationId", c.Param("validationId"), &validationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter validationId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetResourceValidation(c, validationId)
 }
 
 // DeleteResource operation middleware
@@ -9740,10 +9929,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
 	router.GET(options.BaseURL+"/v1/admin/orders/:orderNo/allocations", wrapper.GetAdminOrderAllocation)
 	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
-	router.POST(options.BaseURL+"/v1/admin/project-logos", wrapper.PostAdminProjectLogo)
 	router.POST(options.BaseURL+"/v1/admin/projects", wrapper.PostAdminProject)
 	router.POST(options.BaseURL+"/v1/admin/projects/delete", wrapper.PostAdminProjectsDelete)
 	router.POST(options.BaseURL+"/v1/admin/projects/delist", wrapper.PostAdminProjectsDelist)
+	router.POST(options.BaseURL+"/v1/admin/projects/logos", wrapper.PostAdminProjectLogo)
 	router.POST(options.BaseURL+"/v1/admin/projects/relist", wrapper.PostAdminProjectsRelist)
 	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.DeleteAdminProject)
 	router.PUT(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.PutAdminProject)
@@ -9769,9 +9958,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/proxies/system", wrapper.PostAdminSystemProxy)
 	router.PATCH(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.PatchAdminProxy)
 	router.POST(options.BaseURL+"/v1/admin/proxies/:proxyId/check", wrapper.PostAdminProxyCheck)
-	router.GET(options.BaseURL+"/v1/admin/supplier-applications", wrapper.GetAdminSupplierApplications)
-	router.POST(options.BaseURL+"/v1/admin/supplier-applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
-	router.POST(options.BaseURL+"/v1/admin/supplier-applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
+	router.GET(options.BaseURL+"/v1/admin/suppliers/applications", wrapper.GetAdminSupplierApplications)
+	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
+	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
@@ -9779,9 +9968,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
-	router.GET(options.BaseURL+"/v1/apikey-usage", wrapper.GetApiKeyUsage)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
+	router.GET(options.BaseURL+"/v1/apikeys/usage", wrapper.GetApiKeyUsage)
 	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
@@ -9803,20 +9992,20 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
-	router.GET(options.BaseURL+"/v1/project-logos/:logoKey", wrapper.GetProjectLogo)
 	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
 	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)
+	router.GET(options.BaseURL+"/v1/projects/logos/:logoKey", wrapper.GetProjectLogo)
 	router.GET(options.BaseURL+"/v1/projects/:projectId", wrapper.GetProject)
 	router.GET(options.BaseURL+"/v1/projects/:projectId/inventory", wrapper.GetProjectInventory)
 	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
 	router.GET(options.BaseURL+"/v1/recharges", wrapper.GetRecharges)
-	router.GET(options.BaseURL+"/v1/resource-imports/:importId", wrapper.GetResourceImport)
-	router.POST(options.BaseURL+"/v1/resource-validations", wrapper.PostResourceValidations)
-	router.GET(options.BaseURL+"/v1/resource-validations/:validationId", wrapper.GetResourceValidation)
 	router.GET(options.BaseURL+"/v1/resources", wrapper.GetResources)
 	router.POST(options.BaseURL+"/v1/resources/delete", wrapper.PostResourceDeleteBatch)
 	router.POST(options.BaseURL+"/v1/resources/imports", wrapper.PostResourceImport)
+	router.GET(options.BaseURL+"/v1/resources/imports/:importId", wrapper.GetResourceImport)
 	router.POST(options.BaseURL+"/v1/resources/publish", wrapper.PostResourcePublishBatch)
+	router.POST(options.BaseURL+"/v1/resources/validations", wrapper.PostResourceValidations)
+	router.GET(options.BaseURL+"/v1/resources/validations/:validationId", wrapper.GetResourceValidation)
 	router.DELETE(options.BaseURL+"/v1/resources/:resourceId", wrapper.DeleteResource)
 	router.GET(options.BaseURL+"/v1/resources/:resourceId", wrapper.GetResourceDetail)
 	router.POST(options.BaseURL+"/v1/resources/:resourceId/publish", wrapper.PostResourcePublish)
@@ -9824,8 +10013,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/servers", wrapper.GetServers)
 	router.POST(options.BaseURL+"/v1/servers", wrapper.PostServer)
 	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
-	router.POST(options.BaseURL+"/v1/supplier-applications", wrapper.PostSupplierApplication)
-	router.GET(options.BaseURL+"/v1/supplier-applications/current", wrapper.GetCurrentSupplierApplication)
+	router.POST(options.BaseURL+"/v1/suppliers/applications", wrapper.PostSupplierApplication)
+	router.GET(options.BaseURL+"/v1/suppliers/applications/current", wrapper.GetCurrentSupplierApplication)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)

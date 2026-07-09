@@ -48,135 +48,50 @@ export type SupplierApplicationSubmitResponse = JsonResponse<
   201
 >;
 
-const resourcePageLimit = 10_000;
-const resourcePageConcurrency = 4;
-
-interface ListOwnedResourcesOptions {
-  concurrency?: number;
-  onPage?: (items: ResourceItem[], response: ResourceListResponse) => void;
-}
-
-function normalizePageConcurrency(value: number | undefined) {
-  if (!Number.isFinite(value)) return resourcePageConcurrency;
-  return Math.max(1, Math.min(8, Math.floor(value as number)));
+export interface ResourceListFilter {
+  createdFrom?: string;
+  createdTo?: string;
+  forSale?: boolean;
+  graphAvailable?: boolean;
+  longLived?: boolean;
+  purpose?: "not_sale" | "sale" | "binding";
+  search?: string;
+  status?: string;
+  suffix?: string;
+  tld?: string;
 }
 
 export async function listOwnedMicrosoftResources(
-  options: ListOwnedResourcesOptions = {}
+  filter: ResourceListFilter = {},
+  offset = 0,
+  limit = 20
 ) {
-  return listOwnedResourcesByType("microsoft", options);
+  return listOwnedResources("microsoft", filter, offset, limit);
 }
 
 export async function listOwnedDomainResources(
-  options: ListOwnedResourcesOptions = {}
+  filter: ResourceListFilter = {},
+  offset = 0,
+  limit = 20
 ) {
-  return listOwnedResourcesByType("domain", options);
+  return listOwnedResources("domain", filter, offset, limit);
 }
 
-async function listOwnedResourcesByType(
+async function listOwnedResources(
   resourceType: "microsoft" | "domain",
-  options: ListOwnedResourcesOptions = {}
-) {
-  const collectItems = !options.onPage;
-  const items: ResourceItem[] = [];
-  let loaded = 0;
-  let total = 0;
-  let latest: ResourceListResponse | null = null;
-
-  const firstResponse = await listOwnedResourcesPage(resourceType, 0);
-  latest = firstResponse;
-  total = firstResponse.total;
-  loaded = firstResponse.items.length;
-  if (collectItems) items.push(...firstResponse.items);
-  options.onPage?.(firstResponse.items, firstResponse);
-
-  if (firstResponse.items.length === 0 || loaded >= total) {
-    return {
-      ...firstResponse,
-      items,
-      limit: loaded,
-      offset: 0,
-      total,
-    };
-  }
-
-  const pageOffsets: number[] = [];
-  for (
-    let pageOffset = firstResponse.items.length;
-    pageOffset < total;
-    pageOffset += resourcePageLimit
-  ) {
-    pageOffsets.push(pageOffset);
-  }
-
-  const pageBuffer = new Map<number, ResourceListResponse>();
-  let nextFlushOffset = firstResponse.items.length;
-  let nextOffsetIndex = 0;
-  let firstError: unknown;
-
-  const flushReadyPages = () => {
-    for (;;) {
-      const response = pageBuffer.get(nextFlushOffset);
-      if (!response) return;
-
-      pageBuffer.delete(nextFlushOffset);
-      latest = response;
-      loaded += response.items.length;
-      if (collectItems) items.push(...response.items);
-      options.onPage?.(response.items, response);
-      nextFlushOffset += resourcePageLimit;
-    }
-  };
-
-  const workerCount = Math.min(
-    normalizePageConcurrency(options.concurrency),
-    pageOffsets.length
-  );
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (!firstError) {
-        const pageOffset = pageOffsets[nextOffsetIndex];
-        if (pageOffset === undefined) return;
-        nextOffsetIndex += 1;
-
-        let response: ResourceListResponse;
-        try {
-          response = await listOwnedResourcesPage(resourceType, pageOffset);
-        } catch (error) {
-          firstError ??= error;
-          return;
-        }
-        if (firstError) return;
-
-        pageBuffer.set(pageOffset, response);
-        flushReadyPages();
-      }
-    })
-  );
-
-  if (firstError) throw firstError;
-
-  return {
-    ...(latest as ResourceListResponse),
-    items,
-    limit: loaded,
-    offset: 0,
-    total,
-  };
-}
-
-async function listOwnedResourcesPage(
-  resourceType: "microsoft" | "domain",
-  offset: number
+  filter: ResourceListFilter,
+  offset: number,
+  limit: number
 ) {
   return unwrap<ResourceListResponse>(
     await client.GET("/v1/resources", {
       params: {
         query: {
+          ...filter,
           scope: "owned",
           type: resourceType,
           offset,
-          limit: resourcePageLimit,
+          limit,
         },
       },
     })
@@ -204,7 +119,7 @@ export async function importMicrosoftResources(
 
 export async function getResourceImportStatus(importId: number) {
   return unwrap<ImportStatusResponse>(
-    await client.GET("/v1/resource-imports/{importId}", {
+    await client.GET("/v1/resources/imports/{importId}", {
       params: { path: { importId } },
     })
   );
@@ -223,7 +138,7 @@ export async function validateResource(resourceId: number) {
 
 export async function getResourceValidationStatus(validationId: number) {
   return unwrap<ResourceValidationResponse>(
-    await client.GET("/v1/resource-validations/{validationId}", {
+    await client.GET("/v1/resources/validations/{validationId}", {
       params: { path: { validationId } },
     })
   );
@@ -233,7 +148,7 @@ export async function validateResourcesBatch(
   payload: ValidateResourcesRequest
 ) {
   return unwrap<ResourceValidationsResponse>(
-    await client.POST("/v1/resource-validations", {
+    await client.POST("/v1/resources/validations", {
       body: payload,
       params: { header: csrfHeader() },
     })
@@ -436,7 +351,7 @@ export async function deleteDomainResourcesByFilter(filter: ResourceBulkFilter) 
 
 export async function getCurrentSupplierApplication() {
   return unwrap<SupplierApplicationCurrentResponse>(
-    await client.GET("/v1/supplier-applications/current")
+    await client.GET("/v1/suppliers/applications/current")
   );
 }
 
@@ -444,7 +359,7 @@ export async function submitSupplierApplication(
   payload: SupplierApplicationRequest
 ) {
   return unwrap<SupplierApplicationSubmitResponse>(
-    await client.POST("/v1/supplier-applications", {
+    await client.POST("/v1/suppliers/applications", {
       body: payload,
       params: { header: csrfHeader() },
     })

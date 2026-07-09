@@ -655,33 +655,98 @@ func (r *ResourceRepo) FindExistingMicrosoftEmails(ctx context.Context, emails [
 	return result, nil
 }
 
-func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, resourceType string) *gorm.DB {
+func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&EmailResourceModel{})
 	if ownerUserID > 0 {
 		q = q.Where("email_resources.owner_user_id = ?", ownerUserID)
 	}
-	switch resourceType {
-	case "", "all":
+	switch filter.ResourceType {
+	case "":
 		q = q.Joins("LEFT JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id").
 			Joins("LEFT JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id").
 			Where("email_resources.type <> ? OR ms_filter.status <> ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusDeleted)).
 			Where("email_resources.type <> ? OR dr_filter.status <> ?", string(domain.ResourceTypeDomain), string(domain.DomainStatusDeleted))
-	case string(domain.ResourceTypeMicrosoft):
+		if filter.Status != "" {
+			q = q.Where(
+				"(email_resources.type = ? AND ms_filter.status = ?) OR (email_resources.type = ? AND dr_filter.status = ?)",
+				string(domain.ResourceTypeMicrosoft),
+				filter.Status,
+				string(domain.ResourceTypeDomain),
+				filter.Status,
+			)
+		}
+		if filter.Search != "" {
+			like := "%" + filter.Search + "%"
+			normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+			q = q.Where(
+				"(LOWER(ms_filter.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms_filter.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms_filter.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ? OR LOWER(dr_filter.domain) LIKE ? OR LOWER(dr_filter.domain_tld) LIKE ?)",
+				like,
+				like,
+				normalized,
+				like,
+				like,
+			)
+		}
+	case domain.ResourceTypeMicrosoft:
 		q = q.Joins("JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id AND ms_filter.status <> ?", string(domain.MicrosoftStatusDeleted)).
-			Where("email_resources.type = ?", resourceType)
-	case string(domain.ResourceTypeDomain):
+			Where("email_resources.type = ?", string(domain.ResourceTypeMicrosoft))
+		if filter.Status != "" {
+			q = q.Where("ms_filter.status = ?", filter.Status)
+		}
+		if filter.ForSale != nil {
+			q = q.Where("ms_filter.for_sale = ?", *filter.ForSale)
+		}
+		if filter.LongLived != nil {
+			q = q.Where("ms_filter.long_lived = ?", *filter.LongLived)
+		}
+		if filter.GraphAvailable != nil {
+			q = q.Where("ms_filter.graph_available = ?", *filter.GraphAvailable)
+		}
+		if filter.Suffix != "" {
+			q = q.Where("ms_filter.email_domain = ?", filter.Suffix)
+		}
+		if filter.Search != "" {
+			like := "%" + filter.Search + "%"
+			normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+			q = q.Where(
+				"(LOWER(ms_filter.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms_filter.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms_filter.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)",
+				like,
+				like,
+				normalized,
+			)
+		}
+	case domain.ResourceTypeDomain:
 		q = q.Joins("JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id AND dr_filter.status <> ?", string(domain.DomainStatusDeleted)).
-			Where("email_resources.type = ?", resourceType)
+			Where("email_resources.type = ?", string(domain.ResourceTypeDomain))
+		if filter.Status != "" {
+			q = q.Where("dr_filter.status = ?", filter.Status)
+		}
+		if filter.Purpose != "" {
+			q = q.Where("dr_filter.purpose = ?", filter.Purpose)
+		}
+		if filter.TLD != "" {
+			q = q.Where("dr_filter.domain_tld = ?", filter.TLD)
+		}
+		if filter.Search != "" {
+			like := "%" + filter.Search + "%"
+			q = q.Where("(LOWER(dr_filter.domain) LIKE ? OR LOWER(dr_filter.domain_tld) LIKE ?)", like, like)
+		}
 	default:
-		q = q.Where("email_resources.type = ?", resourceType)
+		q = q.Where("1 = 0")
+	}
+	if filter.CreatedFrom != nil {
+		q = q.Where("email_resources.created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		q = q.Where("email_resources.created_at <= ?", *filter.CreatedTo)
 	}
 	return q
 }
 
-func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, resourceType string, offset, limit int) ([]domain.EmailResource, error) {
+func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int) ([]domain.EmailResource, error) {
 	var models []EmailResourceModel
-	err := r.listQuery(ctx, ownerUserID, resourceType).
-		Order("created_at DESC").
+	err := r.listQuery(ctx, ownerUserID, filter).
+		Order("email_resources.created_at DESC, email_resources.id DESC").
 		Offset(offset).Limit(limit).
 		Find(&models).Error
 	if err != nil {
@@ -694,21 +759,187 @@ func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, resourceType 
 	return result, nil
 }
 
-func (r *ResourceRepo) ListAll(ctx context.Context, resourceType string, offset, limit int) ([]domain.EmailResource, error) {
-	return r.List(ctx, 0, resourceType, offset, limit)
+func (r *ResourceRepo) ListAll(ctx context.Context, filter coreapp.ResourceListFilter, offset, limit int) ([]domain.EmailResource, error) {
+	return r.List(ctx, 0, filter, offset, limit)
 }
 
-func (r *ResourceRepo) Count(ctx context.Context, ownerUserID uint, resourceType string) (int64, error) {
+func (r *ResourceRepo) Count(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
 	var count int64
-	err := r.listQuery(ctx, ownerUserID, resourceType).Count(&count).Error
+	err := r.listQuery(ctx, ownerUserID, filter).Count(&count).Error
 	if err != nil {
 		return 0, fmt.Errorf("count resources: %w", err)
 	}
 	return count, nil
 }
 
-func (r *ResourceRepo) CountAll(ctx context.Context, resourceType string) (int64, error) {
-	return r.Count(ctx, 0, resourceType)
+func (r *ResourceRepo) CountAll(ctx context.Context, filter coreapp.ResourceListFilter) (int64, error) {
+	return r.Count(ctx, 0, filter)
+}
+
+func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (*coreapp.ResourceListFacets, error) {
+	facets := &coreapp.ResourceListFacets{}
+
+	statusBase := filter
+	statusBase.Status = ""
+	var err error
+	facets.Status.All, err = r.countResources(ctx, ownerUserID, statusBase)
+	if err != nil {
+		return nil, err
+	}
+	facets.Status.Normal, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "normal")
+	if err != nil {
+		return nil, err
+	}
+	facets.Status.Abnormal, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "abnormal")
+	if err != nil {
+		return nil, err
+	}
+	facets.Status.Disabled, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "disabled")
+	if err != nil {
+		return nil, err
+	}
+	if filter.ResourceType == domain.ResourceTypeMicrosoft {
+		facets.Status.Pending, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "pending")
+		if err != nil {
+			return nil, err
+		}
+
+		privateBase := filter
+		privateBase.ForSale = nil
+		facets.Private.All, err = r.countResources(ctx, ownerUserID, privateBase)
+		if err != nil {
+			return nil, err
+		}
+		privateYes := privateBase
+		privateYes.ForSale = boolResourceFilter(false)
+		facets.Private.Yes, err = r.countResources(ctx, ownerUserID, privateYes)
+		if err != nil {
+			return nil, err
+		}
+		privateNo := privateBase
+		privateNo.ForSale = boolResourceFilter(true)
+		facets.Private.No, err = r.countResources(ctx, ownerUserID, privateNo)
+		if err != nil {
+			return nil, err
+		}
+
+		longLivedBase := filter
+		longLivedBase.LongLived = nil
+		facets.LongLived.All, err = r.countResources(ctx, ownerUserID, longLivedBase)
+		if err != nil {
+			return nil, err
+		}
+		longLivedYes := longLivedBase
+		longLivedYes.LongLived = boolResourceFilter(true)
+		facets.LongLived.Yes, err = r.countResources(ctx, ownerUserID, longLivedYes)
+		if err != nil {
+			return nil, err
+		}
+		longLivedNo := longLivedBase
+		longLivedNo.LongLived = boolResourceFilter(false)
+		facets.LongLived.No, err = r.countResources(ctx, ownerUserID, longLivedNo)
+		if err != nil {
+			return nil, err
+		}
+
+		graphBase := filter
+		graphBase.GraphAvailable = nil
+		facets.GraphAvailable.All, err = r.countResources(ctx, ownerUserID, graphBase)
+		if err != nil {
+			return nil, err
+		}
+		graphYes := graphBase
+		graphYes.GraphAvailable = boolResourceFilter(true)
+		facets.GraphAvailable.Yes, err = r.countResources(ctx, ownerUserID, graphYes)
+		if err != nil {
+			return nil, err
+		}
+		graphNo := graphBase
+		graphNo.GraphAvailable = boolResourceFilter(false)
+		facets.GraphAvailable.No, err = r.countResources(ctx, ownerUserID, graphNo)
+		if err != nil {
+			return nil, err
+		}
+
+		suffixBase := filter
+		suffixBase.Suffix = ""
+		facets.Suffixes, err = r.resourceFacetGroups(ctx, ownerUserID, suffixBase, "ms_filter.email_domain")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if filter.ResourceType == domain.ResourceTypeDomain {
+		privateBase := filter
+		privateBase.Purpose = ""
+		facets.Private.All, err = r.countResources(ctx, ownerUserID, privateBase)
+		if err != nil {
+			return nil, err
+		}
+		privateYes := privateBase
+		privateYes.Purpose = string(domain.PurposeNotSale)
+		facets.Private.Yes, err = r.countResources(ctx, ownerUserID, privateYes)
+		if err != nil {
+			return nil, err
+		}
+		privateNo := privateBase
+		privateNo.Purpose = string(domain.PurposeSale)
+		facets.Private.No, err = r.countResources(ctx, ownerUserID, privateNo)
+		if err != nil {
+			return nil, err
+		}
+
+		tldBase := filter
+		tldBase.TLD = ""
+		facets.TLDs, err = r.resourceFacetGroups(ctx, ownerUserID, tldBase, "dr_filter.domain_tld")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return facets, nil
+}
+
+func (r *ResourceRepo) countResourcesWithStatus(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, status string) (int64, error) {
+	next := filter
+	next.Status = status
+	return r.countResources(ctx, ownerUserID, next)
+}
+
+func (r *ResourceRepo) countResources(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
+	var count int64
+	err := r.listQuery(ctx, ownerUserID, filter).Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("count resource facets: %w", err)
+	}
+	return count, nil
+}
+
+func (r *ResourceRepo) resourceFacetGroups(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, column string) ([]coreapp.ResourceKeyFacet, error) {
+	type row struct {
+		Key   string `gorm:"column:facet_key"`
+		Count int64  `gorm:"column:count"`
+	}
+	rows := make([]row, 0)
+	err := r.listQuery(ctx, ownerUserID, filter).
+		Select(column + " AS facet_key, COUNT(*) AS count").
+		Where(column + " <> ''").
+		Group(column).
+		Order("count DESC, facet_key ASC").
+		Limit(100).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("resource facet groups: %w", err)
+	}
+	result := make([]coreapp.ResourceKeyFacet, len(rows))
+	for i := range rows {
+		result[i] = coreapp.ResourceKeyFacet{Key: rows[i].Key, Count: rows[i].Count}
+	}
+	return result, nil
+}
+
+func boolResourceFilter(value bool) *bool {
+	return &value
 }
 
 // ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.

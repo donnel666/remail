@@ -246,10 +246,10 @@ func TestResourceListIndexesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 
 	requireIndexExists(t, db, "resource_imports", "idx_resource_imports_owner_created")
-	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_created")
-	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_type_created")
-	requireIndexExists(t, db, "email_resources", "idx_email_resources_type_created")
-	requireIndexExists(t, db, "email_resources", "idx_email_resources_created")
+	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_created_id")
+	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_type_created_id")
+	requireIndexExists(t, db, "email_resources", "idx_email_resources_type_created_id")
+	requireIndexExists(t, db, "email_resources", "idx_email_resources_created_id")
 	requireIndexExists(t, db, "mail_servers", "idx_mail_servers_owner_created")
 	requireIndexExists(t, db, "mail_servers", "idx_mail_servers_created")
 	requireIndexExists(t, db, "mail_servers", "idx_mail_servers_owner_address_mx")
@@ -265,6 +265,125 @@ func TestResourceListIndexesMySQL(t *testing.T) {
 	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_status_updated")
 	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_resource_created")
 	requireIndexExists(t, db, "inbound_mails", "idx_inbound_mails_recipient_created")
+}
+
+func TestResourceRepoListFiltersAndPaginationMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		"supplier",
+		2,
+		"other@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, server_address, status) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		200,
+		1,
+		"mail-owner.test.local",
+		"online",
+		201,
+		2,
+		"mail-other.test.local",
+		"online",
+	).Error)
+
+	base := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Exec(
+		`INSERT INTO email_resources(id, type, owner_user_id, created_at) VALUES
+			(100, 'microsoft', 1, ?),
+			(101, 'microsoft', 1, ?),
+			(102, 'microsoft', 1, ?),
+			(103, 'microsoft', 2, ?),
+			(200, 'domain', 1, ?),
+			(201, 'domain', 1, ?),
+			(202, 'domain', 1, ?)`,
+		base.Add(1*time.Minute),
+		base.Add(2*time.Minute),
+		base.Add(3*time.Minute),
+		base.Add(4*time.Minute),
+		base.Add(5*time.Minute),
+		base.Add(6*time.Minute),
+		base.Add(7*time.Minute),
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO microsoft_resources(id, email_address, email_domain, password, for_sale, long_lived, graph_available, status) VALUES
+			(100, 'alpha@outlook.com', 'outlook.com', 'secret', FALSE, TRUE, TRUE, 'normal'),
+			(101, 'beta@hotmail.com', 'hotmail.com', 'secret', TRUE, FALSE, FALSE, 'abnormal'),
+			(102, 'deleted@outlook.com', 'outlook.com', 'secret', FALSE, TRUE, TRUE, 'deleted'),
+			(103, 'other@outlook.com', 'outlook.com', 'secret', FALSE, TRUE, TRUE, 'normal')`,
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO domain_resources(id, owner_user_id, domain, domain_tld, mail_server_id, purpose, status) VALUES
+			(200, 1, 'app.example.com', '.com', 200, 'not_sale', 'normal'),
+			(201, 1, 'ops.example.net', '.net', 200, 'sale', 'abnormal'),
+			(202, 1, 'deleted.example.com', '.com', 200, 'not_sale', 'deleted')`,
+	).Error)
+
+	microsoftFilter := coreapp.ResourceListFilter{
+		ResourceType:   domain.ResourceTypeMicrosoft,
+		Suffix:         "outlook.com",
+		Status:         string(domain.MicrosoftStatusNormal),
+		ForSale:        boolPtr(false),
+		LongLived:      boolPtr(true),
+		GraphAvailable: boolPtr(true),
+		Search:         "alpha",
+	}
+	items, err := repo.List(context.Background(), 1, microsoftFilter, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 100, items[0].ID)
+	total, err := repo.Count(context.Background(), 1, microsoftFilter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+
+	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 101, items[0].ID)
+	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 100, items[0].ID)
+	total, err = repo.Count(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+
+	domainFilter := coreapp.ResourceListFilter{
+		ResourceType: domain.ResourceTypeDomain,
+		TLD:          ".net",
+		Purpose:      string(domain.PurposeSale),
+		Status:       string(domain.DomainStatusAbnormal),
+	}
+	items, err = repo.List(context.Background(), 1, domainFilter, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 201, items[0].ID)
+	total, err = repo.Count(context.Background(), 1, domainFilter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+
+	createdFrom := base.Add(1 * time.Minute)
+	createdTo := base.Add(5 * time.Minute)
+	total, err = repo.Count(context.Background(), 1, coreapp.ResourceListFilter{
+		CreatedFrom: &createdFrom,
+		CreatedTo:   &createdTo,
+		Status:      string(domain.MicrosoftStatusNormal),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+
+	total, err = repo.CountAll(context.Background(), coreapp.ResourceListFilter{
+		Status: string(domain.MicrosoftStatusNormal),
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
 }
 
 func TestMailServerRepoGetOrCreateDefaultInboundConcurrentMySQL(t *testing.T) {
@@ -635,12 +754,12 @@ func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {
 	).Error)
 
 	requireExplainUsesIndex(t, db,
-		"idx_email_resources_owner_created",
-		"EXPLAIN SELECT * FROM email_resources WHERE owner_user_id = 1 ORDER BY created_at DESC LIMIT 20",
+		"idx_email_resources_owner_created_id",
+		"EXPLAIN SELECT * FROM email_resources WHERE owner_user_id = 1 ORDER BY created_at DESC, id DESC LIMIT 20",
 	)
 	requireExplainUsesIndex(t, db,
-		"idx_email_resources_owner_type_created",
-		"EXPLAIN SELECT * FROM email_resources WHERE owner_user_id = 1 AND type = 'microsoft' ORDER BY created_at DESC LIMIT 20",
+		"idx_email_resources_owner_type_created_id",
+		"EXPLAIN SELECT * FROM email_resources WHERE owner_user_id = 1 AND type = 'microsoft' ORDER BY created_at DESC, id DESC LIMIT 20",
 	)
 	requireExplainUsesIndex(t, db,
 		"idx_mail_servers_owner_created",
@@ -1016,11 +1135,11 @@ func TestResourceRepoDeletePrivateMicrosoftWithLogMySQL(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT status FROM microsoft_resources WHERE id = ?", ms.ID).Scan(&status).Error)
 	require.Equal(t, string(domain.MicrosoftStatusDeleted), status)
 
-	listed, err := repo.List(context.Background(), 1, string(domain.ResourceTypeMicrosoft), 0, 20)
+	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 20)
 	require.NoError(t, err)
 	require.Empty(t, listed)
 
-	visibleCount, err := repo.Count(context.Background(), 1, string(domain.ResourceTypeMicrosoft))
+	visibleCount, err := repo.Count(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft})
 	require.NoError(t, err)
 	require.Zero(t, visibleCount)
 
@@ -1193,11 +1312,11 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT status FROM domain_resources WHERE id = ?", originalID).Scan(&status).Error)
 	require.Equal(t, string(domain.DomainStatusDeleted), status)
 
-	listed, err := repo.List(context.Background(), 1, string(domain.ResourceTypeDomain), 0, 20)
+	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20)
 	require.NoError(t, err)
 	require.Empty(t, listed)
 
-	visibleCount, err := repo.Count(context.Background(), 1, string(domain.ResourceTypeDomain))
+	visibleCount, err := repo.Count(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain})
 	require.NoError(t, err)
 	require.Zero(t, visibleCount)
 
@@ -1241,7 +1360,7 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, mailboxes)
 
-	listed, err = repo.List(context.Background(), 2, string(domain.ResourceTypeDomain), 0, 20)
+	listed, err = repo.List(context.Background(), 2, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 }
@@ -1601,7 +1720,7 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	result, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
 		Mode:        coreapp.ResourceBulkSelectionIDs,
 		ResourceIDs: []uint{normal.ID, abnormal.ID},
-	}, nil, "req-batch-validation", "/v1/resource-validations")
+	}, nil, "req-batch-validation", "/v1/resources/validations")
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Requested)
 	require.Equal(t, 2, result.Queued)
@@ -1659,7 +1778,7 @@ func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCr
 	_, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
 		Mode:        coreapp.ResourceBulkSelectionIDs,
 		ResourceIDs: []uint{owned.ID, other.ID},
-	}, nil, "req-batch-forbidden", "/v1/resource-validations")
+	}, nil, "req-batch-forbidden", "/v1/resources/validations")
 	require.ErrorIs(t, err, domain.ErrForbiddenResource)
 
 	var activeJobs int64
@@ -1739,7 +1858,7 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 			CreatedFrom:  &createdFrom,
 			CreatedTo:    &createdTo,
 		},
-	}, nil, "req-domain-validation-filter", "/v1/resource-validations")
+	}, nil, "req-domain-validation-filter", "/v1/resources/validations")
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Requested)
 	require.Equal(t, 1, result.Created)
@@ -1765,6 +1884,10 @@ func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName s
 		indexName,
 	).Scan(&count).Error)
 	require.Positive(t, count, "expected index %s on %s", indexName, tableName)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, query string) {

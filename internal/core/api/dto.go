@@ -165,10 +165,39 @@ type ResourceItemResponse struct {
 
 // ResourceListResponse is the paginated resource list response.
 type ResourceListResponse struct {
-	Items  []ResourceItemResponse `json:"items"`
-	Total  int64                  `json:"total"`
-	Offset int                    `json:"offset"`
-	Limit  int                    `json:"limit"`
+	Items  []ResourceItemResponse      `json:"items"`
+	Total  int64                       `json:"total"`
+	Offset int                         `json:"offset"`
+	Limit  int                         `json:"limit"`
+	Facets *ResourceListFacetsResponse `json:"facets,omitempty"`
+}
+
+type ResourceFacetCountsResponse struct {
+	All      int64 `json:"all"`
+	Normal   int64 `json:"normal"`
+	Pending  int64 `json:"pending"`
+	Abnormal int64 `json:"abnormal"`
+	Disabled int64 `json:"disabled"`
+}
+
+type ResourceBooleanFacetsResponse struct {
+	All int64 `json:"all"`
+	Yes int64 `json:"yes"`
+	No  int64 `json:"no"`
+}
+
+type ResourceKeyFacetResponse struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+type ResourceListFacetsResponse struct {
+	Status         ResourceFacetCountsResponse   `json:"status"`
+	Private        ResourceBooleanFacetsResponse `json:"private"`
+	LongLived      ResourceBooleanFacetsResponse `json:"longLived"`
+	GraphAvailable ResourceBooleanFacetsResponse `json:"graphAvailable"`
+	Suffixes       []ResourceKeyFacetResponse    `json:"suffixes"`
+	TLDs           []ResourceKeyFacetResponse    `json:"tlds"`
 }
 
 // MicrosoftResourceDetailResponse is the API-safe Microsoft resource detail (no credentials).

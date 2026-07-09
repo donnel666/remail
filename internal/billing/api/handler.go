@@ -426,17 +426,10 @@ func parseUserIDParam(c *gin.Context) (uint, bool) {
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil || offset < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid query parameters.", "requestId": middleware.GetRequestID(c)})
-		return 0, 0, false
-	}
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid query parameters.", "requestId": middleware.GetRequestID(c)})
-		return 0, 0, false
-	}
-	return offset, limit, true
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     1000,
+	})
 }
 
 func walletResponse(summary domain.WalletSummary) WalletResponse {

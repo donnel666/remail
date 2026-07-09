@@ -311,7 +311,7 @@
           },
           "logoUrl": {
             "type": "string",
-            "example": "/v1/project-logos/microsoft.png"
+            "example": "/v1/projects/logos/microsoft.png"
           },
           "description": {
             "type": "string",
@@ -1556,7 +1556,7 @@
     }
   },
   "paths": {
-    "/v1/open/api-key/profile": {
+    "/v1/open/apikey/profile": {
       "get": {
         "tags": [
           "Core"
@@ -2672,7 +2672,7 @@
         }
       }
     },
-    "/v1/open/resource-imports": {
+    "/v1/open/resources/imports": {
       "post": {
         "tags": [
           "Resources"
@@ -2753,7 +2753,7 @@
         }
       }
     },
-    "/v1/open/resource-imports/{importId}": {
+    "/v1/open/resources/imports/{importId}": {
       "get": {
         "tags": [
           "Resources"
@@ -2813,7 +2813,7 @@
         }
       }
     },
-    "/v1/open/resource-validations": {
+    "/v1/open/resources/validations": {
       "post": {
         "tags": [
           "Resources"
@@ -2872,7 +2872,7 @@
         }
       }
     },
-    "/v1/open/resource-validations/{validationId}": {
+    "/v1/open/resources/validations/{validationId}": {
       "get": {
         "tags": [
           "Resources"

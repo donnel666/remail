@@ -3,26 +3,12 @@ import { useEffect, useId } from "react";
 
 import { listAPIKeys } from "@/lib/openapi-credentials-api";
 
+import {
+  loadRuntimeOpenApiSpec,
+  loadSwaggerAssets,
+} from "./api-docs/assets";
 import { installSwaggerZhCn } from "./api-docs/swagger-zh-cn";
 
-declare global {
-  interface Window {
-    SwaggerUIBundle?: SwaggerUIBundleFactory;
-    SwaggerUIStandalonePreset?: unknown;
-  }
-}
-
-interface SwaggerUIBundleFactory {
-  (config: Record<string, unknown>): unknown;
-  presets?: {
-    apis?: unknown;
-  };
-}
-
-const swaggerStyleHref = "/vendor/swagger-ui/swagger-ui.css";
-const swaggerBundleSrc = "/vendor/swagger-ui/swagger-ui-bundle.js";
-const swaggerStandalonePresetSrc =
-  "/vendor/swagger-ui/swagger-ui-standalone-preset.js";
 const swaggerTagOrder = [
   "Core",
   "Resources",
@@ -42,45 +28,6 @@ const developmentFallbackApiKeys = [
     token: "rk-4h8s1k6p9t2w5y7m3c0e",
   },
 ];
-
-function ensureStylesheet(href: string) {
-  if (document.querySelector(`link[href="${href}"]`)) return;
-  const link = document.createElement("link");
-  link.href = href;
-  link.rel = "stylesheet";
-  document.head.appendChild(link);
-}
-
-function loadScript(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${src}"]`
-    );
-    if (existing?.dataset.loaded === "true") {
-      resolve();
-      return;
-    }
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", reject, { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.addEventListener(
-      "load",
-      () => {
-        script.dataset.loaded = "true";
-        resolve();
-      },
-      { once: true }
-    );
-    script.addEventListener("error", reject, { once: true });
-    document.body.appendChild(script);
-  });
-}
 
 export default function ApiDocs() {
   const containerId = useId().replace(/:/g, "");
@@ -109,9 +56,10 @@ export default function ApiDocs() {
       );
 
     async function bootstrapSwagger() {
-      ensureStylesheet(swaggerStyleHref);
-      await loadScript(swaggerBundleSrc);
-      await loadScript(swaggerStandalonePresetSrc);
+      const [spec] = await Promise.all([
+        loadRuntimeOpenApiSpec(),
+        loadSwaggerAssets(),
+      ]);
       if (disposed || !window.SwaggerUIBundle) return;
 
       const presets = [
@@ -139,8 +87,8 @@ export default function ApiDocs() {
           return leftIndex - rightIndex;
         },
         tryItOutEnabled: true,
-        url: "/openapi.json",
         validatorUrl: null,
+        spec,
       });
 
       const container = document.getElementById(containerId);

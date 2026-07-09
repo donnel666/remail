@@ -160,6 +160,8 @@ export interface SwaggerZhCnOptions {
 
 const apiKeyMenuSelector = "[data-remail-api-key-menu='true']";
 const apiKeyManageLinkSelector = "[data-remail-api-key-manage='true']";
+const idempotencyGeneratorSelector =
+  "[data-remail-idempotency-generate='true']";
 let apiKeyPickerSeed = 0;
 
 function normalizeText(value: string) {
@@ -435,6 +437,48 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function randomIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) {
+    return `idem-${globalThis.crypto.randomUUID()}`;
+  }
+  const randomPart = Math.random().toString(36).slice(2, 12);
+  return `idem-${Date.now().toString(36)}${randomPart}`;
+}
+
+function syncIdempotencyKeyGenerators(root: HTMLElement) {
+  root.querySelectorAll<HTMLTableRowElement>("tr").forEach((row) => {
+    const parameterName =
+      row.querySelector<HTMLElement>(".parameter__name")?.textContent ??
+      row.querySelector<HTMLElement>("td")?.textContent ??
+      "";
+    if (!normalizeText(parameterName).includes("Idempotency-Key")) return;
+
+    const input = row.querySelector<HTMLInputElement>(
+      'input[type="text"], input:not([type])'
+    );
+    if (!input) return;
+
+    const wrapper = input.parentElement;
+    if (!wrapper) return;
+    wrapper.classList.add("swagger-idempotency-input");
+    if (wrapper.querySelector(idempotencyGeneratorSelector)) return;
+
+    const button = document.createElement("button");
+    button.className = "swagger-idempotency-generate";
+    button.dataset.remailIdempotencyGenerate = "true";
+    button.type = "button";
+    button.title = "随机生成幂等键";
+    button.setAttribute("aria-label", "随机生成幂等键");
+    button.textContent = "↻";
+    button.addEventListener("click", () => {
+      setInputValue(input, randomIdempotencyKey());
+      input.focus();
+    });
+
+    input.insertAdjacentElement("afterend", button);
+  });
+}
+
 function ensureManageApiKeyLink(
   container: HTMLElement,
   input: HTMLInputElement,
@@ -485,6 +529,7 @@ function translateTree(
 ) {
   translateElementAttributes(root);
   syncApiKeyPicker(root, apiKeys, options);
+  syncIdempotencyKeyGenerators(root);
 
   root.querySelectorAll("*").forEach((element) => {
     translateElementAttributes(element);

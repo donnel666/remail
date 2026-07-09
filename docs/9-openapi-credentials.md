@@ -8,6 +8,7 @@
 | 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：OrderToken 作为 pickup 服务凭证事实，不再作为通用 Bearer 鉴权主体。 |
 | 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、不限 RPM 和软删除语义。 |
 | 2026-07-09 | V1.3 | Codex | 补充公开 API 入口策略：API Key 调用统一收敛到 `/v1/open/**`，文档分组只作为展示标签，不绑定 URI。 |
+| 2026-07-09 | V1.4 | Codex | 按接口命名清洁度要求规范 OpenAPI URI：API Key 当前信息使用 `/v1/open/apikey/profile`，公开资源导入/检测使用 `/v1/open/resources/imports`、`/v1/open/resources/validations`；只调整 URI 命名，不改变 `/v1/open/**` 鉴权和展示分组策略。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -104,7 +105,7 @@ API Key 限制补充设计：
 |------|-----|------|
 | `POST` | `/v1/apikeys` | 创建 API Key，必须幂等，返回明文。 |
 | `GET` | `/v1/apikeys` | 当前用户 API Key 列表，返回明文，用于个人设置页直接复制。 |
-| `GET` | `/v1/apikey-usage` | 当前用户 API Key 使用聚合，只返回请求次数和 Key 数量，不返回明文。 |
+| `GET` | `/v1/apikeys/usage` | 当前用户 API Key 使用聚合，只返回请求次数和 Key 数量，不返回明文。 |
 | `GET` | `/v1/apikeys/{keyId}` | 授权详情，返回明文。 |
 | `PATCH` | `/v1/apikeys/{keyId}` | 启停、限流、并发、额度、过期时间。 |
 | `DELETE` | `/v1/apikeys/{keyId}` | 软删除 API Key；列表/详情/鉴权不可再使用，历史订单事实保留外键引用。 |
@@ -128,7 +129,7 @@ SDK 可调用接口示例：
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `GET` | `/v1/open/api-key/profile` | 查询当前 API Key 的额度、RPM、过期时间和使用状态。 |
+| `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的额度、RPM、过期时间和使用状态。 |
 | `GET` | `/v1/open/projects` | API Key 查询可见项目。 |
 | `GET` | `/v1/open/projects/{projectId}` | API Key 查询可见项目详情。 |
 | `POST` | `/v1/open/orders` | API Key 下单。 |
@@ -142,10 +143,10 @@ SDK 可调用接口示例：
 | `GET` | `/v1/open/resources/{resourceId}` | API Key 查询自己的资源详情。 |
 | `DELETE` | `/v1/open/resources/{resourceId}` | API Key 删除自己的资源。 |
 | `POST` | `/v1/open/resources/{resourceId}/validate` | API Key 提交单个资源检测。 |
-| `POST` | `/v1/open/resource-imports` | API Key 导入微软邮箱 TXT。 |
-| `GET` | `/v1/open/resource-imports/{importId}` | API Key 查询资源导入任务。 |
-| `POST` | `/v1/open/resource-validations` | API Key 批量提交资源检测。 |
-| `GET` | `/v1/open/resource-validations/{validationId}` | API Key 查询资源检测任务。 |
+| `POST` | `/v1/open/resources/imports` | API Key 导入微软邮箱 TXT。 |
+| `GET` | `/v1/open/resources/imports/{importId}` | API Key 查询资源导入任务。 |
+| `POST` | `/v1/open/resources/validations` | API Key 批量提交资源检测。 |
+| `GET` | `/v1/open/resources/validations/{validationId}` | API Key 查询资源检测任务。 |
 | `GET` | `/v1/open/servers` | API Key 查询自有邮件服务器。 |
 | `POST` | `/v1/open/servers` | API Key 创建邮件服务器。 |
 | `POST` | `/v1/open/domains` | API Key 创建域名邮箱资源。 |

@@ -39,16 +39,19 @@ type EmailResourceRepository interface {
 	FindExistingMicrosoftEmails(ctx context.Context, emails []string) (map[string]struct{}, error)
 
 	// List returns paginated resources owned by a user.
-	List(ctx context.Context, ownerUserID uint, resourceType string, offset, limit int) ([]domain.EmailResource, error)
+	List(ctx context.Context, ownerUserID uint, filter ResourceListFilter, offset, limit int) ([]domain.EmailResource, error)
 
 	// ListAll returns paginated resources (admin).
-	ListAll(ctx context.Context, resourceType string, offset, limit int) ([]domain.EmailResource, error)
+	ListAll(ctx context.Context, filter ResourceListFilter, offset, limit int) ([]domain.EmailResource, error)
 
 	// Count returns the total count of resources for a user.
-	Count(ctx context.Context, ownerUserID uint, resourceType string) (int64, error)
+	Count(ctx context.Context, ownerUserID uint, filter ResourceListFilter) (int64, error)
 
 	// CountAll returns the total count of all resources.
-	CountAll(ctx context.Context, resourceType string) (int64, error)
+	CountAll(ctx context.Context, filter ResourceListFilter) (int64, error)
+
+	// Facets returns aggregate counts for resource list filters.
+	Facets(ctx context.Context, ownerUserID uint, filter ResourceListFilter) (*ResourceListFacets, error)
 
 	// UpdateMicrosoft updates non-credential Microsoft resource fields and writes OperationLog.
 	UpdateMicrosoftWithLog(ctx context.Context, resource *domain.MicrosoftResource, log *governancedomain.OperationLog) error
@@ -673,10 +676,39 @@ type DomainResourceDetail struct {
 
 // ResourceListResult holds paginated resource results.
 type ResourceListResult struct {
-	Items  []ResourceItem `json:"items"`
-	Total  int64          `json:"total"`
-	Offset int            `json:"offset"`
-	Limit  int            `json:"limit"`
+	Items  []ResourceItem      `json:"items"`
+	Total  int64               `json:"total"`
+	Offset int                 `json:"offset"`
+	Limit  int                 `json:"limit"`
+	Facets *ResourceListFacets `json:"facets,omitempty"`
+}
+
+type ResourceFacetCounts struct {
+	All      int64
+	Normal   int64
+	Pending  int64
+	Abnormal int64
+	Disabled int64
+}
+
+type ResourceBooleanFacets struct {
+	All int64
+	Yes int64
+	No  int64
+}
+
+type ResourceKeyFacet struct {
+	Key   string
+	Count int64
+}
+
+type ResourceListFacets struct {
+	Status         ResourceFacetCounts
+	Private        ResourceBooleanFacets
+	LongLived      ResourceBooleanFacets
+	GraphAvailable ResourceBooleanFacets
+	Suffixes       []ResourceKeyFacet
+	TLDs           []ResourceKeyFacet
 }
 
 // ResourceBatchPublishResult holds the result of a batch publish command.
@@ -708,8 +740,9 @@ type ResourceBulkSelection struct {
 	Filter      ResourceBulkFilter
 }
 
-// ResourceBulkFilter is the server-side filter used by "all matching" commands.
-type ResourceBulkFilter struct {
+// ResourceListFilter is the server-side filter shared by resource lists and
+// "all matching" bulk commands.
+type ResourceListFilter struct {
 	ResourceType   domain.ResourceType
 	Search         string
 	Suffix         string
@@ -722,6 +755,10 @@ type ResourceBulkFilter struct {
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
 }
+
+// ResourceBulkFilter keeps bulk command APIs on the same filter semantics as
+// the resource list endpoint.
+type ResourceBulkFilter = ResourceListFilter
 
 // MicrosoftStatusResult holds minimal API-safe status for a Microsoft resource.
 type MicrosoftStatusResult struct {
@@ -754,7 +791,7 @@ const (
 )
 
 // List returns the user's resources.
-func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope string, resourceType string, offset, limit int) (*ResourceListResult, error) {
+func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope string, filter ResourceListFilter, offset, limit int) (*ResourceListResult, error) {
 	if limit <= 0 {
 		limit = defaultResourceListLimit
 	}
@@ -764,26 +801,38 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 	if offset < 0 {
 		offset = 0
 	}
+	filter, err := normalizeResourceListFilter(filter)
+	if err != nil {
+		return nil, err
+	}
 
 	var resources []domain.EmailResource
 	var total int64
-	var err error
+	var facets *ResourceListFacets
 
 	if scope == "all" {
-		resources, err = uc.resources.ListAll(ctx, resourceType, offset, limit)
+		resources, err = uc.resources.ListAll(ctx, filter, offset, limit)
 		if err != nil {
 			return nil, err
 		}
-		total, err = uc.resources.CountAll(ctx, resourceType)
+		total, err = uc.resources.CountAll(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		facets, err = uc.resources.Facets(ctx, 0, filter)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		resources, err = uc.resources.List(ctx, ownerUserID, resourceType, offset, limit)
+		resources, err = uc.resources.List(ctx, ownerUserID, filter, offset, limit)
 		if err != nil {
 			return nil, err
 		}
-		total, err = uc.resources.Count(ctx, ownerUserID, resourceType)
+		total, err = uc.resources.Count(ctx, ownerUserID, filter)
+		if err != nil {
+			return nil, err
+		}
+		facets, err = uc.resources.Facets(ctx, ownerUserID, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -863,7 +912,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 		items[i] = item
 	}
 
-	return &ResourceListResult{Items: items, Total: total, Offset: offset, Limit: limit}, nil
+	return &ResourceListResult{Items: items, Total: total, Offset: offset, Limit: limit, Facets: facets}, nil
 }
 
 // GetDetail returns the detailed view of a single resource.
@@ -1293,12 +1342,15 @@ func deleteBatchLogs(userID uint, requestID, path string) (governancedomain.Oper
 		}
 }
 
-func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter, error) {
+func normalizeResourceListFilter(filter ResourceListFilter) (ResourceListFilter, error) {
 	filter.Search = strings.ToLower(strings.TrimSpace(filter.Search))
 	filter.Suffix = strings.ToLower(strings.TrimSpace(filter.Suffix))
 	filter.TLD = strings.ToLower(strings.TrimSpace(filter.TLD))
 	filter.Status = strings.TrimSpace(filter.Status)
 	filter.Purpose = strings.TrimSpace(filter.Purpose)
+	if filter.ResourceType == domain.ResourceType("all") {
+		filter.ResourceType = ""
+	}
 	if filter.Status == "all" {
 		filter.Status = ""
 	}
@@ -1310,8 +1362,19 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 	}
 
 	switch filter.ResourceType {
+	case "":
+		if filter.Suffix != "" || filter.TLD != "" || filter.Purpose != "" || filter.ForSale != nil || filter.LongLived != nil || filter.GraphAvailable != nil {
+			return ResourceListFilter{}, domain.ErrInvalidResourceFilter
+		}
+		if filter.Status != "" && !domain.IsValidMicrosoftStatus(filter.Status) && !domain.IsValidDomainStatus(filter.Status) {
+			return ResourceListFilter{}, domain.ErrInvalidResourceStatus
+		}
+		if filter.Status == string(domain.MicrosoftStatusDeleted) || filter.Status == string(domain.DomainStatusDeleted) {
+			return ResourceListFilter{}, domain.ErrInvalidResourceStatus
+		}
 	case domain.ResourceTypeMicrosoft:
 		filter.Purpose = ""
+		filter.TLD = ""
 		if filter.Suffix != "" {
 			suffix := strings.TrimPrefix(filter.Suffix, "@")
 			normalized, err := domain.NormalizeDomainSuffix(suffix)
@@ -1330,6 +1393,7 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 		filter.ForSale = nil
 		filter.LongLived = nil
 		filter.GraphAvailable = nil
+		filter.Suffix = ""
 		if filter.Purpose != "" && !domain.IsValidPurpose(domain.ResourcePurpose(filter.Purpose)) {
 			return ResourceBulkFilter{}, domain.ErrInvalidPurpose
 		}
@@ -1351,6 +1415,10 @@ func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter,
 	}
 
 	return filter, nil
+}
+
+func normalizeResourceBulkFilter(filter ResourceBulkFilter) (ResourceBulkFilter, error) {
+	return normalizeResourceListFilter(filter)
 }
 
 func uniqueResourceIDs(resourceIDs []uint) []uint {

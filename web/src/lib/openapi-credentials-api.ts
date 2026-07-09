@@ -27,7 +27,7 @@ export async function listAPIKeys(filter: APIKeyListFilter = {}) {
 }
 
 export async function getAPIKeyUsage() {
-  return unwrap<APIKeyUsageResponse>(await client.GET("/v1/apikey-usage"));
+  return unwrap<APIKeyUsageResponse>(await client.GET("/v1/apikeys/usage"));
 }
 
 export async function createAPIKey(payload: APIKeyCreateRequest) {

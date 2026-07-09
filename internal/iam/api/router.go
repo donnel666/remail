@@ -79,8 +79,8 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 		auth.POST("/me/invite", h.PostMeInvite)
 		auth.DELETE("/sessions/current", h.DeleteSession)
 		auth.PATCH("/password", h.PatchPassword)
-		auth.POST("/supplier-applications", h.PostSupplierApplication)
-		auth.GET("/supplier-applications/current", h.GetCurrentSupplierApplication)
+		auth.POST("/suppliers/applications", h.PostSupplierApplication)
+		auth.GET("/suppliers/applications/current", h.GetCurrentSupplierApplication)
 	}
 
 	// Admin routes are authorized by Casbin RBAC permissions.
@@ -92,17 +92,17 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 		admin.GET("/users", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUsers)
 		admin.PATCH("/users/:userId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "write"), h.PatchAdminUser)
 		admin.POST("/users/:userId/sessions/revoke", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminRevokeSessions)
-		admin.GET("/user-groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "read"), h.GetAdminUserGroups)
-		admin.POST("/user-groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PostAdminUserGroup)
-		admin.PATCH("/user-groups/:groupId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PatchAdminUserGroup)
+		admin.GET("/users/groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "read"), h.GetAdminUserGroups)
+		admin.POST("/users/groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PostAdminUserGroup)
+		admin.PATCH("/users/groups/:groupId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PatchAdminUserGroup)
 		admin.GET("/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "read"), h.GetAdminPermissions)
 		admin.GET("/users/:userId/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "read"), h.GetAdminUserPermissions)
 		admin.PUT("/users/:userId/permissions", middleware.PermissionRequired(mod.PermissionChecker, "iam:permission", "write"), h.PutAdminUserPermissions)
 		admin.GET("/invites", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "read"), h.GetAdminInvites)
 		admin.POST("/invites", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "write"), h.PostAdminInvite)
 		admin.PATCH("/invites/:code", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "operate"), h.PatchAdminInvite)
-		admin.GET("/supplier-applications", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "read"), h.GetAdminSupplierApplications)
-		admin.POST("/supplier-applications/:applicationId/approve", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationApprove)
-		admin.POST("/supplier-applications/:applicationId/reject", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationReject)
+		admin.GET("/suppliers/applications", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "read"), h.GetAdminSupplierApplications)
+		admin.POST("/suppliers/applications/:applicationId/approve", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationApprove)
+		admin.POST("/suppliers/applications/:applicationId/reject", middleware.PermissionRequired(mod.PermissionChecker, "iam:supplier_application", "operate"), h.PostAdminSupplierApplicationReject)
 	}
 }

@@ -30,6 +30,7 @@ import {
 } from "@/components/semi/card-table";
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -1373,10 +1374,7 @@ function ProjectDetailSheet({
 export default function AdminProjects() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [items, setItems] = useState<ProjectItem[]>([]);
   const [facets, setFacets] = useState<ProjectListFacets | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
@@ -1416,6 +1414,31 @@ export default function AdminProjects() {
     (privateFilter !== "all" ? 1 : 0) +
     (looseFilter !== "all" ? 1 : 0) +
     (productTypeFilter !== "all" ? 1 : 0);
+
+  const loadProjectBlock = useCallback(
+    async (offset: number, limit: number) => {
+      const response = await listProjects(listFilter, offset, limit);
+      setFacets(response.facets ?? null);
+      return { items: response.items, total: response.total };
+    },
+    [listFilter]
+  );
+
+  const {
+    loading,
+    loadedItems: items,
+    pagedItems,
+    refresh,
+    total,
+  } = useBlockPagedList<ProjectItem>({
+    activePage,
+    filterKey: JSON.stringify(listFilter),
+    loadBlock: loadProjectBlock,
+    onError: (error) => {
+      Toast.error(getIamErrorMessage(t, error, "Projects load failed."));
+    },
+    pageSize,
+  });
 
   const projectFilterStats = useMemo(() => {
     const fallback = {
@@ -1472,28 +1495,6 @@ export default function AdminProjects() {
       },
     };
   }, [facets, items]);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await listProjects(
-        listFilter,
-        (activePage - 1) * pageSize,
-        pageSize
-      );
-      setItems(response.items);
-      setFacets(response.facets ?? null);
-      setTotal(response.total);
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Projects load failed."));
-    } finally {
-      setLoading(false);
-    }
-  }, [activePage, listFilter, pageSize, t]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const resetFilters = () => {
     setSearchKeyword("");
@@ -2364,7 +2365,7 @@ export default function AdminProjects() {
         <CardTable
           className="overflow-hidden rounded-xl"
           columns={tableColumns}
-          dataSource={items}
+          dataSource={pagedItems}
           empty={
             <Empty
               description={t("No projects found")}

@@ -523,74 +523,234 @@ func (r *mockResourceRepo) FindExistingMicrosoftEmails(_ context.Context, emails
 	return result, nil
 }
 
-func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, resourceType string, _, _ int) ([]coredomain.EmailResource, error) {
+func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int) ([]coredomain.EmailResource, error) {
+	return r.listResources(ownerUserID, filter, offset, limit), nil
+}
+
+func (r *mockResourceRepo) ListAll(_ context.Context, filter coreapp.ResourceListFilter, offset, limit int) ([]coredomain.EmailResource, error) {
+	return r.listResources(0, filter, offset, limit), nil
+}
+
+func (r *mockResourceRepo) Count(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
+	return int64(len(r.listResources(ownerUserID, filter, 0, 0))), nil
+}
+
+func (r *mockResourceRepo) CountAll(_ context.Context, filter coreapp.ResourceListFilter) (int64, error) {
+	return int64(len(r.listResources(0, filter, 0, 0))), nil
+}
+
+func (r *mockResourceRepo) Facets(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (*coreapp.ResourceListFacets, error) {
+	facets := &coreapp.ResourceListFacets{}
+	statusBase := filter
+	statusBase.Status = ""
+	facets.Status.All = int64(len(r.listResources(ownerUserID, statusBase, 0, 0)))
+	for _, status := range []string{"normal", "pending", "abnormal", "disabled"} {
+		next := statusBase
+		next.Status = status
+		count := int64(len(r.listResources(ownerUserID, next, 0, 0)))
+		switch status {
+		case "normal":
+			facets.Status.Normal = count
+		case "pending":
+			facets.Status.Pending = count
+		case "abnormal":
+			facets.Status.Abnormal = count
+		case "disabled":
+			facets.Status.Disabled = count
+		}
+	}
+	if filter.ResourceType == coredomain.ResourceTypeMicrosoft {
+		privateBase := filter
+		privateBase.ForSale = nil
+		facets.Private.All = int64(len(r.listResources(ownerUserID, privateBase, 0, 0)))
+		privateYes := privateBase
+		privateYes.ForSale = boolTestPtr(false)
+		facets.Private.Yes = int64(len(r.listResources(ownerUserID, privateYes, 0, 0)))
+		privateNo := privateBase
+		privateNo.ForSale = boolTestPtr(true)
+		facets.Private.No = int64(len(r.listResources(ownerUserID, privateNo, 0, 0)))
+
+		longBase := filter
+		longBase.LongLived = nil
+		facets.LongLived.All = int64(len(r.listResources(ownerUserID, longBase, 0, 0)))
+		longYes := longBase
+		longYes.LongLived = boolTestPtr(true)
+		facets.LongLived.Yes = int64(len(r.listResources(ownerUserID, longYes, 0, 0)))
+		longNo := longBase
+		longNo.LongLived = boolTestPtr(false)
+		facets.LongLived.No = int64(len(r.listResources(ownerUserID, longNo, 0, 0)))
+
+		graphBase := filter
+		graphBase.GraphAvailable = nil
+		facets.GraphAvailable.All = int64(len(r.listResources(ownerUserID, graphBase, 0, 0)))
+		graphYes := graphBase
+		graphYes.GraphAvailable = boolTestPtr(true)
+		facets.GraphAvailable.Yes = int64(len(r.listResources(ownerUserID, graphYes, 0, 0)))
+		graphNo := graphBase
+		graphNo.GraphAvailable = boolTestPtr(false)
+		facets.GraphAvailable.No = int64(len(r.listResources(ownerUserID, graphNo, 0, 0)))
+
+		suffixBase := filter
+		suffixBase.Suffix = ""
+		facets.Suffixes = r.groupResourceFacets(ownerUserID, suffixBase, func(id uint) string {
+			ms := r.microsoft[id]
+			if ms == nil {
+				return ""
+			}
+			return emailDomainForTest(ms.EmailAddress)
+		})
+	}
+	if filter.ResourceType == coredomain.ResourceTypeDomain {
+		privateBase := filter
+		privateBase.Purpose = ""
+		facets.Private.All = int64(len(r.listResources(ownerUserID, privateBase, 0, 0)))
+		privateYes := privateBase
+		privateYes.Purpose = string(coredomain.PurposeNotSale)
+		facets.Private.Yes = int64(len(r.listResources(ownerUserID, privateYes, 0, 0)))
+		privateNo := privateBase
+		privateNo.Purpose = string(coredomain.PurposeSale)
+		facets.Private.No = int64(len(r.listResources(ownerUserID, privateNo, 0, 0)))
+
+		tldBase := filter
+		tldBase.TLD = ""
+		facets.TLDs = r.groupResourceFacets(ownerUserID, tldBase, func(id uint) string {
+			dr := r.domains[id]
+			if dr == nil {
+				return ""
+			}
+			return coredomain.TLD(dr.Domain)
+		})
+	}
+	return facets, nil
+}
+
+func (r *mockResourceRepo) listResources(ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int) []coredomain.EmailResource {
 	var result []coredomain.EmailResource
 	for _, res := range r.resources {
-		if res.OwnerUserID == ownerUserID && resourceMatchesType(res.Type, resourceType) {
-			if r.isDeletedResource(res.ID) {
-				continue
-			}
+		if ownerUserID > 0 && res.OwnerUserID != ownerUserID {
+			continue
+		}
+		if r.resourceMatchesFilter(res, filter) {
 			result = append(result, *res)
 		}
 	}
-	return result, nil
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].ID > result[j].ID
+		}
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(result) {
+		return nil
+	}
+	if limit <= 0 {
+		return result[offset:]
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end]
 }
 
-func (r *mockResourceRepo) ListAll(_ context.Context, resourceType string, _, _ int) ([]coredomain.EmailResource, error) {
-	var result []coredomain.EmailResource
-	for _, res := range r.resources {
-		if resourceMatchesType(res.Type, resourceType) {
-			if r.isDeletedResource(res.ID) {
-				continue
+func (r *mockResourceRepo) groupResourceFacets(ownerUserID uint, filter coreapp.ResourceListFilter, keyOf func(uint) string) []coreapp.ResourceKeyFacet {
+	counts := make(map[string]int64)
+	for _, item := range r.listResources(ownerUserID, filter, 0, 0) {
+		key := keyOf(item.ID)
+		if key == "" {
+			continue
+		}
+		counts[key]++
+	}
+	result := make([]coreapp.ResourceKeyFacet, 0, len(counts))
+	for key, count := range counts {
+		result = append(result, coreapp.ResourceKeyFacet{Key: key, Count: count})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Count == result[j].Count {
+			return result[i].Key < result[j].Key
+		}
+		return result[i].Count > result[j].Count
+	})
+	return result
+}
+
+func (r *mockResourceRepo) resourceMatchesFilter(res *coredomain.EmailResource, filter coreapp.ResourceListFilter) bool {
+	if filter.ResourceType != "" && filter.ResourceType != coredomain.ResourceType("all") && res.Type != filter.ResourceType {
+		return false
+	}
+	if filter.CreatedFrom != nil && res.CreatedAt.Before(*filter.CreatedFrom) {
+		return false
+	}
+	if filter.CreatedTo != nil && res.CreatedAt.After(*filter.CreatedTo) {
+		return false
+	}
+	switch res.Type {
+	case coredomain.ResourceTypeMicrosoft:
+		ms := r.microsoft[res.ID]
+		if ms == nil || ms.Status == coredomain.MicrosoftStatusDeleted {
+			return false
+		}
+		if filter.ResourceType == "" || filter.ResourceType == coredomain.ResourceType("all") || filter.ResourceType == coredomain.ResourceTypeMicrosoft {
+			if filter.Status != "" && string(ms.Status) != filter.Status {
+				return false
 			}
-			result = append(result, *res)
+			if filter.ForSale != nil && ms.ForSale != *filter.ForSale {
+				return false
+			}
+			if filter.LongLived != nil && ms.LongLived != *filter.LongLived {
+				return false
+			}
+			if filter.GraphAvailable != nil && ms.GraphAvailable != *filter.GraphAvailable {
+				return false
+			}
+			domain := emailDomainForTest(ms.EmailAddress)
+			if filter.Suffix != "" && domain != filter.Suffix {
+				return false
+			}
+			if filter.Search != "" && !strings.Contains(strings.ToLower(ms.EmailAddress), filter.Search) && !strings.Contains(domain, filter.Search) {
+				return false
+			}
+			return true
+		}
+	case coredomain.ResourceTypeDomain:
+		dr := r.domains[res.ID]
+		if dr == nil || dr.Status == coredomain.DomainStatusDeleted {
+			return false
+		}
+		if filter.ResourceType == "" || filter.ResourceType == coredomain.ResourceType("all") || filter.ResourceType == coredomain.ResourceTypeDomain {
+			if filter.Status != "" && string(dr.Status) != filter.Status {
+				return false
+			}
+			if filter.Purpose != "" && string(dr.Purpose) != filter.Purpose {
+				return false
+			}
+			tld := coredomain.TLD(dr.Domain)
+			if filter.TLD != "" && tld != filter.TLD {
+				return false
+			}
+			if filter.Search != "" && !strings.Contains(strings.ToLower(dr.Domain), filter.Search) && !strings.Contains(tld, filter.Search) {
+				return false
+			}
+			return true
 		}
 	}
-	return result, nil
+	return false
 }
 
-func (r *mockResourceRepo) Count(_ context.Context, ownerUserID uint, resourceType string) (int64, error) {
-	var count int64
-	for _, res := range r.resources {
-		if res.OwnerUserID == ownerUserID && resourceMatchesType(res.Type, resourceType) {
-			if r.isDeletedResource(res.ID) {
-				continue
-			}
-			count++
-		}
+func emailDomainForTest(email string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(email)), "@")
+	if len(parts) != 2 {
+		return ""
 	}
-	return count, nil
+	return parts[1]
 }
 
-func (r *mockResourceRepo) CountAll(_ context.Context, resourceType string) (int64, error) {
-	var count int64
-	for _, res := range r.resources {
-		if resourceMatchesType(res.Type, resourceType) {
-			if r.isDeletedResource(res.ID) {
-				continue
-			}
-			count++
-		}
-	}
-	return count, nil
-}
-
-func resourceMatchesType(actual coredomain.ResourceType, filter string) bool {
-	return filter == "" || filter == "all" || string(actual) == filter
-}
-
-func (r *mockResourceRepo) isDeletedMicrosoft(id uint) bool {
-	ms, ok := r.microsoft[id]
-	return ok && ms.Status == coredomain.MicrosoftStatusDeleted
-}
-
-func (r *mockResourceRepo) isDeletedDomain(id uint) bool {
-	dr, ok := r.domains[id]
-	return ok && dr.Status == coredomain.DomainStatusDeleted
-}
-
-func (r *mockResourceRepo) isDeletedResource(id uint) bool {
-	return r.isDeletedMicrosoft(id) || r.isDeletedDomain(id)
+func boolTestPtr(value bool) *bool {
+	return &value
 }
 
 func (r *mockResourceRepo) UpdateMicrosoftWithLog(_ context.Context, resource *coredomain.MicrosoftResource, _ *governancedomain.OperationLog) error {
@@ -2050,7 +2210,7 @@ func TestCoreHandler_ValidateBatchQueuesAsyncJobs(t *testing.T) {
 	body := fmt.Sprintf(`{"selection":{"mode":"ids","resourceIds":[%d,%d]}}`, first.ID, second.ID)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/v1/resource-validations", strings.NewReader(body))
+	c.Request = httptest.NewRequest("POST", "/v1/resources/validations", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	setAuthContext(c, 1, iamdomain.RoleUser)
 
@@ -3606,7 +3766,7 @@ func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/v1/admin/project-logos", body)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/logos", body)
 	c.Request.Header.Set("Content-Type", contentType)
 	setAuthContext(c, 1, iamdomain.RoleAdmin)
 
@@ -3615,9 +3775,9 @@ func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	var upload ProjectLogoUploadResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &upload))
-	require.Contains(t, upload.LogoURL, "/v1/project-logos/")
+	require.Contains(t, upload.LogoURL, "/v1/projects/logos/")
 
-	logoKey := strings.TrimPrefix(upload.LogoURL, "/v1/project-logos/")
+	logoKey := strings.TrimPrefix(upload.LogoURL, "/v1/projects/logos/")
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", upload.LogoURL, nil)

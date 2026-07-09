@@ -22,20 +22,20 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		auth.GET("/resources/:resourceId", h.GetResourceDetail)
 		auth.DELETE("/resources/:resourceId", h.DeleteResource)
 		auth.POST("/resources/imports", h.PostResourceImport)
-		auth.GET("/resource-imports/:importId", h.GetResourceImport)
+		auth.GET("/resources/imports/:importId", h.GetResourceImport)
 		auth.POST("/resources/delete", h.PostResourceDeleteBatch)
 		auth.POST("/resources/publish", h.PostResourcePublishBatch)
 		auth.POST("/resources/:resourceId/publish", h.PostResourcePublish)
 		auth.POST("/resources/:resourceId/validate", h.PostResourceValidate)
-		auth.POST("/resource-validations", h.PostResourceValidations)
-		auth.GET("/resource-validations/:validationId", h.GetResourceValidation)
+		auth.POST("/resources/validations", h.PostResourceValidations)
+		auth.GET("/resources/validations/:validationId", h.GetResourceValidation)
 
 		// Project square and user project applications
 		auth.GET("/projects", h.GetProjects)
 		auth.POST("/projects", h.PostProject)
 		auth.GET("/projects/:projectId", h.GetProject)
 		auth.POST("/projects/:projectId/resubmit", h.PostProjectResubmit)
-		auth.GET("/project-logos/:logoKey", h.GetProjectLogo)
+		auth.GET("/projects/logos/:logoKey", h.GetProjectLogo)
 
 		// Mail server management
 		auth.GET("/servers", h.GetServers)
@@ -65,6 +65,6 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		admin.GET("/projects/:projectId/access", middleware.PermissionRequired(checker, "core:project", "read"), h.GetAdminProjectAccess)
 		admin.POST("/projects/:projectId/access", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectAccess)
 		admin.DELETE("/projects/:projectId/access/:userId", middleware.PermissionRequired(checker, "core:project", "operate"), h.DeleteAdminProjectAccess)
-		admin.POST("/project-logos", middleware.PermissionRequired(checker, "core:project", "write"), h.PostAdminProjectLogo)
+		admin.POST("/projects/logos", middleware.PermissionRequired(checker, "core:project", "write"), h.PostAdminProjectLogo)
 	}
 }

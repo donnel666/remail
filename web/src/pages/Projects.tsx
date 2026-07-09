@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -1347,9 +1348,6 @@ function ApplyProjectModal({
 export default function Projects() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [items, setItems] = useState<ProjectItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
@@ -1401,17 +1399,10 @@ export default function Projects() {
     return filter;
   }, [accessFilter, matchFilter, productTypeFilter, searchFilter, statusFilter]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const listResponse = await listProjects(
-        listFilter,
-        (activePage - 1) * pageSize,
-        pageSize
-      );
+  const loadProjectBlock = useCallback(
+    async (offset: number, limit: number) => {
+      const listResponse = await listProjects(listFilter, offset, limit);
       const facets = listResponse.facets;
-      setItems(listResponse.items);
-      setTotal(listResponse.total);
       setStatusCounts({
         all: facets?.status.all ?? listResponse.total,
         listed: facets?.status.listed ?? 0,
@@ -1433,16 +1424,25 @@ export default function Projects() {
         domain: facets?.productType.domain ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
       });
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Projects load failed."));
-    } finally {
-      setLoading(false);
-    }
-  }, [activePage, listFilter, pageSize, t]);
+      return { items: listResponse.items, total: listResponse.total };
+    },
+    [listFilter]
+  );
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const {
+    loading,
+    pagedItems: items,
+    refresh,
+    total,
+  } = useBlockPagedList<ProjectItem>({
+    activePage,
+    filterKey: JSON.stringify(listFilter),
+    loadBlock: loadProjectBlock,
+    onError: (error) => {
+      Toast.error(getIamErrorMessage(t, error, "Projects load failed."));
+    },
+    pageSize,
+  });
 
   const resetFilters = () => {
     setSearchKeyword("");

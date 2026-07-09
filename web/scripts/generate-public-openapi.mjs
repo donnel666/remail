@@ -139,7 +139,7 @@ const schemas = {
       id: { type: "integer", example: 1001 },
       name: { type: "string", example: "Microsoft 账号验证码" },
       targetPlatform: { type: "string", example: "Microsoft" },
-      logoUrl: { type: "string", example: "/v1/project-logos/microsoft.png" },
+      logoUrl: { type: "string", example: "/v1/projects/logos/microsoft.png" },
       description: { type: "string", example: "Microsoft 账号注册与登录验证码接收。" },
       status: stringEnum(["listed", "reviewing", "rejected", "delisted"]),
       accessType: stringEnum(["public", "private"]),
@@ -639,7 +639,7 @@ const spec = {
     schemas,
   },
   paths: {
-    "/v1/open/api-key/profile": {
+    "/v1/open/apikey/profile": {
       get: {
         tags: ["Core"],
         operationId: "getApiKeyProfile",
@@ -862,7 +862,7 @@ const spec = {
         },
       },
     },
-    "/v1/open/resource-imports": {
+    "/v1/open/resources/imports": {
       post: {
         tags: ["Resources"],
         operationId: "importMicrosoftResources",
@@ -889,7 +889,7 @@ const spec = {
         },
       },
     },
-    "/v1/open/resource-imports/{importId}": {
+    "/v1/open/resources/imports/{importId}": {
       get: {
         tags: ["Resources"],
         operationId: "getResourceImport",
@@ -902,7 +902,7 @@ const spec = {
         },
       },
     },
-    "/v1/open/resource-validations": {
+    "/v1/open/resources/validations": {
       post: {
         tags: ["Resources"],
         operationId: "validateResources",
@@ -915,7 +915,7 @@ const spec = {
         },
       },
     },
-    "/v1/open/resource-validations/{validationId}": {
+    "/v1/open/resources/validations/{validationId}": {
       get: {
         tags: ["Resources"],
         operationId: "getResourceValidation",

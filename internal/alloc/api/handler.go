@@ -265,17 +265,10 @@ func domainInventoryResponse(stats allocapp.DomainInventoryStats) DomainInventor
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil || offset < 0 {
-		writeBadRequest(c)
-		return 0, 0, false
-	}
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil || limit < 0 {
-		writeBadRequest(c)
-		return 0, 0, false
-	}
-	return offset, limit, true
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     10000,
+	})
 }
 
 func parsePathUint(c *gin.Context, name string) (uint, bool) {

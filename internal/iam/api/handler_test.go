@@ -1489,7 +1489,7 @@ func TestSupplierApplicationSubmitAndCurrent(t *testing.T) {
 
 	body := `{"reason":"I want to publish my Microsoft resources."}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/supplier-applications", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", "/v1/suppliers/applications", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	addAuthenticatedRequest(req, "user-session")
 	r.ServeHTTP(w, req)
@@ -1498,7 +1498,7 @@ func TestSupplierApplicationSubmitAndCurrent(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"status":"reviewing"`)
 
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/v1/supplier-applications/current", nil)
+	req, _ = http.NewRequest("GET", "/v1/suppliers/applications/current", nil)
 	addAuthenticatedRequest(req, "user-session")
 	r.ServeHTTP(w, req)
 
@@ -1506,7 +1506,7 @@ func TestSupplierApplicationSubmitAndCurrent(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"status":"reviewing"`)
 
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/v1/supplier-applications", strings.NewReader(body))
+	req, _ = http.NewRequest("POST", "/v1/suppliers/applications", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	addAuthenticatedRequest(req, "user-session")
 	r.ServeHTTP(w, req)
@@ -1563,7 +1563,7 @@ func TestAdminApproveSupplierApplicationPromotesUser(t *testing.T) {
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/supplier-applications/%d/approve", application.ID), nil)
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/suppliers/applications/%d/approve", application.ID), nil)
 	req.Header.Set("X-Request-ID", "req-supplier-approve")
 	addAuthenticatedRequest(req, "admin-session")
 	r.ServeHTTP(w, req)

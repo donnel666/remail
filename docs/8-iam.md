@@ -10,6 +10,7 @@
 | 2026-07-06 | V1.3 | Codex | 补充管理员用户查询筛选能力：`GET /v1/admin/users` 支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索，用于后台私有项目授权选择；不改变 IAM 角色、Casbin 和用户实体。 |
 | 2026-07-07 | V1.4 | Codex | 补充用户侧 aff 邀请链接能力；复用邀请码消费事务，不改变后台邀请码策略；GET 只读、POST 创建或获取，保持 safe method 语义。 |
 | 2026-07-08 | V1.5 | Codex | 强制纠偏：移除旧数字权限等级，改为 RBAC `role` + Casbin 权限；新增 `userGroup` 作为权益分组，不参与后台授权。 |
+| 2026-07-09 | V1.6 | Codex | 按接口命名清洁度要求规范 IAM URI：供应商申请改为 `/v1/suppliers/applications`，用户权益分组改为 `/v1/admin/users/groups`；只调整 URI 命名，不改变 RBAC、供应商申请和权益分组语义。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -203,8 +204,8 @@ eft = allow/deny
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `POST` | `/v1/supplier-applications` | 当前普通用户提交供应商申请，只提交申请理由。 |
-| `GET` | `/v1/supplier-applications/current` | 查询当前用户最新供应商申请，用于“出售”按钮分流。 |
+| `POST` | `/v1/suppliers/applications` | 当前普通用户提交供应商申请，只提交申请理由。 |
+| `GET` | `/v1/suppliers/applications/current` | 查询当前用户最新供应商申请，用于“出售”按钮分流。 |
 
 `SupplierApplication` 状态：
 
@@ -223,9 +224,9 @@ canceled
 |------|-----|------|
 | `GET` | `/v1/admin/users` | 用户查询；支持 `ids` 批量精确查询和 `search` 邮箱/昵称/ID 搜索。 |
 | `PATCH` | `/v1/admin/users/{userId}` | 启停、RBAC 角色、权益分组变更。 |
-| `GET` | `/v1/admin/user-groups` | 用户权益分组列表。 |
-| `POST` | `/v1/admin/user-groups` | 创建用户权益分组。 |
-| `PATCH` | `/v1/admin/user-groups/{groupId}` | 更新用户权益分组名称、描述和启停状态。 |
+| `GET` | `/v1/admin/users/groups` | 用户权益分组列表。 |
+| `POST` | `/v1/admin/users/groups` | 创建用户权益分组。 |
+| `PATCH` | `/v1/admin/users/groups/{groupId}` | 更新用户权益分组名称、描述和启停状态。 |
 | `POST` | `/v1/admin/users/{userId}/sessions/revoke` | 强制退出。 |
 | `GET` | `/v1/admin/permissions` | 权限目录。 |
 | `GET` | `/v1/admin/users/{userId}/permissions` | 用户权限矩阵。 |
@@ -233,9 +234,9 @@ canceled
 | `GET` | `/v1/admin/invites` | 邀请码查询。 |
 | `POST` | `/v1/admin/invites` | 创建邀请码。 |
 | `PATCH` | `/v1/admin/invites/{code}` | 启停/调整邀请码。 |
-| `GET` | `/v1/admin/supplier-applications` | 供应商申请列表。 |
-| `POST` | `/v1/admin/supplier-applications/{applicationId}/approve` | 审批通过供应商申请，将申请人提升为 supplier。 |
-| `POST` | `/v1/admin/supplier-applications/{applicationId}/reject` | 驳回供应商申请，必须记录安全审核原因。 |
+| `GET` | `/v1/admin/suppliers/applications` | 供应商申请列表。 |
+| `POST` | `/v1/admin/suppliers/applications/{applicationId}/approve` | 审批通过供应商申请，将申请人提升为 supplier。 |
+| `POST` | `/v1/admin/suppliers/applications/{applicationId}/reject` | 驳回供应商申请，必须记录安全审核原因。 |
 
 ---
 

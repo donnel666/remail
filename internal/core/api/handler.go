@@ -52,7 +52,10 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	}
 
 	scope := c.DefaultQuery("scope", "owned")
-	resourceType := c.DefaultQuery("type", "all")
+	filter, ok := resourceListFilterFromQuery(c)
+	if !ok {
+		return
+	}
 	offset, limit, ok := parsePagination(c)
 	if !ok {
 		return
@@ -66,7 +69,7 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 		}
 	}
 
-	result, err := h.module.ResourceUseCase.List(c.Request.Context(), userID, scope, resourceType, offset, limit)
+	result, err := h.module.ResourceUseCase.List(c.Request.Context(), userID, scope, filter, offset, limit)
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -98,6 +101,7 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 		Total:  result.Total,
 		Offset: result.Offset,
 		Limit:  result.Limit,
+		Facets: toResourceListFacetsResponse(result.Facets),
 	})
 }
 
@@ -275,7 +279,7 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 	c.JSON(http.StatusAccepted, ImportResponse{ImportID: result.ImportID, Imported: result.Imported})
 }
 
-// GET /v1/resource-imports/:importId
+// GET /v1/resources/imports/:importId
 func (h *CoreHandler) GetResourceImport(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -439,7 +443,7 @@ func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 	c.JSON(http.StatusAccepted, toValidationResponse(result))
 }
 
-// POST /v1/resource-validations
+// POST /v1/resources/validations
 func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -482,7 +486,7 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 	})
 }
 
-// GET /v1/resource-validations/:validationId
+// GET /v1/resources/validations/:validationId
 func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
 	userID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -969,7 +973,7 @@ func (h *CoreHandler) DeleteAdminProjectAccess(c *gin.Context) {
 	c.AbortWithStatus(http.StatusNoContent)
 }
 
-// POST /v1/admin/project-logos
+// POST /v1/admin/projects/logos
 func (h *CoreHandler) PostAdminProjectLogo(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxProjectLogoBytes)
 	file, header, err := c.Request.FormFile("file")
@@ -998,7 +1002,7 @@ func (h *CoreHandler) PostAdminProjectLogo(c *gin.Context) {
 	c.JSON(http.StatusCreated, ProjectLogoUploadResponse{LogoURL: logoURL})
 }
 
-// GET /v1/project-logos/:logoKey
+// GET /v1/projects/logos/:logoKey
 func (h *CoreHandler) GetProjectLogo(c *gin.Context) {
 	logo, err := h.module.ProjectAssets.ReadLogo(c.Request.Context(), c.Param("logoKey"))
 	if err != nil {
@@ -1190,6 +1194,118 @@ func projectListFilterFromQuery(c *gin.Context, scope coreapp.ProjectListScope, 
 		filter.CreatedTo = &parsed
 	}
 	return filter, true
+}
+
+func resourceListFilterFromQuery(c *gin.Context) (coreapp.ResourceListFilter, bool) {
+	filter := coreapp.ResourceListFilter{
+		ResourceType: coredomain.ResourceType(strings.TrimSpace(c.DefaultQuery("type", "all"))),
+		Search:       c.Query("search"),
+		Suffix:       c.Query("suffix"),
+		TLD:          c.Query("tld"),
+		Status:       c.Query("status"),
+		Purpose:      c.Query("purpose"),
+	}
+	var ok bool
+	filter.ForSale, ok = parseOptionalBoolQuery(c, "forSale")
+	if !ok {
+		return filter, false
+	}
+	filter.LongLived, ok = parseOptionalBoolQuery(c, "longLived")
+	if !ok {
+		return filter, false
+	}
+	filter.GraphAvailable, ok = parseOptionalBoolQuery(c, "graphAvailable")
+	if !ok {
+		return filter, false
+	}
+	filter.CreatedFrom, ok = parseOptionalCoreTimeQuery(c, "createdFrom")
+	if !ok {
+		return filter, false
+	}
+	filter.CreatedTo, ok = parseOptionalCoreTimeQuery(c, "createdTo")
+	if !ok {
+		return filter, false
+	}
+	return filter, true
+}
+
+func toResourceListFacetsResponse(facets *coreapp.ResourceListFacets) *ResourceListFacetsResponse {
+	if facets == nil {
+		return nil
+	}
+	suffixes := make([]ResourceKeyFacetResponse, len(facets.Suffixes))
+	for i := range facets.Suffixes {
+		suffixes[i] = ResourceKeyFacetResponse{
+			Key:   facets.Suffixes[i].Key,
+			Count: facets.Suffixes[i].Count,
+		}
+	}
+	tlds := make([]ResourceKeyFacetResponse, len(facets.TLDs))
+	for i := range facets.TLDs {
+		tlds[i] = ResourceKeyFacetResponse{
+			Key:   facets.TLDs[i].Key,
+			Count: facets.TLDs[i].Count,
+		}
+	}
+	return &ResourceListFacetsResponse{
+		Status: ResourceFacetCountsResponse{
+			All:      facets.Status.All,
+			Normal:   facets.Status.Normal,
+			Pending:  facets.Status.Pending,
+			Abnormal: facets.Status.Abnormal,
+			Disabled: facets.Status.Disabled,
+		},
+		Private: ResourceBooleanFacetsResponse{
+			All: facets.Private.All,
+			Yes: facets.Private.Yes,
+			No:  facets.Private.No,
+		},
+		LongLived: ResourceBooleanFacetsResponse{
+			All: facets.LongLived.All,
+			Yes: facets.LongLived.Yes,
+			No:  facets.LongLived.No,
+		},
+		GraphAvailable: ResourceBooleanFacetsResponse{
+			All: facets.GraphAvailable.All,
+			Yes: facets.GraphAvailable.Yes,
+			No:  facets.GraphAvailable.No,
+		},
+		Suffixes: suffixes,
+		TLDs:     tlds,
+	}
+}
+
+func parseOptionalBoolQuery(c *gin.Context, name string) (*bool, bool) {
+	value := strings.TrimSpace(c.Query(name))
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return nil, false
+	}
+	return &parsed, true
+}
+
+func parseOptionalCoreTimeQuery(c *gin.Context, name string) (*time.Time, bool) {
+	value := strings.TrimSpace(c.Query(name))
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return nil, false
+	}
+	utc := parsed.UTC()
+	return &utc, true
 }
 
 func parseProjectTimeQuery(c *gin.Context, value string) (time.Time, bool) {
@@ -1803,23 +1919,10 @@ func parseUintParam(c *gin.Context, name string, message string) (uint, bool) {
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message":   "Invalid query parameters.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return 0, 0, false
-	}
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message":   "Invalid query parameters.",
-			"requestId": middleware.GetRequestID(c),
-		})
-		return 0, 0, false
-	}
-	return offset, limit, true
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     10000,
+	})
 }
 
 func writeCoreError(c *gin.Context, err error) {

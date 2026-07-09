@@ -176,7 +176,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/supplier-applications": {
+    "/v1/suppliers/applications": {
         parameters: {
             query?: never;
             header?: never;
@@ -193,7 +193,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/supplier-applications/current": {
+    "/v1/suppliers/applications/current": {
         parameters: {
             query?: never;
             header?: never;
@@ -385,7 +385,7 @@ export interface paths {
         patch: operations["patchAdminInvite"];
         trace?: never;
     };
-    "/v1/admin/supplier-applications": {
+    "/v1/admin/suppliers/applications": {
         parameters: {
             query?: never;
             header?: never;
@@ -402,7 +402,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/supplier-applications/{applicationId}/approve": {
+    "/v1/admin/suppliers/applications/{applicationId}/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -419,7 +419,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/supplier-applications/{applicationId}/reject": {
+    "/v1/admin/suppliers/applications/{applicationId}/reject": {
         parameters: {
             query?: never;
             header?: never;
@@ -505,7 +505,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/project-logos/{logoKey}": {
+    "/v1/projects/logos/{logoKey}": {
         parameters: {
             query?: never;
             header?: never;
@@ -590,7 +590,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/project-logos": {
+    "/v1/admin/projects/logos": {
         parameters: {
             query?: never;
             header?: never;
@@ -848,7 +848,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/resource-imports/{importId}": {
+    "/v1/resources/imports/{importId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -885,7 +885,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/resource-validations": {
+    "/v1/resources/validations": {
         parameters: {
             query?: never;
             header?: never;
@@ -905,7 +905,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/resource-validations/{validationId}": {
+    "/v1/resources/validations/{validationId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1076,7 +1076,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/apikey-usage": {
+    "/v1/apikeys/usage": {
         parameters: {
             query?: never;
             header?: never;
@@ -2086,6 +2086,31 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+            facets?: components["schemas"]["ResourceListFacets"];
+        };
+        ResourceListFacets: {
+            status: components["schemas"]["ResourceFacetCounts"];
+            private: components["schemas"]["ResourceBooleanFacets"];
+            longLived: components["schemas"]["ResourceBooleanFacets"];
+            graphAvailable: components["schemas"]["ResourceBooleanFacets"];
+            suffixes: components["schemas"]["ResourceKeyFacet"][];
+            tlds: components["schemas"]["ResourceKeyFacet"][];
+        };
+        ResourceFacetCounts: {
+            all: number;
+            normal: number;
+            pending: number;
+            abnormal: number;
+            disabled: number;
+        };
+        ResourceBooleanFacets: {
+            all: number;
+            yes: number;
+            no: number;
+        };
+        ResourceKeyFacet: {
+            key: string;
+            count: number;
         };
         ResourceItem: {
             id: number;
@@ -5674,7 +5699,26 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: string;
-                type?: string;
+                type?: "all" | "microsoft" | "domain";
+                /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
+                search?: string;
+                /** @description Exact Microsoft suffix such as @outlook.com. */
+                suffix?: string;
+                /** @description Exact domain suffix such as .com. */
+                tld?: string;
+                status?: string;
+                /** @description Domain resource purpose filter. */
+                purpose?: "not_sale" | "sale" | "binding";
+                /** @description Microsoft public supply filter. false is private; true is public sale. */
+                forSale?: boolean;
+                /** @description Microsoft long-lived filter. */
+                longLived?: boolean;
+                /** @description Microsoft Graph availability filter. */
+                graphAvailable?: boolean;
+                /** @description Inclusive resource creation lower bound. */
+                createdFrom?: string;
+                /** @description Inclusive resource creation upper bound. */
+                createdTo?: string;
                 offset?: number;
                 limit?: number;
             };

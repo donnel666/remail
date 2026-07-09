@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -30,6 +30,7 @@ import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useAuth } from "@/context/auth-provider";
+import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -42,10 +43,12 @@ import {
   publishDomainResource,
   publishDomainResourcesByFilter,
   publishDomainResourcesBatch,
-  validateDomainResourcesBatch,
-  validateDomainResourcesByFilter,
-  type ResourceBulkFilter,
-} from "@/lib/resources-api";
+	  validateDomainResourcesBatch,
+	  validateDomainResourcesByFilter,
+	  type ResourceBulkFilter,
+	  type ResourceListResponse,
+	  type ResourceListFilter,
+	} from "@/lib/resources-api";
 
 import { ImportDomainModal } from "./resources/domain-import-modal";
 import {
@@ -53,7 +56,6 @@ import {
   createDateRangePresets,
   createdFromISOString,
   createdToISOString,
-  matchesCreatedAtRange,
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
@@ -74,18 +76,6 @@ type BooleanFilter = "all" | "yes" | "no";
 
 function hasSupplierRole(role?: string | null) {
   return role === "supplier" || role === "admin" || role === "super_admin";
-}
-
-function matchesStatusFilter(status: DomainStatus, filter: StatusFilter) {
-  if (filter === "all") return true;
-  if (filter === "normal") return isDomainAvailable(status);
-  if (filter === "abnormal") return status === "abnormal";
-  return isDomainDisabled(status);
-}
-
-function matchesBooleanFilter(value: boolean, filter: BooleanFilter) {
-  if (filter === "all") return true;
-  return filter === "yes" ? value : !value;
 }
 
 function renderDomainStatusTag(
@@ -133,8 +123,6 @@ export default function DomainEmails() {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
-  const [items, setItems] = useState<DomainResource[]>([]);
-  const [loading, setLoading] = useState(false);
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const [publishingResourceID, setPublishingResourceID] = useState<
@@ -151,126 +139,16 @@ export default function DomainEmails() {
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
-  const [activePage, setActivePage] = useState(1);
-  const [pageSize, setPageSize] = useSharedPageSize();
-  const refreshSeqRef = useRef(0);
-  const locallyDeletedResourceIDsRef = useRef(new Set<number>());
-  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
+	  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+	  const [activePage, setActivePage] = useState(1);
+	  const [pageSize, setPageSize] = useSharedPageSize();
+	  const [resourceFacets, setResourceFacets] =
+	    useState<ResourceListResponse["facets"] | null>(null);
+	  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.role);
 
-  const refresh = useCallback(async () => {
-    const refreshSeq = refreshSeqRef.current + 1;
-    refreshSeqRef.current = refreshSeq;
-    const isCurrentRefresh = () => refreshSeqRef.current === refreshSeq;
-
-    locallyDeletedResourceIDsRef.current.clear();
-    setLoading(true);
-    setItems([]);
-    setSelectedKeys([]);
-    try {
-      let hasRenderedFirstPage = false;
-      await listOwnedDomainResources({
-        onPage: (pageItems) => {
-          if (!isCurrentRefresh()) return;
-          const mapped = pageItems
-            .map(toDomainResource)
-            .filter((item): item is DomainResource => item !== null)
-            .filter(
-              (item) => !locallyDeletedResourceIDsRef.current.has(item.id)
-            );
-          if (mapped.length === 0) return;
-          setItems((previous) => [...previous, ...mapped]);
-          if (!hasRenderedFirstPage) {
-            hasRenderedFirstPage = true;
-            setLoading(false);
-          }
-        },
-      });
-    } catch (error) {
-      if (isCurrentRefresh()) {
-        Toast.error(getIamErrorMessage(t, error, "Domains load failed."));
-      }
-    } finally {
-      if (isCurrentRefresh()) {
-        setLoading(false);
-      }
-    }
-  }, [t]);
-
-  const invalidateRefresh = useCallback(() => {
-    refreshSeqRef.current += 1;
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const tldCounts = useMemo(() => getTldCounts(items), [items]);
-  const tldSet = useMemo(
-    () => new Set(tldCounts.map(([tld]) => tld)),
-    [tldCounts]
-  );
-
-  const stats = useMemo(
-    () => ({
-      status: {
-        all: items.length,
-        normal: items.filter((i) => isDomainAvailable(i.status)).length,
-        abnormal: items.filter((i) => i.status === "abnormal").length,
-        disabled: items.filter((i) => isDomainDisabled(i.status)).length,
-      },
-      private: {
-        all: items.length,
-        yes: items.filter((i) => i.usageScope === "private").length,
-        no: items.filter((i) => i.usageScope !== "private").length,
-      },
-    }),
-    [items]
-  );
-
-  const activeStatisticFilterCount =
-    Number(statusFilter !== "all") + Number(privateFilter !== "all");
-
-  useEffect(() => {
-    if (activeTld !== "all" && !tldSet.has(activeTld)) {
-      setActiveTld("all");
-    }
-  }, [activeTld, tldSet]);
-
-  const matchesCurrentFilters = useCallback((item: DomainResource) => {
-    const keyword = searchKeyword.trim().toLowerCase();
-    const tldMatched = activeTld === "all" || item.domainTld === activeTld;
-    const statusMatched = matchesStatusFilter(item.status, statusFilter);
-    const privateMatched = matchesBooleanFilter(
-      item.usageScope === "private",
-      privateFilter
-    );
-    const keywordMatched =
-      keyword.length === 0 ||
-      item.domain.toLowerCase().includes(keyword) ||
-      item.domainTld.includes(keyword);
-    const createdAtMatched = matchesCreatedAtRange(
-      item.createdAt,
-      createdAtRange
-    );
-
-    return (
-      tldMatched &&
-      statusMatched &&
-      privateMatched &&
-      keywordMatched &&
-      createdAtMatched
-    );
-  }, [activeTld, createdAtRange, privateFilter, searchKeyword, statusFilter]);
-
-  const filteredItems = useMemo(
-    () => items.filter(matchesCurrentFilters),
-    [items, matchesCurrentFilters]
-  );
-
-  const domainBulkFilter = useMemo<ResourceBulkFilter>(() => {
-    const filter: ResourceBulkFilter = { resourceType: "domain" };
+  const domainListFilter = useMemo<ResourceListFilter>(() => {
+    const filter: ResourceListFilter = {};
     const search = searchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
@@ -285,6 +163,94 @@ export default function DomainEmails() {
     return filter;
   }, [activeTld, createdAtRange, privateFilter, searchKeyword, statusFilter]);
 
+  const loadDomainBlock = useCallback(
+    async (offset: number, limit: number) => {
+	      const response = await listOwnedDomainResources(
+	        domainListFilter,
+	        offset,
+	        limit
+	      );
+	      setResourceFacets(response.facets ?? null);
+	      return {
+	        items: response.items
+          .map(toDomainResource)
+          .filter((item): item is DomainResource => item !== null),
+        total: response.total,
+      };
+    },
+    [domainListFilter]
+  );
+
+  const {
+    adjustTotal,
+    loadedItems: items,
+    loading,
+    pagedItems,
+    refresh,
+    total,
+    updateLoadedItems,
+  } = useBlockPagedList<DomainResource>({
+    activePage,
+    filterKey: JSON.stringify(domainListFilter),
+    loadBlock: loadDomainBlock,
+    onError: (error) => {
+      Toast.error(getIamErrorMessage(t, error, "Domains load failed."));
+    },
+	    pageSize,
+	  });
+
+	  useEffect(() => {
+	    setResourceFacets(null);
+	  }, [domainListFilter]);
+
+	  const tldCounts = useMemo(
+	    () =>
+	      resourceFacets?.tlds?.map(
+	        (item) => [item.key, item.count] as [string, number]
+	      ) ?? getTldCounts(items),
+	    [items, resourceFacets]
+	  );
+  const tldSet = useMemo(
+    () => new Set(tldCounts.map(([tld]) => tld)),
+    [tldCounts]
+  );
+
+	  const stats = useMemo(() => {
+	    if (resourceFacets) {
+	      return {
+	        status: resourceFacets.status,
+	        private: resourceFacets.private,
+	      };
+	    }
+	    return {
+	      status: {
+	        all: total,
+	        normal: items.filter((i) => isDomainAvailable(i.status)).length,
+	        abnormal: items.filter((i) => i.status === "abnormal").length,
+	        disabled: items.filter((i) => isDomainDisabled(i.status)).length,
+	        pending: 0,
+	      },
+	      private: {
+	        all: total,
+	        yes: items.filter((i) => i.usageScope === "private").length,
+	        no: items.filter((i) => i.usageScope !== "private").length,
+	      },
+	    };
+	  }, [items, resourceFacets, total]);
+
+  const activeStatisticFilterCount =
+    Number(statusFilter !== "all") + Number(privateFilter !== "all");
+
+  useEffect(() => {
+    if (activeTld !== "all" && !tldSet.has(activeTld)) {
+      setActiveTld("all");
+    }
+  }, [activeTld, tldSet]);
+
+  const domainBulkFilter = useMemo<ResourceBulkFilter>(() => {
+    return { ...domainListFilter, resourceType: "domain" };
+  }, [domainListFilter]);
+
   const selectedPrivateResourceIds = useMemo(() => {
     const selected = new Set(selectedKeys);
     return items
@@ -292,12 +258,8 @@ export default function DomainEmails() {
       .map((item) => item.id);
   }, [items, selectedKeys]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(activePage, totalPages);
-  const pagedItems = filteredItems.slice(
-    (safePage - 1) * pageSize,
-    safePage * pageSize
-  );
 
   useEffect(() => {
     if (safePage !== activePage) setActivePage(safePage);
@@ -363,7 +325,7 @@ export default function DomainEmails() {
   }, [t]);
 
   const queueFilteredResourceChecks = useCallback(async () => {
-    if (filteredItems.length === 0) {
+    if (total === 0) {
       Toast.info(t("No resources to check."));
       return;
     }
@@ -377,7 +339,7 @@ export default function DomainEmails() {
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
     }
-  }, [domainBulkFilter, filteredItems.length, t]);
+  }, [domainBulkFilter, t, total]);
 
   const promptSupplierApplication = useCallback(async () => {
     try {
@@ -405,45 +367,12 @@ export default function DomainEmails() {
   const markResourcesPublishedForSale = useCallback((resourceIds: number[]) => {
     const published = new Set(resourceIds);
     if (published.size === 0) return;
-    setItems((previous) =>
+    updateLoadedItems((previous) =>
       previous.map((item) =>
         published.has(item.id) ? { ...item, usageScope: "public_sale" } : item
       )
     );
-  }, []);
-
-  const markResourcesPublishedByPredicate = useCallback(
-    (predicate: (item: DomainResource) => boolean) => {
-      setItems((previous) =>
-        previous.map((item) =>
-          predicate(item) ? { ...item, usageScope: "public_sale" } : item
-        )
-      );
-    },
-    []
-  );
-
-  const removeResource = useCallback((resourceId: number) => {
-    locallyDeletedResourceIDsRef.current.add(resourceId);
-    setItems((previous) => previous.filter((item) => item.id !== resourceId));
-  }, []);
-
-  const removeResourcesByPredicate = useCallback(
-    (predicate: (item: DomainResource) => boolean) => {
-      setItems((previous) => {
-        const next: DomainResource[] = [];
-        for (const item of previous) {
-          if (predicate(item)) {
-            locallyDeletedResourceIDsRef.current.add(item.id);
-            continue;
-          }
-          next.push(item);
-        }
-        return next;
-      });
-    },
-    []
-  );
+  }, [updateLoadedItems]);
 
   const publishResourceIds = useCallback(async (resourceIds: number[]) => {
     if (resourceIds.length === 0) {
@@ -493,11 +422,8 @@ export default function DomainEmails() {
             Toast.success(
               t("Resources published for sale.", { count: response.published })
             );
-            invalidateRefresh();
-            markResourcesPublishedByPredicate(
-              (item) => item.usageScope === "private" && matchesCurrentFilters(item)
-            );
             setSelectedKeys([]);
+            await refresh();
           }
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Publish failed."));
@@ -509,10 +435,8 @@ export default function DomainEmails() {
   }, [
     domainBulkFilter,
     ensureCanPublishForSale,
-    invalidateRefresh,
-    markResourcesPublishedByPredicate,
-    matchesCurrentFilters,
     privateFilter,
+    refresh,
     t,
   ]);
 
@@ -545,7 +469,10 @@ export default function DomainEmails() {
     try {
       const response = await deleteDomainResourcesBatch(resourceIds, {
         onDeleted: (resourceId) => {
-          removeResource(resourceId);
+          updateLoadedItems((previous) =>
+            previous.filter((item) => item.id !== resourceId)
+          );
+          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((selectedId) => selectedId !== resourceId)
           );
@@ -557,7 +484,7 @@ export default function DomainEmails() {
     } finally {
       setDeletingBatch(false);
     }
-  }, [removeResource, t]);
+  }, [adjustTotal, t, updateLoadedItems]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedPrivateResourceIds.length === 0) {
@@ -594,12 +521,9 @@ export default function DomainEmails() {
           if (response.deleted === 0) {
             Toast.info(t("No private resources to delete."));
           } else {
-            removeResourcesByPredicate(
-              (item) => item.usageScope === "private" && matchesCurrentFilters(item)
-            );
-            invalidateRefresh();
             setSelectedKeys([]);
             Toast.success(t("Resources deleted.", { count: response.deleted }));
+            await refresh();
           }
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
@@ -610,10 +534,8 @@ export default function DomainEmails() {
     });
   }, [
     domainBulkFilter,
-    invalidateRefresh,
-    matchesCurrentFilters,
     privateFilter,
-    removeResourcesByPredicate,
+    refresh,
     t,
   ]);
 
@@ -655,7 +577,10 @@ export default function DomainEmails() {
         try {
           await deleteDomainResource(record.id);
           Toast.success(t("Resource deleted."));
-          removeResource(record.id);
+          updateLoadedItems((previous) =>
+            previous.filter((item) => item.id !== record.id)
+          );
+          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
@@ -666,7 +591,7 @@ export default function DomainEmails() {
         }
       },
     });
-  }, [removeResource, t]);
+  }, [adjustTotal, t, updateLoadedItems]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,
@@ -811,7 +736,7 @@ export default function DomainEmails() {
           <span className="flex items-center gap-2">
             {t("All")}
             <Tag color={activeTld === "all" ? "red" : "grey"} shape="circle">
-              {items.length}
+              {total}
             </Tag>
           </span>
         }
@@ -1047,7 +972,7 @@ export default function DomainEmails() {
       setActivePage(1);
     },
     pageSize,
-    total: filteredItems.length,
+    total,
     t,
   });
 

@@ -342,7 +342,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/supplier-applications:
+  /v1/suppliers/applications:
     post:
       operationId: postSupplierApplication
       summary: Submit current user's supplier application
@@ -402,7 +402,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/supplier-applications/current:
+  /v1/suppliers/applications/current:
     get:
       operationId: getCurrentSupplierApplication
       summary: Get current user's latest supplier application
@@ -996,7 +996,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/supplier-applications:
+  /v1/admin/suppliers/applications:
     get:
       operationId: getAdminSupplierApplications
       summary: List supplier applications
@@ -1046,7 +1046,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/supplier-applications/{applicationId}/approve:
+  /v1/admin/suppliers/applications/{applicationId}/approve:
     post:
       operationId: postAdminSupplierApplicationApprove
       summary: Approve supplier application
@@ -1105,7 +1105,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/supplier-applications/{applicationId}/reject:
+  /v1/admin/suppliers/applications/{applicationId}/reject:
     post:
       operationId: postAdminSupplierApplicationReject
       summary: Reject supplier application
@@ -1440,7 +1440,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/project-logos/{logoKey}:
+  /v1/projects/logos/{logoKey}:
     get:
       operationId: getProjectLogo
       summary: Read a project logo file
@@ -1691,7 +1691,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/project-logos:
+  /v1/admin/projects/logos:
     post:
       operationId: postAdminProjectLogo
       summary: Upload a project logo
@@ -2328,16 +2328,71 @@ paths:
           in: query
           schema:
             type: string
+            enum: [all, microsoft, domain]
             default: all
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
+        - name: suffix
+          in: query
+          schema:
+            type: string
+          description: Exact Microsoft suffix such as @outlook.com.
+        - name: tld
+          in: query
+          schema:
+            type: string
+          description: Exact domain suffix such as .com.
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: purpose
+          in: query
+          schema:
+            type: string
+            enum: [not_sale, sale, binding]
+          description: Domain resource purpose filter.
+        - name: forSale
+          in: query
+          schema:
+            type: boolean
+          description: Microsoft public supply filter. false is private; true is public sale.
+        - name: longLived
+          in: query
+          schema:
+            type: boolean
+          description: Microsoft long-lived filter.
+        - name: graphAvailable
+          in: query
+          schema:
+            type: boolean
+          description: Microsoft Graph availability filter.
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive resource creation lower bound.
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive resource creation upper bound.
         - name: offset
           in: query
           schema:
             type: integer
+            minimum: 0
             default: 0
         - name: limit
           in: query
           schema:
             type: integer
+            minimum: 1
             default: 20
             maximum: 10000
       responses:
@@ -2671,7 +2726,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/resource-imports/{importId}:
+  /v1/resources/imports/{importId}:
     get:
       operationId: getResourceImport
       summary: Get resource import status
@@ -2768,7 +2823,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/resource-validations:
+  /v1/resources/validations:
     post:
       operationId: postResourceValidations
       summary: Queue asynchronous resource validations in batch
@@ -2822,7 +2877,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/resource-validations/{validationId}:
+  /v1/resources/validations/{validationId}:
     get:
       operationId: getResourceValidation
       summary: Get resource validation status
@@ -3390,7 +3445,7 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   # --- OpenAPI Credentials ---
-  /v1/apikey-usage:
+  /v1/apikeys/usage:
     get:
       operationId: getApiKeyUsage
       summary: Get current user's API key usage summary
@@ -6439,6 +6494,84 @@ components:
         offset:
           type: integer
         limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/ResourceListFacets"
+      additionalProperties: false
+
+    ResourceListFacets:
+      type: object
+      required:
+        - status
+        - private
+        - longLived
+        - graphAvailable
+        - suffixes
+        - tlds
+      properties:
+        status:
+          $ref: "#/components/schemas/ResourceFacetCounts"
+        private:
+          $ref: "#/components/schemas/ResourceBooleanFacets"
+        longLived:
+          $ref: "#/components/schemas/ResourceBooleanFacets"
+        graphAvailable:
+          $ref: "#/components/schemas/ResourceBooleanFacets"
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceKeyFacet"
+        tlds:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceKeyFacet"
+      additionalProperties: false
+
+    ResourceFacetCounts:
+      type: object
+      required:
+        - all
+        - normal
+        - pending
+        - abnormal
+        - disabled
+      properties:
+        all:
+          type: integer
+        normal:
+          type: integer
+        pending:
+          type: integer
+        abnormal:
+          type: integer
+        disabled:
+          type: integer
+      additionalProperties: false
+
+    ResourceBooleanFacets:
+      type: object
+      required:
+        - all
+        - yes
+        - no
+      properties:
+        all:
+          type: integer
+        yes:
+          type: integer
+        no:
+          type: integer
+      additionalProperties: false
+
+    ResourceKeyFacet:
+      type: object
+      required:
+        - key
+        - count
+      properties:
+        key:
+          type: string
+        count:
           type: integer
       additionalProperties: false
 

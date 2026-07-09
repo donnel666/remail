@@ -53,7 +53,10 @@ func (h *Handler) GetAPIKeys(c *gin.Context) {
 	if !ok {
 		return
 	}
-	offset, limit := parseOffsetLimit(c)
+	offset, limit, ok := parseOffsetLimit(c)
+	if !ok {
+		return
+	}
 	items, total, err := h.mod.UseCase.ListAPIKeys(c.Request.Context(), userID, offset, limit)
 	if err != nil {
 		writeOpenAPIError(c, err)
@@ -195,16 +198,11 @@ func currentUserID(c *gin.Context) (uint, bool) {
 	return userID, true
 }
 
-func parseOffsetLimit(c *gin.Context) (int, int) {
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	return offset, limit
+func parseOffsetLimit(c *gin.Context) (int, int, bool) {
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
 }
 
 func parseUintParam(c *gin.Context, name string) (uint, bool) {
