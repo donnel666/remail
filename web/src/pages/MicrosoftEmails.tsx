@@ -43,12 +43,12 @@ import {
   publishMicrosoftResource,
   publishMicrosoftResourcesByFilter,
   publishMicrosoftResourcesBatch,
-	  validateMicrosoftResourcesBatch,
-	  validateMicrosoftResourcesByFilter,
-	  type ResourceBulkFilter,
-	  type ResourceListResponse,
-	  type ResourceListFilter,
-	} from "@/lib/resources-api";
+  validateMicrosoftResourcesBatch,
+  validateMicrosoftResourcesByFilter,
+  type ResourceBulkFilter,
+  type ResourceListResponse,
+  type ResourceListFilter,
+} from "@/lib/resources-api";
 
 import { ImportMicrosoftEmailsModal } from "./resources/import-microsoft-emails-modal";
 import {
@@ -61,12 +61,10 @@ import {
 } from "./resources/date-range-filter";
 import {
   getSuffix,
-  getSuffixCounts,
   type EmailResource,
   type LifetimeType,
   type ResourceStatus,
   type UsageScope,
-  isNormal,
   toEmailResource,
 } from "./resources/model";
 import { renderStatusTag } from "./resources/resource-status-tag";
@@ -99,11 +97,11 @@ export default function MicrosoftEmails() {
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
-	  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
-	  const [activePage, setActivePage] = useState(1);
-	  const [pageSize, setPageSize] = useSharedPageSize();
-	  const [resourceFacets, setResourceFacets] =
-	    useState<ResourceListResponse["facets"] | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+  const [activePage, setActivePage] = useState(1);
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [resourceFacets, setResourceFacets] =
+    useState<ResourceListResponse["facets"] | null>(null);
   const [publishingResourceID, setPublishingResourceID] = useState<number | null>(
     null
   );
@@ -145,22 +143,21 @@ export default function MicrosoftEmails() {
 
   const loadMicrosoftBlock = useCallback(
     async (offset: number, limit: number) => {
-	      const response = await listOwnedMicrosoftResources(
-	        microsoftListFilter,
-	        offset,
-	        limit
-	      );
-	      setResourceFacets(response.facets ?? null);
-	      return {
-	        items: response.items.map(toEmailResource).filter(isEmailResource),
-	        total: response.total,
-	      };
+      const response = await listOwnedMicrosoftResources(
+        microsoftListFilter,
+        offset,
+        limit
+      );
+      setResourceFacets(response.facets ?? null);
+      return {
+        items: response.items.map(toEmailResource).filter(isEmailResource),
+        total: response.total,
+      };
     },
     [microsoftListFilter]
   );
 
   const {
-    adjustTotal,
     loadedItems: items,
     loading,
     pagedItems,
@@ -174,59 +171,59 @@ export default function MicrosoftEmails() {
     onError: (error) => {
       Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
     },
-	    pageSize,
-	  });
+    pageSize,
+  });
 
-	  useEffect(() => {
-	    setResourceFacets(null);
-	  }, [microsoftListFilter]);
+  useEffect(() => {
+    setResourceFacets(null);
+  }, [microsoftListFilter]);
 
-	  const suffixCounts = useMemo(
-	    () =>
-	      resourceFacets?.suffixes?.map(
-	        (item) => [item.key, item.count] as [string, number]
-	      ) ?? getSuffixCounts(items),
-	    [items, resourceFacets]
-	  );
+  const suffixCounts = useMemo(
+    () =>
+      resourceFacets?.suffixes?.map(
+        (item) => [item.key, item.count] as [string, number]
+      ) ?? [],
+    [resourceFacets]
+  );
   const suffixSet = useMemo(
     () => new Set(suffixCounts.map(([suffix]) => suffix)),
     [suffixCounts]
   );
 
-	  const resourceStats = useMemo(() => {
-	    if (resourceFacets) {
-	      return {
-	        longLived: resourceFacets.longLived,
-	        graph: resourceFacets.graphAvailable,
-	        private: resourceFacets.private,
-	        status: resourceFacets.status,
-	      };
-	    }
-	    return {
-	      longLived: {
-	        all: total,
-	        no: items.filter((item) => item.lifetimeType !== "long_lived").length,
-	        yes: items.filter((item) => item.lifetimeType === "long_lived").length,
-	      },
-	      graph: {
-	        all: total,
-	        no: items.filter((item) => !item.graphAvailable).length,
-	        yes: items.filter((item) => item.graphAvailable).length,
-	      },
-	      private: {
-	        all: total,
-	        no: items.filter((item) => item.usageScope !== "private").length,
-	        yes: items.filter((item) => item.usageScope === "private").length,
-	      },
-	      status: {
-	        all: total,
-	        abnormal: items.filter((item) => item.status === "abnormal").length,
-	        disabled: items.filter((item) => item.status === "disabled").length,
-	        normal: items.filter((item) => isNormal(item.status)).length,
-	        pending: items.filter((item) => item.status === "pending").length,
-	      },
-	    };
-	  }, [items, resourceFacets, total]);
+  const resourceStats = useMemo(() => {
+    if (resourceFacets) {
+      return {
+        longLived: resourceFacets.longLived,
+        graph: resourceFacets.graphAvailable,
+        private: resourceFacets.private,
+        status: resourceFacets.status,
+      };
+    }
+    return {
+      longLived: {
+        all: total,
+        no: 0,
+        yes: 0,
+      },
+      graph: {
+        all: total,
+        no: 0,
+        yes: 0,
+      },
+      private: {
+        all: total,
+        no: 0,
+        yes: 0,
+      },
+      status: {
+        all: total,
+        abnormal: 0,
+        disabled: 0,
+        normal: 0,
+        pending: 0,
+      },
+    };
+  }, [resourceFacets, total]);
 
   const activeStatisticFilterCount =
     Number(statusFilter !== "all") +
@@ -515,24 +512,16 @@ export default function MicrosoftEmails() {
 
     setDeletingBatch(true);
     try {
-      const response = await deleteMicrosoftResourcesBatch(resourceIds, {
-        onDeleted: (resourceId) => {
-          updateLoadedItems((previous) =>
-            previous.filter((resource) => resource.id !== resourceId)
-          );
-          adjustTotal(-1);
-          setSelectedKeys((previous) =>
-            previous.filter((selectedId) => selectedId !== resourceId)
-          );
-        },
-      });
+      const response = await deleteMicrosoftResourcesBatch(resourceIds);
+      setSelectedKeys([]);
+      await refresh();
       Toast.success(t("Resources deleted.", { count: response.deleted }));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Delete failed."));
     } finally {
       setDeletingBatch(false);
     }
-  }, [adjustTotal, t, updateLoadedItems]);
+  }, [refresh, t]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedPrivateResourceIds.length === 0) {
@@ -612,13 +601,10 @@ export default function MicrosoftEmails() {
         try {
           await deleteMicrosoftResource(record.id);
           Toast.success(t("Resource deleted."));
-          updateLoadedItems((previous) =>
-            previous.filter((resource) => resource.id !== record.id)
-          );
-          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
+          await refresh();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
         } finally {
@@ -626,7 +612,7 @@ export default function MicrosoftEmails() {
         }
       },
     });
-  }, [adjustTotal, t, updateLoadedItems]);
+  }, [refresh, t]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,

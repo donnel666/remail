@@ -663,7 +663,6 @@ export default function ProxyManagement() {
   );
 
   const {
-    adjustTotal,
     loadedItems: items,
     loading,
     pagedItems,
@@ -729,18 +728,6 @@ export default function ProxyManagement() {
     });
   }, [updateLoadedItems]);
 
-  const removeProxyItems = useCallback((ids: number[]) => {
-    if (ids.length === 0) return;
-    const removedIDs = new Set(ids);
-    updateLoadedItems((previous) =>
-      previous.filter((item) => !removedIDs.has(item.id))
-    );
-    setSelectedKeys((previous) =>
-      previous.filter((id) => !removedIDs.has(id))
-    );
-    adjustTotal(-removedIDs.size);
-  }, [adjustTotal, updateLoadedItems]);
-
   const refreshStats = useCallback(async () => {
     try {
       const [statsResponse, currentStatsResponse] = await Promise.all([
@@ -781,11 +768,14 @@ export default function ProxyManagement() {
       if (proxyMatchesListFilter(next, listFilter)) {
         updateProxyItem(next);
       } else {
-        removeProxyItems([next.id]);
+        setSelectedKeys((previous) => previous.filter((id) => id !== next.id));
+        void refresh({ clearSelection: false });
       }
-      void refreshStats();
+      if (proxyMatchesListFilter(next, listFilter)) {
+        void refreshStats();
+      }
     },
-    [listFilter, refreshStats, removeProxyItems, updateProxyItem]
+    [listFilter, refresh, refreshStats, updateProxyItem]
   );
 
   const updateProxyItems = useCallback((nextItems: ProxyItem[]) => {
@@ -861,8 +851,15 @@ export default function ProxyManagement() {
         .filter((item) => !proxyMatchesListFilter(item, listFilter))
         .map((item) => item.id);
       updateProxyItems(visibleItems);
-      removeProxyItems(hiddenIDs);
-      void refreshStats();
+      if (hiddenIDs.length > 0) {
+        const hiddenIDSet = new Set(hiddenIDs);
+        setSelectedKeys((previous) =>
+          previous.filter((id) => !hiddenIDSet.has(id))
+        );
+        await refresh({ clearSelection: false });
+      } else {
+        void refreshStats();
+      }
       Toast.success(
         t("Proxy check submitted with summary", {
           queued: response.queued,
@@ -877,7 +874,7 @@ export default function ProxyManagement() {
         return next;
       });
     }
-  }, [listFilter, refreshStats, removeProxyItems, selectedKeys, t, updateProxyItems]);
+  }, [listFilter, refresh, refreshStats, selectedKeys, t, updateProxyItems]);
 
   const deleteProxyIDs = useCallback(
     async (proxyIDs: number[]) => {
@@ -887,17 +884,13 @@ export default function ProxyManagement() {
       }
       const response = await deleteAdminProxies(proxyIDs);
       const deletedIDs = new Set(response.deletedProxyIds ?? proxyIDs);
-      updateLoadedItems((previous) =>
-        previous.filter((item) => !deletedIDs.has(item.id))
-      );
       setSelectedKeys((previous) =>
         previous.filter((id) => !deletedIDs.has(id))
       );
-      adjustTotal(-response.deleted);
-      void refreshStats();
+      await refresh();
       Toast.success(t("Proxies deleted.", { count: response.deleted }));
     },
-    [adjustTotal, refreshStats, t, updateLoadedItems]
+    [refresh, t]
   );
 
   const handleDeleteSelected = useCallback(() => {

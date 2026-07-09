@@ -1,5 +1,6 @@
 import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import { generateIdempotencyKey } from "./idempotency";
 import { notifyWalletUpdated } from "./wallet-events";
 
 export type WalletResponse = components["schemas"]["WalletResponse"];
@@ -19,13 +20,6 @@ export interface RechargeListFilter {
   status?: "paying" | "callback" | "reconciled" | "credited" | "failed";
 }
 
-function idempotencyKey() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 export async function getWallet() {
   return unwrap<WalletResponse>(await client.GET("/v1/wallet"));
 }
@@ -36,7 +30,7 @@ export async function getWalletReferrals() {
   );
 }
 
-export async function transferReferralRewards(key = idempotencyKey()) {
+export async function transferReferralRewards(key = generateIdempotencyKey()) {
   const response = await unwrap<WalletReferralTransferResponse>(
     await client.POST("/v1/wallet/referrals/transfer", {
       params: {
@@ -87,7 +81,10 @@ export async function listWalletTransactions(
   );
 }
 
-export async function redeemCard(cardKey: string, key = idempotencyKey()) {
+export async function redeemCard(
+  cardKey: string,
+  key = generateIdempotencyKey()
+) {
   const response = await unwrap<RedeemCardResponse>(
     await client.POST("/v1/cards/redeem", {
       body: { cardKey },

@@ -2796,39 +2796,112 @@ body[theme-mode="dark"] .semi-always-light,
   position: relative;
 }
 
-.api-docs-swagger .swagger-ui .swagger-idempotency-input {
-  display: flex;
-  max-width: 520px;
-  align-items: center;
-  gap: 8px;
+.api-docs-swagger .swagger-ui select,
+.api-docs-swagger .swagger-ui input[type="email"],
+.api-docs-swagger .swagger-ui input[type="file"],
+.api-docs-swagger .swagger-ui input[type="password"],
+.api-docs-swagger .swagger-ui input[type="search"],
+.api-docs-swagger .swagger-ui input[type="text"],
+.api-docs-swagger .swagger-ui textarea {
+  border: 1px solid var(--semi-color-border) !important;
+  border-radius: 6px !important;
+  background-color: var(--semi-color-bg-0) !important;
+  box-shadow: none !important;
+  color: var(--semi-color-text-0) !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  outline: none !important;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease,
+    background-color 0.16s ease;
 }
 
-.api-docs-swagger .swagger-ui .swagger-idempotency-input input {
+.api-docs-swagger .swagger-ui select {
+  min-height: 34px;
+  padding: 6px 36px 6px 12px !important;
+}
+
+.api-docs-swagger .swagger-ui select:focus,
+.api-docs-swagger .swagger-ui select:focus-visible,
+.api-docs-swagger .swagger-ui input[type="email"]:focus,
+.api-docs-swagger .swagger-ui input[type="email"]:focus-visible,
+.api-docs-swagger .swagger-ui input[type="file"]:focus,
+.api-docs-swagger .swagger-ui input[type="file"]:focus-visible,
+.api-docs-swagger .swagger-ui input[type="password"]:focus,
+.api-docs-swagger .swagger-ui input[type="password"]:focus-visible,
+.api-docs-swagger .swagger-ui input[type="search"]:focus,
+.api-docs-swagger .swagger-ui input[type="search"]:focus-visible,
+.api-docs-swagger .swagger-ui input[type="text"]:focus,
+.api-docs-swagger .swagger-ui input[type="text"]:focus-visible,
+.api-docs-swagger .swagger-ui textarea:focus,
+.api-docs-swagger .swagger-ui textarea:focus-visible {
+  border-color: color-mix(in oklch, var(--brand) 50%, var(--semi-color-border)) !important;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 14%, transparent) !important;
+}
+
+.api-docs-swagger .swagger-ui .scheme-container select {
+  min-width: min(680px, calc(100vw - 96px));
+  font-weight: 600 !important;
+}
+
+.api-docs-swagger .swagger-ui .opblock-summary-control:focus,
+.api-docs-swagger .swagger-ui .opblock-summary-control:focus-visible,
+.api-docs-swagger .swagger-ui .model-box-control:focus,
+.api-docs-swagger .swagger-ui .model-box-control:focus-visible,
+.api-docs-swagger .swagger-ui .models-control:focus,
+.api-docs-swagger .swagger-ui .models-control:focus-visible {
+  outline: none !important;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand) 24%, transparent);
+}
+
+.api-docs-swagger .swagger-ui .opblock:focus-within {
+  outline: none;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-field {
+  display: inline-flex;
+  width: min(520px, 100%);
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  vertical-align: middle;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-field input {
+  height: 34px;
   min-width: 0;
   flex: 1;
+  margin: 0 !important;
 }
 
 .api-docs-swagger .swagger-ui .swagger-idempotency-generate {
   display: inline-flex;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--semi-color-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--semi-color-bg-0);
   color: var(--semi-color-text-1);
   cursor: pointer;
-  font-size: 15px;
-  font-weight: 600;
   line-height: 1;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease,
+    background-color 0.16s ease, color 0.16s ease;
 }
 
 .api-docs-swagger .swagger-ui .swagger-idempotency-generate:hover {
   border-color: rgba(255, 122, 0, 0.38);
   background: rgba(255, 122, 0, 0.06);
   color: #b45309;
+}
+
+.api-docs-swagger .swagger-ui .swagger-idempotency-generate:focus,
+.api-docs-swagger .swagger-ui .swagger-idempotency-generate:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklch, var(--brand) 50%, var(--semi-color-border));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 14%, transparent);
 }
 
 .api-docs-swagger .swagger-ui .swagger-api-key-action-row {

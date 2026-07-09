@@ -1,3 +1,5 @@
+import { generateIdempotencyKey } from "@/lib/idempotency";
+
 const textTranslations: Record<string, string> = {
   "Accept": "接收",
   "Additional properties": "附加属性",
@@ -162,6 +164,7 @@ const apiKeyMenuSelector = "[data-remail-api-key-menu='true']";
 const apiKeyManageLinkSelector = "[data-remail-api-key-manage='true']";
 const idempotencyGeneratorSelector =
   "[data-remail-idempotency-generate='true']";
+const idempotencyFieldSelector = "[data-remail-idempotency-field='true']";
 let apiKeyPickerSeed = 0;
 
 function normalizeText(value: string) {
@@ -438,11 +441,28 @@ function setInputValue(input: HTMLInputElement, value: string) {
 }
 
 function randomIdempotencyKey() {
-  if (globalThis.crypto?.randomUUID) {
-    return `idem-${globalThis.crypto.randomUUID()}`;
-  }
-  const randomPart = Math.random().toString(36).slice(2, 12);
-  return `idem-${Date.now().toString(36)}${randomPart}`;
+  return generateIdempotencyKey();
+}
+
+function createRefreshIcon() {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("width", "16");
+  icon.setAttribute("height", "16");
+  icon.setAttribute("aria-hidden", "true");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute(
+    "d",
+    "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M16 8h5V3"
+  );
+  icon.appendChild(path);
+  return icon;
 }
 
 function syncIdempotencyKeyGenerators(root: HTMLElement) {
@@ -458,10 +478,18 @@ function syncIdempotencyKeyGenerators(root: HTMLElement) {
     );
     if (!input) return;
 
-    const wrapper = input.parentElement;
-    if (!wrapper) return;
-    wrapper.classList.add("swagger-idempotency-input");
-    if (wrapper.querySelector(idempotencyGeneratorSelector)) return;
+    const parent = input.parentElement;
+    if (!parent) return;
+
+    let field = input.closest<HTMLDivElement>(idempotencyFieldSelector);
+    if (!field) {
+      field = document.createElement("div");
+      field.className = "swagger-idempotency-field";
+      field.dataset.remailIdempotencyField = "true";
+      parent.insertBefore(field, input);
+      field.appendChild(input);
+    }
+    if (field.querySelector(idempotencyGeneratorSelector)) return;
 
     const button = document.createElement("button");
     button.className = "swagger-idempotency-generate";
@@ -469,13 +497,13 @@ function syncIdempotencyKeyGenerators(root: HTMLElement) {
     button.type = "button";
     button.title = "随机生成幂等键";
     button.setAttribute("aria-label", "随机生成幂等键");
-    button.textContent = "↻";
+    button.appendChild(createRefreshIcon());
     button.addEventListener("click", () => {
       setInputValue(input, randomIdempotencyKey());
       input.focus();
     });
 
-    input.insertAdjacentElement("afterend", button);
+    field.appendChild(button);
   });
 }
 

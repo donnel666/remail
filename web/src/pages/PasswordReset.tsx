@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { CaptchaField } from "@/components/auth/CaptchaField";
 import { useCaptcha } from "@/hooks/use-captcha";
-import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { requestPasswordReset, resetPassword } from "@/lib/iam-api";
 
@@ -75,6 +75,7 @@ export default function PasswordReset() {
         newPassword,
       });
       sessionStorage.setItem(LOGIN_NOTICE_KEY, "Password reset completed. Please log in.");
+      clearLoginReturnTo();
       void navigate({ to: "/login", replace: true });
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "Password reset failed."));
@@ -171,7 +172,11 @@ export default function PasswordReset() {
         </form>
 
         <div className="mt-5 text-center text-sm text-[var(--ink-muted)]">
-          <Link to="/login" className="font-medium text-brand hover:text-brand-hover">
+          <Link
+            to="/login"
+            onClick={clearLoginReturnTo}
+            className="font-medium text-brand hover:text-brand-hover"
+          >
             {t("Back to login")}
           </Link>
         </div>

@@ -5,6 +5,7 @@ import {
   unwrap,
   type JsonResponse,
 } from "./api-client";
+import { generateIdempotencyKey } from "./idempotency";
 
 export type APIKeyCreateRequest = components["schemas"]["APIKeyCreateRequest"];
 export type APIKeyPatchRequest = components["schemas"]["APIKeyPatchRequest"];
@@ -37,7 +38,7 @@ export async function createAPIKey(payload: APIKeyCreateRequest) {
       params: {
         header: {
           ...csrfHeader(),
-          "Idempotency-Key": `apikey-${crypto.randomUUID()}`,
+          "Idempotency-Key": generateIdempotencyKey(),
         },
       },
     })

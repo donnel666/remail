@@ -75,7 +75,9 @@ export function useBlockPagedList<T>({
           if (loadSeqRef.current === seq) onError?.(error);
         })
         .finally(() => {
-          pendingRef.current.delete(offset);
+          if (pendingRef.current.get(offset) === request) {
+            pendingRef.current.delete(offset);
+          }
           if (foreground && loadSeqRef.current === seq) setLoading(false);
         });
 

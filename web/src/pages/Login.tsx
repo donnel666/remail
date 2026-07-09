@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { CaptchaField } from "@/components/auth/CaptchaField";
 import { useAuth } from "@/context/auth-provider";
 import { useCaptcha } from "@/hooks/use-captcha";
-import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
 export default function Login() {
@@ -46,7 +46,7 @@ export default function Login() {
         captchaId: captcha.captcha.captchaId,
         captchaAnswer: captchaAnswer.trim(),
       });
-      void navigate({ to: "/dashboard" });
+      void navigate({ to: consumeLoginReturnTo() as never, replace: true });
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "Login failed."));
       setCaptchaAnswer("");

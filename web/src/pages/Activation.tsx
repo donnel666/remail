@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { LanguageMenu } from "@/components/language-menu";
 import { useActivationGate } from "@/context/activation-gate";
-import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { activateSystem, IamApiError } from "@/lib/iam-api";
 
@@ -35,6 +35,7 @@ export default function Activation() {
 
   useEffect(() => {
     if (activationNeeded === false) {
+      clearLoginReturnTo();
       void navigate({ to: "/login", replace: true });
     }
   }, [activationNeeded, navigate]);
@@ -45,6 +46,7 @@ export default function Activation() {
     setError("");
     setSuccess(t("System activated. Redirecting to login."));
     sessionStorage.setItem(LOGIN_NOTICE_KEY, "System activated. Please log in.");
+    clearLoginReturnTo();
 
     redirectTimer.current = window.setTimeout(() => {
       markActivated();

@@ -7,6 +7,7 @@ import { NotificationPopover } from "@/components/notification-popover";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { UserMenu } from "@/components/user-menu";
 import { HeaderWalletShortcut } from "@/components/header-wallet-shortcut";
+import { clearLoginReturnTo } from "@/lib/auth-flow";
 import { TOP_NAV_ITEMS } from "../config/navigation";
 import type { TopNavItem } from "../types";
 import { HeaderLogo } from "./header-logo";
@@ -75,6 +76,7 @@ function AuthLinks() {
     <div className="flex h-8 items-center">
       <Link
         to="/login"
+        onClick={clearLoginReturnTo}
         className={cn(
           "flex h-8 items-center justify-center rounded-full bg-surface-sunken px-1.5 text-xs font-semibold text-foreground/80 transition-colors hover:bg-surface-hover",
           "md:rounded-l-full md:rounded-r-none"

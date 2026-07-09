@@ -30,7 +30,7 @@ import { useTranslation } from "react-i18next";
 import coverImage from "@/assets/cover-4.webp";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
-import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { changePassword } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { getAPIKeyUsage } from "@/lib/openapi-credentials-api";
@@ -173,6 +173,7 @@ export default function Account() {
         LOGIN_NOTICE_KEY,
         "Password changed. Please log in again."
       );
+      clearLoginReturnTo();
       await logout();
       void navigate({ to: "/login", replace: true });
     } catch (nextError) {

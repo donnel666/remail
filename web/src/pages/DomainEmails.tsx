@@ -43,12 +43,12 @@ import {
   publishDomainResource,
   publishDomainResourcesByFilter,
   publishDomainResourcesBatch,
-	  validateDomainResourcesBatch,
-	  validateDomainResourcesByFilter,
-	  type ResourceBulkFilter,
-	  type ResourceListResponse,
-	  type ResourceListFilter,
-	} from "@/lib/resources-api";
+  validateDomainResourcesBatch,
+  validateDomainResourcesByFilter,
+  type ResourceBulkFilter,
+  type ResourceListResponse,
+  type ResourceListFilter,
+} from "@/lib/resources-api";
 
 import { ImportDomainModal } from "./resources/domain-import-modal";
 import {
@@ -61,9 +61,7 @@ import {
 } from "./resources/date-range-filter";
 import { SupplierApplicationModal } from "./resources/supplier-application-modal";
 import {
-  getTldCounts,
   isDomainAvailable,
-  isDomainDisabled,
   toDomainResource,
   type DomainResource,
   type DomainStatus,
@@ -139,12 +137,12 @@ export default function DomainEmails() {
   const [compactMode, setCompactMode] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierApplicationOpen, setSupplierApplicationOpen] = useState(false);
-	  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
-	  const [activePage, setActivePage] = useState(1);
-	  const [pageSize, setPageSize] = useSharedPageSize();
-	  const [resourceFacets, setResourceFacets] =
-	    useState<ResourceListResponse["facets"] | null>(null);
-	  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
+  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+  const [activePage, setActivePage] = useState(1);
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [resourceFacets, setResourceFacets] =
+    useState<ResourceListResponse["facets"] | null>(null);
+  const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.role);
 
   const domainListFilter = useMemo<ResourceListFilter>(() => {
@@ -165,14 +163,14 @@ export default function DomainEmails() {
 
   const loadDomainBlock = useCallback(
     async (offset: number, limit: number) => {
-	      const response = await listOwnedDomainResources(
-	        domainListFilter,
-	        offset,
-	        limit
-	      );
-	      setResourceFacets(response.facets ?? null);
-	      return {
-	        items: response.items
+      const response = await listOwnedDomainResources(
+        domainListFilter,
+        offset,
+        limit
+      );
+      setResourceFacets(response.facets ?? null);
+      return {
+        items: response.items
           .map(toDomainResource)
           .filter((item): item is DomainResource => item !== null),
         total: response.total,
@@ -182,7 +180,6 @@ export default function DomainEmails() {
   );
 
   const {
-    adjustTotal,
     loadedItems: items,
     loading,
     pagedItems,
@@ -196,47 +193,47 @@ export default function DomainEmails() {
     onError: (error) => {
       Toast.error(getIamErrorMessage(t, error, "Domains load failed."));
     },
-	    pageSize,
-	  });
+    pageSize,
+  });
 
-	  useEffect(() => {
-	    setResourceFacets(null);
-	  }, [domainListFilter]);
+  useEffect(() => {
+    setResourceFacets(null);
+  }, [domainListFilter]);
 
-	  const tldCounts = useMemo(
-	    () =>
-	      resourceFacets?.tlds?.map(
-	        (item) => [item.key, item.count] as [string, number]
-	      ) ?? getTldCounts(items),
-	    [items, resourceFacets]
-	  );
+  const tldCounts = useMemo(
+    () =>
+      resourceFacets?.tlds?.map(
+        (item) => [item.key, item.count] as [string, number]
+      ) ?? [],
+    [resourceFacets]
+  );
   const tldSet = useMemo(
     () => new Set(tldCounts.map(([tld]) => tld)),
     [tldCounts]
   );
 
-	  const stats = useMemo(() => {
-	    if (resourceFacets) {
-	      return {
-	        status: resourceFacets.status,
-	        private: resourceFacets.private,
-	      };
-	    }
-	    return {
-	      status: {
-	        all: total,
-	        normal: items.filter((i) => isDomainAvailable(i.status)).length,
-	        abnormal: items.filter((i) => i.status === "abnormal").length,
-	        disabled: items.filter((i) => isDomainDisabled(i.status)).length,
-	        pending: 0,
-	      },
-	      private: {
-	        all: total,
-	        yes: items.filter((i) => i.usageScope === "private").length,
-	        no: items.filter((i) => i.usageScope !== "private").length,
-	      },
-	    };
-	  }, [items, resourceFacets, total]);
+  const stats = useMemo(() => {
+    if (resourceFacets) {
+      return {
+        status: resourceFacets.status,
+        private: resourceFacets.private,
+      };
+    }
+    return {
+      status: {
+        all: total,
+        normal: 0,
+        abnormal: 0,
+        disabled: 0,
+        pending: 0,
+      },
+      private: {
+        all: total,
+        yes: 0,
+        no: 0,
+      },
+    };
+  }, [resourceFacets, total]);
 
   const activeStatisticFilterCount =
     Number(statusFilter !== "all") + Number(privateFilter !== "all");
@@ -467,24 +464,16 @@ export default function DomainEmails() {
 
     setDeletingBatch(true);
     try {
-      const response = await deleteDomainResourcesBatch(resourceIds, {
-        onDeleted: (resourceId) => {
-          updateLoadedItems((previous) =>
-            previous.filter((item) => item.id !== resourceId)
-          );
-          adjustTotal(-1);
-          setSelectedKeys((previous) =>
-            previous.filter((selectedId) => selectedId !== resourceId)
-          );
-        },
-      });
+      const response = await deleteDomainResourcesBatch(resourceIds);
+      setSelectedKeys([]);
+      await refresh();
       Toast.success(t("Resources deleted.", { count: response.deleted }));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Delete failed."));
     } finally {
       setDeletingBatch(false);
     }
-  }, [adjustTotal, t, updateLoadedItems]);
+  }, [refresh, t]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedPrivateResourceIds.length === 0) {
@@ -577,13 +566,10 @@ export default function DomainEmails() {
         try {
           await deleteDomainResource(record.id);
           Toast.success(t("Resource deleted."));
-          updateLoadedItems((previous) =>
-            previous.filter((item) => item.id !== record.id)
-          );
-          adjustTotal(-1);
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
+          await refresh();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Delete failed."));
         } finally {
@@ -591,7 +577,7 @@ export default function DomainEmails() {
         }
       },
     });
-  }, [adjustTotal, t, updateLoadedItems]);
+  }, [refresh, t]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,

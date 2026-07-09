@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { CaptchaField } from "@/components/auth/CaptchaField";
 import { useCaptcha } from "@/hooks/use-captcha";
-import { LOGIN_NOTICE_KEY } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { registerUser, sendEmailCode } from "@/lib/iam-api";
 
@@ -90,6 +90,7 @@ export default function Register() {
         inviteCode: inviteCode.trim() || undefined,
       });
       sessionStorage.setItem(LOGIN_NOTICE_KEY, "Registration completed. Please log in.");
+      clearLoginReturnTo();
       void navigate({ to: "/login" });
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "Registration failed."));
@@ -201,7 +202,11 @@ export default function Register() {
         </form>
         <div className="mt-5 text-center text-sm text-[var(--ink-muted)]">
           {t("Already have an account")}{" "}
-          <Link to="/login" className="font-medium text-brand hover:text-brand-hover">
+          <Link
+            to="/login"
+            onClick={clearLoginReturnTo}
+            className="font-medium text-brand hover:text-brand-hover"
+          >
             {t("Login")}
           </Link>
         </div>

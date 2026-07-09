@@ -1443,29 +1443,25 @@ export default function AdminProjects() {
   const projectFilterStats = useMemo(() => {
     const fallback = {
       loose: {
-        all: items.length,
-        no: items.filter((item) => !item.looseMatch).length,
-        yes: items.filter((item) => item.looseMatch).length,
+        all: total,
+        no: 0,
+        yes: 0,
       },
       private: {
-        all: items.length,
-        no: items.filter((item) => item.accessType !== "private").length,
-        yes: items.filter((item) => item.accessType === "private").length,
+        all: total,
+        no: 0,
+        yes: 0,
       },
       productType: {
-        all: items.length,
-        domain: items.filter((item) =>
-          item.products?.some((product) => product.type === "domain")
-        ).length,
-        microsoft: items.filter((item) =>
-          item.products?.some((product) => product.type === "microsoft")
-        ).length,
+        all: total,
+        domain: 0,
+        microsoft: 0,
       },
       status: {
-        all: items.length,
-        delisted: items.filter((item) => item.status === "delisted").length,
-        listed: items.filter((item) => item.status === "listed").length,
-        reviewing: items.filter((item) => item.status === "reviewing").length,
+        all: total,
+        delisted: 0,
+        listed: 0,
+        reviewing: 0,
       },
     };
 
@@ -1494,7 +1490,7 @@ export default function AdminProjects() {
         reviewing: facets.status.reviewing,
       },
     };
-  }, [facets, items]);
+  }, [facets, total]);
 
   const resetFilters = () => {
     setSearchKeyword("");

@@ -23,7 +23,11 @@ import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "./context/theme-provider";
 import { AuthProvider, hasPermissionKey, useAuth } from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
-import { AUTH_REQUIRED_EVENT } from "./lib/auth-flow";
+import {
+  AUTH_REQUIRED_EVENT,
+  consumeLoginReturnTo,
+  storeLoginReturnTo,
+} from "./lib/auth-flow";
 import AppShell from "./components/layout/AppShell";
 import {
   ROUTES_WITH_SIDEBAR,
@@ -301,6 +305,7 @@ function RouteGate({ children }: { children: ReactNode }) {
     }
 
     if (!activationNeeded && !authLoading && !currentUser && isProtectedRoute) {
+      storeLoginReturnTo();
       void navigate({ to: "/login", replace: true });
       return;
     }
@@ -321,7 +326,7 @@ function RouteGate({ children }: { children: ReactNode }) {
       currentUser &&
       (pathname === "/login" || pathname === "/register")
     ) {
-      void navigate({ to: "/dashboard", replace: true });
+      void navigate({ to: consumeLoginReturnTo() as never, replace: true });
     }
   }, [
     activationNeeded,
@@ -336,6 +341,7 @@ function RouteGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleAuthRequired = () => {
       if (pathname === "/login" || pathname === "/activation") return;
+      storeLoginReturnTo();
       void navigate({ to: "/login", replace: true });
     };
 

@@ -37,6 +37,7 @@ import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
   getWallet,
   getWalletReferrals,
@@ -312,10 +313,7 @@ export default function Wallet() {
     if (!redeemAttemptRef.current || redeemAttemptRef.current.code !== code) {
       redeemAttemptRef.current = {
         code,
-        key:
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        key: generateIdempotencyKey(),
       };
     }
     try {

@@ -320,9 +320,8 @@
           "status": {
             "type": "string",
             "enum": [
-              "listed",
               "reviewing",
-              "rejected",
+              "listed",
               "delisted"
             ]
           },
@@ -463,7 +462,12 @@
           },
           "ruleType": {
             "type": "string",
-            "example": "subject_regex"
+            "enum": [
+              "sender",
+              "recipient",
+              "subject",
+              "body"
+            ]
           },
           "pattern": {
             "type": "string",
@@ -673,7 +677,11 @@
           },
           "serviceCleanupStatus": {
             "type": "string",
-            "example": "pending"
+            "enum": [
+              "none",
+              "succeeded",
+              "partial_failure"
+            ]
           },
           "serviceToken": {
             "type": "string",

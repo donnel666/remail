@@ -3,6 +3,7 @@ import { Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
 import { IamApiError } from "@/lib/api-client";
+import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
   createOrder,
   getOrder,
@@ -171,10 +172,7 @@ function moneyToNumber(value?: string) {
 }
 
 function nextIdempotencyKey() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `ui_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return generateIdempotencyKey();
 }
 
 function apiErrorMessage(err: unknown, fallback: string) {
