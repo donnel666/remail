@@ -335,7 +335,7 @@ func TestResourceRepoListFiltersAndPaginationMySQL(t *testing.T) {
 		GraphAvailable: boolPtr(true),
 		Search:         "alpha",
 	}
-	items, err := repo.List(context.Background(), 1, microsoftFilter, 0, 20)
+	items, err := repo.List(context.Background(), 1, microsoftFilter, 0, 20, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.EqualValues(t, 100, items[0].ID)
@@ -343,11 +343,11 @@ func TestResourceRepoListFiltersAndPaginationMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 
-	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 1)
+	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 1, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.EqualValues(t, 101, items[0].ID)
-	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 1, 1)
+	items, err = repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 1, 1, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.EqualValues(t, 100, items[0].ID)
@@ -361,7 +361,7 @@ func TestResourceRepoListFiltersAndPaginationMySQL(t *testing.T) {
 		Purpose:      string(domain.PurposeSale),
 		Status:       string(domain.DomainStatusAbnormal),
 	}
-	items, err = repo.List(context.Background(), 1, domainFilter, 0, 20)
+	items, err = repo.List(context.Background(), 1, domainFilter, 0, 20, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.EqualValues(t, 201, items[0].ID)
@@ -1135,7 +1135,7 @@ func TestResourceRepoDeletePrivateMicrosoftWithLogMySQL(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT status FROM microsoft_resources WHERE id = ?", ms.ID).Scan(&status).Error)
 	require.Equal(t, string(domain.MicrosoftStatusDeleted), status)
 
-	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 20)
+	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft}, 0, 20, 0)
 	require.NoError(t, err)
 	require.Empty(t, listed)
 
@@ -1312,7 +1312,7 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT status FROM domain_resources WHERE id = ?", originalID).Scan(&status).Error)
 	require.Equal(t, string(domain.DomainStatusDeleted), status)
 
-	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20)
+	listed, err := repo.List(context.Background(), 1, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20, 0)
 	require.NoError(t, err)
 	require.Empty(t, listed)
 
@@ -1360,7 +1360,7 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, mailboxes)
 
-	listed, err = repo.List(context.Background(), 2, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20)
+	listed, err = repo.List(context.Background(), 2, coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeDomain}, 0, 20, 0)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 }

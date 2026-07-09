@@ -31,7 +31,9 @@ type ServerConfig struct {
 
 // MySQLConfig holds database connection settings.
 type MySQLConfig struct {
-	DSN string
+	DSN          string
+	MaxOpenConns int
+	MaxIdleConns int
 }
 
 // RedisConfig holds Redis connection settings.
@@ -116,7 +118,9 @@ func Load() (*Config, error) {
 			Timeout: getDuration("SERVER_TIMEOUT", 30*time.Second),
 		},
 		MySQL: MySQLConfig{
-			DSN: getEnv("MYSQL_DSN", ""),
+			DSN:          getEnv("MYSQL_DSN", ""),
+			MaxOpenConns: getInt("MYSQL_MAX_OPEN_CONNS", 150),
+			MaxIdleConns: getInt("MYSQL_MAX_IDLE_CONNS", 50),
 		},
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "127.0.0.1:6379"),
@@ -164,6 +168,15 @@ func Load() (*Config, error) {
 func (c *Config) validate() error {
 	if c.MySQL.DSN == "" {
 		return fmt.Errorf("MYSQL_DSN is required")
+	}
+	if c.MySQL.MaxOpenConns <= 0 {
+		return fmt.Errorf("MYSQL_MAX_OPEN_CONNS must be positive")
+	}
+	if c.MySQL.MaxIdleConns <= 0 {
+		return fmt.Errorf("MYSQL_MAX_IDLE_CONNS must be positive")
+	}
+	if c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
+		return fmt.Errorf("MYSQL_MAX_IDLE_CONNS cannot exceed MYSQL_MAX_OPEN_CONNS")
 	}
 	if c.MinIO.AccessKey == "" {
 		return fmt.Errorf("MINIO_ACCESS_KEY is required")

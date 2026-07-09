@@ -39,10 +39,10 @@ type EmailResourceRepository interface {
 	FindExistingMicrosoftEmails(ctx context.Context, emails []string) (map[string]struct{}, error)
 
 	// List returns paginated resources owned by a user.
-	List(ctx context.Context, ownerUserID uint, filter ResourceListFilter, offset, limit int) ([]domain.EmailResource, error)
+	List(ctx context.Context, ownerUserID uint, filter ResourceListFilter, offset, limit int, afterID uint) ([]domain.EmailResource, error)
 
 	// ListAll returns paginated resources (admin).
-	ListAll(ctx context.Context, filter ResourceListFilter, offset, limit int) ([]domain.EmailResource, error)
+	ListAll(ctx context.Context, filter ResourceListFilter, offset, limit int, afterID uint) ([]domain.EmailResource, error)
 
 	// Count returns the total count of resources for a user.
 	Count(ctx context.Context, ownerUserID uint, filter ResourceListFilter) (int64, error)
@@ -95,7 +95,7 @@ type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
 	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
-	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) ([]uint, error)
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource) error) ([]uint, error)
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
@@ -350,8 +350,18 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 		return nil, err
 	}
 
-	afterCreate := func(txCtx context.Context) error {
-		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, lines)
+	linesByEmail := make(map[string]domain.MicrosoftImportLine, len(lines))
+	for _, line := range lines {
+		linesByEmail[microsoftEmailKey(line.Email)] = line
+	}
+	afterCreate := func(txCtx context.Context, created []domain.MicrosoftResource) error {
+		chunkLines := make([]domain.MicrosoftImportLine, 0, len(created))
+		for _, item := range created {
+			if line, ok := linesByEmail[microsoftEmailKey(item.EmailAddress)]; ok {
+				chunkLines = append(chunkLines, line)
+			}
+		}
+		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines)
 	}
 	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate)
 	if err != nil {
@@ -676,11 +686,12 @@ type DomainResourceDetail struct {
 
 // ResourceListResult holds paginated resource results.
 type ResourceListResult struct {
-	Items  []ResourceItem      `json:"items"`
-	Total  int64               `json:"total"`
-	Offset int                 `json:"offset"`
-	Limit  int                 `json:"limit"`
-	Facets *ResourceListFacets `json:"facets,omitempty"`
+	Items       []ResourceItem      `json:"items"`
+	Total       int64               `json:"total"`
+	Offset      int                 `json:"offset"`
+	Limit       int                 `json:"limit"`
+	NextAfterID *uint               `json:"nextAfterId,omitempty"`
+	Facets      *ResourceListFacets `json:"facets,omitempty"`
 }
 
 type ResourceFacetCounts struct {
@@ -791,7 +802,7 @@ const (
 )
 
 // List returns the user's resources.
-func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope string, filter ResourceListFilter, offset, limit int) (*ResourceListResult, error) {
+func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope string, filter ResourceListFilter, offset, limit int, afterID uint) (*ResourceListResult, error) {
 	if limit <= 0 {
 		limit = defaultResourceListLimit
 	}
@@ -811,7 +822,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 	var facets *ResourceListFacets
 
 	if scope == "all" {
-		resources, err = uc.resources.ListAll(ctx, filter, offset, limit)
+		resources, err = uc.resources.ListAll(ctx, filter, offset, limit, afterID)
 		if err != nil {
 			return nil, err
 		}
@@ -824,7 +835,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			return nil, err
 		}
 	} else {
-		resources, err = uc.resources.List(ctx, ownerUserID, filter, offset, limit)
+		resources, err = uc.resources.List(ctx, ownerUserID, filter, offset, limit, afterID)
 		if err != nil {
 			return nil, err
 		}
@@ -912,7 +923,15 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 		items[i] = item
 	}
 
-	return &ResourceListResult{Items: items, Total: total, Offset: offset, Limit: limit, Facets: facets}, nil
+	return &ResourceListResult{Items: items, Total: total, Offset: offset, Limit: limit, NextAfterID: resourceListNextAfterID(resources, limit), Facets: facets}, nil
+}
+
+func resourceListNextAfterID(resources []domain.EmailResource, limit int) *uint {
+	if len(resources) < limit || len(resources) == 0 {
+		return nil
+	}
+	next := resources[len(resources)-1].ID
+	return &next
 }
 
 // GetDetail returns the detailed view of a single resource.

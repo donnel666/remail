@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
+	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
@@ -48,10 +50,22 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	var mailMod *mailapi.MailTransportModule
 	tradeCleanup := func(context.Context) {}
 	openapiCleanup := func(context.Context) {}
+	retentionCleanup := func(context.Context) {}
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
+		retentionLocation, err := time.LoadLocation("Asia/Shanghai")
+		if err != nil {
+			retentionLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+		}
+		retentionService := governanceapp.NewRetentionService(
+			governanceinfra.NewRetentionRepo(p.DB),
+			fileStore,
+			governanceinfra.NewSystemLogRepo(p.DB),
+		)
+		retentionCleanup = retentionService.StartDaily(context.Background(), retentionLocation)
+		cleanup = retentionCleanup
 
 		// Proxy module is initialized before MailTransport so Microsoft ACL can
 		// use the proxy pool through a port instead of bypassing BC-PROXY.
@@ -115,7 +129,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		openapiCleanup = func(ctx context.Context) {
 			_ = openapiMod.UseCase.Close(ctx)
 		}
-		cleanup = openapiCleanup
+		cleanup = func(ctx context.Context) {
+			openapiCleanup(ctx)
+			retentionCleanup(ctx)
+		}
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher)
 
 		// Trade module (unified console/API Key checkout and order query).
@@ -125,6 +142,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanup = func(ctx context.Context) {
 			tradeCleanup(ctx)
 			openapiCleanup(ctx)
+			retentionCleanup(ctx)
 		}
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
@@ -149,11 +167,13 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			tradeCleanup(ctx)
 			openapiCleanup(ctx)
 			mailCleanup(ctx)
+			retentionCleanup(ctx)
 		}
 	} else {
 		cleanup = func(ctx context.Context) {
 			tradeCleanup(ctx)
 			openapiCleanup(ctx)
+			retentionCleanup(ctx)
 		}
 	}
 

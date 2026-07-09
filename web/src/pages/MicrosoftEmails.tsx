@@ -148,14 +148,16 @@ export default function MicrosoftEmails() {
   }, [activeSuffix, microsoftStatsFilter]);
 
   const loadMicrosoftBlock = useCallback(
-    async (offset: number, limit: number) => {
+    async (offset: number, limit: number, cursor?: { afterId?: number }) => {
       const response = await listOwnedMicrosoftResources(
         microsoftListFilter,
         offset,
-        limit
+        limit,
+        cursor?.afterId
       );
       return {
         items: response.items.map(toEmailResource).filter(isEmailResource),
+        nextAfterId: response.nextAfterId,
         total: response.total,
       };
     },

@@ -570,10 +570,7 @@ func (r *ProjectRepo) BulkDeleteWithLog(ctx context.Context, filter coreapp.Proj
 
 func (r *ProjectRepo) List(ctx context.Context, filter coreapp.ProjectListFilter, offset, limit int) ([]coreapp.ProjectSummary, error) {
 	var rows []ProjectSummaryModel
-	q := r.projectListQuery(ctx, filter).
-		Select(`projects.*,
-			(SELECT COUNT(*) FROM project_products WHERE project_products.project_id = projects.id) AS product_count,
-			(SELECT COUNT(*) FROM project_mail_rules WHERE project_mail_rules.project_id = projects.id) AS mail_rule_count`)
+	q := r.projectListQuery(ctx, filter).Select("projects.*")
 	q = applyProjectListOrder(q, filter).
 		Offset(offset).
 		Limit(limit)
@@ -589,14 +586,19 @@ func (r *ProjectRepo) List(ctx context.Context, filter coreapp.ProjectListFilter
 	if err != nil {
 		return nil, err
 	}
+	mailRuleCounts, err := r.countMailRulesByProjectIDs(ctx, projectIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	result := make([]coreapp.ProjectSummary, len(rows))
 	for i := range rows {
+		products := productsByProjectID[rows[i].ID]
 		result[i] = coreapp.ProjectSummary{
 			Project:       rows[i].toDomain(),
-			Products:      productsByProjectID[rows[i].ID],
-			ProductCount:  rows[i].ProductCount,
-			MailRuleCount: rows[i].MailRuleCount,
+			Products:      products,
+			ProductCount:  len(products),
+			MailRuleCount: mailRuleCounts[rows[i].ID],
 		}
 	}
 	return result, nil
@@ -1130,6 +1132,31 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 	for i := range models {
 		product := models[i].toDomain()
 		result[product.ProjectID] = append(result[product.ProjectID], product)
+	}
+	return result, nil
+}
+
+func (r *ProjectRepo) countMailRulesByProjectIDs(ctx context.Context, projectIDs []uint) (map[uint]int, error) {
+	result := make(map[uint]int, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return result, nil
+	}
+
+	type countRow struct {
+		ProjectID uint `gorm:"column:project_id"`
+		Count     int  `gorm:"column:count"`
+	}
+	rows := make([]countRow, 0)
+	if err := r.db.WithContext(ctx).
+		Model(&ProjectMailRuleModel{}).
+		Select("project_id, COUNT(*) AS count").
+		Where("project_id IN ?", projectIDs).
+		Group("project_id").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("count project summary mail rules: %w", err)
+	}
+	for _, row := range rows {
+		result[row.ProjectID] = row.Count
 	}
 	return result, nil
 }

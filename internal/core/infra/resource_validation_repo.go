@@ -135,9 +135,9 @@ func (r *ResourceValidationRepo) CreateWithLog(ctx context.Context, job *domain.
 
 func (r *ResourceValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
 	result := &coreapp.ResourceBatchValidationResult{}
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		switch selection.Mode {
-		case coreapp.ResourceBulkSelectionIDs:
+	switch selection.Mode {
+	case coreapp.ResourceBulkSelectionIDs:
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			candidates, err := selectValidationCandidatesByIDs(ctx, tx, ownerUserID, selection.ResourceIDs)
 			if err != nil {
 				return err
@@ -145,35 +145,60 @@ func (r *ResourceValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUs
 			if err := createValidationCandidateJobsTx(ctx, tx, candidates, requestID, path, result); err != nil {
 				return err
 			}
-		case coreapp.ResourceBulkSelectionFilter:
-			afterID := uint(0)
-			for {
+			if log != nil {
+				if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+					return fmt.Errorf("create operation log: %w", err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	case coreapp.ResourceBulkSelectionFilter:
+		afterID := uint(0)
+		for {
+			candidateCount := 0
+			err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				candidates, err := selectValidationCandidatesByFilter(ctx, tx, ownerUserID, selection.Filter, afterID, resourceValidationCandidatePageSize)
 				if err != nil {
 					return err
 				}
+				candidateCount = len(candidates)
 				if len(candidates) == 0 {
-					break
+					return nil
 				}
 				if err := createValidationCandidateJobsTx(ctx, tx, candidates, requestID, path, result); err != nil {
 					return err
 				}
 				afterID = candidates[len(candidates)-1].ID
+				return nil
+			})
+			if err != nil {
+				return nil, err
 			}
-		default:
-			return domain.ErrInvalidResourceType
+			if candidateCount == 0 {
+				break
+			}
 		}
 		if log != nil {
-			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
-				return fmt.Errorf("create operation log: %w", err)
+			log.SafeSummary = resourceValidationBulkSummary(log.SafeSummary, result.Requested, result.Created)
+			if err := r.operationLogs.Create(ctx, log); err != nil {
+				return nil, fmt.Errorf("create operation log: %w", err)
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	default:
+		return nil, domain.ErrInvalidResourceType
 	}
 	return result, nil
+}
+
+func resourceValidationBulkSummary(summary string, requested int, created int) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(summary), ".")
+	if trimmed == "" {
+		trimmed = "Resource validation batch submitted"
+	}
+	return fmt.Sprintf("%s requested=%d created=%d.", trimmed, requested, created)
 }
 
 func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow, requestID, path string, result *coreapp.ResourceBatchValidationResult) error {

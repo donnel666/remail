@@ -109,9 +109,10 @@ type CaptchaStore interface {
 	Create(ctx context.Context, captchaID, answer string, ttlSeconds int) error
 
 	// Get retrieves a captcha answer. Returns "", nil if not found.
-	// The caller should Delete the captcha after a successful match
-	// to prevent replay.
 	Get(ctx context.Context, captchaID string) (string, error)
+
+	// GetDel atomically retrieves and removes a captcha answer.
+	GetDel(ctx context.Context, captchaID string) (string, error)
 
 	// Delete removes a captcha (prevents replay).
 	Delete(ctx context.Context, captchaID string) error

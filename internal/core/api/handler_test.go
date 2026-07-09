@@ -523,11 +523,11 @@ func (r *mockResourceRepo) FindExistingMicrosoftEmails(_ context.Context, emails
 	return result, nil
 }
 
-func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int) ([]coredomain.EmailResource, error) {
+func (r *mockResourceRepo) List(_ context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int, _ uint) ([]coredomain.EmailResource, error) {
 	return r.listResources(ownerUserID, filter, offset, limit), nil
 }
 
-func (r *mockResourceRepo) ListAll(_ context.Context, filter coreapp.ResourceListFilter, offset, limit int) ([]coredomain.EmailResource, error) {
+func (r *mockResourceRepo) ListAll(_ context.Context, filter coreapp.ResourceListFilter, offset, limit int, _ uint) ([]coredomain.EmailResource, error) {
 	return r.listResources(0, filter, offset, limit), nil
 }
 
@@ -1181,7 +1181,7 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
-func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) ([]uint, error) {
+func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource) error) ([]uint, error) {
 	item := r.imports[id]
 	if item == nil {
 		return nil, coredomain.ErrResourceNotFound
@@ -1193,7 +1193,7 @@ func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Co
 		return nil, err
 	}
 	if afterCreate != nil {
-		if err := afterCreate(ctx); err != nil {
+		if err := afterCreate(ctx, ms); err != nil {
 			return nil, err
 		}
 	}
@@ -1255,6 +1255,11 @@ func (s *mockFileStore) SavePrivateStream(_ context.Context, file governancedoma
 func (s *mockFileStore) ReadPrivate(_ context.Context, objectKey string) (*governancedomain.PrivateFile, error) {
 	file := s.files[objectKey]
 	return &file, nil
+}
+
+func (s *mockFileStore) DeletePrivate(_ context.Context, objectKey string) error {
+	delete(s.files, objectKey)
+	return nil
 }
 
 type mockImportQueue struct {

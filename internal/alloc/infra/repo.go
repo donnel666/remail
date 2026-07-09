@@ -888,11 +888,6 @@ func (r *Repo) TouchMicrosoftAllocated(ctx context.Context, projectID uint, reso
 		Updates(map[string]any{"last_allocated_at": allocatedAt}).Error; err != nil {
 		return fmt.Errorf("touch microsoft allocated: %w", err)
 	}
-	if err := db.Model(&RoutingCandidateModel{}).
-		Where("project_id = ? AND resource_id = ?", projectID, resourceID).
-		Updates(map[string]any{"last_allocated_at": allocatedAt}).Error; err != nil {
-		return fmt.Errorf("touch microsoft candidate allocated: %w", err)
-	}
 	return nil
 }
 

@@ -71,13 +71,21 @@ export class IamApiError extends Error {
   readonly status: number;
   readonly requestId?: string;
   readonly fields?: ApiErrorBody["fields"];
+  readonly retryAfterSeconds?: number;
 
-  constructor(status: number, body: ApiErrorBody) {
+  constructor(status: number, body: ApiErrorBody, response?: Response) {
     super(body.message || "Request failed.");
     this.name = "IamApiError";
     this.status = status;
     this.requestId = body.requestId;
     this.fields = body.fields;
+    const retryAfter = response?.headers.get("Retry-After");
+    if (retryAfter) {
+      const parsed = Number.parseInt(retryAfter, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        this.retryAfterSeconds = parsed;
+      }
+    }
   }
 }
 
@@ -116,7 +124,8 @@ export async function unwrap<T>(result: ApiResult<T>): Promise<T> {
     }
     throw new IamApiError(
       result.response.status,
-      normalizeErrorBody(result.error)
+      normalizeErrorBody(result.error),
+      result.response
     );
   }
   return result.data as T;

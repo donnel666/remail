@@ -21,23 +21,36 @@ export function FetchControl({
   const { t } = useTranslation();
   const [autoCountdown, setAutoCountdown] = useState(30);
   const [manualCooldown, setManualCooldown] = useState(0);
+  const [fetching, setFetching] = useState(false);
   const isCodeVariant = variant === "code";
   const onFetchRef = useRef(onFetch);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     onFetchRef.current = onFetch;
   }, [onFetch]);
 
   const submitFetch = useCallback((source: FetchSource) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setFetching(true);
     try {
       const result = onFetchRef.current(source);
-      if (source === "manual") {
-        void Promise.resolve(result)
-          .then(() => Toast.success(t("Fetch submitted")))
-          .catch(() => Toast.error(t("Fetch failed")));
-      }
+      void Promise.resolve(result)
+        .then(() => {
+          if (source === "manual") Toast.success(t("Fetch submitted"));
+        })
+        .catch(() => {
+          if (source === "manual") Toast.error(t("Fetch failed"));
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+          setFetching(false);
+        });
     } catch {
       if (source === "manual") Toast.error(t("Fetch failed"));
+      inFlightRef.current = false;
+      setFetching(false);
     }
   }, [t]);
 
@@ -65,8 +78,9 @@ export function FetchControl({
         </span>
       ) : null}
       <Button
-        disabled={manualCooldown > 0}
+        disabled={manualCooldown > 0 || fetching}
         icon={<RefreshCw size={14} />}
+        loading={fetching && !isCodeVariant}
         onClick={() => {
           setManualCooldown(10);
           setAutoCountdown(30);

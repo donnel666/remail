@@ -109,36 +109,72 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context) error) ([]uint, error) {
-	var importedResourceIDs []uint
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var importModel ResourceImportModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrResourceNotFound
-			}
-			return fmt.Errorf("lock resource import: %w", err)
-		}
-		switch domain.ResourceImportStatus(importModel.Status) {
-		case domain.ResourceImportImported, domain.ResourceImportFailed:
-			return nil
-		case domain.ResourceImportProcessing:
-		default:
-			return domain.ErrInvalidResourceStatus
-		}
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource) error) ([]uint, error) {
+	if len(resources) != len(ms) {
+		return nil, fmt.Errorf("create microsoft resources and mark import succeeded: resource count mismatch")
+	}
 
-		if err := createMicrosoftBatchTx(tx, resources, ms); err != nil {
-			return err
+	importedResourceIDs := make([]uint, 0, len(ms))
+	alreadyTerminal, err := r.resourceImportAlreadyTerminal(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if alreadyTerminal {
+		return importedResourceIDs, nil
+	}
+
+	for start := 0; start < len(ms); start += resourceImportInsertBatchSize {
+		end := start + resourceImportInsertBatchSize
+		if end > len(ms) {
+			end = len(ms)
 		}
-		ids, err := findMicrosoftResourceIDsByImportRowsTx(tx, ms)
+		chunkResources := resources[start:end]
+		chunkMicrosoft := ms[start:end]
+		var chunkIDs []uint
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			importModel, err := lockProcessingResourceImportTx(tx, id)
+			if err != nil {
+				return err
+			}
+			if importModel == nil {
+				return nil
+			}
+
+			if err := createMicrosoftBatchTx(tx, chunkResources, chunkMicrosoft); err != nil {
+				return err
+			}
+			chunkIDs, err = findMicrosoftResourceIDsByImportRowsTx(tx, chunkMicrosoft)
+			if err != nil {
+				return err
+			}
+			if afterCreate != nil {
+				if err := afterCreate(platform.WithGormTx(ctx, tx), chunkMicrosoft); err != nil {
+					return fmt.Errorf("record microsoft binding inputs: %w", err)
+				}
+			}
+			if err := tx.Model(&ResourceImportModel{}).
+				Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
+				Updates(map[string]interface{}{
+					"imported_count": gorm.Expr("imported_count + ?", len(chunkMicrosoft)),
+					"updated_at":     time.Now(),
+				}).Error; err != nil {
+				return fmt.Errorf("update resource import progress: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		importedResourceIDs = append(importedResourceIDs, chunkIDs...)
+	}
+
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		importModel, err := lockProcessingResourceImportTx(tx, id)
 		if err != nil {
 			return err
 		}
-		importedResourceIDs = ids
-		if afterCreate != nil {
-			if err := afterCreate(platform.WithGormTx(ctx, tx)); err != nil {
-				return fmt.Errorf("record microsoft binding inputs: %w", err)
-			}
+		if importModel == nil {
+			return nil
 		}
 
 		now := time.Now()
@@ -159,6 +195,51 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 		return nil, err
 	}
 	return importedResourceIDs, nil
+}
+
+func (r *ResourceImportRepo) resourceImportAlreadyTerminal(ctx context.Context, id uint) (bool, error) {
+	var terminal bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var importModel ResourceImportModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock resource import: %w", err)
+		}
+		switch domain.ResourceImportStatus(importModel.Status) {
+		case domain.ResourceImportImported, domain.ResourceImportFailed:
+			terminal = true
+			return nil
+		case domain.ResourceImportProcessing:
+			terminal = false
+			return nil
+		default:
+			return domain.ErrInvalidResourceStatus
+		}
+	})
+	if err != nil {
+		return false, err
+	}
+	return terminal, nil
+}
+
+func lockProcessingResourceImportTx(tx *gorm.DB, id uint) (*ResourceImportModel, error) {
+	var importModel ResourceImportModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrResourceNotFound
+		}
+		return nil, fmt.Errorf("lock resource import: %w", err)
+	}
+	switch domain.ResourceImportStatus(importModel.Status) {
+	case domain.ResourceImportImported, domain.ResourceImportFailed:
+		return nil, nil
+	case domain.ResourceImportProcessing:
+		return &importModel, nil
+	default:
+		return nil, domain.ErrInvalidResourceStatus
+	}
 }
 
 func findMicrosoftResourceIDsByImportRowsTx(tx *gorm.DB, rows []domain.MicrosoftResource) ([]uint, error) {

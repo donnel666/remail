@@ -95,8 +95,8 @@ func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Durat
 		return nil, nil, fmt.Errorf("get sql.DB: %w", err)
 	}
 
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(2 * time.Minute)
 

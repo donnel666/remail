@@ -582,6 +582,14 @@ func (c *mockCaptchaStore) Get(_ context.Context, captchaID string) (string, err
 	return "", nil
 }
 
+func (c *mockCaptchaStore) GetDel(_ context.Context, captchaID string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	answer := c.captchas[captchaID]
+	delete(c.captchas, captchaID)
+	return answer, nil
+}
+
 func (c *mockCaptchaStore) Delete(_ context.Context, captchaID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -161,6 +161,11 @@ func (s *fileStoreStub) ReadPrivate(_ context.Context, objectKey string) (*gover
 	return &file, nil
 }
 
+func (s *fileStoreStub) DeletePrivate(_ context.Context, objectKey string) error {
+	delete(s.files, objectKey)
+	return nil
+}
+
 type inboundQueueStub struct {
 	tasks      []InboundProcessTask
 	dispatches []time.Duration

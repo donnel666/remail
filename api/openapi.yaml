@@ -2388,6 +2388,12 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: afterId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: Seek cursor. When present, the server ignores offset and returns resources with id lower than this value.
         - name: limit
           in: query
           schema:
@@ -6626,6 +6632,9 @@ components:
           type: integer
         limit:
           type: integer
+        nextAfterId:
+          type: integer
+          nullable: true
         facets:
           $ref: "#/components/schemas/ResourceListFacets"
       additionalProperties: false

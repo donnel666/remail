@@ -93,7 +93,7 @@ type ProxyRepo struct {
 	operationLogs *governanceinfra.OperationLogRepo
 }
 
-const transactionRetryAttempts = 3
+const transactionRetryAttempts = 8
 
 var errRetryProxyAcquire = errors.New("retry proxy acquire")
 
@@ -783,6 +783,9 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 
 			proxy, err := selectResourceProxy(ctx, tx, ipVersion, now)
 			if err != nil {
+				if errors.Is(err, domain.ErrProxyUnavailable) {
+					return errRetryProxyAcquire
+				}
 				return err
 			}
 			bindingExpireAt := now.Add(bindingTTL)
@@ -828,6 +831,9 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 		})
 	})
 	if err != nil {
+		if errors.Is(err, errRetryProxyAcquire) {
+			return nil, domain.ErrProxyUnavailable
+		}
 		return nil, err
 	}
 	if selected == nil {
@@ -1097,7 +1103,8 @@ WHERE p.pool = ? AND p.status = ? AND (p.expire_at IS NULL OR p.expire_at > ?)`
 	         COALESCE(b.active_bindings, 0) ASC,
 	         CASE WHEN p.latency_ms > 0 THEN p.latency_ms ELSE 2147483647 END ASC,
 	         p.id ASC
-	LIMIT 1`
+	LIMIT 1
+	FOR UPDATE SKIP LOCKED`
 	return sql, args
 }
 

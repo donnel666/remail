@@ -733,7 +733,7 @@ func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB 
 		query = query.Where("service_mode = ?", string(filter.ServiceMode))
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		like := "%" + search + "%"
+		like := search + "%"
 		query = query.Where("order_no LIKE ? OR delivery_email LIKE ?", like, like)
 	}
 	return query

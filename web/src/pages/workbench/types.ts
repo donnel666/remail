@@ -17,7 +17,10 @@ export type ServiceState =
   | "activated"
   | "in_warranty"
   | "activation_timeout"
-  | "read_expired";
+  | "read_expired"
+  | "order_failed"
+  | "refunded"
+  | "warranty_ended";
 
 export interface WorkbenchProject {
   description: string;

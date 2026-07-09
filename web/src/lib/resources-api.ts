@@ -64,24 +64,27 @@ export interface ResourceListFilter {
 export async function listOwnedMicrosoftResources(
   filter: ResourceListFilter = {},
   offset = 0,
-  limit = 20
+  limit = 20,
+  afterId?: number
 ) {
-  return listOwnedResources("microsoft", filter, offset, limit);
+  return listOwnedResources("microsoft", filter, offset, limit, afterId);
 }
 
 export async function listOwnedDomainResources(
   filter: ResourceListFilter = {},
   offset = 0,
-  limit = 20
+  limit = 20,
+  afterId?: number
 ) {
-  return listOwnedResources("domain", filter, offset, limit);
+  return listOwnedResources("domain", filter, offset, limit, afterId);
 }
 
 async function listOwnedResources(
   resourceType: "microsoft" | "domain",
   filter: ResourceListFilter,
   offset: number,
-  limit: number
+  limit: number,
+  afterId?: number
 ) {
   return unwrap<ResourceListResponse>(
     await client.GET("/v1/resources", {
@@ -91,6 +94,7 @@ async function listOwnedResources(
           scope: "owned",
           type: resourceType,
           offset,
+          afterId,
           limit,
         },
       },

@@ -54,6 +54,10 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	if !ok {
 		return
 	}
+	afterID, ok := parseOptionalUintQuery(c, "afterId")
+	if !ok {
+		return
+	}
 
 	// Non-admin users can only see their own resources
 	if scope == "all" {
@@ -63,7 +67,7 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 		}
 	}
 
-	result, err := h.module.ResourceUseCase.List(c.Request.Context(), userID, scope, filter, offset, limit)
+	result, err := h.module.ResourceUseCase.List(c.Request.Context(), userID, scope, filter, offset, limit, afterID)
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -91,11 +95,12 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ResourceListResponse{
-		Items:  items,
-		Total:  result.Total,
-		Offset: result.Offset,
-		Limit:  result.Limit,
-		Facets: toResourceListFacetsResponse(result.Facets),
+		Items:       items,
+		Total:       result.Total,
+		Offset:      result.Offset,
+		Limit:       result.Limit,
+		NextAfterID: result.NextAfterID,
+		Facets:      toResourceListFacetsResponse(result.Facets),
 	})
 }
 
@@ -1895,6 +1900,22 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 		DefaultLimit: 20,
 		MaxLimit:     10000,
 	})
+}
+
+func parseOptionalUintQuery(c *gin.Context, name string) (uint, bool) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || value == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid " + name + ".",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return 0, false
+	}
+	return uint(value), true
 }
 
 func writeCoreError(c *gin.Context, err error) {

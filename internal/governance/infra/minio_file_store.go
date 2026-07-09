@@ -103,6 +103,19 @@ func (s *MinIOFileStore) ReadPrivate(ctx context.Context, objectKey string) (*do
 	}, nil
 }
 
+func (s *MinIOFileStore) DeletePrivate(ctx context.Context, objectKey string) error {
+	if objectKey == "" {
+		return nil
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	if err := s.client.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("delete private file: %w", err)
+	}
+	return nil
+}
+
 func (s *MinIOFileStore) ensureBucket(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

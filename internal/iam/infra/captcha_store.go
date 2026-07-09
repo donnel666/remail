@@ -45,6 +45,17 @@ func (s *CaptchaStore) Get(ctx context.Context, captchaID string) (string, error
 	return val, nil
 }
 
+func (s *CaptchaStore) GetDel(ctx context.Context, captchaID string) (string, error) {
+	val, err := s.rdb.GetDel(ctx, captchaKey(captchaID)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", nil
+		}
+		return "", fmt.Errorf("redis captcha getdel: %w", err)
+	}
+	return val, nil
+}
+
 func (s *CaptchaStore) Delete(ctx context.Context, captchaID string) error {
 	return s.rdb.Del(ctx, captchaKey(captchaID)).Err()
 }

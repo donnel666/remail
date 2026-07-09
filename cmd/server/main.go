@@ -97,20 +97,23 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in a goroutine
+	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("server listening", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+			serverErr <- err
 		}
 	}()
 
 	// Wait for interrupt signal for graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
-	slog.Info("shutting down server", "signal", sig.String())
+	select {
+	case sig := <-quit:
+		slog.Info("shutting down server", "signal", sig.String())
+	case err := <-serverErr:
+		slog.Error("server error", "error", err)
+	}
 
 	// Give outstanding requests up to 30 seconds to complete
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

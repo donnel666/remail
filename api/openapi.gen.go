@@ -3251,11 +3251,12 @@ type ResourceListFacets struct {
 
 // ResourceListResponse defines model for ResourceListResponse.
 type ResourceListResponse struct {
-	Facets *ResourceListFacets `json:"facets,omitempty"`
-	Items  []ResourceItem      `json:"items"`
-	Limit  int                 `json:"limit"`
-	Offset int                 `json:"offset"`
-	Total  int                 `json:"total"`
+	Facets      *ResourceListFacets `json:"facets,omitempty"`
+	Items       []ResourceItem      `json:"items"`
+	Limit       int                 `json:"limit"`
+	NextAfterId *int                `json:"nextAfterId,omitempty"`
+	Offset      int                 `json:"offset"`
+	Total       int                 `json:"total"`
 }
 
 // ResourceValidationResponse defines model for ResourceValidationResponse.
@@ -4102,7 +4103,10 @@ type GetResourcesParams struct {
 	// CreatedTo Inclusive resource creation upper bound.
 	CreatedTo *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
 	Offset    *int       `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit     *int       `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Seek cursor. When present, the server ignores offset and returns resources with id lower than this value.
+	AfterId *int `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetResourcesParamsType defines parameters for GetResources.
@@ -9310,6 +9314,14 @@ func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
 		return
 	}
 

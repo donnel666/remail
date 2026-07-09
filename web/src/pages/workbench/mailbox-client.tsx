@@ -1,7 +1,7 @@
 import { Empty, Input, Modal, Tag, Typography } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import { Mail } from "lucide-react";
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { createCopyableConfig } from "@/components/semi/copyable-config";
@@ -52,10 +52,23 @@ export function MailboxClient({
   );
   const hasVerificationCode = messages.some((message) => message.verificationCode);
   const [selectedMessageId, setSelectedMessageId] = useState("");
+  const previousEmailRef = useRef(email);
 
   useEffect(() => {
+    const emailChanged = previousEmailRef.current !== email;
+    previousEmailRef.current = email;
+    if (emailChanged) {
+      setSelectedMessageId(filteredMessages[0]?.id ?? "");
+      return;
+    }
+    if (
+      selectedMessageId &&
+      filteredMessages.some((message) => message.id === selectedMessageId)
+    ) {
+      return;
+    }
     setSelectedMessageId(filteredMessages[0]?.id ?? "");
-  }, [email, filteredMessages]);
+  }, [email, filteredMessages, selectedMessageId]);
 
   const selectedMessage =
     filteredMessages.find((message) => message.id === selectedMessageId) ??

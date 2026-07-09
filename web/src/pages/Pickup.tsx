@@ -1,9 +1,10 @@
 import { Button, Empty, Toast } from "@douyinfe/semi-ui";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Mail } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { IamApiError } from "@/lib/api-client";
 import {
   readPickupMail,
   type OrderMailResponse,
@@ -47,14 +48,19 @@ export default function Pickup() {
   const email = params.get("email")?.trim() ?? "";
   const token = params.get("token")?.trim() ?? "";
   const [messages, setMessages] = useState<WorkbenchMessage[]>([]);
+  const loadSeqRef = useRef(0);
 
   async function loadPickup(source: FetchSource) {
     if (!email || !token) return;
+    const seq = loadSeqRef.current + 1;
+    loadSeqRef.current = seq;
     try {
       void source;
       const result = await readPickupMail(email, token);
+      if (loadSeqRef.current !== seq) return;
       setMessages(toPickupMessages(result.items));
     } catch (err) {
+      if (err instanceof IamApiError && err.status === 429) return;
       Toast.error(err instanceof Error ? err.message : t("An unexpected error occurred."));
     }
   }

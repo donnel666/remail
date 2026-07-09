@@ -683,6 +683,8 @@
   "Activated": "Activated",
   "In warranty": "In warranty",
   "Activation timed out": "Activation timed out",
+  "Order failed": "Order failed",
+  "Warranty ended": "Warranty ended",
   "Read expired": "Read expired",
   "Pending payment": "Pending payment",
   "Refunded": "Refunded",

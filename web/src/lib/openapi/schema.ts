@@ -2123,6 +2123,7 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+            nextAfterId?: number | null;
             facets?: components["schemas"]["ResourceListFacets"];
         };
         ResourceListFacets: {
@@ -5775,6 +5776,8 @@ export interface operations {
                 /** @description Inclusive resource creation upper bound. */
                 createdTo?: string;
                 offset?: number;
+                /** @description Seek cursor. When present, the server ignores offset and returns resources with id lower than this value. */
+                afterId?: number;
                 limit?: number;
             };
             header?: never;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
@@ -257,7 +257,7 @@ function latestVerificationCode(messages: WorkbenchMessage[]) {
 
 function orderServiceState(order: OrderResponse): ServiceState {
   if (order.status === "completed") {
-    return order.serviceMode === "code" ? "code_received" : "read_expired";
+    return order.serviceMode === "code" ? "code_received" : "warranty_ended";
   }
   if (order.status === "active") {
     if (order.serviceMode === "purchase") {
@@ -265,8 +265,11 @@ function orderServiceState(order: OrderResponse): ServiceState {
     }
     return "waiting_mail";
   }
-  if (order.status === "failed" || order.status === "refunded") {
-    return "activation_timeout";
+  if (order.status === "failed") {
+    return "order_failed";
+  }
+  if (order.status === "refunded") {
+    return "refunded";
   }
   return "waiting_mail";
 }
@@ -409,6 +412,8 @@ export default function Dashboard() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("purchase");
+  const fetchInFlightRef = useRef(new Map<string, Promise<void>>());
+  const fetchSeqRef = useRef(new Map<string, number>());
 
   const projectsById = useMemo(() => {
     return new Map(projects.map((project) => [project.id, project]));
@@ -437,8 +442,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     void loadWorkbenchProjects();
-    void refreshOrders();
   }, []);
+
+  useEffect(() => {
+    void refreshOrders(serviceMode);
+  }, [serviceMode]);
 
   useEffect(() => {
     if (!selectedProjectId && filteredProjects[0]) {
@@ -537,10 +545,14 @@ export default function Dashboard() {
     }
   }
 
-  async function refreshOrders() {
+  async function refreshOrders(mode: ServiceMode = serviceMode) {
     try {
-      const list = await listOrders({ limit: 100 });
-      setOrders(list.items.map(toWorkbenchOrder));
+      const list = await listOrders({ limit: 100, serviceMode: mode });
+      const nextOrders = list.items.map(toWorkbenchOrder);
+      setOrders((prev) => [
+        ...nextOrders,
+        ...prev.filter((order) => order.serviceMode !== mode),
+      ]);
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
     }
@@ -669,52 +681,69 @@ export default function Dashboard() {
     }
   }
 
-  async function handleFetchOrderMail(order: WorkbenchOrder, _source: FetchSource) {
-    try {
-      let target = order;
-      if (!target.token) {
-        target = await loadOrderDetail(order.orderNo);
-      }
-      if (!target.deliveryEmail || !target.token) {
-        Toast.error(t("Service credential is unavailable."));
-        return;
-      }
-      const result = await readPickupMail(target.deliveryEmail, target.token);
-      const messages = toWorkbenchMessages(result.items);
-      const latestCode = latestVerificationCode(messages);
-      const lastFetchedAt =
-        result.fetch?.lastReceivedAt ??
-        result.fetch?.lastSuccessAt ??
-        result.fetch?.lastSubmittedAt ??
-        new Date().toISOString();
-      let refreshedDetail: WorkbenchOrder | undefined;
-      if (latestCode) {
-        try {
-          refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
-        } catch {
-          refreshedDetail = undefined;
+  async function handleFetchOrderMail(order: WorkbenchOrder, source: FetchSource) {
+    const existing = fetchInFlightRef.current.get(order.orderNo);
+    if (existing) return existing;
+
+    const seq = (fetchSeqRef.current.get(order.orderNo) ?? 0) + 1;
+    fetchSeqRef.current.set(order.orderNo, seq);
+    const request = (async () => {
+      try {
+        let target = order;
+        if (!target.token) {
+          target = await loadOrderDetail(order.orderNo);
         }
+        if (!target.deliveryEmail || !target.token) {
+          Toast.error(t("Service credential is unavailable."));
+          return;
+        }
+        const result = await readPickupMail(target.deliveryEmail, target.token);
+        if (fetchSeqRef.current.get(target.orderNo) !== seq) return;
+
+        const messages = toWorkbenchMessages(result.items);
+        const latestCode = latestVerificationCode(messages);
+        const lastFetchedAt =
+          result.fetch?.lastReceivedAt ??
+          result.fetch?.lastSuccessAt ??
+          result.fetch?.lastSubmittedAt ??
+          new Date().toISOString();
+        let refreshedDetail: WorkbenchOrder | undefined;
+        if (latestCode) {
+          try {
+            refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
+          } catch {
+            refreshedDetail = undefined;
+          }
+        }
+        if (fetchSeqRef.current.get(target.orderNo) !== seq) return;
+        setOrders((prev) =>
+          prev.map((item) =>
+            item.orderNo === target.orderNo
+              ? {
+                  ...(refreshedDetail ?? item),
+                  messages,
+                  lastFetchedAt,
+                  verificationCode: latestCode ?? item.verificationCode,
+                  serviceState: latestCode
+                    ? target.serviceMode === "code"
+                      ? "code_received"
+                      : "in_warranty"
+                    : (refreshedDetail?.serviceState ?? item.serviceState),
+                }
+              : item
+          )
+        );
+      } catch (err) {
+        if (err instanceof IamApiError && err.status === 429) return;
+        if (source === "manual") {
+          Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+        }
+      } finally {
+        fetchInFlightRef.current.delete(order.orderNo);
       }
-      setOrders((prev) =>
-        prev.map((item) =>
-          item.orderNo === target.orderNo
-            ? {
-                ...(refreshedDetail ?? item),
-                messages,
-                lastFetchedAt,
-                verificationCode: latestCode ?? item.verificationCode,
-                serviceState: latestCode
-                  ? target.serviceMode === "code"
-                    ? "code_received"
-                    : "in_warranty"
-                  : (refreshedDetail?.serviceState ?? item.serviceState),
-              }
-            : item
-        )
-      );
-    } catch (err) {
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
-    }
+    })();
+    fetchInFlightRef.current.set(order.orderNo, request);
+    return request;
   }
 
   function handleSelectOrder(orderNo: string) {

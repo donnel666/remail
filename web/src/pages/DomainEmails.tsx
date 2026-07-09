@@ -169,16 +169,18 @@ export default function DomainEmails() {
   }, [activeTld, domainStatsFilter]);
 
   const loadDomainBlock = useCallback(
-    async (offset: number, limit: number) => {
+    async (offset: number, limit: number, cursor?: { afterId?: number }) => {
       const response = await listOwnedDomainResources(
         domainListFilter,
         offset,
-        limit
+        limit,
+        cursor?.afterId
       );
       return {
         items: response.items
           .map(toDomainResource)
           .filter((item): item is DomainResource => item !== null),
+        nextAfterId: response.nextAfterId,
         total: response.total,
       };
     },

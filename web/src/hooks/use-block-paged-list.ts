@@ -5,20 +5,30 @@ const PREFETCH_THRESHOLD = 0.8;
 
 export interface BlockPageResult<T> {
   items: T[];
+  nextAfterId?: number | null;
   total: number;
+}
+
+export interface BlockLoadCursor {
+  afterId?: number;
 }
 
 interface UseBlockPagedListOptions<T> {
   activePage: number;
   blockSize?: number;
   filterKey: string;
-  loadBlock: (offset: number, limit: number) => Promise<BlockPageResult<T>>;
+  loadBlock: (
+    offset: number,
+    limit: number,
+    cursor?: BlockLoadCursor
+  ) => Promise<BlockPageResult<T>>;
   onError?: (error: unknown) => void;
   pageSize: number;
 }
 
 interface CachedBlock<T> {
   items: T[];
+  nextAfterId?: number | null;
   total: number;
 }
 
@@ -60,12 +70,18 @@ export function useBlockPagedList<T>({
 
       const seq = loadSeqRef.current;
       if (foreground) setLoading(true);
+      const previousBlock = cacheRef.current.get(offset - blockSize);
+      const cursor =
+        offset > 0 && previousBlock?.nextAfterId
+          ? { afterId: previousBlock.nextAfterId }
+          : undefined;
 
-      const request = loadBlock(offset, blockSize)
+      const request = loadBlock(offset, blockSize, cursor)
         .then((response) => {
           if (loadSeqRef.current !== seq) return;
           cacheRef.current.set(offset, {
             items: response.items,
+            nextAfterId: response.nextAfterId ?? null,
             total: response.total,
           });
           setTotal(response.total);

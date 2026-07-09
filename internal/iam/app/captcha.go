@@ -67,7 +67,7 @@ func VerifyCaptcha(ctx context.Context, store CaptchaStore, captchaID, answer st
 		return domain.ErrCaptchaIncorrect
 	}
 
-	storedAnswer, err := store.Get(ctx, captchaID)
+	storedAnswer, err := store.GetDel(ctx, captchaID)
 	if err != nil {
 		return fmt.Errorf("get captcha: %w", err)
 	}
@@ -76,9 +76,6 @@ func VerifyCaptcha(ctx context.Context, store CaptchaStore, captchaID, answer st
 	}
 
 	matched := strings.EqualFold(storedAnswer, strings.TrimSpace(answer))
-	if err := store.Delete(ctx, captchaID); err != nil {
-		return fmt.Errorf("delete captcha: %w", err)
-	}
 	if !matched {
 		return domain.ErrCaptchaIncorrect
 	}

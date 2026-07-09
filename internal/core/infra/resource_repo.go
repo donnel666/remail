@@ -13,6 +13,7 @@ import (
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -154,6 +155,7 @@ func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
 type ResourceRepo struct {
 	db            *gorm.DB
 	operationLogs *governanceinfra.OperationLogRepo
+	facetsCache   *platform.TTLCache[string, coreapp.ResourceListFacets]
 }
 
 const (
@@ -162,6 +164,7 @@ const (
 	resourceImportLookupChunkSize      = 10000
 	resourceImportInsertBatchSize      = 1000
 	microsoftImportRestoreTempTable    = "tmp_microsoft_import_restore"
+	resourceFacetsCacheTTL             = 10 * time.Second
 )
 
 // NewResourceRepo creates a new GORM-backed resource repository.
@@ -169,6 +172,7 @@ func NewResourceRepo(db *gorm.DB) *ResourceRepo {
 	return &ResourceRepo{
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
+		facetsCache:   platform.NewTTLCache[string, coreapp.ResourceListFacets](),
 	}
 }
 
@@ -743,12 +747,17 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 	return q
 }
 
-func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int) ([]domain.EmailResource, error) {
+func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, offset, limit int, afterID uint) ([]domain.EmailResource, error) {
 	var models []EmailResourceModel
-	err := r.listQuery(ctx, ownerUserID, filter).
-		Order("email_resources.created_at DESC, email_resources.id DESC").
-		Offset(offset).Limit(limit).
-		Find(&models).Error
+	q := r.listQuery(ctx, ownerUserID, filter).
+		Order("email_resources.id DESC").
+		Limit(limit)
+	if afterID > 0 {
+		q = q.Where("email_resources.id < ?", afterID)
+	} else {
+		q = q.Offset(offset)
+	}
+	err := q.Find(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("list resources: %w", err)
 	}
@@ -759,8 +768,8 @@ func (r *ResourceRepo) List(ctx context.Context, ownerUserID uint, filter coreap
 	return result, nil
 }
 
-func (r *ResourceRepo) ListAll(ctx context.Context, filter coreapp.ResourceListFilter, offset, limit int) ([]domain.EmailResource, error) {
-	return r.List(ctx, 0, filter, offset, limit)
+func (r *ResourceRepo) ListAll(ctx context.Context, filter coreapp.ResourceListFilter, offset, limit int, afterID uint) ([]domain.EmailResource, error) {
+	return r.List(ctx, 0, filter, offset, limit, afterID)
 }
 
 func (r *ResourceRepo) Count(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
@@ -777,86 +786,39 @@ func (r *ResourceRepo) CountAll(ctx context.Context, filter coreapp.ResourceList
 }
 
 func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (*coreapp.ResourceListFacets, error) {
+	cacheKey := resourceFacetsCacheKey(ownerUserID, filter)
+	if cached, ok := r.facetsCache.Get(cacheKey); ok {
+		return cloneResourceListFacets(&cached), nil
+	}
+
 	facets := &coreapp.ResourceListFacets{}
 
 	statusBase := filter
 	statusBase.Status = ""
-	var err error
-	facets.Status.All, err = r.countResources(ctx, ownerUserID, statusBase)
+	statusFacets, err := r.resourceStatusFacets(ctx, ownerUserID, statusBase)
 	if err != nil {
 		return nil, err
 	}
-	facets.Status.Normal, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "normal")
-	if err != nil {
-		return nil, err
-	}
-	facets.Status.Abnormal, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "abnormal")
-	if err != nil {
-		return nil, err
-	}
-	facets.Status.Disabled, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "disabled")
-	if err != nil {
-		return nil, err
-	}
-	if filter.ResourceType == domain.ResourceTypeMicrosoft {
-		facets.Status.Pending, err = r.countResourcesWithStatus(ctx, ownerUserID, statusBase, "pending")
-		if err != nil {
-			return nil, err
-		}
+	facets.Status = statusFacets
 
+	if filter.ResourceType == domain.ResourceTypeMicrosoft {
 		privateBase := filter
 		privateBase.ForSale = nil
-		facets.Private.All, err = r.countResources(ctx, ownerUserID, privateBase)
-		if err != nil {
-			return nil, err
-		}
-		privateYes := privateBase
-		privateYes.ForSale = boolResourceFilter(false)
-		facets.Private.Yes, err = r.countResources(ctx, ownerUserID, privateYes)
-		if err != nil {
-			return nil, err
-		}
-		privateNo := privateBase
-		privateNo.ForSale = boolResourceFilter(true)
-		facets.Private.No, err = r.countResources(ctx, ownerUserID, privateNo)
+		facets.Private, err = r.resourceBooleanFacets(ctx, ownerUserID, privateBase, "ms_filter.for_sale", false)
 		if err != nil {
 			return nil, err
 		}
 
 		longLivedBase := filter
 		longLivedBase.LongLived = nil
-		facets.LongLived.All, err = r.countResources(ctx, ownerUserID, longLivedBase)
-		if err != nil {
-			return nil, err
-		}
-		longLivedYes := longLivedBase
-		longLivedYes.LongLived = boolResourceFilter(true)
-		facets.LongLived.Yes, err = r.countResources(ctx, ownerUserID, longLivedYes)
-		if err != nil {
-			return nil, err
-		}
-		longLivedNo := longLivedBase
-		longLivedNo.LongLived = boolResourceFilter(false)
-		facets.LongLived.No, err = r.countResources(ctx, ownerUserID, longLivedNo)
+		facets.LongLived, err = r.resourceBooleanFacets(ctx, ownerUserID, longLivedBase, "ms_filter.long_lived", true)
 		if err != nil {
 			return nil, err
 		}
 
 		graphBase := filter
 		graphBase.GraphAvailable = nil
-		facets.GraphAvailable.All, err = r.countResources(ctx, ownerUserID, graphBase)
-		if err != nil {
-			return nil, err
-		}
-		graphYes := graphBase
-		graphYes.GraphAvailable = boolResourceFilter(true)
-		facets.GraphAvailable.Yes, err = r.countResources(ctx, ownerUserID, graphYes)
-		if err != nil {
-			return nil, err
-		}
-		graphNo := graphBase
-		graphNo.GraphAvailable = boolResourceFilter(false)
-		facets.GraphAvailable.No, err = r.countResources(ctx, ownerUserID, graphNo)
+		facets.GraphAvailable, err = r.resourceBooleanFacets(ctx, ownerUserID, graphBase, "ms_filter.graph_available", true)
 		if err != nil {
 			return nil, err
 		}
@@ -872,19 +834,7 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 	if filter.ResourceType == domain.ResourceTypeDomain {
 		privateBase := filter
 		privateBase.Purpose = ""
-		facets.Private.All, err = r.countResources(ctx, ownerUserID, privateBase)
-		if err != nil {
-			return nil, err
-		}
-		privateYes := privateBase
-		privateYes.Purpose = string(domain.PurposeNotSale)
-		facets.Private.Yes, err = r.countResources(ctx, ownerUserID, privateYes)
-		if err != nil {
-			return nil, err
-		}
-		privateNo := privateBase
-		privateNo.Purpose = string(domain.PurposeSale)
-		facets.Private.No, err = r.countResources(ctx, ownerUserID, privateNo)
+		facets.Private, err = r.resourceDomainPrivateFacets(ctx, ownerUserID, privateBase)
 		if err != nil {
 			return nil, err
 		}
@@ -897,22 +847,161 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 		}
 	}
 
+	r.facetsCache.Set(cacheKey, *cloneResourceListFacets(facets), resourceFacetsCacheTTL)
 	return facets, nil
 }
 
-func (r *ResourceRepo) countResourcesWithStatus(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, status string) (int64, error) {
-	next := filter
-	next.Status = status
-	return r.countResources(ctx, ownerUserID, next)
+type resourceStatusFacetRow struct {
+	All      int64 `gorm:"column:all_count"`
+	Normal   int64 `gorm:"column:normal_count"`
+	Pending  int64 `gorm:"column:pending_count"`
+	Abnormal int64 `gorm:"column:abnormal_count"`
+	Disabled int64 `gorm:"column:disabled_count"`
 }
 
-func (r *ResourceRepo) countResources(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (int64, error) {
-	var count int64
-	err := r.listQuery(ctx, ownerUserID, filter).Count(&count).Error
+func (r *ResourceRepo) resourceStatusFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (coreapp.ResourceFacetCounts, error) {
+	statusExpr := resourceStatusExpression(filter.ResourceType)
+	var row resourceStatusFacetRow
+	err := r.listQuery(ctx, ownerUserID, filter).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS normal_count,
+			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS pending_count,
+			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS abnormal_count,
+			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS disabled_count`,
+			string(domain.MicrosoftStatusNormal),
+			string(domain.MicrosoftStatusPending),
+			string(domain.MicrosoftStatusAbnormal),
+			string(domain.MicrosoftStatusDisabled),
+		).
+		Scan(&row).Error
 	if err != nil {
-		return 0, fmt.Errorf("count resource facets: %w", err)
+		return coreapp.ResourceFacetCounts{}, fmt.Errorf("resource status facets: %w", err)
 	}
-	return count, nil
+	return coreapp.ResourceFacetCounts{
+		All:      row.All,
+		Normal:   row.Normal,
+		Pending:  row.Pending,
+		Abnormal: row.Abnormal,
+		Disabled: row.Disabled,
+	}, nil
+}
+
+func resourceStatusExpression(resourceType domain.ResourceType) string {
+	switch resourceType {
+	case domain.ResourceTypeMicrosoft:
+		return "ms_filter.status"
+	case domain.ResourceTypeDomain:
+		return "dr_filter.status"
+	default:
+		return "CASE WHEN email_resources.type = 'microsoft' THEN ms_filter.status WHEN email_resources.type = 'domain' THEN dr_filter.status ELSE '' END"
+	}
+}
+
+type resourceBooleanFacetRow struct {
+	All int64 `gorm:"column:all_count"`
+	Yes int64 `gorm:"column:yes_count"`
+	No  int64 `gorm:"column:no_count"`
+}
+
+func (r *ResourceRepo) resourceBooleanFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, column string, yesValue bool) (coreapp.ResourceBooleanFacets, error) {
+	yesSQL := resourceBoolSQL(yesValue)
+	noSQL := resourceBoolSQL(!yesValue)
+	var row resourceBooleanFacetRow
+	err := r.listQuery(ctx, ownerUserID, filter).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN ` + column + ` = ` + yesSQL + ` THEN 1 ELSE 0 END), 0) AS yes_count,
+			COALESCE(SUM(CASE WHEN ` + column + ` = ` + noSQL + ` THEN 1 ELSE 0 END), 0) AS no_count`,
+		).
+		Scan(&row).Error
+	if err != nil {
+		return coreapp.ResourceBooleanFacets{}, fmt.Errorf("resource boolean facets: %w", err)
+	}
+	return coreapp.ResourceBooleanFacets{All: row.All, Yes: row.Yes, No: row.No}, nil
+}
+
+func resourceBoolSQL(value bool) string {
+	if value {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+
+func (r *ResourceRepo) resourceDomainPrivateFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (coreapp.ResourceBooleanFacets, error) {
+	var row resourceBooleanFacetRow
+	err := r.listQuery(ctx, ownerUserID, filter).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN dr_filter.purpose = ? THEN 1 ELSE 0 END), 0) AS yes_count,
+			COALESCE(SUM(CASE WHEN dr_filter.purpose = ? THEN 1 ELSE 0 END), 0) AS no_count`,
+			string(domain.PurposeNotSale),
+			string(domain.PurposeSale),
+		).
+		Scan(&row).Error
+	if err != nil {
+		return coreapp.ResourceBooleanFacets{}, fmt.Errorf("resource domain private facets: %w", err)
+	}
+	return coreapp.ResourceBooleanFacets{All: row.All, Yes: row.Yes, No: row.No}, nil
+}
+
+func resourceFacetsCacheKey(ownerUserID uint, filter coreapp.ResourceListFilter) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("owner=%d", ownerUserID))
+	b.WriteString("|type=")
+	b.WriteString(string(filter.ResourceType))
+	b.WriteString("|search=")
+	b.WriteString(strings.ToLower(strings.TrimSpace(filter.Search)))
+	b.WriteString("|suffix=")
+	b.WriteString(strings.ToLower(strings.TrimSpace(filter.Suffix)))
+	b.WriteString("|tld=")
+	b.WriteString(strings.ToLower(strings.TrimSpace(filter.TLD)))
+	b.WriteString("|status=")
+	b.WriteString(strings.TrimSpace(filter.Status))
+	b.WriteString("|purpose=")
+	b.WriteString(strings.TrimSpace(filter.Purpose))
+	b.WriteString("|forSale=")
+	b.WriteString(resourceBoolPtrKey(filter.ForSale))
+	b.WriteString("|longLived=")
+	b.WriteString(resourceBoolPtrKey(filter.LongLived))
+	b.WriteString("|graph=")
+	b.WriteString(resourceBoolPtrKey(filter.GraphAvailable))
+	b.WriteString("|from=")
+	b.WriteString(resourceTimePtrKey(filter.CreatedFrom))
+	b.WriteString("|to=")
+	b.WriteString(resourceTimePtrKey(filter.CreatedTo))
+	return b.String()
+}
+
+func resourceBoolPtrKey(value *bool) string {
+	if value == nil {
+		return "nil"
+	}
+	if *value {
+		return "true"
+	}
+	return "false"
+}
+
+func resourceTimePtrKey(value *time.Time) string {
+	if value == nil {
+		return "nil"
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func cloneResourceListFacets(facets *coreapp.ResourceListFacets) *coreapp.ResourceListFacets {
+	if facets == nil {
+		return nil
+	}
+	clone := *facets
+	if facets.Suffixes != nil {
+		clone.Suffixes = append([]coreapp.ResourceKeyFacet(nil), facets.Suffixes...)
+	}
+	if facets.TLDs != nil {
+		clone.TLDs = append([]coreapp.ResourceKeyFacet(nil), facets.TLDs...)
+	}
+	return &clone
 }
 
 func (r *ResourceRepo) resourceFacetGroups(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter, column string) ([]coreapp.ResourceKeyFacet, error) {
@@ -936,10 +1025,6 @@ func (r *ResourceRepo) resourceFacetGroups(ctx context.Context, ownerUserID uint
 		result[i] = coreapp.ResourceKeyFacet{Key: rows[i].Key, Count: rows[i].Count}
 	}
 	return result, nil
-}
-
-func boolResourceFilter(value bool) *bool {
-	return &value
 }
 
 // ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.
@@ -1709,153 +1794,87 @@ func (r *ResourceRepo) DeleteResourcesByFilterWithLog(ctx context.Context, owner
 }
 
 func (r *ResourceRepo) deleteMicrosoftByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
-	deleted := int64(0)
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		whereSQL, whereArgs := microsoftBulkMutationWhere(ownerUserID, filter)
-		now := time.Now().UTC()
-		args := append([]interface{}{
-			string(domain.MicrosoftStatusDeleted),
-			"",
-			now,
-		}, whereArgs...)
-		result := tx.Exec(
-			"UPDATE microsoft_resources AS ms JOIN email_resources AS er ON er.id = ms.id SET ms.status = ?, ms.last_safe_error = ?, ms.last_allocated_at = NULL, ms.updated_at = ? WHERE "+whereSQL,
-			args...,
-		)
-		if result.Error != nil {
-			return fmt.Errorf("delete microsoft resources by filter: %w", result.Error)
+	deleted := 0
+	for {
+		candidateCount := 0
+		chunkDeleted := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectMicrosoftBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
+
+			result := tx.Model(&MicrosoftResourceModel{}).
+				Where("id IN ? AND for_sale = ? AND status <> ?", ids, false, string(domain.MicrosoftStatusDeleted)).
+				Updates(map[string]interface{}{
+					"status":            string(domain.MicrosoftStatusDeleted),
+					"last_safe_error":   "",
+					"last_allocated_at": nil,
+					"updated_at":        time.Now().UTC(),
+				})
+			if result.Error != nil {
+				return fmt.Errorf("delete microsoft resources by filter: %w", result.Error)
+			}
+			chunkDeleted = int(result.RowsAffected)
+			if chunkDeleted == 0 {
+				return nil
+			}
+			return createBulkMutationLog(ctx, tx, log, int64(chunkDeleted), r.operationLogs)
+		})
+		if err != nil {
+			return deleted, err
 		}
-		deleted = result.RowsAffected
-		if deleted == 0 {
-			return nil
+		if candidateCount == 0 {
+			return deleted, nil
 		}
-		return createBulkMutationLog(ctx, tx, log, deleted, r.operationLogs)
-	})
-	if err != nil {
-		return 0, err
+		deleted += chunkDeleted
 	}
-	return int(deleted), nil
 }
 
 func (r *ResourceRepo) deleteDomainByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, log governancedomain.OperationLog) (int, error) {
-	deleted := int64(0)
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		whereSQL, whereArgs := domainBulkMutationWhere(ownerUserID, filter)
-		now := time.Now().UTC()
-		args := append([]interface{}{
-			string(domain.DomainStatusDeleted),
-			"",
-			now,
-		}, whereArgs...)
-		result := tx.Exec(
-			"UPDATE domain_resources AS dr JOIN email_resources AS er ON er.id = dr.id SET dr.status = ?, dr.last_safe_error = ?, dr.last_allocated_at = NULL, dr.updated_at = ? WHERE "+whereSQL,
-			args...,
-		)
-		if result.Error != nil {
-			return fmt.Errorf("delete domain resources by filter: %w", result.Error)
-		}
-		deleted = result.RowsAffected
-		if deleted == 0 {
-			return nil
-		}
-		return createBulkMutationLog(ctx, tx, log, deleted, r.operationLogs)
-	})
-	if err != nil {
-		return 0, err
-	}
-	return int(deleted), nil
-}
+	deleted := 0
+	for {
+		candidateCount := 0
+		chunkDeleted := 0
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			ids, err := selectDomainBulkIDs(ctx, tx, ownerUserID, filter)
+			if err != nil {
+				return err
+			}
+			candidateCount = len(ids)
+			if len(ids) == 0 {
+				return nil
+			}
 
-func microsoftBulkMutationWhere(ownerUserID uint, filter coreapp.ResourceBulkFilter) (string, []interface{}) {
-	conditions := []string{
-		"er.owner_user_id = ?",
-		"er.type = ?",
-		"ms.for_sale = ?",
-		"ms.status <> ?",
-	}
-	args := []interface{}{
-		ownerUserID,
-		string(domain.ResourceTypeMicrosoft),
-		false,
-		string(domain.MicrosoftStatusDeleted),
-	}
-	if filter.Status != "" {
-		conditions = append(conditions, "ms.status = ?")
-		args = append(args, filter.Status)
-	}
-	if filter.LongLived != nil {
-		conditions = append(conditions, "ms.long_lived = ?")
-		args = append(args, *filter.LongLived)
-	}
-	if filter.GraphAvailable != nil {
-		conditions = append(conditions, "ms.graph_available = ?")
-		args = append(args, *filter.GraphAvailable)
-	}
-	if filter.CreatedFrom != nil {
-		conditions = append(conditions, "er.created_at >= ?")
-		args = append(args, *filter.CreatedFrom)
-	}
-	if filter.CreatedTo != nil {
-		conditions = append(conditions, "er.created_at <= ?")
-		args = append(args, *filter.CreatedTo)
-	}
-	if filter.Suffix != "" {
-		suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filter.Suffix)), "@")
-		if suffix != "" {
-			conditions = append(conditions, "ms.email_domain = ?")
-			args = append(args, suffix)
-		}
-	}
-	if filter.Search != "" {
-		like := "%" + filter.Search + "%"
-		normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
-		conditions = append(conditions, "(LOWER(ms.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)")
-		args = append(args, like, like, normalized)
-	}
-	return strings.Join(conditions, " AND "), args
-}
-
-func domainBulkMutationWhere(ownerUserID uint, filter coreapp.ResourceBulkFilter) (string, []interface{}) {
-	conditions := []string{
-		"er.owner_user_id = ?",
-		"er.type = ?",
-		"dr.owner_user_id = ?",
-		"dr.purpose = ?",
-		"dr.status <> ?",
-	}
-	args := []interface{}{
-		ownerUserID,
-		string(domain.ResourceTypeDomain),
-		ownerUserID,
-		string(domain.PurposeNotSale),
-		string(domain.DomainStatusDeleted),
-	}
-	if filter.Status != "" {
-		conditions = append(conditions, "dr.status = ?")
-		args = append(args, filter.Status)
-	}
-	if filter.CreatedFrom != nil {
-		conditions = append(conditions, "er.created_at >= ?")
-		args = append(args, *filter.CreatedFrom)
-	}
-	if filter.CreatedTo != nil {
-		conditions = append(conditions, "er.created_at <= ?")
-		args = append(args, *filter.CreatedTo)
-	}
-	if filter.TLD != "" {
-		tld, err := domain.NormalizeDomainSuffix(filter.TLD)
+			result := tx.Model(&DomainResourceModel{}).
+				Where("id IN ? AND purpose = ? AND status <> ?", ids, string(domain.PurposeNotSale), string(domain.DomainStatusDeleted)).
+				Updates(map[string]interface{}{
+					"status":            string(domain.DomainStatusDeleted),
+					"last_safe_error":   "",
+					"last_allocated_at": nil,
+					"updated_at":        time.Now().UTC(),
+				})
+			if result.Error != nil {
+				return fmt.Errorf("delete domain resources by filter: %w", result.Error)
+			}
+			chunkDeleted = int(result.RowsAffected)
+			if chunkDeleted == 0 {
+				return nil
+			}
+			return createBulkMutationLog(ctx, tx, log, int64(chunkDeleted), r.operationLogs)
+		})
 		if err != nil {
-			conditions = append(conditions, "1 = 0")
-		} else {
-			conditions = append(conditions, "dr.domain_tld = ?")
-			args = append(args, tld)
+			return deleted, err
 		}
+		if candidateCount == 0 {
+			return deleted, nil
+		}
+		deleted += chunkDeleted
 	}
-	if filter.Search != "" {
-		conditions = append(conditions, "LOWER(dr.domain) LIKE ?")
-		args = append(args, "%"+filter.Search+"%")
-	}
-	return strings.Join(conditions, " AND "), args
 }
 
 func createBulkMutationLog(ctx context.Context, tx *gorm.DB, log governancedomain.OperationLog, affected int64, operationLogs *governanceinfra.OperationLogRepo) error {

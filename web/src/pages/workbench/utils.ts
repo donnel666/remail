@@ -106,6 +106,15 @@ export function serviceStateMeta(
   if (state === "activation_timeout") {
     return { color: "red" as const, label: t("Activation timed out") };
   }
+  if (state === "order_failed") {
+    return { color: "red" as const, label: t("Order failed") };
+  }
+  if (state === "refunded") {
+    return { color: "grey" as const, label: t("Refunded") };
+  }
+  if (state === "warranty_ended") {
+    return { color: "grey" as const, label: t("Warranty ended") };
+  }
   return { color: "grey" as const, label: t("Read expired") };
 }
 

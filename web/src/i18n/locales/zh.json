@@ -683,6 +683,8 @@
   "Activated": "已激活",
   "In warranty": "质保中",
   "Activation timed out": "激活超时",
+  "Order failed": "订单失败",
+  "Warranty ended": "质保结束",
   "Read expired": "读取期结束",
   "Pending payment": "待支付",
   "Refunded": "已退款",
