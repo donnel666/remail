@@ -8,6 +8,10 @@ type CreateOrderRequest struct {
 	EmailSuffix string `json:"emailSuffix,omitempty"`
 }
 
+type AdminOrderCommandRequest struct {
+	Reason string `json:"reason"`
+}
+
 type OrderResponse struct {
 	ID                   uint       `json:"id"`
 	OrderNo              string     `json:"orderNo"`

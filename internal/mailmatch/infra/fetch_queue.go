@@ -17,7 +17,7 @@ const (
 
 	mailmatchQueueName           = "default"
 	mailmatchFetchTaskMaxRetry   = 0
-	mailmatchFetchTaskTimeout    = 3 * time.Minute
+	mailmatchFetchTaskTimeout    = 60 * time.Second
 	mailmatchDispatchTaskTimeout = 30 * time.Second
 )
 

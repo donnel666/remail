@@ -213,6 +213,36 @@ func (r *Repo) FindAPIKey(ctx context.Context, userID uint, keyID uint) (*domain
 	return &item, nil
 }
 
+func (r *Repo) FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.APIKey, error) {
+	var model APIKeyModel
+	if err := r.db.WithContext(ctx).First(&model, "key_plain = ? AND deleted_at IS NULL", strings.TrimSpace(plain)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrAPIKeyNotFound
+		}
+		return nil, fmt.Errorf("find api key by plain: %w", err)
+	}
+	var owner struct {
+		Enabled bool
+		Role    string
+	}
+	if err := r.db.WithContext(ctx).
+		Table("users").
+		Select("enabled, role").
+		Where("id = ?", model.UserID).
+		Take(&owner).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrAPIKeyDisabled
+		}
+		return nil, fmt.Errorf("load api key owner: %w", err)
+	}
+	if !owner.Enabled {
+		return nil, domain.ErrAPIKeyDisabled
+	}
+	item := apiKeyModelToDomain(model)
+	item.OwnerRole = owner.Role
+	return &item, nil
+}
+
 func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyCommand) (*domain.APIKey, error) {
 	updates := map[string]any{}
 	if cmd.Name != nil {
@@ -239,9 +269,6 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 	}
 	if len(updates) > 0 {
 		query := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("id = ? AND user_id = ? AND deleted_at IS NULL", cmd.KeyID, cmd.UserID)
-		if cmd.ConcurrencyLimit != nil {
-			query = query.Where("active_requests <= ?", *cmd.ConcurrencyLimit)
-		}
 		if cmd.QuotaSet && cmd.QuotaLimit != nil {
 			query = query.Where("quota_used <= ?", *cmd.QuotaLimit)
 		}
@@ -253,9 +280,6 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 			existing, err := r.FindAPIKey(ctx, cmd.UserID, cmd.KeyID)
 			if err != nil {
 				return nil, err
-			}
-			if cmd.ConcurrencyLimit != nil && existing.ActiveRequests > *cmd.ConcurrencyLimit {
-				return nil, domain.ErrAPIKeyConcurrencyLimit
 			}
 			if cmd.QuotaSet && cmd.QuotaLimit != nil && existing.QuotaUsed > *cmd.QuotaLimit {
 				return nil, domain.ErrAPIKeyQuotaExceeded
@@ -283,96 +307,18 @@ func (r *Repo) DeleteAPIKey(ctx context.Context, userID uint, keyID uint, delete
 	return nil
 }
 
-func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.Time) (*domain.APIKey, error) {
-	var model APIKeyModel
-	ownerRole := ""
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.WithContext(ctx).
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&model, "key_plain = ? AND deleted_at IS NULL", strings.TrimSpace(plain)).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrAPIKeyNotFound
-			}
-			return fmt.Errorf("lock api key for request: %w", err)
-		}
-		if !model.Enabled {
-			return domain.ErrAPIKeyDisabled
-		}
-		var owner struct {
-			Enabled bool
-			Role    string
-		}
-		if err := tx.WithContext(ctx).
-			Table("users").
-			Select("enabled, role").
-			Where("id = ?", model.UserID).
-			Take(&owner).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrAPIKeyDisabled
-			}
-			return fmt.Errorf("load api key owner: %w", err)
-		}
-		if !owner.Enabled {
-			return domain.ErrAPIKeyDisabled
-		}
-		ownerRole = owner.Role
-		if model.ExpireAt != nil && !model.ExpireAt.After(now) {
-			return domain.ErrAPIKeyExpired
-		}
-		if model.ActiveRequests >= model.ConcurrencyLimit {
-			return domain.ErrAPIKeyConcurrencyLimit
-		}
-		windowStartedAt := model.WindowStartedAt
-		windowRequestCount := model.WindowRequestCount
-		if shouldResetRateWindow(windowStartedAt, now) {
-			windowStartedAt = &now
-			windowRequestCount = 0
-		}
-		if model.RateLimitPerMinute != nil && windowRequestCount >= *model.RateLimitPerMinute {
-			return domain.ErrAPIKeyRateLimited
-		}
-		if model.QuotaLimit != nil && model.QuotaUsed >= *model.QuotaLimit {
-			return domain.ErrAPIKeyQuotaExceeded
-		}
-		result := tx.WithContext(ctx).Model(&APIKeyModel{}).
-			Where("id = ?", model.ID).
-			Updates(map[string]any{
-				"active_requests":      model.ActiveRequests + 1,
-				"quota_used":           model.QuotaUsed + 1,
-				"window_started_at":    windowStartedAt,
-				"window_request_count": windowRequestCount + 1,
-				"last_used_at":         now,
-			})
-		if result.Error != nil {
-			return fmt.Errorf("acquire api key request: %w", result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return domain.ErrAPIKeyNotFound
-		}
-		model.ActiveRequests++
-		model.QuotaUsed++
-		model.WindowStartedAt = windowStartedAt
-		model.WindowRequestCount = windowRequestCount + 1
-		model.LastUsedAt = &now
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	item := apiKeyModelToDomain(model)
-	item.OwnerRole = ownerRole
-	return &item, nil
-}
-
-func (r *Repo) ReleaseAPIKeyRequest(ctx context.Context, keyID uint) error {
-	if keyID == 0 {
+func (r *Repo) AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error {
+	if keyID == 0 || delta <= 0 {
 		return nil
 	}
 	result := r.db.WithContext(ctx).Model(&APIKeyModel{}).
-		Where("id = ?", keyID).
-		Update("active_requests", gorm.Expr("CASE WHEN active_requests > 0 THEN active_requests - 1 ELSE 0 END"))
+		Where("id = ? AND deleted_at IS NULL", keyID).
+		Updates(map[string]any{
+			"quota_used":   gorm.Expr("quota_used + ?", delta),
+			"last_used_at": gorm.Expr("CASE WHEN last_used_at IS NULL OR last_used_at < ? THEN ? ELSE last_used_at END", lastUsedAt, lastUsedAt),
+		})
 	if result.Error != nil {
-		return fmt.Errorf("release api key request: %w", result.Error)
+		return fmt.Errorf("add api key quota used: %w", result.Error)
 	}
 	return nil
 }
@@ -486,6 +432,36 @@ func (r *Repo) CreateAPILog(ctx context.Context, cmd openapiapp.CreateAPILogComm
 	return nil
 }
 
+func (r *Repo) CreateAPILogs(ctx context.Context, commands []openapiapp.CreateAPILogCommand) error {
+	if len(commands) == 0 {
+		return nil
+	}
+	models := make([]APILogModel, 0, len(commands))
+	for _, cmd := range commands {
+		var userID *uint
+		if cmd.UserID > 0 {
+			value := cmd.UserID
+			userID = &value
+		}
+		models = append(models, APILogModel{
+			PrincipalType:  strings.TrimSpace(cmd.PrincipalType),
+			PrincipalID:    cmd.PrincipalID,
+			UserID:         userID,
+			Path:           strings.TrimSpace(cmd.Path),
+			Method:         strings.TrimSpace(cmd.Method),
+			IdempotencyKey: strings.TrimSpace(cmd.IdempotencyKey),
+			HTTPStatus:     cmd.HTTPStatus,
+			DurationMs:     cmd.DurationMs,
+			RequestID:      strings.TrimSpace(cmd.RequestID),
+			CreatedAt:      cmd.Now,
+		})
+	}
+	if err := r.db.WithContext(ctx).CreateInBatches(models, 500).Error; err != nil {
+		return fmt.Errorf("create api logs: %w", err)
+	}
+	return nil
+}
+
 func withIdempotencyInTx(ctx context.Context, tx *gorm.DB, ownerUserID uint, operation string, idempotencyKey string, fingerprint string, run func(*gorm.DB) ([]byte, error)) ([]byte, bool, error) {
 	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(fingerprint) == "" {
 		return nil, false, domain.ErrIdempotencyRequired
@@ -567,11 +543,4 @@ func isDuplicateKeyError(err error) bool {
 	}
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
-}
-
-func shouldResetRateWindow(startedAt *time.Time, now time.Time) bool {
-	if startedAt == nil {
-		return true
-	}
-	return now.Sub(*startedAt) >= time.Minute || startedAt.After(now.Add(5*time.Second))
 }

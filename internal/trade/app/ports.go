@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/trade/domain"
 )
@@ -82,18 +83,39 @@ type OrderTokenPort interface {
 	DisableOrderToken(ctx context.Context, orderNo string, reason string) error
 }
 
+type OrderSnapshotProof struct {
+	ReceivedAt time.Time
+}
+
+type OrderSnapshotPort interface {
+	FindOrderSnapshotProof(ctx context.Context, orderNo string) (*OrderSnapshotProof, error)
+}
+
+type SystemLogPort interface {
+	Create(ctx context.Context, log *governancedomain.SystemLog) error
+}
+
 type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
+	LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error)
 	LoadOrCreatePendingOrder(ctx context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error)
 	FindOrder(ctx context.Context, orderNo string) (*domain.Order, error)
 	MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error)
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
 	MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error)
+	RefundOrder(ctx context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error)
+	CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
+	CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
+	MarkServiceCleanup(ctx context.Context, orderNo string, status string) error
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
 	ListOrders(ctx context.Context, filter OrderListFilter, offset, limit int) ([]domain.Order, int64, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
 	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
 	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error)
+	ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
+	ListExpiredPurchaseActivationOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
+	ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
+	ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error)
 }
 
 type CreatePendingOrderCommand struct {
@@ -136,6 +158,14 @@ type MarkFailedCommand struct {
 	Now          time.Time
 }
 
+type RefundOrderCommand struct {
+	OrderNo      string
+	RefundTxID   uint
+	RefundAmount string
+	Reason       string
+	Operator     domain.OperatorType
+}
+
 type OrderListFilter struct {
 	UserID      uint
 	IsAdmin     bool
@@ -169,12 +199,30 @@ type MatchCodeResultRequest struct {
 	MatchedAt time.Time
 }
 
+type AdminOrderCommandRequest struct {
+	OrderNo        string
+	Reason         string
+	IdempotencyKey string
+	RequestID      string
+	OperatorUserID uint
+}
+
+type ExpireOrdersResult struct {
+	CodeTimedOut                int
+	PurchaseActivationCompleted int
+	PurchaseWarrantyCompleted   int
+	CodeCleaned                 int
+	Failed                      int
+}
+
 type UseCase struct {
 	repo       Repository
 	ordering   OrderingPort
 	wallet     WalletPort
 	allocation AllocationPort
 	tokens     OrderTokenPort
+	snapshots  OrderSnapshotPort
+	systemLogs SystemLogPort
 	now        func() time.Time
 }
 
@@ -187,6 +235,14 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 		tokens:     tokens,
 		now:        func() time.Time { return time.Now().UTC() },
 	}
+}
+
+func (uc *UseCase) SetOrderSnapshotPort(snapshots OrderSnapshotPort) {
+	uc.snapshots = snapshots
+}
+
+func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
+	uc.systemLogs = systemLogs
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*CheckoutResult, error) {
@@ -315,6 +371,108 @@ func (uc *UseCase) Archive(ctx context.Context, orderNo string, userID uint) (*d
 	return uc.repo.Archive(ctx, strings.TrimSpace(orderNo), userID, uc.now())
 }
 
+func (uc *UseCase) AdminRefundOrder(ctx context.Context, req AdminOrderCommandRequest) (*domain.Order, error) {
+	orderNo := strings.TrimSpace(req.OrderNo)
+	reason := strings.TrimSpace(req.Reason)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if orderNo == "" || reason == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	if idempotencyKey == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
+		OrderNo:        orderNo,
+		Reason:         reason,
+		IdempotencyKey: idempotencyKey,
+		RequestID:      strings.TrimSpace(req.RequestID),
+		Operator:       domain.OperatorTypeAdmin,
+		AllowedStatuses: []domain.OrderStatus{
+			domain.OrderStatusActive,
+			domain.OrderStatusCompleted,
+		},
+	})
+	if err != nil || order == nil || !changed {
+		return order, err
+	}
+	if cleanupErr := uc.cleanupOrderService(ctx, *order, order.ServiceMode == domain.ServiceModeCode, "Order refunded.", req.RequestID); cleanupErr != nil {
+		return order, cleanupErr
+	}
+	return order, nil
+}
+
+func (uc *UseCase) AdminTerminateOrder(ctx context.Context, req AdminOrderCommandRequest) (*domain.Order, error) {
+	orderNo := strings.TrimSpace(req.OrderNo)
+	reason := strings.TrimSpace(req.Reason)
+	if orderNo == "" || reason == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	order, changed, err := uc.repo.CloseActiveOrder(ctx, orderNo, reason)
+	if err != nil || order == nil || !changed {
+		return order, err
+	}
+	if cleanupErr := uc.cleanupOrderService(ctx, *order, true, "Order terminated.", req.RequestID); cleanupErr != nil {
+		return order, cleanupErr
+	}
+	return order, nil
+}
+
+func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrdersResult, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	now := uc.now()
+	result := &ExpireOrdersResult{}
+	codeExpired, err := uc.repo.ListExpiredCodeOrderNos(ctx, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range codeExpired {
+		if err := uc.expireCodeOrder(ctx, orderNo, now); err != nil {
+			result.Failed++
+			continue
+		}
+		result.CodeTimedOut++
+	}
+	purchaseActivationExpired, err := uc.repo.ListExpiredPurchaseActivationOrderNos(ctx, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range purchaseActivationExpired {
+		if err := uc.completeExpiredOrder(ctx, orderNo, "Purchase activation window expired."); err != nil {
+			result.Failed++
+			continue
+		}
+		result.PurchaseActivationCompleted++
+	}
+	purchaseWarrantyExpired, err := uc.repo.ListExpiredPurchaseWarrantyOrderNos(ctx, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range purchaseWarrantyExpired {
+		if err := uc.completeExpiredOrder(ctx, orderNo, "Purchase warranty window expired."); err != nil {
+			result.Failed++
+			continue
+		}
+		result.PurchaseWarrantyCompleted++
+	}
+	codeCleanup, err := uc.repo.ListCodeOrderNosReadyForCleanup(ctx, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range codeCleanup {
+		if err := uc.cleanupExpiredCodeOrder(ctx, orderNo); err != nil {
+			result.Failed++
+			continue
+		}
+		result.CodeCleaned++
+	}
+	return result, nil
+}
+
 func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultRequest) error {
 	orderNo := strings.TrimSpace(req.OrderNo)
 	if orderNo == "" {
@@ -350,6 +508,159 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		}
 		return uc.tokens.ExtendOrderToken(txCtx, orderNo, readUntil)
 	})
+}
+
+type refundOrderRequest struct {
+	OrderNo         string
+	Reason          string
+	IdempotencyKey  string
+	RequestID       string
+	Operator        domain.OperatorType
+	AllowedStatuses []domain.OrderStatus
+}
+
+func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, now time.Time) error {
+	if uc.snapshots != nil {
+		proof, err := uc.snapshots.FindOrderSnapshotProof(ctx, orderNo)
+		if err != nil {
+			return err
+		}
+		if proof != nil {
+			matchedAt := proof.ReceivedAt
+			if matchedAt.IsZero() {
+				matchedAt = now
+			}
+			return uc.NotifyMatchedCode(ctx, MatchCodeResultRequest{OrderNo: orderNo, MatchedAt: matchedAt})
+		}
+	}
+	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
+		OrderNo:        orderNo,
+		Reason:         "Code receive window expired.",
+		IdempotencyKey: "order:" + strings.TrimSpace(orderNo) + ":refund",
+		Operator:       domain.OperatorTypeSystem,
+		AllowedStatuses: []domain.OrderStatus{
+			domain.OrderStatusActive,
+		},
+	})
+	if err != nil || order == nil || !changed {
+		return err
+	}
+	return uc.cleanupOrderService(ctx, *order, true, "Code order expired.", "")
+}
+
+func (uc *UseCase) completeExpiredOrder(ctx context.Context, orderNo string, reason string) error {
+	_, _, err := uc.repo.CompleteExpiredOrder(ctx, strings.TrimSpace(orderNo), reason)
+	return err
+}
+
+func (uc *UseCase) cleanupExpiredCodeOrder(ctx context.Context, orderNo string) error {
+	order, err := uc.repo.FindOrder(ctx, strings.TrimSpace(orderNo))
+	if err != nil {
+		return err
+	}
+	return uc.cleanupOrderService(ctx, *order, true, "Code read window expired.", "")
+}
+
+func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*domain.Order, bool, error) {
+	orderNo := strings.TrimSpace(req.OrderNo)
+	reason := strings.TrimSpace(req.Reason)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if orderNo == "" || reason == "" || idempotencyKey == "" {
+		return nil, false, domain.ErrInvalidOrderRequest
+	}
+	if req.Operator == "" {
+		req.Operator = domain.OperatorTypeSystem
+	}
+	var refunded *domain.Order
+	changed := false
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
+		if err != nil {
+			return err
+		}
+		refunded = locked
+		if locked.Status == domain.OrderStatusRefunded {
+			return nil
+		}
+		if !statusAllowed(locked.Status, req.AllowedStatuses) {
+			return domain.ErrOrderStateConflict
+		}
+		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
+			UserID:         locked.UserID,
+			Amount:         locked.PayAmount,
+			Reason:         "order:" + locked.OrderNo,
+			IdempotencyKey: idempotencyKey,
+			RequestID:      strings.TrimSpace(req.RequestID),
+		})
+		if err != nil {
+			return err
+		}
+		updated, didChange, err := uc.repo.RefundOrder(txCtx, RefundOrderCommand{
+			OrderNo:      locked.OrderNo,
+			RefundTxID:   refund.ID,
+			RefundAmount: locked.PayAmount,
+			Reason:       reason,
+			Operator:     req.Operator,
+		})
+		if err != nil {
+			return err
+		}
+		refunded = updated
+		changed = didChange
+		return nil
+	})
+	return refunded, changed, err
+}
+
+func (uc *UseCase) cleanupOrderService(ctx context.Context, order domain.Order, releaseAllocation bool, reason string, requestID string) error {
+	failures := make([]string, 0, 2)
+	if releaseAllocation && uc.allocation != nil {
+		if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
+			failures = append(failures, "release allocation: "+err.Error())
+		}
+	}
+	if uc.tokens != nil {
+		if err := uc.tokens.DisableOrderToken(ctx, order.OrderNo, reason); err != nil {
+			failures = append(failures, "disable order token: "+err.Error())
+		}
+	}
+	status := "succeeded"
+	if len(failures) > 0 {
+		status = "partial_failure"
+	}
+	if err := uc.repo.MarkServiceCleanup(ctx, order.OrderNo, status); err != nil {
+		return err
+	}
+	if len(failures) > 0 {
+		uc.writeSystemLog(ctx, "warning", "trade.order_cleanup_partial_failure", requestID, order.OrderNo, strings.Join(failures, "; "))
+		return fmt.Errorf("%w: %s", domain.ErrOrderCompensationError, strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func (uc *UseCase) writeSystemLog(ctx context.Context, level string, eventType string, requestID string, orderNo string, detail string) {
+	if uc.systemLogs == nil {
+		return
+	}
+	_ = uc.systemLogs.Create(ctx, &governancedomain.SystemLog{
+		Level:     level,
+		Module:    "trade",
+		EventType: eventType,
+		RequestID: strings.TrimSpace(requestID),
+		BizType:   "order",
+		BizID:     strings.TrimSpace(orderNo),
+		Message:   "Order lifecycle cleanup requires attention.",
+		Detail:    strings.TrimSpace(detail),
+	})
+}
+
+func statusAllowed(status domain.OrderStatus, allowed []domain.OrderStatus) bool {
+	for _, item := range allowed {
+		if status == item {
+			return true
+		}
+	}
+	return false
 }
 
 func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote OrderingQuote, emailSuffix string, requestID string) (*CheckoutResult, error) {

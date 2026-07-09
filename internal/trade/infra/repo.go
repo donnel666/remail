@@ -150,6 +150,15 @@ func (r *Repo) FindOrder(ctx context.Context, orderNo string) (*domain.Order, er
 	return &order, nil
 }
 
+func (r *Repo) LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error) {
+	var model OrderModel
+	if err := lockOrder(ctx, r.dbFor(ctx), strings.TrimSpace(orderNo), &model); err != nil {
+		return nil, err
+	}
+	order := orderModelToDomain(model)
+	return &order, nil
+}
+
 func (r *Repo) MarkPaid(ctx context.Context, cmd tradeapp.MarkPaidCommand) (*domain.Order, error) {
 	orderNo := strings.TrimSpace(cmd.OrderNo)
 	payAmount := strings.TrimSpace(cmd.PayAmount)
@@ -288,6 +297,154 @@ func (r *Repo) MarkFailed(ctx context.Context, cmd tradeapp.MarkFailedCommand) (
 	return &order, nil
 }
 
+func (r *Repo) RefundOrder(ctx context.Context, cmd tradeapp.RefundOrderCommand) (*domain.Order, bool, error) {
+	orderNo := strings.TrimSpace(cmd.OrderNo)
+	refundAmount := strings.TrimSpace(cmd.RefundAmount)
+	if orderNo == "" || cmd.RefundTxID == 0 || refundAmount == "" {
+		return nil, false, domain.ErrInvalidOrderRequest
+	}
+	operator := cmd.Operator
+	if operator == "" {
+		operator = domain.OperatorTypeSystem
+	}
+	var model OrderModel
+	changed := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		tx := r.dbFor(txCtx)
+		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
+			return err
+		}
+		current := domain.OrderStatus(model.Status)
+		if current == domain.OrderStatusRefunded {
+			return nil
+		}
+		if current != domain.OrderStatusActive && current != domain.OrderStatusCompleted {
+			return domain.ErrOrderStateConflict
+		}
+		result := tx.Model(&OrderModel{}).
+			Where("order_no = ? AND status IN ?", orderNo, []string{string(domain.OrderStatusActive), string(domain.OrderStatusCompleted)}).
+			Updates(map[string]any{
+				"status":        string(domain.OrderStatusRefunded),
+				"refund_tx_id":  cmd.RefundTxID,
+				"refund_amount": refundAmount,
+				"version":       gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("refund order: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrderStateConflict
+		}
+		if err := tx.First(&model, "order_no = ?", orderNo).Error; err != nil {
+			return fmt.Errorf("reload refunded order: %w", err)
+		}
+		changed = true
+		return r.appendEvent(txCtx, tx, orderNo, "order.refunded", &current, ptrStatus(domain.OrderStatusRefunded), operator, cmd.Reason)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	order := orderModelToDomain(model)
+	return &order, changed, nil
+}
+
+func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	var model OrderModel
+	changed := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		tx := r.dbFor(txCtx)
+		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
+			return err
+		}
+		current := domain.OrderStatus(model.Status)
+		if current == domain.OrderStatusCompleted {
+			return nil
+		}
+		if current != domain.OrderStatusActive {
+			return nil
+		}
+		result := tx.Model(&OrderModel{}).
+			Where("order_no = ? AND status = ?", orderNo, string(domain.OrderStatusActive)).
+			Updates(map[string]any{
+				"status":  string(domain.OrderStatusCompleted),
+				"version": gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("complete expired order: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrderStateConflict
+		}
+		if err := tx.First(&model, "order_no = ?", orderNo).Error; err != nil {
+			return fmt.Errorf("reload expired completed order: %w", err)
+		}
+		changed = true
+		return r.appendEvent(txCtx, tx, orderNo, "order.completed", &current, ptrStatus(domain.OrderStatusCompleted), domain.OperatorTypeSystem, reason)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	order := orderModelToDomain(model)
+	return &order, changed, nil
+}
+
+func (r *Repo) CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	var model OrderModel
+	changed := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		tx := r.dbFor(txCtx)
+		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
+			return err
+		}
+		current := domain.OrderStatus(model.Status)
+		if current == domain.OrderStatusClosed {
+			return nil
+		}
+		if current != domain.OrderStatusActive {
+			return domain.ErrOrderStateConflict
+		}
+		result := tx.Model(&OrderModel{}).
+			Where("order_no = ? AND status = ?", orderNo, string(domain.OrderStatusActive)).
+			Updates(map[string]any{
+				"status":  string(domain.OrderStatusClosed),
+				"version": gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("close active order: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrderStateConflict
+		}
+		if err := tx.First(&model, "order_no = ?", orderNo).Error; err != nil {
+			return fmt.Errorf("reload closed order: %w", err)
+		}
+		changed = true
+		return r.appendEvent(txCtx, tx, orderNo, "order.closed", &current, ptrStatus(domain.OrderStatusClosed), domain.OperatorTypeAdmin, reason)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	order := orderModelToDomain(model)
+	return &order, changed, nil
+}
+
+func (r *Repo) MarkServiceCleanup(ctx context.Context, orderNo string, status string) error {
+	orderNo = strings.TrimSpace(orderNo)
+	status = strings.TrimSpace(status)
+	if orderNo == "" || (status != "succeeded" && status != "partial_failure") {
+		return domain.ErrInvalidOrderRequest
+	}
+	result := r.dbFor(ctx).Model(&OrderModel{}).
+		Where("order_no = ?", orderNo).
+		Update("service_cleanup_status", status)
+	if result.Error != nil {
+		return fmt.Errorf("mark order service cleanup: %w", result.Error)
+	}
+	return nil
+}
+
 func (r *Repo) Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error) {
 	var model OrderModel
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
@@ -374,6 +531,54 @@ func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAd
 		items[i] = eventModelToDomain(models[i])
 	}
 	return items, total, nil
+}
+
+func (r *Repo) ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND receive_until IS NOT NULL AND receive_until < ?",
+		string(domain.OrderStatusActive),
+		string(domain.ServiceModeCode),
+		now.UTC(),
+	)
+}
+
+func (r *Repo) ListExpiredPurchaseActivationOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND activated_at IS NULL AND receive_until IS NOT NULL AND receive_until < ?",
+		string(domain.OrderStatusActive),
+		string(domain.ServiceModePurchase),
+		now.UTC(),
+	)
+}
+
+func (r *Repo) ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND activated_at IS NOT NULL AND after_sale_until IS NOT NULL AND after_sale_until < ?",
+		string(domain.OrderStatusActive),
+		string(domain.ServiceModePurchase),
+		now.UTC(),
+	)
+}
+
+func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
+		[]string{string(domain.OrderStatusCompleted), string(domain.OrderStatusRefunded)},
+		string(domain.ServiceModeCode),
+		"none",
+		now.UTC(),
+	)
+}
+
+func (r *Repo) listOrderNos(ctx context.Context, limit int, condition string, args ...any) ([]string, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var orderNos []string
+	if err := r.dbFor(ctx).Model(&OrderModel{}).
+		Where(condition, args...).
+		Order("id ASC").
+		Limit(limit).
+		Pluck("order_no", &orderNos).Error; err != nil {
+		return nil, fmt.Errorf("list lifecycle order numbers: %w", err)
+	}
+	return orderNos, nil
 }
 
 func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error) {

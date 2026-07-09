@@ -46,6 +46,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
+	tradeCleanup := func(context.Context) {}
+	openapiCleanup := func(context.Context) {}
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
@@ -110,11 +112,20 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// OpenAPI credentials and order service tokens.
 		openapiMod := openapiapi.NewModule(p.DB)
+		openapiCleanup = func(ctx context.Context) {
+			_ = openapiMod.UseCase.Close(ctx)
+		}
+		cleanup = openapiCleanup
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher)
 
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
-		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher)
+		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
+		tradeCleanup = tradeapi.StartLifecycleScanner(tradeMod)
+		cleanup = func(ctx context.Context) {
+			tradeCleanup(ctx)
+			openapiCleanup(ctx)
+		}
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, openapiMod.UseCase)
@@ -132,7 +143,17 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		return nil, cleanup, err
 	}
 	if mailMod != nil {
-		cleanup = mailMod.Start(context.Background())
+		mailCleanup := mailMod.Start(context.Background())
+		cleanup = func(ctx context.Context) {
+			tradeCleanup(ctx)
+			openapiCleanup(ctx)
+			mailCleanup(ctx)
+		}
+	} else {
+		cleanup = func(ctx context.Context) {
+			tradeCleanup(ctx)
+			openapiCleanup(ctx)
+		}
 	}
 
 	// Serve embedded frontend SPA if available

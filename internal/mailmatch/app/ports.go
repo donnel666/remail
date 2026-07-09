@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
@@ -23,7 +24,7 @@ const (
 	purchaseReadLimit          = 30
 	messageScanLimit           = 120
 	defaultFetchMaxAttempts    = 3
-	staleFetchRunningThreshold = 10 * time.Minute
+	staleFetchRunningThreshold = 90 * time.Second
 )
 
 type MailRuleType string
@@ -190,7 +191,7 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	if err != nil {
 		return nil, nil, err
 	}
-	if !hasSnapshot {
+	if shouldScheduleReadFetch(*scope, hasSnapshot) {
 		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
 			OrderNo: scope.OrderNo,
 			UserID:  userID,
@@ -213,7 +214,7 @@ func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo stri
 	if err != nil {
 		return nil, nil, err
 	}
-	if !hasSnapshot {
+	if shouldScheduleReadFetch(*scope, hasSnapshot) {
 		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
 			OrderNo:      scope.OrderNo,
 			Purpose:      domain.FetchPurposeAutoRefresh,
@@ -222,6 +223,10 @@ func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo stri
 		})
 	}
 	return items, state, nil
+}
+
+func shouldScheduleReadFetch(scope OrderScope, hasSnapshot bool) bool {
+	return !(scope.ServiceMode == "code" && hasSnapshot)
 }
 
 func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, bool, error) {
@@ -937,9 +942,32 @@ func recipientKind(scope OrderScope) string {
 	}
 }
 
-func regexMatch(pattern string, value string) bool {
+type cachedRegex struct {
+	re *regexp.Regexp
+}
+
+var regexCache sync.Map
+
+func compileCachedRegex(pattern string) *regexp.Regexp {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+	if cached, ok := regexCache.Load(pattern); ok {
+		return cached.(cachedRegex).re
+	}
 	re, err := regexp.Compile(pattern)
+	item := cachedRegex{re: re}
 	if err != nil {
+		item.re = nil
+	}
+	actual, _ := regexCache.LoadOrStore(pattern, item)
+	return actual.(cachedRegex).re
+}
+
+func regexMatch(pattern string, value string) bool {
+	re := compileCachedRegex(pattern)
+	if re == nil {
 		return false
 	}
 	return re.MatchString(value)
@@ -951,8 +979,8 @@ func extractByBodyRules(body string, patterns []string) string {
 		return ""
 	}
 	for _, pattern := range patterns {
-		re, err := regexp.Compile(strings.TrimSpace(pattern))
-		if err != nil {
+		re := compileCachedRegex(pattern)
+		if re == nil {
 			continue
 		}
 		matches := re.FindStringSubmatch(body)

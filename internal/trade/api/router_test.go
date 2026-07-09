@@ -16,11 +16,17 @@ func (noSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.R
 	return 0, "", "", false
 }
 
+type noPermissionChecker struct{}
+
+func (noPermissionChecker) Check(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
+	return false, nil
+}
+
 func TestConsoleOrderRoutesIgnoreAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	RegisterRoutes(r.Group("/v1"), nil, noSessionFetcher{})
+	RegisterRoutes(r.Group("/v1"), nil, noSessionFetcher{}, noPermissionChecker{})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/orders", nil)

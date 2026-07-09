@@ -17,7 +17,7 @@ const (
 
 	validationQueueName             = "default"
 	validationTaskMaxRetry          = 3
-	validationTaskTimeout           = 3 * time.Minute
+	validationTaskTimeout           = 15 * time.Minute
 	validationDispatcherTaskTimeout = 30 * time.Second
 )
 
@@ -42,6 +42,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 		ctx,
 		asynqTask,
 		asynq.Queue(validationQueueName),
+		asynq.TaskID(fmt.Sprintf("%s:%d", TypeResourceValidation, task.JobID)),
 		asynq.MaxRetry(validationTaskMaxRetry),
 		asynq.Timeout(validationTaskTimeout),
 	)

@@ -264,6 +264,7 @@ func (r *ResourceValidationRepo) MarkRunning(ctx context.Context, id uint) (bool
 		).
 		Updates(map[string]interface{}{
 			"status":          string(domain.ResourceValidationRunning),
+			"attempts":        gorm.Expr("CASE WHEN status = ? AND updated_at < ? THEN attempts + 1 ELSE attempts END", string(domain.ResourceValidationRunning), staleBefore),
 			"last_safe_error": "",
 			"started_at":      now,
 			"updated_at":      now,

@@ -154,3 +154,10 @@ func TestScopeReadableUsesPurchaseActivationWindowBeforeWarranty(t *testing.T) {
 	require.True(t, scopeReadable(activated, func() time.Time { return receiveUntil.Add(time.Second) }))
 	require.False(t, scopeReadable(activated, func() time.Time { return afterSaleUntil.Add(time.Second) }))
 }
+
+func TestShouldScheduleReadFetchOnlySuppressesCodeSnapshots(t *testing.T) {
+	require.False(t, shouldScheduleReadFetch(OrderScope{ServiceMode: "code"}, true))
+	require.True(t, shouldScheduleReadFetch(OrderScope{ServiceMode: "code"}, false))
+	require.True(t, shouldScheduleReadFetch(OrderScope{ServiceMode: "purchase"}, true))
+	require.True(t, shouldScheduleReadFetch(OrderScope{ServiceMode: "purchase"}, false))
+}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
@@ -148,6 +149,84 @@ func (h *Handler) PostOrderArchive(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+}
+
+func (h *Handler) PostAdminOrderRefund(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	var req AdminOrderCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund", c.Param("orderNo"), "failure", "Order refund failed.")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	order, err := h.mod.UseCase.AdminRefundOrder(c.Request.Context(), tradeapp.AdminOrderCommandRequest{
+		OrderNo:        c.Param("orderNo"),
+		Reason:         req.Reason,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c),
+		OperatorUserID: operatorUserID,
+	})
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund", c.Param("orderNo"), "failure", "Order refund failed.")
+		writeTradeError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund", c.Param("orderNo"), "success", "Order refunded.")
+	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+}
+
+func (h *Handler) PostAdminOrderTerminate(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	var req AdminOrderCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.terminate", c.Param("orderNo"), "failure", "Order termination failed.")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	order, err := h.mod.UseCase.AdminTerminateOrder(c.Request.Context(), tradeapp.AdminOrderCommandRequest{
+		OrderNo:        c.Param("orderNo"),
+		Reason:         req.Reason,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c),
+		OperatorUserID: operatorUserID,
+	})
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.terminate", c.Param("orderNo"), "failure", "Order termination failed.")
+		writeTradeError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "trade.order.terminate", c.Param("orderNo"), "success", "Order terminated.")
+	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+}
+
+func (h *Handler) writeOperationLog(c *gin.Context, operatorUserID uint, operationType, resourceID, result, summary string) error {
+	log := h.operationLog(c, operatorUserID, operationType, resourceID, result, summary)
+	if log == nil {
+		return nil
+	}
+	return h.mod.OperationLogs.Create(c.Request.Context(), log)
+}
+
+func (h *Handler) operationLog(c *gin.Context, operatorUserID uint, operationType, resourceID, result, summary string) *governancedomain.OperationLog {
+	if h.mod == nil || h.mod.OperationLogs == nil {
+		return nil
+	}
+	return &governancedomain.OperationLog{
+		OperatorUserID: operatorUserID,
+		OperationType:  operationType,
+		ResourceType:   "order",
+		ResourceID:     strings.TrimSpace(resourceID),
+		Path:           c.FullPath(),
+		Result:         result,
+		SafeSummary:    summary,
+		RequestID:      middleware.GetRequestID(c),
+	}
 }
 
 func currentUserID(c *gin.Context) (uint, bool) {

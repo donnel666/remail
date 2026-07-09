@@ -11,6 +11,8 @@ import (
 	billingdomain "github.com/donnel666/remail/internal/billing/domain"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
+	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
@@ -19,20 +21,49 @@ import (
 )
 
 type Module struct {
-	UseCase *tradeapp.UseCase
+	UseCase       *tradeapp.UseCase
+	OperationLogs governanceapp.OperationLogPort
 }
 
 func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet *billingapp.WalletUseCase, alloc *allocapp.UseCase, tokens *openapiapp.UseCase) *Module {
 	repo := infra.NewRepo(db)
+	systemLogs := governanceinfra.NewSystemLogRepo(db)
+	operationLogs := governanceinfra.NewOperationLogRepo(db)
+	uc := tradeapp.NewUseCase(
+		repo,
+		coreOrderingAdapter{projects: coreProjects},
+		billingWalletAdapter{wallet: billingWallet},
+		allocationAdapter{alloc: alloc},
+		orderTokenAdapter{tokens: tokens},
+	)
+	uc.SetOrderSnapshotPort(orderSnapshotAdapter{db: db})
+	uc.SetSystemLogPort(systemLogs)
 	return &Module{
-		UseCase: tradeapp.NewUseCase(
-			repo,
-			coreOrderingAdapter{projects: coreProjects},
-			billingWalletAdapter{wallet: billingWallet},
-			allocationAdapter{alloc: alloc},
-			orderTokenAdapter{tokens: tokens},
-		),
+		UseCase:       uc,
+		OperationLogs: operationLogs,
 	}
+}
+
+type orderSnapshotAdapter struct {
+	db *gorm.DB
+}
+
+func (a orderSnapshotAdapter) FindOrderSnapshotProof(ctx context.Context, orderNo string) (*tradeapp.OrderSnapshotProof, error) {
+	var row struct {
+		ReceivedAt time.Time `gorm:"column:received_at"`
+	}
+	err := a.db.WithContext(ctx).
+		Table("mailmatch_order_snapshots").
+		Select("received_at").
+		Where("order_no = ?", orderNo).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &tradeapp.OrderSnapshotProof{ReceivedAt: row.ReceivedAt}, nil
 }
 
 type coreOrderingAdapter struct {

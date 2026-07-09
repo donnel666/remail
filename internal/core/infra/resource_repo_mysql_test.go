@@ -1744,6 +1744,66 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	require.Empty(t, abnormalSafeError)
 }
 
+func TestResourceValidationRepoMarkRunningIncrementsStaleRunningAttemptMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		"supplier",
+	).Error)
+
+	resource := &domain.MicrosoftResource{
+		EmailAddress: "validation-stale@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, resource))
+
+	created, err := validationRepo.CreateWithLog(ctx, &domain.ResourceValidation{
+		ResourceID:   resource.ID,
+		ResourceType: domain.ResourceTypeMicrosoft,
+		OwnerUserID:  1,
+		Status:       domain.ResourceValidationQueued,
+		Attempts:     1,
+		MaxAttempts:  3,
+		RequestID:    "req-stale-validation",
+		Path:         "/v1/resources/:resourceId/validate",
+	}, nil)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	var jobID uint
+	require.NoError(t, db.Raw(
+		"SELECT id FROM resource_validation_jobs WHERE resource_id = ?",
+		resource.ID,
+	).Row().Scan(&jobID))
+	staleUpdatedAt := time.Now().UTC().Add(-11 * time.Minute)
+	require.NoError(t, db.Exec(
+		"UPDATE resource_validation_jobs SET status = ?, attempts = ?, updated_at = ? WHERE id = ?",
+		string(domain.ResourceValidationRunning),
+		1,
+		staleUpdatedAt,
+		jobID,
+	).Error)
+
+	claimed, err := validationRepo.MarkRunning(ctx, jobID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	var attempts int
+	require.NoError(t, db.Raw(
+		"SELECT attempts FROM resource_validation_jobs WHERE id = ?",
+		jobID,
+	).Row().Scan(&attempts))
+	require.Equal(t, 2, attempts)
+}
+
 func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCreateMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)

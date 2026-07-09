@@ -27,8 +27,8 @@ type Repository interface {
 	FindAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error)
 	UpdateAPIKey(ctx context.Context, cmd UpdateAPIKeyCommand) (*domain.APIKey, error)
 	DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error
-	AcquireAPIKeyRequest(ctx context.Context, plain string, now time.Time) (*domain.APIKey, error)
-	ReleaseAPIKeyRequest(ctx context.Context, keyID uint) error
+	FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.APIKey, error)
+	AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*domain.OrderToken, error)
@@ -37,6 +37,7 @@ type Repository interface {
 	DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error
 
 	CreateAPILog(ctx context.Context, cmd CreateAPILogCommand) error
+	CreateAPILogs(ctx context.Context, commands []CreateAPILogCommand) error
 }
 
 type CreateAPIKeyRequest struct {
@@ -138,15 +139,18 @@ type IssueOrderTokenCommand struct {
 }
 
 type UseCase struct {
-	repo Repository
-	now  func() time.Time
+	repo    Repository
+	runtime *apiKeyRuntime
+	now     func() time.Time
 }
 
 func NewUseCase(repo Repository) *UseCase {
-	return &UseCase{
+	uc := &UseCase{
 		repo: repo,
 		now:  func() time.Time { return time.Now().UTC() },
 	}
+	uc.runtime = newAPIKeyRuntime(repo, uc.now)
+	return uc
 }
 
 func (uc *UseCase) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (*domain.APIKey, error) {
@@ -195,14 +199,24 @@ func (uc *UseCase) ListAPIKeys(ctx context.Context, userID uint, offset, limit i
 	if offset < 0 {
 		offset = 0
 	}
-	return uc.repo.ListAPIKeys(ctx, userID, offset, limit)
+	items, total, err := uc.repo.ListAPIKeys(ctx, userID, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	uc.runtime.overlayKeys(items)
+	return items, total, nil
 }
 
 func (uc *UseCase) GetAPIKeyUsage(ctx context.Context, userID uint) (*APIKeyUsage, error) {
 	if userID == 0 {
 		return nil, domain.ErrInvalidCredentialFilter
 	}
-	return uc.repo.GetAPIKeyUsage(ctx, userID)
+	usage, err := uc.repo.GetAPIKeyUsage(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	usage.RequestCount += uc.runtime.quotaDeltaForUser(userID)
+	return usage, nil
 }
 
 func (uc *UseCase) GetAPIKey(ctx context.Context, userID uint, keyID uint) (*domain.APIKey, error) {
@@ -229,14 +243,36 @@ func (uc *UseCase) UpdateAPIKey(ctx context.Context, req UpdateAPIKeyRequest) (*
 	if req.QuotaSet && req.QuotaLimit != nil && *req.QuotaLimit <= 0 {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	return uc.repo.UpdateAPIKey(ctx, UpdateAPIKeyCommand(req))
+	if err := uc.runtime.flush(ctx); err != nil {
+		return nil, err
+	}
+	key, err := uc.repo.UpdateAPIKey(ctx, UpdateAPIKeyCommand(req))
+	if err == nil {
+		uc.runtime.invalidateAll()
+	}
+	return key, err
 }
 
 func (uc *UseCase) DeleteAPIKey(ctx context.Context, userID uint, keyID uint) error {
 	if userID == 0 || keyID == 0 {
 		return domain.ErrInvalidAPIKey
 	}
-	return uc.repo.DeleteAPIKey(ctx, userID, keyID, uc.now())
+	if err := uc.runtime.flush(ctx); err != nil {
+		return err
+	}
+	err := uc.repo.DeleteAPIKey(ctx, userID, keyID, uc.now())
+	if err == nil {
+		uc.runtime.invalidateAll()
+	}
+	return err
+}
+
+func (uc *UseCase) FlushRuntime(ctx context.Context) error {
+	return uc.runtime.flush(ctx)
+}
+
+func (uc *UseCase) Close(ctx context.Context) error {
+	return uc.runtime.close(ctx)
 }
 
 func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKeyAuthResult, error) {
@@ -244,7 +280,7 @@ func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKe
 	if plain == "" {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	key, err := uc.repo.AcquireAPIKeyRequest(ctx, plain, uc.now())
+	key, err := uc.runtime.begin(ctx, plain)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +291,8 @@ func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, keyID uint) error {
 	if keyID == 0 {
 		return nil
 	}
-	return uc.repo.ReleaseAPIKeyRequest(ctx, keyID)
+	uc.runtime.finish(keyID)
+	return nil
 }
 
 func (uc *UseCase) IssueOrderToken(ctx context.Context, orderNo string, expireAt *time.Time) (*domain.OrderToken, error) {
@@ -331,7 +368,7 @@ func (uc *UseCase) LogAPIRequest(ctx context.Context, req LogAPIRequestRequest) 
 	if path == "" || method == "" {
 		return domain.ErrInvalidAPIKey
 	}
-	return uc.repo.CreateAPILog(ctx, CreateAPILogCommand{
+	return uc.runtime.enqueueLog(CreateAPILogCommand{
 		PrincipalType:  truncate(strings.TrimSpace(req.PrincipalType), 32),
 		PrincipalID:    req.PrincipalID,
 		UserID:         req.UserID,

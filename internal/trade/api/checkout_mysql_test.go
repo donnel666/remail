@@ -22,6 +22,7 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
@@ -297,6 +298,243 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 	require.Equal(t, "released", allocation.Status)
 }
 
+func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-expired-code",
+		RequestID:      "req-expired-code",
+	})
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
+	past := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.Table("orders").
+		Where("order_no = ?", result.Order.OrderNo).
+		Updates(map[string]any{"receive_until": past, "after_sale_until": past}).Error)
+
+	expired, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired.CodeTimedOut)
+	require.Equal(t, 0, expired.Failed)
+
+	var order struct {
+		Status               string
+		RefundTxID           *uint
+		RefundAmount         string
+		ServiceCleanupStatus string
+	}
+	require.NoError(t, db.Table("orders").
+		Select("status, refund_tx_id, refund_amount, service_cleanup_status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusRefunded), order.Status)
+	require.NotNil(t, order.RefundTxID)
+	require.Equal(t, "1.00", order.RefundAmount)
+	require.Equal(t, "succeeded", order.ServiceCleanupStatus)
+
+	var allocationStatus string
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&allocationStatus).Error)
+	require.Equal(t, "released", allocationStatus)
+
+	var tokenEnabled bool
+	require.NoError(t, db.Table("order_tokens").
+		Select("enabled").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&tokenEnabled).Error)
+	require.False(t, tokenEnabled)
+
+	var refundCount int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, "refund", "order:"+result.Order.OrderNo).
+		Count(&refundCount).Error)
+	require.EqualValues(t, 1, refundCount)
+
+	replayed, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 0, replayed.CodeTimedOut)
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, "refund", "order:"+result.Order.OrderNo).
+		Count(&refundCount).Error)
+	require.EqualValues(t, 1, refundCount)
+}
+
+func TestExpireDueOrdersCompletesExpiredCodeWithSnapshotWithoutRefundMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-expired-code-snapshot",
+		RequestID:      "req-expired-code-snapshot",
+	})
+	require.NoError(t, err)
+	past := time.Now().UTC().Add(-time.Minute)
+	receivedAt := time.Now().UTC()
+	require.NoError(t, db.Table("orders").
+		Where("order_no = ?", result.Order.OrderNo).
+		Updates(map[string]any{"receive_until": past, "after_sale_until": past}).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_snapshots(order_no, sender, recipient, received_at, subject, body, verification_code)
+VALUES (?, 'noreply@example.com', ?, ?, 'Code', 'Your code is 123456', '123456')`,
+		result.Order.OrderNo,
+		result.Order.DeliveryEmail,
+		receivedAt,
+	).Error)
+
+	expired, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired.CodeTimedOut)
+	require.Equal(t, 0, expired.Failed)
+
+	var order struct {
+		Status       string
+		RefundTxID   *uint
+		AfterSale    *time.Time `gorm:"column:after_sale_until"`
+		RefundAmount string
+	}
+	require.NoError(t, db.Table("orders").
+		Select("status, refund_tx_id, refund_amount, after_sale_until").
+		Where("order_no = ?", result.Order.OrderNo).
+		Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusCompleted), order.Status)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "0.00", order.RefundAmount)
+	require.NotNil(t, order.AfterSale)
+	require.InDelta(t, int64(time.Hour.Seconds()), int64(order.AfterSale.Sub(receivedAt).Seconds()), 1)
+
+	var tokenExpireAt *time.Time
+	require.NoError(t, db.Table("order_tokens").
+		Select("expire_at").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&tokenExpireAt).Error)
+	require.NotNil(t, tokenExpireAt)
+	require.InDelta(t, int64(time.Hour.Seconds()), int64(tokenExpireAt.Sub(receivedAt).Seconds()), 1)
+
+	var refundCount int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, "refund", "order:"+result.Order.OrderNo).
+		Count(&refundCount).Error)
+	require.EqualValues(t, 0, refundCount)
+}
+
+func TestExpireDueOrdersCompletesExpiredPurchaseWithoutRefundOrReleaseMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "purchase",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-expired-purchase",
+		RequestID:      "req-expired-purchase",
+	})
+	require.NoError(t, err)
+	past := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.Table("orders").
+		Where("order_no = ?", result.Order.OrderNo).
+		Updates(map[string]any{"receive_until": past}).Error)
+
+	expired, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired.PurchaseActivationCompleted)
+	require.Equal(t, 0, expired.Failed)
+
+	var order struct {
+		Status               string
+		RefundTxID           *uint
+		ServiceCleanupStatus string
+	}
+	require.NoError(t, db.Table("orders").
+		Select("status, refund_tx_id, service_cleanup_status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusCompleted), order.Status)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "none", order.ServiceCleanupStatus)
+
+	var allocationStatus string
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&allocationStatus).Error)
+	require.Equal(t, "allocated", allocationStatus)
+
+	var tokenEnabled bool
+	require.NoError(t, db.Table("order_tokens").
+		Select("enabled").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&tokenEnabled).Error)
+	require.True(t, tokenEnabled)
+}
+
+func TestAdminOrderRefundRouteWritesOperationLogMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-admin-refund",
+		RequestID:      "req-admin-refund-order",
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	RegisterRoutes(router.Group("/v1"), newTradeModule(db), fixedTradeSessionFetcher{}, allowTradePermissionChecker{})
+
+	body := strings.NewReader(`{"reason":"manual support refund"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/orders/"+result.Order.OrderNo+"/refund", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "admin-refund-idem")
+	req.Header.Set(middleware.CSRFHeaderName, "csrf")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "sid-admin"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var logCount int64
+	require.NoError(t, db.Table("operation_logs").
+		Where("operator_user_id = ? AND operation_type = ? AND resource_id = ? AND result = ?", 1, "trade.order.refund", result.Order.OrderNo, "success").
+		Count(&logCount).Error)
+	require.EqualValues(t, 1, logCount)
+}
+
 func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
@@ -352,6 +590,7 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.Len(t, listResp.Items, 1)
 	require.Empty(t, listResp.Items[0].ServiceToken)
 
+	require.NoError(t, openapiMod.UseCase.FlushRuntime(context.Background()))
 	var apiLogs []struct {
 		Path           string
 		Method         string
@@ -648,6 +887,7 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
 	require.Equal(t, 1, successes)
 	require.Equal(t, attempts-1, quotaExceeded)
 
+	require.NoError(t, openapiMod.UseCase.FlushRuntime(context.Background()))
 	var quotaUsed int64
 	require.NoError(t, db.Table("api_keys").Select("quota_used").Where("id = ?", concurrentKey.ID).Scan(&quotaUsed).Error)
 	require.EqualValues(t, 1, quotaUsed)
@@ -801,6 +1041,18 @@ func registerOpenOrderRoute(router *gin.Engine, mod *Module, openapiMod *openapi
 	open.POST("/orders", h.PostOrder)
 	open.GET("/orders", h.GetOrders)
 	open.GET("/orders/:orderNo", h.GetOrder)
+}
+
+type fixedTradeSessionFetcher struct{}
+
+func (fixedTradeSessionFetcher) FetchSession(context.Context, string) (uint, iamdomain.Role, string, bool) {
+	return 1, iamdomain.RoleAdmin, "admin@test.local", true
+}
+
+type allowTradePermissionChecker struct{}
+
+func (allowTradePermissionChecker) Check(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
+	return true, nil
 }
 
 func newTradeModule(db *gorm.DB) *Module {

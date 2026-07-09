@@ -76,6 +76,16 @@ function filterProducts(
 
 type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
 
+const checkoutBatchStorageKey = "remail.workbench.checkoutBatch";
+const checkoutBatchConcurrency = 5;
+
+interface CheckoutBatchState {
+  batchId: string;
+  quantity: number;
+  signature: string;
+  succeededIndexes: number[];
+}
+
 function toWorkbenchProject(
   project: ProjectItem,
   inventory?: ProjectInventoryTotalResponse
@@ -233,6 +243,18 @@ function toWorkbenchMessages(items: OrderMailResponse["items"]): WorkbenchMessag
   });
 }
 
+function messageTimestamp(value: string) {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function latestVerificationCode(messages: WorkbenchMessage[]) {
+  return [...messages]
+    .filter((item) => item.verificationCode)
+    .sort((a, b) => messageTimestamp(b.receivedAt) - messageTimestamp(a.receivedAt))[0]
+    ?.verificationCode;
+}
+
 function orderServiceState(order: OrderResponse): ServiceState {
   if (order.status === "completed") {
     return order.serviceMode === "code" ? "code_received" : "read_expired";
@@ -272,6 +294,93 @@ function clampQuantity(value: number, inventory: number) {
 
 function nextIdempotencyKey() {
   return generateIdempotencyKey();
+}
+
+function checkoutBatchSignature(input: {
+  inventoryScope: InventoryScope;
+  productId: string;
+  projectId: string;
+  quantity: number;
+  serviceMode: ServiceMode;
+  suffix: string;
+}) {
+  return [
+    input.serviceMode,
+    input.inventoryScope,
+    input.projectId,
+    input.productId,
+    input.suffix,
+    input.quantity,
+  ].join("|");
+}
+
+function sanitizeSucceededIndexes(value: unknown, quantity: number) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value.filter(
+        (item): item is number =>
+          Number.isInteger(item) && item >= 0 && item < quantity
+      )
+    )
+  ).sort((a, b) => a - b);
+}
+
+function loadCheckoutBatchState(
+  signature: string,
+  quantity: number
+): CheckoutBatchState {
+  const fresh = {
+    batchId: nextIdempotencyKey(),
+    quantity,
+    signature,
+    succeededIndexes: [],
+  };
+  try {
+    const raw = globalThis.sessionStorage?.getItem(checkoutBatchStorageKey);
+    if (!raw) return fresh;
+    const parsed = JSON.parse(raw) as Partial<CheckoutBatchState>;
+    if (
+      parsed.signature !== signature ||
+      parsed.quantity !== quantity ||
+      typeof parsed.batchId !== "string" ||
+      parsed.batchId.trim() === ""
+    ) {
+      return fresh;
+    }
+    return {
+      batchId: parsed.batchId,
+      quantity,
+      signature,
+      succeededIndexes: sanitizeSucceededIndexes(parsed.succeededIndexes, quantity),
+    };
+  } catch {
+    return fresh;
+  }
+}
+
+function saveCheckoutBatchState(state: CheckoutBatchState) {
+  try {
+    globalThis.sessionStorage?.setItem(
+      checkoutBatchStorageKey,
+      JSON.stringify(state)
+    );
+  } catch {
+    // The batch is still protected by per-request idempotency keys in memory.
+  }
+}
+
+function clearCheckoutBatchState(batchId: string) {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(checkoutBatchStorageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<CheckoutBatchState>;
+    if (parsed.batchId === batchId) {
+      globalThis.sessionStorage?.removeItem(checkoutBatchStorageKey);
+    }
+  } catch {
+    globalThis.sessionStorage?.removeItem(checkoutBatchStorageKey);
+  }
 }
 
 function apiErrorMessage(err: unknown, fallback: string) {
@@ -469,6 +578,17 @@ export default function Dashboard() {
     if (requestedQuantity <= 0) return;
     setCreating(true);
     const createdOrders: OrderResponse[] = [];
+    const signature = checkoutBatchSignature({
+      inventoryScope,
+      productId: selectedProduct.id,
+      projectId: selectedProject.id,
+      quantity: requestedQuantity,
+      serviceMode,
+      suffix: selectedProduct.emailSuffix,
+    });
+    const batch = loadCheckoutBatchState(signature, requestedQuantity);
+    const succeededIndexes = new Set(batch.succeededIndexes);
+    saveCheckoutBatchState(batch);
     let createdOrdersMerged = false;
     const mergeCreatedOrders = () => {
       if (createdOrdersMerged || createdOrders.length === 0) return;
@@ -482,25 +602,61 @@ export default function Dashboard() {
       setSelectedOrderNo(nextOrders[0]?.orderNo ?? "");
     };
     try {
-      for (let index = 0; index < requestedQuantity; index += 1) {
-        createdOrders.push(
-          await createOrder(
-            {
-              emailSuffix: selectedProduct.emailSuffix || undefined,
-              projectId: Number(selectedProject.id),
-              productId: Number(selectedProduct.productId),
-            },
-            {
-              idempotencyKey: nextIdempotencyKey(),
-              serviceMode,
-              supply: inventoryScope,
-            }
-          )
+      const missingIndexes = Array.from(
+        { length: requestedQuantity },
+        (_, index) => index
+      ).filter((index) => !succeededIndexes.has(index));
+      const failures: unknown[] = [];
+      for (
+        let start = 0;
+        start < missingIndexes.length && failures.length === 0;
+        start += checkoutBatchConcurrency
+      ) {
+        const chunk = missingIndexes.slice(start, start + checkoutBatchConcurrency);
+        const settled = await Promise.allSettled(
+          chunk.map(async (index) => ({
+            index,
+            order: await createOrder(
+              {
+                emailSuffix: selectedProduct.emailSuffix || undefined,
+                projectId: Number(selectedProject.id),
+                productId: Number(selectedProduct.productId),
+              },
+              {
+                idempotencyKey: `${batch.batchId}:${index}`,
+                serviceMode,
+                supply: inventoryScope,
+              }
+            ),
+          }))
         );
+        for (const item of settled) {
+          if (item.status === "fulfilled") {
+            createdOrders.push(item.value.order);
+            succeededIndexes.add(item.value.index);
+            batch.succeededIndexes = [...succeededIndexes].sort((a, b) => a - b);
+            saveCheckoutBatchState(batch);
+          } else {
+            failures.push(item.reason);
+          }
+        }
+      }
+      if (succeededIndexes.size >= requestedQuantity) {
+        clearCheckoutBatchState(batch.batchId);
+        mergeCreatedOrders();
+        Toast.success(t("Order created."));
+        void refreshOrders();
+        void loadProjectInventory(selectedProject.id);
+        return;
       }
       mergeCreatedOrders();
-      Toast.success(t("Order created."));
+      void refreshOrders();
       void loadProjectInventory(selectedProject.id);
+      const firstFailure = failures[0];
+      Toast.error(
+        `${apiErrorMessage(firstFailure, t("An unexpected error occurred."))} (${succeededIndexes.size}/${requestedQuantity})`
+      );
+      return;
     } catch (err) {
       if (createdOrders.length > 0) {
         mergeCreatedOrders();
@@ -525,7 +681,7 @@ export default function Dashboard() {
       }
       const result = await readPickupMail(target.deliveryEmail, target.token);
       const messages = toWorkbenchMessages(result.items);
-      const latestCode = messages.find((item) => item.verificationCode)?.verificationCode;
+      const latestCode = latestVerificationCode(messages);
       const lastFetchedAt =
         result.fetch?.lastReceivedAt ??
         result.fetch?.lastSuccessAt ??
@@ -546,7 +702,7 @@ export default function Dashboard() {
                 ...(refreshedDetail ?? item),
                 messages,
                 lastFetchedAt,
-                verificationCode: latestCode,
+                verificationCode: latestCode ?? item.verificationCode,
                 serviceState: latestCode
                   ? target.serviceMode === "code"
                     ? "code_received"
