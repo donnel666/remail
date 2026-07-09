@@ -10,7 +10,7 @@ import (
 
 	"github.com/donnel666/remail/internal/billing/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	"github.com/google/uuid"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 type WalletRepository interface {
@@ -429,7 +429,7 @@ func normalizeCardKeys(values []string) []string {
 func generateCardKeys(count int) []string {
 	keys := make([]string, 0, count)
 	for len(keys) < count {
-		keys = append(keys, "RM-"+strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")))
+		keys = append(keys, "RM-"+platform.NewUUIDV4CompactUpper())
 	}
 	return keys
 }

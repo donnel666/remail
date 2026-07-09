@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/openapi/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
@@ -346,11 +346,7 @@ func (uc *UseCase) LogAPIRequest(ctx context.Context, req LogAPIRequestRequest) 
 }
 
 func nextCredential(prefix string) string {
-	var raw [24]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		panic(fmt.Sprintf("credential entropy unavailable: %v", err))
-	}
-	return prefix + strings.ToLower(hex.EncodeToString(raw[:]))
+	return prefix + platform.NewUUIDV4String()
 }
 
 func credentialPrefix(plain string) string {

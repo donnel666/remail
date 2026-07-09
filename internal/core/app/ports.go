@@ -12,7 +12,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	"github.com/google/uuid"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 // EmailResourceRepository defines the persistence contract for email resources.
@@ -194,7 +194,7 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 	now := time.Now().UTC()
 	importID := strings.TrimSpace(requestID)
 	if importID == "" {
-		importID = uuid.NewString()
+		importID = platform.NewUUIDV7String()
 	}
 	sourceObjectKey := importObjectKey("source", ownerUserID, now, importID, ".txt")
 	storedSource, err := uc.files.SavePrivate(ctx, governancedomain.PrivateFile{
@@ -257,7 +257,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	now := time.Now().UTC()
 	importID := strings.TrimSpace(task.RequestID)
 	if importID == "" {
-		importID = uuid.NewString()
+		importID = platform.NewUUIDV7String()
 	}
 	errorStrategy, ok := domain.NormalizeImportErrorStrategy(string(task.ErrorStrategy))
 	if !ok {
@@ -607,7 +607,7 @@ func safeObjectSegment(value string) string {
 		}
 	}
 	if b.Len() == 0 {
-		return uuid.NewString()
+		return platform.NewUUIDV7String()
 	}
 	return b.String()
 }

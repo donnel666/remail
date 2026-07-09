@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/trade/domain"
-	"github.com/google/uuid"
 )
 
 type OrderingQuote struct {
@@ -530,5 +530,5 @@ func orderAllowsServiceToken(status domain.OrderStatus) bool {
 }
 
 func nextOrderNo() string {
-	return "OR" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+	return "OR" + platform.NewUUIDV7CompactUpper()
 }

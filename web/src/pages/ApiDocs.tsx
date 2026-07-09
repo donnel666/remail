@@ -20,12 +20,12 @@ const developmentFallbackApiKeys = [
   {
     enabled: true,
     name: "主账户开放接口密钥",
-    token: "rk-7q9m2x4n8p6v1c3b5d0a",
+    token: "rk-550e8400-e29b-41d4-a716-446655440000",
   },
   {
     enabled: true,
     name: "订单服务专用密钥",
-    token: "rk-4h8s1k6p9t2w5y7m3c0e",
+    token: "rk-3d813cbb-47fb-42ba-91df-831e1593ac29",
   },
 ];
 

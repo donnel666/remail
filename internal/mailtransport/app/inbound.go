@@ -11,7 +11,7 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
-	"github.com/google/uuid"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const inboundProcessingStaleAge = 2 * time.Minute
@@ -89,7 +89,7 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 	}
 
 	now := s.now().UTC()
-	objectKey := inboundObjectKey(now, uuid.NewString())
+	objectKey := inboundObjectKey(now, platform.NewUUIDV7String())
 	stored, err := s.saveRawMessage(ctx, objectKey, message)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))

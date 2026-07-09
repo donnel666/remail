@@ -16,7 +16,6 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -150,7 +149,7 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
 		db := tx.WithContext(ctx)
-		name := "billing_sp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		name := "billing_sp_" + platform.NewUUIDV7CompactString()
 		if err := db.SavePoint(name).Error; err != nil {
 			return fmt.Errorf("create billing savepoint: %w", err)
 		}
@@ -1028,7 +1027,7 @@ func normalizeDBMoney(value string) (string, error) {
 }
 
 func nextTransactionNo() string {
-	return "TX" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+	return "TX" + platform.NewUUIDV7CompactUpper()
 }
 
 func trimBizID(value string) string {

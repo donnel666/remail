@@ -13,7 +13,6 @@ import (
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -570,7 +569,7 @@ func ptrStatus(value domain.OrderStatus) *domain.OrderStatus {
 }
 
 func nextEventNo() string {
-	return "OE" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+	return "OE" + platform.NewUUIDV7CompactUpper()
 }
 
 func isDuplicateKeyError(err error) bool {

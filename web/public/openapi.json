@@ -169,7 +169,7 @@
           },
           "keyPrefix": {
             "type": "string",
-            "example": "rk-7q9m2x4n8p"
+            "example": "rk-550e8400-e2"
           },
           "enabled": {
             "type": "boolean",
@@ -685,7 +685,7 @@
           },
           "serviceToken": {
             "type": "string",
-            "example": "st_7jr3kfk9k2d7n4m1p6q8r0t2v"
+            "example": "st_550e8400-e29b-41d4-a716-446655440000"
           },
           "archivedAt": {
             "type": [

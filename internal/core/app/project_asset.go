@@ -10,7 +10,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	"github.com/google/uuid"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
@@ -42,7 +42,7 @@ func (uc *ProjectAssetUseCase) SaveLogo(ctx context.Context, fileName string, co
 	if !ok {
 		return "", domain.ErrInvalidProject
 	}
-	objectKey := projectLogoPrefix + uuid.NewString() + extension
+	objectKey := projectLogoPrefix + platform.NewUUIDV7String() + extension
 	stored, err := uc.files.SavePrivate(ctx, governancedomain.PrivateFile{
 		ObjectKey:    objectKey,
 		FileName:     cleanProjectLogoFileName(fileName, extension),
