@@ -354,8 +354,8 @@ jobs:
           context: .
           push: false
           tags: remail:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=remail-docker
+          cache-to: type=gha,mode=min,scope=remail-docker
 
   image:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -395,8 +395,8 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.image.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=remail-docker
+          cache-to: type=gha,mode=min,scope=remail-docker
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
