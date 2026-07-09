@@ -404,7 +404,7 @@ func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error)
 	proxyURL = normalizeMailProxyURL(proxyURL)
 	dialer := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
 	if proxyURL == "" {
-		return dialer.DialContext(ctx, "tcp", outlookIMAPAddress)
+		return nil, fmt.Errorf("proxy url is required for outlook imap fallback")
 	}
 	parsed, err := url.Parse(proxyURL)
 	if err != nil || parsed.Host == "" {

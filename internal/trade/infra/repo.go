@@ -348,6 +348,53 @@ func (r *Repo) RefundOrder(ctx context.Context, cmd tradeapp.RefundOrderCommand)
 	return &order, changed, nil
 }
 
+func (r *Repo) AttachFailedOrderRefund(ctx context.Context, cmd tradeapp.RefundOrderCommand) (*domain.Order, bool, error) {
+	orderNo := strings.TrimSpace(cmd.OrderNo)
+	refundAmount := strings.TrimSpace(cmd.RefundAmount)
+	if orderNo == "" || cmd.RefundTxID == 0 || refundAmount == "" {
+		return nil, false, domain.ErrInvalidOrderRequest
+	}
+	operator := cmd.Operator
+	if operator == "" {
+		operator = domain.OperatorTypeSystem
+	}
+	var model OrderModel
+	changed := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		tx := r.dbFor(txCtx)
+		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
+			return err
+		}
+		current := domain.OrderStatus(model.Status)
+		if current != domain.OrderStatusFailed || model.DebitTxID == nil || model.RefundTxID != nil {
+			return domain.ErrOrderStateConflict
+		}
+		result := tx.Model(&OrderModel{}).
+			Where("order_no = ? AND status = ? AND debit_tx_id IS NOT NULL AND refund_tx_id IS NULL", orderNo, string(domain.OrderStatusFailed)).
+			Updates(map[string]any{
+				"refund_tx_id":  cmd.RefundTxID,
+				"refund_amount": refundAmount,
+				"version":       gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("attach failed order refund: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrderStateConflict
+		}
+		if err := tx.First(&model, "order_no = ?", orderNo).Error; err != nil {
+			return fmt.Errorf("reload failed refunded order: %w", err)
+		}
+		changed = true
+		return r.appendEvent(txCtx, tx, orderNo, "order.refund_retried", &current, ptrStatus(domain.OrderStatusFailed), operator, cmd.Reason)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	order := orderModelToDomain(model)
+	return &order, changed, nil
+}
+
 func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	var model OrderModel

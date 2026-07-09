@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Modal, Space, TextArea, Toast, Typography } from "@douyinfe/semi-ui";
 import type { TFunction } from "i18next";
 import { FileText, Upload } from "lucide-react";
@@ -42,7 +42,9 @@ export function ImportMicrosoftEmailsModal({
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [polling, setPolling] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const importPollAbortRef = useRef<AbortController | null>(null);
 
   const lines = useMemo(
     () =>
@@ -54,18 +56,33 @@ export function ImportMicrosoftEmailsModal({
   );
 
   const reset = () => {
+    importPollAbortRef.current?.abort();
+    importPollAbortRef.current = null;
     setMode("paste");
     setLifetimeType("long_lived");
     setErrorStrategy("skip");
     setText("");
     setFile(null);
     setBusy(false);
+    setPolling(false);
   };
 
   const close = () => {
+    if (busy && !polling) return;
+    if (polling) {
+      Toast.info(t("Resource import continues in background."));
+    }
     reset();
     onOpenChange(false);
   };
+
+  useEffect(() => {
+    if (open) return;
+    importPollAbortRef.current?.abort();
+    importPollAbortRef.current = null;
+    setPolling(false);
+    setBusy(false);
+  }, [open]);
 
   const switchButtonClass = (active: boolean) =>
     [
@@ -112,7 +129,12 @@ export function ImportMicrosoftEmailsModal({
         errorStrategy
       );
       Toast.success(t("Resource import accepted."));
-      const status = await waitForResourceImport(result.importId);
+      const controller = new AbortController();
+      importPollAbortRef.current = controller;
+      setPolling(true);
+      const status = await waitForResourceImport(result.importId, {
+        signal: controller.signal,
+      });
       if (status.status === "failed") {
         throw new Error(t(status.lastSafeError || "Resource import failed."));
       }
@@ -122,8 +144,11 @@ export function ImportMicrosoftEmailsModal({
       close();
       await onSuccess();
     } catch (error) {
+      if (isAbortError(error)) return;
       Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
     } finally {
+      importPollAbortRef.current = null;
+      setPolling(false);
       setBusy(false);
     }
   };
@@ -132,8 +157,8 @@ export function ImportMicrosoftEmailsModal({
     <Modal
       footer={
         <Space>
-          <Button disabled={busy} onClick={close} theme="outline">
-            {t("Cancel")}
+          <Button disabled={busy && !polling} onClick={close} theme="outline">
+            {polling ? t("Continue in background") : t("Cancel")}
           </Button>
           <Button
             disabled={mode === "paste" ? lines.length === 0 : !file}
@@ -272,6 +297,10 @@ function getImportWarningMessage(t: TFunction, safeMessage: string) {
     return t("Import skipped errors", { count: Number(match[1]) });
   }
   return t(safeMessage);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function getImportPreprocessFailureMessage(

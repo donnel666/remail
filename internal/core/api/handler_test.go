@@ -1262,6 +1262,19 @@ func (s *mockFileStore) DeletePrivate(_ context.Context, objectKey string) error
 	return nil
 }
 
+func (s *mockFileStore) ListPrivate(_ context.Context, prefix string, limit int) ([]governancedomain.PrivateObject, error) {
+	items := make([]governancedomain.PrivateObject, 0)
+	for objectKey := range s.files {
+		if strings.HasPrefix(objectKey, prefix) {
+			items = append(items, governancedomain.PrivateObject{ObjectKey: objectKey})
+		}
+	}
+	if limit > 0 && len(items) > limit {
+		return items[:limit], nil
+	}
+	return items, nil
+}
+
 type mockImportQueue struct {
 	tasks []coreapp.MicrosoftImportTask
 }

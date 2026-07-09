@@ -53,6 +53,25 @@ func (r *RetentionRepo) ListInboundMailObjectsBefore(ctx context.Context, before
 	return rows, nil
 }
 
+func (r *RetentionRepo) ListExistingInboundObjectKeys(ctx context.Context, objectKeys []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{}, len(objectKeys))
+	if len(objectKeys) == 0 {
+		return result, nil
+	}
+	var rows []string
+	if err := r.db.WithContext(ctx).
+		Table("inbound_mails").
+		Select("source_object_key").
+		Where("source_object_key IN ?", objectKeys).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list existing inbound object keys: %w", err)
+	}
+	for _, objectKey := range rows {
+		result[objectKey] = struct{}{}
+	}
+	return result, nil
+}
+
 func (r *RetentionRepo) DeleteInboundMailsByID(ctx context.Context, ids []uint64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil

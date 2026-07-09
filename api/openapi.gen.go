@@ -2370,6 +2370,15 @@ type Error struct {
 	RequestId string `json:"requestId"`
 }
 
+// ExpireOrdersResponse defines model for ExpireOrdersResponse.
+type ExpireOrdersResponse struct {
+	CodeCleaned                 int `json:"codeCleaned"`
+	CodeTimedOut                int `json:"codeTimedOut"`
+	Failed                      int `json:"failed"`
+	PurchaseActivationCompleted int `json:"purchaseActivationCompleted"`
+	PurchaseWarrantyCompleted   int `json:"purchaseWarrantyCompleted"`
+}
+
 // FetchStateResponse defines model for FetchStateResponse.
 type FetchStateResponse struct {
 	LastJobId          *int       `json:"lastJobId,omitempty"`
@@ -3602,8 +3611,29 @@ type PatchAdminInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminOrderTimeoutScanParams defines parameters for PostAdminOrderTimeoutScan.
+type PostAdminOrderTimeoutScanParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminOrderCleanupRetryParams defines parameters for PostAdminOrderCleanupRetry.
+type PostAdminOrderCleanupRetryParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminOrderRefundParams defines parameters for PostAdminOrderRefund.
 type PostAdminOrderRefundParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminOrderRefundRetryParams defines parameters for PostAdminOrderRefundRetry.
+type PostAdminOrderRefundRetryParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
@@ -4242,6 +4272,9 @@ type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
 
 // PostAdminOrderRefundJSONRequestBody defines body for PostAdminOrderRefund for application/json ContentType.
 type PostAdminOrderRefundJSONRequestBody = AdminOrderCommandRequest
+
+// PostAdminOrderRefundRetryJSONRequestBody defines body for PostAdminOrderRefundRetry for application/json ContentType.
+type PostAdminOrderRefundRetryJSONRequestBody = AdminOrderCommandRequest
 
 // PostAdminOrderTerminateJSONRequestBody defines body for PostAdminOrderTerminate for application/json ContentType.
 type PostAdminOrderTerminateJSONRequestBody = AdminOrderCommandRequest
@@ -4901,12 +4934,21 @@ type ServerInterface interface {
 	// Update invite
 	// (PATCH /v1/admin/invites/{code})
 	PatchAdminInvite(c *gin.Context, code string, params PatchAdminInviteParams)
+	// Run order timeout scan
+	// (POST /v1/admin/orders/timeouts/scan)
+	PostAdminOrderTimeoutScan(c *gin.Context, params PostAdminOrderTimeoutScanParams)
 	// Get allocation by order number
 	// (GET /v1/admin/orders/{orderNo}/allocations)
 	GetAdminOrderAllocation(c *gin.Context, orderNo string)
+	// Retry order service cleanup
+	// (POST /v1/admin/orders/{orderNo}/cleanup/retry)
+	PostAdminOrderCleanupRetry(c *gin.Context, orderNo string, params PostAdminOrderCleanupRetryParams)
 	// Refund one order
 	// (POST /v1/admin/orders/{orderNo}/refund)
 	PostAdminOrderRefund(c *gin.Context, orderNo string, params PostAdminOrderRefundParams)
+	// Retry compensation refund for a failed order
+	// (POST /v1/admin/orders/{orderNo}/refund/retry)
+	PostAdminOrderRefundRetry(c *gin.Context, orderNo string, params PostAdminOrderRefundRetryParams)
 	// Terminate one active order service
 	// (POST /v1/admin/orders/{orderNo}/terminate)
 	PostAdminOrderTerminate(c *gin.Context, orderNo string, params PostAdminOrderTerminateParams)
@@ -5682,6 +5724,51 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 	siw.Handler.PatchAdminInvite(c, code, params)
 }
 
+// PostAdminOrderTimeoutScan operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminOrderTimeoutScan(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminOrderTimeoutScanParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminOrderTimeoutScan(c, params)
+}
+
 // GetAdminOrderAllocation operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminOrderAllocation(c *gin.Context) {
 
@@ -5707,6 +5794,60 @@ func (siw *ServerInterfaceWrapper) GetAdminOrderAllocation(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminOrderAllocation(c, orderNo)
+}
+
+// PostAdminOrderCleanupRetry operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminOrderCleanupRetry(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminOrderCleanupRetryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminOrderCleanupRetry(c, orderNo, params)
 }
 
 // PostAdminOrderRefund operation middleware
@@ -5783,6 +5924,82 @@ func (siw *ServerInterfaceWrapper) PostAdminOrderRefund(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminOrderRefund(c, orderNo, params)
+}
+
+// PostAdminOrderRefundRetry operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminOrderRefundRetry(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "orderNo" -------------
+	var orderNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orderNo", c.Param("orderNo"), &orderNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter orderNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminOrderRefundRetryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminOrderRefundRetry(c, orderNo, params)
 }
 
 // PostAdminOrderTerminate operation middleware
@@ -10163,8 +10380,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
+	router.POST(options.BaseURL+"/v1/admin/orders/timeouts/scan", wrapper.PostAdminOrderTimeoutScan)
 	router.GET(options.BaseURL+"/v1/admin/orders/:orderNo/allocations", wrapper.GetAdminOrderAllocation)
+	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/cleanup/retry", wrapper.PostAdminOrderCleanupRetry)
 	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/refund", wrapper.PostAdminOrderRefund)
+	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/refund/retry", wrapper.PostAdminOrderRefundRetry)
 	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/terminate", wrapper.PostAdminOrderTerminate)
 	router.GET(options.BaseURL+"/v1/admin/permissions", wrapper.GetAdminPermissions)
 	router.POST(options.BaseURL+"/v1/admin/projects", wrapper.PostAdminProject)

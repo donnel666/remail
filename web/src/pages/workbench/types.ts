@@ -1,5 +1,7 @@
 export type InventoryScope = "private_first" | "public_only";
 export type FetchSource = "auto" | "manual";
+export type FetchResult = number | void;
+export type FetchHandler = (source: FetchSource) => FetchResult | Promise<FetchResult>;
 export type OrderStatus =
   | "pending_payment"
   | "paid"

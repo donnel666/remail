@@ -60,7 +60,9 @@ export default function Pickup() {
       if (loadSeqRef.current !== seq) return;
       setMessages(toPickupMessages(result.items));
     } catch (err) {
-      if (err instanceof IamApiError && err.status === 429) return;
+      if (err instanceof IamApiError && err.status === 429) {
+        return err.retryAfterSeconds;
+      }
       Toast.error(err instanceof Error ? err.message : t("An unexpected error occurred."));
     }
   }

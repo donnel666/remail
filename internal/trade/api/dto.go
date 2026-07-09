@@ -64,3 +64,11 @@ type OrderEventListResponse struct {
 	Offset int                  `json:"offset"`
 	Limit  int                  `json:"limit"`
 }
+
+type ExpireOrdersResponse struct {
+	CodeTimedOut                int `json:"codeTimedOut"`
+	PurchaseActivationCompleted int `json:"purchaseActivationCompleted"`
+	PurchaseWarrantyCompleted   int `json:"purchaseWarrantyCompleted"`
+	CodeCleaned                 int `json:"codeCleaned"`
+	Failed                      int `json:"failed"`
+}

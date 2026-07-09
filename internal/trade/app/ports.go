@@ -104,6 +104,7 @@ type Repository interface {
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
 	MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error)
 	RefundOrder(ctx context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error)
+	AttachFailedOrderRefund(ctx context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error)
 	CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
 	CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
 	MarkServiceCleanup(ctx context.Context, orderNo string, status string) error
@@ -420,6 +421,79 @@ func (uc *UseCase) AdminTerminateOrder(ctx context.Context, req AdminOrderComman
 	return order, nil
 }
 
+func (uc *UseCase) AdminRetryOrderCleanup(ctx context.Context, orderNo string, requestID string) (*domain.Order, error) {
+	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	order, err := uc.repo.FindOrder(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	releaseAllocation := cleanupRetryShouldReleaseAllocation(*order)
+	if !releaseAllocation && order.ServiceMode == domain.ServiceModePurchase && order.Status == domain.OrderStatusCompleted {
+		return nil, domain.ErrOrderStateConflict
+	}
+	if err := uc.cleanupOrderService(ctx, *order, releaseAllocation, "Order cleanup retried.", requestID); err != nil {
+		return order, err
+	}
+	return order, nil
+}
+
+func (uc *UseCase) AdminRetryOrderRefund(ctx context.Context, req AdminOrderCommandRequest) (*domain.Order, error) {
+	orderNo := strings.TrimSpace(req.OrderNo)
+	reason := strings.TrimSpace(req.Reason)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if orderNo == "" || reason == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	if idempotencyKey == "" {
+		return nil, domain.ErrIdempotencyRequired
+	}
+	var refunded *domain.Order
+	changed := false
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
+		if err != nil {
+			return err
+		}
+		refunded = locked
+		if locked.Status != domain.OrderStatusFailed || locked.DebitTxID == nil || locked.RefundTxID != nil {
+			return domain.ErrOrderStateConflict
+		}
+		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
+			UserID:         locked.UserID,
+			Amount:         locked.PayAmount,
+			Reason:         "order:" + locked.OrderNo,
+			IdempotencyKey: idempotencyKey,
+			RequestID:      strings.TrimSpace(req.RequestID),
+		})
+		if err != nil {
+			return err
+		}
+		updated, didChange, err := uc.repo.AttachFailedOrderRefund(txCtx, RefundOrderCommand{
+			OrderNo:      locked.OrderNo,
+			RefundTxID:   refund.ID,
+			RefundAmount: locked.PayAmount,
+			Reason:       reason,
+			Operator:     domain.OperatorTypeAdmin,
+		})
+		if err != nil {
+			return err
+		}
+		refunded = updated
+		changed = didChange
+		return nil
+	})
+	if err != nil || refunded == nil || !changed {
+		return refunded, err
+	}
+	if cleanupErr := uc.cleanupOrderService(ctx, *refunded, true, "Order refund retried.", req.RequestID); cleanupErr != nil {
+		return refunded, cleanupErr
+	}
+	return refunded, nil
+}
+
 func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrdersResult, error) {
 	if limit <= 0 {
 		limit = 200
@@ -661,6 +735,14 @@ func statusAllowed(status domain.OrderStatus, allowed []domain.OrderStatus) bool
 		}
 	}
 	return false
+}
+
+func cleanupRetryShouldReleaseAllocation(order domain.Order) bool {
+	if order.Status == domain.OrderStatusRefunded || order.Status == domain.OrderStatusClosed {
+		return true
+	}
+	return order.ServiceMode == domain.ServiceModeCode &&
+		(order.Status == domain.OrderStatusCompleted || order.Status == domain.OrderStatusRefunded)
 }
 
 func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote OrderingQuote, emailSuffix string, requestID string) (*CheckoutResult, error) {

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { FetchControl } from "./fetch-control";
 import { ProjectIcon } from "./project-icon";
 import type {
+  FetchResult,
   FetchSource,
   InventoryScope,
   ServiceMode,
@@ -56,7 +57,7 @@ function OrderAccordionItem({
   project,
 }: {
   expanded: boolean;
-  onFetchMail: (order: WorkbenchOrder, source: FetchSource) => void | Promise<void>;
+  onFetchMail: (order: WorkbenchOrder, source: FetchSource) => FetchResult | Promise<FetchResult>;
   onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
   onToggle: () => void;
   order: WorkbenchOrder;
@@ -253,7 +254,7 @@ export function OrderPanel({
   onFetchOrderMail: (
     order: WorkbenchOrder,
     source: FetchSource
-  ) => void | Promise<void>;
+  ) => FetchResult | Promise<FetchResult>;
   onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
   onQuantityChange: (value: number) => void;
   onSearchChange: (value: string) => void;

@@ -205,12 +205,82 @@ func (h *Handler) PostAdminOrderTerminate(c *gin.Context) {
 	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
 }
 
+func (h *Handler) PostAdminOrderCleanupRetry(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	order, err := h.mod.UseCase.AdminRetryOrderCleanup(c.Request.Context(), c.Param("orderNo"), middleware.GetRequestID(c))
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.cleanup_retry", c.Param("orderNo"), "failure", "Order cleanup retry failed.")
+		writeTradeError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "trade.order.cleanup_retry", c.Param("orderNo"), "success", "Order cleanup retried.")
+	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+}
+
+func (h *Handler) PostAdminOrderRefundRetry(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	var req AdminOrderCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund_retry", c.Param("orderNo"), "failure", "Order refund retry failed.")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	order, err := h.mod.UseCase.AdminRetryOrderRefund(c.Request.Context(), tradeapp.AdminOrderCommandRequest{
+		OrderNo:        c.Param("orderNo"),
+		Reason:         req.Reason,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		RequestID:      middleware.GetRequestID(c),
+		OperatorUserID: operatorUserID,
+	})
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund_retry", c.Param("orderNo"), "failure", "Order refund retry failed.")
+		writeTradeError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund_retry", c.Param("orderNo"), "success", "Order refund retried.")
+	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+}
+
+func (h *Handler) PostAdminOrderTimeoutScan(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	result, err := h.mod.UseCase.ExpireDueOrders(c.Request.Context(), 0)
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "trade.order.timeout_scan", "timeouts", "failure", "Order timeout scan failed.")
+		writeTradeError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "trade.order.timeout_scan", "timeouts", "success", "Order timeout scan completed.")
+	c.JSON(http.StatusAccepted, expireOrdersResponse(result))
+}
+
 func (h *Handler) writeOperationLog(c *gin.Context, operatorUserID uint, operationType, resourceID, result, summary string) error {
 	log := h.operationLog(c, operatorUserID, operationType, resourceID, result, summary)
 	if log == nil {
 		return nil
 	}
 	return h.mod.OperationLogs.Create(c.Request.Context(), log)
+}
+
+func expireOrdersResponse(result *tradeapp.ExpireOrdersResult) ExpireOrdersResponse {
+	if result == nil {
+		return ExpireOrdersResponse{}
+	}
+	return ExpireOrdersResponse{
+		CodeTimedOut:                result.CodeTimedOut,
+		PurchaseActivationCompleted: result.PurchaseActivationCompleted,
+		PurchaseWarrantyCompleted:   result.PurchaseWarrantyCompleted,
+		CodeCleaned:                 result.CodeCleaned,
+		Failed:                      result.Failed,
+	}
 }
 
 func (h *Handler) operationLog(c *gin.Context, operatorUserID uint, operationType, resourceID, result, summary string) *governancedomain.OperationLog {

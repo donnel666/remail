@@ -9,7 +9,7 @@ import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
 import { FetchControl } from "./fetch-control";
-import type { FetchSource, WorkbenchMessage } from "./types";
+import type { FetchHandler, WorkbenchMessage } from "./types";
 import { formatDateTime } from "./utils";
 
 const { Text } = Typography;
@@ -42,7 +42,7 @@ export function MailboxClient({
 }: {
   email: string;
   messages: WorkbenchMessage[];
-  onFetch: (source: FetchSource) => void | Promise<void>;
+  onFetch: FetchHandler;
 }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -223,7 +223,7 @@ export function MailboxClientModal({
   email?: string;
   messages?: WorkbenchMessage[];
   onClose: () => void;
-  onFetch: (source: FetchSource) => void | Promise<void>;
+  onFetch: FetchHandler;
 }) {
   const open = Boolean(email);
 

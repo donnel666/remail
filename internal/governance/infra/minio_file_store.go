@@ -116,6 +116,32 @@ func (s *MinIOFileStore) DeletePrivate(ctx context.Context, objectKey string) er
 	return nil
 }
 
+func (s *MinIOFileStore) ListPrivate(ctx context.Context, prefix string, limit int) ([]domain.PrivateObject, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]domain.PrivateObject, 0, limit)
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if object.Err != nil {
+			return nil, fmt.Errorf("list private files: %w", object.Err)
+		}
+		out = append(out, domain.PrivateObject{
+			ObjectKey:    object.Key,
+			LastModified: object.LastModified,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *MinIOFileStore) ensureBucket(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

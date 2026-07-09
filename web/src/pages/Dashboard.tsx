@@ -412,7 +412,7 @@ export default function Dashboard() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("purchase");
-  const fetchInFlightRef = useRef(new Map<string, Promise<void>>());
+  const fetchInFlightRef = useRef(new Map<string, Promise<number | void>>());
   const fetchSeqRef = useRef(new Map<string, number>());
 
   const projectsById = useMemo(() => {
@@ -567,7 +567,7 @@ export default function Dashboard() {
               ...detail,
               messages: item.messages,
               lastFetchedAt: item.lastFetchedAt,
-              verificationCode: item.verificationCode,
+              verificationCode: detail.verificationCode || item.verificationCode,
             }
           : item
       )
@@ -734,7 +734,9 @@ export default function Dashboard() {
           )
         );
       } catch (err) {
-        if (err instanceof IamApiError && err.status === 429) return;
+        if (err instanceof IamApiError && err.status === 429) {
+          return err.retryAfterSeconds;
+        }
         if (source === "manual") {
           Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
         }

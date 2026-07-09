@@ -1,6 +1,9 @@
 package domain
 
-import "io"
+import (
+	"io"
+	"time"
+)
 
 // PrivateFile is a file that must stay in the private object bucket.
 type PrivateFile struct {
@@ -26,4 +29,10 @@ type StoredPrivateFile struct {
 	FileName    string
 	ContentType string
 	Size        int64
+}
+
+// PrivateObject is private object metadata used by retention cleanup.
+type PrivateObject struct {
+	ObjectKey    string
+	LastModified time.Time
 }

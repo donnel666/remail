@@ -26,6 +26,9 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 	admin.Use(middleware.CSRFRequired())
 	{
 		admin.POST("/orders/:orderNo/refund", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminOrderRefund)
+		admin.POST("/orders/:orderNo/refund/retry", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminOrderRefundRetry)
 		admin.POST("/orders/:orderNo/terminate", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminOrderTerminate)
+		admin.POST("/orders/:orderNo/cleanup/retry", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminOrderCleanupRetry)
+		admin.POST("/orders/timeouts/scan", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminOrderTimeoutScan)
 	}
 }

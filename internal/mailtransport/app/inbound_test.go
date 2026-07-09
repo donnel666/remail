@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -164,6 +165,19 @@ func (s *fileStoreStub) ReadPrivate(_ context.Context, objectKey string) (*gover
 func (s *fileStoreStub) DeletePrivate(_ context.Context, objectKey string) error {
 	delete(s.files, objectKey)
 	return nil
+}
+
+func (s *fileStoreStub) ListPrivate(_ context.Context, prefix string, limit int) ([]governancedomain.PrivateObject, error) {
+	items := make([]governancedomain.PrivateObject, 0)
+	for objectKey := range s.files {
+		if strings.HasPrefix(objectKey, prefix) {
+			items = append(items, governancedomain.PrivateObject{ObjectKey: objectKey})
+		}
+	}
+	if limit > 0 && len(items) > limit {
+		return items[:limit], nil
+	}
+	return items, nil
 }
 
 type inboundQueueStub struct {

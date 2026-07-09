@@ -3,7 +3,28 @@ import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { FetchSource } from "./types";
+import type { FetchHandler, FetchSource } from "./types";
+
+const tickerSubscribers = new Set<() => void>();
+let tickerID: number | undefined;
+
+function subscribeFetchTicker(callback: () => void) {
+  tickerSubscribers.add(callback);
+  if (tickerID === undefined) {
+    tickerID = window.setInterval(() => {
+      for (const subscriber of tickerSubscribers) {
+        subscriber();
+      }
+    }, 1000);
+  }
+  return () => {
+    tickerSubscribers.delete(callback);
+    if (tickerSubscribers.size === 0 && tickerID !== undefined) {
+      window.clearInterval(tickerID);
+      tickerID = undefined;
+    }
+  };
+}
 
 export function FetchControl({
   actionLabelKey = "Fetch mail",
@@ -15,7 +36,7 @@ export function FetchControl({
   actionLabelKey?: string;
   autoEnabled?: boolean;
   compact?: boolean;
-  onFetch: (source: FetchSource) => void | Promise<void>;
+  onFetch: FetchHandler;
   variant?: "default" | "code";
 }) {
   const { t } = useTranslation();
@@ -37,8 +58,17 @@ export function FetchControl({
     try {
       const result = onFetchRef.current(source);
       void Promise.resolve(result)
-        .then(() => {
-          if (source === "manual") Toast.success(t("Fetch submitted"));
+        .then((retryAfterSeconds) => {
+          const hasRetryAfter =
+            typeof retryAfterSeconds === "number" &&
+            Number.isFinite(retryAfterSeconds) &&
+            retryAfterSeconds > 0;
+          if (hasRetryAfter) {
+            setAutoCountdown(Math.ceil(retryAfterSeconds));
+            setManualCooldown((current) =>
+              Math.max(current, Math.ceil(retryAfterSeconds))
+            );
+          }
         })
         .catch(() => {
           if (source === "manual") Toast.error(t("Fetch failed"));
@@ -55,7 +85,7 @@ export function FetchControl({
   }, [t]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    return subscribeFetchTicker(() => {
       setAutoCountdown((current) => {
         if (current <= 1) {
           if (autoEnabled) {
@@ -66,8 +96,7 @@ export function FetchControl({
         return current - 1;
       });
       setManualCooldown((current) => Math.max(0, current - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
+    });
   }, [autoEnabled, submitFetch]);
 
   return (

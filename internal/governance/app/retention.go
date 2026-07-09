@@ -13,6 +13,7 @@ const (
 	retentionBatchSize    = 5000
 	retentionBatchSleep   = 200 * time.Millisecond
 	retentionDailyRunHour = 4
+	inboundObjectPrefix   = "mailtransport/inbound/"
 )
 
 type RetentionRepository interface {
@@ -21,6 +22,7 @@ type RetentionRepository interface {
 	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, status string, limit int) (int64, error)
 	DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	ListInboundMailObjectsBefore(ctx context.Context, before time.Time, limit int) ([]RetentionInboundMailObject, error)
+	ListExistingInboundObjectKeys(ctx context.Context, objectKeys []string) (map[string]struct{}, error)
 	DeleteInboundMailsByID(ctx context.Context, ids []uint64) (int64, error)
 }
 
@@ -68,9 +70,12 @@ func (s *RetentionService) StartDaily(ctx context.Context, loc *time.Location) f
 			}
 		}
 	}()
-	return func(context.Context) {
+	return func(shutdownCtx context.Context) {
 		cancel()
-		<-done
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+		}
 	}
 }
 
@@ -88,7 +93,7 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 		return
 	}
 	now := s.now()
-	summary := make([]string, 0, 6)
+	summary := make([]string, 0, 7)
 	summary = append(summary, s.deleteLoop(ctx, "api_logs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteAPILogsBefore(ctx, before, retentionBatchSize)
 	}))
@@ -104,7 +109,9 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_fetch_jobs", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteFetchJobsTerminalBefore(ctx, before, retentionBatchSize)
 	}))
-	summary = append(summary, s.deleteInboundMails(ctx, now.AddDate(0, 0, -90)))
+	inboundBefore := now.AddDate(0, 0, -90)
+	summary = append(summary, s.deleteInboundMails(ctx, inboundBefore))
+	summary = append(summary, s.deleteOrphanInboundObjects(ctx, inboundBefore))
 	s.writeSummary(ctx, strings.Join(summary, "; "))
 }
 
@@ -158,6 +165,67 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 		}
 		sleepOrDone(ctx, retentionBatchSleep)
 	}
+}
+
+func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, before time.Time) string {
+	if s.files == nil {
+		return "inbound_orphans=0 no_file_store"
+	}
+	objects, err := s.files.ListPrivate(ctx, inboundObjectPrefix, retentionBatchSize)
+	if err != nil {
+		return fmt.Sprintf("inbound_orphans=0 error=%s", safeRetentionDetail(err))
+	}
+	candidates := make([]string, 0, len(objects))
+	for _, object := range objects {
+		if inboundObjectBefore(object, before) {
+			candidates = append(candidates, object.ObjectKey)
+		}
+	}
+	if len(candidates) == 0 {
+		return "inbound_orphans=0"
+	}
+	existing, err := s.repo.ListExistingInboundObjectKeys(ctx, candidates)
+	if err != nil {
+		return fmt.Sprintf("inbound_orphans=0 error=%s", safeRetentionDetail(err))
+	}
+	var deleted int64
+	for _, objectKey := range candidates {
+		if ctx.Err() != nil {
+			return fmt.Sprintf("inbound_orphans=%d canceled", deleted)
+		}
+		if _, ok := existing[objectKey]; ok {
+			continue
+		}
+		if err := s.files.DeletePrivate(ctx, objectKey); err != nil {
+			return fmt.Sprintf("inbound_orphans=%d object_error=%s", deleted, safeRetentionDetail(err))
+		}
+		deleted++
+	}
+	return fmt.Sprintf("inbound_orphans=%d", deleted)
+}
+
+func inboundObjectBefore(object domain.PrivateObject, before time.Time) bool {
+	if strings.TrimSpace(object.ObjectKey) == "" {
+		return false
+	}
+	if !object.LastModified.IsZero() {
+		return object.LastModified.Before(before)
+	}
+	createdAt, ok := inboundObjectDate(object.ObjectKey)
+	return ok && createdAt.Before(before)
+}
+
+func inboundObjectDate(objectKey string) (time.Time, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(objectKey), inboundObjectPrefix)
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 4 {
+		return time.Time{}, false
+	}
+	parsed, err := time.ParseInLocation("2006/01/02", strings.Join(parts[:3], "/"), time.UTC)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func sleepOrDone(ctx context.Context, duration time.Duration) {

@@ -101,12 +101,13 @@ type OrderSnapshotModel struct {
 func (OrderSnapshotModel) TableName() string { return "mailmatch_order_snapshots" }
 
 type Repo struct {
-	db    *gorm.DB
-	files governanceapp.FilePort
+	db         *gorm.DB
+	files      governanceapp.FilePort
+	rulesCache *platform.TTLCache[uint, []app.MailRule]
 }
 
 func NewRepo(db *gorm.DB, files governanceapp.FilePort) *Repo {
-	return &Repo{db: db, files: files}
+	return &Repo{db: db, files: files, rulesCache: platform.NewTTLCache[uint, []app.MailRule]()}
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -328,7 +329,14 @@ func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 	}
 }
 
+const mailRulesCacheTTL = 10 * time.Second
+
 func (r *Repo) loadMailRules(ctx context.Context, projectID uint) ([]app.MailRule, error) {
+	if r.rulesCache != nil {
+		if cached, ok := r.rulesCache.Get(projectID); ok {
+			return cloneMailRules(cached), nil
+		}
+	}
 	var rows []struct {
 		RuleType string
 		Pattern  string
@@ -345,7 +353,19 @@ func (r *Repo) loadMailRules(ctx context.Context, projectID uint) ([]app.MailRul
 	for i := range rows {
 		rules[i] = app.MailRule{Type: app.MailRuleType(rows[i].RuleType), Pattern: rows[i].Pattern, Enabled: rows[i].Enabled}
 	}
-	return rules, nil
+	if r.rulesCache != nil {
+		r.rulesCache.Set(projectID, cloneMailRules(rules), mailRulesCacheTTL)
+	}
+	return cloneMailRules(rules), nil
+}
+
+func cloneMailRules(rules []app.MailRule) []app.MailRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]app.MailRule, len(rules))
+	copy(out, rules)
+	return out
 }
 
 func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limit int) ([]domain.Message, error) {

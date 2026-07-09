@@ -4005,6 +4005,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/orders/{orderNo}/refund/retry:
+    post:
+      operationId: postAdminOrderRefundRetry
+      summary: Retry compensation refund for a failed order
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOrderCommandRequest"
+      responses:
+        "200":
+          description: Compensation refund retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Order cannot retry refund in current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/orders/{orderNo}/terminate:
     post:
       operationId: postAdminOrderTerminate
@@ -4060,6 +4120,83 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Order cannot be terminated in current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/orders/{orderNo}/cleanup/retry:
+    post:
+      operationId: postAdminOrderCleanupRetry
+      summary: Retry order service cleanup
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cleanup retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Order cannot retry cleanup in current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/orders/timeouts/scan:
+    post:
+      operationId: postAdminOrderTimeoutScan
+      summary: Run order timeout scan
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Timeout scan completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpireOrdersResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -5518,6 +5655,27 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+      additionalProperties: false
+
+    ExpireOrdersResponse:
+      type: object
+      required:
+        - codeTimedOut
+        - purchaseActivationCompleted
+        - purchaseWarrantyCompleted
+        - codeCleaned
+        - failed
+      properties:
+        codeTimedOut:
+          type: integer
+        purchaseActivationCompleted:
+          type: integer
+        purchaseWarrantyCompleted:
+          type: integer
+        codeCleaned:
+          type: integer
+        failed:
+          type: integer
       additionalProperties: false
 
     OrderResponse:

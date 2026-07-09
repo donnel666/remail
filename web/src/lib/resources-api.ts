@@ -121,10 +121,14 @@ export async function importMicrosoftResources(
   );
 }
 
-export async function getResourceImportStatus(importId: number) {
+export async function getResourceImportStatus(
+  importId: number,
+  signal?: AbortSignal
+) {
   return unwrap<ImportStatusResponse>(
     await client.GET("/v1/resources/imports/{importId}", {
       params: { path: { importId } },
+      signal,
     })
   );
 }
@@ -161,20 +165,51 @@ export async function validateResourcesBatch(
 
 export async function waitForResourceImport(
   importId: number,
-  options: { intervalMs?: number; maxAttempts?: number } = {}
+  options: {
+    intervalMs?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  } = {}
 ) {
   const intervalMs = options.intervalMs ?? 1000;
   const maxAttempts = options.maxAttempts ?? 120;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const status = await getResourceImportStatus(importId);
+    throwIfAborted(options.signal);
+    const status = await getResourceImportStatus(importId, options.signal);
     if (status.status !== "processing") {
       return status;
     }
-    await new Promise((resolve) => globalThis.setTimeout(resolve, intervalMs));
+    await abortableDelay(intervalMs, options.signal);
   }
 
-  return getResourceImportStatus(importId);
+  throwIfAborted(options.signal);
+  return getResourceImportStatus(importId, options.signal);
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return;
+  throw new DOMException("The operation was aborted.", "AbortError");
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const timer = globalThis.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      globalThis.clearTimeout(timer);
+      cleanup();
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export async function publishResourcesBatch(
