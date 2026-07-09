@@ -11,9 +11,10 @@
   },
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build",
+    "build": "pnpm generate:public-openapi && rsbuild build",
     "typecheck": "tsc --noEmit",
-    "generate:api": "openapi-typescript ../api/openapi.yaml -o src/lib/openapi/schema.ts"
+    "generate:api": "openapi-typescript ../api/openapi.yaml -o src/lib/openapi/schema.ts",
+    "generate:public-openapi": "node scripts/generate-public-openapi.mjs"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "2.100.0",

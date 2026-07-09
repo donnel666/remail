@@ -285,6 +285,7 @@ func (r *Repo) DeleteAPIKey(ctx context.Context, userID uint, keyID uint, delete
 
 func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.Time) (*domain.APIKey, error) {
 	var model APIKeyModel
+	ownerRole := ""
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.WithContext(ctx).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -299,10 +300,11 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 		}
 		var owner struct {
 			Enabled bool
+			Role    string
 		}
 		if err := tx.WithContext(ctx).
 			Table("users").
-			Select("enabled").
+			Select("enabled, role").
 			Where("id = ?", model.UserID).
 			Take(&owner).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -313,6 +315,7 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 		if !owner.Enabled {
 			return domain.ErrAPIKeyDisabled
 		}
+		ownerRole = owner.Role
 		if model.ExpireAt != nil && !model.ExpireAt.After(now) {
 			return domain.ErrAPIKeyExpired
 		}
@@ -357,6 +360,7 @@ func (r *Repo) AcquireAPIKeyRequest(ctx context.Context, plain string, now time.
 		return nil, err
 	}
 	item := apiKeyModelToDomain(model)
+	item.OwnerRole = ownerRole
 	return &item, nil
 }
 

@@ -39,7 +39,7 @@ func LoadAPIKey(useCase *openapiapp.UseCase) gin.HandlerFunc {
 			writeAuthError(c, err)
 			return
 		}
-		middleware.SetCurrentUser(c, result.UserID, iamdomain.RoleUser, "", "")
+		middleware.SetCurrentUser(c, result.UserID, apiKeyRole(result.Role), "", "")
 		c.Set(contextKeyClientChannel, ClientChannelAPIKey)
 		c.Set(contextKeyAPIKeyID, result.APIKeyID)
 		startedAt := time.Now()
@@ -78,6 +78,16 @@ func MarkConsoleChannel() gin.HandlerFunc {
 func KeyAllowed() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(contextKeyAPIKeyAllowed, true)
+		c.Next()
+	}
+}
+
+func KeyRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if channel, ok := CurrentClientChannel(c); !ok || channel != ClientChannelAPIKey {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
 		c.Next()
 	}
 }
@@ -138,6 +148,14 @@ func isAPIKeyAllowed(c *gin.Context) bool {
 	}
 	allowed, ok := value.(bool)
 	return ok && allowed
+}
+
+func apiKeyRole(raw string) iamdomain.Role {
+	role := iamdomain.Role(strings.TrimSpace(raw))
+	if !role.IsValid() || role.HasAdminAccess() {
+		return iamdomain.RoleUser
+	}
+	return role
 }
 
 func writeAuthError(c *gin.Context, err error) {

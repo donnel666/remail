@@ -22,7 +22,6 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
-	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
@@ -174,14 +173,11 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
-		return 0, "", "", false
-	}), openapiMod)
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
 
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/v1/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/open/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
 	req.Header.Set("Idempotency-Key", "route-order-idem")
 	req.Header.Set("Content-Type", "application/json")
@@ -204,7 +200,7 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.NoError(t, db.Table("order_tokens").Select("expire_at").Where("order_no = ?", resp.OrderNo).Take(&codeToken).Error)
 	require.NotNil(t, codeToken.ExpireAt)
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/orders?scope=mine", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/open/orders?scope=mine", nil)
 	listReq.Header.Set("Authorization", "Bearer "+key.KeyPlain)
 	listRec := httptest.NewRecorder()
 	router.ServeHTTP(listRec, listReq)
@@ -213,18 +209,6 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
 	require.Len(t, listResp.Items, 1)
 	require.Empty(t, listResp.Items[0].ServiceToken)
-
-	eventsReq := httptest.NewRequest(http.MethodGet, "/v1/orders/"+resp.OrderNo+"/events", nil)
-	eventsReq.Header.Set("Authorization", "Bearer "+key.KeyPlain)
-	eventsRec := httptest.NewRecorder()
-	router.ServeHTTP(eventsRec, eventsReq)
-	require.Equal(t, http.StatusForbidden, eventsRec.Code, eventsRec.Body.String())
-
-	archiveReq := httptest.NewRequest(http.MethodPost, "/v1/orders/"+resp.OrderNo+"/archive", nil)
-	archiveReq.Header.Set("Authorization", "Bearer "+key.KeyPlain)
-	archiveRec := httptest.NewRecorder()
-	router.ServeHTTP(archiveRec, archiveReq)
-	require.Equal(t, http.StatusForbidden, archiveRec.Code, archiveRec.Body.String())
 
 	var apiLogs []struct {
 		Path           string
@@ -238,19 +222,15 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 		Where("principal_type = ? AND principal_id = ? AND user_id = ?", "api_key", key.ID, 2).
 		Order("id ASC").
 		Scan(&apiLogs).Error)
-	require.Len(t, apiLogs, 4)
-	require.Equal(t, "/v1/orders", apiLogs[0].Path)
+	require.Len(t, apiLogs, 2)
+	require.Equal(t, "/v1/open/orders", apiLogs[0].Path)
 	require.Equal(t, http.MethodPost, apiLogs[0].Method)
 	require.Equal(t, "route-order-idem", apiLogs[0].IdempotencyKey)
 	require.Equal(t, http.StatusCreated, apiLogs[0].HTTPStatus)
 	require.NotEmpty(t, apiLogs[0].RequestID)
-	require.Equal(t, "/v1/orders", apiLogs[1].Path)
+	require.Equal(t, "/v1/open/orders", apiLogs[1].Path)
 	require.Equal(t, http.MethodGet, apiLogs[1].Method)
 	require.Equal(t, http.StatusOK, apiLogs[1].HTTPStatus)
-	require.Equal(t, "/v1/orders/:orderNo/events", apiLogs[2].Path)
-	require.Equal(t, http.StatusForbidden, apiLogs[2].HTTPStatus)
-	require.Equal(t, "/v1/orders/:orderNo/archive", apiLogs[3].Path)
-	require.Equal(t, http.StatusForbidden, apiLogs[3].HTTPStatus)
 }
 
 func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {
@@ -270,14 +250,11 @@ func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *te
 	require.NoError(t, err)
 
 	router := gin.New()
-	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
-		return 0, "", "", false
-	}), openapiMod)
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
 
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/v1/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/open/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
 	req.Header.Set("X-API-Key", key.KeyPlain)
 	req.Header.Set("Idempotency-Key", "route-order-idem-delete-keeps-facts")
 	req.Header.Set("Content-Type", "application/json")
@@ -551,14 +528,11 @@ func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
-		return 0, "", "", false
-	}), openapiMod)
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
 
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/v1/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/open/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
 	req.Header.Set("Idempotency-Key", "route-order-disabled-owner")
 	req.Header.Set("Content-Type", "application/json")
@@ -621,10 +595,7 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	require.NoError(t, err)
 
 	router := gin.New()
-	v1 := router.Group("/v1")
-	RegisterRoutes(v1, newTradeModule(db), middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
-		return 0, "", "", false
-	}), openapiMod)
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
 
 	const requests = 8
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
@@ -635,7 +606,7 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/v1/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/v1/open/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
 			req.Header.Set("X-API-Key", key.KeyPlain)
 			req.Header.Set("Idempotency-Key", "route-order-idem-concurrent")
 			req.Header.Set("Content-Type", "application/json")
@@ -672,6 +643,16 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 
 func newTradeUseCase(db *gorm.DB) *tradeapp.UseCase {
 	return newTradeModule(db).UseCase
+}
+
+func registerOpenOrderRoute(router *gin.Engine, mod *Module, openapiMod *openapiapi.Module) {
+	open := router.Group("/v1/open")
+	open.Use(openapiapi.LoadAPIKey(openapiMod.UseCase))
+	open.Use(openapiapi.KeyRequired())
+	h := NewHandler(mod)
+	open.POST("/orders", h.PostOrder)
+	open.GET("/orders", h.GetOrders)
+	open.GET("/orders/:orderNo", h.GetOrder)
 }
 
 func newTradeModule(db *gorm.DB) *Module {

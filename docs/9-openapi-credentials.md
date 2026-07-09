@@ -7,6 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：OrderToken 作为 pickup 服务凭证事实，不再作为通用 Bearer 鉴权主体。 |
 | 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、不限 RPM 和软删除语义。 |
+| 2026-07-09 | V1.3 | Codex | 补充公开 API 入口策略：API Key 调用统一收敛到 `/v1/open/**`，文档分组只作为展示标签，不绑定 URI。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -21,7 +22,7 @@
 | `ApiKey` | `userId` | 让 SDK/脚本以用户身份调用被开放的统一业务 API。 |
 | `OrderToken` | `orderNo` | 订单服务凭证事实；外部只通过 `pickup(email + token)` 读取绑定订单的邮件/验证码。 |
 
-重要决策：SDK 不需要后端另做一套接口。API Key 通过鉴权中间件调用同一批 `/v1/**` 业务 API；OpenAPI 文档标记哪些操作允许 API Key。
+重要决策：SDK 通过 `/v1/open/**` 公开入口调用稳定业务 API。`/v1/open` 只做 API Key 鉴权、日志、限流和薄适配；能复用控制台 handler 的能力直接复用，不能复用的能力在对应上下文内补公开 handler。OpenAPI 文档的 `Core/Resources/Wallet/Tickets` 只是展示分组，不能反向决定 URI 层级。
 
 ---
 
@@ -75,7 +76,7 @@ API Key 限制补充设计：
 | 编号 | 规则 |
 |------|------|
 | INV-O1 | API Key 只能代表所属用户，不授予管理员特权。 |
-| INV-O2 | API Key 能调用哪些接口由 OpenAPI 标记和中间件控制，不能默认开放全部接口。 |
+| INV-O2 | API Key 能调用哪些接口由 `/v1/open/**` 路由注册表和中间件控制，不能默认开放全部接口。 |
 | INV-O3 | API Key 下单必须带幂等键，同 Key + 同幂等键不产生第二个订单。 |
 | INV-O4 | OrderToken 只能通过 pickup handler 校验；校验成功后只读取绑定 `orderNo` 且与 `email` 匹配的服务结果。 |
 | INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
@@ -127,9 +128,28 @@ SDK 可调用接口示例：
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `POST` | `/v1/orders` | API Key 下单。 |
-| `GET` | `/v1/orders` | API Key 查询自己的订单。 |
-| `GET` | `/v1/orders/{orderNo}` | API Key 查询自己的订单详情。 |
+| `GET` | `/v1/open/api-key/profile` | 查询当前 API Key 的额度、RPM、过期时间和使用状态。 |
+| `GET` | `/v1/open/projects` | API Key 查询可见项目。 |
+| `GET` | `/v1/open/projects/{projectId}` | API Key 查询可见项目详情。 |
+| `POST` | `/v1/open/orders` | API Key 下单。 |
+| `GET` | `/v1/open/orders` | API Key 查询自己的订单。 |
+| `GET` | `/v1/open/orders/{orderNo}` | API Key 查询自己的订单详情。 |
+| `GET` | `/v1/open/wallet` | API Key 查询自己的钱包。 |
+| `GET` | `/v1/open/wallet/transactions` | API Key 查询自己的钱包流水。 |
+| `GET` | `/v1/open/recharges` | API Key 查询自己的充值记录。 |
+| `POST` | `/v1/open/cards/redeem` | API Key 兑换卡密充值。 |
+| `GET` | `/v1/open/resources` | API Key 查询自己的资源。 |
+| `GET` | `/v1/open/resources/{resourceId}` | API Key 查询自己的资源详情。 |
+| `DELETE` | `/v1/open/resources/{resourceId}` | API Key 删除自己的资源。 |
+| `POST` | `/v1/open/resources/{resourceId}/validate` | API Key 提交单个资源检测。 |
+| `POST` | `/v1/open/resource-imports` | API Key 导入微软邮箱 TXT。 |
+| `GET` | `/v1/open/resource-imports/{importId}` | API Key 查询资源导入任务。 |
+| `POST` | `/v1/open/resource-validations` | API Key 批量提交资源检测。 |
+| `GET` | `/v1/open/resource-validations/{validationId}` | API Key 查询资源检测任务。 |
+| `GET` | `/v1/open/servers` | API Key 查询自有邮件服务器。 |
+| `POST` | `/v1/open/servers` | API Key 创建邮件服务器。 |
+| `POST` | `/v1/open/domains` | API Key 创建域名邮箱资源。 |
+| `GET` | `/v1/open/domains/{domainId}/mailboxes` | API Key 查询域名生成邮箱。 |
 
 取件接口：
 
@@ -143,7 +163,7 @@ SDK 可调用接口示例：
 
 | ADR | 决策 | 理由 |
 |-----|------|------|
-| ADR-OAPI-1 | SDK 复用统一业务 API | 避免 `/open` 和控制台接口重复开发。 |
+| ADR-OAPI-1 | SDK 使用 `/v1/open/**` 公开入口，入口内薄复用业务 handler | 用户侧 URI 稳定，鉴权边界清晰，同时避免复制业务逻辑。 |
 | ADR-OAPI-2 | API Key 是用户自动化身份 | 业务规则仍由对应业务域判断。 |
 | ADR-OAPI-3 | OrderToken 绑定 `orderNo` | 持有者通过 pickup 读取该订单服务结果，不作为通用 Bearer principal。 |
 | ADR-OAPI-4 | 凭据原值保存 | 授权接口需要重复展示明文。 |

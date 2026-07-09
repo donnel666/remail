@@ -51,3 +51,7 @@ type KeyUsageResponse struct {
 	RequestCount int64 `json:"requestCount"`
 	KeyCount     int64 `json:"keyCount"`
 }
+
+type KeyProfileResponse struct {
+	APIKey KeyResponse `json:"apiKey"`
+}

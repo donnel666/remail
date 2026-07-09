@@ -82,6 +82,24 @@ func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetAPIKeyProfile(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	keyID, ok := CurrentAPIKeyID(c)
+	if !ok || keyID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	item, err := h.mod.UseCase.GetAPIKey(c.Request.Context(), userID, keyID)
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, KeyProfileResponse{APIKey: apiKeyResponse(*item, false)})
+}
+
 func (h *Handler) GetAPIKey(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {

@@ -9,6 +9,7 @@ import (
 type APIKey struct {
 	ID                 uint
 	UserID             uint
+	OwnerRole          string
 	Name               string
 	KeyPrefix          string
 	KeyPlain           string

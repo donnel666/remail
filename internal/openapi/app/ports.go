@@ -96,6 +96,7 @@ type UpdateAPIKeyCommand struct {
 type APIKeyAuthResult struct {
 	UserID   uint
 	APIKeyID uint
+	Role     string
 }
 
 type APIKeyUsage struct {
@@ -247,7 +248,7 @@ func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKe
 	if err != nil {
 		return nil, err
 	}
-	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID}, nil
+	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID, Role: key.OwnerRole}, nil
 }
 
 func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, keyID uint) error {
