@@ -30,6 +30,13 @@ type MailTransportModule struct {
 	InboundSMTPEnabled  bool
 }
 
+func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsumerPort) {
+	if m == nil || m.InboundUseCase == nil {
+		return
+	}
+	m.InboundUseCase.SetConsumer(consumer)
+}
+
 func NewMailTransportModule(
 	db *gorm.DB,
 	files governanceapp.FilePort,

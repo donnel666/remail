@@ -1,21 +1,14 @@
 package infra
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"mime"
-	"mime/multipart"
-	"mime/quotedprintable"
-	stdmail "net/mail"
-	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	"github.com/donnel666/remail/internal/mailmatch/app"
@@ -35,8 +28,6 @@ type MessageModel struct {
 	Sender            string         `gorm:"type:varchar(255);not null;default:''"`
 	Subject           string         `gorm:"type:varchar(500);not null;default:''"`
 	RawBody           sql.NullString `gorm:"type:mediumtext;column:raw_body"`
-	RawSource         sql.NullString `gorm:"type:mediumtext;column:raw_source"`
-	ProviderPayload   sql.NullString `gorm:"type:json;column:provider_payload"`
 	BodyPreview       string         `gorm:"type:varchar(1000);not null;default:'';column:body_preview"`
 	VerificationCode  string         `gorm:"type:varchar(64);not null;default:'';column:verification_code"`
 	MessageIDHeader   string         `gorm:"type:varchar(500);not null;default:'';column:message_id_header"`
@@ -81,7 +72,7 @@ type FetchJobModel struct {
 func (FetchJobModel) TableName() string { return "mailmatch_fetch_jobs" }
 
 type FetchStateModel struct {
-	OrderNo         string     `gorm:"primaryKey;type:varchar(64);column:order_no"`
+	EmailResourceID uint       `gorm:"primaryKey;column:email_resource_id"`
 	LastJobID       *uint      `gorm:"column:last_job_id"`
 	LastStatus      string     `gorm:"type:varchar(32);not null;default:'';column:last_status"`
 	LastSubmittedAt *time.Time `gorm:"column:last_submitted_at"`
@@ -93,7 +84,7 @@ type FetchStateModel struct {
 	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
-func (FetchStateModel) TableName() string { return "mailmatch_order_fetch_states" }
+func (FetchStateModel) TableName() string { return "mailmatch_resource_fetch_states" }
 
 type OrderSnapshotModel struct {
 	OrderNo          string         `gorm:"primaryKey;type:varchar(64);column:order_no"`
@@ -378,6 +369,7 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 		end = *scope.AfterSaleUntil
 	}
 	query := r.dbFor(ctx).Model(&MessageModel{}).
+		Select("id, email_resource_id, resource_type, recipient, recipients_json, sender, subject, raw_body, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
 		Where("email_resource_id = ? AND resource_type = ? AND received_at >= ? AND received_at <= ?",
 			scope.EmailResourceID,
 			string(scope.AllocationType),
@@ -500,9 +492,9 @@ func (r *Repo) orderScopeRowsToScopes(ctx context.Context, rows []orderScopeRow)
 	return items, nil
 }
 
-func (r *Repo) FindLatestReceivedAt(ctx context.Context, orderNo string) (*time.Time, error) {
+func (r *Repo) FindLatestReceivedAt(ctx context.Context, emailResourceID uint) (*time.Time, error) {
 	var state FetchStateModel
-	err := r.dbFor(ctx).First(&state, "order_no = ?", strings.TrimSpace(orderNo)).Error
+	err := r.dbFor(ctx).First(&state, "email_resource_id = ?", emailResourceID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -512,9 +504,9 @@ func (r *Repo) FindLatestReceivedAt(ctx context.Context, orderNo string) (*time.
 	return state.LastReceivedAt, nil
 }
 
-func (r *Repo) FindActiveFetchJob(ctx context.Context, orderNo string) (*domain.FetchJob, error) {
+func (r *Repo) FindActiveFetchJobByResource(ctx context.Context, emailResourceID uint) (*domain.FetchJob, error) {
 	var model FetchJobModel
-	err := r.dbFor(ctx).Where("order_no = ? AND status IN ?", strings.TrimSpace(orderNo), activeFetchStatuses()).
+	err := r.dbFor(ctx).Where("email_resource_id = ? AND status IN ?", emailResourceID, activeFetchStatuses()).
 		Order("created_at ASC, id ASC").
 		First(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -527,13 +519,13 @@ func (r *Repo) FindActiveFetchJob(ctx context.Context, orderNo string) (*domain.
 	return &item, nil
 }
 
-func (r *Repo) FindFetchStateForUpdate(ctx context.Context, orderNo string) (*domain.FetchState, error) {
+func (r *Repo) FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error) {
 	db := r.dbFor(ctx)
 	if _, ok := platform.GormTxFromContext(ctx); ok {
 		db = db.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	var model FetchStateModel
-	err := db.First(&model, "order_no = ?", strings.TrimSpace(orderNo)).Error
+	err := db.First(&model, "email_resource_id = ?", emailResourceID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -544,13 +536,13 @@ func (r *Repo) FindFetchStateForUpdate(ctx context.Context, orderNo string) (*do
 	return &item, nil
 }
 
-func (r *Repo) CreateFetchState(ctx context.Context, orderNo string) (*domain.FetchState, error) {
-	model := FetchStateModel{OrderNo: strings.TrimSpace(orderNo)}
+func (r *Repo) CreateFetchState(ctx context.Context, emailResourceID uint) (*domain.FetchState, error) {
+	model := FetchStateModel{EmailResourceID: emailResourceID}
 	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
 		if !isDuplicateKeyError(err) {
 			return nil, fmt.Errorf("create fetch state: %w", err)
 		}
-		return r.FindFetchStateForUpdate(ctx, orderNo)
+		return r.FindFetchStateForUpdate(ctx, emailResourceID)
 	}
 	item := fetchStateModelToDomain(model)
 	return &item, nil
@@ -707,9 +699,9 @@ func (r *Repo) ClaimDispatchableFetchJobs(ctx context.Context, limit int, staleB
 	return items, nil
 }
 
-func (r *Repo) UpdateFetchStateSubmitted(ctx context.Context, orderNo string, jobID uint, status string, cooldownUntil time.Time, now time.Time) error {
+func (r *Repo) UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error {
 	result := r.dbFor(ctx).Model(&FetchStateModel{}).
-		Where("order_no = ?", strings.TrimSpace(orderNo)).
+		Where("email_resource_id = ?", emailResourceID).
 		Updates(map[string]any{
 			"last_job_id":       jobID,
 			"last_status":       status,
@@ -727,7 +719,7 @@ func (r *Repo) UpdateFetchStateSubmitted(ctx context.Context, orderNo string, jo
 	return nil
 }
 
-func (r *Repo) UpdateFetchStateCompleted(ctx context.Context, orderNo string, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error {
+func (r *Repo) UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error {
 	updates := map[string]any{
 		"last_job_id":     jobID,
 		"last_status":     status,
@@ -740,7 +732,7 @@ func (r *Repo) UpdateFetchStateCompleted(ctx context.Context, orderNo string, jo
 	if lastReceivedAt != nil {
 		updates["last_received_at"] = *lastReceivedAt
 	}
-	result := r.dbFor(ctx).Model(&FetchStateModel{}).Where("order_no = ?", strings.TrimSpace(orderNo)).Updates(updates)
+	result := r.dbFor(ctx).Model(&FetchStateModel{}).Where("email_resource_id = ?", emailResourceID).Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("update fetch state completed: %w", result.Error)
 	}
@@ -763,8 +755,6 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) (i
 			"sender",
 			"subject",
 			"raw_body",
-			"raw_source",
-			"provider_payload",
 			"body_preview",
 			"verification_code",
 			"message_id_header",
@@ -781,39 +771,6 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) (i
 		return 0, fmt.Errorf("upsert mailmatch messages: %w", err)
 	}
 	return len(models), nil
-}
-
-func (r *Repo) LoadDomainInboundMessages(ctx context.Context, scope app.OrderScope, sinceAt, untilAt time.Time, limit int) ([]app.FetchedMessage, error) {
-	if r.files == nil {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 30
-	}
-	var rows []inboundMailRow
-	if err := r.dbFor(ctx).Table("inbound_mails").
-		Select("id, envelope_from, recipient, source_object_key, status, created_at").
-		Where("resource_type = ? AND resource_id = ? AND created_at >= ? AND created_at <= ? AND status IN ?",
-			string(domain.ResourceTypeDomain),
-			scope.EmailResourceID,
-			sinceAt,
-			untilAt,
-			[]string{"pending", "processing", "stored"},
-		).
-		Order("created_at DESC, id DESC").
-		Limit(limit).
-		Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("load domain inbound messages: %w", err)
-	}
-	items := make([]app.FetchedMessage, 0, len(rows))
-	for _, row := range rows {
-		file, err := r.files.ReadPrivate(ctx, row.SourceObjectKey)
-		if err != nil || file == nil {
-			continue
-		}
-		items = append(items, parseInboundFetchedMessage(scope, row, file.ContentBytes))
-	}
-	return items, nil
 }
 
 func (r *Repo) UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint, refreshToken string) error {
@@ -834,58 +791,6 @@ func (r *Repo) UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint,
 	return nil
 }
 
-type inboundMailRow struct {
-	ID              uint
-	EnvelopeFrom    string
-	Recipient       string
-	SourceObjectKey string
-	Status          string
-	CreatedAt       time.Time
-}
-
-func parseInboundFetchedMessage(scope app.OrderScope, row inboundMailRow, raw []byte) app.FetchedMessage {
-	item := app.FetchedMessage{
-		EmailResourceID:   scope.EmailResourceID,
-		ResourceType:      domain.ResourceTypeDomain,
-		Recipient:         strings.ToLower(strings.TrimSpace(row.Recipient)),
-		Recipients:        []string{strings.ToLower(strings.TrimSpace(row.Recipient))},
-		Sender:            strings.TrimSpace(row.EnvelopeFrom),
-		Body:              strings.TrimSpace(string(raw)),
-		RawSource:         string(raw),
-		BodyPreview:       bodyPreview(string(raw)),
-		MessageIDHeader:   fmt.Sprintf("inbound:%d", row.ID),
-		ProviderMessageID: fmt.Sprintf("%d", row.ID),
-		Protocol:          "smtp",
-		Folder:            "inbound",
-		ReceivedAt:        row.CreatedAt.UTC(),
-	}
-	msg, err := stdmail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return item
-	}
-	decoder := new(mime.WordDecoder)
-	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
-		item.Subject = subject
-	}
-	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
-		item.Sender = from
-	}
-	// Keep the ownership recipient from the SMTP envelope. Header To may be a
-	// display address, a list, or an alias and must not change MailMatch scope.
-	if messageID := strings.Trim(strings.TrimSpace(msg.Header.Get("Message-Id")), "<>"); messageID != "" {
-		item.MessageIDHeader = messageID
-	}
-	if date, err := stdmail.ParseDate(msg.Header.Get("Date")); err == nil {
-		item.ReceivedAt = date.UTC()
-	}
-	body, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body)
-	if strings.TrimSpace(body) != "" {
-		item.Body = strings.TrimSpace(body)
-		item.BodyPreview = bodyPreview(body)
-	}
-	return item
-}
-
 func activeFetchStatuses() []string {
 	return []string{string(domain.FetchJobPending), string(domain.FetchJobQueued), string(domain.FetchJobRunning)}
 }
@@ -894,14 +799,6 @@ func messageModelToDomain(model MessageModel) domain.Message {
 	rawBody := ""
 	if model.RawBody.Valid {
 		rawBody = model.RawBody.String
-	}
-	rawSource := ""
-	if model.RawSource.Valid {
-		rawSource = model.RawSource.String
-	}
-	providerPayload := ""
-	if model.ProviderPayload.Valid {
-		providerPayload = model.ProviderPayload.String
 	}
 	return domain.Message{
 		ID:                model.ID,
@@ -912,8 +809,6 @@ func messageModelToDomain(model MessageModel) domain.Message {
 		Sender:            model.Sender,
 		Subject:           model.Subject,
 		RawBody:           rawBody,
-		RawSource:         rawSource,
-		ProviderPayload:   providerPayload,
 		BodyPreview:       model.BodyPreview,
 		VerificationCode:  model.VerificationCode,
 		MessageIDHeader:   model.MessageIDHeader,
@@ -930,9 +825,8 @@ func messageModelToDomain(model MessageModel) domain.Message {
 }
 
 func messageModelFromDomain(item domain.Message) MessageModel {
-	rawBody := sql.NullString{String: item.RawBody, Valid: strings.TrimSpace(item.RawBody) != ""}
-	rawSource := sql.NullString{String: item.RawSource, Valid: strings.TrimSpace(item.RawSource) != ""}
-	providerPayload := sql.NullString{String: item.ProviderPayload, Valid: strings.TrimSpace(item.ProviderPayload) != ""}
+	rawBodyValue := truncateUTF8Bytes(strings.TrimSpace(item.RawBody), 64*1024)
+	rawBody := sql.NullString{String: rawBodyValue, Valid: rawBodyValue != ""}
 	recipientsJSON := encodeRecipients(item.Recipients, item.Recipient)
 	return MessageModel{
 		EmailResourceID:   item.EmailResourceID,
@@ -942,8 +836,6 @@ func messageModelFromDomain(item domain.Message) MessageModel {
 		Sender:            truncate(item.Sender, 255),
 		Subject:           truncate(item.Subject, 500),
 		RawBody:           rawBody,
-		RawSource:         rawSource,
-		ProviderPayload:   providerPayload,
 		BodyPreview:       truncate(item.BodyPreview, 1000),
 		VerificationCode:  truncate(item.VerificationCode, 64),
 		MessageIDHeader:   truncate(item.MessageIDHeader, 500),
@@ -1085,7 +977,7 @@ func fetchJobModelFromDomain(item domain.FetchJob) FetchJobModel {
 
 func fetchStateModelToDomain(model FetchStateModel) domain.FetchState {
 	return domain.FetchState{
-		OrderNo:         model.OrderNo,
+		EmailResourceID: model.EmailResourceID,
 		LastJobID:       model.LastJobID,
 		LastStatus:      model.LastStatus,
 		LastSubmittedAt: model.LastSubmittedAt,
@@ -1102,83 +994,6 @@ func safeDiagnostic(value string) string {
 	return truncate(strings.Join(strings.Fields(strings.TrimSpace(value)), " "), 500)
 }
 
-func decodeMIMEHeader(decoder *mime.WordDecoder, value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	decoded, err := decoder.DecodeHeader(value)
-	if err != nil {
-		return value
-	}
-	return decoded
-}
-
-func readMIMEBody(contentType string, transferEncoding string, body io.Reader) (string, error) {
-	mediaType, params, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		mediaType = "text/plain"
-	}
-	if strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
-		mr := multipart.NewReader(body, params["boundary"])
-		var htmlFallback string
-		for {
-			part, err := mr.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return "", err
-			}
-			partBody, err := readMIMEBody(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
-			if err != nil {
-				continue
-			}
-			partType, _, _ := mime.ParseMediaType(part.Header.Get("Content-Type"))
-			switch strings.ToLower(partType) {
-			case "text/plain":
-				if strings.TrimSpace(partBody) != "" {
-					return partBody, nil
-				}
-			case "text/html":
-				if htmlFallback == "" {
-					htmlFallback = stripHTML(partBody)
-				}
-			}
-		}
-		return htmlFallback, nil
-	}
-
-	reader := decodeTransferReader(body, transferEncoding)
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return "", err
-	}
-	text := string(data)
-	if strings.EqualFold(mediaType, "text/html") {
-		text = stripHTML(text)
-	}
-	return text, nil
-}
-
-func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
-	switch strings.ToLower(strings.TrimSpace(transferEncoding)) {
-	case "base64":
-		return base64.NewDecoder(base64.StdEncoding, body)
-	case "quoted-printable":
-		return quotedprintable.NewReader(body)
-	default:
-		return body
-	}
-}
-
-func stripHTML(value string) string {
-	value = regexp.MustCompile(`(?is)<script\b.*?</script>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?is)<style\b.*?</style>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(value, " ")
-	return strings.Join(strings.Fields(value), " ")
-}
-
 func bodyPreview(value string) string {
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	return truncate(value, 1000)
@@ -1190,6 +1005,18 @@ func truncate(value string, limit int) string {
 		return value
 	}
 	return value[:limit]
+}
+
+func truncateUTF8Bytes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	out := value[:limit]
+	for len(out) > 0 && !utf8.ValidString(out) {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 func isDuplicateKeyError(err error) bool {

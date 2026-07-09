@@ -7,6 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-08 | V1.1 | Codex | P1-I8 补充/修正：外部取件统一为 `pickup(email + token)`，控制台和分享链接共用同一入口。 |
 | 2026-07-09 | V1.2 | Codex | 补充设计：新增订单交付结果快照，用于接码一次性交付和购买最新验证码展示，不改变 `Message` 原始邮件事实模型。 |
+| 2026-07-09 | V1.3 | Codex | 补充实现约束：`Message` 表停止保存 `raw_source/provider_payload`，只保留结构化正文与索引字段；RFC822 原件由 MailTransport/MinIO 私有对象保留。 |
 
 > 核心域。BC-MAILMATCH 保存邮件事实，按项目规则识别订单服务结果。协议收发不在本上下文内。
 
@@ -65,7 +66,7 @@
 | 接码 `serviceMode=code` | 首次唯一命中后写入一次，后续重复匹配不覆盖。 |
 | 购买 `serviceMode=purchase` | 唯一命中后按 `receivedAt` 更新到最新验证码，旧邮件不能倒退覆盖。 |
 
-`Message` 仍然是原始邮件事实，正文和 provider payload 不因快照而裁剪；匹配仍然按“原始收件人候选 -> 有效分配 -> 项目规则”执行。快照不能作为匹配输入，不能绕过规则直接交付。
+`Message` 仍然是结构化邮件事实，匹配仍然按“原始收件人候选 -> 有效分配 -> 项目规则”执行。为控制表体积，`Message` 表不保存 `raw_source/provider_payload`，`rawBody` 只保存用于匹配与展示的正文；需要协议原件时使用 MailTransport 保存的 MinIO 私有 RFC822 对象。快照不能作为匹配输入，不能绕过规则直接交付。
 
 ---
 

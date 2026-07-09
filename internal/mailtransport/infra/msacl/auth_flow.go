@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -45,22 +44,17 @@ func requestDeviceCode(session *Session) (string, string, error) {
 	return userCode, deviceCode, nil
 }
 
-var sessionDCMu = struct {
-	sync.Mutex
-	m map[*Session][2]int
-}{m: map[*Session][2]int{}}
-
 func sessionSetDC(session *Session, interval, expiresIn int) {
-	sessionDCMu.Lock()
-	defer sessionDCMu.Unlock()
-	sessionDCMu.m[session] = [2]int{interval, expiresIn}
+	if session == nil {
+		return
+	}
+	session.dcInterval = interval
+	session.dcExpiresIn = expiresIn
 }
 
 func sessionDCInterval(session *Session) int {
-	sessionDCMu.Lock()
-	defer sessionDCMu.Unlock()
-	if values, ok := sessionDCMu.m[session]; ok && values[0] > 0 {
-		return values[0]
+	if session != nil && session.dcInterval > 0 {
+		return session.dcInterval
 	}
 	return tokenPollInterval
 }

@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
+
+const inventoryStatsCacheTTL = 30 * time.Second
 
 type AllocateCommand struct {
 	OrderNo          string
@@ -20,8 +23,10 @@ type AllocateCommand struct {
 }
 
 type UseCase struct {
-	repo  Repository
-	queue CandidateRefreshQueue
+	repo                  Repository
+	queue                 CandidateRefreshQueue
+	inventoryStatsCache   *platform.TTLCache[string, InventoryStats]
+	productInventoryCache *platform.TTLCache[string, ProjectProductInventoryTotals]
 }
 
 func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
@@ -29,7 +34,12 @@ func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
 	if len(queues) > 0 {
 		queue = queues[0]
 	}
-	return &UseCase{repo: repo, queue: queue}
+	return &UseCase{
+		repo:                  repo,
+		queue:                 queue,
+		inventoryStatsCache:   platform.NewTTLCache[string, InventoryStats](),
+		productInventoryCache: platform.NewTTLCache[string, ProjectProductInventoryTotals](),
+	}
 }
 
 func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.UnifiedAllocation, error) {
@@ -164,14 +174,32 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint, buyerU
 	if projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
+	key := inventoryCacheKey(projectID, buyerUserID)
+	if cached, ok := uc.inventoryStatsCache.Get(key); ok {
+		return cloneInventoryStats(cached), nil
+	}
+	stats, err := uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
+	if err != nil || stats == nil {
+		return stats, err
+	}
+	uc.inventoryStatsCache.Set(key, *stats, inventoryStatsCacheTTL)
+	return cloneInventoryStats(*stats), nil
 }
 
 func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error) {
 	if projectID == 0 || buyerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+	key := inventoryCacheKey(projectID, buyerUserID)
+	if cached, ok := uc.productInventoryCache.Get(key); ok {
+		return cloneProductInventoryTotals(cached), nil
+	}
+	totals, err := uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+	if err != nil || totals == nil {
+		return totals, err
+	}
+	uc.productInventoryCache.Set(key, *totals, inventoryStatsCacheTTL)
+	return cloneProductInventoryTotals(*totals), nil
 }
 
 func (uc *UseCase) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {
@@ -218,6 +246,25 @@ func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID u
 		CreatedAt: job.CreatedAt,
 		UpdatedAt: job.UpdatedAt,
 	}, nil
+}
+
+func inventoryCacheKey(projectID uint, buyerUserID uint) string {
+	return strconv.FormatUint(uint64(projectID), 10) + "|" + strconv.FormatUint(uint64(buyerUserID), 10)
+}
+
+func cloneInventoryStats(stats InventoryStats) *InventoryStats {
+	copy := stats
+	return &copy
+}
+
+func cloneProductInventoryTotals(totals ProjectProductInventoryTotals) *ProjectProductInventoryTotals {
+	copy := totals
+	copy.Items = make([]ProductInventoryTotal, len(totals.Items))
+	for i := range totals.Items {
+		copy.Items[i] = totals.Items[i]
+		copy.Items[i].Suffixes = append([]ProductInventorySuffixTotal(nil), totals.Items[i].Suffixes...)
+	}
+	return &copy
 }
 
 func (uc *UseCase) ProcessCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error {

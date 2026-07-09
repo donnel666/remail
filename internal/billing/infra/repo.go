@@ -26,6 +26,8 @@ type WalletModel struct {
 	ConsumerBalance   string    `gorm:"type:decimal(18,2);not null;default:0;column:consumer_balance"`
 	SupplierAvailable string    `gorm:"type:decimal(18,2);not null;default:0;column:supplier_available"`
 	SupplierFrozen    string    `gorm:"type:decimal(18,2);not null;default:0;column:supplier_frozen"`
+	TotalSpend        string    `gorm:"type:decimal(18,2);not null;default:0;column:total_spend"`
+	SpendCount        int64     `gorm:"not null;default:0;column:spend_count"`
 	CreatedAt         time.Time `gorm:"not null;autoCreateTime;column:created_at"`
 	UpdatedAt         time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
@@ -176,29 +178,14 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 		return nil, err
 	}
 
-	var spend string
-	if err := r.db.WithContext(ctx).
-		Model(&WalletTransactionModel{}).
-		Select("COALESCE(SUM(-amount), 0)").
-		Where("user_id = ? AND balance_bucket = ? AND direction = ?", userID, domain.BalanceBucketConsumer, domain.TransactionDirectionOut).
-		Scan(&spend).Error; err != nil {
-		return nil, fmt.Errorf("sum wallet spend: %w", err)
-	}
-	var orderCount int64
-	if err := r.db.WithContext(ctx).
-		Model(&WalletTransactionModel{}).
-		Where("user_id = ? AND balance_bucket = ? AND direction = ?", userID, domain.BalanceBucketConsumer, domain.TransactionDirectionOut).
-		Count(&orderCount).Error; err != nil {
-		return nil, fmt.Errorf("count wallet spend: %w", err)
-	}
-	normalizedSpend, err := normalizeDBMoney(spend)
+	normalizedSpend, err := normalizeDBMoney(wallet.TotalSpend)
 	if err != nil {
 		return nil, err
 	}
 	return &domain.WalletSummary{
 		Wallet:          walletModelToDomain(wallet),
 		HistoricalSpend: normalizedSpend,
-		OrderCount:      orderCount,
+		OrderCount:      wallet.SpendCount,
 	}, nil
 }
 
@@ -791,6 +778,8 @@ func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID
 		ConsumerBalance:   "0.00",
 		SupplierAvailable: "0.00",
 		SupplierFrozen:    "0.00",
+		TotalSpend:        "0.00",
+		SpendCount:        0,
 	}
 	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
 		return WalletModel{}, fmt.Errorf("ensure wallet: %w", err)
@@ -895,13 +884,26 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 	if err := tx.WithContext(ctx).Create(&transaction).Error; err != nil {
 		return nil, fmt.Errorf("create wallet transaction: %w", err)
 	}
+	updates := map[string]any{"consumer_balance": afterString}
+	if req.Direction == domain.TransactionDirectionOut {
+		updates["total_spend"] = gorm.Expr("total_spend + ?", domain.MoneyString(amount))
+		updates["spend_count"] = gorm.Expr("spend_count + 1")
+	}
 	if err := tx.WithContext(ctx).
 		Model(&WalletModel{}).
 		Where("user_id = ?", wallet.UserID).
-		Update("consumer_balance", afterString).Error; err != nil {
+		Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update wallet balance: %w", err)
 	}
 	wallet.ConsumerBalance = afterString
+	if req.Direction == domain.TransactionDirectionOut {
+		totalSpend, err := domain.ParseMoney(wallet.TotalSpend)
+		if err != nil {
+			return nil, err
+		}
+		wallet.TotalSpend = domain.MoneyString(totalSpend.Add(amount))
+		wallet.SpendCount++
+	}
 	wallet.UpdatedAt = time.Now().UTC()
 	return &billingapp.AdjustBalanceResult{
 		Wallet:      walletModelToDomain(*wallet),

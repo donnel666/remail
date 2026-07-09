@@ -51,8 +51,6 @@ type Message struct {
 	Sender            string
 	Subject           string
 	RawBody           string
-	RawSource         string
-	ProviderPayload   string
 	BodyPreview       string
 	VerificationCode  string
 	MessageIDHeader   string
@@ -114,7 +112,7 @@ type FetchJob struct {
 }
 
 type FetchState struct {
-	OrderNo         string
+	EmailResourceID uint
 	LastJobID       *uint
 	LastStatus      string
 	LastSubmittedAt *time.Time

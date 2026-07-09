@@ -15,7 +15,7 @@ const (
 	TypeMailmatchFetch           = "mailmatch:fetch"
 	TypeMailmatchFetchDispatcher = "mailmatch:fetch_dispatcher"
 
-	mailmatchQueueName           = "default"
+	mailmatchQueueName           = "mailfetch"
 	mailmatchFetchTaskMaxRetry   = 0
 	mailmatchFetchTaskTimeout    = 60 * time.Second
 	mailmatchDispatchTaskTimeout = 30 * time.Second

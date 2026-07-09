@@ -129,6 +129,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, openapiMod.UseCase)
+		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 

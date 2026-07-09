@@ -150,9 +150,10 @@ func initAsynqServer(cfg RedisConfig) *asynq.Server {
 		DB:       cfg.DB,
 	}
 	return asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: 6,
+		Concurrency: 128,
 		Queues: map[string]int{
-			"default":       5,
+			"mailfetch":     8,
+			"default":       3,
 			"mailtransport": 1,
 		},
 	})

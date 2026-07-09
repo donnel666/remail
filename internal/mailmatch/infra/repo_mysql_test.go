@@ -130,6 +130,53 @@ func TestUpsertLatestOrderSnapshotOnlyMovesForwardMySQL(t *testing.T) {
 	require.WithinDuration(t, newerAt, snapshot.ReceivedAt, time.Second)
 }
 
+func TestResourceFetchStateAndActiveJobConstraintsMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchFetchResource(t, db)
+	now := time.Now().UTC()
+
+	err := db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(email_resource_id)
+VALUES (99999)`).Error
+	require.Error(t, err)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(email_resource_id)
+VALUES (100)`).Error)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_fetch_jobs(
+    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
+    recipient, status, since_at, until_at
+) VALUES (
+    'OR_FETCH_RESOURCE_A', 'order_fetch', 'microsoft', 1000, 10, 100,
+    'a@example.com', 'pending', ?, ?
+)`, now.Add(-time.Hour), now).Error)
+
+	err = db.Exec(`
+INSERT INTO mailmatch_fetch_jobs(
+    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
+    recipient, status, since_at, until_at
+) VALUES (
+    'OR_FETCH_RESOURCE_B', 'order_fetch', 'microsoft', 1001, 10, 100,
+    'b@example.com', 'pending', ?, ?
+)`, now.Add(-time.Hour), now).Error
+	require.Error(t, err)
+
+	require.NoError(t, db.Exec(`
+UPDATE mailmatch_fetch_jobs
+SET status = 'succeeded'
+WHERE order_no = 'OR_FETCH_RESOURCE_A'`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_fetch_jobs(
+    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
+    recipient, status, since_at, until_at
+) VALUES (
+    'OR_FETCH_RESOURCE_B', 'order_fetch', 'microsoft', 1001, 10, 100,
+    'b@example.com', 'pending', ?, ?
+)`, now.Add(-time.Hour), now).Error)
+}
+
 func seedMailmatchOrder(t *testing.T, db *gorm.DB, orderNo string) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
@@ -156,4 +203,40 @@ INSERT INTO orders(
     'public_only', 'pending_payment', 1.00, 0.00, '',
     'console', ?, REPEAT('a', 64), 'none'
 )`, orderNo, orderNo+"-idem").Error)
+}
+
+func seedMailmatchFetchResource(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES
+    (100, 'microsoft', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resources(id, resource_type, email_address, email_domain, password, client_id, refresh_token, status)
+VALUES (100, 'microsoft', 'main@example.com', 'example.com', 'secret', 'client', 'rt', 'normal')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
+VALUES (10, 'MailMatch Fetch Project', 'mailmatch', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (20, 10, 'microsoft', 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 60, 1, 0, 0)`).Error)
+	for _, orderNo := range []string{"OR_FETCH_RESOURCE_A", "OR_FETCH_RESOURCE_B"} {
+		require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, refund_amount, delivery_email,
+    client_channel, idempotency_key, request_fingerprint, service_cleanup_status
+) VALUES (
+    ?, 2, 10, 20, 'microsoft', 'code',
+    'public_only', 'pending_payment', 1.00, 0.00, '',
+    'console', ?, REPEAT('b', 64), 'none'
+)`, orderNo, orderNo+"-idem").Error)
+	}
 }

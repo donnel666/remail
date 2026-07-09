@@ -171,21 +171,25 @@ func (r *InboundMailRepo) ClaimDispatchable(ctx context.Context, limit int, stal
 }
 
 func (r *InboundMailRepo) MarkPending(ctx context.Context, id uint, safeError string) error {
-	return r.updateStatus(ctx, id, domain.InboundStatusPending, safeDiagnostic(safeError))
+	return r.updateStatus(ctx, id, domain.InboundStatusPending, []domain.InboundStatus{domain.InboundStatusPending, domain.InboundStatusProcessing}, safeDiagnostic(safeError))
 }
 
 func (r *InboundMailRepo) MarkStored(ctx context.Context, id uint) error {
-	return r.updateStatus(ctx, id, domain.InboundStatusStored, "")
+	return r.updateStatus(ctx, id, domain.InboundStatusStored, []domain.InboundStatus{domain.InboundStatusProcessing}, "")
 }
 
 func (r *InboundMailRepo) MarkFailed(ctx context.Context, id uint, safeError string) error {
-	return r.updateStatus(ctx, id, domain.InboundStatusFailed, safeDiagnostic(safeError))
+	return r.updateStatus(ctx, id, domain.InboundStatusFailed, []domain.InboundStatus{domain.InboundStatusPending, domain.InboundStatusProcessing}, safeDiagnostic(safeError))
 }
 
-func (r *InboundMailRepo) updateStatus(ctx context.Context, id uint, status domain.InboundStatus, safeError string) error {
+func (r *InboundMailRepo) updateStatus(ctx context.Context, id uint, status domain.InboundStatus, allowed []domain.InboundStatus, safeError string) error {
 	safeError = strings.TrimSpace(safeError)
+	allowedValues := make([]string, 0, len(allowed))
+	for _, value := range allowed {
+		allowedValues = append(allowedValues, string(value))
+	}
 	result := r.db.WithContext(ctx).Model(&InboundMailModel{}).
-		Where("id = ?", id).
+		Where("id = ? AND status IN ?", id, allowedValues).
 		Updates(map[string]any{
 			"status":         string(status),
 			"failure_reason": safeError,

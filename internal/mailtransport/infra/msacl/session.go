@@ -31,6 +31,8 @@ type Session struct {
 	navHeaders  map[string]string
 	corsHeaders map[string]string
 	userAgent   string
+	dcInterval  int
+	dcExpiresIn int
 }
 
 type HTTPResponse struct {

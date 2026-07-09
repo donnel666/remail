@@ -401,6 +401,7 @@ func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "4.50", summary.HistoricalSpend)
+	require.EqualValues(t, 2, summary.OrderCount)
 
 	require.Error(t, db.Create(&WalletTransactionModel{
 		TransactionNo:   "TX-DIR-CONSTRAINT",

@@ -35,6 +35,19 @@ type InboundMailQueue interface {
 	EnqueueInboundDispatch(ctx context.Context, delay time.Duration) error
 }
 
+type InboundConsumerPort interface {
+	IngestInboundMail(ctx context.Context, req InboundConsumeRequest) error
+}
+
+type InboundConsumeRequest struct {
+	EmailResourceID uint
+	ResourceType    domain.InboundResourceType
+	Recipient       string
+	EnvelopeFrom    string
+	Raw             []byte
+	ReceivedAt      time.Time
+}
+
 type InboundRawMessage struct {
 	EnvelopeFrom string
 	Recipients   []domain.InboundRecipient
@@ -61,6 +74,7 @@ type InboundService struct {
 	files    governanceapp.FilePort
 	queue    InboundMailQueue
 	logs     SystemLogPort
+	consumer InboundConsumerPort
 	now      func() time.Time
 }
 
@@ -73,6 +87,13 @@ func NewInboundService(repo InboundMailRepository, resolver InboundResourceResol
 		logs:     logs,
 		now:      time.Now,
 	}
+}
+
+func (s *InboundService) SetConsumer(consumer InboundConsumerPort) {
+	if s == nil {
+		return
+	}
+	s.consumer = consumer
 }
 
 func (s *InboundService) ResolveRecipient(ctx context.Context, email string) (*domain.InboundRecipient, error) {
@@ -173,7 +194,8 @@ func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, f
 	if !claimed {
 		return nil
 	}
-	if _, err := s.files.ReadPrivate(ctx, task.ObjectKey); err != nil {
+	file, err := s.files.ReadPrivate(ctx, task.ObjectKey)
+	if err != nil || file == nil {
 		if finalAttempt {
 			_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail object unavailable.")
 			writeSystemLog(ctx, s.logs, "error", "mail.inbound_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing failed.", err)
@@ -181,7 +203,29 @@ func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, f
 			_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail object unavailable.")
 			writeSystemLog(ctx, s.logs, "warning", "mail.inbound_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing will retry.", err)
 		}
-		return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+		if err != nil {
+			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+		}
+		return fmt.Errorf("%w: inbound mail object unavailable", domain.ErrInboundStorageUnavailable)
+	}
+	if mail.ResourceType == domain.InboundResourceDomain && s.consumer != nil {
+		if err := s.consumer.IngestInboundMail(ctx, InboundConsumeRequest{
+			EmailResourceID: mail.ResourceID,
+			ResourceType:    mail.ResourceType,
+			Recipient:       mail.Recipient,
+			EnvelopeFrom:    mail.EnvelopeFrom,
+			Raw:             file.ContentBytes,
+			ReceivedAt:      mail.CreatedAt,
+		}); err != nil {
+			if finalAttempt {
+				_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail match failed.")
+				writeSystemLog(ctx, s.logs, "error", "mail.inbound_match_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail could not be consumed by MailMatch.", err)
+			} else {
+				_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail match failed.")
+				writeSystemLog(ctx, s.logs, "warning", "mail.inbound_match_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail MailMatch consume will retry.", err)
+			}
+			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+		}
 	}
 	return s.repo.MarkStored(ctx, task.InboundMailID)
 }

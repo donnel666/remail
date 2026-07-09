@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
@@ -11,6 +12,7 @@ import (
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 type Handler struct {
@@ -27,6 +29,11 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
+	if !globalPickupLimiter.allow(tokenPlain) {
+		c.Header("Retry-After", "1")
+		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
 	startedAt := time.Now()
 	token, err := h.mod.OpenAPI.FindOrderTokenByPlain(c.Request.Context(), tokenPlain)
 	if err != nil {
@@ -40,6 +47,74 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, orderMailResponse(items, state))
+}
+
+const maxPickupLimiterKeys = 100000
+
+var globalPickupLimiter = newPickupLimiter()
+
+type pickupLimiter struct {
+	mu    sync.Mutex
+	items map[string]*pickupLimiterEntry
+}
+
+type pickupLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+func newPickupLimiter() *pickupLimiter {
+	return &pickupLimiter{items: make(map[string]*pickupLimiterEntry)}
+}
+
+func (l *pickupLimiter) allow(token string) bool {
+	key := pickupLimitKey(token)
+	if key == "" {
+		return false
+	}
+	now := time.Now()
+	l.mu.Lock()
+	entry := l.items[key]
+	if entry == nil {
+		entry = &pickupLimiterEntry{limiter: rate.NewLimiter(rate.Limit(1), 3)}
+		l.items[key] = entry
+	}
+	entry.lastSeen = now
+	if len(l.items) > maxPickupLimiterKeys {
+		l.pruneLocked(now)
+	}
+	limiter := entry.limiter
+	l.mu.Unlock()
+	return limiter.Allow()
+}
+
+func (l *pickupLimiter) pruneLocked(now time.Time) {
+	cutoff := now.Add(-10 * time.Minute)
+	for key, entry := range l.items {
+		if entry.lastSeen.Before(cutoff) {
+			delete(l.items, key)
+		}
+	}
+	if len(l.items) <= maxPickupLimiterKeys {
+		return
+	}
+	for key := range l.items {
+		delete(l.items, key)
+		if len(l.items) <= maxPickupLimiterKeys {
+			return
+		}
+	}
+}
+
+func pickupLimitKey(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	if len(token) <= 14 {
+		return token
+	}
+	return token[:14]
 }
 
 func pickupCredential(c *gin.Context) (email string, token string, ok bool) {

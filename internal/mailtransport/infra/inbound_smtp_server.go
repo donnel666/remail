@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -22,6 +23,8 @@ type InboundSMTPConfig struct {
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 }
+
+const defaultInboundSMTPMaxConnections = 200
 
 type InboundAccepter interface {
 	ResolveRecipient(ctx context.Context, email string) (*domain.InboundRecipient, error)
@@ -40,6 +43,7 @@ func NewInboundSMTPServer(cfg InboundSMTPConfig, accepter InboundAccepter) *Inbo
 	backend := &inboundSMTPBackend{
 		accepter:        accepter,
 		maxMessageBytes: maxMessageBytes,
+		connSlots:       make(chan struct{}, defaultInboundSMTPMaxConnections),
 	}
 	server := smtpserver.NewServer(backend)
 	server.Addr = firstNonEmpty(cfg.Addr, ":2525")
@@ -78,9 +82,17 @@ func (s *InboundSMTPServer) Shutdown(ctx context.Context) error {
 type inboundSMTPBackend struct {
 	accepter        InboundAccepter
 	maxMessageBytes int64
+	connSlots       chan struct{}
 }
 
 func (b *inboundSMTPBackend) NewSession(conn *smtpserver.Conn) (smtpserver.Session, error) {
+	if b.connSlots != nil {
+		select {
+		case b.connSlots <- struct{}{}:
+		default:
+			return nil, smtpTemporary("too many connections")
+		}
+	}
 	remoteAddr := ""
 	if conn != nil && conn.Conn() != nil {
 		remoteAddr = conn.Conn().RemoteAddr().String()
@@ -89,6 +101,15 @@ func (b *inboundSMTPBackend) NewSession(conn *smtpserver.Conn) (smtpserver.Sessi
 		accepter:        b.accepter,
 		remoteAddr:      remoteAddr,
 		maxMessageBytes: b.maxMessageBytes,
+		releaseConn: func() {
+			if b.connSlots == nil {
+				return
+			}
+			select {
+			case <-b.connSlots:
+			default:
+			}
+		},
 	}, nil
 }
 
@@ -96,6 +117,8 @@ type inboundSMTPSession struct {
 	accepter        InboundAccepter
 	remoteAddr      string
 	maxMessageBytes int64
+	releaseConn     func()
+	releaseOnce     sync.Once
 	envelopeFrom    string
 	recipients      []domain.InboundRecipient
 }
@@ -106,6 +129,11 @@ func (s *inboundSMTPSession) Reset() {
 }
 
 func (s *inboundSMTPSession) Logout() error {
+	s.releaseOnce.Do(func() {
+		if s.releaseConn != nil {
+			s.releaseConn()
+		}
+	})
 	return nil
 }
 

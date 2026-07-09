@@ -1,9 +1,11 @@
 package infra
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-sasl"
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -316,13 +319,9 @@ func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, 
 }
 
 func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchRequest, accessToken string) (MicrosoftMailFetchResult, error) {
-	dialer := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
-	client, err := imapclient.DialTLS(outlookIMAPAddress, &imapclient.Options{
-		Dialer:    dialer,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "outlook.office365.com"},
-	})
+	client, err := dialOutlookIMAPClient(ctx, req.ProxyURL)
 	if err != nil {
-		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", false), err
+		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
 	}
 	defer client.Close()
 
@@ -385,6 +384,105 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
 	result.MessageCount = len(result.Messages)
 	return result, nil
+}
+
+func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Client, error) {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "outlook.office365.com", NextProtos: []string{"imap"}}
+	conn, err := dialOutlookIMAPConn(ctx, proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	tlsConn := tls.Client(conn, tlsConfig)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return imapclient.New(tlsConn, &imapclient.Options{TLSConfig: tlsConfig}), nil
+}
+
+func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error) {
+	proxyURL = normalizeMailProxyURL(proxyURL)
+	dialer := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
+	if proxyURL == "" {
+		return dialer.DialContext(ctx, "tcp", outlookIMAPAddress)
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid proxy url")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "socks5", "socks5h":
+		auth := (*proxy.Auth)(nil)
+		if parsed.User != nil {
+			password, _ := parsed.User.Password()
+			auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
+		}
+		socksDialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, dialer)
+		if err != nil {
+			return nil, err
+		}
+		return socksDialer.Dial("tcp", outlookIMAPAddress)
+	case "http", "https":
+		return dialHTTPConnect(ctx, dialer, parsed, outlookIMAPAddress)
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme")
+	}
+}
+
+func normalizeMailProxyURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "://") {
+		return value
+	}
+	return "http://" + value
+}
+
+func dialHTTPConnect(ctx context.Context, dialer *net.Dialer, parsed *url.URL, target string) (net.Conn, error) {
+	var conn net.Conn
+	var err error
+	if strings.EqualFold(parsed.Scheme, "https") {
+		conn, err = tls.DialWithDialer(dialer, "tcp", parsed.Host, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: parsed.Hostname()})
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", parsed.Host)
+	}
+	if err != nil {
+		return nil, err
+	}
+	request := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", target, target)
+	if parsed.User != nil {
+		password, _ := parsed.User.Password()
+		credential := base64.StdEncoding.EncodeToString([]byte(parsed.User.Username() + ":" + password))
+		request += "Proxy-Authorization: Basic " + credential + "\r\n"
+	}
+	request += "\r\n"
+	if _, err := conn.Write([]byte(request)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if !strings.Contains(line, " 200 ") {
+		_ = conn.Close()
+		return nil, fmt.Errorf("proxy connect failed")
+	}
+	for {
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		if strings.TrimSpace(header) == "" {
+			break
+		}
+	}
+	return conn, nil
 }
 
 func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint32, sinceAt time.Time, maxMessages int) (imap.SeqSet, error) {

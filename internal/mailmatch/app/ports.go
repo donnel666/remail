@@ -1,11 +1,18 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
+	stdmail "net/mail"
 	"regexp"
 	"strings"
 	"sync"
@@ -22,7 +29,7 @@ const (
 	readWindowSkew             = 2 * time.Minute
 	codeReadLimit              = 1
 	purchaseReadLimit          = 30
-	messageScanLimit           = 120
+	messageScanLimit           = 40
 	defaultFetchMaxAttempts    = 3
 	staleFetchRunningThreshold = 90 * time.Second
 )
@@ -95,6 +102,15 @@ type FetchMessagesResult struct {
 	RefreshToken string
 }
 
+type InboundMailRequest struct {
+	EmailResourceID uint
+	ResourceType    domain.ResourceType
+	Recipient       string
+	EnvelopeFrom    string
+	Raw             []byte
+	ReceivedAt      time.Time
+}
+
 type MailTransportFetchPort interface {
 	FetchMicrosoftMessages(ctx context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error)
 }
@@ -108,10 +124,9 @@ type Repository interface {
 	CreateOrderSnapshotOnce(ctx context.Context, snapshot domain.OrderSnapshot) error
 	UpsertLatestOrderSnapshot(ctx context.Context, snapshot domain.OrderSnapshot) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
-	FindLatestReceivedAt(ctx context.Context, orderNo string) (*time.Time, error)
-	FindActiveFetchJob(ctx context.Context, orderNo string) (*domain.FetchJob, error)
-	FindFetchStateForUpdate(ctx context.Context, orderNo string) (*domain.FetchState, error)
-	CreateFetchState(ctx context.Context, orderNo string) (*domain.FetchState, error)
+	FindActiveFetchJobByResource(ctx context.Context, emailResourceID uint) (*domain.FetchJob, error)
+	FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
+	CreateFetchState(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
 	CreateFetchJob(ctx context.Context, job *domain.FetchJob) error
 	MarkFetchJobQueued(ctx context.Context, jobID uint) error
 	FindFetchJob(ctx context.Context, jobID uint) (*domain.FetchJob, error)
@@ -120,10 +135,9 @@ type Repository interface {
 	MarkFetchJobSkipped(ctx context.Context, jobID uint, safeError string, now time.Time) error
 	MarkFetchJobFailed(ctx context.Context, jobID uint, safeError string, retry bool, now time.Time) error
 	ClaimDispatchableFetchJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.FetchJob, error)
-	UpdateFetchStateSubmitted(ctx context.Context, orderNo string, jobID uint, status string, cooldownUntil time.Time, now time.Time) error
-	UpdateFetchStateCompleted(ctx context.Context, orderNo string, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error
+	UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error
+	UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error
 	UpsertMessages(ctx context.Context, messages []domain.Message) (int, error)
-	LoadDomainInboundMessages(ctx context.Context, scope OrderScope, sinceAt, untilAt time.Time, limit int) ([]FetchedMessage, error)
 	UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint, refreshToken string) error
 }
 
@@ -237,7 +251,7 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	state, err := uc.repo.FindFetchStateForUpdate(ctx, scope.OrderNo)
+	state, err := uc.repo.FindFetchStateForUpdate(ctx, scope.EmailResourceID)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -338,7 +352,15 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 		if !scopeFetchable(*scope, uc.now) {
 			return domain.ErrOrderUnavailable
 		}
-		active, err := uc.repo.FindActiveFetchJob(txCtx, orderNo)
+		if scope.AllocationType == domain.ResourceTypeDomain {
+			result = &FetchSubmitResult{
+				Accepted: false,
+				Reason:   "push_only",
+				Status:   "push_only",
+			}
+			return nil
+		}
+		active, err := uc.repo.FindActiveFetchJobByResource(txCtx, scope.EmailResourceID)
 		if err != nil {
 			return err
 		}
@@ -351,12 +373,12 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 			}
 			return nil
 		}
-		state, err := uc.repo.FindFetchStateForUpdate(txCtx, orderNo)
+		state, err := uc.repo.FindFetchStateForUpdate(txCtx, scope.EmailResourceID)
 		if err != nil {
 			return err
 		}
 		if state == nil {
-			state, err = uc.repo.CreateFetchState(txCtx, orderNo)
+			state, err = uc.repo.CreateFetchState(txCtx, scope.EmailResourceID)
 			if err != nil {
 				return err
 			}
@@ -396,7 +418,7 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 		}
 		if err := uc.repo.CreateFetchJob(txCtx, job); err != nil {
 			if errors.Is(err, domain.ErrFetchJobConflict) {
-				active, findErr := uc.repo.FindActiveFetchJob(txCtx, orderNo)
+				active, findErr := uc.repo.FindActiveFetchJobByResource(txCtx, scope.EmailResourceID)
 				if findErr != nil {
 					return findErr
 				}
@@ -413,7 +435,7 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 			return err
 		}
 		cooldownUntil := now.Add(fetchCooldown(purpose))
-		if err := uc.repo.UpdateFetchStateSubmitted(txCtx, orderNo, job.ID, string(job.Status), cooldownUntil, now); err != nil {
+		if err := uc.repo.UpdateFetchStateSubmitted(txCtx, scope.EmailResourceID, job.ID, string(job.Status), cooldownUntil, now); err != nil {
 			return err
 		}
 		result = &FetchSubmitResult{
@@ -456,12 +478,12 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, job.OrderNo)
 	if err != nil {
 		_ = uc.repo.MarkFetchJobSkipped(ctx, task.JobID, "Order is not available for mail fetch.", uc.now())
-		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
+		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
 		return nil
 	}
 	if !scopeFetchable(*scope, uc.now) {
 		_ = uc.repo.MarkFetchJobSkipped(ctx, task.JobID, "Order is not available for mail fetch.", uc.now())
-		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
+		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
 		return nil
 	}
 	fetched, fetchErr := uc.fetchMessages(ctx, *scope, *job)
@@ -469,7 +491,7 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 		retry := job.Attempts < job.MaxAttempts
 		_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail service is temporarily unavailable.", retry, uc.now())
 		if !retry {
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), nil, "Mail service is temporarily unavailable.", uc.now())
+			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Mail service is temporarily unavailable.", uc.now())
 		}
 		return fetchErr
 	}
@@ -478,22 +500,65 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 		scope.AllocationType == domain.ResourceTypeMicrosoft {
 		if err := uc.repo.UpdateMicrosoftRefreshToken(ctx, scope.EmailResourceID, fetched.RefreshToken); err != nil {
 			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Microsoft credential refresh failed.", false, uc.now())
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
+			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
 			return err
 		}
 	}
-	messages := make([]domain.Message, 0, len(fetched.Messages))
+	stored, matched, lastReceivedAt, err := uc.ingestFetchedMessages(ctx, fetched.Messages)
+	if err != nil {
+		safeError := "Mail message ingestion failed."
+		if stageErr := (*mailIngestError)(nil); errors.As(err, &stageErr) {
+			safeError = stageErr.safe
+		}
+		retry := job.Attempts < job.MaxAttempts && safeError == "Mail match result notification failed."
+		_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, safeError, retry, uc.now())
+		if !retry {
+			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), lastReceivedAt, safeError, uc.now())
+		}
+		return err
+	}
+	if err := uc.repo.MarkFetchJobSucceeded(ctx, task.JobID, len(fetched.Messages), stored, matched, lastReceivedAt, uc.now()); err != nil {
+		return err
+	}
+	if err := uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSucceeded), lastReceivedAt, "", uc.now()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
+	if req.EmailResourceID == 0 || strings.TrimSpace(req.Recipient) == "" || len(req.Raw) == 0 {
+		return domain.ErrInvalidRequest
+	}
+	if req.ResourceType == "" {
+		req.ResourceType = domain.ResourceTypeDomain
+	}
+	if req.ResourceType != domain.ResourceTypeDomain {
+		return nil
+	}
+	_, _, _, err := uc.ingestFetchedMessages(ctx, []FetchedMessage{inboundFetchedMessage(req)})
+	return err
+}
+
+type mailIngestError struct {
+	safe string
+	err  error
+}
+
+func (e *mailIngestError) Error() string { return e.err.Error() }
+func (e *mailIngestError) Unwrap() error { return e.err }
+
+func (uc *UseCase) ingestFetchedMessages(ctx context.Context, fetched []FetchedMessage) (int, int, *time.Time, error) {
+	messages := make([]domain.Message, 0, len(fetched))
 	matchResults := make([]MatchResult, 0)
 	matchSnapshots := make([]struct {
 		scope   OrderScope
 		message domain.Message
 	}, 0)
-	for _, item := range fetched.Messages {
+	for _, item := range fetched {
 		message, matchedScope, err := uc.fetchedMessageToDomain(ctx, item)
 		if err != nil {
-			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail message matching failed.", false, uc.now())
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), nil, "Mail message matching failed.", uc.now())
-			return err
+			return 0, 0, latestReceivedAt(messages), &mailIngestError{safe: "Mail message matching failed.", err: err}
 		}
 		messages = append(messages, message)
 		if matchedScope != nil && strings.TrimSpace(message.VerificationCode) != "" {
@@ -508,38 +573,22 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 			}{scope: *matchedScope, message: message})
 		}
 	}
+	lastReceivedAt := latestReceivedAt(messages)
 	stored, err := uc.repo.UpsertMessages(ctx, messages)
 	if err != nil {
-		_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail message storage failed.", false, uc.now())
-		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), nil, "Mail message storage failed.", uc.now())
-		return err
+		return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message storage failed.", err: err}
 	}
-	lastReceivedAt := latestReceivedAt(messages)
-	matched := countMatched(messages)
 	for _, snapshot := range matchSnapshots {
 		if err := uc.saveOrderSnapshot(ctx, snapshot.scope, snapshot.message); err != nil {
-			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail match snapshot storage failed.", false, uc.now())
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), lastReceivedAt, "Mail match snapshot storage failed.", uc.now())
-			return err
+			return stored, countMatched(messages), lastReceivedAt, &mailIngestError{safe: "Mail match snapshot storage failed.", err: err}
 		}
 	}
 	for _, result := range matchResults {
 		if err := uc.matches.NotifyMatchedCode(ctx, result); err != nil {
-			retry := job.Attempts < job.MaxAttempts
-			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail match result notification failed.", retry, uc.now())
-			if !retry {
-				_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), lastReceivedAt, "Mail match result notification failed.", uc.now())
-			}
-			return err
+			return stored, countMatched(messages), lastReceivedAt, &mailIngestError{safe: "Mail match result notification failed.", err: err}
 		}
 	}
-	if err := uc.repo.MarkFetchJobSucceeded(ctx, task.JobID, len(messages), stored, matched, lastReceivedAt, uc.now()); err != nil {
-		return err
-	}
-	if err := uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobSucceeded), lastReceivedAt, "", uc.now()); err != nil {
-		return err
-	}
-	return nil
+	return stored, countMatched(messages), lastReceivedAt, nil
 }
 
 func (uc *UseCase) DispatchFetchJobs(ctx context.Context, limit int) (int, error) {
@@ -604,11 +653,7 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 		}
 		return uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{Scope: scope, SinceAt: sinceAt, UntilAt: untilAt})
 	case domain.ResourceTypeDomain:
-		items, err := uc.repo.LoadDomainInboundMessages(ctx, scope, sinceAt, untilAt, purchaseReadLimit)
-		if err != nil {
-			return nil, err
-		}
-		return &FetchMessagesResult{Messages: items}, nil
+		return &FetchMessagesResult{Messages: nil}, nil
 	default:
 		return nil, domain.ErrInvalidRequest
 	}
@@ -743,8 +788,6 @@ func baseMessageFromFetched(item FetchedMessage) domain.Message {
 		Sender:            strings.TrimSpace(item.Sender),
 		Subject:           strings.TrimSpace(item.Subject),
 		RawBody:           body,
-		RawSource:         strings.TrimSpace(item.RawSource),
-		ProviderPayload:   strings.TrimSpace(item.ProviderPayload),
 		BodyPreview:       bodyPreview(item.BodyPreview),
 		VerificationCode:  strings.TrimSpace(item.VerificationCode),
 		MessageIDHeader:   strings.TrimSpace(item.MessageIDHeader),
@@ -788,8 +831,6 @@ func fetchedMessageFromDomain(message domain.Message) FetchedMessage {
 		Sender:            message.Sender,
 		Subject:           message.Subject,
 		Body:              message.RawBody,
-		RawSource:         message.RawSource,
-		ProviderPayload:   message.ProviderPayload,
 		BodyPreview:       message.BodyPreview,
 		VerificationCode:  message.VerificationCode,
 		MessageIDHeader:   message.MessageIDHeader,
@@ -829,6 +870,87 @@ func fetchedRecipientCandidates(item FetchedMessage) []string {
 		out = append(out, normalized)
 	}
 	return out
+}
+
+func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
+	recipient := normalizeEmail(req.Recipient)
+	receivedAt := req.ReceivedAt
+	if receivedAt.IsZero() {
+		receivedAt = time.Now().UTC()
+	}
+	body := strings.TrimSpace(string(req.Raw))
+	item := FetchedMessage{
+		EmailResourceID: req.EmailResourceID,
+		ResourceType:    req.ResourceType,
+		Recipient:       recipient,
+		Recipients:      []string{recipient},
+		Sender:          strings.TrimSpace(req.EnvelopeFrom),
+		Body:            body,
+		BodyPreview:     bodyPreview(body),
+		MessageIDHeader: hashParts("inbound-raw", recipient, fmt.Sprintf("%d", receivedAt.UnixNano()), body),
+		Protocol:        "smtp",
+		Folder:          "inbound",
+		ReceivedAt:      receivedAt.UTC(),
+	}
+	msg, err := stdmail.ReadMessage(bytes.NewReader(req.Raw))
+	if err != nil {
+		return item
+	}
+	decoder := new(mime.WordDecoder)
+	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
+		item.Subject = subject
+	}
+	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
+		item.Sender = from
+	}
+	item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("To"))...))
+	item.Recipients = normalizeRecipientCandidates(append(item.Recipients, mailAddressCandidates(msg.Header.Get("Cc"))...))
+	if messageID := strings.Trim(strings.TrimSpace(msg.Header.Get("Message-Id")), "<>"); messageID != "" {
+		item.MessageIDHeader = messageID
+	}
+	if date, err := stdmail.ParseDate(msg.Header.Get("Date")); err == nil {
+		item.ReceivedAt = date.UTC()
+	}
+	if parsedBody, _ := readMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body); strings.TrimSpace(parsedBody) != "" {
+		item.Body = strings.TrimSpace(parsedBody)
+		item.BodyPreview = bodyPreview(parsedBody)
+	}
+	return item
+}
+
+func normalizeRecipientCandidates(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := normalizeEmail(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+var mailAddressCandidateRe = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+
+func mailAddressCandidates(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	values := make([]string, 0)
+	if list, err := stdmail.ParseAddressList(raw); err == nil {
+		for _, address := range list {
+			values = append(values, address.Address)
+		}
+	} else {
+		values = append(values, mailAddressCandidateRe.FindAllString(raw, -1)...)
+	}
+	return values
 }
 
 func minInt(a, b int) int {
@@ -1028,6 +1150,83 @@ func bodyPreview(value string) string {
 		return value
 	}
 	return value[:1000]
+}
+
+func decodeMIMEHeader(decoder *mime.WordDecoder, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	decoded, err := decoder.DecodeHeader(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+func readMIMEBody(contentType string, transferEncoding string, body io.Reader) (string, error) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = "text/plain"
+	}
+	if strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		mr := multipart.NewReader(body, params["boundary"])
+		var htmlFallback string
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
+			partBody, err := readMIMEBody(part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"), part)
+			if err != nil {
+				continue
+			}
+			partType, _, _ := mime.ParseMediaType(part.Header.Get("Content-Type"))
+			switch strings.ToLower(partType) {
+			case "text/plain":
+				if strings.TrimSpace(partBody) != "" {
+					return partBody, nil
+				}
+			case "text/html":
+				if htmlFallback == "" {
+					htmlFallback = stripHTML(partBody)
+				}
+			}
+		}
+		return htmlFallback, nil
+	}
+
+	reader := decodeTransferReader(body, transferEncoding)
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	text := string(data)
+	if strings.EqualFold(mediaType, "text/html") {
+		text = stripHTML(text)
+	}
+	return text, nil
+}
+
+func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
+	switch strings.ToLower(strings.TrimSpace(transferEncoding)) {
+	case "base64":
+		return base64.NewDecoder(base64.StdEncoding, body)
+	case "quoted-printable":
+		return quotedprintable.NewReader(body)
+	default:
+		return body
+	}
+}
+
+func stripHTML(value string) string {
+	value = regexp.MustCompile(`(?is)<script\b.*?</script>`).ReplaceAllString(value, " ")
+	value = regexp.MustCompile(`(?is)<style\b.*?</style>`).ReplaceAllString(value, " ")
+	value = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(value, " ")
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func messageDedupeKey(item FetchedMessage) string {
