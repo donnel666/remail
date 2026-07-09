@@ -82,9 +82,8 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.NotNil(t, first.Order.ReceiveStartedAt)
 	require.NotNil(t, first.Order.ReceiveUntil)
 	require.Nil(t, first.Order.ActivatedAt)
-	require.NotNil(t, first.Order.AfterSaleUntil)
+	require.Nil(t, first.Order.AfterSaleUntil)
 	require.InDelta(t, int64((60 * time.Minute).Seconds()), int64(first.Order.ReceiveUntil.Sub(*first.Order.ReceiveStartedAt).Seconds()), 1)
-	require.InDelta(t, int64((1440 * time.Minute).Seconds()), int64(first.Order.AfterSaleUntil.Sub(*first.Order.ReceiveUntil).Seconds()), 1)
 
 	replay, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
 		UserID:         2,
@@ -120,6 +119,19 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	}
 	require.NoError(t, db.Table("order_tokens").Select("expire_at").Where("order_no = ?", first.Order.OrderNo).Take(&purchaseToken).Error)
 	require.Nil(t, purchaseToken.ExpireAt)
+
+	matchedAt := first.Order.ReceiveStartedAt.Add(10 * time.Minute)
+	require.NoError(t, uc.NotifyMatchedCode(context.Background(), tradeapp.MatchCodeResultRequest{
+		OrderNo:   first.Order.OrderNo,
+		MatchedAt: matchedAt,
+	}))
+	activated, err := uc.GetOrder(context.Background(), first.Order.OrderNo, 2, false)
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, activated.Order.Status)
+	require.NotNil(t, activated.Order.ActivatedAt)
+	require.InDelta(t, int64(0), int64(activated.Order.ActivatedAt.Sub(matchedAt).Seconds()), 1)
+	require.NotNil(t, activated.Order.AfterSaleUntil)
+	require.InDelta(t, int64((1440 * time.Minute).Seconds()), int64(activated.Order.AfterSaleUntil.Sub(*first.Order.ReceiveStartedAt).Seconds()), 1)
 }
 
 func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {

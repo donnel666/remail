@@ -13,6 +13,7 @@ export type ServiceMode = "purchase" | "code";
 export type ServiceState =
   | "waiting_mail"
   | "code_received"
+  | "pending_activation"
   | "activated"
   | "in_warranty"
   | "activation_timeout"
@@ -63,6 +64,7 @@ export interface WorkbenchMessage {
 export interface WorkbenchOrder {
   afterSaleUntil: string;
   activationUntil?: string;
+  activatedAt?: string;
   createdAt: string;
   deliveryEmail: string;
   id: string;

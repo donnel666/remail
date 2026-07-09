@@ -50,6 +50,7 @@ export function MailboxClient({
     () => messages.filter((message) => matchesMail(message, search)),
     [messages, search]
   );
+  const hasVerificationCode = messages.some((message) => message.verificationCode);
   const [selectedMessageId, setSelectedMessageId] = useState("");
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export function MailboxClient({
           <div className="mailbox-client-address font-mono-data">
             <OverflowTooltip content={email}>{email}</OverflowTooltip>
           </div>
-          <FetchControl compact onFetch={onFetch} />
+          <FetchControl autoEnabled={!hasVerificationCode} compact onFetch={onFetch} />
         </div>
         <Input
           className="resources-search-input mailbox-client-search"

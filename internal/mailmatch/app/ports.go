@@ -55,6 +55,7 @@ type OrderScope struct {
 	Recipient         string
 	ReceiveStartedAt  *time.Time
 	ReceiveUntil      *time.Time
+	ActivatedAt       *time.Time
 	AfterSaleUntil    *time.Time
 	LooseMatch        bool
 	Rules             []MailRule
@@ -102,6 +103,9 @@ type Repository interface {
 	LoadOrderScope(ctx context.Context, orderNo string, userID uint, isAdmin bool) (*OrderScope, error)
 	LoadOrderScopeForServiceToken(ctx context.Context, orderNo string) (*OrderScope, error)
 	ListOrderMessages(ctx context.Context, scope OrderScope, limit int) ([]domain.Message, error)
+	FindOrderSnapshot(ctx context.Context, orderNo string) (*domain.OrderSnapshot, error)
+	CreateOrderSnapshotOnce(ctx context.Context, snapshot domain.OrderSnapshot) error
+	UpsertLatestOrderSnapshot(ctx context.Context, snapshot domain.OrderSnapshot) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
 	FindLatestReceivedAt(ctx context.Context, orderNo string) (*time.Time, error)
 	FindActiveFetchJob(ctx context.Context, orderNo string) (*domain.FetchJob, error)
@@ -182,13 +186,19 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	if err != nil {
 		return nil, nil, err
 	}
-	uc.scheduleReadFetch(ctx, FetchSubmitRequest{
-		OrderNo: scope.OrderNo,
-		UserID:  userID,
-		IsAdmin: isAdmin,
-		Purpose: domain.FetchPurposeAutoRefresh,
-	})
-	return uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasSnapshot, err := uc.listOrderMailByScope(ctx, *scope)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasSnapshot {
+		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
+			OrderNo: scope.OrderNo,
+			UserID:  userID,
+			IsAdmin: isAdmin,
+			Purpose: domain.FetchPurposeAutoRefresh,
+		})
+	}
+	return items, state, nil
 }
 
 func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo string, email string) ([]domain.MailContent, *domain.FetchState, error) {
@@ -199,18 +209,35 @@ func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo stri
 	if strings.TrimSpace(email) != "" && normalizeEmail(email) != normalizeEmail(scope.Recipient) {
 		return nil, nil, domain.ErrOrderForbidden
 	}
-	uc.scheduleReadFetch(ctx, FetchSubmitRequest{
-		OrderNo:      scope.OrderNo,
-		Purpose:      domain.FetchPurposeAutoRefresh,
-		ServiceToken: true,
-		ServiceEmail: email,
-	})
-	return uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasSnapshot, err := uc.listOrderMailByScope(ctx, *scope)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasSnapshot {
+		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
+			OrderNo:      scope.OrderNo,
+			Purpose:      domain.FetchPurposeAutoRefresh,
+			ServiceToken: true,
+			ServiceEmail: email,
+		})
+	}
+	return items, state, nil
 }
 
-func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, error) {
+func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, bool, error) {
 	if !scopeReadable(scope, uc.now) {
-		return nil, nil, domain.ErrOrderUnavailable
+		return nil, nil, false, domain.ErrOrderUnavailable
+	}
+	snapshot, err := uc.repo.FindOrderSnapshot(ctx, scope.OrderNo)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	state, err := uc.repo.FindFetchStateForUpdate(ctx, scope.OrderNo)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if snapshot != nil && scope.ServiceMode == "code" {
+		return []domain.MailContent{mailContentFromSnapshot(*snapshot)}, state, true, nil
 	}
 	limit := purchaseReadLimit
 	if scope.ServiceMode == "code" {
@@ -218,7 +245,7 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	}
 	messages, err := uc.repo.ListOrderMessages(ctx, scope, messageScanLimit)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	messages = filterMessagesForScope(messages, scope, limit)
 	items := make([]domain.MailContent, len(messages))
@@ -232,8 +259,64 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 			VerificationCode: messages[i].VerificationCode,
 		}
 	}
-	state, _ := uc.repo.FindFetchStateForUpdate(ctx, scope.OrderNo)
-	return items, state, nil
+	if snapshot != nil {
+		items = prependSnapshotMail(items, mailContentFromSnapshot(*snapshot), limit)
+	}
+	return items, state, snapshot != nil, nil
+}
+
+func (uc *UseCase) saveOrderSnapshot(ctx context.Context, scope OrderScope, message domain.Message) error {
+	code := strings.TrimSpace(message.VerificationCode)
+	if code == "" || strings.TrimSpace(scope.OrderNo) == "" {
+		return nil
+	}
+	snapshot := domain.OrderSnapshot{
+		OrderNo:          scope.OrderNo,
+		Sender:           message.Sender,
+		Recipient:        message.Recipient,
+		ReceivedAt:       message.ReceivedAt,
+		Subject:          message.Subject,
+		Body:             message.RawBody,
+		VerificationCode: code,
+	}
+	if scope.ServiceMode == "code" {
+		return uc.repo.CreateOrderSnapshotOnce(ctx, snapshot)
+	}
+	return uc.repo.UpsertLatestOrderSnapshot(ctx, snapshot)
+}
+
+func mailContentFromSnapshot(snapshot domain.OrderSnapshot) domain.MailContent {
+	return domain.MailContent{
+		Sender:           snapshot.Sender,
+		Recipient:        snapshot.Recipient,
+		ReceivedAt:       snapshot.ReceivedAt,
+		Subject:          snapshot.Subject,
+		Body:             snapshot.Body,
+		VerificationCode: snapshot.VerificationCode,
+	}
+}
+
+func prependSnapshotMail(items []domain.MailContent, snapshot domain.MailContent, limit int) []domain.MailContent {
+	for i := range items {
+		if sameMailContent(items[i], snapshot) {
+			return items
+		}
+	}
+	out := make([]domain.MailContent, 0, len(items)+1)
+	out = append(out, snapshot)
+	out = append(out, items...)
+	if limit > 0 && len(out) > limit {
+		return out[:limit]
+	}
+	return out
+}
+
+func sameMailContent(a, b domain.MailContent) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Recipient), strings.TrimSpace(b.Recipient)) &&
+		strings.TrimSpace(a.Sender) == strings.TrimSpace(b.Sender) &&
+		strings.TrimSpace(a.Subject) == strings.TrimSpace(b.Subject) &&
+		strings.TrimSpace(a.VerificationCode) == strings.TrimSpace(b.VerificationCode) &&
+		a.ReceivedAt.Equal(b.ReceivedAt)
 }
 
 func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*FetchSubmitResult, error) {
@@ -285,8 +368,8 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 		}
 		sinceAt := fetchSinceAt(*scope, state, now)
 		untilAt := now
-		if scope.AfterSaleUntil != nil && scope.AfterSaleUntil.Before(untilAt) {
-			untilAt = *scope.AfterSaleUntil
+		if readUntil := scopeReadUntil(*scope); readUntil != nil && readUntil.Before(untilAt) {
+			untilAt = *readUntil
 		}
 		purpose := req.Purpose
 		if purpose == "" {
@@ -396,20 +479,28 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	}
 	messages := make([]domain.Message, 0, len(fetched.Messages))
 	matchResults := make([]MatchResult, 0)
+	matchSnapshots := make([]struct {
+		scope   OrderScope
+		message domain.Message
+	}, 0)
 	for _, item := range fetched.Messages {
-		message, matchedOrderNo, err := uc.fetchedMessageToDomain(ctx, item)
+		message, matchedScope, err := uc.fetchedMessageToDomain(ctx, item)
 		if err != nil {
 			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail message matching failed.", false, uc.now())
 			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), nil, "Mail message matching failed.", uc.now())
 			return err
 		}
 		messages = append(messages, message)
-		if matchedOrderNo != "" && strings.TrimSpace(message.VerificationCode) != "" {
+		if matchedScope != nil && strings.TrimSpace(message.VerificationCode) != "" {
 			matchResults = append(matchResults, MatchResult{
-				OrderNo:          matchedOrderNo,
+				OrderNo:          matchedScope.OrderNo,
 				VerificationCode: message.VerificationCode,
 				MatchedAt:        message.ReceivedAt,
 			})
+			matchSnapshots = append(matchSnapshots, struct {
+				scope   OrderScope
+				message domain.Message
+			}{scope: *matchedScope, message: message})
 		}
 	}
 	stored, err := uc.repo.UpsertMessages(ctx, messages)
@@ -420,6 +511,13 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	}
 	lastReceivedAt := latestReceivedAt(messages)
 	matched := countMatched(messages)
+	for _, snapshot := range matchSnapshots {
+		if err := uc.saveOrderSnapshot(ctx, snapshot.scope, snapshot.message); err != nil {
+			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail match snapshot storage failed.", false, uc.now())
+			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.OrderNo, job.ID, string(domain.FetchJobFailed), lastReceivedAt, "Mail match snapshot storage failed.", uc.now())
+			return err
+		}
+	}
 	for _, result := range matchResults {
 		if err := uc.matches.NotifyMatchedCode(ctx, result); err != nil {
 			retry := job.Attempts < job.MaxAttempts
@@ -531,11 +629,18 @@ func scopeReadable(scope OrderScope, now func() time.Time) bool {
 	default:
 		return false
 	}
-	readUntil := scope.AfterSaleUntil
-	if scope.ServiceMode == "code" {
-		readUntil = scope.ReceiveUntil
-	}
+	readUntil := scopeReadUntil(scope)
 	return readUntil == nil || readUntil.After(now())
+}
+
+func scopeReadUntil(scope OrderScope) *time.Time {
+	if scope.ServiceMode == "code" {
+		return scope.ReceiveUntil
+	}
+	if scope.ActivatedAt == nil {
+		return scope.ReceiveUntil
+	}
+	return scope.AfterSaleUntil
 }
 
 func scopeFetchable(scope OrderScope, now func() time.Time) bool {
@@ -569,7 +674,7 @@ func fetchCooldown(purpose domain.FetchPurpose) time.Duration {
 	return defaultFetchCooldown
 }
 
-func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, string, error) {
+func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, error) {
 	message := baseMessageFromFetched(item)
 	matches := make([]struct {
 		scope OrderScope
@@ -579,7 +684,7 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 	for _, recipient := range fetchedRecipientCandidates(item) {
 		scopes, err := uc.repo.ListMatchingScopesByRecipient(ctx, message.ResourceType, message.EmailResourceID, recipient, message.ReceivedAt)
 		if err != nil {
-			return message, "", err
+			return message, nil, err
 		}
 		for _, scope := range scopes {
 			if _, ok := seenOrders[scope.OrderNo]; ok {
@@ -604,12 +709,12 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 	case 1:
 		message.Status = domain.MessageStatusMatched
 		message.VerificationCode = matches[0].code
-		return message, matches[0].scope.OrderNo, nil
+		return message, &matches[0].scope, nil
 	default:
 		message.Status = domain.MessageStatusReceived
 		message.MatchDiagnostic = "Message matched multiple active order services."
 	}
-	return message, "", nil
+	return message, nil, nil
 }
 
 func baseMessageFromFetched(item FetchedMessage) domain.Message {

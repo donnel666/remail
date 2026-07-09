@@ -33,6 +33,7 @@ import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -619,10 +620,12 @@ export default function ProxyManagement() {
   const [importOpen, setImportOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyItem | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
 
   const listFilter = useMemo<ProxyListFilter>(() => {
     const filter: ProxyListFilter = {};
-    const search = searchKeyword.trim();
+    const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (activeCountry !== "all") filter.country = activeCountry;
@@ -638,8 +641,8 @@ export default function ProxyManagement() {
   }, [
     activeCountry,
     createdAtRange,
+    debouncedSearchKeyword,
     ipv6Filter,
-    searchKeyword,
     statusFilter,
     systemProxyFilter,
   ]);
@@ -1102,6 +1105,7 @@ export default function ProxyManagement() {
 
   const resetFilters = () => {
     setSearchKeyword("");
+    flushSearchKeyword("");
     setCreatedAtRange([]);
     setStatusFilter("all");
     setSystemProxyFilter("all");
@@ -1610,7 +1614,10 @@ export default function ProxyManagement() {
             size="small"
             loading={loading}
             className="remail-toolbar-fixed-button flex-1 md:flex-none"
-            onClick={() => setActivePage(1)}
+            onClick={() => {
+              flushSearchKeyword();
+              setActivePage(1);
+            }}
           >
             {t("Query")}
           </Button>

@@ -31,6 +31,7 @@ import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useAuth } from "@/context/auth-provider";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -144,14 +145,15 @@ export default function DomainEmails() {
     useState<ResourceListResponse["facets"] | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.role);
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
 
-  const domainListFilter = useMemo<ResourceListFilter>(() => {
+  const domainStatsFilter = useMemo<ResourceListFilter>(() => {
     const filter: ResourceListFilter = {};
-    const search = searchKeyword.trim();
+    const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
-    if (activeTld !== "all") filter.tld = activeTld;
     if (statusFilter !== "all") filter.status = statusFilter;
     if (privateFilter !== "all") {
       filter.purpose = privateFilter === "yes" ? "not_sale" : "sale";
@@ -159,7 +161,12 @@ export default function DomainEmails() {
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [activeTld, createdAtRange, privateFilter, searchKeyword, statusFilter]);
+  }, [createdAtRange, debouncedSearchKeyword, privateFilter, statusFilter]);
+
+  const domainListFilter = useMemo<ResourceListFilter>(() => {
+    if (activeTld === "all") return domainStatsFilter;
+    return { ...domainStatsFilter, tld: activeTld };
+  }, [activeTld, domainStatsFilter]);
 
   const loadDomainBlock = useCallback(
     async (offset: number, limit: number) => {
@@ -168,7 +175,6 @@ export default function DomainEmails() {
         offset,
         limit
       );
-      setResourceFacets(response.facets ?? null);
       return {
         items: response.items
           .map(toDomainResource)
@@ -183,7 +189,7 @@ export default function DomainEmails() {
     loadedItems: items,
     loading,
     pagedItems,
-    refresh,
+    refresh: refreshList,
     total,
     updateLoadedItems,
   } = useBlockPagedList<DomainResource>({
@@ -196,9 +202,22 @@ export default function DomainEmails() {
     pageSize,
   });
 
+  const refreshStats = useCallback(async () => {
+    try {
+      const response = await listOwnedDomainResources(domainStatsFilter, 0, 1);
+      setResourceFacets(response.facets ?? null);
+    } catch {
+      // Keep the previous tabs stable; the next refresh will retry stats.
+    }
+  }, [domainStatsFilter]);
+
   useEffect(() => {
-    setResourceFacets(null);
-  }, [domainListFilter]);
+    void refreshStats();
+  }, [refreshStats]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshStats(), refreshList()]);
+  }, [refreshList, refreshStats]);
 
   const tldCounts = useMemo(
     () =>
@@ -239,10 +258,10 @@ export default function DomainEmails() {
     Number(statusFilter !== "all") + Number(privateFilter !== "all");
 
   useEffect(() => {
-    if (activeTld !== "all" && !tldSet.has(activeTld)) {
+    if (resourceFacets && activeTld !== "all" && !tldSet.has(activeTld)) {
       setActiveTld("all");
     }
-  }, [activeTld, tldSet]);
+  }, [activeTld, resourceFacets, tldSet]);
 
   const domainBulkFilter = useMemo<ResourceBulkFilter>(() => {
     return { ...domainListFilter, resourceType: "domain" };
@@ -270,6 +289,7 @@ export default function DomainEmails() {
 
   const resetFilters = () => {
     setSearchKeyword("");
+    flushSearchKeyword("");
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
@@ -722,7 +742,7 @@ export default function DomainEmails() {
           <span className="flex items-center gap-2">
             {t("All")}
             <Tag color={activeTld === "all" ? "red" : "grey"} shape="circle">
-              {total}
+              {stats.status.all}
             </Tag>
           </span>
         }
@@ -906,7 +926,11 @@ export default function DomainEmails() {
           size="small"
           value={searchKeyword}
           style={{ width: isMobile ? "100%" : 224 }}
-          onChange={(value) => setSearchKeyword(String(value))}
+          onChange={(value) => {
+            setSearchKeyword(String(value));
+            setActivePage(1);
+            setSelectedKeys([]);
+          }}
           className="resources-search-input w-full md:w-56"
         />
         <DatePicker
@@ -932,7 +956,10 @@ export default function DomainEmails() {
             size="small"
             loading={loading}
             className="remail-toolbar-fixed-button flex-1 md:flex-none"
-            onClick={() => setActivePage(1)}
+            onClick={() => {
+              flushSearchKeyword();
+              setActivePage(1);
+            }}
           >
             {t("Query")}
           </Button>

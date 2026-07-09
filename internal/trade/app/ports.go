@@ -93,6 +93,7 @@ type Repository interface {
 	ListOrders(ctx context.Context, filter OrderListFilter, offset, limit int) ([]domain.Order, int64, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
 	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
+	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error)
 }
 
 type CreatePendingOrderCommand struct {
@@ -118,7 +119,7 @@ type MarkActiveCommand struct {
 	DeliveryEmail    string
 	ReceiveStartedAt time.Time
 	ReceiveUntil     time.Time
-	AfterSaleUntil   time.Time
+	AfterSaleUntil   *time.Time
 }
 
 type MarkPaidCommand struct {
@@ -323,6 +324,21 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 	if matchedAt.IsZero() {
 		matchedAt = uc.now()
 	}
+	order, err := uc.repo.FindOrder(ctx, orderNo)
+	if err != nil {
+		return err
+	}
+	if order.ServiceMode == domain.ServiceModePurchase {
+		quote, err := uc.ordering.GetOrderingQuote(ctx, order.ProjectID, order.ProjectProductID, order.UserID, domain.ServiceModePurchase)
+		if err != nil {
+			return err
+		}
+		afterSaleUntil := purchaseWarrantyUntil(*order, *quote, matchedAt)
+		return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+			_, _, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil)
+			return err
+		})
+	}
 	readUntil := matchedAt.Add(time.Hour)
 	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		_, changed, err := uc.repo.CompleteCodeOrder(txCtx, orderNo, matchedAt, readUntil)
@@ -387,7 +403,8 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				return nil, err
 			}
 			receiveStartedAt := uc.now()
-			receiveUntil, afterSaleUntil := serviceWindows(receiveStartedAt, quote, order.ServiceMode)
+			receiveUntil := serviceReceiveUntil(receiveStartedAt, quote, order.ServiceMode)
+			afterSaleUntil := initialAfterSaleUntil(receiveUntil, order.ServiceMode)
 			token, err := uc.tokens.IssueOrderToken(ctx, order.OrderNo, tokenExpireAt(order.ServiceMode, receiveUntil))
 			if err != nil {
 				_ = uc.allocation.ReleaseByOrder(ctx, order.OrderNo)
@@ -496,16 +513,32 @@ func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, reas
 	})
 }
 
-func serviceWindows(now time.Time, quote OrderingQuote, mode domain.ServiceMode) (time.Time, time.Time) {
+func serviceReceiveUntil(now time.Time, quote OrderingQuote, mode domain.ServiceMode) time.Time {
 	switch mode {
 	case domain.ServiceModePurchase:
-		receiveUntil := now.Add(time.Duration(quote.ActivationWindowMinutes) * time.Minute)
-		afterSaleUntil := receiveUntil.Add(time.Duration(quote.WarrantyMinutes) * time.Minute)
-		return receiveUntil, afterSaleUntil
+		return now.Add(time.Duration(quote.ActivationWindowMinutes) * time.Minute)
 	default:
-		receiveUntil := now.Add(time.Duration(quote.CodeWindowMinutes) * time.Minute)
-		return receiveUntil, receiveUntil
+		return now.Add(time.Duration(quote.CodeWindowMinutes) * time.Minute)
 	}
+}
+
+func initialAfterSaleUntil(receiveUntil time.Time, mode domain.ServiceMode) *time.Time {
+	if mode == domain.ServiceModePurchase {
+		return nil
+	}
+	return &receiveUntil
+}
+
+func purchaseWarrantyUntil(order domain.Order, quote OrderingQuote, matchedAt time.Time) time.Time {
+	start := matchedAt.UTC()
+	if order.ReceiveStartedAt != nil && !order.ReceiveStartedAt.IsZero() {
+		start = order.ReceiveStartedAt.UTC()
+	}
+	until := start.Add(time.Duration(quote.WarrantyMinutes) * time.Minute)
+	if until.Before(matchedAt.UTC()) {
+		return matchedAt.UTC()
+	}
+	return until
 }
 
 func tokenExpireAt(mode domain.ServiceMode, receiveUntil time.Time) *time.Time {

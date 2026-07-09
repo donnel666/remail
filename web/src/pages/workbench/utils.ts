@@ -94,6 +94,9 @@ export function serviceStateMeta(
   if (state === "code_received") {
     return { color: "green" as const, label: t("Code received") };
   }
+  if (state === "pending_activation") {
+    return { color: "amber" as const, label: t("Pending activation") };
+  }
   if (state === "activated") {
     return { color: "green" as const, label: t("Activated") };
   }

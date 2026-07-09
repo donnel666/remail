@@ -31,6 +31,7 @@ import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useAuth } from "@/context/auth-provider";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -112,14 +113,15 @@ export default function MicrosoftEmails() {
   const [deletingBatch, setDeletingBatch] = useState(false);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const canPublishForSale = hasSupplierRole(currentUser?.role);
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
 
-  const microsoftListFilter = useMemo<ResourceListFilter>(() => {
+  const microsoftStatsFilter = useMemo<ResourceListFilter>(() => {
     const filter: ResourceListFilter = {};
-    const search = searchKeyword.trim();
+    const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
-    if (activeSuffix !== "all") filter.suffix = activeSuffix;
     if (statusFilter !== "all") filter.status = statusFilter;
     if (privateFilter !== "all") filter.forSale = privateFilter === "no";
     if (longLivedFilter !== "all") {
@@ -132,14 +134,18 @@ export default function MicrosoftEmails() {
     if (createdTo) filter.createdTo = createdTo;
     return filter;
   }, [
-    activeSuffix,
     createdAtRange,
+    debouncedSearchKeyword,
     graphFilter,
     longLivedFilter,
     privateFilter,
-    searchKeyword,
     statusFilter,
   ]);
+
+  const microsoftListFilter = useMemo<ResourceListFilter>(() => {
+    if (activeSuffix === "all") return microsoftStatsFilter;
+    return { ...microsoftStatsFilter, suffix: activeSuffix };
+  }, [activeSuffix, microsoftStatsFilter]);
 
   const loadMicrosoftBlock = useCallback(
     async (offset: number, limit: number) => {
@@ -148,7 +154,6 @@ export default function MicrosoftEmails() {
         offset,
         limit
       );
-      setResourceFacets(response.facets ?? null);
       return {
         items: response.items.map(toEmailResource).filter(isEmailResource),
         total: response.total,
@@ -161,7 +166,7 @@ export default function MicrosoftEmails() {
     loadedItems: items,
     loading,
     pagedItems,
-    refresh,
+    refresh: refreshList,
     total,
     updateLoadedItems,
   } = useBlockPagedList<EmailResource>({
@@ -174,9 +179,26 @@ export default function MicrosoftEmails() {
     pageSize,
   });
 
+  const refreshStats = useCallback(async () => {
+    try {
+      const response = await listOwnedMicrosoftResources(
+        microsoftStatsFilter,
+        0,
+        1
+      );
+      setResourceFacets(response.facets ?? null);
+    } catch {
+      // Keep the previous tabs stable; the next refresh will retry stats.
+    }
+  }, [microsoftStatsFilter]);
+
   useEffect(() => {
-    setResourceFacets(null);
-  }, [microsoftListFilter]);
+    void refreshStats();
+  }, [refreshStats]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshStats(), refreshList()]);
+  }, [refreshList, refreshStats]);
 
   const suffixCounts = useMemo(
     () =>
@@ -232,10 +254,14 @@ export default function MicrosoftEmails() {
     Number(graphFilter !== "all");
 
   useEffect(() => {
-    if (activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
+    if (
+      resourceFacets &&
+      activeSuffix !== "all" &&
+      !suffixSet.has(activeSuffix)
+    ) {
       setActiveSuffix("all");
     }
-  }, [activeSuffix, suffixSet]);
+  }, [activeSuffix, resourceFacets, suffixSet]);
 
   const microsoftBulkFilter = useMemo<ResourceBulkFilter>(() => {
     return { ...microsoftListFilter, resourceType: "microsoft" };
@@ -256,6 +282,7 @@ export default function MicrosoftEmails() {
 
   const resetFilters = () => {
     setSearchKeyword("");
+    flushSearchKeyword("");
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
@@ -769,7 +796,7 @@ export default function MicrosoftEmails() {
           <span className="flex items-center gap-2">
             {t("All")}
             <Tag color={activeSuffix === "all" ? "red" : "grey"} shape="circle">
-              {total}
+              {resourceStats.status.all}
             </Tag>
           </span>
         }
@@ -1017,7 +1044,11 @@ export default function MicrosoftEmails() {
           size="small"
           value={searchKeyword}
           style={{ width: isMobile ? "100%" : 224 }}
-          onChange={(value) => setSearchKeyword(String(value))}
+          onChange={(value) => {
+            setSearchKeyword(String(value));
+            setActivePage(1);
+            setSelectedKeys([]);
+          }}
           className="resources-search-input w-full md:w-56"
         />
         <DatePicker
@@ -1043,7 +1074,10 @@ export default function MicrosoftEmails() {
             size="small"
             loading={loading}
             className="remail-toolbar-fixed-button flex-1 md:flex-none"
-            onClick={() => setActivePage(1)}
+            onClick={() => {
+              flushSearchKeyword();
+              setActivePage(1);
+            }}
           >
             {t("Query")}
           </Button>

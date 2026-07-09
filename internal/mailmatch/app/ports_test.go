@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/stretchr/testify/require"
@@ -123,4 +124,33 @@ func TestFilterMessagesForScopeKeepsOriginalRecipient(t *testing.T) {
 	require.Len(t, filtered, 1)
 	require.Equal(t, "main@example.com", filtered[0].Recipient)
 	require.Equal(t, "112233", filtered[0].VerificationCode)
+}
+
+func TestScopeReadableUsesPurchaseActivationWindowBeforeWarranty(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	receiveUntil := now.Add(time.Hour)
+	afterSaleUntil := now.Add(24 * time.Hour)
+	activatedAt := now.Add(5 * time.Minute)
+
+	preActivation := OrderScope{
+		OrderNo:          "OR_PURCHASE_PRE",
+		EmailResourceID:  1,
+		Recipient:        "user@example.com",
+		ServiceMode:      "purchase",
+		OrderStatus:      "active",
+		ReceiveUntil:     &receiveUntil,
+		AfterSaleUntil:   nil,
+		AllocationID:     1,
+		AllocationType:   domain.ResourceTypeMicrosoft,
+		ReceiveStartedAt: &now,
+	}
+	require.True(t, scopeReadable(preActivation, func() time.Time { return now }))
+	require.False(t, scopeReadable(preActivation, func() time.Time { return receiveUntil.Add(time.Second) }))
+
+	activated := preActivation
+	activated.OrderNo = "OR_PURCHASE_ACTIVE"
+	activated.ActivatedAt = &activatedAt
+	activated.AfterSaleUntil = &afterSaleUntil
+	require.True(t, scopeReadable(activated, func() time.Time { return receiveUntil.Add(time.Second) }))
+	require.False(t, scopeReadable(activated, func() time.Time { return afterSaleUntil.Add(time.Second) }))
 }

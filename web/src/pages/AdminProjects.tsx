@@ -31,6 +31,7 @@ import {
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -1391,10 +1392,12 @@ export default function AdminProjects() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [operatingProjectID, setOperatingProjectID] = useState<number | null>(null);
   const [bulkOperating, setBulkOperating] = useState<"relist" | "delist" | "delete" | null>(null);
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
 
   const listFilter = useMemo<ProjectListFilter>(() => {
     const filter: ProjectListFilter = { scope: "all" };
-    const search = searchKeyword.trim();
+    const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
@@ -1405,7 +1408,7 @@ export default function AdminProjects() {
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [createdAtRange, looseFilter, privateFilter, productTypeFilter, searchKeyword, statusFilter]);
+  }, [createdAtRange, debouncedSearchKeyword, looseFilter, privateFilter, productTypeFilter, statusFilter]);
 
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
 
@@ -1494,6 +1497,7 @@ export default function AdminProjects() {
 
   const resetFilters = () => {
     setSearchKeyword("");
+    flushSearchKeyword("");
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
@@ -2312,8 +2316,8 @@ export default function AdminProjects() {
             className="remail-toolbar-fixed-button flex-1 md:flex-none"
             loading={loading}
             onClick={() => {
+              flushSearchKeyword();
               setActivePage(1);
-              void refresh();
             }}
             size="small"
             type="tertiary"

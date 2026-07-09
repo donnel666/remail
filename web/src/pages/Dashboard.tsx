@@ -195,6 +195,7 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
       order.serviceMode === "purchase"
         ? order.receiveUntil ?? order.afterSaleUntil ?? undefined
         : undefined,
+    activatedAt: order.activatedAt ?? undefined,
     afterSaleUntil: order.afterSaleUntil ?? order.receiveUntil ?? order.updatedAt,
     createdAt: order.createdAt,
     deliveryEmail: order.deliveryEmail,
@@ -237,7 +238,10 @@ function orderServiceState(order: OrderResponse): ServiceState {
     return order.serviceMode === "code" ? "code_received" : "read_expired";
   }
   if (order.status === "active") {
-    return order.serviceMode === "purchase" ? "in_warranty" : "waiting_mail";
+    if (order.serviceMode === "purchase") {
+      return order.activatedAt ? "in_warranty" : "pending_activation";
+    }
+    return "waiting_mail";
   }
   if (order.status === "failed" || order.status === "refunded") {
     return "activation_timeout";
@@ -438,7 +442,12 @@ export default function Dashboard() {
     setOrders((prev) =>
       prev.map((item) =>
         item.orderNo === orderNo
-          ? { ...detail, messages: item.messages, lastFetchedAt: item.lastFetchedAt }
+          ? {
+              ...detail,
+              messages: item.messages,
+              lastFetchedAt: item.lastFetchedAt,
+              verificationCode: item.verificationCode,
+            }
           : item
       )
     );
@@ -504,7 +513,7 @@ export default function Dashboard() {
     }
   }
 
-  async function handleFetchOrderMail(order: WorkbenchOrder, source: FetchSource) {
+  async function handleFetchOrderMail(order: WorkbenchOrder, _source: FetchSource) {
     try {
       let target = order;
       if (!target.token) {
@@ -514,7 +523,6 @@ export default function Dashboard() {
         Toast.error(t("Service credential is unavailable."));
         return;
       }
-      void source;
       const result = await readPickupMail(target.deliveryEmail, target.token);
       const messages = toWorkbenchMessages(result.items);
       const latestCode = messages.find((item) => item.verificationCode)?.verificationCode;
@@ -523,15 +531,27 @@ export default function Dashboard() {
         result.fetch?.lastSuccessAt ??
         result.fetch?.lastSubmittedAt ??
         new Date().toISOString();
+      let refreshedDetail: WorkbenchOrder | undefined;
+      if (latestCode) {
+        try {
+          refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
+        } catch {
+          refreshedDetail = undefined;
+        }
+      }
       setOrders((prev) =>
         prev.map((item) =>
           item.orderNo === target.orderNo
             ? {
-                ...item,
+                ...(refreshedDetail ?? item),
                 messages,
                 lastFetchedAt,
                 verificationCode: latestCode,
-                serviceState: latestCode ? "code_received" : item.serviceState,
+                serviceState: latestCode
+                  ? target.serviceMode === "code"
+                    ? "code_received"
+                    : "in_warranty"
+                  : (refreshedDetail?.serviceState ?? item.serviceState),
               }
             : item
         )
@@ -546,9 +566,17 @@ export default function Dashboard() {
       if (current === orderNo) return "";
       const order = orders.find((item) => item.orderNo === orderNo);
       if (order && !order.token) {
-        void loadOrderDetail(orderNo).catch((err) =>
-          Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")))
-        );
+        void loadOrderDetail(orderNo)
+          .then((detail) => {
+            if (!detail.verificationCode) {
+              void handleFetchOrderMail(detail, "auto");
+            }
+          })
+          .catch((err) =>
+            Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")))
+          );
+      } else if (order && !order.verificationCode) {
+        void handleFetchOrderMail(order, "auto");
       }
       return orderNo;
     });

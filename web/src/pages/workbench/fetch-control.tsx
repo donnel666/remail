@@ -7,11 +7,13 @@ import type { FetchSource } from "./types";
 
 export function FetchControl({
   actionLabelKey = "Fetch mail",
+  autoEnabled = true,
   compact = false,
   onFetch,
   variant = "default",
 }: {
   actionLabelKey?: string;
+  autoEnabled?: boolean;
   compact?: boolean;
   onFetch: (source: FetchSource) => void | Promise<void>;
   variant?: "default" | "code";
@@ -43,7 +45,9 @@ export function FetchControl({
     const timer = window.setInterval(() => {
       setAutoCountdown((current) => {
         if (current <= 1) {
-          submitFetch("auto");
+          if (autoEnabled) {
+            submitFetch("auto");
+          }
           return 30;
         }
         return current - 1;
@@ -51,13 +55,15 @@ export function FetchControl({
       setManualCooldown((current) => Math.max(0, current - 1));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [submitFetch]);
+  }, [autoEnabled, submitFetch]);
 
   return (
     <div className={`workbench-fetch-control ${isCodeVariant ? "is-code" : ""}`}>
-      <span className="font-mono-data text-[12px] text-[var(--semi-color-text-2)]">
-        {t("Auto fetch in seconds", { seconds: autoCountdown })}
-      </span>
+      {autoEnabled ? (
+        <span className="font-mono-data text-[12px] text-[var(--semi-color-text-2)]">
+          {t("Auto fetch in seconds", { seconds: autoCountdown })}
+        </span>
+      ) : null}
       <Button
         disabled={manualCooldown > 0}
         icon={<RefreshCw size={14} />}

@@ -32,6 +32,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -1361,6 +1362,7 @@ export default function Projects() {
   const [applyInitialValue, setApplyInitialValue] = useState<ApplyFormState>();
   const [resubmitProjectId, setResubmitProjectId] = useState<number>();
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
+  const [debouncedSearchKeyword] = useDebouncedValue(searchKeyword);
   const [accessCounts, setAccessCounts] = useState<Record<AccessFilter, number>>({
     all: 0,
     private: 0,
@@ -1384,9 +1386,9 @@ export default function Projects() {
   });
 
   const searchFilter = useMemo<ProjectListFilter>(() => {
-    const search = searchKeyword.trim();
+    const search = debouncedSearchKeyword.trim();
     return search ? { search, scope: "visible" as const } : { scope: "visible" as const };
-  }, [searchKeyword]);
+  }, [debouncedSearchKeyword]);
 
   const listFilter = useMemo<ProjectListFilter>(() => {
     const filter: ProjectListFilter = { ...searchFilter };

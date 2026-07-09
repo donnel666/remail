@@ -76,6 +76,18 @@ type MailContent struct {
 	VerificationCode string
 }
 
+type OrderSnapshot struct {
+	OrderNo          string
+	Sender           string
+	Recipient        string
+	ReceivedAt       time.Time
+	Subject          string
+	Body             string
+	VerificationCode string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type FetchJob struct {
 	ID              uint
 	OrderNo         string

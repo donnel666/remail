@@ -95,6 +95,20 @@ type FetchStateModel struct {
 
 func (FetchStateModel) TableName() string { return "mailmatch_order_fetch_states" }
 
+type OrderSnapshotModel struct {
+	OrderNo          string         `gorm:"primaryKey;type:varchar(64);column:order_no"`
+	Sender           string         `gorm:"type:varchar(255);not null;default:''"`
+	Recipient        string         `gorm:"type:varchar(255);not null"`
+	ReceivedAt       time.Time      `gorm:"not null;column:received_at"`
+	Subject          string         `gorm:"type:varchar(500);not null;default:''"`
+	Body             sql.NullString `gorm:"type:mediumtext;column:body"`
+	VerificationCode string         `gorm:"type:varchar(64);not null;column:verification_code"`
+	CreatedAt        time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt        time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
+}
+
+func (OrderSnapshotModel) TableName() string { return "mailmatch_order_snapshots" }
+
 type Repo struct {
 	db    *gorm.DB
 	files governanceapp.FilePort
@@ -169,6 +183,7 @@ type orderScopeRow struct {
 	Recipient         string
 	ReceiveStartedAt  *time.Time
 	ReceiveUntil      *time.Time
+	ActivatedAt       *time.Time
 	AfterSaleUntil    *time.Time
 	LooseMatch        bool
 	MicrosoftEmail    string
@@ -194,6 +209,7 @@ SELECT
     CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
     o.receive_started_at,
     o.receive_until,
+    o.activated_at,
     o.after_sale_until,
     p.loose_match,
     COALESCE(mr.email_address, '') AS microsoft_email,
@@ -226,6 +242,7 @@ SELECT
     ma.email AS recipient,
     o.receive_started_at,
     o.receive_until,
+    o.activated_at,
     o.after_sale_until,
     p.loose_match,
     COALESCE(mr.email_address, '') AS microsoft_email,
@@ -244,7 +261,11 @@ WHERE ma.resource_id = ?
   AND (
     (o.service_mode = 'code' AND (o.receive_until IS NULL OR ? <= o.receive_until))
     OR
-    (o.service_mode <> 'code' AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
+    (o.service_mode <> 'code' AND (
+      (o.activated_at IS NULL AND (o.receive_until IS NULL OR ? <= o.receive_until))
+      OR
+      (o.activated_at IS NOT NULL AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
+    ))
   )
 ORDER BY o.created_at ASC, o.id ASC
 LIMIT 20`
@@ -264,6 +285,7 @@ SELECT
     da.email AS recipient,
     o.receive_started_at,
     o.receive_until,
+    o.activated_at,
     o.after_sale_until,
     p.loose_match,
     '' AS microsoft_email,
@@ -281,7 +303,11 @@ WHERE da.resource_id = ?
   AND (
     (o.service_mode = 'code' AND (o.receive_until IS NULL OR ? <= o.receive_until))
     OR
-    (o.service_mode <> 'code' AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
+    (o.service_mode <> 'code' AND (
+      (o.activated_at IS NULL AND (o.receive_until IS NULL OR ? <= o.receive_until))
+      OR
+      (o.activated_at IS NOT NULL AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
+    ))
   )
 ORDER BY o.created_at ASC, o.id ASC
 LIMIT 20`
@@ -301,6 +327,7 @@ func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 		Recipient:         strings.ToLower(strings.TrimSpace(r.Recipient)),
 		ReceiveStartedAt:  r.ReceiveStartedAt,
 		ReceiveUntil:      r.ReceiveUntil,
+		ActivatedAt:       r.ActivatedAt,
 		AfterSaleUntil:    r.AfterSaleUntil,
 		LooseMatch:        r.LooseMatch,
 		Rules:             rules,
@@ -343,6 +370,10 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 		if scope.ReceiveUntil != nil {
 			end = *scope.ReceiveUntil
 		}
+	} else if scope.ActivatedAt == nil {
+		if scope.ReceiveUntil != nil {
+			end = *scope.ReceiveUntil
+		}
 	} else if scope.AfterSaleUntil != nil {
 		end = *scope.AfterSaleUntil
 	}
@@ -366,6 +397,67 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 	return items, nil
 }
 
+func (r *Repo) FindOrderSnapshot(ctx context.Context, orderNo string) (*domain.OrderSnapshot, error) {
+	var model OrderSnapshotModel
+	err := r.dbFor(ctx).First(&model, "order_no = ?", strings.TrimSpace(orderNo)).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find order mail snapshot: %w", err)
+	}
+	item := orderSnapshotModelToDomain(model)
+	return &item, nil
+}
+
+func (r *Repo) CreateOrderSnapshotOnce(ctx context.Context, snapshot domain.OrderSnapshot) error {
+	model := orderSnapshotModelFromDomain(snapshot)
+	if model.OrderNo == "" || model.Recipient == "" || model.VerificationCode == "" {
+		return domain.ErrInvalidRequest
+	}
+	if err := r.dbFor(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&model).Error; err != nil {
+		return fmt.Errorf("create order mail snapshot: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) UpsertLatestOrderSnapshot(ctx context.Context, snapshot domain.OrderSnapshot) error {
+	model := orderSnapshotModelFromDomain(snapshot)
+	if model.OrderNo == "" || model.Recipient == "" || model.VerificationCode == "" {
+		return domain.ErrInvalidRequest
+	}
+	body := any(nil)
+	if model.Body.Valid {
+		body = model.Body.String
+	}
+	err := r.dbFor(ctx).Exec(`
+INSERT INTO mailmatch_order_snapshots (
+    order_no, sender, recipient, received_at, subject, body, verification_code
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    sender = IF(VALUES(received_at) >= received_at, VALUES(sender), sender),
+    recipient = IF(VALUES(received_at) >= received_at, VALUES(recipient), recipient),
+    subject = IF(VALUES(received_at) >= received_at, VALUES(subject), subject),
+    body = IF(VALUES(received_at) >= received_at, VALUES(body), body),
+    verification_code = IF(VALUES(received_at) >= received_at, VALUES(verification_code), verification_code),
+    received_at = IF(VALUES(received_at) >= received_at, VALUES(received_at), received_at),
+    updated_at = IF(VALUES(received_at) >= received_at, CURRENT_TIMESTAMP, updated_at)`,
+		model.OrderNo,
+		model.Sender,
+		model.Recipient,
+		model.ReceivedAt.UTC(),
+		model.Subject,
+		body,
+		model.VerificationCode,
+	).Error
+	if err != nil {
+		return fmt.Errorf("upsert latest order mail snapshot: %w", err)
+	}
+	return nil
+}
+
 func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]app.OrderScope, error) {
 	recipient = strings.ToLower(strings.TrimSpace(recipient))
 	if emailResourceID == 0 || recipient == "" {
@@ -378,9 +470,9 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 	var err error
 	switch resourceType {
 	case domain.ResourceTypeMicrosoft:
-		err = r.dbFor(ctx).Raw(microsoftMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
+		err = r.dbFor(ctx).Raw(microsoftMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeDomain:
-		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
+		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
 	default:
 		return nil, nil
 	}
@@ -862,6 +954,40 @@ func messageModelFromDomain(item domain.Message) MessageModel {
 		Status:            string(item.Status),
 		MatchDiagnostic:   truncate(item.MatchDiagnostic, 500),
 		ReceivedAt:        item.ReceivedAt.UTC(),
+	}
+}
+
+func orderSnapshotModelToDomain(model OrderSnapshotModel) domain.OrderSnapshot {
+	body := ""
+	if model.Body.Valid {
+		body = model.Body.String
+	}
+	return domain.OrderSnapshot{
+		OrderNo:          model.OrderNo,
+		Sender:           model.Sender,
+		Recipient:        model.Recipient,
+		ReceivedAt:       model.ReceivedAt,
+		Subject:          model.Subject,
+		Body:             body,
+		VerificationCode: model.VerificationCode,
+		CreatedAt:        model.CreatedAt,
+		UpdatedAt:        model.UpdatedAt,
+	}
+}
+
+func orderSnapshotModelFromDomain(item domain.OrderSnapshot) OrderSnapshotModel {
+	body := sql.NullString{String: strings.TrimSpace(item.Body), Valid: strings.TrimSpace(item.Body) != ""}
+	if item.ReceivedAt.IsZero() {
+		item.ReceivedAt = time.Now().UTC()
+	}
+	return OrderSnapshotModel{
+		OrderNo:          strings.TrimSpace(item.OrderNo),
+		Sender:           truncate(item.Sender, 255),
+		Recipient:        strings.ToLower(strings.TrimSpace(item.Recipient)),
+		ReceivedAt:       item.ReceivedAt.UTC(),
+		Subject:          truncate(item.Subject, 500),
+		Body:             body,
+		VerificationCode: truncate(item.VerificationCode, 64),
 	}
 }
 
