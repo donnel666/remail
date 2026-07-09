@@ -2749,3 +2749,133 @@ body[theme-mode="dark"] .semi-always-light,
     width: 100%;
   }
 }
+
+.api-docs-page {
+  width: 100%;
+  height: calc(100vh - 57px);
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.api-docs-page > div {
+  display: block;
+  height: 100%;
+  overflow: auto;
+}
+
+.api-docs-swagger {
+  background: #fafafa;
+}
+
+.api-docs-swagger .swagger-ui .topbar {
+  display: none;
+}
+
+.api-docs-swagger .swagger-ui .download-url-wrapper,
+.api-docs-swagger .swagger-ui .download-url-input,
+.api-docs-swagger .swagger-ui .download-url-button,
+.api-docs-swagger .swagger-ui a[href="/openapi.json"] {
+  display: none;
+}
+
+.api-docs-swagger .swagger-ui .information-container.wrapper {
+  display: none;
+}
+
+.api-docs-swagger .swagger-ui .scheme-container,
+.api-docs-swagger .swagger-ui .opblock-tag-section,
+.api-docs-swagger .swagger-ui .models {
+  max-width: none;
+  padding-right: 24px;
+  padding-left: 24px;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-picker {
+  position: relative;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-action-row {
+  display: flex;
+  margin: 8px 0 12px;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-manage-link {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--semi-color-text-1);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-manage-link:hover {
+  border-color: rgba(255, 122, 0, 0.38);
+  background: rgba(255, 122, 0, 0.06);
+  color: #b45309;
+  text-decoration: none;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-menu {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(360px, calc(100vw - 96px));
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(31, 35, 41, 0.14);
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-menu[hidden] {
+  display: none;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-option {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--semi-color-text-0);
+  cursor: pointer;
+  text-align: left;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-option:hover,
+.api-docs-swagger .swagger-ui .swagger-api-key-option.is-active {
+  background: rgba(255, 122, 0, 0.08);
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-option-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-docs-swagger .swagger-ui .swagger-api-key-option-token {
+  overflow: hidden;
+  color: var(--semi-color-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

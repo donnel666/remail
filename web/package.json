@@ -41,6 +41,7 @@
     "@types/react-dom": "^19.0.0",
     "https-proxy-agent": "^9.1.0",
     "openapi-typescript": "^7.13.0",
+    "swagger-ui-dist": "^5.32.8",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0"
   }

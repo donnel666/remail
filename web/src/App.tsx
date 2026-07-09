@@ -360,7 +360,7 @@ const routeTree = rootRoute.addChildren([
     component: PasswordReset,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/account", component: Account }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/api-docs", component: ApiDocs }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/docs", component: ApiDocs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/qna", component: Qna }),
   createRoute({ getParentRoute: () => rootRoute, path: "/403", component: ForbiddenPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/404", component: NotFoundPage }),

@@ -1,0 +1,1561 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ReMail 开放接口",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://remail.aishop6.com",
+      "description": "生产环境"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Core",
+      "description": "高频集成接口，覆盖账户查询、API Key 查询、项目查询、下单、订单查询和邮件取件。"
+    },
+    {
+      "name": "Resources",
+      "description": "微软邮箱和域名邮箱资源的查询、导入、创建与检测。"
+    },
+    {
+      "name": "Wallet",
+      "description": "钱包余额、兑换码充值和账单查询。"
+    },
+    {
+      "name": "Tickets",
+      "description": "售后工单查询和创建。"
+    }
+  ],
+  "security": [
+    {
+      "remailApiKey": []
+    }
+  ],
+  "paths": {
+    "/v1/account/profile": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询账户信息",
+        "description": "返回当前 API Key 所属账户的基础信息、用户分组和账户余额。",
+        "operationId": "getAccountProfile",
+        "responses": {
+          "200": {
+            "description": "账户信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfileResponse"
+                },
+                "examples": {
+                  "默认": {
+                    "value": {
+                      "account": {
+                        "id": 10001,
+                        "email": "user@example.com",
+                        "nickname": "ReMail 用户",
+                        "userGroup": "普通用户",
+                        "balance": "386.40",
+                        "enabled": true,
+                        "createdAt": "2026-07-01T10:00:00Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/api-key/profile": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询当前 API Key 信息",
+        "description": "返回当前 API Key 的余额、有效期、剩余额度和 RPM 限制。如果 Key 未设置独立额度，则余额代表账户余额；如果 Key 设置了额度，则余额和剩余额度以 Key 自身限制为准。",
+        "operationId": "getApiKeyProfile",
+        "responses": {
+          "200": {
+            "description": "API Key 信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKeyProfileResponse"
+                },
+                "examples": {
+                  "默认": {
+                    "value": {
+                      "apiKey": {
+                        "id": 10001,
+                        "name": "默认接口 Key",
+                        "key": "rk-docs9x4f2p7m6q8r3s1t5u9v0w2x",
+                        "enabled": true,
+                        "balance": "386.40",
+                        "expiresAt": "2026-12-31T15:59:59Z",
+                        "quotaLimit": null,
+                        "quotaRemaining": null,
+                        "rpmLimit": 120
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询可用项目列表",
+        "description": "查询当前调用方可见的项目。排序策略为：申请驳回、申请中、可用私有项目、公共项目。项目广场不展示库存，但接口会在商品中返回库存摘要，供下单页使用。",
+        "operationId": "listProjects",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductType"
+          },
+          {
+            "$ref": "#/components/parameters/ProjectAccess"
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "项目列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectListResponse"
+                },
+                "examples": {
+                  "默认": {
+                    "value": {
+                      "items": [
+                        {
+                          "id": 1001,
+                          "name": "GitHub 账号验证",
+                          "description": "用于 GitHub 注册、登录和安全验证场景的邮箱项目。",
+                          "logoUrl": "https://remail.aishop6.com/logo.png",
+                          "projectUrl": "https://github.com",
+                          "accessType": "private",
+                          "applicationStatus": "approved",
+                          "products": [
+                            {
+                              "type": "code",
+                              "name": "短效接码",
+                              "price": "0.80",
+                              "warrantyMinutes": 20,
+                              "inventory": {
+                                "available": 815
+                              }
+                            },
+                            {
+                              "type": "purchase",
+                              "name": "长效购买",
+                              "price": "8.90",
+                              "warrantyMinutes": 10080,
+                              "inventory": {
+                                "available": 128
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "total": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询项目详情",
+        "description": "查询单个项目的基础信息、商品价格、质保时间和库存摘要。",
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "项目详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/orders": {
+      "post": {
+        "tags": ["Core"],
+        "summary": "创建订单",
+        "description": "统一下单接口。通过查询参数指定长效购买或短效接码，以及库存选择策略。默认是长效购买，并优先使用私有库存。",
+        "operationId": "createOrder",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "订单模式。purchase 表示长效购买，code 表示短效接码。",
+            "schema": {
+              "type": "string",
+              "enum": ["purchase", "code"],
+              "default": "purchase"
+            }
+          },
+          {
+            "name": "inventoryPreference",
+            "in": "query",
+            "required": false,
+            "description": "库存选择策略。默认私有库存优先。",
+            "schema": {
+              "type": "string",
+              "enum": ["private_first", "public_only"],
+              "default": "private_first"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderRequest"
+              },
+              "examples": {
+                "短效接码": {
+                  "summary": "创建短效接码订单",
+                  "value": {
+                    "projectId": 1001,
+                    "productType": "microsoft",
+                    "emailSuffix": "outlook.com",
+                    "quantity": 1
+                  }
+                },
+                "长效购买": {
+                  "summary": "创建长效购买订单",
+                  "value": {
+                    "projectId": 1001,
+                    "productType": "domain",
+                    "emailSuffix": "lclaitech.com",
+                    "quantity": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "订单已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "402": {
+            "$ref": "#/components/responses/InsufficientBalance"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询订单列表",
+        "description": "查询当前用户或 API Key 所属账户的订单列表。",
+        "operationId": "listOrders",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "description": "订单模式筛选。",
+            "schema": {
+              "type": "string",
+              "enum": ["purchase", "code"]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "订单状态筛选。",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "completed", "expired", "refunded"]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{orderNo}": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "查询订单详情",
+        "operationId": "getOrder",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrderNo"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/pickup": {
+      "get": {
+        "tags": ["Core"],
+        "summary": "读取邮件与验证码",
+        "description": "只需要 email 和 token 两个参数。接口读取本地缓存的邮件事实，并可在内部自动提交异步拉取任务。接码订单只返回最后一封匹配到验证码的邮件；长效购买订单返回最近 30 封邮件。",
+        "operationId": "pickupMail",
+        "security": [],
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "description": "交付邮箱地址。",
+            "schema": {
+              "type": "string",
+              "format": "email",
+              "example": "mateo.richards@outlook.com"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "description": "服务凭证。任何持有该凭证的人都可以读取对应资源。",
+            "schema": {
+              "type": "string",
+              "example": "st_7jr3kfk9k2d"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取件结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupMailResponse"
+                },
+                "examples": {
+                  "接码": {
+                    "value": {
+                      "mode": "code",
+                      "latestCode": "438921",
+                      "messages": [
+                        {
+                          "sender": "noreply@github.com",
+                          "recipient": "mateo.richards@outlook.com",
+                          "receivedAt": "2026-07-08T12:40:00Z",
+                          "subject": "GitHub 验证码",
+                          "body": "你的 GitHub 验证码是 438921。",
+                          "verificationCode": "438921"
+                        }
+                      ],
+                      "fetch": {
+                        "status": "queued",
+                        "nextAllowedAt": "2026-07-08T12:40:10Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidPickupToken"
+          }
+        }
+      }
+    },
+    "/v1/wallet": {
+      "get": {
+        "tags": ["Wallet"],
+        "summary": "查询钱包概览",
+        "description": "查询余额、历史消耗、兑换码能力和可划转返佣。",
+        "operationId": "getWallet",
+        "responses": {
+          "200": {
+            "description": "钱包概览",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletSummaryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wallet/redeem": {
+      "post": {
+        "tags": ["Wallet"],
+        "summary": "兑换充值码",
+        "operationId": "redeemRechargeCode",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRechargeCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "兑换成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/v1/wallet/bills": {
+      "get": {
+        "tags": ["Wallet"],
+        "summary": "查询账单列表",
+        "operationId": "listWalletBills",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "账单类型。",
+            "schema": {
+              "type": "string",
+              "enum": ["recharge", "order_payment", "refund", "referral_reward", "referral_settlement"]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "账单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/microsoft-emails": {
+      "get": {
+        "tags": ["Resources"],
+        "summary": "查询微软邮箱资源",
+        "operationId": "listMicrosoftResources",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "资源状态。",
+            "schema": {
+              "type": "string",
+              "enum": ["normal", "abnormal", "pending", "disabled"]
+            }
+          },
+          {
+            "name": "graph",
+            "in": "query",
+            "description": "是否支持 Graph 协议。",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "微软邮箱资源列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MicrosoftResourceListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Resources"],
+        "summary": "导入微软邮箱资源",
+        "description": "导入成功并落库后即返回。验证任务异步执行，不阻塞导入接口。",
+        "operationId": "importMicrosoftResources",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportMicrosoftResourcesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "导入任务已接受，验证异步执行。"
+          }
+        }
+      }
+    },
+    "/v1/admin/microsoft-emails/{resourceId}/check": {
+      "post": {
+        "tags": ["Resources"],
+        "summary": "提交微软邮箱检测任务",
+        "description": "只提交异步检测任务，不等待检测完成。",
+        "operationId": "checkMicrosoftResource",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "检测任务已提交。"
+          }
+        }
+      }
+    },
+    "/v1/admin/domain-emails": {
+      "get": {
+        "tags": ["Resources"],
+        "summary": "查询域名邮箱资源",
+        "operationId": "listDomainResources",
+        "parameters": [
+          {
+            "name": "purpose",
+            "in": "query",
+            "description": "用途。binding 表示辅助邮箱。",
+            "schema": {
+              "type": "string",
+              "enum": ["sale", "not_sale", "binding"]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "域名资源列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainResourceListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Resources"],
+        "summary": "创建域名邮箱资源",
+        "description": "创建自建域名资源。DNS、MX、入站验证可异步执行。",
+        "operationId": "createDomainResource",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDomainResourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "域名资源已创建。"
+          }
+        }
+      }
+    },
+    "/v1/tickets": {
+      "get": {
+        "tags": ["Tickets"],
+        "summary": "查询工单列表",
+        "operationId": "listTickets",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "工单状态。",
+            "schema": {
+              "type": "string",
+              "enum": ["open", "processing", "resolved", "closed"]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "工单列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Tickets"],
+        "summary": "创建工单",
+        "operationId": "createTicket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "工单已创建。"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "remailApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "使用个人设置中创建的 API Key 访问开放接口。请选择或填写 `rk-` 开头的密钥。"
+      }
+    },
+    "parameters": {
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "description": "项目 ID。",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 1001
+        }
+      },
+      "OrderNo": {
+        "name": "orderNo",
+        "in": "path",
+        "required": true,
+        "description": "订单号。",
+        "schema": {
+          "type": "string",
+          "example": "RO202607080001"
+        }
+      },
+      "ResourceId": {
+        "name": "resourceId",
+        "in": "path",
+        "required": true,
+        "description": "资源 ID。",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 8201
+        }
+      },
+      "ProductType": {
+        "name": "productType",
+        "in": "query",
+        "description": "资源商品类型。",
+        "schema": {
+          "type": "string",
+          "enum": ["microsoft", "domain"]
+        }
+      },
+      "ProjectAccess": {
+        "name": "access",
+        "in": "query",
+        "description": "项目访问类型。",
+        "schema": {
+          "type": "string",
+          "enum": ["all", "private", "public"],
+          "default": "all"
+        }
+      },
+      "Search": {
+        "name": "search",
+        "in": "query",
+        "description": "模糊搜索关键词。",
+        "schema": {
+          "type": "string",
+          "example": "github"
+        }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "description": "分页偏移量。",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "每页数量。",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "请求参数错误",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "缺少或无效的 API Key",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "资源不存在",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "InsufficientBalance": {
+        "description": "InsufficientBalance",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "message": "余额不足。",
+              "requestId": "req_01jzmn6s8fp3d4g7r1m9t0v2ka"
+            }
+          }
+        }
+      },
+      "InvalidPickupToken": {
+        "description": "取件邮箱或服务凭证无效",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AccountProfileResponse": {
+        "type": "object",
+        "required": ["account"],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountProfile"
+          }
+        }
+      },
+      "AccountProfile": {
+        "type": "object",
+        "required": ["id", "email", "nickname", "userGroup", "balance", "enabled"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "账户 ID。",
+            "example": 10001
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "账户邮箱。",
+            "example": "user@example.com"
+          },
+          "nickname": {
+            "type": "string",
+            "description": "账户昵称。",
+            "example": "ReMail 用户"
+          },
+          "userGroup": {
+            "type": "string",
+            "description": "权益分组名称。",
+            "example": "普通用户"
+          },
+          "balance": {
+            "type": "string",
+            "description": "账户可用余额。",
+            "example": "386.40"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "账户是否启用。",
+            "example": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "账户创建时间。"
+          }
+        }
+      },
+      "APIKeyProfileResponse": {
+        "type": "object",
+        "required": ["apiKey"],
+        "properties": {
+          "apiKey": {
+            "$ref": "#/components/schemas/APIKeyProfile"
+          }
+        }
+      },
+      "APIKeyProfile": {
+        "type": "object",
+        "required": ["id", "name", "key", "enabled", "balance"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "API Key ID。"
+          },
+          "name": {
+            "type": "string",
+            "description": "API Key 名称。"
+          },
+          "key": {
+            "type": "string",
+            "description": "明文 API Key。按设计文档要求，列表接口允许返回明文。",
+            "example": "rk-docs9x4f2p7m6q8r3s1t5u9v0w2x"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用。"
+          },
+          "balance": {
+            "type": "string",
+            "description": "可用余额。",
+            "example": "386.40"
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "过期时间。null 表示长期有效。"
+          },
+          "quotaLimit": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "额度限制。null 表示无限制。"
+          },
+          "quotaRemaining": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "剩余额度。null 表示无限制。"
+          },
+          "rpmLimit": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "每分钟请求数限制。null 表示无限制。"
+          }
+        }
+      },
+      "ProjectListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "总数。"
+          }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "required": ["id", "name", "accessType", "products"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1001
+          },
+          "name": {
+            "type": "string",
+            "example": "GitHub 账号验证"
+          },
+          "description": {
+            "type": "string",
+            "description": "项目描述。"
+          },
+          "logoUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "项目 Logo 地址。"
+          },
+          "projectUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "项目官网或业务链接。"
+          },
+          "accessType": {
+            "type": "string",
+            "enum": ["private", "public"],
+            "description": "私有或公共项目。"
+          },
+          "applicationStatus": {
+            "type": "string",
+            "enum": ["none", "pending", "rejected", "approved"],
+            "description": "当前用户的私有项目申请状态。"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "required": ["type", "price", "warrantyMinutes"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["code", "purchase"],
+            "description": "code 表示短效接码，purchase 表示长效购买。"
+          },
+          "name": {
+            "type": "string",
+            "description": "商品名称。"
+          },
+          "price": {
+            "type": "string",
+            "description": "价格，单位元。",
+            "example": "0.80"
+          },
+          "warrantyMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "质保时间，单位分钟。"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/ProductInventory"
+          }
+        }
+      },
+      "ProductInventory": {
+        "type": "object",
+        "required": ["available"],
+        "properties": {
+          "available": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "可用库存总数。",
+            "example": 815
+          }
+        }
+      },
+      "CreateOrderRequest": {
+        "type": "object",
+        "required": ["projectId", "productType", "quantity"],
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "项目 ID。",
+            "example": 1001
+          },
+          "productType": {
+            "type": "string",
+            "enum": ["microsoft", "domain"],
+            "description": "邮箱资源类型。"
+          },
+          "emailSuffix": {
+            "type": "string",
+            "description": "邮箱后缀筛选。",
+            "example": "outlook.com"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 1,
+            "description": "购买数量。"
+          }
+        }
+      },
+      "CreateOrderResponse": {
+        "type": "object",
+        "required": ["order"],
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          }
+        }
+      },
+      "OrderListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["orderNo", "mode", "status", "email", "token"],
+        "properties": {
+          "orderNo": {
+            "type": "string",
+            "description": "订单号。",
+            "example": "RO202607080001"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["purchase", "code"],
+            "description": "订单模式。"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "completed", "expired", "refunded"],
+            "description": "订单状态。"
+          },
+          "projectId": {
+            "type": "integer",
+            "description": "项目 ID。"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "交付邮箱。",
+            "example": "mateo.richards@outlook.com"
+          },
+          "token": {
+            "type": "string",
+            "description": "服务凭证。",
+            "example": "st_7jr3kfk9k2d"
+          },
+          "pickupUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "取件链接。",
+            "example": "https://remail.aishop6.com/pickup?email=mateo.richards%40outlook.com&token=st_7jr3kfk9k2d"
+          },
+          "receiveUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "可收件截止时间。"
+          },
+          "afterSalesUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "售后截止时间。"
+          }
+        }
+      },
+      "PickupMailResponse": {
+        "type": "object",
+        "required": ["mode", "messages", "fetch"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["purchase", "code"],
+            "description": "订单模式。"
+          },
+          "latestCode": {
+            "type": ["string", "null"],
+            "description": "快捷验证码。",
+            "example": "438921"
+          },
+          "messages": {
+            "type": "array",
+            "description": "邮件列表。接码只返回最后一封命中验证码的邮件，长效购买返回最近 30 封。",
+            "items": {
+              "$ref": "#/components/schemas/MailMessage"
+            }
+          },
+          "fetch": {
+            "$ref": "#/components/schemas/FetchState"
+          }
+        }
+      },
+      "MailMessage": {
+        "type": "object",
+        "required": ["sender", "recipient", "receivedAt", "subject", "body"],
+        "properties": {
+          "sender": {
+            "type": "string",
+            "description": "发件人。",
+            "example": "noreply@github.com"
+          },
+          "recipient": {
+            "type": "string",
+            "description": "收件人。",
+            "example": "mateo.richards@outlook.com"
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "收件时间。"
+          },
+          "subject": {
+            "type": "string",
+            "description": "主题。"
+          },
+          "body": {
+            "type": "string",
+            "description": "正文。"
+          },
+          "verificationCode": {
+            "type": ["string", "null"],
+            "description": "验证码。",
+            "example": "438921"
+          }
+        }
+      },
+      "FetchState": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["idle", "queued", "running", "succeeded", "failed", "cooldown"],
+            "description": "异步拉取状态。"
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最近成功拉取时间。"
+          },
+          "nextAllowedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "下一次允许刷新时间。"
+          }
+        }
+      },
+      "WalletSummaryResponse": {
+        "type": "object",
+        "required": ["balance", "totalConsumed", "rechargeCodeSupported"],
+        "properties": {
+          "balance": {
+            "type": "string",
+            "description": "账户余额。",
+            "example": "386.40"
+          },
+          "totalConsumed": {
+            "type": "string",
+            "description": "历史消耗。",
+            "example": "1288.60"
+          },
+          "rechargeCodeSupported": {
+            "type": "boolean",
+            "description": "是否支持兑换码充值。",
+            "example": true
+          },
+          "referralRewardAvailable": {
+            "type": "string",
+            "description": "可划转返佣。",
+            "example": "28.80"
+          }
+        }
+      },
+      "RedeemRechargeCodeRequest": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "兑换码。",
+            "example": "RC-2026-8KQ7-2N4P"
+          }
+        }
+      },
+      "BillListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bill"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Bill": {
+        "type": "object",
+        "required": ["id", "type", "amount", "createdAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "账单 ID。"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["recharge", "order_payment", "refund", "referral_reward", "referral_settlement"],
+            "description": "账单类型。"
+          },
+          "amount": {
+            "type": "string",
+            "description": "变动金额。",
+            "example": "10.00"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "创建时间。"
+          },
+          "remark": {
+            "type": "string",
+            "description": "备注。"
+          }
+        }
+      },
+      "MicrosoftResourceListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MicrosoftResource"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "MicrosoftResource": {
+        "type": "object",
+        "required": ["id", "email", "status", "graph"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "资源 ID。"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "微软邮箱。"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["normal", "abnormal", "pending", "disabled"],
+            "description": "资源状态。"
+          },
+          "graph": {
+            "type": "boolean",
+            "description": "是否支持 Graph 协议。"
+          },
+          "lastCheckMessage": {
+            "type": ["string", "null"],
+            "description": "最近检测结果。"
+          }
+        }
+      },
+      "ImportMicrosoftResourcesRequest": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "导入内容，每行一个微软邮箱凭据。"
+          },
+          "autoCheck": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否自动提交异步检测任务。"
+          }
+        }
+      },
+      "DomainResourceListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainResource"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "DomainResource": {
+        "type": "object",
+        "required": ["id", "domain", "purpose", "enabled"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "资源 ID。"
+          },
+          "domain": {
+            "type": "string",
+            "description": "域名。",
+            "example": "lclaitech.com"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": ["sale", "not_sale", "binding"],
+            "description": "资源用途。binding 表示辅助邮箱。"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用。"
+          },
+          "dailyLimit": {
+            "type": "integer",
+            "description": "日限量。",
+            "example": 10000
+          }
+        }
+      },
+      "CreateDomainResourceRequest": {
+        "type": "object",
+        "required": ["domain", "purpose"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "域名。",
+            "example": "lclaitech.com"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": ["sale", "not_sale", "binding"],
+            "description": "用途。"
+          },
+          "dailyLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10000,
+            "description": "每日最大生成数量。"
+          }
+        }
+      },
+      "TicketListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ticket"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "required": ["id", "orderNo", "status", "title"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "工单 ID。"
+          },
+          "orderNo": {
+            "type": "string",
+            "description": "关联订单号。"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "processing", "resolved", "closed"],
+            "description": "工单状态。"
+          },
+          "title": {
+            "type": "string",
+            "description": "工单标题。"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "创建时间。"
+          }
+        }
+      },
+      "CreateTicketRequest": {
+        "type": "object",
+        "required": ["orderNo", "title", "content"],
+        "properties": {
+          "orderNo": {
+            "type": "string",
+            "description": "关联订单号。"
+          },
+          "title": {
+            "type": "string",
+            "description": "工单标题。"
+          },
+          "content": {
+            "type": "string",
+            "description": "工单内容。"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["message", "requestId"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "错误消息。"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "请求 ID。"
+          }
+        }
+      }
+    }
+  }
+}

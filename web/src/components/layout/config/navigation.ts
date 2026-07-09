@@ -118,6 +118,6 @@ export const TOP_NAV_ITEMS: TopNavItem[] = [
   { path: "/", labelKey: "Home" },
   { path: "/console", labelKey: "Console", activePaths: ROUTES_WITH_SIDEBAR },
   { path: "/projects", labelKey: "Project Square" },
-  { path: "/api-docs", labelKey: "API Docs" },
+  { path: "/docs", labelKey: "API Docs" },
   { path: "/qna", labelKey: "FAQ" },
 ];
