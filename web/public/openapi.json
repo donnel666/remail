@@ -424,8 +424,40 @@
           "totalAvailable": {
             "type": "integer",
             "example": 815
+          },
+          "publicAvailable": {
+            "type": "integer",
+            "example": 300
+          },
+          "suffixes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductSuffixInventory"
+            }
           }
         }
+      },
+      "ProductSuffixInventory": {
+        "type": "object",
+        "properties": {
+          "suffix": {
+            "type": "string",
+            "example": "outlook.com"
+          },
+          "totalAvailable": {
+            "type": "integer",
+            "example": 120
+          },
+          "publicAvailable": {
+            "type": "integer",
+            "example": 80
+          }
+        },
+        "required": [
+          "suffix",
+          "totalAvailable",
+          "publicAvailable"
+        ]
       },
       "ProjectProduct": {
         "allOf": [

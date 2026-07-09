@@ -7178,6 +7178,7 @@ components:
         - activationWindowMinutes
         - warrantyMinutes
         - totalAvailable
+        - publicAvailable
       properties:
         id:
           type: integer
@@ -7205,6 +7206,32 @@ components:
           type: integer
           format: int64
           description: User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
+        publicAvailable:
+          type: integer
+          format: int64
+          description: User-safe public inventory currently available for this product summary.
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSuffixInventory"
+      additionalProperties: false
+
+    ProductSuffixInventory:
+      type: object
+      required:
+        - suffix
+        - totalAvailable
+        - publicAvailable
+      properties:
+        suffix:
+          type: string
+          description: Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix.
+        totalAvailable:
+          type: integer
+          format: int64
+        publicAvailable:
+          type: integer
+          format: int64
       additionalProperties: false
 
     ProjectProduct:
@@ -7802,6 +7829,7 @@ components:
         - projectId
         - productId
         - resourceId
+        - supplyScope
         - mailbox
         - email
         - status
@@ -7820,6 +7848,9 @@ components:
           type: integer
         resourceId:
           type: integer
+        supplyScope:
+          type: string
+          enum: [owned, public]
         mailbox:
           type: string
           enum: [main, alias, dot, plus, domain]
@@ -7903,11 +7934,18 @@ components:
       required:
         - productId
         - totalAvailable
+        - publicAvailable
       properties:
         productId:
           type: integer
         totalAvailable:
           type: integer
+        publicAvailable:
+          type: integer
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSuffixInventory"
       additionalProperties: false
 
     MicrosoftInventory:

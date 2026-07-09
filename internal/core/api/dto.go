@@ -400,17 +400,25 @@ type ProjectProductResponse struct {
 
 // ProjectProductSummaryResponse is a safe product summary embedded in project lists.
 type ProjectProductSummaryResponse struct {
-	ID                      uint   `json:"id"`
-	Type                    string `json:"type"`
-	Status                  string `json:"status"`
-	CodeEnabled             bool   `json:"codeEnabled"`
-	PurchaseEnabled         bool   `json:"purchaseEnabled"`
-	CodePrice               string `json:"codePrice"`
-	PurchasePrice           string `json:"purchasePrice"`
-	CodeWindowMinutes       int    `json:"codeWindowMinutes"`
-	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
-	WarrantyMinutes         int    `json:"warrantyMinutes"`
-	TotalAvailable          int64  `json:"totalAvailable"`
+	ID                      uint                                    `json:"id"`
+	Type                    string                                  `json:"type"`
+	Status                  string                                  `json:"status"`
+	CodeEnabled             bool                                    `json:"codeEnabled"`
+	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
+	CodePrice               string                                  `json:"codePrice"`
+	PurchasePrice           string                                  `json:"purchasePrice"`
+	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
+	ActivationWindowMinutes int                                     `json:"activationWindowMinutes"`
+	WarrantyMinutes         int                                     `json:"warrantyMinutes"`
+	TotalAvailable          int64                                   `json:"totalAvailable"`
+	PublicAvailable         int64                                   `json:"publicAvailable"`
+	Suffixes                []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
+}
+
+type ProjectProductSuffixInventoryResponse struct {
+	Suffix          string `json:"suffix"`
+	TotalAvailable  int64  `json:"totalAvailable"`
+	PublicAvailable int64  `json:"publicAvailable"`
 }
 
 // ProjectMailRuleResponse is a mail matching rule view.

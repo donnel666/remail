@@ -5,6 +5,7 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-09 | V1.1 | Codex | 补充分配优先于扣款的私有库存语义：实际分配到 `owned` 库存时订单应付为 `0.00`，仍必须创建 0 元消费流水。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -31,7 +32,7 @@
 | `projectProductId` | 商品 ID |
 | `serviceMode` | `code/purchase` |
 | `status` | `pending_payment/paid/active/completed/refunded/failed/closed` |
-| `payAmount/refundAmount` | 金额 |
+| `payAmount/refundAmount` | 订单实际支付/退款金额；私有库存订单 `payAmount=0.00` |
 | `debitTxId/refundTxId` | 钱包流水外键 |
 | `microsoftAllocId/domainAllocId` | 分配外键二选一 |
 | `deliveryEmail` | 交付邮箱冗余只读值，用于订单交付展示 |
@@ -67,7 +68,7 @@
 ```mermaid
 stateDiagram-v2
     [*] --> pending_payment: 创建订单
-    pending_payment --> paid: 扣款成功
+    pending_payment --> paid: 扣款流水创建成功
     pending_payment --> failed: 扣款失败
     pending_payment --> closed: 用户取消
     paid --> active: 分配成功并签发凭证
@@ -101,7 +102,7 @@ stateDiagram-v2
 
 | 服务 | 职责 |
 |------|------|
-| `CheckoutService` | 下单编排：项目准入、扣款、分配、凭证签发、供应商冻结结算。 |
+| `CheckoutService` | 下单编排：项目准入、分配、扣款流水、凭证签发、供应商冻结结算。 |
 | `OrderStateService` | 状态流转和不变式守卫。 |
 | `RefundService` | 退款编排：钱包退款、分配释放、Token 禁用、结算取消。 |
 | `FulfillmentPolicyService` | 接码成功、购买激活、超时、过保策略。 |
@@ -119,7 +120,7 @@ stateDiagram-v2
 | INV-T1 | `orderNo` 全局唯一且不可变。 |
 | INV-T2 | Microsoft 分配外键和自建分配外键最多只能有一个；进入服务状态后必须有且只有一个。 |
 | INV-T3 | 进入 `active/completed` 时必须已有一个分配外键；`failed/refunded` 若发生在分配前可以无分配，但已扣款必须有退款流水。 |
-| INV-T4 | 进入 `paid` 必须绑定扣款流水。 |
+| INV-T4 | 进入 `paid` 必须绑定扣款流水；公开库存流水金额为商品价格的负数，私有库存流水金额为 `0.00`，不得因 0 元跳过流水。 |
 | INV-T5 | 每次状态变化和关键服务生命周期事件必须追加订单事件。 |
 | INV-T6 | 同一用户/渠道/API Key/幂等键不得创建第二个订单。 |
 | INV-T7 | 接码订单超时无验证码必须自动退款。 |
@@ -138,7 +139,7 @@ stateDiagram-v2
 | `OrderingPort` | 出站到 BC-CORE | 校验项目、商品、服务模式、访问和规则，返回价格/窗口/资源类型。 |
 | `WalletPort` | 出站到 BC-BILLING | 扣款/退款，返回流水 ID。 |
 | `SettlementPort` | 出站到 BC-BILLING | 创建冻结结算、取消、入账。 |
-| `AllocationPort` | 出站到 BC-ALLOC | 创建分配。 |
+| `AllocationPort` | 出站到 BC-ALLOC | 创建分配并返回实际 `supplyScope=owned/public`。 |
 | `ReleasePort` | 出站到 BC-ALLOC | 释放分配。 |
 | `OrderTokenPort` | 出站到 BC-OPENAPI | 签发、禁用、重置服务凭证。 |
 | `FetchTriggerPort` | 出站到 BC-MAILMATCH | 触发订单收件。 |

@@ -3,17 +3,18 @@ package api
 import "time"
 
 type AllocationItemResponse struct {
-	Type       string     `json:"type"`
-	ID         uint       `json:"id"`
-	OrderNo    string     `json:"orderNo"`
-	ProjectID  uint       `json:"projectId"`
-	ProductID  uint       `json:"productId"`
-	ResourceID uint       `json:"resourceId"`
-	Mailbox    string     `json:"mailbox"`
-	Email      string     `json:"email"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	ReleasedAt *time.Time `json:"releasedAt,omitempty"`
+	Type        string     `json:"type"`
+	ID          uint       `json:"id"`
+	OrderNo     string     `json:"orderNo"`
+	ProjectID   uint       `json:"projectId"`
+	ProductID   uint       `json:"productId"`
+	ResourceID  uint       `json:"resourceId"`
+	SupplyScope string     `json:"supplyScope"`
+	Mailbox     string     `json:"mailbox"`
+	Email       string     `json:"email"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	ReleasedAt  *time.Time `json:"releasedAt,omitempty"`
 }
 
 type AllocationListResponse struct {
@@ -39,8 +40,16 @@ type ProjectInventoryTotalResponse struct {
 }
 
 type ProjectProductInventoryTotalResponse struct {
-	ProductID      uint  `json:"productId"`
-	TotalAvailable int64 `json:"totalAvailable"`
+	ProductID       uint                                    `json:"productId"`
+	TotalAvailable  int64                                   `json:"totalAvailable"`
+	PublicAvailable int64                                   `json:"publicAvailable"`
+	Suffixes        []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
+}
+
+type ProjectProductSuffixInventoryResponse struct {
+	Suffix          string `json:"suffix"`
+	TotalAvailable  int64  `json:"totalAvailable"`
+	PublicAvailable int64  `json:"publicAvailable"`
 }
 
 type MicrosoftInventoryResponse struct {

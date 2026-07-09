@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
-	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
@@ -27,10 +25,6 @@ const MaxProjectLogoBytes = 2 * 1024 * 1024 // 2 MB
 type CoreHandler struct {
 	module            *CoreModule
 	permissionChecker middleware.PermissionChecker
-}
-
-type ProductInventoryProvider interface {
-	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.ProjectProductInventoryTotals, error)
 }
 
 // NewCoreHandler creates a new Core handler.
@@ -548,10 +542,9 @@ func (h *CoreHandler) GetProjects(c *gin.Context) {
 		return
 	}
 
-	inventoryByProductID := h.projectProductInventoryByID(c.Request.Context(), result.Items, userID)
 	items := make([]ProjectItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = toProjectItemResponse(result.Items[i], isAdmin, userID, inventoryByProductID)
+		items[i] = toProjectItemResponse(result.Items[i], isAdmin, userID)
 	}
 	c.JSON(http.StatusOK, ProjectListResponse{
 		Items:  items,
@@ -560,26 +553,6 @@ func (h *CoreHandler) GetProjects(c *gin.Context) {
 		Limit:  result.Limit,
 		Facets: toProjectListFacetsResponse(result.Facets),
 	})
-}
-
-func (h *CoreHandler) projectProductInventoryByID(ctx context.Context, summaries []coreapp.ProjectSummary, userID uint) map[uint]int64 {
-	if h.module == nil || h.module.ProductInventory == nil || len(summaries) == 0 || userID == 0 {
-		return nil
-	}
-	result := make(map[uint]int64)
-	for i := range summaries {
-		if summaries[i].Project.Status != coredomain.ProjectStatusListed {
-			continue
-		}
-		totals, err := h.module.ProductInventory.GetProductInventoryTotals(ctx, summaries[i].Project.ID, userID)
-		if err != nil || totals == nil {
-			continue
-		}
-		for _, item := range totals.Items {
-			result[item.ProductID] = item.TotalAvailable
-		}
-	}
-	return result
 }
 
 // POST /v1/projects
@@ -1434,7 +1407,7 @@ func toAppProjectBulkSelection(req ProjectBulkSelectionRequest) coreapp.ProjectB
 	}
 }
 
-func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]int64) ProjectItemResponse {
+func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint) ProjectItemResponse {
 	project := summary.Project
 	item := ProjectItemResponse{
 		ID:             project.ID,
@@ -1447,7 +1420,7 @@ func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool,
 		LooseMatch:     project.LooseMatch,
 		ProductCount:   summary.ProductCount,
 		MailRuleCount:  summary.MailRuleCount,
-		Products:       toProjectProductSummaryResponses(summary.Products, inventoryByProductID),
+		Products:       toProjectProductSummaryResponses(summary.Products),
 		CreatedAt:      project.CreatedAt,
 		UpdatedAt:      project.UpdatedAt,
 	}
@@ -1494,7 +1467,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 	}
 }
 
-func toProjectProductSummaryResponses(products []coredomain.Product, inventoryByProductID map[uint]int64) []ProjectProductSummaryResponse {
+func toProjectProductSummaryResponses(products []coredomain.Product) []ProjectProductSummaryResponse {
 	if len(products) == 0 {
 		return nil
 	}
@@ -1512,7 +1485,6 @@ func toProjectProductSummaryResponses(products []coredomain.Product, inventoryBy
 			CodeWindowMinutes:       product.CodeWindowMinutes,
 			ActivationWindowMinutes: product.ActivationWindowMinutes,
 			WarrantyMinutes:         product.WarrantyMinutes,
-			TotalAvailable:          inventoryByProductID[product.ID],
 		}
 	}
 	return items
@@ -1524,7 +1496,7 @@ func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal b
 		Project:       detail.Project,
 		ProductCount:  len(detail.Products),
 		MailRuleCount: len(detail.MailRules),
-	}, includeInternal, viewerUserID, nil)
+	}, includeInternal, viewerUserID)
 	products := make([]ProjectProductResponse, len(detail.Products))
 	for i := range detail.Products {
 		product := detail.Products[i]

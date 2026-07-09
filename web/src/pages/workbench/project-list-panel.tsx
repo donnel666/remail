@@ -92,7 +92,7 @@ export function ProjectListPanel({
                     {project.visibility === "private" ? t("Private") : t("Public")}
                   </Tag>
                   <span className="font-mono-data text-[12px] text-[var(--semi-color-text-2)]">
-                    {inventory}
+                    {project.inventoryLoaded ? inventory : "--"}
                   </span>
                 </span>
               </button>

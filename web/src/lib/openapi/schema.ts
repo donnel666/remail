@@ -2382,6 +2382,20 @@ export interface components {
              * @description User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
              */
             totalAvailable: number;
+            /**
+             * Format: int64
+             * @description User-safe public inventory currently available for this product summary.
+             */
+            publicAvailable: number;
+            suffixes?: components["schemas"]["ProductSuffixInventory"][];
+        };
+        ProductSuffixInventory: {
+            /** @description Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix. */
+            suffix: string;
+            /** Format: int64 */
+            totalAvailable: number;
+            /** Format: int64 */
+            publicAvailable: number;
         };
         ProjectProduct: {
             id: number;
@@ -2630,6 +2644,8 @@ export interface components {
             productId: number;
             resourceId: number;
             /** @enum {string} */
+            supplyScope: "owned" | "public";
+            /** @enum {string} */
             mailbox: "main" | "alias" | "dot" | "plus" | "domain";
             email: string;
             /** @enum {string} */
@@ -2661,6 +2677,8 @@ export interface components {
         ProjectProductInventoryTotal: {
             productId: number;
             totalAvailable: number;
+            publicAvailable: number;
+            suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         MicrosoftInventory: {
             enabled: boolean;

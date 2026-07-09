@@ -21,6 +21,7 @@ export type ServiceState =
 export interface WorkbenchProject {
   description: string;
   id: string;
+  inventoryLoaded?: boolean;
   logoUrl?: string;
   name: string;
   products: WorkbenchProduct[];
@@ -34,9 +35,12 @@ export interface WorkbenchProduct {
   codeInventory: number;
   codePrice: number;
   codeWindowMinutes: number;
+  emailSuffix: string;
   id: string;
   label: string;
+  productId: string;
   productType: ProductType;
+  publicInventory: number;
   projectId: string;
   purchaseEnabled: boolean;
   purchaseInventory: number;

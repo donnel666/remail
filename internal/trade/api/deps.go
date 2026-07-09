@@ -107,10 +107,18 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		return nil, mapAllocationError(err)
 	}
 	return &tradeapp.AllocationResult{
-		Type:  domain.AllocationType(result.Type),
-		ID:    result.ID,
-		Email: result.Email,
+		Type:        domain.AllocationType(result.Type),
+		ID:          result.ID,
+		Email:       result.Email,
+		SupplyScope: tradeSupplyScope(result.SupplyScope),
 	}, nil
+}
+
+func tradeSupplyScope(scope allocdomain.SupplyScope) tradeapp.SupplyScope {
+	if scope == allocdomain.SupplyScopeOwned {
+		return tradeapp.SupplyScopeOwned
+	}
+	return tradeapp.SupplyScopePublic
 }
 
 func (a allocationAdapter) ReleaseByOrder(ctx context.Context, orderNo string) error {

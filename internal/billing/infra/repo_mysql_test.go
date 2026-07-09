@@ -377,6 +377,43 @@ func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "5.50", debited.Wallet.ConsumerBalance)
+	require.Equal(t, "-4.50", debited.Transaction.Amount)
+	require.Equal(t, "10.00", debited.Transaction.BalanceBefore)
+	require.Equal(t, "5.50", debited.Transaction.BalanceAfter)
+
+	zeroDebit, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "0.00",
+		Reason:             "private stock order",
+		TransactionType:    domain.TransactionTypeDebit,
+		Direction:          domain.TransactionDirectionOut,
+		IdempotencyKey:     "idem-debit-zero",
+		RequestFingerprint: "fingerprint-debit-zero",
+		RequestID:          "req-debit-zero",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "5.50", zeroDebit.Wallet.ConsumerBalance)
+	require.Equal(t, "0.00", zeroDebit.Transaction.Amount)
+	require.Equal(t, "5.50", zeroDebit.Transaction.BalanceBefore)
+	require.Equal(t, "5.50", zeroDebit.Transaction.BalanceAfter)
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "4.50", summary.HistoricalSpend)
+
+	require.Error(t, db.Create(&WalletTransactionModel{
+		TransactionNo:   "TX-DIR-CONSTRAINT",
+		UserID:          userID,
+		TransactionType: string(domain.TransactionTypeDebit),
+		BalanceBucket:   string(domain.BalanceBucketConsumer),
+		Direction:       string(domain.TransactionDirectionIn),
+		Amount:          "1.00",
+		BalanceBefore:   "5.50",
+		BalanceAfter:    "6.50",
+		BizType:         "constraint",
+		BizID:           "direction",
+	}).Error)
 
 	_, err = repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
 		UserID:             userID,

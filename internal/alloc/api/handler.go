@@ -126,8 +126,10 @@ func (h *Handler) GetUserProjectInventory(c *gin.Context) {
 	products := make([]ProjectProductInventoryTotalResponse, len(stats.Items))
 	for i := range stats.Items {
 		products[i] = ProjectProductInventoryTotalResponse{
-			ProductID:      stats.Items[i].ProductID,
-			TotalAvailable: stats.Items[i].TotalAvailable,
+			ProductID:       stats.Items[i].ProductID,
+			TotalAvailable:  stats.Items[i].TotalAvailable,
+			PublicAvailable: stats.Items[i].PublicAvailable,
+			Suffixes:        productSuffixInventoryResponse(stats.Items[i].Suffixes),
 		}
 	}
 	c.JSON(http.StatusOK, ProjectInventoryTotalResponse{
@@ -135,6 +137,21 @@ func (h *Handler) GetUserProjectInventory(c *gin.Context) {
 		TotalAvailable: stats.TotalAvailable,
 		Products:       products,
 	})
+}
+
+func productSuffixInventoryResponse(items []allocapp.ProductInventorySuffixTotal) []ProjectProductSuffixInventoryResponse {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]ProjectProductSuffixInventoryResponse, len(items))
+	for i := range items {
+		result[i] = ProjectProductSuffixInventoryResponse{
+			Suffix:          items[i].Suffix,
+			TotalAvailable:  items[i].TotalAvailable,
+			PublicAvailable: items[i].PublicAvailable,
+		}
+	}
+	return result
 }
 
 func (h *Handler) GetProjectCandidates(c *gin.Context) {
@@ -220,17 +237,18 @@ func (h *Handler) PostProjectCandidatesRefresh(c *gin.Context) {
 
 func allocationResponse(item domain.UnifiedAllocation) AllocationItemResponse {
 	return AllocationItemResponse{
-		Type:       string(item.Type),
-		ID:         item.ID,
-		OrderNo:    item.OrderNo,
-		ProjectID:  item.ProjectID,
-		ProductID:  item.ProductID,
-		ResourceID: item.ResourceID,
-		Mailbox:    item.Mailbox,
-		Email:      item.Email,
-		Status:     string(item.Status),
-		CreatedAt:  item.CreatedAt,
-		ReleasedAt: item.ReleasedAt,
+		Type:        string(item.Type),
+		ID:          item.ID,
+		OrderNo:     item.OrderNo,
+		ProjectID:   item.ProjectID,
+		ProductID:   item.ProductID,
+		ResourceID:  item.ResourceID,
+		SupplyScope: string(item.SupplyScope),
+		Mailbox:     item.Mailbox,
+		Email:       item.Email,
+		Status:      string(item.Status),
+		CreatedAt:   item.CreatedAt,
+		ReleasedAt:  item.ReleasedAt,
 	}
 }
 

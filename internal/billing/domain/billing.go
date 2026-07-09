@@ -187,6 +187,14 @@ func NormalizePositiveMoney(value string) (string, error) {
 	return MoneyString(amount), nil
 }
 
+func NormalizeNonNegativeMoney(value string) (string, error) {
+	amount, err := ParseMoney(value)
+	if err != nil || amount.IsNegative() {
+		return "", ErrInvalidAmount
+	}
+	return MoneyString(amount), nil
+}
+
 func ParseMoney(value string) (decimal.Decimal, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func NewRepo(db *gorm.DB) *Repo {
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		name := fmt.Sprintf("alloc_sp_%d", rand.Uint64())
+		name := "alloc_sp_" + platform.NewUUIDV7CompactString()
 		if err := tx.WithContext(ctx).SavePoint(name).Error; err != nil {
 			return fmt.Errorf("create allocation savepoint: %w", err)
 		}
@@ -85,6 +86,7 @@ type MicrosoftAllocationModel struct {
 	ProjectID       uint       `gorm:"not null;column:project_id"`
 	ProductID       uint       `gorm:"not null;column:product_id"`
 	ResourceID      uint       `gorm:"not null;column:resource_id"`
+	SupplyScope     string     `gorm:"type:varchar(16);not null;column:supply_scope"`
 	Mailbox         string     `gorm:"type:varchar(32);not null"`
 	ExplicitAliasID *uint      `gorm:"column:explicit_alias_id"`
 	DotAliasID      *uint      `gorm:"column:dot_alias_id"`
@@ -104,6 +106,7 @@ func microsoftAllocationFromDomain(allocation *domain.MicrosoftAllocation) *Micr
 		ProjectID:       allocation.ProjectID,
 		ProductID:       allocation.ProductID,
 		ResourceID:      allocation.ResourceID,
+		SupplyScope:     string(domain.NormalizeSupplyScope(allocation.SupplyScope)),
 		Mailbox:         string(allocation.Mailbox),
 		ExplicitAliasID: allocation.ExplicitAliasID,
 		DotAliasID:      allocation.DotAliasID,
@@ -122,6 +125,7 @@ func (m MicrosoftAllocationModel) toDomain() domain.MicrosoftAllocation {
 		ProjectID:       m.ProjectID,
 		ProductID:       m.ProductID,
 		ResourceID:      m.ResourceID,
+		SupplyScope:     domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
 		Mailbox:         domain.MicrosoftMailbox(m.Mailbox),
 		ExplicitAliasID: m.ExplicitAliasID,
 		DotAliasID:      m.DotAliasID,
@@ -135,78 +139,83 @@ func (m MicrosoftAllocationModel) toDomain() domain.MicrosoftAllocation {
 
 func (m MicrosoftAllocationModel) unified() domain.UnifiedAllocation {
 	return domain.UnifiedAllocation{
-		Type:       domain.AllocationTypeMicrosoft,
-		ID:         m.ID,
-		OrderNo:    m.OrderNo,
-		ProjectID:  m.ProjectID,
-		ProductID:  m.ProductID,
-		ResourceID: m.ResourceID,
-		Mailbox:    m.Mailbox,
-		Email:      m.Email,
-		Status:     domain.AllocationStatus(m.Status),
-		CreatedAt:  m.CreatedAt,
-		ReleasedAt: m.ReleasedAt,
+		Type:        domain.AllocationTypeMicrosoft,
+		ID:          m.ID,
+		OrderNo:     m.OrderNo,
+		ProjectID:   m.ProjectID,
+		ProductID:   m.ProductID,
+		ResourceID:  m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		Mailbox:     m.Mailbox,
+		Email:       m.Email,
+		Status:      domain.AllocationStatus(m.Status),
+		CreatedAt:   m.CreatedAt,
+		ReleasedAt:  m.ReleasedAt,
 	}
 }
 
 type DomainAllocationModel struct {
-	ID         uint       `gorm:"primaryKey;autoIncrement"`
-	OrderNo    string     `gorm:"type:varchar(64);not null;column:order_no"`
-	ProjectID  uint       `gorm:"not null;column:project_id"`
-	ProductID  uint       `gorm:"not null;column:product_id"`
-	ResourceID uint       `gorm:"not null;column:resource_id"`
-	MailboxID  uint       `gorm:"not null;column:mailbox_id"`
-	Email      string     `gorm:"type:varchar(255);not null"`
-	Status     string     `gorm:"type:varchar(32);not null;default:'allocated'"`
-	CreatedAt  time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	ReleasedAt *time.Time `gorm:"column:released_at"`
+	ID          uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo     string     `gorm:"type:varchar(64);not null;column:order_no"`
+	ProjectID   uint       `gorm:"not null;column:project_id"`
+	ProductID   uint       `gorm:"not null;column:product_id"`
+	ResourceID  uint       `gorm:"not null;column:resource_id"`
+	SupplyScope string     `gorm:"type:varchar(16);not null;column:supply_scope"`
+	MailboxID   uint       `gorm:"not null;column:mailbox_id"`
+	Email       string     `gorm:"type:varchar(255);not null"`
+	Status      string     `gorm:"type:varchar(32);not null;default:'allocated'"`
+	CreatedAt   time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	ReleasedAt  *time.Time `gorm:"column:released_at"`
 }
 
 func (DomainAllocationModel) TableName() string { return "domain_allocations" }
 
 func domainAllocationFromDomain(allocation *domain.GeneratedMailboxAllocation) *DomainAllocationModel {
 	return &DomainAllocationModel{
-		ID:         allocation.ID,
-		OrderNo:    allocation.OrderNo,
-		ProjectID:  allocation.ProjectID,
-		ProductID:  allocation.ProductID,
-		ResourceID: allocation.ResourceID,
-		MailboxID:  allocation.MailboxID,
-		Email:      strings.ToLower(strings.TrimSpace(allocation.Email)),
-		Status:     string(allocation.Status),
-		CreatedAt:  allocation.CreatedAt,
-		ReleasedAt: allocation.ReleasedAt,
+		ID:          allocation.ID,
+		OrderNo:     allocation.OrderNo,
+		ProjectID:   allocation.ProjectID,
+		ProductID:   allocation.ProductID,
+		ResourceID:  allocation.ResourceID,
+		SupplyScope: string(domain.NormalizeSupplyScope(allocation.SupplyScope)),
+		MailboxID:   allocation.MailboxID,
+		Email:       strings.ToLower(strings.TrimSpace(allocation.Email)),
+		Status:      string(allocation.Status),
+		CreatedAt:   allocation.CreatedAt,
+		ReleasedAt:  allocation.ReleasedAt,
 	}
 }
 
 func (m DomainAllocationModel) toDomain() domain.GeneratedMailboxAllocation {
 	return domain.GeneratedMailboxAllocation{
-		ID:         m.ID,
-		OrderNo:    m.OrderNo,
-		ProjectID:  m.ProjectID,
-		ProductID:  m.ProductID,
-		ResourceID: m.ResourceID,
-		MailboxID:  m.MailboxID,
-		Email:      m.Email,
-		Status:     domain.AllocationStatus(m.Status),
-		CreatedAt:  m.CreatedAt,
-		ReleasedAt: m.ReleasedAt,
+		ID:          m.ID,
+		OrderNo:     m.OrderNo,
+		ProjectID:   m.ProjectID,
+		ProductID:   m.ProductID,
+		ResourceID:  m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		MailboxID:   m.MailboxID,
+		Email:       m.Email,
+		Status:      domain.AllocationStatus(m.Status),
+		CreatedAt:   m.CreatedAt,
+		ReleasedAt:  m.ReleasedAt,
 	}
 }
 
 func (m DomainAllocationModel) unified() domain.UnifiedAllocation {
 	return domain.UnifiedAllocation{
-		Type:       domain.AllocationTypeDomain,
-		ID:         m.ID,
-		OrderNo:    m.OrderNo,
-		ProjectID:  m.ProjectID,
-		ProductID:  m.ProductID,
-		ResourceID: m.ResourceID,
-		Mailbox:    "domain",
-		Email:      m.Email,
-		Status:     domain.AllocationStatus(m.Status),
-		CreatedAt:  m.CreatedAt,
-		ReleasedAt: m.ReleasedAt,
+		Type:        domain.AllocationTypeDomain,
+		ID:          m.ID,
+		OrderNo:     m.OrderNo,
+		ProjectID:   m.ProjectID,
+		ProductID:   m.ProductID,
+		ResourceID:  m.ResourceID,
+		SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(m.SupplyScope)),
+		Mailbox:     "domain",
+		Email:       m.Email,
+		Status:      domain.AllocationStatus(m.Status),
+		CreatedAt:   m.CreatedAt,
+		ReleasedAt:  m.ReleasedAt,
 	}
 }
 
@@ -464,14 +473,18 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
+func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
 	args := []any{}
 	where := []string{
-		"dr.purpose = 'sale'",
 		"dr.status = 'normal'",
 		"ms.status = 'online'",
-		"u.enabled = TRUE",
-		"u.role IN ('supplier', 'admin', 'super_admin')",
+	}
+	switch scope {
+	case domain.SupplyScopeOwned:
+		where = append(where, "dr.purpose = 'not_sale'", "dr.owner_user_id = ?")
+		args = append(args, buyerUserID)
+	default:
+		where = append(where, "dr.purpose = 'sale'", "u.enabled = TRUE", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "dr.domain = ?")
@@ -551,11 +564,10 @@ FOR UPDATE SKIP LOCKED`
 	return &row, nil
 }
 
-func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, emailSuffix string) (*allocapp.DomainCandidate, error) {
+func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.DomainCandidate, error) {
 	args := []any{resourceID}
 	where := []string{
 		"dr.id = ?",
-		"dr.purpose = 'sale'",
 		"dr.status = 'normal'",
 		`EXISTS (
 	      SELECT 1
@@ -563,7 +575,15 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, emailSu
 	      WHERE ms.id = dr.mail_server_id
 	        AND ms.status = 'online'
 	  )`,
-		`EXISTS (
+	}
+	switch scope {
+	case domain.SupplyScopeOwned:
+		where = append(where, "dr.purpose = 'not_sale'", "dr.owner_user_id = ?")
+		args = append(args, buyerUserID)
+	default:
+		where = append(where,
+			"dr.purpose = 'sale'",
+			`EXISTS (
 	      SELECT 1
 	      FROM email_resources er
 	      JOIN users u ON u.id = er.owner_user_id
@@ -572,6 +592,7 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, emailSu
 	        AND u.enabled = TRUE
 	        AND u.role IN ('supplier', 'admin', 'super_admin')
 	  )`,
+		)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "dr.domain = ?")
@@ -1149,13 +1170,16 @@ WHERE adu.usage_date = ?
 			EligibleResources int64
 			MailboxDailyLimit int64
 		}
+		domainScope, domainScopeArgs := domainInventoryScopeSQL(buyerUserID)
 		if err := scan(&capacity, `
 SELECT COUNT(*) AS eligible_resources, COALESCE(SUM(dr.mailbox_daily_limit), 0) AS mailbox_daily_limit
 FROM domain_resources dr
 JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
 JOIN mail_servers ms ON ms.id = dr.mail_server_id
 JOIN users u ON u.id = er.owner_user_id
-WHERE dr.purpose = 'sale' AND dr.status = 'normal' AND ms.status = 'online' AND u.enabled = TRUE AND u.role IN ('supplier', 'admin', 'super_admin')`); err != nil {
+WHERE dr.status = 'normal'
+  AND ms.status = 'online'
+  AND `+domainScope, domainScopeArgs...); err != nil {
 			return nil, err
 		}
 		stats.Domain.EligibleResources = capacity.EligibleResources
@@ -1170,11 +1194,9 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE adu.usage_date = ?
   AND adu.resource_type = 'domain'
   AND adu.usage_kind = 'domain_mailbox'
-  AND dr.purpose = 'sale'
   AND dr.status = 'normal'
   AND ms.status = 'online'
-  AND u.enabled = TRUE
-  AND u.role IN ('supplier', 'admin', 'super_admin')`, today); err != nil {
+  AND `+domainScope, append([]any{today}, domainScopeArgs...)...); err != nil {
 			return nil, err
 		}
 		stats.Domain.MailboxDailyAvailable = nonNegative(stats.Domain.MailboxDailyLimit - stats.Domain.MailboxDailyUsed)
@@ -1190,14 +1212,16 @@ WHERE adu.usage_date = ?
 	return stats, nil
 }
 
+type productInventoryRow struct {
+	ProductID  uint
+	Type       string
+	MainWeight int
+	DotWeight  int
+	PlusWeight int
+}
+
 func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.ProjectProductInventoryTotals, error) {
-	var productRows []struct {
-		ProductID  uint
-		Type       string
-		MainWeight int
-		DotWeight  int
-		PlusWeight int
-	}
+	var productRows []productInventoryRow
 	if err := r.dbFor(ctx).Raw(`
 SELECT
     pp.id AS product_id,
@@ -1228,32 +1252,329 @@ ORDER BY pp.id ASC`, projectID, buyerUserID).Scan(&productRows).Error; err != ni
 	if err != nil {
 		return nil, err
 	}
+	publicStats := stats
+	if buyerUserID != 0 {
+		publicStats, err = r.GetInventoryStats(ctx, projectID, 0)
+		if err != nil {
+			return nil, err
+		}
+	}
 	result := &allocapp.ProjectProductInventoryTotals{
 		ProjectID: projectID,
 		Items:     make([]allocapp.ProductInventoryTotal, 0, len(productRows)),
 	}
 	for _, row := range productRows {
-		item := allocapp.ProductInventoryTotal{ProductID: row.ProductID}
+		item := allocapp.ProductInventoryTotal{
+			ProductID:       row.ProductID,
+			TotalAvailable:  productInventoryTotalFromStats(row, stats),
+			PublicAvailable: productInventoryTotalFromStats(row, publicStats),
+		}
 		switch domain.AllocationType(row.Type) {
 		case domain.AllocationTypeMicrosoft:
-			if row.MainWeight > 0 {
-				item.TotalAvailable += stats.Microsoft.MainAvailable + stats.Microsoft.ExplicitAliasAvailable
-			}
-			if row.DotWeight > 0 {
-				item.TotalAvailable += stats.Microsoft.DotAvailable
-			}
-			if row.PlusWeight > 0 {
-				item.TotalAvailable += stats.Microsoft.PlusDailyAvailable
-			}
+			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, buyerUserID, row)
 		case domain.AllocationTypeDomain:
-			item.TotalAvailable = stats.Domain.TotalAvailable
+			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx, buyerUserID)
 		default:
 			return nil, domain.ErrProjectNotAllocatable
+		}
+		if err != nil {
+			return nil, err
 		}
 		result.TotalAvailable += item.TotalAvailable
 		result.Items = append(result.Items, item)
 	}
 	return result, nil
+}
+
+func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.InventoryStats) int64 {
+	if stats == nil {
+		return 0
+	}
+	switch domain.AllocationType(row.Type) {
+	case domain.AllocationTypeMicrosoft:
+		total := int64(0)
+		if row.MainWeight > 0 {
+			total += stats.Microsoft.MainAvailable + stats.Microsoft.ExplicitAliasAvailable
+		}
+		if row.DotWeight > 0 {
+			total += stats.Microsoft.DotAvailable
+		}
+		if row.PlusWeight > 0 {
+			total += stats.Microsoft.PlusDailyAvailable
+		}
+		return total
+	case domain.AllocationTypeDomain:
+		return stats.Domain.TotalAvailable
+	default:
+		return 0
+	}
+}
+
+type suffixInventoryValue struct {
+	TotalAvailable  int64
+	PublicAvailable int64
+}
+
+func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projectID uint, buyerUserID uint, row productInventoryRow) ([]allocapp.ProductInventorySuffixTotal, error) {
+	total, err := r.microsoftSuffixInventoryByScope(ctx, projectID, buyerUserID, row)
+	if err != nil {
+		return nil, err
+	}
+	public := total
+	if buyerUserID != 0 {
+		public, err = r.microsoftSuffixInventoryByScope(ctx, projectID, 0, row)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return mergeSuffixInventory(total, public), nil
+}
+
+func (r *Repo) microsoftSuffixInventoryByScope(ctx context.Context, projectID uint, buyerUserID uint, row productInventoryRow) (map[string]int64, error) {
+	scope, scopeArgs := microsoftInventoryScopeSQL(buyerUserID)
+	result := map[string]int64{}
+	var capacities []struct {
+		Suffix            string
+		EligibleResources int64
+		PlusDailyLimit    int64
+	}
+	if err := r.dbFor(ctx).Raw(`
+SELECT ms.email_domain AS suffix, COUNT(*) AS eligible_resources, COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
+FROM microsoft_resources ms
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ms.status = 'normal'
+  AND `+scope+`
+GROUP BY ms.email_domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
+		return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
+	}
+	eligibleBySuffix := map[string]int64{}
+	plusLimitBySuffix := map[string]int64{}
+	for _, row := range capacities {
+		suffix := normalizeCandidateSuffix(row.Suffix)
+		if suffix == "" {
+			continue
+		}
+		eligibleBySuffix[suffix] += row.EligibleResources
+		plusLimitBySuffix[suffix] += row.PlusDailyLimit
+	}
+
+	if row.MainWeight > 0 {
+		activeMain, err := r.microsoftSuffixCount(ctx, `
+SELECT ms.email_domain AS suffix, COUNT(*) AS count
+FROM microsoft_allocations ma
+JOIN microsoft_resources ms ON ms.id = ma.resource_id
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ma.status = 'allocated'
+  AND ma.mailbox = 'main'
+  AND ms.status = 'normal'
+  AND `+scope+`
+GROUP BY ms.email_domain`, scopeArgs...)
+		if err != nil {
+			return nil, err
+		}
+		explicitAlias, err := r.microsoftSuffixCount(ctx, `
+SELECT SUBSTRING_INDEX(ea.email, '@', -1) AS suffix, COUNT(*) AS count
+FROM explicit_aliases ea
+JOIN microsoft_resources ms ON ms.id = ea.resource_id
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+LEFT JOIN microsoft_allocations ma
+  ON ma.explicit_alias_id = ea.id
+ AND ma.mailbox = 'alias'
+ AND ma.status = 'allocated'
+WHERE ea.status = 'normal'
+  AND ma.id IS NULL
+  AND ms.status = 'normal'
+  AND `+scope+`
+GROUP BY SUBSTRING_INDEX(ea.email, '@', -1)`, scopeArgs...)
+		if err != nil {
+			return nil, err
+		}
+		for suffix, eligible := range eligibleBySuffix {
+			result[suffix] += nonNegative(eligible - activeMain[suffix])
+		}
+		for suffix, count := range explicitAlias {
+			result[suffix] += count
+		}
+	}
+
+	if row.DotWeight > 0 {
+		activeDot, err := r.microsoftSuffixCount(ctx, `
+SELECT ms.email_domain AS suffix, COUNT(*) AS count
+FROM microsoft_allocations ma
+JOIN microsoft_resources ms ON ms.id = ma.resource_id
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ma.project_id = ?
+  AND ma.status = 'allocated'
+  AND ma.mailbox = 'dot'
+  AND ms.status = 'normal'
+  AND `+scope+`
+GROUP BY ms.email_domain`, append([]any{projectID}, scopeArgs...)...)
+		if err != nil {
+			return nil, err
+		}
+		for suffix, eligible := range eligibleBySuffix {
+			result[suffix] += nonNegative(eligible*int64(allocapp.DotAliasCapacityPerResource) - activeDot[suffix])
+		}
+	}
+
+	if row.PlusWeight > 0 {
+		today := time.Now().UTC().Format("2006-01-02")
+		plusUsed, err := r.microsoftSuffixCount(ctx, `
+SELECT ms.email_domain AS suffix, COALESCE(SUM(adu.used_count), 0) AS count
+FROM allocation_daily_usages adu
+JOIN microsoft_resources ms ON ms.id = adu.resource_id
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE adu.usage_date = ?
+  AND adu.resource_type = 'microsoft'
+  AND adu.usage_kind = 'plus'
+  AND ms.status = 'normal'
+  AND `+scope+`
+GROUP BY ms.email_domain`, append([]any{today}, scopeArgs...)...)
+		if err != nil {
+			return nil, err
+		}
+		for suffix, limit := range plusLimitBySuffix {
+			result[suffix] += nonNegative(limit - plusUsed[suffix])
+		}
+	}
+	return result, nil
+}
+
+func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context, buyerUserID uint) ([]allocapp.ProductInventorySuffixTotal, error) {
+	total, err := r.domainSuffixInventoryByScope(ctx, buyerUserID)
+	if err != nil {
+		return nil, err
+	}
+	public := total
+	if buyerUserID != 0 {
+		public, err = r.domainSuffixInventoryByScope(ctx, 0)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return mergeSuffixInventory(total, public), nil
+}
+
+func (r *Repo) domainSuffixInventoryByScope(ctx context.Context, buyerUserID uint) (map[string]int64, error) {
+	scope, scopeArgs := domainInventoryScopeSQL(buyerUserID)
+	var capacities []struct {
+		Suffix            string
+		MailboxDailyLimit int64
+	}
+	if err := r.dbFor(ctx).Raw(`
+SELECT dr.domain AS suffix, COALESCE(SUM(dr.mailbox_daily_limit), 0) AS mailbox_daily_limit
+FROM domain_resources dr
+JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
+JOIN mail_servers ms ON ms.id = dr.mail_server_id
+JOIN users u ON u.id = er.owner_user_id
+WHERE dr.status = 'normal'
+  AND ms.status = 'online'
+  AND `+scope+`
+GROUP BY dr.domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
+		return nil, fmt.Errorf("domain suffix capacity: %w", err)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	used, err := r.domainSuffixCount(ctx, `
+SELECT dr.domain AS suffix, COALESCE(SUM(adu.used_count), 0) AS count
+FROM allocation_daily_usages adu
+JOIN domain_resources dr ON dr.id = adu.resource_id
+JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
+JOIN mail_servers ms ON ms.id = dr.mail_server_id
+JOIN users u ON u.id = er.owner_user_id
+WHERE adu.usage_date = ?
+  AND adu.resource_type = 'domain'
+  AND adu.usage_kind = 'domain_mailbox'
+  AND dr.status = 'normal'
+  AND ms.status = 'online'
+  AND `+scope+`
+GROUP BY dr.domain`, append([]any{today}, scopeArgs...)...)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]int64{}
+	for _, capacity := range capacities {
+		suffix := normalizeCandidateSuffix(capacity.Suffix)
+		if suffix == "" {
+			continue
+		}
+		result[suffix] += nonNegative(capacity.MailboxDailyLimit - used[suffix])
+	}
+	return result, nil
+}
+
+func (r *Repo) microsoftSuffixCount(ctx context.Context, query string, args ...any) (map[string]int64, error) {
+	rows, err := r.suffixCount(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("microsoft suffix count: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) domainSuffixCount(ctx context.Context, query string, args ...any) (map[string]int64, error) {
+	rows, err := r.suffixCount(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("domain suffix count: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) suffixCount(ctx context.Context, query string, args ...any) (map[string]int64, error) {
+	var rows []struct {
+		Suffix string
+		Count  int64
+	}
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		suffix := normalizeCandidateSuffix(row.Suffix)
+		if suffix == "" {
+			continue
+		}
+		result[suffix] += row.Count
+	}
+	return result, nil
+}
+
+func mergeSuffixInventory(total map[string]int64, public map[string]int64) []allocapp.ProductInventorySuffixTotal {
+	merged := make(map[string]suffixInventoryValue, len(total)+len(public))
+	for suffix, available := range total {
+		value := merged[suffix]
+		value.TotalAvailable = available
+		merged[suffix] = value
+	}
+	for suffix, available := range public {
+		value := merged[suffix]
+		value.PublicAvailable = available
+		if value.TotalAvailable < available {
+			value.TotalAvailable = available
+		}
+		merged[suffix] = value
+	}
+	items := make([]allocapp.ProductInventorySuffixTotal, 0, len(merged))
+	for suffix, value := range merged {
+		if value.TotalAvailable <= 0 && value.PublicAvailable <= 0 {
+			continue
+		}
+		items = append(items, allocapp.ProductInventorySuffixTotal{
+			Suffix:          suffix,
+			TotalAvailable:  value.TotalAvailable,
+			PublicAvailable: value.PublicAvailable,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TotalAvailable == items[j].TotalAvailable {
+			return items[i].Suffix < items[j].Suffix
+		}
+		return items[i].TotalAvailable > items[j].TotalAvailable
+	})
+	return items
 }
 
 func (r *Repo) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {
@@ -1369,11 +1690,11 @@ LEFT JOIN users u ON u.id = er.owner_user_id
 WHERE dc.project_id = ?
   AND (
       dr.id IS NULL
-      OR dr.purpose <> 'sale'
+      OR dr.purpose NOT IN ('sale', 'not_sale')
       OR dr.status <> 'normal'
       OR ms.status <> 'online'
       OR u.enabled <> TRUE
-      OR u.role NOT IN ('supplier', 'admin', 'super_admin')
+      OR (dr.purpose = 'sale' AND u.role NOT IN ('supplier', 'admin', 'super_admin'))
   )`, projectID).Error; err != nil {
 		return 0, fmt.Errorf("delete stale domain candidates: %w", err)
 	}
@@ -1394,11 +1715,11 @@ FROM domain_resources dr
 JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
 JOIN mail_servers ms ON ms.id = dr.mail_server_id
 JOIN users u ON u.id = er.owner_user_id
-WHERE dr.purpose = 'sale'
+WHERE dr.purpose IN ('sale', 'not_sale')
   AND dr.status = 'normal'
   AND ms.status = 'online'
   AND u.enabled = TRUE
-  AND u.role IN ('supplier', 'admin', 'super_admin')
+  AND (dr.purpose = 'not_sale' OR u.role IN ('supplier', 'admin', 'super_admin'))
 ON DUPLICATE KEY UPDATE
     domain = VALUES(domain),
     domain_tld = VALUES(domain_tld),
@@ -1495,7 +1816,7 @@ SELECT
     resource_id,
     domain AS address,
     domain_tld AS domain_suffix,
-    TRUE AS for_sale,
+    (purpose = 'sale') AS for_sale,
     0 AS quality_score,
     status,
     alloc_bucket,
@@ -1810,24 +2131,25 @@ func (r *Repo) findByGuard(ctx context.Context, guard OrderGuardModel) (*domain.
 }
 
 type unifiedRow struct {
-	Type       string
-	ID         uint
-	OrderNo    string
-	ProjectID  uint
-	ProductID  uint
-	ResourceID uint
-	Mailbox    string
-	Email      string
-	Status     string
-	CreatedAt  time.Time
-	ReleasedAt *time.Time
+	Type        string
+	ID          uint
+	OrderNo     string
+	ProjectID   uint
+	ProductID   uint
+	ResourceID  uint
+	SupplyScope string
+	Mailbox     string
+	Email       string
+	Status      string
+	CreatedAt   time.Time
+	ReleasedAt  *time.Time
 }
 
 func (r *Repo) queryUnifiedAllocations(ctx context.Context, filter allocapp.AllocationFilter, paginate bool) ([]domain.UnifiedAllocation, int64, error) {
 	selects := []string{}
 	args := []any{}
 	addSelect := func(table, typ, mailboxExpr string, conditions []string, condArgs []any) {
-		selects = append(selects, fmt.Sprintf(`SELECT '%s' AS type, id, order_no, project_id, product_id, resource_id, %s AS mailbox, email, status, created_at, released_at FROM %s WHERE %s`, typ, mailboxExpr, table, strings.Join(conditions, " AND ")))
+		selects = append(selects, fmt.Sprintf(`SELECT '%s' AS type, id, order_no, project_id, product_id, resource_id, supply_scope, %s AS mailbox, email, status, created_at, released_at FROM %s WHERE %s`, typ, mailboxExpr, table, strings.Join(conditions, " AND ")))
 		args = append(args, condArgs...)
 	}
 	if filter.Type == "" || filter.Type == domain.AllocationTypeMicrosoft {
@@ -1865,17 +2187,18 @@ func (r *Repo) queryUnifiedAllocations(ctx context.Context, filter allocapp.Allo
 	items := make([]domain.UnifiedAllocation, len(rows))
 	for i := range rows {
 		items[i] = domain.UnifiedAllocation{
-			Type:       domain.AllocationType(rows[i].Type),
-			ID:         rows[i].ID,
-			OrderNo:    rows[i].OrderNo,
-			ProjectID:  rows[i].ProjectID,
-			ProductID:  rows[i].ProductID,
-			ResourceID: rows[i].ResourceID,
-			Mailbox:    rows[i].Mailbox,
-			Email:      rows[i].Email,
-			Status:     domain.AllocationStatus(rows[i].Status),
-			CreatedAt:  rows[i].CreatedAt,
-			ReleasedAt: rows[i].ReleasedAt,
+			Type:        domain.AllocationType(rows[i].Type),
+			ID:          rows[i].ID,
+			OrderNo:     rows[i].OrderNo,
+			ProjectID:   rows[i].ProjectID,
+			ProductID:   rows[i].ProductID,
+			ResourceID:  rows[i].ResourceID,
+			SupplyScope: domain.NormalizeSupplyScope(domain.SupplyScope(rows[i].SupplyScope)),
+			Mailbox:     rows[i].Mailbox,
+			Email:       rows[i].Email,
+			Status:      domain.AllocationStatus(rows[i].Status),
+			CreatedAt:   rows[i].CreatedAt,
+			ReleasedAt:  rows[i].ReleasedAt,
 		}
 	}
 	return items, total, nil
@@ -1931,6 +2254,14 @@ func microsoftInventoryScopeSQL(buyerUserID uint) (string, []any) {
 		return publicScope, nil
 	}
 	return "(" + publicScope + " OR (ms.for_sale = FALSE AND er.owner_user_id = ?))", []any{buyerUserID}
+}
+
+func domainInventoryScopeSQL(buyerUserID uint) (string, []any) {
+	publicScope := "(dr.purpose = 'sale' AND u.enabled = TRUE AND u.role IN ('supplier', 'admin', 'super_admin'))"
+	if buyerUserID == 0 {
+		return publicScope, nil
+	}
+	return "(" + publicScope + " OR (dr.purpose = 'not_sale' AND er.owner_user_id = ?))", []any{buyerUserID}
 }
 
 func normalizeCandidateSuffix(value string) string {

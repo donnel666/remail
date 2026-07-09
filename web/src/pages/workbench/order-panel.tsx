@@ -1,4 +1,12 @@
-import { Button, Card, Empty, Input, Tag, Typography } from "@douyinfe/semi-ui";
+import {
+  Button,
+  Card,
+  Empty,
+  Input,
+  InputNumber,
+  Tag,
+  Typography,
+} from "@douyinfe/semi-ui";
 import { ChevronDown, ChevronUp, Mail, ShoppingCart, Zap } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,10 +44,6 @@ function getPrice(product: WorkbenchProduct, serviceMode: ServiceMode, quantity:
   return serviceMode === "code"
     ? product.codePrice * Math.max(1, quantity)
     : product.purchasePrice * Math.max(1, quantity);
-}
-
-function getInventory(product: WorkbenchProduct, serviceMode: ServiceMode) {
-  return serviceMode === "code" ? product.codeInventory : product.purchaseInventory;
 }
 
 function OrderAccordionItem({
@@ -229,14 +233,17 @@ export function OrderPanel({
   onCreateOrder,
   onFetchOrderMail,
   onOpenMailbox,
+  onQuantityChange,
   onSearchChange,
   onSelectOrder,
   orders,
   orderSearch,
   productsById,
   projectsById,
+  quantity,
   selectedOrder,
   selectedProduct,
+  selectedProductInventory,
   selectedProject,
   serviceMode,
 }: {
@@ -248,27 +255,35 @@ export function OrderPanel({
     source: FetchSource
   ) => void | Promise<void>;
   onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
+  onQuantityChange: (value: number) => void;
   onSearchChange: (value: string) => void;
   onSelectOrder: (orderNo: string) => void;
   orders: WorkbenchOrder[];
   orderSearch: string;
   productsById: Map<string, WorkbenchProduct>;
   projectsById: Map<string, WorkbenchProject>;
+  quantity: number;
   selectedOrder?: WorkbenchOrder;
   selectedProduct?: WorkbenchProduct;
+  selectedProductInventory: number;
   selectedProject?: WorkbenchProject;
   serviceMode: ServiceMode;
 }) {
   const { t } = useTranslation();
+  const safeQuantity =
+    selectedProductInventory > 0
+      ? Math.min(Math.max(1, quantity), selectedProductInventory)
+      : 0;
   const totalPrice = selectedProduct
-    ? getPrice(selectedProduct, serviceMode, 1)
+    ? getPrice(selectedProduct, serviceMode, safeQuantity)
     : 0;
-  const inventory = selectedProduct ? getInventory(selectedProduct, serviceMode) : 0;
+  const inventory = selectedProductInventory;
   const stockText = `${t("Stock")} ${inventory}`;
   const visibleOrders = useMemo(
     () => orders.filter((order) => order.status !== "refunded"),
     [orders]
   );
+  const minQuantity = inventory > 0 ? 1 : 0;
 
   return (
     <Card className="workbench-column workbench-order-panel" shadows="hover">
@@ -294,12 +309,20 @@ export function OrderPanel({
                 : `${selectedProduct?.warrantyHours ?? 0}h`}
             </span>
             <strong className="workbench-quick-price">{formatMoney(totalPrice)}</strong>
-            <Input
-              disabled
-              min={1}
+            <InputNumber
+              className="workbench-quantity-input"
+              disabled={!selectedProduct || inventory <= 0 || creating}
+              max={inventory}
+              min={minQuantity}
+              onChange={(value) => {
+                const parsed = Number(value);
+                onQuantityChange(Number.isFinite(parsed) ? parsed : minQuantity);
+              }}
+              precision={0}
+              showClear={false}
+              step={1}
               style={{ width: "100%" }}
-              type="number"
-              value="1"
+              value={safeQuantity}
             />
             <Button
               className="workbench-create-order-button"

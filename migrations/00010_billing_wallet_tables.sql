@@ -36,8 +36,20 @@ CREATE TABLE wallet_transactions (
     CONSTRAINT chk_wallet_transactions_type CHECK (transaction_type IN ('recharge', 'debit', 'refund', 'freeze', 'credit', 'withdrawal', 'manual_adjustment', 'card_redeem', 'transfer')),
     CONSTRAINT chk_wallet_transactions_bucket CHECK (balance_bucket IN ('consumer', 'supplier_available', 'supplier_frozen')),
     CONSTRAINT chk_wallet_transactions_direction CHECK (direction IN ('in', 'out')),
-    CONSTRAINT chk_wallet_transactions_amount CHECK (amount > 0),
-    CONSTRAINT chk_wallet_transactions_balance CHECK (balance_before >= 0 AND balance_after >= 0),
+    CONSTRAINT chk_wallet_transactions_type_direction CHECK (
+        (transaction_type IN ('debit', 'freeze', 'withdrawal') AND direction = 'out')
+        OR (transaction_type IN ('recharge', 'refund', 'credit', 'card_redeem', 'transfer') AND direction = 'in')
+        OR transaction_type = 'manual_adjustment'
+    ),
+    CONSTRAINT chk_wallet_transactions_amount CHECK (
+        (direction = 'in' AND amount >= 0)
+        OR (direction = 'out' AND amount <= 0)
+    ),
+    CONSTRAINT chk_wallet_transactions_balance CHECK (
+        balance_before >= 0
+        AND balance_after >= 0
+        AND balance_after = balance_before + amount
+    ),
     CONSTRAINT chk_wallet_transactions_biz CHECK (biz_type <> '' AND biz_id <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

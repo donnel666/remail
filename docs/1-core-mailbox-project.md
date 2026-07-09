@@ -30,6 +30,7 @@
 | 2026-07-06 | V1.23 | Codex | 补充 P1-I4 管理员完整项目配置的私有授权集合保存策略：管理员创建、审批通过、编辑项目时可提交 `accessUserIds`；后端在同一数据库事务内替换 `ProjectAccess` 集合，`public` 项目必须清空授权集合。此为缺失事务边界补充，不改变项目状态机。 |
 | 2026-07-09 | V1.24 | Codex | 补充资源列表 facets：`GET /v1/resources` 在分页返回当前页数据的同时返回后端聚合筛选计数，前端不得使用已加载分页块推断全量后缀/TLD/状态/私有等计数。此为缺失性能和 UI 一致性设计补充，不改变资源状态机和既有筛选策略。 |
 | 2026-07-09 | V1.25 | Codex | 按接口命名清洁度要求规范 Core URI：资源导入/检测改为 `/v1/resources/imports`、`/v1/resources/validations`，项目 Logo 改为 `/v1/projects/logos`；只调整 URI 命名，不改变资源、验证任务和项目 Logo 业务语义。 |
+| 2026-07-09 | V1.26 | Codex | 补充 Domain 私有库存口径：`purpose=not_sale` 不进入公开供给池，但可作为 owner 自己下单的私有库存。此为缺失库存口径补充，不改变资源状态机。 |
 
 > 核心域。BC-CORE 是邮箱资源和项目规则的所有者。分配记录、订单、邮件事实、钱包余额不在本上下文内。
 
@@ -264,14 +265,19 @@ stateDiagram-v2
 可分配条件：
 
 ```text
-purpose=sale
+公开供给：purpose=sale
 status=normal
 MailServer.status=online
 ownerUserId 对应用户启用
 ownerUserId 具备 supplier/admin/super_admin 任一角色
+
+owner 私有供给：purpose=not_sale
+status=normal
+MailServer.status=online
+ownerUserId = 当前下单用户
 ```
 
-`purpose=not_sale` 是普通用户自有域名资源的默认用途，用户侧展示为私有或不可出售，不进入公开出售供给池；`purpose=sale` 才能作为公开出售候选；`purpose=binding` 只用于 Microsoft 辅助邮箱验证码接收，只能由管理员创建或调整，不进入出售库存和分配。
+`purpose=not_sale` 是普通用户自有域名资源的默认用途，用户侧展示为私有或不可出售，不进入公开出售供给池，但可以作为 owner 自己下单时的私有库存；`purpose=sale` 才能作为公开出售候选；`purpose=binding` 只用于 Microsoft 辅助邮箱验证码接收，只能由管理员创建或调整，不进入出售库存和分配。
 
 P1 一期内置默认本机收件服务器，MX 记录固定指向 `mx.aishop6.com`。用户创建自建域名时，`mailServerId` 可省略；省略时服务端为当前 owner 复用或创建默认本机入站服务器。MailServer 实体和接口保留为后续多邮局/供应商自建邮局的扩展基础，但用户侧 P1 引导默认只展示本机 MX。
 
@@ -443,7 +449,7 @@ stateDiagram-v2
 | INV-C6 | `MailRule` 缺少当前策略必需类型时，邮件匹配失败而不是放宽范围。 |
 | INV-C7 | 显式别名配额按同一资源自然周/自然年统计，配额校验和落库必须串行化。 |
 | INV-C8 | 点别名、加号别名、自建生成邮箱必须优先复用，无法复用时才生成。 |
-| INV-C9 | 自建邮箱域名只有 `purpose=sale` 才进入出售分配。 |
+| INV-C9 | 自建邮箱域名 `purpose=sale` 才进入公开出售分配；`purpose=not_sale` 只能作为 owner 自己的私有库存分配。 |
 | INV-C10 | 管理员创建自建邮箱域名时 owner 由服务端按当前用户写入，前端不提交 owner。 |
 | INV-C11 | 自建邮箱域名引用的 `MailServer` 必须与自建邮箱域名同 owner，禁止跨供应商复用服务器配置。 |
 

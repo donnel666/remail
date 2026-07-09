@@ -99,16 +99,16 @@ CREATE TABLE orders (
         (client_channel = 'console' AND api_key_id IS NULL)
         OR (client_channel = 'api_key' AND api_key_id IS NOT NULL)
     ),
-    CONSTRAINT chk_orders_money CHECK (pay_amount > 0 AND refund_amount >= 0),
+    CONSTRAINT chk_orders_money CHECK (pay_amount >= 0 AND refund_amount >= 0),
     CONSTRAINT chk_orders_debit_state CHECK (status NOT IN ('paid', 'active', 'completed', 'refunded') OR debit_tx_id IS NOT NULL),
     CONSTRAINT chk_orders_refund_state CHECK (
         (status NOT IN ('refunded', 'failed') AND refund_tx_id IS NULL AND refund_amount = 0.00)
-        OR (status = 'refunded' AND refund_tx_id IS NOT NULL AND refund_amount > 0)
+        OR (status = 'refunded' AND refund_tx_id IS NOT NULL AND refund_amount >= 0)
         OR (
             status = 'failed'
             AND (
                 (debit_tx_id IS NULL AND refund_tx_id IS NULL AND refund_amount = 0.00)
-                OR (debit_tx_id IS NOT NULL AND refund_tx_id IS NOT NULL AND refund_amount > 0)
+                OR (debit_tx_id IS NOT NULL AND refund_tx_id IS NOT NULL AND refund_amount >= 0)
             )
         )
     ),

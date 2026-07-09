@@ -15,7 +15,9 @@ import {
   type OrderMailResponse,
 } from "@/lib/mailmatch-api";
 import {
+  getProjectInventory,
   listProjects,
+  type ProjectInventoryTotalResponse,
   type ProjectItem,
   type ProjectProductSummary,
 } from "@/lib/projects-api";
@@ -64,7 +66,7 @@ function filterProducts(
     )
     .filter((product) =>
       q
-        ? [product.label, product.suffix, product.productType]
+        ? [product.label, product.suffix, product.emailSuffix, product.productType]
             .join(" ")
             .toLowerCase()
             .includes(q)
@@ -72,41 +74,118 @@ function filterProducts(
     );
 }
 
-function toWorkbenchProject(project: ProjectItem): WorkbenchProject {
+type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
+
+function toWorkbenchProject(
+  project: ProjectItem,
+  inventory?: ProjectInventoryTotalResponse
+): WorkbenchProject {
+  const inventoryByProductId = new Map(
+    (inventory?.products ?? []).map((item) => [String(item.productId), item])
+  );
   return {
     description: project.description ?? "",
     id: String(project.id),
+    inventoryLoaded: Boolean(inventory),
     logoUrl: project.logoUrl,
     name: project.name,
-    products: (project.products ?? []).map((product) =>
-      toWorkbenchProduct(project.id, product, product.totalAvailable ?? 0)
+    products: (project.products ?? []).flatMap((product) =>
+      toWorkbenchProducts(project.id, product, inventoryByProductId.get(String(product.id)))
     ),
     projectUrl: project.targetPlatform,
     visibility: project.accessType,
   };
 }
 
-function toWorkbenchProduct(
+function toWorkbenchProducts(
   projectId: number,
   product: ProjectProductSummary,
-  inventory: number
-): WorkbenchProduct {
+  inventory?: ProductInventoryTotal
+): WorkbenchProduct[] {
   const label = product.type === "microsoft" ? "Microsoft" : "Domain";
-  return {
+  const totalAvailable = inventory?.totalAvailable ?? product.totalAvailable ?? 0;
+  const publicAvailable = inventory?.publicAvailable ?? product.publicAvailable ?? 0;
+  const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
-    codeInventory: inventory,
+    codeInventory: totalAvailable,
     codePrice: moneyToNumber(product.codePrice),
     codeWindowMinutes: product.codeWindowMinutes,
+    emailSuffix: "",
     id: String(product.id),
     label,
+    productId: String(product.id),
     productType: product.type,
+    publicInventory: publicAvailable,
     projectId: String(projectId),
     purchaseEnabled: product.purchaseEnabled,
-    purchaseInventory: inventory,
+    purchaseInventory: totalAvailable,
     purchasePrice: moneyToNumber(product.purchasePrice),
     suffix: label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
+  };
+  const suffixProducts = (inventory?.suffixes ?? product.suffixes ?? [])
+    .map((suffix) => ({
+      ...suffix,
+      suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
+    }))
+    .filter((suffix) => suffix.suffix)
+    .map((suffix) => ({
+      ...baseProduct,
+      codeInventory: suffix.totalAvailable ?? 0,
+      emailSuffix: suffix.suffix,
+      id: `${product.id}:${suffix.suffix}`,
+      publicInventory: suffix.publicAvailable ?? 0,
+      purchaseInventory: suffix.totalAvailable ?? 0,
+      suffix: `@${suffix.suffix}`,
+    }));
+  return [baseProduct, ...suffixProducts];
+}
+
+function mergeProjectInventory(
+  project: WorkbenchProject,
+  inventory: ProjectInventoryTotalResponse
+): WorkbenchProject {
+  const inventoryByProductId = new Map(
+    (inventory.products ?? []).map((item) => [String(item.productId), item])
+  );
+  const baseProducts = project.products.filter(
+    (product) => product.id === product.productId
+  );
+  return {
+    ...project,
+    inventoryLoaded: true,
+    products: baseProducts.flatMap((product) => {
+      const inventoryItem = inventoryByProductId.get(product.productId);
+      if (!inventoryItem) return [product];
+      const totalAvailable = inventoryItem.totalAvailable ?? 0;
+      const publicAvailable = inventoryItem.publicAvailable ?? 0;
+      const baseProduct: WorkbenchProduct = {
+        ...product,
+        codeInventory: totalAvailable,
+        emailSuffix: "",
+        id: product.productId,
+        publicInventory: publicAvailable,
+        purchaseInventory: totalAvailable,
+        suffix: product.label,
+      };
+      const suffixProducts = (inventoryItem.suffixes ?? [])
+        .map((suffix) => ({
+          ...suffix,
+          suffix: String(suffix.suffix ?? "").replace(/^@/, ""),
+        }))
+        .filter((suffix) => suffix.suffix)
+        .map((suffix) => ({
+          ...baseProduct,
+          codeInventory: suffix.totalAvailable ?? 0,
+          emailSuffix: suffix.suffix,
+          id: `${product.productId}:${suffix.suffix}`,
+          publicInventory: suffix.publicAvailable ?? 0,
+          purchaseInventory: suffix.totalAvailable ?? 0,
+          suffix: `@${suffix.suffix}`,
+        }));
+      return [baseProduct, ...suffixProducts];
+    }),
   };
 }
 
@@ -171,6 +250,22 @@ function moneyToNumber(value?: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function getProductInventory(
+  product: WorkbenchProduct | undefined,
+  serviceMode: ServiceMode,
+  inventoryScope: InventoryScope
+) {
+  if (!product) return 0;
+  if (inventoryScope === "public_only") return product.publicInventory;
+  return serviceMode === "code" ? product.codeInventory : product.purchaseInventory;
+}
+
+function clampQuantity(value: number, inventory: number) {
+  if (inventory <= 0) return 0;
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(Math.trunc(value), inventory));
+}
+
 function nextIdempotencyKey() {
   return generateIdempotencyKey();
 }
@@ -196,6 +291,7 @@ export default function Dashboard() {
   const [productSearch, setProductSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [projects, setProjects] = useState<WorkbenchProject[]>([]);
+  const [quantity, setQuantity] = useState(1);
   const [selectedOrderNo, setSelectedOrderNo] = useState("");
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -238,6 +334,11 @@ export default function Dashboard() {
   }, [filteredProjects, selectedProjectId]);
 
   useEffect(() => {
+    if (!selectedProjectId) return;
+    void loadProjectInventory(selectedProjectId);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
     if (!selectedProject) return;
     if (selectedProject.products.some((product) => product.id === selectedProductId)) {
       return;
@@ -258,6 +359,15 @@ export default function Dashboard() {
     productsById.get(selectedProductId) ??
     filteredProducts[0] ??
     selectedProject?.products[0];
+  const selectedInventory = getProductInventory(
+    selectedProduct,
+    serviceMode,
+    inventoryScope
+  );
+
+  useEffect(() => {
+    setQuantity((current) => clampQuantity(current, selectedInventory));
+  }, [selectedInventory]);
 
   const visibleOrders = useMemo(() => {
     return orders
@@ -299,6 +409,21 @@ export default function Dashboard() {
     }
   }
 
+  async function loadProjectInventory(projectId: string) {
+    const numericProjectId = Number(projectId);
+    if (!Number.isInteger(numericProjectId) || numericProjectId <= 0) return;
+    try {
+      const inventory = await getProjectInventory(numericProjectId);
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.id === projectId ? mergeProjectInventory(project, inventory) : project
+        )
+      );
+    } catch (err) {
+      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+    }
+  }
+
   async function refreshOrders() {
     try {
       const list = await listOrders({ limit: 100 });
@@ -331,28 +456,48 @@ export default function Dashboard() {
 
   async function handleCreateOrder() {
     if (!selectedProject || !selectedProduct || creating) return;
+    const requestedQuantity = clampQuantity(quantity, selectedInventory);
+    if (requestedQuantity <= 0) return;
     setCreating(true);
-    try {
-      const order = await createOrder(
-        {
-          projectId: Number(selectedProject.id),
-          productId: Number(selectedProduct.id),
-        },
-        {
-          idempotencyKey: nextIdempotencyKey(),
-          serviceMode,
-          supply: inventoryScope,
-        }
-      );
-      const nextOrder = toWorkbenchOrder(order);
+    const createdOrders: OrderResponse[] = [];
+    let createdOrdersMerged = false;
+    const mergeCreatedOrders = () => {
+      if (createdOrdersMerged || createdOrders.length === 0) return;
+      createdOrdersMerged = true;
+      const nextOrders = createdOrders.map(toWorkbenchOrder);
+      const nextOrderNos = new Set(nextOrders.map((order) => order.orderNo));
       setOrders((prev) => [
-        nextOrder,
-        ...prev.filter((item) => item.orderNo !== nextOrder.orderNo),
+        ...nextOrders,
+        ...prev.filter((item) => !nextOrderNos.has(item.orderNo)),
       ]);
-      setSelectedOrderNo(nextOrder.orderNo);
+      setSelectedOrderNo(nextOrders[0]?.orderNo ?? "");
+    };
+    try {
+      for (let index = 0; index < requestedQuantity; index += 1) {
+        createdOrders.push(
+          await createOrder(
+            {
+              emailSuffix: selectedProduct.emailSuffix || undefined,
+              projectId: Number(selectedProject.id),
+              productId: Number(selectedProduct.productId),
+            },
+            {
+              idempotencyKey: nextIdempotencyKey(),
+              serviceMode,
+              supply: inventoryScope,
+            }
+          )
+        );
+      }
+      mergeCreatedOrders();
       Toast.success(t("Order created."));
-      void loadWorkbenchProjects();
+      void loadProjectInventory(selectedProject.id);
     } catch (err) {
+      if (createdOrders.length > 0) {
+        mergeCreatedOrders();
+        void refreshOrders();
+        void loadProjectInventory(selectedProject.id);
+      }
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
     } finally {
       setCreating(false);
@@ -470,15 +615,20 @@ export default function Dashboard() {
             onCreateOrder={handleCreateOrder}
             onFetchOrderMail={handleFetchOrderMail}
             onOpenMailbox={handleOpenMailbox}
+            onQuantityChange={(value) =>
+              setQuantity(clampQuantity(value, selectedInventory))
+            }
             onSearchChange={setOrderSearch}
             onSelectOrder={handleSelectOrder}
             orderSearch={orderSearch}
             orders={visibleOrders}
             productsById={productsById}
             projectsById={projectsById}
+            quantity={quantity}
             selectedOrder={selectedOrder}
             selectedProduct={selectedProduct}
             selectedProject={selectedProject}
+            selectedProductInventory={selectedInventory}
             serviceMode={serviceMode}
           />
         </div>

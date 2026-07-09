@@ -69,8 +69,16 @@ type InventoryStats struct {
 }
 
 type ProductInventoryTotal struct {
-	ProductID      uint
-	TotalAvailable int64
+	ProductID       uint
+	TotalAvailable  int64
+	PublicAvailable int64
+	Suffixes        []ProductInventorySuffixTotal
+}
+
+type ProductInventorySuffixTotal struct {
+	Suffix          string
+	TotalAvailable  int64
+	PublicAvailable int64
 }
 
 type ProjectProductInventoryTotals struct {
@@ -189,9 +197,9 @@ type Repository interface {
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint) (*ProductAllocationConfig, error)
 
 	ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
-	ListDomainSourceCandidates(ctx context.Context, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
+	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
-	LockDomainCandidate(ctx context.Context, resourceID uint, emailSuffix string) (*DomainCandidate, error)
+	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 
 	FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)

@@ -106,6 +106,24 @@ func (e AllocationItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for AllocationItemSupplyScope.
+const (
+	AllocationItemSupplyScopeOwned  AllocationItemSupplyScope = "owned"
+	AllocationItemSupplyScopePublic AllocationItemSupplyScope = "public"
+)
+
+// Valid indicates whether the value is a known member of the AllocationItemSupplyScope enum.
+func (e AllocationItemSupplyScope) Valid() bool {
+	switch e {
+	case AllocationItemSupplyScopeOwned:
+		return true
+	case AllocationItemSupplyScopePublic:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AllocationItemType.
 const (
 	AllocationItemTypeDomain    AllocationItemType = "domain"
@@ -1719,16 +1737,16 @@ func (e GetProjectsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsAccessType.
 const (
-	Private GetProjectsParamsAccessType = "private"
-	Public  GetProjectsParamsAccessType = "public"
+	GetProjectsParamsAccessTypePrivate GetProjectsParamsAccessType = "private"
+	GetProjectsParamsAccessTypePublic  GetProjectsParamsAccessType = "public"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
 func (e GetProjectsParamsAccessType) Valid() bool {
 	switch e {
-	case Private:
+	case GetProjectsParamsAccessTypePrivate:
 		return true
-	case Public:
+	case GetProjectsParamsAccessTypePublic:
 		return true
 	default:
 		return false
@@ -2027,17 +2045,18 @@ type AdminUserListResponse struct {
 
 // AllocationItem defines model for AllocationItem.
 type AllocationItem struct {
-	CreatedAt  time.Time             `json:"createdAt"`
-	Email      string                `json:"email"`
-	Id         int                   `json:"id"`
-	Mailbox    AllocationItemMailbox `json:"mailbox"`
-	OrderNo    string                `json:"orderNo"`
-	ProductId  int                   `json:"productId"`
-	ProjectId  int                   `json:"projectId"`
-	ReleasedAt *time.Time            `json:"releasedAt,omitempty"`
-	ResourceId int                   `json:"resourceId"`
-	Status     AllocationItemStatus  `json:"status"`
-	Type       AllocationItemType    `json:"type"`
+	CreatedAt   time.Time                 `json:"createdAt"`
+	Email       string                    `json:"email"`
+	Id          int                       `json:"id"`
+	Mailbox     AllocationItemMailbox     `json:"mailbox"`
+	OrderNo     string                    `json:"orderNo"`
+	ProductId   int                       `json:"productId"`
+	ProjectId   int                       `json:"projectId"`
+	ReleasedAt  *time.Time                `json:"releasedAt,omitempty"`
+	ResourceId  int                       `json:"resourceId"`
+	Status      AllocationItemStatus      `json:"status"`
+	SupplyScope AllocationItemSupplyScope `json:"supplyScope"`
+	Type        AllocationItemType        `json:"type"`
 }
 
 // AllocationItemMailbox defines model for AllocationItem.Mailbox.
@@ -2045,6 +2064,9 @@ type AllocationItemMailbox string
 
 // AllocationItemStatus defines model for AllocationItem.Status.
 type AllocationItemStatus string
+
+// AllocationItemSupplyScope defines model for AllocationItem.SupplyScope.
+type AllocationItemSupplyScope string
 
 // AllocationItemType defines model for AllocationItem.Type.
 type AllocationItemType string
@@ -2624,6 +2646,15 @@ type PermissionPolicyResponse struct {
 // PermissionPolicyResponseEffect defines model for PermissionPolicyResponse.Effect.
 type PermissionPolicyResponseEffect string
 
+// ProductSuffixInventory defines model for ProductSuffixInventory.
+type ProductSuffixInventory struct {
+	PublicAvailable int64 `json:"publicAvailable"`
+
+	// Suffix Email suffix without leading @. Empty is not used here; callers use the parent product row for random suffix.
+	Suffix         string `json:"suffix"`
+	TotalAvailable int64  `json:"totalAvailable"`
+}
+
 // ProjectAccess defines model for ProjectAccess.
 type ProjectAccess struct {
 	CreatedAt time.Time `json:"createdAt"`
@@ -2830,8 +2861,10 @@ type ProjectProductType string
 
 // ProjectProductInventoryTotal defines model for ProjectProductInventoryTotal.
 type ProjectProductInventoryTotal struct {
-	ProductId      int `json:"productId"`
-	TotalAvailable int `json:"totalAvailable"`
+	ProductId       int                       `json:"productId"`
+	PublicAvailable int                       `json:"publicAvailable"`
+	Suffixes        *[]ProductSuffixInventory `json:"suffixes,omitempty"`
+	TotalAvailable  int                       `json:"totalAvailable"`
 }
 
 // ProjectProductRequest defines model for ProjectProductRequest.
@@ -2860,14 +2893,18 @@ type ProjectProductRequestType string
 
 // ProjectProductSummary defines model for ProjectProductSummary.
 type ProjectProductSummary struct {
-	ActivationWindowMinutes int                         `json:"activationWindowMinutes"`
-	CodeEnabled             bool                        `json:"codeEnabled"`
-	CodePrice               string                      `json:"codePrice"`
-	CodeWindowMinutes       int                         `json:"codeWindowMinutes"`
-	Id                      int                         `json:"id"`
-	PurchaseEnabled         bool                        `json:"purchaseEnabled"`
-	PurchasePrice           string                      `json:"purchasePrice"`
-	Status                  ProjectProductSummaryStatus `json:"status"`
+	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
+	CodeEnabled             bool   `json:"codeEnabled"`
+	CodePrice               string `json:"codePrice"`
+	CodeWindowMinutes       int    `json:"codeWindowMinutes"`
+	Id                      int    `json:"id"`
+
+	// PublicAvailable User-safe public inventory currently available for this product summary.
+	PublicAvailable int64                       `json:"publicAvailable"`
+	PurchaseEnabled bool                        `json:"purchaseEnabled"`
+	PurchasePrice   string                      `json:"purchasePrice"`
+	Status          ProjectProductSummaryStatus `json:"status"`
+	Suffixes        *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
 
 	// TotalAvailable User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
 	TotalAvailable  int64                     `json:"totalAvailable"`

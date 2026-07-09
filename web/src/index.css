@@ -1930,6 +1930,14 @@ body[theme-mode="dark"] .semi-always-light,
   transition: background-color 0.16s ease;
 }
 
+.workbench-product-row.is-suffix {
+  padding-left: 18px;
+}
+
+.workbench-product-row.is-suffix .workbench-product-title {
+  font-weight: 650;
+}
+
 .workbench-product-title {
   display: flex;
   min-width: 0;
@@ -2052,6 +2060,10 @@ body[theme-mode="dark"] .semi-always-light,
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workbench-quantity-input .semi-input-number {
+  width: 100%;
 }
 
 .workbench-create-order-button {

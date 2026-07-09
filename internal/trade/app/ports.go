@@ -59,9 +59,10 @@ type AllocationCommand struct {
 }
 
 type AllocationResult struct {
-	Type  domain.AllocationType
-	ID    uint
-	Email string
+	Type        domain.AllocationType
+	ID          uint
+	Email       string
+	SupplyScope SupplyScope
 }
 
 type AllocationPort interface {
@@ -85,7 +86,7 @@ type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LoadOrCreatePendingOrder(ctx context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error)
 	FindOrder(ctx context.Context, orderNo string) (*domain.Order, error)
-	MarkPaid(ctx context.Context, orderNo string, debitTxID uint) (*domain.Order, error)
+	MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error)
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
 	MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error)
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
@@ -118,6 +119,12 @@ type MarkActiveCommand struct {
 	ReceiveStartedAt time.Time
 	ReceiveUntil     time.Time
 	AfterSaleUntil   time.Time
+}
+
+type MarkPaidCommand struct {
+	OrderNo   string
+	DebitTxID uint
+	PayAmount string
 }
 
 type MarkFailedCommand struct {
@@ -333,20 +340,31 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 	for {
 		switch order.Status {
 		case domain.OrderStatusPendingPayment:
+			allocation, err := uc.allocate(ctx, order, emailSuffix)
+			if err != nil {
+				_, _ = uc.repo.MarkFailed(ctx, MarkFailedCommand{OrderNo: order.OrderNo, Reason: "Allocation failed.", Now: uc.now()})
+				return nil, err
+			}
+			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
 			debit, err := uc.wallet.DebitConsumer(ctx, WalletCommand{
 				UserID:         order.UserID,
-				Amount:         order.PayAmount,
+				Amount:         payAmount,
 				Reason:         "order:" + order.OrderNo,
 				IdempotencyKey: "order:" + order.OrderNo + ":debit",
 				RequestID:      requestID,
 			})
 			if err != nil {
 				if err == domain.ErrInsufficientBalance {
+					_ = uc.allocation.ReleaseByOrder(ctx, order.OrderNo)
 					_, _ = uc.repo.MarkFailed(ctx, MarkFailedCommand{OrderNo: order.OrderNo, Reason: "Payment failed.", Now: uc.now()})
 				}
 				return nil, err
 			}
-			updated, err := uc.repo.MarkPaid(ctx, order.OrderNo, debit.ID)
+			updated, err := uc.repo.MarkPaid(ctx, MarkPaidCommand{
+				OrderNo:   order.OrderNo,
+				DebitTxID: debit.ID,
+				PayAmount: payAmount,
+			})
 			if err != nil {
 				if err == domain.ErrOrderStateConflict {
 					reloaded, reloadErr := uc.repo.FindOrder(ctx, order.OrderNo)
@@ -426,7 +444,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 
 func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix string) (*AllocationResult, error) {
 	scopes := []SupplyScope{SupplyScopePublic}
-	if order.ProductType == domain.ProductTypeMicrosoft && order.SupplyPolicy == domain.SupplyPolicyPrivateFirst {
+	if order.SupplyPolicy == domain.SupplyPolicyPrivateFirst {
 		scopes = []SupplyScope{SupplyScopeOwned, SupplyScopePublic}
 	}
 	var lastErr error
@@ -450,6 +468,13 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 		return nil, lastErr
 	}
 	return nil, domain.ErrInsufficientInventory
+}
+
+func checkoutPayAmount(listedAmount string, scope SupplyScope) string {
+	if scope == SupplyScopeOwned {
+		return "0.00"
+	}
+	return listedAmount
 }
 
 func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, reason string) (*domain.Order, error) {

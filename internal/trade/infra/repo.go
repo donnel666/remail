@@ -150,7 +150,12 @@ func (r *Repo) FindOrder(ctx context.Context, orderNo string) (*domain.Order, er
 	return &order, nil
 }
 
-func (r *Repo) MarkPaid(ctx context.Context, orderNo string, debitTxID uint) (*domain.Order, error) {
+func (r *Repo) MarkPaid(ctx context.Context, cmd tradeapp.MarkPaidCommand) (*domain.Order, error) {
+	orderNo := strings.TrimSpace(cmd.OrderNo)
+	payAmount := strings.TrimSpace(cmd.PayAmount)
+	if orderNo == "" || cmd.DebitTxID == 0 || payAmount == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
 	var model OrderModel
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
 		tx := r.dbFor(txCtx)
@@ -165,7 +170,8 @@ func (r *Repo) MarkPaid(ctx context.Context, orderNo string, debitTxID uint) (*d
 			Where("order_no = ? AND status = ?", orderNo, string(domain.OrderStatusPendingPayment)).
 			Updates(map[string]any{
 				"status":      string(domain.OrderStatusPaid),
-				"debit_tx_id": debitTxID,
+				"pay_amount":  payAmount,
+				"debit_tx_id": cmd.DebitTxID,
 				"version":     gorm.Expr("version + 1"),
 			})
 		if result.Error != nil {

@@ -88,7 +88,7 @@ const schemas = {
     properties: {
       id: { type: "integer", example: 18 },
       name: { type: "string", example: "订单服务专用密钥" },
-      keyPrefix: { type: "string", example: "rk-7q9m2x4n8p" },
+      keyPrefix: { type: "string", example: "rk-550e8400-e2" },
       enabled: { type: "boolean", example: true },
       rateLimitPerMinute: nullable("integer"),
       concurrencyLimit: { type: "integer", example: 5 },
@@ -177,7 +177,18 @@ const schemas = {
       activationWindowMinutes: { type: "integer", example: 30 },
       warrantyMinutes: { type: "integer", example: 1440 },
       totalAvailable: { type: "integer", example: 815 },
+      publicAvailable: { type: "integer", example: 300 },
+      suffixes: listOf("ProductSuffixInventory"),
     },
+  },
+  ProductSuffixInventory: {
+    type: "object",
+    properties: {
+      suffix: { type: "string", example: "outlook.com" },
+      totalAvailable: { type: "integer", example: 120 },
+      publicAvailable: { type: "integer", example: 80 },
+    },
+    required: ["suffix", "totalAvailable", "publicAvailable"],
   },
   ProjectProduct: {
     allOf: [
@@ -256,7 +267,7 @@ const schemas = {
       clientChannel: { type: "string", example: "api_key" },
       apiKeyId: nullable("integer"),
       serviceCleanupStatus: stringEnum(["none", "succeeded", "partial_failure"]),
-      serviceToken: { type: "string", example: "st_7jr3kfk9k2d7n4m1p6q8r0t2v" },
+      serviceToken: { type: "string", example: "st_550e8400-e29b-41d4-a716-446655440000" },
       archivedAt: nullable("string"),
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },

@@ -267,6 +267,33 @@ func TestOwnedAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 	require.Equal(t, "ms1000@example.com", result.Email)
 }
 
+func TestOwnedDomainAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 2, 2000, 1, "not_sale")
+	seedDomainResourcesWithPurpose(t, db, 3, 3000, 1, "not_sale")
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-domain-public-private",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	result, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-domain-owned",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopeOwned,
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.AllocationTypeDomain, result.Type)
+	require.Equal(t, uint(2000), result.ResourceID)
+	require.Contains(t, result.Email, "@d2000.example.com")
+}
+
 func TestRefreshRoutingCandidatesMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
@@ -280,16 +307,17 @@ INSERT INTO project_products(
 	seedMicrosoftResources(t, db, 1, 1000, 3, true, "normal")
 	seedMicrosoftResources(t, db, 3, 2000, 2, true, "normal")
 	seedDomainResources(t, db, 1, 3000, 2)
+	seedDomainResourcesWithPurpose(t, db, 2, 4000, 1, "not_sale")
 
 	repo := NewRepo(db)
 	affected, err := repo.RefreshRoutingCandidates(context.Background(), 10)
 	require.NoError(t, err)
-	require.Equal(t, 5, affected)
+	require.Equal(t, 6, affected)
 
 	result, err := repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Limit: 10})
 	require.NoError(t, err)
-	require.Equal(t, int64(5), result.Total)
-	require.Len(t, result.Items, 5)
+	require.Equal(t, int64(6), result.Total)
+	require.Len(t, result.Items, 6)
 
 	result, err = repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Type: domain.AllocationTypeMicrosoft, Limit: 10})
 	require.NoError(t, err)
@@ -299,9 +327,17 @@ INSERT INTO project_products(
 
 	result, err = repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Type: domain.AllocationTypeDomain, Limit: 10})
 	require.NoError(t, err)
-	require.Equal(t, int64(2), result.Total)
-	require.Len(t, result.Items, 2)
+	require.Equal(t, int64(3), result.Total)
+	require.Len(t, result.Items, 3)
 	require.Equal(t, domain.AllocationTypeDomain, result.Items[0].Type)
+	var privateDomainCandidateFound bool
+	for _, item := range result.Items {
+		if item.ResourceID == 4000 {
+			privateDomainCandidateFound = true
+			require.False(t, item.ForSale)
+		}
+	}
+	require.True(t, privateDomainCandidateFound)
 }
 
 func TestAllocationSQLConstraintsMySQL(t *testing.T) {
@@ -322,18 +358,18 @@ func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 
 	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-cross', 'microsoft')").Error)
 	require.Error(t, db.Exec(`
-	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, mailbox_id, email)
-	VALUES ('ord-cross', 10, 20, 2000, ?, 'x@d2000.example.com')`, mailboxID).Error)
+	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email)
+	VALUES ('ord-cross', 10, 20, 2000, 'public', ?, 'x@d2000.example.com')`, mailboxID).Error)
 
 	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-alias-mismatch', 'microsoft')").Error)
 	require.Error(t, db.Exec(`
-	INSERT INTO microsoft_allocations(order_no, project_id, product_id, resource_id, mailbox, explicit_alias_id, email)
-	VALUES ('ord-alias-mismatch', 10, 20, 1000, 'alias', ?, 'alias1001@example.com')`, explicitAliasID).Error)
+	INSERT INTO microsoft_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox, explicit_alias_id, email)
+	VALUES ('ord-alias-mismatch', 10, 20, 1000, 'public', 'alias', ?, 'alias1001@example.com')`, explicitAliasID).Error)
 
 	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-mailbox-mismatch', 'domain')").Error)
 	require.Error(t, db.Exec(`
-	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, mailbox_id, email)
-	VALUES ('ord-mailbox-mismatch', 10, 20, 2000, ?, 'wrong@d2001.example.com')`, mailboxID).Error)
+	INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email)
+	VALUES ('ord-mailbox-mismatch', 10, 20, 2000, 'public', ?, 'wrong@d2001.example.com')`, mailboxID).Error)
 
 	require.NoError(t, db.Exec("INSERT INTO projects(id, name, target_platform, status, access_type) VALUES (11, 'Other Project', 'alloc', 'listed', 'public')").Error)
 	require.NoError(t, db.Exec(`
@@ -345,8 +381,8 @@ func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 	) VALUES (21, 11, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
 	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-product-mismatch', 'microsoft')").Error)
 	require.Error(t, db.Exec(`
-	INSERT INTO microsoft_allocations(order_no, project_id, product_id, resource_id, mailbox, email)
-	VALUES ('ord-product-mismatch', 10, 21, 1000, 'main', 'ms1000@example.com')`).Error)
+	INSERT INTO microsoft_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox, email)
+	VALUES ('ord-product-mismatch', 10, 21, 1000, 'public', 'main', 'ms1000@example.com')`).Error)
 }
 
 func TestAllocateRollbackOnInsufficientInventoryMySQL(t *testing.T) {
@@ -508,6 +544,30 @@ func TestInventoryStatsIncludeBuyerPrivateMicrosoftMySQL(t *testing.T) {
 	require.Equal(t, int64(1), productStats.Items[0].TotalAvailable)
 }
 
+func TestInventoryStatsIncludeBuyerPrivateDomainMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 2, 2000, 1, "not_sale")
+
+	repo := NewRepo(db)
+	adminStats, err := repo.GetInventoryStats(context.Background(), 10, 0)
+	require.NoError(t, err)
+	require.Zero(t, adminStats.Domain.EligibleResources)
+	require.Zero(t, adminStats.TotalAvailable)
+
+	buyerStats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), buyerStats.Domain.EligibleResources)
+	require.Equal(t, int64(10000), buyerStats.Domain.TotalAvailable)
+	require.Equal(t, int64(10000), buyerStats.TotalAvailable)
+
+	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(10000), productStats.TotalAvailable)
+	require.Len(t, productStats.Items, 1)
+	require.Equal(t, int64(10000), productStats.Items[0].TotalAvailable)
+}
+
 func TestPlusDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 0, 0, 1)
@@ -643,6 +703,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"microsoft_resources", "idx_microsoft_alloc_owned"},
 		{"microsoft_resources", "idx_microsoft_inventory_public"},
 		{"domain_resources", "idx_domain_alloc_public"},
+		{"domain_resources", "idx_domain_alloc_owned"},
 		{"domain_resources", "idx_domain_inventory_public"},
 		{"project_products", "idx_project_products_id_project"},
 		{"explicit_aliases", "idx_explicit_aliases_id_resource"},
@@ -798,10 +859,16 @@ func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, quer
 }
 
 func seedDomainResources(t *testing.T, db *gorm.DB, ownerID, startID, count int) {
+	seedDomainResourcesWithPurpose(t, db, ownerID, startID, count, "sale")
+}
+
+func seedDomainResourcesWithPurpose(t *testing.T, db *gorm.DB, ownerID, startID, count int, purpose string) {
 	t.Helper()
+	mailServerID := 900 + ownerID
 	require.NoError(t, db.Exec(`
 INSERT INTO mail_servers(id, owner_user_id, name, server_address, mx_record, status)
-VALUES (900, ?, 'default', 'mx.aishop6.com', 'mx.aishop6.com', 'online')`, ownerID).Error)
+VALUES (?, ?, 'default', 'mx.aishop6.com', 'mx.aishop6.com', 'online')
+ON DUPLICATE KEY UPDATE status = VALUES(status)`, mailServerID, ownerID).Error)
 	for i := 0; i < count; i++ {
 		id := startID + i
 		domainName := fmt.Sprintf("d%d.example.com", id)
@@ -812,10 +879,12 @@ VALUES (900, ?, 'default', 'mx.aishop6.com', 'mx.aishop6.com', 'online')`, owner
 		).Error)
 		require.NoError(t, db.Exec(`
 INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, domain_tld, mail_server_id, purpose, status, alloc_bucket)
-VALUES (?, 'domain', ?, ?, 'example.com', 900, 'sale', 'normal', MOD(?, 64))`,
+VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 64))`,
 			id,
 			ownerID,
 			domainName,
+			mailServerID,
+			purpose,
 			id,
 		).Error)
 	}

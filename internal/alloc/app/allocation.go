@@ -383,7 +383,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 
 	switch mailbox {
 	case domain.MicrosoftMailboxMain:
-		result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
+		result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
 		if err == nil {
 			return result, nil
 		}
@@ -397,21 +397,21 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		if alias == nil {
 			return nil, domain.ErrAllocationConflict
 		}
-		return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxAlias, &alias.ID, nil, nil, alias.Email, now, nil)
+		return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxAlias, &alias.ID, nil, nil, alias.Email, now, nil)
 	case domain.MicrosoftMailboxDot:
 		alias, err := uc.repo.FindReusableDotAlias(ctx, config.ProjectID, candidate.ResourceID)
 		if err != nil {
 			return nil, err
 		}
 		if alias != nil {
-			return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
+			return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
 		}
 		for _, email := range dotAliasVariants(candidate.EmailAddress) {
 			alias, err = uc.repo.FindOrCreateDotAlias(ctx, candidate.ResourceID, email)
 			if err != nil {
 				return nil, err
 			}
-			result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
+			result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
 			if err == nil {
 				return result, nil
 			}
@@ -436,14 +436,14 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 			return nil, err
 		}
 		if alias != nil {
-			return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
+			return uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
 		}
 		for _, email := range plusAliasVariants(candidate.EmailAddress, config.ProjectID, cmd.OrderNo) {
 			alias, err = uc.repo.FindOrCreatePlusAlias(ctx, candidate.ResourceID, email)
 			if err != nil {
 				return nil, err
 			}
-			result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
+			result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
 			if err == nil {
 				return result, nil
 			}
@@ -457,12 +457,13 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 	}
 }
 
-func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, orderNo string, config ProductAllocationConfig, resourceID uint, mailbox domain.MicrosoftMailbox, explicitAliasID, dotAliasID, plusAliasID *uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
+func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, orderNo string, supplyScope domain.SupplyScope, config ProductAllocationConfig, resourceID uint, mailbox domain.MicrosoftMailbox, explicitAliasID, dotAliasID, plusAliasID *uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
 	allocation := &domain.MicrosoftAllocation{
 		OrderNo:         orderNo,
 		ProjectID:       config.ProjectID,
 		ProductID:       config.ProductID,
 		ResourceID:      resourceID,
+		SupplyScope:     supplyScope,
 		Mailbox:         mailbox,
 		ExplicitAliasID: explicitAliasID,
 		DotAliasID:      dotAliasID,
@@ -485,16 +486,17 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, orderNo string
 		return nil, err
 	}
 	return &domain.UnifiedAllocation{
-		Type:       domain.AllocationTypeMicrosoft,
-		ID:         allocation.ID,
-		OrderNo:    allocation.OrderNo,
-		ProjectID:  allocation.ProjectID,
-		ProductID:  allocation.ProductID,
-		ResourceID: allocation.ResourceID,
-		Mailbox:    string(allocation.Mailbox),
-		Email:      allocation.Email,
-		Status:     allocation.Status,
-		CreatedAt:  allocation.CreatedAt,
+		Type:        domain.AllocationTypeMicrosoft,
+		ID:          allocation.ID,
+		OrderNo:     allocation.OrderNo,
+		ProjectID:   allocation.ProjectID,
+		ProductID:   allocation.ProductID,
+		ResourceID:  allocation.ResourceID,
+		SupplyScope: allocation.SupplyScope,
+		Mailbox:     string(allocation.Mailbox),
+		Email:       allocation.Email,
+		Status:      allocation.Status,
+		CreatedAt:   allocation.CreatedAt,
 	}, nil
 }
 
@@ -529,7 +531,7 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 	if bucket == nil {
 		limit = globalCandidateWindow
 	}
-	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, bucket, limit, cmd.EmailSuffix)
+	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
 		return nil, false, err
 	}
@@ -550,7 +552,7 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.EmailSuffix)
+	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -575,14 +577,14 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 		return nil, err
 	}
 	if mailbox != nil {
-		return uc.createDomainAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
+		return uc.createDomainAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
 	}
 	for _, email := range generatedMailboxVariants(candidate.Domain, config.ProjectID, cmd.OrderNo) {
 		mailbox, err = uc.repo.FindOrCreateGeneratedMailbox(ctx, candidate.ResourceID, candidate.OwnerUserID, email)
 		if err != nil {
 			return nil, err
 		}
-		result, err := uc.createDomainAllocation(ctx, cmd.OrderNo, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
+		result, err := uc.createDomainAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
 		if err == nil {
 			return result, nil
 		}
@@ -593,15 +595,16 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (uc *UseCase) createDomainAllocation(ctx context.Context, orderNo string, config ProductAllocationConfig, resourceID uint, mailboxID uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
+func (uc *UseCase) createDomainAllocation(ctx context.Context, orderNo string, supplyScope domain.SupplyScope, config ProductAllocationConfig, resourceID uint, mailboxID uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
 	allocation := &domain.GeneratedMailboxAllocation{
-		OrderNo:    orderNo,
-		ProjectID:  config.ProjectID,
-		ProductID:  config.ProductID,
-		ResourceID: resourceID,
-		MailboxID:  mailboxID,
-		Email:      strings.ToLower(strings.TrimSpace(email)),
-		Status:     domain.AllocationStatusAllocated,
+		OrderNo:     orderNo,
+		ProjectID:   config.ProjectID,
+		ProductID:   config.ProductID,
+		ResourceID:  resourceID,
+		SupplyScope: supplyScope,
+		MailboxID:   mailboxID,
+		Email:       strings.ToLower(strings.TrimSpace(email)),
+		Status:      domain.AllocationStatusAllocated,
 	}
 	if allocation.Email == "" {
 		return nil, domain.ErrInvalidAllocationRequest
@@ -618,16 +621,17 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, orderNo string, c
 		return nil, err
 	}
 	return &domain.UnifiedAllocation{
-		Type:       domain.AllocationTypeDomain,
-		ID:         allocation.ID,
-		OrderNo:    allocation.OrderNo,
-		ProjectID:  allocation.ProjectID,
-		ProductID:  allocation.ProductID,
-		ResourceID: allocation.ResourceID,
-		Mailbox:    "domain",
-		Email:      allocation.Email,
-		Status:     allocation.Status,
-		CreatedAt:  allocation.CreatedAt,
+		Type:        domain.AllocationTypeDomain,
+		ID:          allocation.ID,
+		OrderNo:     allocation.OrderNo,
+		ProjectID:   allocation.ProjectID,
+		ProductID:   allocation.ProductID,
+		ResourceID:  allocation.ResourceID,
+		SupplyScope: allocation.SupplyScope,
+		Mailbox:     "domain",
+		Email:       allocation.Email,
+		Status:      allocation.Status,
+		CreatedAt:   allocation.CreatedAt,
 	}, nil
 }
 

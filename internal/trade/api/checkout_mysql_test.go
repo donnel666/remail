@@ -106,6 +106,12 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, "debit", "order:"+first.Order.OrderNo).
 		Count(&txCount).Error)
 	require.EqualValues(t, 1, txCount)
+	var debitAmount string
+	require.NoError(t, db.Table("wallet_transactions").
+		Select("amount").
+		Where("id = ?", *first.Order.DebitTxID).
+		Scan(&debitAmount).Error)
+	require.Equal(t, "-2.00", debitAmount)
 	var allocationCount int64
 	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", first.Order.OrderNo).Count(&allocationCount).Error)
 	require.EqualValues(t, 1, allocationCount)
@@ -116,7 +122,93 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.Nil(t, purchaseToken.ExpireAt)
 }
 
-func TestCheckoutAllocationFailureRefundsDebitMySQL(t *testing.T) {
+func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 2, 1000, 1, false)
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "purchase",
+		SupplyPolicy:   "private_first",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-owned-microsoft",
+		RequestID:      "req-owned-microsoft",
+	})
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, "0.00", result.Order.PayAmount)
+	require.NotNil(t, result.Order.DebitTxID)
+	require.NotNil(t, result.Order.MicrosoftAllocID)
+	require.Equal(t, "ms1000@example.com", result.Order.DeliveryEmail)
+
+	var tx struct {
+		Amount        string
+		BalanceBefore string
+		BalanceAfter  string
+	}
+	require.NoError(t, db.Table("wallet_transactions").
+		Select("amount, balance_before, balance_after").
+		Where("id = ?", *result.Order.DebitTxID).
+		Take(&tx).Error)
+	require.Equal(t, "0.00", tx.Amount)
+	require.Equal(t, "0.00", tx.BalanceBefore)
+	require.Equal(t, "0.00", tx.BalanceAfter)
+	var supplyScope string
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("supply_scope").
+		Where("id = ?", *result.Order.MicrosoftAllocID).
+		Scan(&supplyScope).Error)
+	require.Equal(t, "owned", supplyScope)
+}
+
+func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "domain")
+	seedTradeDomainResources(t, db, 2, 2000, 1, "not_sale")
+
+	uc := newTradeUseCase(db)
+	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "purchase",
+		SupplyPolicy:   "private_first",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-owned-domain",
+		RequestID:      "req-owned-domain",
+	})
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, "0.00", result.Order.PayAmount)
+	require.NotNil(t, result.Order.DebitTxID)
+	require.NotNil(t, result.Order.DomainAllocID)
+	require.Contains(t, result.Order.DeliveryEmail, "@trade2000.example.com")
+
+	var tx struct {
+		Amount        string
+		BalanceBefore string
+		BalanceAfter  string
+	}
+	require.NoError(t, db.Table("wallet_transactions").
+		Select("amount, balance_before, balance_after").
+		Where("id = ?", *result.Order.DebitTxID).
+		Take(&tx).Error)
+	require.Equal(t, "0.00", tx.Amount)
+	require.Equal(t, "0.00", tx.BalanceBefore)
+	require.Equal(t, "0.00", tx.BalanceAfter)
+	var supplyScope string
+	require.NoError(t, db.Table("domain_allocations").
+		Select("supply_scope").
+		Where("id = ?", *result.Order.DomainAllocID).
+		Scan(&supplyScope).Error)
+	require.Equal(t, "owned", supplyScope)
+}
+
+func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	creditBuyer(t, db, 2, "10.00")
@@ -143,9 +235,9 @@ func TestCheckoutAllocationFailureRefundsDebitMySQL(t *testing.T) {
 	}
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-refund").Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
-	require.NotNil(t, order.DebitTxID)
-	require.NotNil(t, order.RefundTxID)
-	require.Equal(t, "1.00", order.RefundAmount)
+	require.Nil(t, order.DebitTxID)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "0.00", order.RefundAmount)
 	var guardCount int64
 	require.NoError(t, db.Table("allocation_order_guards").Where("order_no = ?", order.OrderNo).Count(&guardCount).Error)
 	require.EqualValues(t, 0, guardCount)
@@ -153,6 +245,44 @@ func TestCheckoutAllocationFailureRefundsDebitMySQL(t *testing.T) {
 	summary, err := billinginfra.NewBillingRepo(db).GetOrCreateWalletSummary(context.Background(), 2)
 	require.NoError(t, err)
 	require.Equal(t, "10.00", summary.Wallet.ConsumerBalance)
+}
+
+func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+
+	uc := newTradeUseCase(db)
+	_, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-insufficient-balance",
+		RequestID:      "req-insufficient-balance",
+	})
+	require.ErrorIs(t, err, tradedomain.ErrInsufficientBalance)
+
+	var order struct {
+		OrderNo      string
+		Status       string
+		DebitTxID    *uint
+		RefundTxID   *uint
+		RefundAmount string
+	}
+	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-insufficient-balance").Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
+	require.Nil(t, order.DebitTxID)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "0.00", order.RefundAmount)
+
+	var allocation struct {
+		Status string
+	}
+	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", order.OrderNo).Take(&allocation).Error)
+	require.Equal(t, "released", allocation.Status)
 }
 
 func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
@@ -313,7 +443,7 @@ func TestCheckoutEmailSuffixFiltersAllocationSourceMySQL(t *testing.T) {
 	require.NotNil(t, result.Order.MicrosoftAllocID)
 }
 
-func TestCheckoutEmailSuffixMismatchRefundsDebitMySQL(t *testing.T) {
+func TestCheckoutEmailSuffixMismatchDoesNotDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	seedTradeMicrosoftResource(t, db, 1, 1000, "first@example.com", "example.com", 100, true)
@@ -334,6 +464,7 @@ func TestCheckoutEmailSuffixMismatchRefundsDebitMySQL(t *testing.T) {
 	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
 
 	var order struct {
+		OrderNo      string
 		Status       string
 		DebitTxID    *uint
 		RefundTxID   *uint
@@ -341,9 +472,14 @@ func TestCheckoutEmailSuffixMismatchRefundsDebitMySQL(t *testing.T) {
 	}
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-suffix-missing").Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
-	require.NotNil(t, order.DebitTxID)
-	require.NotNil(t, order.RefundTxID)
-	require.Equal(t, "1.00", order.RefundAmount)
+	require.Nil(t, order.DebitTxID)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "0.00", order.RefundAmount)
+	var txCount int64
+	require.NoError(t, db.Table("wallet_transactions").
+		Where("biz_id = ?", "order:"+order.OrderNo).
+		Count(&txCount).Error)
+	require.EqualValues(t, 0, txCount)
 }
 
 func TestFailedOrderDetailDoesNotExposeServiceTokenMySQL(t *testing.T) {
@@ -679,6 +815,12 @@ func creditBuyer(t *testing.T, db *gorm.DB, userID uint, amount string) {
 
 func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()
+	mainWeight := 0
+	dotWeight := 0
+	plusWeight := 0
+	if productType == "microsoft" {
+		mainWeight = 1
+	}
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
     (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
@@ -693,7 +835,12 @@ INSERT INTO project_products(
     code_price, purchase_price, code_supplier_price, purchase_supplier_price,
     code_window_minutes, activation_window_minutes, warranty_minutes,
     main_weight, dot_weight, plus_weight
-) VALUES (20, 10, ?, 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, 1, 0, 0)`, productType).Error)
+) VALUES (20, 10, ?, 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, ?, ?, ?)`,
+		productType,
+		mainWeight,
+		dotWeight,
+		plusWeight,
+	).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
     (10, 'sender', '.*', TRUE),
@@ -726,4 +873,32 @@ VALUES (?, ?, ?, 'secret', ?, 'normal', ?, MOD(?, 64))`,
 		quality,
 		id,
 	).Error)
+}
+
+func seedTradeDomainResources(t *testing.T, db *gorm.DB, ownerID, startID, count int, purpose string) {
+	t.Helper()
+	mailServerID := 900 + ownerID
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, name, server_address, mx_record, status)
+VALUES (?, ?, 'default', 'mx.aishop6.com', 'mx.aishop6.com', 'online')
+ON DUPLICATE KEY UPDATE status = VALUES(status)`, mailServerID, ownerID).Error)
+	for i := 0; i < count; i++ {
+		id := startID + i
+		domainName := fmt.Sprintf("trade%d.example.com", id)
+		require.NoError(t, db.Exec(
+			"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, 'domain', ?)",
+			id,
+			ownerID,
+		).Error)
+		require.NoError(t, db.Exec(`
+INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, domain_tld, mail_server_id, purpose, status, alloc_bucket)
+VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 64))`,
+			id,
+			ownerID,
+			domainName,
+			mailServerID,
+			purpose,
+			id,
+		).Error)
+	}
 }

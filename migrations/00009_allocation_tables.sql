@@ -13,7 +13,8 @@ ALTER TABLE domain_resources
     ADD COLUMN mailbox_daily_limit INT NOT NULL DEFAULT 10000,
     ADD COLUMN alloc_bucket TINYINT UNSIGNED NOT NULL DEFAULT 0,
     ADD INDEX idx_domain_inventory_public (purpose, status, id, mailbox_daily_limit),
-    ADD INDEX idx_domain_alloc_public (alloc_bucket, purpose, status, last_allocated_at, id);
+    ADD INDEX idx_domain_alloc_public (alloc_bucket, purpose, status, last_allocated_at, id),
+    ADD INDEX idx_domain_alloc_owned (alloc_bucket, owner_user_id, purpose, status, last_allocated_at, id);
 
 UPDATE domain_resources SET alloc_bucket = MOD(id, 64);
 
@@ -74,7 +75,7 @@ CREATE TABLE domain_routing_candidates (
     INDEX idx_domain_candidates_resource (resource_id),
     CONSTRAINT fk_domain_candidates_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     CONSTRAINT fk_domain_candidates_resource FOREIGN KEY (resource_id) REFERENCES domain_resources(id) ON DELETE CASCADE,
-    CONSTRAINT chk_domain_candidates_purpose CHECK (purpose = 'sale'),
+    CONSTRAINT chk_domain_candidates_purpose CHECK (purpose IN ('sale', 'not_sale')),
     CONSTRAINT chk_domain_candidates_status CHECK (status IN ('normal', 'abnormal', 'disabled'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -108,6 +109,7 @@ CREATE TABLE microsoft_allocations (
     project_id BIGINT UNSIGNED NOT NULL,
     product_id BIGINT UNSIGNED NOT NULL,
     resource_id BIGINT UNSIGNED NOT NULL,
+    supply_scope VARCHAR(16) NOT NULL COMMENT 'owned|public',
     mailbox VARCHAR(32) NOT NULL COMMENT 'main|alias|dot|plus',
     explicit_alias_id BIGINT UNSIGNED NULL,
     dot_alias_id BIGINT UNSIGNED NULL,
@@ -156,6 +158,7 @@ CREATE TABLE microsoft_allocations (
     CONSTRAINT fk_ms_alloc_dot_alias_resource FOREIGN KEY (dot_alias_id, resource_id) REFERENCES dot_aliases(id, resource_id) ON DELETE RESTRICT,
     CONSTRAINT fk_ms_alloc_plus_alias_resource FOREIGN KEY (plus_alias_id, resource_id) REFERENCES plus_aliases(id, resource_id) ON DELETE RESTRICT,
     CONSTRAINT chk_ms_alloc_guard_type CHECK (guard_type = 'microsoft'),
+    CONSTRAINT chk_ms_alloc_supply_scope CHECK (supply_scope IN ('owned', 'public')),
     CONSTRAINT chk_ms_alloc_mailbox CHECK (mailbox IN ('main', 'alias', 'dot', 'plus')),
     CONSTRAINT chk_ms_alloc_status CHECK (status IN ('allocated', 'released')),
     CONSTRAINT chk_ms_alloc_email CHECK (email <> ''),
@@ -174,6 +177,7 @@ CREATE TABLE domain_allocations (
     project_id BIGINT UNSIGNED NOT NULL,
     product_id BIGINT UNSIGNED NOT NULL,
     resource_id BIGINT UNSIGNED NOT NULL,
+    supply_scope VARCHAR(16) NOT NULL COMMENT 'owned|public',
     mailbox_id BIGINT UNSIGNED NOT NULL,
     email VARCHAR(255) NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'allocated' COMMENT 'allocated|released',
@@ -200,6 +204,7 @@ CREATE TABLE domain_allocations (
     CONSTRAINT fk_domain_alloc_resource FOREIGN KEY (resource_id) REFERENCES domain_resources(id) ON DELETE RESTRICT,
     CONSTRAINT fk_domain_alloc_mailbox_resource FOREIGN KEY (mailbox_id, resource_id) REFERENCES generated_mailboxes(id, resource_id) ON DELETE RESTRICT,
     CONSTRAINT chk_domain_alloc_guard_type CHECK (guard_type = 'domain'),
+    CONSTRAINT chk_domain_alloc_supply_scope CHECK (supply_scope IN ('owned', 'public')),
     CONSTRAINT chk_domain_alloc_status CHECK (status IN ('allocated', 'released')),
     CONSTRAINT chk_domain_alloc_email CHECK (email <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

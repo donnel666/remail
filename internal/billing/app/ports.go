@@ -257,7 +257,7 @@ func (uc *WalletUseCase) RefundConsumer(ctx context.Context, req AdjustConsumerB
 }
 
 func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerBalanceRequest, direction domain.TransactionDirection) (*AdjustBalanceResult, error) {
-	amount, err := domain.NormalizePositiveMoney(req.Amount)
+	amount, err := normalizeConsumerAdjustmentAmount(req.Amount, req.TransactionType)
 	if err != nil {
 		return nil, err
 	}
@@ -282,6 +282,13 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 		Now:                uc.now(),
 		OperationLog:       req.OperationLog,
 	})
+}
+
+func normalizeConsumerAdjustmentAmount(value string, transactionType domain.TransactionType) (string, error) {
+	if transactionType == domain.TransactionTypeDebit || transactionType == domain.TransactionTypeRefund {
+		return domain.NormalizeNonNegativeMoney(value)
+	}
+	return domain.NormalizePositiveMoney(value)
 }
 
 func (uc *WalletUseCase) ListCards(ctx context.Context, filter CardListFilter, offset, limit int) (*CardListResult, error) {

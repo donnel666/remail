@@ -179,7 +179,7 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 	var spend string
 	if err := r.db.WithContext(ctx).
 		Model(&WalletTransactionModel{}).
-		Select("COALESCE(SUM(amount), 0)").
+		Select("COALESCE(SUM(-amount), 0)").
 		Where("user_id = ? AND balance_bucket = ? AND direction = ?", userID, domain.BalanceBucketConsumer, domain.TransactionDirectionOut).
 		Scan(&spend).Error; err != nil {
 		return nil, fmt.Errorf("sum wallet spend: %w", err)
@@ -750,6 +750,9 @@ func (r *BillingRepo) settleReferralRewardInTx(
 	if relation.InviterUserID == 0 || relation.InviteCode == "" {
 		return nil
 	}
+	if source.Direction != domain.TransactionDirectionIn {
+		return domain.ErrInvalidAmount
+	}
 
 	sourceAmount, err := domain.ParseMoney(source.Amount)
 	if err != nil || !sourceAmount.IsPositive() {
@@ -851,7 +854,7 @@ type consumerTransactionRequest struct {
 
 func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB, wallet *WalletModel, req consumerTransactionRequest) (*billingapp.AdjustBalanceResult, error) {
 	amount, err := domain.ParseMoney(req.Amount)
-	if err != nil || !amount.IsPositive() {
+	if err != nil || !validConsumerTransactionAmount(amount, req.TransactionType) {
 		return nil, domain.ErrInvalidAmount
 	}
 	before, err := domain.ParseMoney(wallet.ConsumerBalance)
@@ -859,18 +862,21 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 		return nil, err
 	}
 	var afterString string
+	var signedAmount decimal.Decimal
 	switch req.Direction {
 	case domain.TransactionDirectionIn:
 		afterString = domain.MoneyString(before.Add(amount))
+		signedAmount = amount
 	case domain.TransactionDirectionOut:
 		if before.LessThan(amount) {
 			return nil, domain.ErrInsufficientBalance
 		}
 		afterString = domain.MoneyString(before.Sub(amount))
+		signedAmount = amount.Neg()
 	default:
 		return nil, domain.ErrInvalidTransactionType
 	}
-	amountString := domain.MoneyString(amount)
+	amountString := domain.MoneyString(signedAmount)
 	beforeString := domain.MoneyString(before)
 	transaction := WalletTransactionModel{
 		TransactionNo:   nextTransactionNo(),
@@ -901,6 +907,16 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 		Wallet:      walletModelToDomain(*wallet),
 		Transaction: transactionModelToDomain(transaction),
 	}, nil
+}
+
+func validConsumerTransactionAmount(amount decimal.Decimal, transactionType domain.TransactionType) bool {
+	if amount.IsNegative() {
+		return false
+	}
+	if transactionType == domain.TransactionTypeDebit || transactionType == domain.TransactionTypeRefund {
+		return true
+	}
+	return amount.IsPositive()
 }
 
 func applyTransactionFilter(query *gorm.DB, filter billingapp.TransactionListFilter) *gorm.DB {

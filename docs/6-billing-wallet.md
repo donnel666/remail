@@ -6,6 +6,7 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-07 | V1.1 | Codex | 补充用户邀请返佣结算规则；作为充值入账后的 Billing 事实，不改变钱包额度桶策略。 |
+| 2026-07-09 | V1.2 | Codex | 补充银行流水式 signed delta 模型：流水金额允许正数、负数和零，余额变动由流水金额直接表达。 |
 
 > 支撑域。BC-BILLING 只保证资金事实正确，不理解订单为什么扣款、退款或结算。
 
@@ -42,7 +43,7 @@
 | `transactionType` | 充值、扣款、退款、冻结、入账、提现、人工调整等 |
 | `balanceBucket` | 额度桶 |
 | `direction` | `in/out` |
-| `amount` | 金额 |
+| `amount` | 余额变动值；入账为正数，出账为负数，零金额业务事实为 `0.00` |
 | `balanceBefore/balanceAfter` | 变动前后 |
 | `bizType/bizId` | 业务来源 |
 | `createdAt` | 时间 |
@@ -118,7 +119,7 @@ stateDiagram-v2
 | INV-B4 | 供应商收入在争议窗口内只能进冻结额度。 |
 | INV-B5 | 退款发生在结算入账前必须取消冻结结算。 |
 | INV-B6 | 流水不可修改、不可物理删除。 |
-| INV-B7 | 金额必须大于 0，余额变动必须精确匹配。 |
+| INV-B7 | 流水金额采用银行流水式 signed delta：`direction=in` 时 `amount >= 0`，`direction=out` 时 `amount <= 0`，`balanceAfter = balanceBefore + amount`；余额桶不得为负。0 元业务事实必须写流水，例如私有库存订单的 0 元消费和对应 0 元退款。 |
 | INV-B8 | 状态更新必须带 expected status，冲突返回 `409 Conflict`。 |
 | INV-B9 | 资金写动作必须幂等，同幂等键不同指纹返回 `409 Conflict`。 |
 | INV-B10 | 卡密和 API Key 这类需重复展示凭据按原值保存，普通日志禁敏。 |
@@ -134,6 +135,8 @@ stateDiagram-v2
 | 一次性 | `referral_rewards.invitee_user_id` 唯一约束保证一个被邀请人只奖励一次。 |
 | 并发 | 充值时先插入唯一返佣事实；划转时后端批量锁定当前用户 `available` 返佣行并创建一条合并入账流水，前端不得循环处理。 |
 | 前端统计 | `/v1/wallet/referrals` 返回邀请人数、待划转奖励和历史收益。 |
+
+调用边界补充：应用层的 `DebitConsumer(amount=10.00)` 表达“扣 10 元”，不要求调用方传负数；BC-BILLING 仓储写入流水时根据 `direction=out` 保存为 `amount=-10.00`。`RefundConsumer(amount=10.00)` 写入 `+10.00`。这样业务命令保持非负金额，数据库流水保持 signed delta 事实。
 
 ---
 

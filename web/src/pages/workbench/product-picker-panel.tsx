@@ -20,6 +20,15 @@ function getInventory(product: WorkbenchProduct, serviceMode: ServiceMode) {
     : product.purchaseInventory;
 }
 
+function getScopedInventory(
+  product: WorkbenchProduct,
+  serviceMode: ServiceMode,
+  inventoryScope: InventoryScope
+) {
+  if (inventoryScope === "public_only") return product.publicInventory;
+  return getInventory(product, serviceMode);
+}
+
 function getPrice(product: WorkbenchProduct, serviceMode: ServiceMode) {
   return serviceMode === "code" ? product.codePrice : product.purchasePrice;
 }
@@ -108,9 +117,14 @@ export function ProductPickerPanel({
         ) : (
           products.map((product) => {
             const selected = selectedProductId === product.id;
+            const inventory = getScopedInventory(product, serviceMode, inventoryScope);
             return (
               <button
-                className={cn("workbench-product-row", selected && "is-selected")}
+                className={cn(
+                  "workbench-product-row",
+                  product.emailSuffix && "is-suffix",
+                  selected && "is-selected"
+                )}
                 key={product.id}
                 onClick={() => onSelectProduct(product.id)}
                 type="button"
@@ -136,7 +150,7 @@ export function ProductPickerPanel({
                     {formatMoney(getPrice(product, serviceMode))}
                   </span>
                   <span className="workbench-product-stock">
-                    {t("Stock")} {getInventory(product, serviceMode)}
+                    {t("Stock")} {inventory}
                   </span>
                 </span>
               </button>

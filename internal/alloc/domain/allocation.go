@@ -51,6 +51,7 @@ type MicrosoftAllocation struct {
 	ProjectID       uint
 	ProductID       uint
 	ResourceID      uint
+	SupplyScope     SupplyScope
 	Mailbox         MicrosoftMailbox
 	ExplicitAliasID *uint
 	DotAliasID      *uint
@@ -62,30 +63,32 @@ type MicrosoftAllocation struct {
 }
 
 type GeneratedMailboxAllocation struct {
-	ID         uint
-	OrderNo    string
-	ProjectID  uint
-	ProductID  uint
-	ResourceID uint
-	MailboxID  uint
-	Email      string
-	Status     AllocationStatus
-	CreatedAt  time.Time
-	ReleasedAt *time.Time
+	ID          uint
+	OrderNo     string
+	ProjectID   uint
+	ProductID   uint
+	ResourceID  uint
+	SupplyScope SupplyScope
+	MailboxID   uint
+	Email       string
+	Status      AllocationStatus
+	CreatedAt   time.Time
+	ReleasedAt  *time.Time
 }
 
 type UnifiedAllocation struct {
-	Type       AllocationType
-	ID         uint
-	OrderNo    string
-	ProjectID  uint
-	ProductID  uint
-	ResourceID uint
-	Mailbox    string
-	Email      string
-	Status     AllocationStatus
-	CreatedAt  time.Time
-	ReleasedAt *time.Time
+	Type        AllocationType
+	ID          uint
+	OrderNo     string
+	ProjectID   uint
+	ProductID   uint
+	ResourceID  uint
+	SupplyScope SupplyScope
+	Mailbox     string
+	Email       string
+	Status      AllocationStatus
+	CreatedAt   time.Time
+	ReleasedAt  *time.Time
 }
 
 func IsValidAllocationType(value AllocationType) bool {
@@ -110,4 +113,8 @@ func NormalizeSupplyScope(value SupplyScope) SupplyScope {
 		return SupplyScopeOwned
 	}
 	return SupplyScopePublic
+}
+
+func IsValidSupplyScope(value SupplyScope) bool {
+	return value == SupplyScopePublic || value == SupplyScopeOwned
 }
