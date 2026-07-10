@@ -889,5 +889,21 @@
   "Reject": "Reject",
   "Claim": "Claim",
   "Load more orders": "Load more orders",
-  "Reason": "Reason"
+  "Reason": "Reason",
+  "Search order or email": "Search order no or email",
+  "Order No": "Order No",
+  "Amount": "Amount",
+  "Created at": "Created at",
+  "No orders yet": "No orders yet",
+  "Order detail": "Order detail",
+  "Pay amount": "Pay amount",
+  "Refund amount": "Refund amount",
+  "Activated at": "Activated at",
+  "Orders load failed.": "Orders load failed.",
+  "Copy pickup URL": "Copy pickup URL",
+  "Mail load failed.": "Mail load failed.",
+  "View": "View",
+  "Ticket": "Ticket",
+  "Selected orders": "{{count}} orders selected",
+  "Ticket submission is coming soon.": "Ticket submission is coming soon."
 }

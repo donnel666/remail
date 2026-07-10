@@ -372,6 +372,15 @@ body[theme-mode="dark"] .semi-always-light,
   white-space: nowrap;
 }
 
+/* Reserve the vertical scrollbar gutter from the first paint. Without this,
+   Semi only applies scrollbar compensation to the fixed header after it
+   detects the body scrollbar post-mount, which makes the fixed action column
+   title visibly jump left to align with the column divider line. */
+.remail-stable-table .semi-table-header,
+.remail-stable-table .semi-table-body {
+  scrollbar-gutter: stable;
+}
+
 .remail-table-cell-ellipsis {
   display: block;
   max-width: 100%;

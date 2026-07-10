@@ -889,5 +889,21 @@
   "Reject": "驳回",
   "Claim": "认领",
   "Load more orders": "加载更多订单",
-  "Reason": "原因"
+  "Reason": "原因",
+  "Search order or email": "搜索订单号或邮箱",
+  "Order No": "订单号",
+  "Amount": "金额",
+  "Created at": "创建时间",
+  "No orders yet": "暂无订单记录",
+  "Order detail": "订单详情",
+  "Pay amount": "实付金额",
+  "Refund amount": "退款金额",
+  "Activated at": "激活时间",
+  "Orders load failed.": "订单加载失败。",
+  "Copy pickup URL": "复制取件 URL",
+  "Mail load failed.": "邮件加载失败。",
+  "View": "查看",
+  "Ticket": "工单",
+  "Selected orders": "已选择 {{count}} 个订单",
+  "Ticket submission is coming soon.": "提工单功能即将开放。"
 }
