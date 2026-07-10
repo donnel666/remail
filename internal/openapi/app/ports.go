@@ -389,10 +389,3 @@ func validRateLimitPerMinute(value int) bool {
 func validAPIKeyConcurrency(value int) bool {
 	return value > 0 && value <= maxAPIKeyConcurrency
 }
-
-func truncate(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
-}

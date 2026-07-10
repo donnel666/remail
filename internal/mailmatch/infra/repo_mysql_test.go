@@ -155,7 +155,7 @@ func TestListOrderMessagesOnlyReturnsPersistedOwnershipMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	orderID := seedMailmatchOrder(t, db, "OR_MESSAGE_OWNER")
 	repo := NewRepo(db, nil)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Second)
 	owned := domain.Message{
 		EmailResourceID:  100,
 		ResourceType:     domain.ResourceTypeMicrosoft,
