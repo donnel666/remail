@@ -19,11 +19,12 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
-	defaultFetchCooldown       = 10 * time.Second
-	autoFetchCooldown          = 30 * time.Second
+	defaultFetchCooldown       = 5 * time.Second
+	autoFetchCooldown          = 5 * time.Second
 	fetchLookbackWindow        = 90 * 24 * time.Hour
 	fetchOverlapWindow         = 5 * time.Minute
 	readWindowSkew             = 2 * time.Minute
@@ -50,6 +51,7 @@ type MailRule struct {
 }
 
 type OrderScope struct {
+	OrderID           uint
 	OrderNo           string
 	UserID            uint
 	ProjectID         uint
@@ -70,6 +72,11 @@ type OrderScope struct {
 	MicrosoftEmail    string
 	MicrosoftClientID string
 	MicrosoftRT       string
+}
+
+type OrderDelivery struct {
+	Message    *domain.Message
+	ReceivedAt time.Time
 }
 
 type FetchedMessage struct {
@@ -119,10 +126,12 @@ type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LoadOrderScope(ctx context.Context, orderNo string, userID uint, isAdmin bool) (*OrderScope, error)
 	LoadOrderScopeForServiceToken(ctx context.Context, orderNo string) (*OrderScope, error)
+	LoadPickupScope(ctx context.Context, token string, email string) (*OrderScope, error)
 	ListOrderMessages(ctx context.Context, scope OrderScope, limit int) ([]domain.Message, error)
-	FindOrderSnapshot(ctx context.Context, orderNo string) (*domain.OrderSnapshot, error)
-	CreateOrderSnapshotOnce(ctx context.Context, snapshot domain.OrderSnapshot) error
-	UpsertLatestOrderSnapshot(ctx context.Context, snapshot domain.OrderSnapshot) error
+	FindOrderMessage(ctx context.Context, orderID uint, messageID uint) (*domain.Message, error)
+	FindOrderDelivery(ctx context.Context, orderID uint) (*OrderDelivery, error)
+	CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
+	AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
 	FindActiveFetchJobByResource(ctx context.Context, emailResourceID uint) (*domain.FetchJob, error)
 	FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
@@ -137,7 +146,9 @@ type Repository interface {
 	ClaimDispatchableFetchJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.FetchJob, error)
 	UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error
 	UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error
-	UpsertMessages(ctx context.Context, messages []domain.Message) (int, error)
+	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
+	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
+	UpsertMicrosoftProjectMatches(ctx context.Context, matches []HistoricalProjectMatch) error
 	UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint, refreshToken string) error
 }
 
@@ -201,11 +212,11 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	if err != nil {
 		return nil, nil, err
 	}
-	items, state, hasSnapshot, err := uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasDelivery, err := uc.listOrderMailByScope(ctx, *scope)
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasSnapshot) {
+	if shouldScheduleReadFetch(*scope, hasDelivery) && fetchDue(state, uc.now()) {
 		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
 			OrderNo: scope.OrderNo,
 			UserID:  userID,
@@ -216,19 +227,16 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	return items, state, nil
 }
 
-func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo string, email string) ([]domain.MailContent, *domain.FetchState, error) {
-	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, strings.TrimSpace(orderNo))
+func (uc *UseCase) ListPickupMail(ctx context.Context, token string, email string) ([]domain.MailContent, *domain.FetchState, error) {
+	scope, err := uc.repo.LoadPickupScope(ctx, strings.TrimSpace(token), normalizeEmail(email))
 	if err != nil {
 		return nil, nil, err
 	}
-	if strings.TrimSpace(email) != "" && normalizeEmail(email) != normalizeEmail(scope.Recipient) {
-		return nil, nil, domain.ErrOrderForbidden
-	}
-	items, state, hasSnapshot, err := uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasDelivery, err := uc.listOrderMailByScope(ctx, *scope)
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasSnapshot) {
+	if shouldScheduleReadFetch(*scope, hasDelivery) && fetchDue(state, uc.now()) {
 		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
 			OrderNo:      scope.OrderNo,
 			Purpose:      domain.FetchPurposeAutoRefresh,
@@ -239,15 +247,41 @@ func (uc *UseCase) ListOrderMailByServiceToken(ctx context.Context, orderNo stri
 	return items, state, nil
 }
 
-func shouldScheduleReadFetch(scope OrderScope, hasSnapshot bool) bool {
-	return !(scope.ServiceMode == "code" && hasSnapshot)
+func (uc *UseCase) GetPickupMessage(ctx context.Context, token string, email string, messageID uint) (*domain.MailContent, error) {
+	if messageID == 0 {
+		return nil, domain.ErrInvalidRequest
+	}
+	scope, err := uc.repo.LoadPickupScope(ctx, strings.TrimSpace(token), normalizeEmail(email))
+	if err != nil {
+		return nil, err
+	}
+	if !scopeReadable(*scope, uc.now) {
+		return nil, domain.ErrOrderUnavailable
+	}
+	message, err := uc.repo.FindOrderMessage(ctx, scope.OrderID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	content := mailContentFromMessage(*message)
+	return &content, nil
+}
+
+func shouldScheduleReadFetch(scope OrderScope, hasDelivery bool) bool {
+	return scope.ServiceMode != "code" || !hasDelivery
+}
+
+func fetchDue(state *domain.FetchState, now time.Time) bool {
+	if state == nil || state.CooldownUntil == nil {
+		return true
+	}
+	return !state.CooldownUntil.After(now)
 }
 
 func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, bool, error) {
 	if !scopeReadable(scope, uc.now) {
 		return nil, nil, false, domain.ErrOrderUnavailable
 	}
-	snapshot, err := uc.repo.FindOrderSnapshot(ctx, scope.OrderNo)
+	delivery, err := uc.repo.FindOrderDelivery(ctx, scope.OrderID)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -255,8 +289,11 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if snapshot != nil && scope.ServiceMode == "code" {
-		return []domain.MailContent{mailContentFromSnapshot(*snapshot)}, state, true, nil
+	if delivery != nil && scope.ServiceMode == "code" {
+		if delivery.Message == nil {
+			return nil, state, true, nil
+		}
+		return []domain.MailContent{mailContentFromMessage(*delivery.Message)}, state, true, nil
 	}
 	limit := purchaseReadLimit
 	if scope.ServiceMode == "code" {
@@ -266,63 +303,51 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	messages = filterMessagesForScope(messages, scope, limit)
+	if len(messages) > limit {
+		messages = messages[:limit]
+	}
 	items := make([]domain.MailContent, len(messages))
 	for i := range messages {
-		items[i] = domain.MailContent{
-			Sender:           messages[i].Sender,
-			Recipient:        messages[i].Recipient,
-			ReceivedAt:       messages[i].ReceivedAt,
-			Subject:          messages[i].Subject,
-			Body:             messages[i].RawBody,
-			VerificationCode: messages[i].VerificationCode,
-		}
+		items[i] = mailContentFromMessage(messages[i])
 	}
-	if snapshot != nil {
-		items = prependSnapshotMail(items, mailContentFromSnapshot(*snapshot), limit)
+	if delivery != nil && delivery.Message != nil {
+		items = prependDeliveryMail(items, mailContentFromMessage(*delivery.Message), limit)
 	}
-	return items, state, snapshot != nil, nil
+	return items, state, delivery != nil, nil
 }
 
-func (uc *UseCase) saveOrderSnapshot(ctx context.Context, scope OrderScope, message domain.Message) error {
+func (uc *UseCase) saveOrderDelivery(ctx context.Context, scope OrderScope, message domain.Message) error {
 	code := strings.TrimSpace(message.VerificationCode)
-	if code == "" || strings.TrimSpace(scope.OrderNo) == "" {
+	if code == "" || scope.OrderID == 0 || message.ID == 0 {
 		return nil
 	}
-	snapshot := domain.OrderSnapshot{
-		OrderNo:          scope.OrderNo,
+	if scope.ServiceMode == "code" {
+		return uc.repo.CreateCodeOrderDelivery(ctx, scope.OrderID, message)
+	}
+	return uc.repo.AdvancePurchaseOrderDelivery(ctx, scope.OrderID, message)
+}
+
+func mailContentFromMessage(message domain.Message) domain.MailContent {
+	return domain.MailContent{
+		ID:               message.ID,
 		Sender:           message.Sender,
 		Recipient:        message.Recipient,
 		ReceivedAt:       message.ReceivedAt,
 		Subject:          message.Subject,
 		Body:             message.RawBody,
-		VerificationCode: code,
-	}
-	if scope.ServiceMode == "code" {
-		return uc.repo.CreateOrderSnapshotOnce(ctx, snapshot)
-	}
-	return uc.repo.UpsertLatestOrderSnapshot(ctx, snapshot)
-}
-
-func mailContentFromSnapshot(snapshot domain.OrderSnapshot) domain.MailContent {
-	return domain.MailContent{
-		Sender:           snapshot.Sender,
-		Recipient:        snapshot.Recipient,
-		ReceivedAt:       snapshot.ReceivedAt,
-		Subject:          snapshot.Subject,
-		Body:             snapshot.Body,
-		VerificationCode: snapshot.VerificationCode,
+		BodyPreview:      message.BodyPreview,
+		VerificationCode: message.VerificationCode,
 	}
 }
 
-func prependSnapshotMail(items []domain.MailContent, snapshot domain.MailContent, limit int) []domain.MailContent {
+func prependDeliveryMail(items []domain.MailContent, delivery domain.MailContent, limit int) []domain.MailContent {
 	for i := range items {
-		if sameMailContent(items[i], snapshot) {
+		if sameMailContent(items[i], delivery) {
 			return items
 		}
 	}
 	out := make([]domain.MailContent, 0, len(items)+1)
-	out = append(out, snapshot)
+	out = append(out, delivery)
 	out = append(out, items...)
 	if limit > 0 && len(out) > limit {
 		return out[:limit]
@@ -475,6 +500,7 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	if job == nil {
 		return domain.ErrFetchJobNotFound
 	}
+	platform.ObserveQueueWait("mailmatch_fetch", job.CreatedAt)
 	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, job.OrderNo)
 	if err != nil {
 		_ = uc.repo.MarkFetchJobSkipped(ctx, task.JobID, "Order is not available for mail fetch.", uc.now())
@@ -545,16 +571,17 @@ type mailIngestError struct {
 	err  error
 }
 
+type matchedDelivery struct {
+	scope   OrderScope
+	message domain.Message
+}
+
 func (e *mailIngestError) Error() string { return e.err.Error() }
 func (e *mailIngestError) Unwrap() error { return e.err }
 
 func (uc *UseCase) ingestFetchedMessages(ctx context.Context, fetched []FetchedMessage) (int, int, *time.Time, error) {
 	messages := make([]domain.Message, 0, len(fetched))
-	matchResults := make([]MatchResult, 0)
-	matchSnapshots := make([]struct {
-		scope   OrderScope
-		message domain.Message
-	}, 0)
+	matchDeliveries := make([]matchedDelivery, 0)
 	for _, item := range fetched {
 		message, matchedScope, err := uc.fetchedMessageToDomain(ctx, item)
 		if err != nil {
@@ -562,33 +589,82 @@ func (uc *UseCase) ingestFetchedMessages(ctx context.Context, fetched []FetchedM
 		}
 		messages = append(messages, message)
 		if matchedScope != nil && strings.TrimSpace(message.VerificationCode) != "" {
-			matchResults = append(matchResults, MatchResult{
-				OrderNo:          matchedScope.OrderNo,
-				VerificationCode: message.VerificationCode,
-				MatchedAt:        message.ReceivedAt,
-			})
-			matchSnapshots = append(matchSnapshots, struct {
-				scope   OrderScope
-				message domain.Message
-			}{scope: *matchedScope, message: message})
+			matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: message})
 		}
 	}
+	matchDeliveries = latestOrderDeliveries(matchDeliveries)
 	lastReceivedAt := latestReceivedAt(messages)
-	stored, err := uc.repo.UpsertMessages(ctx, messages)
+	storedDeliveries := make([]matchedDelivery, 0, len(matchDeliveries))
+	stored := 0
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		storedMessages, err := uc.repo.UpsertMessages(txCtx, messages)
+		if err != nil {
+			return &mailIngestError{safe: "Mail message storage failed.", err: err}
+		}
+		messages = storedMessages
+		stored = len(storedMessages)
+		storedByIdentity := make(map[string]domain.Message, len(storedMessages))
+		for _, message := range storedMessages {
+			storedByIdentity[mailMessageIdentity(message)] = message
+		}
+		for _, delivery := range matchDeliveries {
+			message, ok := storedByIdentity[mailMessageIdentity(delivery.message)]
+			if !ok {
+				return &mailIngestError{safe: "Mail delivery message resolution failed.", err: domain.ErrMessageNotFound}
+			}
+			if message.MatchedOrderID == nil || *message.MatchedOrderID != delivery.scope.OrderID {
+				continue
+			}
+			if err := uc.saveOrderDelivery(txCtx, delivery.scope, message); err != nil {
+				return &mailIngestError{safe: "Mail delivery storage failed.", err: err}
+			}
+			delivery.message = message
+			storedDeliveries = append(storedDeliveries, delivery)
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message storage failed.", err: err}
+		return 0, 0, lastReceivedAt, err
 	}
-	for _, snapshot := range matchSnapshots {
-		if err := uc.saveOrderSnapshot(ctx, snapshot.scope, snapshot.message); err != nil {
-			return stored, countMatched(messages), lastReceivedAt, &mailIngestError{safe: "Mail match snapshot storage failed.", err: err}
+	for _, message := range messages {
+		if message.Status == domain.MessageStatusMatched {
+			platform.ObserveMailVisible(string(message.ResourceType), message.ReceivedAt)
 		}
 	}
-	for _, result := range matchResults {
+	for _, delivery := range storedDeliveries {
+		result := MatchResult{
+			OrderNo:          delivery.scope.OrderNo,
+			VerificationCode: delivery.message.VerificationCode,
+			MatchedAt:        delivery.message.ReceivedAt,
+		}
 		if err := uc.matches.NotifyMatchedCode(ctx, result); err != nil {
 			return stored, countMatched(messages), lastReceivedAt, &mailIngestError{safe: "Mail match result notification failed.", err: err}
 		}
 	}
 	return stored, countMatched(messages), lastReceivedAt, nil
+}
+
+func mailMessageIdentity(message domain.Message) string {
+	return fmt.Sprintf("%d:%s", message.EmailResourceID, strings.TrimSpace(message.DedupeKey))
+}
+
+func latestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
+	if len(deliveries) < 2 {
+		return deliveries
+	}
+	latestByOrder := make(map[uint]matchedDelivery, len(deliveries))
+	for _, delivery := range deliveries {
+		current, exists := latestByOrder[delivery.scope.OrderID]
+		if !exists || delivery.message.ReceivedAt.After(current.message.ReceivedAt) ||
+			(delivery.message.ReceivedAt.Equal(current.message.ReceivedAt) && delivery.message.DedupeKey > current.message.DedupeKey) {
+			latestByOrder[delivery.scope.OrderID] = delivery
+		}
+	}
+	result := make([]matchedDelivery, 0, len(latestByOrder))
+	for _, delivery := range latestByOrder {
+		result = append(result, delivery)
+	}
+	return result
 }
 
 func (uc *UseCase) DispatchFetchJobs(ctx context.Context, limit int) (int, error) {
@@ -684,13 +760,10 @@ func scopeReadable(scope OrderScope, now func() time.Time) bool {
 }
 
 func scopeReadUntil(scope OrderScope) *time.Time {
-	if scope.ServiceMode == "code" {
-		return scope.ReceiveUntil
+	if scope.ServiceMode == "purchase" {
+		return nil
 	}
-	if scope.ActivatedAt == nil {
-		return scope.ReceiveUntil
-	}
-	return scope.AfterSaleUntil
+	return scope.ReceiveUntil
 }
 
 func scopeFetchable(scope OrderScope, now func() time.Time) bool {
@@ -759,10 +832,14 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 	case 1:
 		message.Status = domain.MessageStatusMatched
 		message.VerificationCode = matches[0].code
+		matchedOrderID := matches[0].scope.OrderID
+		message.MatchedOrderID = &matchedOrderID
+		platform.RecordBusinessEvent("mail_match", "matched")
 		return message, &matches[0].scope, nil
 	default:
 		message.Status = domain.MessageStatusReceived
 		message.MatchDiagnostic = "Message matched multiple active order services."
+		platform.RecordBusinessEvent("mail_match", "ambiguous")
 	}
 	return message, nil, nil
 }
@@ -798,28 +875,6 @@ func baseMessageFromFetched(item FetchedMessage) domain.Message {
 		Status:            domain.MessageStatusReceived,
 		ReceivedAt:        item.ReceivedAt.UTC(),
 	}
-}
-
-func filterMessagesForScope(messages []domain.Message, scope OrderScope, limit int) []domain.Message {
-	if limit <= 0 {
-		limit = purchaseReadLimit
-	}
-	out := make([]domain.Message, 0, minInt(limit, len(messages)))
-	for _, message := range messages {
-		matched, code, _ := matchAndExtractAnyRecipient(fetchedMessageFromDomain(message), scope)
-		if !matched {
-			continue
-		}
-		message.VerificationCode = code
-		if scope.ServiceMode == "code" && strings.TrimSpace(code) == "" {
-			continue
-		}
-		out = append(out, message)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
 }
 
 func fetchedMessageFromDomain(message domain.Message) FetchedMessage {
@@ -951,13 +1006,6 @@ func mailAddressCandidates(raw string) []string {
 		values = append(values, mailAddressCandidateRe.FindAllString(raw, -1)...)
 	}
 	return values
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func matchAndExtract(message FetchedMessage, scope OrderScope) (bool, string, string) {
@@ -1222,10 +1270,16 @@ func decodeTransferReader(body io.Reader, transferEncoding string) io.Reader {
 	}
 }
 
+var (
+	htmlScriptRe = regexp.MustCompile(`(?is)<script\b.*?</script>`)
+	htmlStyleRe  = regexp.MustCompile(`(?is)<style\b.*?</style>`)
+	htmlTagRe    = regexp.MustCompile(`(?s)<[^>]+>`)
+)
+
 func stripHTML(value string) string {
-	value = regexp.MustCompile(`(?is)<script\b.*?</script>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?is)<style\b.*?</style>`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(value, " ")
+	value = htmlScriptRe.ReplaceAllString(value, " ")
+	value = htmlStyleRe.ReplaceAllString(value, " ")
+	value = htmlTagRe.ReplaceAllString(value, " ")
 	return strings.Join(strings.Fields(value), " ")
 }
 
@@ -1233,21 +1287,27 @@ func messageDedupeKey(item FetchedMessage) string {
 	if messageID := strings.ToLower(strings.Trim(strings.TrimSpace(item.MessageIDHeader), "<>")); messageID != "" {
 		return hashParts("message-id", messageID)
 	}
-	if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
-		return hashParts(
-			"provider",
-			strings.ToLower(strings.TrimSpace(item.Protocol)),
-			strings.ToLower(strings.TrimSpace(item.Folder)),
-			providerMessageID,
-		)
+	recipients := strings.Join(fetchedRecipientCandidates(item), ",")
+	sender := strings.ToLower(strings.TrimSpace(item.Sender))
+	subject := strings.TrimSpace(item.Subject)
+	normalizedBody := stripHTML(item.Body)
+	if strings.TrimSpace(recipients+sender+subject+normalizedBody) == "" {
+		if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
+			return hashParts(
+				"provider",
+				strings.ToLower(strings.TrimSpace(item.Protocol)),
+				strings.ToLower(strings.TrimSpace(item.Folder)),
+				providerMessageID,
+			)
+		}
 	}
 	parts := []string{
-		"fallback",
-		strings.Join(fetchedRecipientCandidates(item), ","),
-		strings.ToLower(strings.TrimSpace(item.Sender)),
-		strings.TrimSpace(item.Subject),
+		"content",
+		recipients,
+		sender,
+		subject,
 		item.ReceivedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
-		bodyHash(item.Body),
+		bodyHash(normalizedBody),
 	}
 	return hashParts(parts...)
 }

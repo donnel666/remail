@@ -85,6 +85,27 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	require.Equal(t, int64(workers), active)
 }
 
+func TestMicrosoftAllocationSkipsHistoricalProjectMatchMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 2, true, "normal")
+	now := time.Now().UTC()
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resource_project_matches(
+    resource_id, project_id, first_matched_at, last_matched_at,
+    evidence_count, last_scanned_at
+) VALUES (1000, 10, ?, ?, 1, ?)`, now, now, now).Error)
+
+	result, err := allocapp.NewUseCase(NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-history-exclusion",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(1001), result.ResourceID)
+}
+
 func TestDomainAllocationConcurrentMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
@@ -294,52 +315,6 @@ func TestOwnedDomainAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 	require.Contains(t, result.Email, "@d2000.example.com")
 }
 
-func TestRefreshRoutingCandidatesMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
-	seedAllocBase(t, db, "microsoft", 1, 0, 0)
-	require.NoError(t, db.Exec(`
-INSERT INTO project_products(
-    id, project_id, type, status, code_enabled, purchase_enabled,
-    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
-    code_window_minutes, activation_window_minutes, warranty_minutes,
-    main_weight, dot_weight, plus_weight
-) VALUES (21, 10, 'domain', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 0, 0, 0)`).Error)
-	seedMicrosoftResources(t, db, 1, 1000, 3, true, "normal")
-	seedMicrosoftResources(t, db, 3, 2000, 2, true, "normal")
-	seedDomainResources(t, db, 1, 3000, 2)
-	seedDomainResourcesWithPurpose(t, db, 2, 4000, 1, "not_sale")
-
-	repo := NewRepo(db)
-	affected, err := repo.RefreshRoutingCandidates(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, 6, affected)
-
-	result, err := repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Limit: 10})
-	require.NoError(t, err)
-	require.Equal(t, int64(6), result.Total)
-	require.Len(t, result.Items, 6)
-
-	result, err = repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Type: domain.AllocationTypeMicrosoft, Limit: 10})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), result.Total)
-	require.Len(t, result.Items, 3)
-	require.Equal(t, domain.AllocationTypeMicrosoft, result.Items[0].Type)
-
-	result, err = repo.ListRoutingCandidates(context.Background(), allocapp.CandidateFilter{ProjectID: 10, Type: domain.AllocationTypeDomain, Limit: 10})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), result.Total)
-	require.Len(t, result.Items, 3)
-	require.Equal(t, domain.AllocationTypeDomain, result.Items[0].Type)
-	var privateDomainCandidateFound bool
-	for _, item := range result.Items {
-		if item.ResourceID == 4000 {
-			privateDomainCandidateFound = true
-			require.False(t, item.ForSale)
-		}
-	}
-	require.True(t, privateDomainCandidateFound)
-}
-
 func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
@@ -420,82 +395,6 @@ func TestWithTxPanicRollsBackMySQL(t *testing.T) {
 	var guardCount int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM allocation_order_guards WHERE order_no = 'ord-panic'").Scan(&guardCount).Error)
 	require.Zero(t, guardCount)
-}
-
-func TestCandidateRefreshJobLifecycleMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
-	seedAllocBase(t, db, "microsoft", 1, 0, 0)
-	seedMicrosoftResources(t, db, 1, 1000, 2, true, "normal")
-	repo := NewRepo(db)
-
-	job := &domain.CandidateRefreshJob{
-		ProjectID:      10,
-		OperatorUserID: 1,
-		Status:         domain.CandidateRefreshPending,
-		RequestID:      "req-refresh",
-		Path:           "/v1/admin/projects/:projectId/candidates/refresh",
-	}
-	created, err := repo.CreateCandidateRefreshJobWithLog(context.Background(), job)
-	require.NoError(t, err)
-	require.True(t, created)
-	require.NotZero(t, job.ID)
-	require.Equal(t, domain.CandidateRefreshPending, job.Status)
-
-	duplicate := &domain.CandidateRefreshJob{ProjectID: 10, OperatorUserID: 1}
-	created, err = repo.CreateCandidateRefreshJobWithLog(context.Background(), duplicate)
-	require.NoError(t, err)
-	require.False(t, created)
-	require.Equal(t, job.ID, duplicate.ID)
-
-	queued, err := repo.MarkCandidateRefreshJobQueued(context.Background(), job.ID)
-	require.NoError(t, err)
-	require.True(t, queued)
-	running, err := repo.MarkCandidateRefreshJobRunning(context.Background(), job.ID)
-	require.NoError(t, err)
-	require.True(t, running)
-	affected, err := repo.RefreshRoutingCandidates(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, 2, affected)
-	require.NoError(t, repo.MarkCandidateRefreshJobSucceeded(context.Background(), job.ID, affected))
-
-	stored, err := repo.FindCandidateRefreshJob(context.Background(), job.ID)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	require.Equal(t, domain.CandidateRefreshSucceeded, stored.Status)
-	require.Equal(t, 2, stored.Affected)
-}
-
-func TestStaleRunningCandidateRefreshJobExpiresMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
-	seedAllocBase(t, db, "microsoft", 1, 0, 0)
-	repo := NewRepo(db)
-	old := time.Now().UTC().Add(-30 * time.Minute)
-	require.NoError(t, db.Exec(`
-INSERT INTO allocation_candidate_refresh_jobs(
-    project_id, operator_user_id, status, attempts, max_attempts,
-    request_id, path, started_at, created_at, updated_at
-) VALUES (10, 1, 'running', 1, 1, 'req-stale', '/v1/admin/projects/:projectId/candidates/refresh', ?, ?, ?)`,
-		old, old, old).Error)
-	var staleID uint
-	require.NoError(t, db.Raw("SELECT id FROM allocation_candidate_refresh_jobs WHERE request_id = 'req-stale'").Scan(&staleID).Error)
-
-	expired, err := repo.ExpireStaleCandidateRefreshJobs(context.Background(), time.Now().UTC().Add(-10*time.Minute))
-	require.NoError(t, err)
-	require.Equal(t, 1, expired)
-
-	stored, err := repo.FindCandidateRefreshJob(context.Background(), staleID)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	require.Equal(t, domain.CandidateRefreshFailed, stored.Status)
-	require.NotNil(t, stored.FinishedAt)
-	require.Equal(t, "Candidate refresh job expired before completion.", stored.LastSafeError)
-
-	next := &domain.CandidateRefreshJob{ProjectID: 10, OperatorUserID: 1}
-	created, err := repo.CreateCandidateRefreshJobWithLog(context.Background(), next)
-	require.NoError(t, err)
-	require.True(t, created)
-	require.NotEqual(t, staleID, next.ID)
-	require.Equal(t, domain.CandidateRefreshPending, next.Status)
 }
 
 func TestInventoryStatsAreScopedToProjectProductsMySQL(t *testing.T) {
@@ -714,19 +613,11 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"plus_aliases", "idx_plus_aliases_alloc_reuse"},
 		{"generated_mailboxes", "idx_generated_mailboxes_id_resource"},
 		{"generated_mailboxes", "idx_generated_mailboxes_alloc_reuse"},
-		{"allocation_candidate_refresh_jobs", "idx_alloc_refresh_active_project"},
-		{"allocation_candidate_refresh_jobs", "idx_alloc_refresh_status_updated"},
 		{"allocation_daily_usages", "PRIMARY"},
 		{"allocation_daily_usages", "idx_allocation_daily_usages_resource"},
-		{"microsoft_routing_candidates", "idx_ms_candidates_project_bucket"},
-		{"domain_routing_candidates", "idx_domain_candidates_project_bucket"},
-		{"domain_routing_candidates", "idx_domain_candidates_project_resource"},
 		{"allocation_order_guards", "PRIMARY"},
 		{"allocation_order_guards", "idx_allocation_order_guards_order_type"},
-		{"microsoft_allocations", "idx_ms_alloc_active_main"},
-		{"microsoft_allocations", "idx_ms_alloc_active_alias"},
-		{"microsoft_allocations", "idx_ms_alloc_active_dot"},
-		{"microsoft_allocations", "idx_ms_alloc_active_plus"},
+		{"microsoft_allocations", "idx_ms_alloc_active"},
 		{"microsoft_allocations", "idx_ms_alloc_guard_type"},
 		{"microsoft_allocations", "idx_ms_alloc_product_project"},
 		{"microsoft_allocations", "idx_ms_alloc_explicit_alias_resource"},
@@ -759,14 +650,6 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_ms_alloc_email_status",
 		"EXPLAIN SELECT id FROM microsoft_allocations WHERE email = 'ms1000@example.com' AND status = 'allocated'",
-	)
-	requireExplainUsesIndex(t, db,
-		"idx_alloc_refresh_status_updated",
-		"EXPLAIN SELECT id FROM allocation_candidate_refresh_jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 100",
-	)
-	requireExplainUsesIndex(t, db,
-		"idx_domain_candidates_project_bucket",
-		"EXPLAIN SELECT id FROM domain_routing_candidates WHERE project_id = 10 AND alloc_bucket = MOD(2000, 64) AND status = 'normal' AND purpose = 'sale' ORDER BY last_allocated_at ASC, resource_id ASC LIMIT 4",
 	)
 	requireExplainUsesIndex(t, db,
 		"PRIMARY",

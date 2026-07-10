@@ -41,10 +41,10 @@ type TransactionItemResponse struct {
 }
 
 type TransactionListResponse struct {
-	Items  []TransactionItemResponse `json:"items"`
-	Total  int64                     `json:"total"`
-	Offset int                       `json:"offset"`
-	Limit  int                       `json:"limit"`
+	Items       []TransactionItemResponse `json:"items"`
+	NextAfterID *uint                     `json:"nextAfterId,omitempty"`
+	HasNext     bool                      `json:"hasNext"`
+	Limit       int                       `json:"limit"`
 }
 
 type RechargeItemResponse struct {

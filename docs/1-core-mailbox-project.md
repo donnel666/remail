@@ -195,7 +195,7 @@ email----password----clientID----refreshToken----辅助邮箱
 
 `email/password/clientID/refreshToken` 属于 Core 的 `MicrosoftResource` 资源本体字段。`辅助邮箱` 是后续 BC-MAILTRANSPORT 创建或复用辅助邮箱绑定记录的输入，不新增到 Core 资源表，不进入 Core 资源状态机，也不得出现在资源列表、资源详情、普通日志或导出中。辅助邮箱是否已分配、已发码、已验证或失败，仍由 MailTransport 的辅助邮箱绑定实体和状态机表达。
 
-P1-I3 验证任务必须把上述输入边界落实为代码边界：Core 解析导入 TXT 后，通过 `MicrosoftBindingInputRecorder` Port 把 `ownerUserId/email/bindingAddress` 交给 BC-MAILTRANSPORT；Core 不持久化辅助邮箱状态，也不在资源验证任务中解释 Microsoft 页面绑定细节。ResourceValidation worker 只把资源本体凭据交给 MailTransport ACL，并接收结构化验证结果回写资源状态。Microsoft ACL 内部的第三步项目匹配与关系插入是 BC-MAILMATCH/Project 的后续扩展点，不属于 Core 资源状态机。
+P1-I3 验证任务必须把上述输入边界落实为代码边界：Core 解析导入 TXT 后，通过 `MicrosoftBindingInputRecorder` Port 把 `ownerUserId/email/bindingAddress` 交给 BC-MAILTRANSPORT；Core 不持久化辅助邮箱状态，也不在资源验证任务中解释 Microsoft 页面绑定细节。ResourceValidation worker 只把资源本体凭据交给 MailTransport ACL，并接收结构化验证结果回写资源状态。Microsoft ACL 的第三步把全量历史邮件交给 BC-MAILMATCH，后者按当前项目规则维护 `microsoft_resource_project_matches`；该关系不属于 Core 资源状态机，匹配失败不得改变资源健康。
 
 #### P1-I2 补充设计：资源导入 artifact
 

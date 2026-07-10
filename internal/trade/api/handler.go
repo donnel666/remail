@@ -3,11 +3,13 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
+	"github.com/donnel666/remail/internal/platform"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/gin-gonic/gin"
@@ -52,9 +54,11 @@ func (h *Handler) PostOrder(c *gin.Context) {
 		RequestID:      middleware.GetRequestID(c),
 	})
 	if err != nil {
+		platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
 		writeTradeError(c, err)
 		return
 	}
+	platform.RecordBusinessEvent("checkout", "succeeded")
 	status := http.StatusOK
 	if result.Created {
 		status = http.StatusCreated
@@ -62,14 +66,36 @@ func (h *Handler) PostOrder(c *gin.Context) {
 	c.JSON(status, orderResponse(*result))
 }
 
+func checkoutMetricResult(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrInsufficientBalance):
+		return "insufficient_balance"
+	case errors.Is(err, domain.ErrInsufficientInventory):
+		return "insufficient_inventory"
+	case errors.Is(err, domain.ErrIdempotencyConflict):
+		return "idempotency_conflict"
+	default:
+		return "failed"
+	}
+}
+
 func (h *Handler) GetOrders(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
 		return
 	}
-	offset, limit, ok := parseOffsetLimit(c)
+	_, limit, ok := parseOffsetLimit(c)
 	if !ok {
 		return
+	}
+	var afterID uint
+	if raw := strings.TrimSpace(c.Query("afterId")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || parsed == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		afterID = uint(parsed)
 	}
 	status, ok := parseOrderStatus(c.Query("status"))
 	if !ok {
@@ -83,19 +109,24 @@ func (h *Handler) GetOrders(c *gin.Context) {
 	}
 	role, _ := middleware.GetCurrentRole(c)
 	isAdmin := role.HasAdminAccess()
-	items, total, err := h.mod.UseCase.ListOrders(c.Request.Context(), tradeapp.OrderListFilter{
+	items, nextAfterID, err := h.mod.UseCase.ListOrders(c.Request.Context(), tradeapp.OrderListFilter{
 		UserID:      userID,
 		IsAdmin:     isAdmin,
 		Scope:       strings.TrimSpace(c.DefaultQuery("scope", "mine")),
 		Status:      status,
 		ServiceMode: serviceMode,
 		Search:      strings.TrimSpace(c.Query("search")),
-	}, offset, limit)
+	}, afterID, limit)
 	if err != nil {
 		writeTradeError(c, err)
 		return
 	}
-	resp := OrderListResponse{Items: make([]OrderResponse, len(items)), Total: total, Offset: offset, Limit: limit}
+	resp := OrderListResponse{
+		Items:       make([]OrderResponse, len(items)),
+		NextAfterID: nextAfterID,
+		HasNext:     nextAfterID != nil,
+		Limit:       limit,
+	}
 	for i := range items {
 		resp.Items[i] = orderResponse(items[i])
 	}
@@ -148,7 +179,7 @@ func (h *Handler) PostOrderArchive(c *gin.Context) {
 		writeTradeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+	h.respondOrder(c, http.StatusOK, order.OrderNo, userID, false)
 }
 
 func (h *Handler) PostAdminOrderRefund(c *gin.Context) {
@@ -175,7 +206,7 @@ func (h *Handler) PostAdminOrderRefund(c *gin.Context) {
 		return
 	}
 	_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund", c.Param("orderNo"), "success", "Order refunded.")
-	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+	h.respondOrder(c, http.StatusOK, order.OrderNo, operatorUserID, true)
 }
 
 func (h *Handler) PostAdminOrderTerminate(c *gin.Context) {
@@ -202,7 +233,7 @@ func (h *Handler) PostAdminOrderTerminate(c *gin.Context) {
 		return
 	}
 	_ = h.writeOperationLog(c, operatorUserID, "trade.order.terminate", c.Param("orderNo"), "success", "Order terminated.")
-	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+	h.respondOrder(c, http.StatusOK, order.OrderNo, operatorUserID, true)
 }
 
 func (h *Handler) PostAdminOrderCleanupRetry(c *gin.Context) {
@@ -217,7 +248,7 @@ func (h *Handler) PostAdminOrderCleanupRetry(c *gin.Context) {
 		return
 	}
 	_ = h.writeOperationLog(c, operatorUserID, "trade.order.cleanup_retry", c.Param("orderNo"), "success", "Order cleanup retried.")
-	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+	h.respondOrder(c, http.StatusOK, order.OrderNo, operatorUserID, true)
 }
 
 func (h *Handler) PostAdminOrderRefundRetry(c *gin.Context) {
@@ -244,7 +275,16 @@ func (h *Handler) PostAdminOrderRefundRetry(c *gin.Context) {
 		return
 	}
 	_ = h.writeOperationLog(c, operatorUserID, "trade.order.refund_retry", c.Param("orderNo"), "success", "Order refund retried.")
-	c.JSON(http.StatusOK, orderResponse(tradeapp.CheckoutResult{Order: *order}))
+	h.respondOrder(c, http.StatusOK, order.OrderNo, operatorUserID, true)
+}
+
+func (h *Handler) respondOrder(c *gin.Context, status int, orderNo string, userID uint, isAdmin bool) {
+	result, err := h.mod.UseCase.GetOrder(c.Request.Context(), orderNo, userID, isAdmin)
+	if err != nil {
+		writeTradeError(c, err)
+		return
+	}
+	c.JSON(status, orderResponse(*result))
 }
 
 func (h *Handler) PostAdminOrderTimeoutScan(c *gin.Context) {
@@ -279,6 +319,8 @@ func expireOrdersResponse(result *tradeapp.ExpireOrdersResult) ExpireOrdersRespo
 		PurchaseActivationCompleted: result.PurchaseActivationCompleted,
 		PurchaseWarrantyCompleted:   result.PurchaseWarrantyCompleted,
 		CodeCleaned:                 result.CodeCleaned,
+		CleanupRetried:              result.CleanupRetried,
+		DeliveryReconciled:          result.DeliveryReconciled,
 		Failed:                      result.Failed,
 	}
 }
@@ -359,6 +401,7 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		ServiceMode:          string(order.ServiceMode),
 		SupplyPolicy:         string(order.SupplyPolicy),
 		Status:               string(order.Status),
+		FailureCode:          string(order.FailureCode),
 		PayAmount:            order.PayAmount,
 		RefundAmount:         order.RefundAmount,
 		AllocationType:       allocationType,
@@ -372,6 +415,9 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		APIKeyID:             order.APIKeyID,
 		ServiceCleanupStatus: order.ServiceCleanupStatus,
 		ServiceToken:         result.ServiceToken,
+		HasDelivery:          result.HasDelivery,
+		VerificationCode:     result.VerificationCode,
+		LastMailReceivedAt:   result.LastMailReceivedAt,
 		ArchivedAt:           order.ArchivedAt,
 		CreatedAt:            order.CreatedAt,
 		UpdatedAt:            order.UpdatedAt,

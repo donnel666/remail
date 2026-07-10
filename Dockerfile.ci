@@ -1,0 +1,19 @@
+FROM golang:1.25-alpine AS backend
+WORKDIR /app
+ENV GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN test -s web/dist/index.html \
+    && rm -rf cmd/server/webdist \
+    && mkdir -p cmd/server/webdist \
+    && cp -R web/dist/. cmd/server/webdist/
+RUN CGO_ENABLED=0 go build -o /server ./cmd/server
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=backend /server /server
+COPY --from=backend /app/migrations /app/migrations
+ENV MIGRATIONS_DIR=/app/migrations
+EXPOSE 8080 2525
+ENTRYPOINT ["/server"]

@@ -23,6 +23,7 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 		inboundRows: map[uint64]string{
 			1: oldRecordedKey,
 		},
+		messageCutoffs: make(map[string]time.Time),
 		existingKeys: map[string]struct{}{
 			oldRecordedKey:   {},
 			oldReferencedKey: {},
@@ -48,6 +49,13 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 			},
 		},
 	}
+	for i := 0; i < retentionBatchSize+1; i++ {
+		key := "mailtransport/inbound/2026/03/02/bulk-" + strings.Repeat("0", 5-len(intString(i))) + intString(i) + ".eml"
+		files.objects[key] = domain.PrivateObject{
+			ObjectKey:    key,
+			LastModified: now.AddDate(0, 0, -120),
+		}
+	}
 	service := NewRetentionService(repo, files, nil)
 	service.now = func() time.Time { return now }
 
@@ -58,26 +66,49 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	require.Contains(t, files.objects, oldReferencedKey)
 	require.Contains(t, files.objects, recentOrphanKey)
 	require.Empty(t, repo.inboundRows)
+	require.Equal(t, now.AddDate(0, 0, -3), repo.messageCutoffs["microsoft"])
+	require.Equal(t, now.AddDate(0, 0, -30), repo.messageCutoffs["domain"])
+	for objectKey := range files.objects {
+		require.NotContains(t, objectKey, "/bulk-")
+	}
 }
 
 type retentionRepoStub struct {
-	inboundRows  map[uint64]string
-	existingKeys map[string]struct{}
-}
-
-func (r *retentionRepoStub) DeleteAPILogsBefore(context.Context, time.Time, int) (int64, error) {
-	return 0, nil
+	inboundRows    map[uint64]string
+	messageCutoffs map[string]time.Time
+	existingKeys   map[string]struct{}
 }
 
 func (r *retentionRepoStub) DeleteIdempotencyKeysBefore(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }
 
-func (r *retentionRepoStub) DeleteMailmatchMessagesBefore(context.Context, time.Time, string, int) (int64, error) {
+func (r *retentionRepoStub) DeleteMailmatchMessagesBefore(_ context.Context, before time.Time, resourceType string, _ int) (int64, error) {
+	r.messageCutoffs[resourceType] = before
 	return 0, nil
 }
 
 func (r *retentionRepoStub) DeleteFetchJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (r *retentionRepoStub) DeleteAllocationDailyUsagesBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (r *retentionRepoStub) DeleteResourceValidationJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (r *retentionRepoStub) DeleteProxyCheckJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (r *retentionRepoStub) DeleteOutboundMailsTerminalBefore(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (r *retentionRepoStub) DeleteSystemLogsBefore(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }
 
@@ -133,10 +164,10 @@ func (s *retentionFileStoreStub) DeletePrivate(_ context.Context, objectKey stri
 	return nil
 }
 
-func (s *retentionFileStoreStub) ListPrivate(_ context.Context, prefix string, limit int) ([]domain.PrivateObject, error) {
+func (s *retentionFileStoreStub) ListPrivate(_ context.Context, prefix string, startAfter string, limit int) ([]domain.PrivateObject, error) {
 	items := make([]domain.PrivateObject, 0, len(s.objects))
 	for _, object := range s.objects {
-		if strings.HasPrefix(object.ObjectKey, prefix) {
+		if strings.HasPrefix(object.ObjectKey, prefix) && (startAfter == "" || object.ObjectKey > startAfter) {
 			items = append(items, object)
 		}
 	}
@@ -145,4 +176,18 @@ func (s *retentionFileStoreStub) ListPrivate(_ context.Context, prefix string, l
 		return items[:limit], nil
 	}
 	return items, nil
+}
+
+func intString(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
 }

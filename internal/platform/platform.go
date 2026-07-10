@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -29,6 +30,8 @@ type Platform struct {
 	SessionMaxAge int
 	SessionSecure bool
 	Diagnostics   DiagnosticsConfig
+	workerStop    sync.Once
+	clientClose   sync.Once
 }
 
 // New initializes all external service clients and returns the Platform.
@@ -64,12 +67,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.SMTP = cfg.SMTP
 
 	cleanup := func() {
-		slog.Info("shutting down platform clients")
-		p.AsynqServer.Shutdown()
-		p.Asynq.Close()
-		rdb.Close()
-		sqlDB.Close()
-		slog.Info("platform clients shut down")
+		p.Close()
 	}
 
 	p.SessionMaxAge = cfg.Session.MaxAge
@@ -77,6 +75,39 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.Diagnostics = cfg.Diagnostics
 
 	return p, cleanup, nil
+}
+
+func (p *Platform) ShutdownWorkers() {
+	if p == nil {
+		return
+	}
+	p.workerStop.Do(func() {
+		slog.Info("shutting down task workers")
+		if p.AsynqServer != nil {
+			p.AsynqServer.Shutdown()
+		}
+		slog.Info("task workers shut down")
+	})
+}
+
+func (p *Platform) Close() {
+	if p == nil {
+		return
+	}
+	p.clientClose.Do(func() {
+		slog.Info("shutting down platform clients")
+		p.ShutdownWorkers()
+		if p.Asynq != nil {
+			_ = p.Asynq.Close()
+		}
+		if p.Redis != nil {
+			_ = p.Redis.Close()
+		}
+		if p.SQLDB != nil {
+			_ = p.SQLDB.Close()
+		}
+		slog.Info("platform clients shut down")
+	})
 }
 
 func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Duration) (*gorm.DB, *sql.DB, error) {

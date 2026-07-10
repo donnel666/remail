@@ -1042,40 +1042,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/projects/{projectId}/candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List routing candidates for a project */
-        get: operations["getAdminProjectCandidates"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/projects/{projectId}/candidates/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refresh routing candidates for a project */
-        post: operations["postAdminProjectCandidatesRefresh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/apikeys/usage": {
         parameters: {
             query?: never;
@@ -1299,6 +1265,23 @@ export interface paths {
         };
         /** Read mail messages with service email and token */
         get: operations["getPickupMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pickup/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one mail body with service email and token */
+        get: operations["getPickupMessage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1724,7 +1707,7 @@ export interface components {
             id: number;
             name: string;
             keyPrefix: string;
-            /** @description Plain API key, only returned immediately after creation or on detail view. */
+            /** @description Plain API key returned to its owner on create, list, and detail views. */
             keyPlain?: string;
             enabled: boolean;
             rateLimitPerMinute: number | null;
@@ -1777,6 +1760,8 @@ export interface components {
             purchaseActivationCompleted: number;
             purchaseWarrantyCompleted: number;
             codeCleaned: number;
+            cleanupRetried: number;
+            deliveryReconciled: number;
             failed: number;
         };
         OrderResponse: {
@@ -1793,6 +1778,8 @@ export interface components {
             supplyPolicy: "private_first" | "public_only";
             /** @enum {string} */
             status: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
+            /** @enum {string} */
+            failureCode?: "unknown" | "insufficient_inventory" | "insufficient_balance" | "allocation_failed" | "service_token_failed" | "activation_failed";
             payAmount: string;
             refundAmount: string;
             /** @enum {string} */
@@ -1813,6 +1800,15 @@ export interface components {
             serviceCleanupStatus: string;
             /** @description Service credential used by pickup URLs and later mail-result APIs. */
             serviceToken?: string;
+            /** @description Whether the order already has a matched verification-code delivery. */
+            hasDelivery: boolean;
+            /** @description Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery. */
+            verificationCode?: string;
+            /**
+             * Format: date-time
+             * @description Provider receive time of the delivered message.
+             */
+            lastMailReceivedAt?: string | null;
             /** Format: date-time */
             archivedAt?: string | null;
             /** Format: date-time */
@@ -1822,8 +1818,8 @@ export interface components {
         };
         OrderListResponse: {
             items: components["schemas"]["OrderResponse"][];
-            total: number;
-            offset: number;
+            nextAfterId?: number;
+            hasNext: boolean;
             limit: number;
         };
         OrderEventResponse: {
@@ -1845,13 +1841,17 @@ export interface components {
             limit: number;
         };
         MailContentResponse: {
+            id: number;
             sender: string;
             recipient: string;
             /** Format: date-time */
             receivedAt: string;
             subject: string;
-            body: string;
+            bodyPreview: string;
             verificationCode?: string;
+        };
+        MailContentDetailResponse: components["schemas"]["MailContentResponse"] & {
+            body: string;
         };
         FetchStateResponse: {
             lastJobId?: number;
@@ -1917,8 +1917,8 @@ export interface components {
         };
         TransactionListResponse: {
             items: components["schemas"]["TransactionItem"][];
-            total: number;
-            offset: number;
+            nextAfterId?: number;
+            hasNext: boolean;
             limit: number;
         };
         RechargeItem: {
@@ -2799,40 +2799,6 @@ export interface components {
             mailboxDailyUsed: number;
             mailboxDailyAvailable: number;
             totalAvailable: number;
-        };
-        RoutingCandidate: {
-            id: number;
-            /** @enum {string} */
-            type: "microsoft" | "domain";
-            projectId: number;
-            resourceId: number;
-            address: string;
-            domainSuffix: string;
-            forSale: boolean;
-            qualityScore: number;
-            /** @enum {string} */
-            status: "normal" | "abnormal" | "disabled";
-            bucket: number;
-            /** Format: date-time */
-            lastAllocatedAt?: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        RoutingCandidateListResponse: {
-            items: components["schemas"]["RoutingCandidate"][];
-            total: number;
-            offset: number;
-            limit: number;
-        };
-        CandidateRefreshResponse: {
-            jobId: number;
-            projectId: number;
-            /** @enum {string} */
-            status: "pending" | "queued" | "running" | "succeeded" | "failed";
-            created: boolean;
-            message: string;
         };
         ProxyBindingListResponse: {
             items: components["schemas"]["ProxyBindingItem"][];
@@ -6972,120 +6938,6 @@ export interface operations {
             };
         };
     };
-    getAdminProjectCandidates: {
-        parameters: {
-            query?: {
-                type?: "microsoft" | "domain";
-                offset?: number;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Routing candidate list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RoutingCandidateListResponse"];
-                };
-            };
-            /** @description Invalid path or query parameters */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid candidate type */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    postAdminProjectCandidatesRefresh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
-                "X-CSRF-Token": components["parameters"]["CsrfToken"];
-            };
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Candidate refresh job accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CandidateRefreshResponse"];
-                };
-            };
-            /** @description Invalid path parameters */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Permission denied */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     getApiKeyUsage: {
         parameters: {
             query?: never;
@@ -7383,7 +7235,7 @@ export interface operations {
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
                 search?: string;
-                offset?: number;
+                afterId?: number;
                 limit?: number;
             };
             header?: never;
@@ -8038,6 +7890,96 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Pickup rate limit exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Mail service is temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPickupMessage: {
+        parameters: {
+            query: {
+                email: string;
+                token: string;
+            };
+            header?: never;
+            path: {
+                messageId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token scoped mail message detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailContentDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid or expired credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Message not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Order is not available for mail reading */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Pickup rate limit exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getWallet: {
@@ -8164,7 +8106,7 @@ export interface operations {
             query?: {
                 scope?: "mine" | "all";
                 search?: string;
-                offset?: number;
+                afterId?: number;
                 limit?: number;
             };
             header?: never;

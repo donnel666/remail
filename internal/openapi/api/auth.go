@@ -42,22 +42,7 @@ func LoadAPIKey(useCase *openapiapp.UseCase) gin.HandlerFunc {
 		middleware.SetCurrentUser(c, result.UserID, apiKeyRole(result.Role), "", "")
 		c.Set(contextKeyClientChannel, ClientChannelAPIKey)
 		c.Set(contextKeyAPIKeyID, result.APIKeyID)
-		startedAt := time.Now()
 		defer func() {
-			logCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = useCase.LogAPIRequest(logCtx, openapiapp.LogAPIRequestRequest{
-				PrincipalType:  "api_key",
-				PrincipalID:    result.APIKeyID,
-				UserID:         result.UserID,
-				Path:           apiLogPath(c),
-				Method:         c.Request.Method,
-				IdempotencyKey: c.GetHeader("Idempotency-Key"),
-				HTTPStatus:     c.Writer.Status(),
-				DurationMs:     int(time.Since(startedAt) / time.Millisecond),
-				RequestID:      middleware.GetRequestID(c),
-			})
-			cancel()
-
 			finishCtx, finishCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer finishCancel()
 			_ = useCase.FinishAPIKeyRequest(finishCtx, result.APIKeyID)
@@ -189,14 +174,4 @@ func bearerCredential(c *gin.Context) (plain string, present bool, valid bool) {
 		return strings.TrimSpace(parts[1]), true, true
 	}
 	return "", false, true
-}
-
-func apiLogPath(c *gin.Context) string {
-	if fullPath := strings.TrimSpace(c.FullPath()); fullPath != "" {
-		return fullPath
-	}
-	if c.Request == nil || c.Request.URL == nil {
-		return ""
-	}
-	return c.Request.URL.Path
 }

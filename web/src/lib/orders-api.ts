@@ -34,7 +34,7 @@ export async function createOrder(
 }
 
 export async function listOrders(filter: {
-  offset?: number;
+  afterId?: number;
   limit?: number;
   search?: string;
   serviceMode?: "purchase" | "code";
@@ -45,7 +45,7 @@ export async function listOrders(filter: {
       params: {
         query: {
           scope: "mine",
-          offset: filter.offset ?? 0,
+          afterId: filter.afterId,
           limit: filter.limit ?? 100,
           search: filter.search,
           serviceMode: filter.serviceMode,

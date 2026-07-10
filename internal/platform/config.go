@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
+	Environment string
 	Server      ServerConfig
 	MySQL       MySQLConfig
 	Redis       RedisConfig
@@ -113,6 +115,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		Environment: strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "development"))),
 		Server: ServerConfig{
 			Addr:    getEnv("SERVER_ADDR", ":8080"),
 			Timeout: getDuration("SERVER_TIMEOUT", 30*time.Second),
@@ -166,6 +169,26 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	if c.Environment != "development" && c.Environment != "test" && c.Environment != "production" {
+		return fmt.Errorf("APP_ENV must be development, test, or production")
+	}
+	if c.Environment == "production" && !c.Session.Secure {
+		return fmt.Errorf("SESSION_SECURE must be true in production")
+	}
+	if c.Diagnostics.PprofAddr != "" {
+		host, port, err := net.SplitHostPort(c.Diagnostics.PprofAddr)
+		if err != nil || port == "" {
+			return fmt.Errorf("PPROF_ADDR must be a loopback host:port")
+		}
+		if host == "" {
+			c.Diagnostics.PprofAddr = net.JoinHostPort("127.0.0.1", port)
+		} else if host != "localhost" {
+			ip := net.ParseIP(host)
+			if ip == nil || !ip.IsLoopback() {
+				return fmt.Errorf("PPROF_ADDR must bind to loopback")
+			}
+		}
+	}
 	if c.MySQL.DSN == "" {
 		return fmt.Errorf("MYSQL_DSN is required")
 	}

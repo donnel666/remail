@@ -27,6 +27,7 @@ type OrderModel struct {
 	ServiceMode          string     `gorm:"type:varchar(32);not null;column:service_mode"`
 	SupplyPolicy         string     `gorm:"type:varchar(32);not null;column:supply_policy"`
 	Status               string     `gorm:"type:varchar(32);not null"`
+	FailureCode          string     `gorm:"type:varchar(32);not null;default:'';column:failure_code"`
 	PayAmount            string     `gorm:"type:decimal(18,2);not null;column:pay_amount"`
 	RefundAmount         string     `gorm:"type:decimal(18,2);not null;column:refund_amount"`
 	DebitTxID            *uint      `gorm:"column:debit_tx_id"`
@@ -113,6 +114,7 @@ func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.Create
 			ServiceMode:          string(cmd.ServiceMode),
 			SupplyPolicy:         string(cmd.SupplyPolicy),
 			Status:               string(domain.OrderStatusPendingPayment),
+			FailureCode:          "",
 			PayAmount:            cmd.PayAmount,
 			RefundAmount:         "0.00",
 			ClientChannel:        string(cmd.ClientChannel),
@@ -269,8 +271,9 @@ func (r *Repo) MarkFailed(ctx context.Context, cmd tradeapp.MarkFailedCommand) (
 			return domain.ErrOrderStateConflict
 		}
 		updates := map[string]any{
-			"status":  string(domain.OrderStatusFailed),
-			"version": gorm.Expr("version + 1"),
+			"status":       string(domain.OrderStatusFailed),
+			"failure_code": string(normalizeFailureCode(cmd.FailureCode)),
+			"version":      gorm.Expr("version + 1"),
 		}
 		if cmd.RefundTxID != nil {
 			updates["refund_tx_id"] = *cmd.RefundTxID
@@ -485,7 +488,10 @@ func (r *Repo) MarkServiceCleanup(ctx context.Context, orderNo string, status st
 	}
 	result := r.dbFor(ctx).Model(&OrderModel{}).
 		Where("order_no = ?", orderNo).
-		Update("service_cleanup_status", status)
+		Updates(map[string]any{
+			"service_cleanup_status": status,
+			"updated_at":             time.Now().UTC(),
+		})
 	if result.Error != nil {
 		return fmt.Errorf("mark order service cleanup: %w", result.Error)
 	}
@@ -527,26 +533,29 @@ func (r *Repo) Archive(ctx context.Context, orderNo string, userID uint, archive
 	return &order, nil
 }
 
-func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, offset, limit int) ([]domain.Order, int64, error) {
-	query := r.dbFor(ctx).Model(&OrderModel{})
-	query = applyOrderFilter(query, filter)
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count orders: %w", err)
+func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, afterID uint, limit int) ([]domain.Order, *uint, error) {
+	query := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), filter)
+	if afterID > 0 {
+		query = query.Where("id < ?", afterID)
 	}
 	var models []OrderModel
-	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), filter).
-		Order("created_at DESC, id DESC").
-		Offset(offset).
-		Limit(limit).
+	if err := query.
+		Order("id DESC").
+		Limit(limit + 1).
 		Find(&models).Error; err != nil {
-		return nil, 0, fmt.Errorf("list orders: %w", err)
+		return nil, nil, fmt.Errorf("list orders: %w", err)
+	}
+	var nextAfterID *uint
+	if len(models) > limit {
+		models = models[:limit]
+		next := models[len(models)-1].ID
+		nextAfterID = &next
 	}
 	items := make([]domain.Order, len(models))
 	for i := range models {
 		items[i] = orderModelToDomain(models[i])
 	}
-	return items, total, nil
+	return items, nextAfterID, nil
 }
 
 func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error) {
@@ -611,6 +620,25 @@ func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Tim
 		"none",
 		now.UTC(),
 	)
+}
+
+func (r *Repo) ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var orderNos []string
+	if err := r.dbFor(ctx).Model(&OrderModel{}).
+		Where("service_cleanup_status = ? AND (status IN ? OR (status = ? AND refund_tx_id IS NOT NULL))",
+			"partial_failure",
+			[]string{string(domain.OrderStatusRefunded), string(domain.OrderStatusClosed)},
+			string(domain.OrderStatusFailed),
+		).
+		Order("updated_at ASC, id ASC").
+		Limit(limit).
+		Pluck("order_no", &orderNos).Error; err != nil {
+		return nil, fmt.Errorf("list partial cleanup order numbers: %w", err)
+	}
+	return orderNos, nil
 }
 
 func (r *Repo) listOrderNos(ctx context.Context, limit int, condition string, args ...any) ([]string, error) {
@@ -687,10 +715,10 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 			return nil
 		}
 		current := domain.OrderStatus(model.Status)
-		if current != domain.OrderStatusActive {
+		if current != domain.OrderStatusActive && current != domain.OrderStatusCompleted {
 			return nil
 		}
-		if model.ActivatedAt != nil && model.AfterSaleUntil != nil && !afterSaleUntil.After(*model.AfterSaleUntil) {
+		if model.ActivatedAt != nil {
 			return nil
 		}
 		previous := current
@@ -700,7 +728,10 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 			"version":          gorm.Expr("version + 1"),
 		}
 		result := tx.Model(&OrderModel{}).
-			Where("order_no = ? AND service_mode = ? AND status = ?", orderNo, string(domain.ServiceModePurchase), string(domain.OrderStatusActive)).
+			Where("order_no = ? AND service_mode = ? AND status IN ?", orderNo, string(domain.ServiceModePurchase), []string{
+				string(domain.OrderStatusActive),
+				string(domain.OrderStatusCompleted),
+			}).
 			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("activate purchase order: %w", result.Error)
@@ -713,7 +744,7 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 		}
 		changed = true
 		reason := "Purchase activated by matched code at " + matchedAt.UTC().Format(time.RFC3339)
-		return r.appendEvent(txCtx, tx, orderNo, "order.purchase_activated", &previous, ptrStatus(domain.OrderStatusActive), domain.OperatorTypeSystem, reason)
+		return r.appendEvent(txCtx, tx, orderNo, "order.purchase_activated", &previous, &previous, domain.OperatorTypeSystem, reason)
 	})
 	if err != nil {
 		return nil, false, err
@@ -802,6 +833,7 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		ServiceMode:          domain.ServiceMode(model.ServiceMode),
 		SupplyPolicy:         domain.SupplyPolicy(model.SupplyPolicy),
 		Status:               domain.OrderStatus(model.Status),
+		FailureCode:          domain.OrderFailureCode(model.FailureCode),
 		PayAmount:            model.PayAmount,
 		RefundAmount:         model.RefundAmount,
 		DebitTxID:            model.DebitTxID,
@@ -852,6 +884,19 @@ func eventModelToDomain(model OrderEventModel) domain.OrderEvent {
 		Reason:       model.Reason,
 		EventContext: contextValue,
 		CreatedAt:    model.CreatedAt,
+	}
+}
+
+func normalizeFailureCode(code domain.OrderFailureCode) domain.OrderFailureCode {
+	switch code {
+	case domain.OrderFailureInsufficientInventory,
+		domain.OrderFailureInsufficientBalance,
+		domain.OrderFailureAllocation,
+		domain.OrderFailureServiceToken,
+		domain.OrderFailureActivation:
+		return code
+	default:
+		return domain.OrderFailureUnknown
 	}
 }
 

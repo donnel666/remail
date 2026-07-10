@@ -235,28 +235,27 @@ func (r *BillingRepo) GetReferralSummary(ctx context.Context, userID uint) (*dom
 	}, nil
 }
 
-func (r *BillingRepo) ListTransactions(ctx context.Context, filter billingapp.TransactionListFilter, offset, limit int) ([]domain.Transaction, error) {
+func (r *BillingRepo) ListTransactions(ctx context.Context, filter billingapp.TransactionListFilter, afterID uint, limit int) ([]domain.Transaction, *uint, error) {
 	var models []WalletTransactionModel
 	query := r.db.WithContext(ctx).Model(&WalletTransactionModel{})
 	query = applyTransactionFilter(query, filter)
-	if err := query.Order("created_at DESC, id DESC").Offset(offset).Limit(limit).Find(&models).Error; err != nil {
-		return nil, fmt.Errorf("list wallet transactions: %w", err)
+	if afterID > 0 {
+		query = query.Where("id < ?", afterID)
+	}
+	if err := query.Order("id DESC").Limit(limit + 1).Find(&models).Error; err != nil {
+		return nil, nil, fmt.Errorf("list wallet transactions: %w", err)
+	}
+	var nextAfterID *uint
+	if len(models) > limit {
+		models = models[:limit]
+		next := models[len(models)-1].ID
+		nextAfterID = &next
 	}
 	items := make([]domain.Transaction, len(models))
 	for i := range models {
 		items[i] = transactionModelToDomain(models[i])
 	}
-	return items, nil
-}
-
-func (r *BillingRepo) CountTransactions(ctx context.Context, filter billingapp.TransactionListFilter) (int64, error) {
-	var total int64
-	query := r.db.WithContext(ctx).Model(&WalletTransactionModel{})
-	query = applyTransactionFilter(query, filter)
-	if err := query.Count(&total).Error; err != nil {
-		return 0, fmt.Errorf("count wallet transactions: %w", err)
-	}
-	return total, nil
+	return items, nextAfterID, nil
 }
 
 func (r *BillingRepo) ListRecharges(ctx context.Context, filter billingapp.RechargeListFilter, offset, limit int) ([]domain.Recharge, error) {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
@@ -17,10 +18,14 @@ const (
 )
 
 type RetentionRepository interface {
-	DeleteAPILogsBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteIdempotencyKeysBefore(ctx context.Context, before time.Time, limit int) (int64, error)
-	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, status string, limit int) (int64, error)
+	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error)
 	DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	DeleteResourceValidationJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	DeleteSystemLogsBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	ListInboundMailObjectsBefore(ctx context.Context, before time.Time, limit int) ([]RetentionInboundMailObject, error)
 	ListExistingInboundObjectKeys(ctx context.Context, objectKeys []string) (map[string]struct{}, error)
 	DeleteInboundMailsByID(ctx context.Context, ids []uint64) (int64, error)
@@ -93,26 +98,39 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 		return
 	}
 	now := s.now()
-	summary := make([]string, 0, 7)
-	summary = append(summary, s.deleteLoop(ctx, "api_logs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteAPILogsBefore(ctx, before, retentionBatchSize)
-	}))
+	summary := make([]string, 0, 12)
 	summary = append(summary, s.deleteLoop(ctx, "idempotency_keys", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteIdempotencyKeysBefore(ctx, before, retentionBatchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_ignored", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "ignored", retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_microsoft", now.AddDate(0, 0, -3), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "microsoft", retentionBatchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_all", now.AddDate(0, 0, -180), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "", retentionBatchSize)
+	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", retentionBatchSize)
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_fetch_jobs", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteFetchJobsTerminalBefore(ctx, before, retentionBatchSize)
 	}))
-	inboundBefore := now.AddDate(0, 0, -90)
+	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, retentionBatchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "resource_validation_jobs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteResourceValidationJobsTerminalBefore(ctx, before, retentionBatchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "proxy_check_jobs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteProxyCheckJobsTerminalBefore(ctx, before, retentionBatchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "outbound_mails", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteOutboundMailsTerminalBefore(ctx, before, retentionBatchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "system_logs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteSystemLogsBefore(ctx, before, retentionBatchSize)
+	}))
+	inboundBefore := now.AddDate(0, 0, -30)
 	summary = append(summary, s.deleteInboundMails(ctx, inboundBefore))
 	summary = append(summary, s.deleteOrphanInboundObjects(ctx, inboundBefore))
 	s.writeSummary(ctx, strings.Join(summary, "; "))
+	platform.RecordBusinessEvent("retention", "completed")
 }
 
 func (s *RetentionService) deleteLoop(ctx context.Context, name string, before time.Time, deleteBatch func(context.Context, time.Time) (int64, error)) string {
@@ -148,11 +166,6 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 		}
 		ids := make([]uint64, 0, len(objects))
 		for _, object := range objects {
-			if s.files != nil {
-				if err := s.files.DeletePrivate(ctx, object.ObjectKey); err != nil {
-					return fmt.Sprintf("inbound_mails=%d object_error=%s", total, safeRetentionDetail(err))
-				}
-			}
 			ids = append(ids, object.ID)
 		}
 		deleted, err := s.repo.DeleteInboundMailsByID(ctx, ids)
@@ -160,6 +173,13 @@ func (s *RetentionService) deleteInboundMails(ctx context.Context, before time.T
 			return fmt.Sprintf("inbound_mails=%d error=%s", total, safeRetentionDetail(err))
 		}
 		total += deleted
+		if s.files != nil {
+			for _, object := range objects {
+				if err := s.files.DeletePrivate(ctx, object.ObjectKey); err != nil {
+					return fmt.Sprintf("inbound_mails=%d object_error=%s", total, safeRetentionDetail(err))
+				}
+			}
+		}
 		if len(objects) < retentionBatchSize {
 			return fmt.Sprintf("inbound_mails=%d", total)
 		}
@@ -171,37 +191,49 @@ func (s *RetentionService) deleteOrphanInboundObjects(ctx context.Context, befor
 	if s.files == nil {
 		return "inbound_orphans=0 no_file_store"
 	}
-	objects, err := s.files.ListPrivate(ctx, inboundObjectPrefix, retentionBatchSize)
-	if err != nil {
-		return fmt.Sprintf("inbound_orphans=0 error=%s", safeRetentionDetail(err))
-	}
-	candidates := make([]string, 0, len(objects))
-	for _, object := range objects {
-		if inboundObjectBefore(object, before) {
-			candidates = append(candidates, object.ObjectKey)
-		}
-	}
-	if len(candidates) == 0 {
-		return "inbound_orphans=0"
-	}
-	existing, err := s.repo.ListExistingInboundObjectKeys(ctx, candidates)
-	if err != nil {
-		return fmt.Sprintf("inbound_orphans=0 error=%s", safeRetentionDetail(err))
-	}
-	var deleted int64
-	for _, objectKey := range candidates {
+	var total int64
+	startAfter := ""
+	for {
 		if ctx.Err() != nil {
-			return fmt.Sprintf("inbound_orphans=%d canceled", deleted)
+			return fmt.Sprintf("inbound_orphans=%d canceled", total)
 		}
-		if _, ok := existing[objectKey]; ok {
-			continue
+		objects, err := s.files.ListPrivate(ctx, inboundObjectPrefix, startAfter, retentionBatchSize)
+		if err != nil {
+			return fmt.Sprintf("inbound_orphans=%d error=%s", total, safeRetentionDetail(err))
 		}
-		if err := s.files.DeletePrivate(ctx, objectKey); err != nil {
-			return fmt.Sprintf("inbound_orphans=%d object_error=%s", deleted, safeRetentionDetail(err))
+		if len(objects) == 0 {
+			return fmt.Sprintf("inbound_orphans=%d", total)
 		}
-		deleted++
+		candidates := make([]string, 0, len(objects))
+		for _, object := range objects {
+			if inboundObjectBefore(object, before) {
+				candidates = append(candidates, object.ObjectKey)
+			}
+		}
+		if len(candidates) > 0 {
+			existing, err := s.repo.ListExistingInboundObjectKeys(ctx, candidates)
+			if err != nil {
+				return fmt.Sprintf("inbound_orphans=%d error=%s", total, safeRetentionDetail(err))
+			}
+			for _, objectKey := range candidates {
+				if ctx.Err() != nil {
+					return fmt.Sprintf("inbound_orphans=%d canceled", total)
+				}
+				if _, ok := existing[objectKey]; ok {
+					continue
+				}
+				if err := s.files.DeletePrivate(ctx, objectKey); err != nil {
+					return fmt.Sprintf("inbound_orphans=%d object_error=%s", total, safeRetentionDetail(err))
+				}
+				total++
+			}
+		}
+		if len(objects) < retentionBatchSize {
+			return fmt.Sprintf("inbound_orphans=%d", total)
+		}
+		startAfter = objects[len(objects)-1].ObjectKey
+		sleepOrDone(ctx, retentionBatchSleep)
 	}
-	return fmt.Sprintf("inbound_orphans=%d", deleted)
 }
 
 func inboundObjectBefore(object domain.PrivateObject, before time.Time) bool {

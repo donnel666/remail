@@ -437,9 +437,17 @@ LIMIT 1`, productID, buyerUserID).Scan(&item).Error
 	}, nil
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
-	args := []any{}
-	where := []string{"ms.status = 'normal'"}
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+	args := []any{projectID}
+	where := []string{
+		"ms.status = 'normal'",
+		`NOT EXISTS (
+			SELECT 1
+			FROM microsoft_resource_project_matches mrpm
+			WHERE mrpm.resource_id = ms.id
+			  AND mrpm.project_id = ?
+		)`,
+	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "ms.email_domain = ?")
 		args = append(args, suffix)
@@ -511,11 +519,17 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
-	args := []any{resourceID}
+func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
+	args := []any{resourceID, projectID}
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
+		`NOT EXISTS (
+			SELECT 1
+			FROM microsoft_resource_project_matches mrpm
+			WHERE mrpm.resource_id = ms.id
+			  AND mrpm.project_id = ?
+		)`,
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "ms.email_domain = ?")
@@ -624,9 +638,9 @@ WHERE ea.resource_id = ?
   AND NOT EXISTS (
       SELECT 1
       FROM microsoft_allocations ma
-      WHERE ma.explicit_alias_id = ea.id
-        AND ma.mailbox = 'alias'
-        AND ma.status = 'allocated'
+      WHERE ma.active_kind = 2
+        AND ma.active_project_id = 0
+        AND ma.active_entity_id = ea.id
   )
 ORDER BY ea.id ASC
 LIMIT 1`, resourceID).Scan(&candidate).Error
@@ -656,14 +670,18 @@ FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error
 }
 
 func (r *Repo) FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
-	return r.findReusableProjectAlias(ctx, "dot_aliases", "dot_alias_id", "dot", projectID, resourceID)
+	return r.findReusableProjectAlias(ctx, "dot_aliases", "dot", projectID, resourceID)
 }
 
 func (r *Repo) FindReusablePlusAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
-	return r.findReusableProjectAlias(ctx, "plus_aliases", "plus_alias_id", "plus", projectID, resourceID)
+	return r.findReusableProjectAlias(ctx, "plus_aliases", "plus", projectID, resourceID)
 }
 
-func (r *Repo) findReusableProjectAlias(ctx context.Context, table, column, mailbox string, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
+func (r *Repo) findReusableProjectAlias(ctx context.Context, table, mailbox string, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
+	activeKind := 3
+	if mailbox == "plus" {
+		activeKind = 4
+	}
 	var candidate allocapp.AliasCandidate
 	query := fmt.Sprintf(`
 SELECT a.id AS id, a.email AS email
@@ -673,14 +691,13 @@ WHERE a.resource_id = ?
   AND NOT EXISTS (
       SELECT 1
       FROM microsoft_allocations ma
-      WHERE ma.%s = a.id
-        AND ma.project_id = ?
-        AND ma.mailbox = ?
-        AND ma.status = 'allocated'
+      WHERE ma.active_kind = ?
+        AND ma.active_project_id = ?
+        AND ma.active_entity_id = a.id
   )
 ORDER BY a.id ASC
-LIMIT 1`, table, column)
-	if err := r.dbFor(ctx).Raw(query, resourceID, projectID, mailbox).Scan(&candidate).Error; err != nil {
+LIMIT 1`, table)
+	if err := r.dbFor(ctx).Raw(query, resourceID, activeKind, projectID).Scan(&candidate).Error; err != nil {
 		return nil, fmt.Errorf("find reusable %s alias: %w", mailbox, err)
 	}
 	if candidate.ID == 0 {
@@ -881,7 +898,7 @@ func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.Ge
 	return nil
 }
 
-func (r *Repo) TouchMicrosoftAllocated(ctx context.Context, projectID uint, resourceID uint, allocatedAt time.Time) error {
+func (r *Repo) TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error {
 	db := r.dbFor(ctx)
 	if err := db.Model(&struct{}{}).Table("microsoft_resources").
 		Where("id = ?", resourceID).

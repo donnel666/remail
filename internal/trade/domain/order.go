@@ -39,6 +39,17 @@ const (
 	OrderStatusClosed         OrderStatus = "closed"
 )
 
+type OrderFailureCode string
+
+const (
+	OrderFailureUnknown               OrderFailureCode = "unknown"
+	OrderFailureInsufficientInventory OrderFailureCode = "insufficient_inventory"
+	OrderFailureInsufficientBalance   OrderFailureCode = "insufficient_balance"
+	OrderFailureAllocation            OrderFailureCode = "allocation_failed"
+	OrderFailureServiceToken          OrderFailureCode = "service_token_failed"
+	OrderFailureActivation            OrderFailureCode = "activation_failed"
+)
+
 type ClientChannel string
 
 const (
@@ -72,6 +83,7 @@ type Order struct {
 	ServiceMode          ServiceMode
 	SupplyPolicy         SupplyPolicy
 	Status               OrderStatus
+	FailureCode          OrderFailureCode
 	PayAmount            string
 	RefundAmount         string
 	DebitTxID            *uint

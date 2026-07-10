@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -83,12 +85,21 @@ type OrderTokenPort interface {
 	DisableOrderToken(ctx context.Context, orderNo string, reason string) error
 }
 
-type OrderSnapshotProof struct {
+type OrderDeliverySummary struct {
+	VerificationCode string
+	ReceivedAt       time.Time
+}
+
+type OrderDeliveryNotification struct {
+	OrderID    uint
+	OrderNo    string
 	ReceivedAt time.Time
 }
 
-type OrderSnapshotPort interface {
-	FindOrderSnapshotProof(ctx context.Context, orderNo string) (*OrderSnapshotProof, error)
+type OrderDeliveryPort interface {
+	FindOrderDelivery(ctx context.Context, orderID uint) (*OrderDeliverySummary, error)
+	ListOrderDeliveries(ctx context.Context, orderIDs []uint) (map[uint]OrderDeliverySummary, error)
+	ListPendingNotifications(ctx context.Context, afterOrderID uint, limit int) ([]OrderDeliveryNotification, error)
 }
 
 type SystemLogPort interface {
@@ -109,7 +120,7 @@ type Repository interface {
 	CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
 	MarkServiceCleanup(ctx context.Context, orderNo string, status string) error
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
-	ListOrders(ctx context.Context, filter OrderListFilter, offset, limit int) ([]domain.Order, int64, error)
+	ListOrders(ctx context.Context, filter OrderListFilter, afterID uint, limit int) ([]domain.Order, *uint, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
 	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
 	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error)
@@ -117,6 +128,7 @@ type Repository interface {
 	ListExpiredPurchaseActivationOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error)
+	ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]string, error)
 }
 
 type CreatePendingOrderCommand struct {
@@ -155,6 +167,7 @@ type MarkFailedCommand struct {
 	OrderNo      string
 	RefundTxID   *uint
 	RefundAmount string
+	FailureCode  domain.OrderFailureCode
 	Reason       string
 	Now          time.Time
 }
@@ -190,9 +203,12 @@ type CheckoutRequest struct {
 }
 
 type CheckoutResult struct {
-	Order        domain.Order
-	ServiceToken string
-	Created      bool
+	Order              domain.Order
+	ServiceToken       string
+	Created            bool
+	HasDelivery        bool
+	VerificationCode   string
+	LastMailReceivedAt *time.Time
 }
 
 type MatchCodeResultRequest struct {
@@ -213,18 +229,21 @@ type ExpireOrdersResult struct {
 	PurchaseActivationCompleted int
 	PurchaseWarrantyCompleted   int
 	CodeCleaned                 int
+	CleanupRetried              int
+	DeliveryReconciled          int
 	Failed                      int
 }
 
 type UseCase struct {
-	repo       Repository
-	ordering   OrderingPort
-	wallet     WalletPort
-	allocation AllocationPort
-	tokens     OrderTokenPort
-	snapshots  OrderSnapshotPort
-	systemLogs SystemLogPort
-	now        func() time.Time
+	repo                       Repository
+	ordering                   OrderingPort
+	wallet                     WalletPort
+	allocation                 AllocationPort
+	tokens                     OrderTokenPort
+	deliveries                 OrderDeliveryPort
+	systemLogs                 SystemLogPort
+	now                        func() time.Time
+	deliveryNotificationCursor atomic.Uint64
 }
 
 func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, allocation AllocationPort, tokens OrderTokenPort) *UseCase {
@@ -238,8 +257,8 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 	}
 }
 
-func (uc *UseCase) SetOrderSnapshotPort(snapshots OrderSnapshotPort) {
-	uc.snapshots = snapshots
+func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
+	uc.deliveries = deliveries
 }
 
 func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
@@ -337,25 +356,61 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 			result.ServiceToken = token.TokenPlain
 		}
 	}
+	if err := uc.attachOrderDelivery(ctx, result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
-func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offset, limit int) ([]CheckoutResult, int64, error) {
+func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, afterID uint, limit int) ([]CheckoutResult, *uint, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	if offset < 0 {
-		offset = 0
-	}
-	items, total, err := uc.repo.ListOrders(ctx, filter, offset, limit)
+	items, nextAfterID, err := uc.repo.ListOrders(ctx, filter, afterID, limit)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	results := make([]CheckoutResult, len(items))
+	orderIDs := make([]uint, len(items))
 	for i := range items {
 		results[i].Order = items[i]
+		orderIDs[i] = items[i].ID
 	}
-	return results, total, nil
+	if uc.deliveries == nil || len(orderIDs) == 0 {
+		return results, nextAfterID, nil
+	}
+	deliveries, err := uc.deliveries.ListOrderDeliveries(ctx, orderIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range results {
+		attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
+	}
+	return results, nextAfterID, nil
+}
+
+func (uc *UseCase) attachOrderDelivery(ctx context.Context, result *CheckoutResult) error {
+	if uc.deliveries == nil || result == nil || result.Order.ID == 0 {
+		return nil
+	}
+	delivery, err := uc.deliveries.FindOrderDelivery(ctx, result.Order.ID)
+	if err != nil {
+		return err
+	}
+	if delivery != nil {
+		attachOrderDeliverySummary(result, *delivery)
+	}
+	return nil
+}
+
+func attachOrderDeliverySummary(result *CheckoutResult, delivery OrderDeliverySummary) {
+	if result == nil || strings.TrimSpace(delivery.VerificationCode) == "" || delivery.ReceivedAt.IsZero() {
+		return
+	}
+	receivedAt := delivery.ReceivedAt.UTC()
+	result.HasDelivery = true
+	result.VerificationCode = delivery.VerificationCode
+	result.LastMailReceivedAt = &receivedAt
 }
 
 func (uc *UseCase) ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error) {
@@ -396,7 +451,7 @@ func (uc *UseCase) AdminRefundOrder(ctx context.Context, req AdminOrderCommandRe
 	if err != nil || order == nil || !changed {
 		return order, err
 	}
-	if cleanupErr := uc.cleanupOrderService(ctx, *order, order.ServiceMode == domain.ServiceModeCode, "Order refunded.", req.RequestID); cleanupErr != nil {
+	if cleanupErr := uc.cleanupOrderService(ctx, *order, true, "Order refunded.", req.RequestID); cleanupErr != nil {
 		return order, cleanupErr
 	}
 	return order, nil
@@ -500,6 +555,23 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 	}
 	now := uc.now()
 	result := &ExpireOrdersResult{}
+	if uc.deliveries != nil {
+		pendingNotifications, err := uc.deliveries.ListPendingNotifications(ctx, uint(uc.deliveryNotificationCursor.Load()), limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, notification := range pendingNotifications {
+			uc.deliveryNotificationCursor.Store(uint64(notification.OrderID))
+			if err := uc.NotifyMatchedCode(ctx, MatchCodeResultRequest{
+				OrderNo:   notification.OrderNo,
+				MatchedAt: notification.ReceivedAt,
+			}); err != nil {
+				result.Failed++
+				continue
+			}
+			result.DeliveryReconciled++
+		}
+	}
 	codeExpired, err := uc.repo.ListExpiredCodeOrderNos(ctx, now, limit)
 	if err != nil {
 		return nil, err
@@ -544,6 +616,22 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		}
 		result.CodeCleaned++
 	}
+	partialCleanup, err := uc.repo.ListPartialCleanupOrderNos(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range partialCleanup {
+		order, findErr := uc.repo.FindOrder(ctx, orderNo)
+		if findErr != nil {
+			result.Failed++
+			continue
+		}
+		if cleanupErr := uc.cleanupOrderService(ctx, *order, cleanupRetryShouldReleaseAllocation(*order), "Order cleanup automatically retried.", ""); cleanupErr != nil {
+			result.Failed++
+			continue
+		}
+		result.CleanupRetried++
+	}
 	return result, nil
 }
 
@@ -561,6 +649,12 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		return err
 	}
 	if order.ServiceMode == domain.ServiceModePurchase {
+		if order.ActivatedAt != nil {
+			return nil
+		}
+		if order.ReceiveUntil != nil && matchedAt.After(order.ReceiveUntil.UTC()) {
+			return nil
+		}
 		quote, err := uc.ordering.GetOrderingQuote(ctx, order.ProjectID, order.ProjectProductID, order.UserID, domain.ServiceModePurchase)
 		if err != nil {
 			return err
@@ -594,13 +688,17 @@ type refundOrderRequest struct {
 }
 
 func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, now time.Time) error {
-	if uc.snapshots != nil {
-		proof, err := uc.snapshots.FindOrderSnapshotProof(ctx, orderNo)
+	if uc.deliveries != nil {
+		order, err := uc.repo.FindOrder(ctx, orderNo)
 		if err != nil {
 			return err
 		}
-		if proof != nil {
-			matchedAt := proof.ReceivedAt
+		delivery, err := uc.deliveries.FindOrderDelivery(ctx, order.ID)
+		if err != nil {
+			return err
+		}
+		if delivery != nil {
+			matchedAt := delivery.ReceivedAt
 			if matchedAt.IsZero() {
 				matchedAt = now
 			}
@@ -751,7 +849,16 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 		case domain.OrderStatusPendingPayment:
 			allocation, err := uc.allocate(ctx, order, emailSuffix)
 			if err != nil {
-				_, _ = uc.repo.MarkFailed(ctx, MarkFailedCommand{OrderNo: order.OrderNo, Reason: "Allocation failed.", Now: uc.now()})
+				if errors.Is(err, domain.ErrInsufficientInventory) {
+					if _, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
+						OrderNo:     order.OrderNo,
+						FailureCode: domain.OrderFailureInsufficientInventory,
+						Reason:      "Allocation failed.",
+						Now:         uc.now(),
+					}); markErr != nil {
+						return nil, markErr
+					}
+				}
 				return nil, err
 			}
 			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
@@ -763,9 +870,18 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				RequestID:      requestID,
 			})
 			if err != nil {
-				if err == domain.ErrInsufficientBalance {
-					_ = uc.allocation.ReleaseByOrder(ctx, order.OrderNo)
-					_, _ = uc.repo.MarkFailed(ctx, MarkFailedCommand{OrderNo: order.OrderNo, Reason: "Payment failed.", Now: uc.now()})
+				if errors.Is(err, domain.ErrInsufficientBalance) {
+					if releaseErr := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); releaseErr != nil {
+						return nil, releaseErr
+					}
+					if _, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
+						OrderNo:     order.OrderNo,
+						FailureCode: domain.OrderFailureInsufficientBalance,
+						Reason:      "Payment failed.",
+						Now:         uc.now(),
+					}); markErr != nil {
+						return nil, markErr
+					}
 				}
 				return nil, err
 			}
@@ -790,7 +906,11 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 		case domain.OrderStatusPaid:
 			allocation, err := uc.allocate(ctx, order, emailSuffix)
 			if err != nil {
-				if _, refundErr := uc.refundPaidOrder(ctx, order, "Allocation failed."); refundErr != nil {
+				failureCode := domain.OrderFailureAllocation
+				if errors.Is(err, domain.ErrInsufficientInventory) {
+					failureCode = domain.OrderFailureInsufficientInventory
+				}
+				if _, refundErr := uc.refundPaidOrder(ctx, order, failureCode, "Allocation failed."); refundErr != nil {
 					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
 				}
 				return nil, err
@@ -800,8 +920,10 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 			afterSaleUntil := initialAfterSaleUntil(receiveUntil, order.ServiceMode)
 			token, err := uc.tokens.IssueOrderToken(ctx, order.OrderNo, tokenExpireAt(order.ServiceMode, receiveUntil))
 			if err != nil {
-				_ = uc.allocation.ReleaseByOrder(ctx, order.OrderNo)
-				if _, refundErr := uc.refundPaidOrder(ctx, order, "Service token failed."); refundErr != nil {
+				if releaseErr := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); releaseErr != nil {
+					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, releaseErr)
+				}
+				if _, refundErr := uc.refundPaidOrder(ctx, order, domain.OrderFailureServiceToken, "Service token failed."); refundErr != nil {
 					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
 				}
 				return nil, err
@@ -824,9 +946,13 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 					order = *reloaded
 					continue
 				}
-				_ = uc.tokens.DisableOrderToken(ctx, order.OrderNo, "Order activation failed.")
-				_ = uc.allocation.ReleaseByOrder(ctx, order.OrderNo)
-				if _, refundErr := uc.refundPaidOrder(ctx, order, "Order activation failed."); refundErr != nil {
+				if disableErr := uc.tokens.DisableOrderToken(ctx, order.OrderNo, "Order activation failed."); disableErr != nil {
+					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, disableErr)
+				}
+				if releaseErr := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); releaseErr != nil {
+					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, releaseErr)
+				}
+				if _, refundErr := uc.refundPaidOrder(ctx, order, domain.OrderFailureActivation, "Order activation failed."); refundErr != nil {
 					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
 				}
 				return nil, err
@@ -845,6 +971,9 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				}
 			}
 			return &CheckoutResult{Order: order, ServiceToken: token.TokenPlain}, nil
+
+		case domain.OrderStatusFailed:
+			return nil, checkoutErrorForFailedOrder(order)
 
 		default:
 			return &CheckoutResult{Order: order}, nil
@@ -887,7 +1016,7 @@ func checkoutPayAmount(listedAmount string, scope SupplyScope) string {
 	return listedAmount
 }
 
-func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, reason string) (*domain.Order, error) {
+func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, failureCode domain.OrderFailureCode, reason string) (*domain.Order, error) {
 	refund, err := uc.wallet.RefundConsumer(ctx, WalletCommand{
 		UserID:         order.UserID,
 		Amount:         order.PayAmount,
@@ -901,6 +1030,7 @@ func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, reas
 		OrderNo:      order.OrderNo,
 		RefundTxID:   &refund.ID,
 		RefundAmount: order.PayAmount,
+		FailureCode:  failureCode,
 		Reason:       reason,
 		Now:          uc.now(),
 	})
@@ -961,7 +1091,18 @@ func checkoutFingerprint(parts ...any) string {
 }
 
 func shouldCommitCheckoutError(err error) bool {
-	return err == domain.ErrInsufficientBalance || err == domain.ErrInsufficientInventory
+	return errors.Is(err, domain.ErrInsufficientBalance) || errors.Is(err, domain.ErrInsufficientInventory)
+}
+
+func checkoutErrorForFailedOrder(order domain.Order) error {
+	switch order.FailureCode {
+	case domain.OrderFailureInsufficientBalance:
+		return domain.ErrInsufficientBalance
+	case domain.OrderFailureInsufficientInventory:
+		return domain.ErrInsufficientInventory
+	default:
+		return domain.ErrInvalidOrderRequest
+	}
 }
 
 func apiKeyFingerprint(apiKeyID *uint) uint {

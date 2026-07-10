@@ -71,13 +71,13 @@ flowchart LR
 | BC-IAM | `User`、`Role`、`Permission`、`Invite` | 身份、登录会话、RBAC、首次激活 | 钱包、订单、资源 |
 | BC-GOVERNANCE | `Setting`、`OperationLog`、`SystemLog`、`Announcement`、`Notification`、`HelpArticle`、`TaskView` | 配置、日志、内容运营、任务可观测和后台命令入口 | 业务状态机 |
 | BC-CORE | `EmailResource`、`MicrosoftResource`、`DomainResource`、`Project` | 资源状态、别名池、项目商品、项目访问、邮件规则 | 订单、分配事实、邮件正文、余额 |
-| BC-ALLOC | `RoutingCandidate`、`MicrosoftAllocation`、`DomainAllocation` | 一单一资源、分配唯一性、释放 | 资源验证、订单状态、钱包 |
+| BC-ALLOC | `MicrosoftAllocation`、`DomainAllocation` | 一单一资源、分配唯一性、历史项目排除、释放 | 资源验证、订单状态、钱包 |
 | BC-BILLING | `Wallet`、`Transaction`、`Recharge`、`CardKey`、`Settlement`、`Withdrawal` | 多额度桶、不可变流水、充值、卡密、结算、提现 | 订单为什么扣款或退款 |
 | BC-TRADE | `Order`、`OrderEvent` | 订单状态机、扣款/退款绑定、分配外键、服务窗口 | 钱包余额、资源策略、邮件正文 |
 | BC-MAILTRANSPORT | `OutboundMail`、`Binding`、`InboundSetting` | 协议调用、外发邮件、辅助邮箱绑定、SMTP 入站配置 | 邮件归属和项目匹配 |
 | BC-PROXY | `Proxy`、`Binding` | 代理检测、IP 版本、7 天绑定、系统池兜底、错误计数、异常隔离和管理员禁用 | Microsoft 页面流、资源状态、邮件事实 |
 | BC-MAILMATCH | `Message` | 邮件去重、匹配、验证码、真实服务读取 | 协议收发、订单退款、资源验证 |
-| BC-OPENAPI | `ApiKey`、`OrderToken`、`ApiLog` | 凭证签发、认证、限流、并发、日志 | 下单业务规则、邮件匹配规则 |
+| BC-OPENAPI | `ApiKey`、`OrderToken` | 凭证签发、认证、限流、并发、配额累计 | 下单业务规则、邮件匹配规则 |
 | BC-AFTERSALE | `Ticket`、`TicketMessage`、`Attachment`、`FlowLog` | 工单状态、供应商 SLA、自动检测、平台裁决 | 订单归属和退款执行 |
 
 ---
@@ -358,3 +358,5 @@ POST /v1/admin/resources/{resourceId}/validate
 | `13-quality-matrices.md` | 设计、测试、验收矩阵 |
 | `14-microsoft-go-acl-strategy.md` | Microsoft Go ACL 策略 |
 | `15-proxy-pool.md` | BC-PROXY 代理池 |
+| `17-operations-runbook.md` | 生产监控、备份、恢复与安全停机 |
+| `18-cicd-quality-gates.md` | CI/CD 并行门禁、产物复用与 Cleanup |

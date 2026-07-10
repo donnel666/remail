@@ -36,6 +36,7 @@ import { SiAlipay } from "react-icons/si";
 import { useTranslation } from "react-i18next";
 
 import sampleProjectCover from "@/assets/cover-4.webp";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
@@ -186,16 +187,21 @@ export default function Wallet() {
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
+  const [debouncedBillingKeyword] = useDebouncedValue(billingKeyword, 400);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
   const [referralLink, setReferralLink] = useState("");
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [billingNextAfterId, setBillingNextAfterId] = useState<number>();
+  const [billingHasMore, setBillingHasMore] = useState(false);
   const [walletLoading, setWalletLoading] = useState(false);
   const [referralLoading, setReferralLoading] = useState(false);
   const [transferringRewards, setTransferringRewards] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const redeemAttemptRef = useRef<{ code: string; key: string } | null>(null);
+  const transferAttemptRef = useRef<string | null>(null);
+  const billingRequestSeqRef = useRef(0);
   const amountFormApiRef = useRef<{
     setValue?: (field: "topUpCount", value: unknown) => void;
   } | null>(null);
@@ -231,20 +237,60 @@ export default function Wallet() {
   }, [t]);
 
   const refreshRecharges = useCallback(async () => {
+    const seq = billingRequestSeqRef.current + 1;
+    billingRequestSeqRef.current = seq;
     setBillingLoading(true);
     try {
       const response = await listWalletTransactions(
-        { search: billingKeyword.trim() || undefined },
-        0,
+        { search: debouncedBillingKeyword.trim() || undefined },
+        undefined,
         100
       );
+      if (billingRequestSeqRef.current !== seq) return;
       setTransactions(response.items);
+      setBillingNextAfterId(response.nextAfterId);
+      setBillingHasMore(response.hasNext);
     } catch (error) {
+      if (billingRequestSeqRef.current !== seq) return;
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
     } finally {
-      setBillingLoading(false);
+      if (billingRequestSeqRef.current === seq) setBillingLoading(false);
     }
-  }, [billingKeyword, t]);
+  }, [debouncedBillingKeyword, t]);
+
+  const loadMoreTransactions = useCallback(async () => {
+    if (billingLoading || !billingHasMore || !billingNextAfterId) return;
+    setBillingLoading(true);
+    const seq = billingRequestSeqRef.current;
+    try {
+      const response = await listWalletTransactions(
+        { search: debouncedBillingKeyword.trim() || undefined },
+        billingNextAfterId,
+        100
+      );
+      if (billingRequestSeqRef.current !== seq) return;
+      setTransactions((current) => {
+        const existing = new Set(current.map((item) => item.id));
+        return [
+          ...current,
+          ...response.items.filter((item) => !existing.has(item.id)),
+        ];
+      });
+      setBillingNextAfterId(response.nextAfterId);
+      setBillingHasMore(response.hasNext);
+    } catch (error) {
+      if (billingRequestSeqRef.current !== seq) return;
+      Toast.error(error instanceof Error ? error.message : t("Request failed."));
+    } finally {
+      if (billingRequestSeqRef.current === seq) setBillingLoading(false);
+    }
+  }, [
+    billingHasMore,
+    billingLoading,
+    billingNextAfterId,
+    debouncedBillingKeyword,
+    t,
+  ]);
 
   useEffect(() => {
     void refreshWallet();
@@ -287,15 +333,20 @@ export default function Wallet() {
       return;
     }
     setTransferringRewards(true);
+    transferAttemptRef.current ??= generateIdempotencyKey();
     try {
-      await transferReferralRewards();
+      await transferReferralRewards(transferAttemptRef.current);
       Toast.success(t("Transfer completed."));
+      transferAttemptRef.current = null;
       await refreshWallet();
       await refreshReferrals();
       if (billingOpen) {
         await refreshRecharges();
       }
     } catch (error) {
+      if (error instanceof IamApiError && error.status >= 400 && error.status < 500) {
+        transferAttemptRef.current = null;
+      }
       Toast.error(error instanceof Error ? error.message : t("Request failed."));
     } finally {
       setTransferringRewards(false);
@@ -760,6 +811,17 @@ export default function Wallet() {
             rowKey="orderNo"
             size="small"
           />
+          {billingHasMore ? (
+            <div className="mt-3 flex justify-center">
+              <Button
+                loading={billingLoading}
+                onClick={() => void loadMoreTransactions()}
+                theme="outline"
+              >
+                {t("Load more")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </Modal>
     </>

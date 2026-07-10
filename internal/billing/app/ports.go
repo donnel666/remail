@@ -17,8 +17,7 @@ type WalletRepository interface {
 	GetOrCreateWalletSummary(ctx context.Context, userID uint) (*domain.WalletSummary, error)
 	GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error)
 	TransferReferralRewards(ctx context.Context, req TransferReferralRewardsCommand) (*TransferReferralRewardsResult, error)
-	ListTransactions(ctx context.Context, filter TransactionListFilter, offset, limit int) ([]domain.Transaction, error)
-	CountTransactions(ctx context.Context, filter TransactionListFilter) (int64, error)
+	ListTransactions(ctx context.Context, filter TransactionListFilter, afterID uint, limit int) ([]domain.Transaction, *uint, error)
 	ListRecharges(ctx context.Context, filter RechargeListFilter, offset, limit int) ([]domain.Recharge, error)
 	CountRecharges(ctx context.Context, filter RechargeListFilter) (int64, error)
 	RedeemCard(ctx context.Context, req RedeemCardCommand) (*RedeemCardResult, error)
@@ -195,17 +194,13 @@ func (uc *WalletUseCase) TransferReferralRewards(ctx context.Context, req Transf
 	})
 }
 
-func (uc *WalletUseCase) ListTransactions(ctx context.Context, filter TransactionListFilter, offset, limit int) (*TransactionListResult, error) {
-	offset, limit = normalizePagination(offset, limit)
-	items, err := uc.repo.ListTransactions(ctx, filter, offset, limit)
+func (uc *WalletUseCase) ListTransactions(ctx context.Context, filter TransactionListFilter, afterID uint, limit int) (*TransactionListResult, error) {
+	_, limit = normalizePagination(0, limit)
+	items, nextAfterID, err := uc.repo.ListTransactions(ctx, filter, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
-	total, err := uc.repo.CountTransactions(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	return &TransactionListResult{Items: items, Total: total, Offset: offset, Limit: limit}, nil
+	return &TransactionListResult{Items: items, NextAfterID: nextAfterID, HasNext: nextAfterID != nil, Limit: limit}, nil
 }
 
 func (uc *WalletUseCase) ListRecharges(ctx context.Context, filter RechargeListFilter, offset, limit int) (*RechargeListResult, error) {
@@ -378,10 +373,10 @@ func (uc *WalletUseCase) UpdateCard(ctx context.Context, req UpdateCardRequest) 
 }
 
 type TransactionListResult struct {
-	Items  []domain.Transaction
-	Total  int64
-	Offset int
-	Limit  int
+	Items       []domain.Transaction
+	NextAfterID *uint
+	HasNext     bool
+	Limit       int
 }
 
 type RechargeListResult struct {

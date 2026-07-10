@@ -81,9 +81,18 @@ func (h *BillingHandler) PostWalletReferralTransfer(c *gin.Context) {
 }
 
 func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {
-	offset, limit, ok := parsePagination(c)
+	_, limit, ok := parsePagination(c)
 	if !ok {
 		return
+	}
+	var afterID uint
+	if raw := strings.TrimSpace(c.Query("afterId")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || parsed == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		afterID = uint(parsed)
 	}
 	userID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -100,7 +109,7 @@ func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {
 		filter.UserID = 0
 	}
 
-	result, err := h.module.WalletUseCase.ListTransactions(c.Request.Context(), filter, offset, limit)
+	result, err := h.module.WalletUseCase.ListTransactions(c.Request.Context(), filter, afterID, limit)
 	if err != nil {
 		writeBillingError(c, err)
 		return
@@ -110,10 +119,10 @@ func (h *BillingHandler) GetWalletTransactions(c *gin.Context) {
 		items[i] = transactionResponse(result.Items[i])
 	}
 	c.JSON(http.StatusOK, TransactionListResponse{
-		Items:  items,
-		Total:  result.Total,
-		Offset: result.Offset,
-		Limit:  result.Limit,
+		Items:       items,
+		NextAfterID: result.NextAfterID,
+		HasNext:     result.HasNext,
+		Limit:       result.Limit,
 	})
 }
 

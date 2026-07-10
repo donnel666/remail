@@ -33,7 +33,6 @@
 |------|------|
 | `ApiKey` | `keyId`、`keyPrefix`、`plain`、`userId`、`enabled`、`rateLimit`、`concurrency`、`quotaLimit/quotaUsed`、`expireAt`、`lastUsedAt` |
 | `OrderToken` | `tokenId`、`tokenPrefix`、`plain`、`orderNo`、`enabled`、`expireAt`、`disabledAt`、`disabledReason` |
-| `ApiLog` | `principalType`、`principalId`、`path`、`method`、`idempotencyKey`、`httpStatus`、`durationMs`、`requestId` |
 
 API Key 和 OrderToken 按原值保存；授权凭证管理接口可重复查看明文。普通日志、错误响应、导出文件禁敏；非凭证管理列表默认只显示前缀。
 
@@ -67,8 +66,9 @@ API Key 限制补充设计：
 限流和并发占用
 注入 Principal 到上下文
 请求结束释放并发占用
-写 ApiLog
 ```
+
+成功请求不逐条写 MySQL 日志。API Key 使用总量由 `quota_used` 每 5 秒批量落库，HTTP 延迟/状态由 Prometheus 聚合；异常通过 requestId 和安全结构化日志定位，避免高 QPS 下每天产生亿级 `api_logs`。
 
 ---
 

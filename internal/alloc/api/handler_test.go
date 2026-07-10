@@ -77,31 +77,12 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
 	})
 
-	t.Run("candidate refresh accepted", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
-		resp := performAllocAPIRequest(router, http.MethodPost, "/v1/admin/projects/10/candidates/refresh", true)
-		require.Equal(t, http.StatusAccepted, resp.Code)
-		require.Contains(t, resp.Body.String(), `"status"`)
-		require.Contains(t, resp.Body.String(), `"jobId"`)
-	})
-
-	t.Run("domain candidate type is accepted", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
-		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/projects/10/candidates?type=domain", true)
-		require.Equal(t, http.StatusOK, resp.Code)
-	})
-
 	t.Run("inventory rejects unavailable project", func(t *testing.T) {
 		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/projects/999/inventory", true)
 		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
 	})
 
-	t.Run("invalid candidate type is rejected", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
-		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/projects/10/candidates?type=invalid", true)
-		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
-	})
 }
 
 type fakeSessionFetcher struct {

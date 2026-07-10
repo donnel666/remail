@@ -13,6 +13,7 @@ node_modules/
 web/dist/
 web/.rsbuild/
 web/coverage/
+scripts/perf/pickup-fixtures.json
 
 # Env
 .env

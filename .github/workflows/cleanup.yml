@@ -24,15 +24,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ACTION_CACHE_TARGET_BYTES: "6442450944"
-  ACTION_CACHE_MAX_AGE_DAYS: "7"
-  GHCR_KEEP_VERSIONS: "20"
-  GHCR_KEEP_TAGGED_DAYS: "14"
-  GHCR_KEEP_UNTAGGED_DAYS: "1"
+  ACTION_CACHE_KEEP_VERSIONS: "3"
+  GHCR_KEEP_VERSIONS: "3"
 
 jobs:
   cleanup-actions-cache:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Prune GitHub Actions caches
         env:
@@ -45,62 +43,35 @@ jobs:
           cache_file="$(mktemp)"
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
             --jq '.actions_caches[] | [.id, .key, .size_in_bytes, .last_accessed_at] | @tsv' \
-            > "$cache_file" || true
+            > "$cache_file"
 
           if [ ! -s "$cache_file" ]; then
             echo "No GitHub Actions caches found."
             exit 0
           fi
 
-          now="$(date -u +%s)"
-          max_age_seconds="$((ACTION_CACHE_MAX_AGE_DAYS * 86400))"
-          target_bytes="${ACTION_CACHE_TARGET_BYTES}"
-          total_bytes="$(awk -F '\t' '{ sum += $3 } END { printf "%.0f", sum }' "$cache_file")"
-
-          declare -A delete_ids=()
-          selected_bytes=0
-
+          keep_versions="${ACTION_CACHE_KEEP_VERSIONS}"
+          rank=0
+          deleted=0
           while IFS=$'\t' read -r cache_id cache_key size_bytes last_accessed_at; do
-            last_accessed_epoch="$(date -u -d "$last_accessed_at" +%s)"
-            age_seconds="$((now - last_accessed_epoch))"
-            if [ "$age_seconds" -gt "$max_age_seconds" ]; then
-              delete_ids["$cache_id"]="$cache_key"
-              selected_bytes="$((selected_bytes + size_bytes))"
+            rank="$((rank + 1))"
+            if [ "$rank" -le "$keep_versions" ]; then
+              echo "Keeping cache rank=${rank} id=${cache_id} key=${cache_key} last_accessed=${last_accessed_at}"
+              continue
             fi
-          done < "$cache_file"
-
-          remaining_bytes="$((total_bytes - selected_bytes))"
-          if [ "$remaining_bytes" -gt "$target_bytes" ]; then
-            while IFS=$'\t' read -r cache_id cache_key size_bytes last_accessed_at; do
-              if [ -n "${delete_ids[$cache_id]+x}" ]; then
-                continue
-              fi
-              delete_ids["$cache_id"]="$cache_key"
-              selected_bytes="$((selected_bytes + size_bytes))"
-              remaining_bytes="$((remaining_bytes - size_bytes))"
-              if [ "$remaining_bytes" -le "$target_bytes" ]; then
-                break
-              fi
-            done < <(sort -t $'\t' -k4,4 "$cache_file")
-          fi
-
-          echo "Current cache bytes: $total_bytes"
-          echo "Target cache bytes:  $target_bytes"
-          echo "Selected bytes:      $selected_bytes"
-          echo "Selected caches:     ${#delete_ids[@]}"
-
-          for cache_id in "${!delete_ids[@]}"; do
-            cache_key="${delete_ids[$cache_id]}"
+            deleted="$((deleted + 1))"
             if [ "$DRY_RUN" = "true" ]; then
-              echo "DRY RUN: would delete cache $cache_id $cache_key"
+              echo "DRY RUN: would delete cache ${cache_id} ${cache_key} bytes=${size_bytes}"
             else
-              echo "Deleting cache $cache_id $cache_key"
+              echo "Deleting cache ${cache_id} ${cache_key} bytes=${size_bytes}"
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}" >/dev/null
             fi
-          done
+          done < <(sort -r -t $'\t' -k4,4 "$cache_file")
+          echo "Kept newest caches: ${keep_versions}; selected for deletion: ${deleted}"
 
   cleanup-ghcr:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Prune old GHCR package versions
         env:
@@ -122,7 +93,7 @@ jobs:
           else
             echo "::warning::Unable to list GHCR package versions for ${owner}/${package_name}."
             echo "::warning::Ensure the package exists and GITHUB_TOKEN has packages:write permission."
-            exit 0
+            exit 1
           fi
 
           versions_file="$(mktemp)"
@@ -133,50 +104,29 @@ jobs:
             exit 0
           fi
 
-          purgeable_file="$(mktemp)"
+          all_versions_file="$(mktemp)"
           while IFS= read -r encoded_version; do
             version_json="$(printf '%s' "$encoded_version" | base64 -d)"
             version_id="$(jq -r '.id' <<< "$version_json")"
             updated_at="$(jq -r '.updated_at // .created_at' <<< "$version_json")"
             tags="$(jq -r '(.metadata.container.tags // []) | join(",")' <<< "$version_json")"
-            protected="$(jq -r 'any(.metadata.container.tags // []; . == "main" or . == "latest" or startswith("v"))' <<< "$version_json")"
-
-            if [ "$protected" = "true" ]; then
-              echo "Keeping protected version ${version_id} tags=${tags}"
-              continue
-            fi
-
-            printf '%s\t%s\t%s\n' "$updated_at" "$version_id" "$tags" >> "$purgeable_file"
+            printf '%s\t%s\t%s\n' "$updated_at" "$version_id" "$tags" >> "$all_versions_file"
           done < "$versions_file"
 
-          if [ ! -s "$purgeable_file" ]; then
-            echo "No purgeable GHCR versions found."
+          if [ ! -s "$all_versions_file" ]; then
+            echo "No GHCR versions found after parsing."
             exit 0
           fi
 
-          now="$(date -u +%s)"
           keep_versions="${GHCR_KEEP_VERSIONS}"
-          tagged_max_age_seconds="$((GHCR_KEEP_TAGGED_DAYS * 86400))"
-          untagged_max_age_seconds="$((GHCR_KEEP_UNTAGGED_DAYS * 86400))"
           delete_file="$(mktemp)"
 
-          sort -r -t $'\t' -k1,1 "$purgeable_file" | nl -w1 -s $'\t' | \
+          sort -r -t $'\t' -k1,1 "$all_versions_file" | nl -w1 -s $'\t' | \
           while IFS=$'\t' read -r rank updated_at version_id tags; do
-            updated_epoch="$(date -u -d "$updated_at" +%s)"
-            age_seconds="$((now - updated_epoch))"
-            should_delete="false"
-            reason=""
-
-            if [ -z "$tags" ] && [ "$age_seconds" -gt "$untagged_max_age_seconds" ]; then
-              should_delete="true"
-              reason="untagged older than ${GHCR_KEEP_UNTAGGED_DAYS}d"
-            elif [ "$rank" -gt "$keep_versions" ] && [ "$age_seconds" -gt "$tagged_max_age_seconds" ]; then
-              should_delete="true"
-              reason="outside latest ${GHCR_KEEP_VERSIONS} and older than ${GHCR_KEEP_TAGGED_DAYS}d"
-            fi
-
-            if [ "$should_delete" = "true" ]; then
-              printf '%s\t%s\t%s\n' "$version_id" "$tags" "$reason" >> "$delete_file"
+            if [ "$rank" -le "$keep_versions" ]; then
+              echo "Keeping GHCR version rank=${rank} id=${version_id} tags=${tags:-<untagged>} updated=${updated_at}"
+            else
+              printf '%s\t%s\toutside newest %s versions\n' "$version_id" "$tags" "$keep_versions" >> "$delete_file"
             fi
           done
 

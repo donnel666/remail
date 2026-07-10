@@ -19,6 +19,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 	require.NotNil(t, cfg)
 
 	assert.Equal(t, ":8080", cfg.Server.Addr)
+	assert.Equal(t, "development", cfg.Environment)
 	assert.Equal(t, "test:test@tcp(127.0.0.1:3306)/test", cfg.MySQL.DSN)
 	assert.Equal(t, "127.0.0.1:6379", cfg.Redis.Addr)
 	assert.Equal(t, 0, cfg.Redis.DB)
@@ -66,6 +67,34 @@ func TestConfigValidateRelayRequiresAddr(t *testing.T) {
 	assert.Contains(t, err.Error(), "SMTP_ADDR")
 }
 
+func TestConfigRequiresSecureSessionInProduction(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SESSION_SECURE")
+}
+
+func TestConfigRejectsPublicPprofAddress(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("PPROF_ADDR", "0.0.0.0:6060")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PPROF_ADDR")
+}
+
 func TestConfigLoadDKIM(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
@@ -110,6 +139,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Helper()
 
 	keys := []string{
+		"APP_ENV",
 		"SERVER_ADDR",
 		"SERVER_TIMEOUT",
 		"MYSQL_DSN",

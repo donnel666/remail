@@ -35,9 +35,6 @@ type Repository interface {
 	FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error)
 	ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error
 	DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error
-
-	CreateAPILog(ctx context.Context, cmd CreateAPILogCommand) error
-	CreateAPILogs(ctx context.Context, commands []CreateAPILogCommand) error
 }
 
 type CreateAPIKeyRequest struct {
@@ -103,31 +100,6 @@ type APIKeyAuthResult struct {
 type APIKeyUsage struct {
 	RequestCount int64
 	KeyCount     int64
-}
-
-type CreateAPILogCommand struct {
-	PrincipalType  string
-	PrincipalID    uint
-	UserID         uint
-	Path           string
-	Method         string
-	IdempotencyKey string
-	HTTPStatus     int
-	DurationMs     int
-	RequestID      string
-	Now            time.Time
-}
-
-type LogAPIRequestRequest struct {
-	PrincipalType  string
-	PrincipalID    uint
-	UserID         uint
-	Path           string
-	Method         string
-	IdempotencyKey string
-	HTTPStatus     int
-	DurationMs     int
-	RequestID      string
 }
 
 type IssueOrderTokenCommand struct {
@@ -287,7 +259,7 @@ func (uc *UseCase) BeginAPIKeyRequest(ctx context.Context, plain string) (*APIKe
 	return &APIKeyAuthResult{UserID: key.UserID, APIKeyID: key.ID, Role: key.OwnerRole}, nil
 }
 
-func (uc *UseCase) FinishAPIKeyRequest(ctx context.Context, keyID uint) error {
+func (uc *UseCase) FinishAPIKeyRequest(_ context.Context, keyID uint) error {
 	if keyID == 0 {
 		return nil
 	}
@@ -354,32 +326,6 @@ func (uc *UseCase) ExtendOrderToken(ctx context.Context, orderNo string, expireA
 		return domain.ErrInvalidOrderToken
 	}
 	return uc.repo.ExtendOrderToken(ctx, orderNo, expireAt.UTC())
-}
-
-func (uc *UseCase) LogAPIRequest(ctx context.Context, req LogAPIRequestRequest) error {
-	if req.PrincipalID == 0 || strings.TrimSpace(req.PrincipalType) == "" {
-		return domain.ErrInvalidAPIKey
-	}
-	if req.HTTPStatus < 100 || req.HTTPStatus > 599 || req.DurationMs < 0 {
-		return domain.ErrInvalidAPIKey
-	}
-	path := truncate(strings.TrimSpace(req.Path), 255)
-	method := truncate(strings.ToUpper(strings.TrimSpace(req.Method)), 16)
-	if path == "" || method == "" {
-		return domain.ErrInvalidAPIKey
-	}
-	return uc.runtime.enqueueLog(CreateAPILogCommand{
-		PrincipalType:  truncate(strings.TrimSpace(req.PrincipalType), 32),
-		PrincipalID:    req.PrincipalID,
-		UserID:         req.UserID,
-		Path:           path,
-		Method:         method,
-		IdempotencyKey: truncate(strings.TrimSpace(req.IdempotencyKey), 128),
-		HTTPStatus:     req.HTTPStatus,
-		DurationMs:     req.DurationMs,
-		RequestID:      truncate(strings.TrimSpace(req.RequestID), 64),
-		Now:            uc.now(),
-	})
 }
 
 func nextCredential(prefix string) string {

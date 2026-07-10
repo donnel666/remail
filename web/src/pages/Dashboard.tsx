@@ -12,6 +12,7 @@ import {
 } from "@/lib/orders-api";
 import {
   readPickupMail,
+  readPickupMessage,
   type OrderMailResponse,
 } from "@/lib/mailmatch-api";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/lib/projects-api";
 
 import { MailboxClientModal } from "./workbench/mailbox-client";
+import { mergeOrderRuntimeState } from "./workbench/order-runtime";
 import { OrderPanel } from "./workbench/order-panel";
 import { ProductPickerPanel } from "./workbench/product-picker-panel";
 import { ProjectListPanel } from "./workbench/project-list-panel";
@@ -45,7 +47,7 @@ function filterProjects(projects: WorkbenchProject[], search: string) {
         [project.name, project.description, project.projectUrl]
           .join(" ")
           .toLowerCase()
-          .includes(q)
+          .includes(q),
       )
     : projects;
   return [...filtered].sort((a, b) => {
@@ -57,20 +59,25 @@ function filterProjects(projects: WorkbenchProject[], search: string) {
 function filterProducts(
   products: WorkbenchProduct[],
   search: string,
-  serviceMode: ServiceMode
+  serviceMode: ServiceMode,
 ) {
   const q = search.trim().toLowerCase();
   return products
     .filter((product) =>
-      serviceMode === "code" ? product.codeEnabled : product.purchaseEnabled
+      serviceMode === "code" ? product.codeEnabled : product.purchaseEnabled,
     )
     .filter((product) =>
       q
-        ? [product.label, product.suffix, product.emailSuffix, product.productType]
+        ? [
+            product.label,
+            product.suffix,
+            product.emailSuffix,
+            product.productType,
+          ]
             .join(" ")
             .toLowerCase()
             .includes(q)
-        : true
+        : true,
     );
 }
 
@@ -78,6 +85,15 @@ type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
 
 const checkoutBatchStorageKey = "remail.workbench.checkoutBatch";
 const checkoutBatchConcurrency = 5;
+const orderPageLimit = 100;
+const initialOrderCursors: Record<ServiceMode, number | undefined> = {
+  code: undefined,
+  purchase: undefined,
+};
+const initialOrderHasMore: Record<ServiceMode, boolean> = {
+  code: false,
+  purchase: false,
+};
 
 interface CheckoutBatchState {
   batchId: string;
@@ -88,10 +104,10 @@ interface CheckoutBatchState {
 
 function toWorkbenchProject(
   project: ProjectItem,
-  inventory?: ProjectInventoryTotalResponse
+  inventory?: ProjectInventoryTotalResponse,
 ): WorkbenchProject {
   const inventoryByProductId = new Map(
-    (inventory?.products ?? []).map((item) => [String(item.productId), item])
+    (inventory?.products ?? []).map((item) => [String(item.productId), item]),
   );
   return {
     description: project.description ?? "",
@@ -100,7 +116,11 @@ function toWorkbenchProject(
     logoUrl: project.logoUrl,
     name: project.name,
     products: (project.products ?? []).flatMap((product) =>
-      toWorkbenchProducts(project.id, product, inventoryByProductId.get(String(product.id)))
+      toWorkbenchProducts(
+        project.id,
+        product,
+        inventoryByProductId.get(String(product.id)),
+      ),
     ),
     projectUrl: project.targetPlatform,
     visibility: project.accessType,
@@ -110,11 +130,13 @@ function toWorkbenchProject(
 function toWorkbenchProducts(
   projectId: number,
   product: ProjectProductSummary,
-  inventory?: ProductInventoryTotal
+  inventory?: ProductInventoryTotal,
 ): WorkbenchProduct[] {
   const label = product.type === "microsoft" ? "Microsoft" : "Domain";
-  const totalAvailable = inventory?.totalAvailable ?? product.totalAvailable ?? 0;
-  const publicAvailable = inventory?.publicAvailable ?? product.publicAvailable ?? 0;
+  const totalAvailable =
+    inventory?.totalAvailable ?? product.totalAvailable ?? 0;
+  const publicAvailable =
+    inventory?.publicAvailable ?? product.publicAvailable ?? 0;
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
@@ -154,13 +176,13 @@ function toWorkbenchProducts(
 
 function mergeProjectInventory(
   project: WorkbenchProject,
-  inventory: ProjectInventoryTotalResponse
+  inventory: ProjectInventoryTotalResponse,
 ): WorkbenchProject {
   const inventoryByProductId = new Map(
-    (inventory.products ?? []).map((item) => [String(item.productId), item])
+    (inventory.products ?? []).map((item) => [String(item.productId), item]),
   );
   const baseProducts = project.products.filter(
-    (product) => product.id === product.productId
+    (product) => product.id === product.productId,
   );
   return {
     ...project,
@@ -203,37 +225,45 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
   return {
     activationUntil:
       order.serviceMode === "purchase"
-        ? order.receiveUntil ?? order.afterSaleUntil ?? undefined
+        ? (order.receiveUntil ?? order.afterSaleUntil ?? undefined)
         : undefined,
     activatedAt: order.activatedAt ?? undefined,
-    afterSaleUntil: order.afterSaleUntil ?? order.receiveUntil ?? order.updatedAt,
+    afterSaleUntil:
+      order.afterSaleUntil ?? order.receiveUntil ?? order.updatedAt,
     createdAt: order.createdAt,
     deliveryEmail: order.deliveryEmail,
+    hasDelivery: order.hasDelivery ?? false,
     id: String(order.id),
     inventoryScope: order.supplyPolicy,
-    lastFetchedAt: order.updatedAt,
+    lastFetchedAt: order.lastMailReceivedAt ?? order.updatedAt,
+    lastMailReceivedAt: order.lastMailReceivedAt ?? undefined,
     messages: [],
     orderNo: order.orderNo,
     payAmount: moneyToNumber(order.payAmount),
+    productType: order.productType,
     productId: String(order.projectProductId),
     projectId: String(order.projectId),
     quantity: 1,
-    receiveUntil: order.serviceMode === "code" ? order.receiveUntil ?? undefined : undefined,
+    receiveUntil:
+      order.serviceMode === "code"
+        ? (order.receiveUntil ?? undefined)
+        : undefined,
     serviceMode: order.serviceMode,
     serviceState: orderServiceState(order),
     status: order.status,
     token: order.serviceToken ?? "",
+    verificationCode: order.verificationCode ?? undefined,
   };
 }
 
-function toWorkbenchMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
-  return items.map((item, index) => {
-    const body = item.body ?? "";
-    const preview = body.replace(/\s+/g, " ").trim().slice(0, 180);
+function toWorkbenchMessages(
+  items: OrderMailResponse["items"],
+): WorkbenchMessage[] {
+  return items.map((item) => {
     return {
-      body,
-      id: `${item.receivedAt}-${index}-${item.sender}-${item.subject}`,
-      preview,
+      body: "",
+      id: String(item.id),
+      preview: item.bodyPreview,
       receivedAt: item.receivedAt,
       sender: item.sender,
       status: item.verificationCode ? "matched" : "received",
@@ -248,11 +278,12 @@ function messageTimestamp(value: string) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function latestVerificationCode(messages: WorkbenchMessage[]) {
+function latestVerificationMessage(messages: WorkbenchMessage[]) {
   return [...messages]
     .filter((item) => item.verificationCode)
-    .sort((a, b) => messageTimestamp(b.receivedAt) - messageTimestamp(a.receivedAt))[0]
-    ?.verificationCode;
+    .sort(
+      (a, b) => messageTimestamp(b.receivedAt) - messageTimestamp(a.receivedAt),
+    )[0];
 }
 
 function orderServiceState(order: OrderResponse): ServiceState {
@@ -282,11 +313,13 @@ function moneyToNumber(value?: string) {
 function getProductInventory(
   product: WorkbenchProduct | undefined,
   serviceMode: ServiceMode,
-  inventoryScope: InventoryScope
+  inventoryScope: InventoryScope,
 ) {
   if (!product) return 0;
   if (inventoryScope === "public_only") return product.publicInventory;
-  return serviceMode === "code" ? product.codeInventory : product.purchaseInventory;
+  return serviceMode === "code"
+    ? product.codeInventory
+    : product.purchaseInventory;
 }
 
 function clampQuantity(value: number, inventory: number) {
@@ -323,15 +356,15 @@ function sanitizeSucceededIndexes(value: unknown, quantity: number) {
     new Set(
       value.filter(
         (item): item is number =>
-          Number.isInteger(item) && item >= 0 && item < quantity
-      )
-    )
+          Number.isInteger(item) && item >= 0 && item < quantity,
+      ),
+    ),
   ).sort((a, b) => a - b);
 }
 
 function loadCheckoutBatchState(
   signature: string,
-  quantity: number
+  quantity: number,
 ): CheckoutBatchState {
   const fresh = {
     batchId: nextIdempotencyKey(),
@@ -355,7 +388,10 @@ function loadCheckoutBatchState(
       batchId: parsed.batchId,
       quantity,
       signature,
-      succeededIndexes: sanitizeSucceededIndexes(parsed.succeededIndexes, quantity),
+      succeededIndexes: sanitizeSucceededIndexes(
+        parsed.succeededIndexes,
+        quantity,
+      ),
     };
   } catch {
     return fresh;
@@ -366,7 +402,7 @@ function saveCheckoutBatchState(state: CheckoutBatchState) {
   try {
     globalThis.sessionStorage?.setItem(
       checkoutBatchStorageKey,
-      JSON.stringify(state)
+      JSON.stringify(state),
     );
   } catch {
     // The batch is still protected by per-request idempotency keys in memory.
@@ -404,6 +440,11 @@ export default function Dashboard() {
   } | null>(null);
   const [orderSearch, setOrderSearch] = useState("");
   const [orders, setOrders] = useState<WorkbenchOrder[]>([]);
+  const [orderCursors, setOrderCursors] =
+    useState<Record<ServiceMode, number | undefined>>(initialOrderCursors);
+  const [orderHasMore, setOrderHasMore] =
+    useState<Record<ServiceMode, boolean>>(initialOrderHasMore);
+  const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [projects, setProjects] = useState<WorkbenchProject[]>([]);
@@ -414,6 +455,8 @@ export default function Dashboard() {
   const [serviceMode, setServiceMode] = useState<ServiceMode>("purchase");
   const fetchInFlightRef = useRef(new Map<string, Promise<number | void>>());
   const fetchSeqRef = useRef(new Map<string, number>());
+  const refreshOrdersSeqRef = useRef(new Map<ServiceMode, number>());
+  const loadingMoreOrdersRef = useRef(false);
 
   const projectsById = useMemo(() => {
     return new Map(projects.map((project) => [project.id, project]));
@@ -422,22 +465,27 @@ export default function Dashboard() {
   const productsById = useMemo(() => {
     return new Map(
       projects.flatMap((project) =>
-        project.products.map((product) => [product.id, product] as const)
-      )
+        project.products.map((product) => [product.id, product] as const),
+      ),
     );
   }, [projects]);
 
   const filteredProjects = useMemo(
     () => filterProjects(projects, projectSearch),
-    [projects, projectSearch]
+    [projects, projectSearch],
   );
 
-  const selectedProject = projectsById.get(selectedProjectId) ?? filteredProjects[0];
+  const selectedProject =
+    projectsById.get(selectedProjectId) ?? filteredProjects[0];
 
   const filteredProducts = useMemo(
     () =>
-      filterProducts(selectedProject?.products ?? [], productSearch, serviceMode),
-    [productSearch, selectedProject?.products, serviceMode]
+      filterProducts(
+        selectedProject?.products ?? [],
+        productSearch,
+        serviceMode,
+      ),
+    [productSearch, selectedProject?.products, serviceMode],
   );
 
   useEffect(() => {
@@ -461,11 +509,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!selectedProject) return;
-    if (selectedProject.products.some((product) => product.id === selectedProductId)) {
+    if (
+      selectedProject.products.some(
+        (product) => product.id === selectedProductId,
+      )
+    ) {
       return;
     }
     setSelectedProductId(
-      filterProducts(selectedProject.products, productSearch, serviceMode)[0]?.id ?? ""
+      filterProducts(selectedProject.products, productSearch, serviceMode)[0]
+        ?.id ?? "",
     );
   }, [productSearch, selectedProject, selectedProductId, serviceMode]);
 
@@ -473,7 +526,9 @@ export default function Dashboard() {
     if (filteredProducts.some((product) => product.id === selectedProductId)) {
       return;
     }
-    setSelectedProductId(filteredProducts[0]?.id ?? selectedProject?.products[0]?.id ?? "");
+    setSelectedProductId(
+      filteredProducts[0]?.id ?? selectedProject?.products[0]?.id ?? "",
+    );
   }, [filteredProducts, selectedProductId, selectedProject?.products]);
 
   const selectedProduct =
@@ -483,7 +538,7 @@ export default function Dashboard() {
   const selectedInventory = getProductInventory(
     selectedProduct,
     serviceMode,
-    inventoryScope
+    inventoryScope,
   );
 
   useEffect(() => {
@@ -497,33 +552,41 @@ export default function Dashboard() {
         matchesProjectEmailSearch(
           order,
           orderSearch,
-          projectsById.get(order.projectId)?.name
-        )
+          projectsById.get(order.projectId)?.name,
+        ),
       );
   }, [orderSearch, orders, projectsById, serviceMode]);
 
   useEffect(() => {
     if (!selectedOrderNo) return;
-    if (visibleOrders.some((order) => order.orderNo === selectedOrderNo)) return;
+    if (visibleOrders.some((order) => order.orderNo === selectedOrderNo))
+      return;
     setSelectedOrderNo("");
   }, [selectedOrderNo, visibleOrders]);
 
   const selectedOrder = visibleOrders.find(
-    (order) => order.orderNo === selectedOrderNo
+    (order) => order.orderNo === selectedOrderNo,
   );
   const mailClientOrder = mailClientParams
     ? orders.find(
         (order) =>
           order.orderNo === mailClientParams.orderNo &&
           order.deliveryEmail === mailClientParams.email &&
-          order.token === mailClientParams.token
+          order.token === mailClientParams.token,
       )
     : undefined;
+  const hasMoreOrders = orderHasMore[serviceMode];
 
   async function loadWorkbenchProjects() {
     try {
-      const list = await listProjects({ scope: "visible", status: "listed" }, 0, 100);
-      const listed = list.items.filter((project) => project.status === "listed");
+      const list = await listProjects(
+        { scope: "visible", status: "listed" },
+        0,
+        100,
+      );
+      const listed = list.items.filter(
+        (project) => project.status === "listed",
+      );
       setProjects(listed.map((project) => toWorkbenchProject(project)));
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
@@ -537,8 +600,10 @@ export default function Dashboard() {
       const inventory = await getProjectInventory(numericProjectId);
       setProjects((prev) =>
         prev.map((project) =>
-          project.id === projectId ? mergeProjectInventory(project, inventory) : project
-        )
+          project.id === projectId
+            ? mergeProjectInventory(project, inventory)
+            : project,
+        ),
       );
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
@@ -546,15 +611,65 @@ export default function Dashboard() {
   }
 
   async function refreshOrders(mode: ServiceMode = serviceMode) {
+    const seq = (refreshOrdersSeqRef.current.get(mode) ?? 0) + 1;
+    refreshOrdersSeqRef.current.set(mode, seq);
     try {
-      const list = await listOrders({ limit: 100, serviceMode: mode });
+      const list = await listOrders({
+        limit: orderPageLimit,
+        serviceMode: mode,
+      });
+      if (refreshOrdersSeqRef.current.get(mode) !== seq) return;
       const nextOrders = list.items.map(toWorkbenchOrder);
-      setOrders((prev) => [
-        ...nextOrders,
-        ...prev.filter((order) => order.serviceMode !== mode),
-      ]);
+      setOrderCursors((prev) => ({ ...prev, [mode]: list.nextAfterId }));
+      setOrderHasMore((prev) => ({ ...prev, [mode]: list.hasNext }));
+      setOrders((prev) => {
+        const currentByOrderNo = new Map(
+          prev.map((order) => [order.orderNo, order])
+        );
+        return [
+          ...nextOrders.map((order) =>
+            mergeOrderRuntimeState(order, currentByOrderNo.get(order.orderNo))
+          ),
+          ...prev.filter((order) => order.serviceMode !== mode),
+        ];
+      });
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+    }
+  }
+
+  async function loadMoreOrders() {
+    if (loadingMoreOrdersRef.current) return;
+    const mode = serviceMode;
+    const afterId = orderCursors[mode];
+    if (!orderHasMore[mode] || !afterId) return;
+    const refreshSeq = refreshOrdersSeqRef.current.get(mode) ?? 0;
+    loadingMoreOrdersRef.current = true;
+    setLoadingMoreOrders(true);
+    try {
+      const list = await listOrders({
+        afterId,
+        limit: orderPageLimit,
+        serviceMode: mode,
+      });
+      if (refreshOrdersSeqRef.current.get(mode) !== refreshSeq) return;
+      const nextOrders = list.items.map(toWorkbenchOrder);
+      setOrderCursors((prev) => ({ ...prev, [mode]: list.nextAfterId }));
+      setOrderHasMore((prev) => ({ ...prev, [mode]: list.hasNext }));
+      setOrders((prev) => {
+        const currentByOrderNo = new Map(
+          prev.map((order) => [order.orderNo, order])
+        );
+        const additions = nextOrders
+          .filter((order) => !currentByOrderNo.has(order.orderNo))
+          .map((order) => mergeOrderRuntimeState(order));
+        return [...prev, ...additions];
+      });
+    } catch (err) {
+      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+    } finally {
+      loadingMoreOrdersRef.current = false;
+      setLoadingMoreOrders(false);
     }
   }
 
@@ -565,12 +680,17 @@ export default function Dashboard() {
         item.orderNo === orderNo
           ? {
               ...detail,
+              hasDelivery: detail.hasDelivery || item.hasDelivery,
               messages: item.messages,
-              lastFetchedAt: item.lastFetchedAt,
-              verificationCode: detail.verificationCode || item.verificationCode,
+              lastFetchedAt:
+                detail.lastMailReceivedAt ?? item.lastFetchedAt,
+              lastMailReceivedAt:
+                detail.lastMailReceivedAt ?? item.lastMailReceivedAt,
+              verificationCode:
+                detail.verificationCode || item.verificationCode,
             }
-          : item
-      )
+          : item,
+      ),
     );
     return detail;
   }
@@ -580,7 +700,7 @@ export default function Dashboard() {
     setSelectedProjectId(projectId);
     setProductSearch("");
     setSelectedProductId(
-      filterProducts(project?.products ?? [], "", serviceMode)[0]?.id ?? ""
+      filterProducts(project?.products ?? [], "", serviceMode)[0]?.id ?? "",
     );
   }
 
@@ -616,7 +736,7 @@ export default function Dashboard() {
     try {
       const missingIndexes = Array.from(
         { length: requestedQuantity },
-        (_, index) => index
+        (_, index) => index,
       ).filter((index) => !succeededIndexes.has(index));
       const failures: unknown[] = [];
       for (
@@ -624,7 +744,10 @@ export default function Dashboard() {
         start < missingIndexes.length && failures.length === 0;
         start += checkoutBatchConcurrency
       ) {
-        const chunk = missingIndexes.slice(start, start + checkoutBatchConcurrency);
+        const chunk = missingIndexes.slice(
+          start,
+          start + checkoutBatchConcurrency,
+        );
         const settled = await Promise.allSettled(
           chunk.map(async (index) => ({
             index,
@@ -638,15 +761,17 @@ export default function Dashboard() {
                 idempotencyKey: `${batch.batchId}:${index}`,
                 serviceMode,
                 supply: inventoryScope,
-              }
+              },
             ),
-          }))
+          })),
         );
         for (const item of settled) {
           if (item.status === "fulfilled") {
             createdOrders.push(item.value.order);
             succeededIndexes.add(item.value.index);
-            batch.succeededIndexes = [...succeededIndexes].sort((a, b) => a - b);
+            batch.succeededIndexes = [...succeededIndexes].sort(
+              (a, b) => a - b,
+            );
             saveCheckoutBatchState(batch);
           } else {
             failures.push(item.reason);
@@ -666,7 +791,7 @@ export default function Dashboard() {
       void loadProjectInventory(selectedProject.id);
       const firstFailure = failures[0];
       Toast.error(
-        `${apiErrorMessage(firstFailure, t("An unexpected error occurred."))} (${succeededIndexes.size}/${requestedQuantity})`
+        `${apiErrorMessage(firstFailure, t("An unexpected error occurred."))} (${succeededIndexes.size}/${requestedQuantity})`,
       );
       return;
     } catch (err) {
@@ -681,7 +806,10 @@ export default function Dashboard() {
     }
   }
 
-  async function handleFetchOrderMail(order: WorkbenchOrder, source: FetchSource) {
+  async function handleFetchOrderMail(
+    order: WorkbenchOrder,
+    source: FetchSource,
+  ) {
     const existing = fetchInFlightRef.current.get(order.orderNo);
     if (existing) return existing;
 
@@ -701,7 +829,8 @@ export default function Dashboard() {
         if (fetchSeqRef.current.get(target.orderNo) !== seq) return;
 
         const messages = toWorkbenchMessages(result.items);
-        const latestCode = latestVerificationCode(messages);
+        const latestDelivery = latestVerificationMessage(messages);
+        const latestCode = latestDelivery?.verificationCode;
         const lastFetchedAt =
           result.fetch?.lastReceivedAt ??
           result.fetch?.lastSuccessAt ??
@@ -722,7 +851,15 @@ export default function Dashboard() {
               ? {
                   ...(refreshedDetail ?? item),
                   messages,
+                  hasDelivery:
+                    Boolean(latestCode) ||
+                    refreshedDetail?.hasDelivery ||
+                    item.hasDelivery,
                   lastFetchedAt,
+                  lastMailReceivedAt:
+                    refreshedDetail?.lastMailReceivedAt ??
+                    latestDelivery?.receivedAt ??
+                    item.lastMailReceivedAt,
                   verificationCode: latestCode ?? item.verificationCode,
                   serviceState: latestCode
                     ? target.serviceMode === "code"
@@ -730,9 +867,18 @@ export default function Dashboard() {
                       : "in_warranty"
                     : (refreshedDetail?.serviceState ?? item.serviceState),
                 }
-              : item
-          )
+              : item,
+          ),
         );
+        if (result.fetch?.nextFetchAllowedAt) {
+          return Math.max(
+            1,
+            Math.ceil(
+              (Date.parse(result.fetch.nextFetchAllowedAt) - Date.now()) / 1000
+            )
+          );
+        }
+        return 5;
       } catch (err) {
         if (err instanceof IamApiError && err.status === 429) {
           return err.retryAfterSeconds;
@@ -755,14 +901,16 @@ export default function Dashboard() {
       if (order && !order.token) {
         void loadOrderDetail(orderNo)
           .then((detail) => {
-            if (!detail.verificationCode) {
+            if (!detail.hasDelivery) {
               void handleFetchOrderMail(detail, "auto");
             }
           })
           .catch((err) =>
-            Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")))
+            Toast.error(
+              apiErrorMessage(err, t("An unexpected error occurred.")),
+            ),
           );
-      } else if (order && !order.verificationCode) {
+      } else if (order && !order.hasDelivery) {
         void handleFetchOrderMail(order, "auto");
       }
       return orderNo;
@@ -792,7 +940,7 @@ export default function Dashboard() {
         void handleFetchOrderMail(order, "auto");
       })
       .catch((err) =>
-        Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")))
+        Toast.error(apiErrorMessage(err, t("An unexpected error occurred."))),
       );
   }
 
@@ -826,9 +974,12 @@ export default function Dashboard() {
 
           <OrderPanel
             creating={creating}
+            hasMoreOrders={hasMoreOrders}
             inventoryScope={inventoryScope}
+            loadingMoreOrders={loadingMoreOrders}
             onCreateOrder={handleCreateOrder}
             onFetchOrderMail={handleFetchOrderMail}
+            onLoadMoreOrders={loadMoreOrders}
             onOpenMailbox={handleOpenMailbox}
             onQuantityChange={(value) =>
               setQuantity(clampQuantity(value, selectedInventory))
@@ -851,11 +1002,22 @@ export default function Dashboard() {
 
       <MailboxClientModal
         email={mailClientParams?.email}
+        fetchEnabled={mailClientOrder?.productType !== "domain"}
+        fetchKey={mailClientParams?.orderNo}
         messages={mailClientOrder?.messages ?? []}
         onClose={() => setMailClientParams(null)}
         onFetch={(source) => {
           if (!mailClientOrder) return;
-          handleFetchOrderMail(mailClientOrder, source);
+          return handleFetchOrderMail(mailClientOrder, source);
+        }}
+        onLoadMessage={async (messageId) => {
+          if (!mailClientParams) return "";
+          const detail = await readPickupMessage(
+            mailClientParams.email,
+            mailClientParams.token,
+            Number(messageId)
+          );
+          return detail.body;
         }}
       />
     </>

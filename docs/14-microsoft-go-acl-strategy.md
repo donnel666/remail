@@ -158,9 +158,9 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 |------|----------|------------------|
 | 1. RT 获取/刷新 | 有 `clientId + refreshToken` 时先用 RT 换 Graph AT；没有 RT 时沿用 `rt` 页面流获取 RT，辅助邮箱绑定策略不改。 | 是。获取/刷新失败按错误分类返回。 |
 | 2. 收全部邮件 | 优先用 RT 换 Graph AT 调 Microsoft Graph，分页读取 `Inbox` 和 `JunkEmail`；Graph 不可用时用同一 RT 换 IMAP token 回退 Outlook IMAP。 | 是。Graph 或 IMAP 任一路径读取接口返回正常，即资源验证可成功。 |
-| 3. 项目匹配与关系插入 | 将第二步结构化邮件交给后续 BC-MAILMATCH/Project 规则，匹配系统项目并插入业务关系。 | 否。该步骤是业务增强，不参与资源本体是否正常的判断。 |
+| 3. 项目匹配与关系插入 | 将第二步全量结构化邮件交给 BC-MAILMATCH，使用当前 `listed/delisted` Microsoft 项目规则匹配并幂等写入 `microsoft_resource_project_matches`。 | 否。该步骤是业务增强，不参与资源本体是否正常的判断。 |
 
-当前 P1-I3 只必须完成前两步。第三步必须在代码中保留扩展点并在文档中记录技术债，等 Project 与 MailMatch 模块具备项目规则、邮件匹配和关系落库能力后再接入。第三步失败、未实现或无匹配结果，不得把 Microsoft 资源置为 `abnormal`。
+第三步现已接入验证流程：Graph/IMAP 完成 Inbox 与 JunkEmail 全量扫描后，MailMatch 对每个项目只记录一次资源关系，并累计最早/最晚证据时间。重复验证使用 `(resource_id, project_id)` 主键幂等更新；第三步失败只写安全诊断，不得把 Microsoft 资源置为 `abnormal`。BC-ALLOC 在候选查询和行锁重校验时排除同项目历史匹配资源，避免把已用于旧项目的邮箱再次分配给该项目。
 
 收件策略：
 

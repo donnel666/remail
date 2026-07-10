@@ -25,6 +25,7 @@ type MailTransportModule struct {
 	OutboundSendUseCase *mailapp.OutboundSendUseCase
 	InboundUseCase      *mailapp.InboundService
 	ValidationUseCase   coreapp.ResourceValidationPort
+	ValidationAdapter   *ResourceValidationAdapter
 	BindingRecorder     coreapp.MicrosoftBindingInputRecorder
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
@@ -35,6 +36,13 @@ func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsume
 		return
 	}
 	m.InboundUseCase.SetConsumer(consumer)
+}
+
+func (m *MailTransportModule) SetHistoricalProjectMatcher(matcher mailapp.HistoricalProjectMatcher) {
+	if m == nil || m.ValidationAdapter == nil {
+		return
+	}
+	m.ValidationAdapter.SetHistoricalProjectMatcher(matcher)
 }
 
 func NewMailTransportModule(
@@ -57,12 +65,14 @@ func NewMailTransportModule(
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
 	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundStore, outboundQueue, systemLogs, outboundFrom)
+	validationAdapter := NewResourceValidationAdapter(proxies, bindingRepo)
 	module := &MailTransportModule{
 		DeliveryUseCase:     outboundDelivery,
 		OutboundDelivery:    outboundDelivery,
 		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(outboundStore, sender, systemLogs),
 		InboundUseCase:      inboundUseCase,
-		ValidationUseCase:   NewResourceValidationAdapter(proxies, bindingRepo),
+		ValidationUseCase:   validationAdapter,
+		ValidationAdapter:   validationAdapter,
 		BindingRecorder:     NewMicrosoftBindingInputAdapter(bindingRepo),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 	}

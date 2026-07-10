@@ -36,7 +36,7 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 		allocationAdapter{alloc: alloc},
 		orderTokenAdapter{tokens: tokens},
 	)
-	uc.SetOrderSnapshotPort(orderSnapshotAdapter{db: db})
+	uc.SetOrderDeliveryPort(orderDeliveryAdapter{db: db})
 	uc.SetSystemLogPort(systemLogs)
 	return &Module{
 		UseCase:       uc,
@@ -44,26 +44,92 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 	}
 }
 
-type orderSnapshotAdapter struct {
+type orderDeliveryAdapter struct {
 	db *gorm.DB
 }
 
-func (a orderSnapshotAdapter) FindOrderSnapshotProof(ctx context.Context, orderNo string) (*tradeapp.OrderSnapshotProof, error) {
-	var row struct {
-		ReceivedAt time.Time `gorm:"column:received_at"`
-	}
-	err := a.db.WithContext(ctx).
-		Table("mailmatch_order_snapshots").
-		Select("received_at").
-		Where("order_no = ?", orderNo).
-		Take(&row).Error
+func (a orderDeliveryAdapter) FindOrderDelivery(ctx context.Context, orderID uint) (*tradeapp.OrderDeliverySummary, error) {
+	items, err := a.ListOrderDeliveries(ctx, []uint{orderID})
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return &tradeapp.OrderSnapshotProof{ReceivedAt: row.ReceivedAt}, nil
+	delivery, ok := items[orderID]
+	if !ok {
+		return nil, nil
+	}
+	return &delivery, nil
+}
+
+func (a orderDeliveryAdapter) ListOrderDeliveries(ctx context.Context, orderIDs []uint) (map[uint]tradeapp.OrderDeliverySummary, error) {
+	result := make(map[uint]tradeapp.OrderDeliverySummary)
+	if len(orderIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		OrderID          uint      `gorm:"column:order_id"`
+		VerificationCode string    `gorm:"column:verification_code"`
+		ReceivedAt       time.Time `gorm:"column:received_at"`
+	}
+	if err := a.db.WithContext(ctx).
+		Table("mailmatch_order_delivery_heads AS h").
+		Select("h.order_id, COALESCE(m.verification_code, '') AS verification_code, h.message_received_at AS received_at").
+		Joins("LEFT JOIN mailmatch_messages AS m ON m.id = h.message_id").
+		Where("h.order_id IN ?", orderIDs).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.OrderID] = tradeapp.OrderDeliverySummary{
+			VerificationCode: row.VerificationCode,
+			ReceivedAt:       row.ReceivedAt,
+		}
+	}
+	return result, nil
+}
+
+func (a orderDeliveryAdapter) ListPendingNotifications(ctx context.Context, afterOrderID uint, limit int) ([]tradeapp.OrderDeliveryNotification, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var rows []struct {
+		OrderID    uint      `gorm:"column:order_id"`
+		OrderNo    string    `gorm:"column:order_no"`
+		ReceivedAt time.Time `gorm:"column:received_at"`
+	}
+	query := a.db.WithContext(ctx).
+		Table("mailmatch_order_delivery_heads AS h").
+		Select("h.order_id, o.order_no, h.message_received_at AS received_at").
+		Joins("JOIN orders AS o ON o.id = h.order_id").
+		Where(`
+			(o.service_mode = 'code' AND o.status = 'active')
+			OR (
+				o.service_mode = 'purchase'
+				AND o.status IN ('active', 'completed')
+				AND o.activated_at IS NULL
+				AND (o.receive_until IS NULL OR h.message_received_at <= o.receive_until)
+			)
+		`)
+	if afterOrderID > 0 {
+		query = query.Where("h.order_id > ?", afterOrderID)
+	}
+	if err := query.
+		Order("h.order_id ASC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 && afterOrderID > 0 {
+		return a.ListPendingNotifications(ctx, 0, limit)
+	}
+	items := make([]tradeapp.OrderDeliveryNotification, len(rows))
+	for i := range rows {
+		items[i] = tradeapp.OrderDeliveryNotification{
+			OrderID:    rows[i].OrderID,
+			OrderNo:    rows[i].OrderNo,
+			ReceivedAt: rows[i].ReceivedAt,
+		}
+	}
+	return items, nil
 }
 
 type coreOrderingAdapter struct {

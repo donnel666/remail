@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export const DEFAULT_BLOCK_PAGE_SIZE = 10_000;
+export const DEFAULT_BLOCK_PAGE_SIZE = 1_000;
 const PREFETCH_THRESHOLD = 0.8;
 
 export interface BlockPageResult<T> {

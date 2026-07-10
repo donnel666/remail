@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 const (
 	apiKeyRuntimeMetaTTL       = 30 * time.Second
 	apiKeyRuntimeFlushInterval = 5 * time.Second
-	apiKeyRuntimeLogBatchSize  = 500
-	apiKeyRuntimeLogBufferSize = 10000
 )
 
 type apiKeyRuntime struct {
@@ -25,7 +22,6 @@ type apiKeyRuntime struct {
 	byPlain map[string]*apiKeyState
 	byID    map[uint]*apiKeyState
 
-	logs     chan CreateAPILogCommand
 	stop     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
@@ -58,7 +54,6 @@ func newAPIKeyRuntime(repo Repository, now func() time.Time) *apiKeyRuntime {
 		now:     now,
 		byPlain: make(map[string]*apiKeyState),
 		byID:    make(map[uint]*apiKeyState),
-		logs:    make(chan CreateAPILogCommand, apiKeyRuntimeLogBufferSize),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
@@ -111,14 +106,6 @@ func (rt *apiKeyRuntime) finish(keyID uint) {
 		state.active--
 	}
 	state.mu.Unlock()
-}
-
-func (rt *apiKeyRuntime) enqueueLog(cmd CreateAPILogCommand) error {
-	select {
-	case rt.logs <- cmd:
-	default:
-	}
-	return nil
 }
 
 func (rt *apiKeyRuntime) invalidateAll() {
@@ -249,7 +236,7 @@ func (rt *apiKeyRuntime) close(ctx context.Context) error {
 }
 
 func (rt *apiKeyRuntime) flush(ctx context.Context) error {
-	return errors.Join(rt.flushQuota(ctx), rt.flushLogs(ctx))
+	return rt.flushQuota(ctx)
 }
 
 func (rt *apiKeyRuntime) flushQuota(ctx context.Context) error {
@@ -284,45 +271,6 @@ func (rt *apiKeyRuntime) flushQuota(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (rt *apiKeyRuntime) flushLogs(ctx context.Context) error {
-	var errs []error
-	for {
-		batch := make([]CreateAPILogCommand, 0, apiKeyRuntimeLogBatchSize)
-		for len(batch) < apiKeyRuntimeLogBatchSize {
-			select {
-			case item := <-rt.logs:
-				batch = append(batch, item)
-			default:
-				if len(batch) == 0 {
-					return errors.Join(errs...)
-				}
-				if err := rt.repo.CreateAPILogs(ctx, batch); err != nil {
-					errs = append(errs, fmt.Errorf("flush api logs: %w", err))
-					rt.requeueLogs(batch)
-					return errors.Join(errs...)
-				}
-				goto nextBatch
-			}
-		}
-		if err := rt.repo.CreateAPILogs(ctx, batch); err != nil {
-			errs = append(errs, fmt.Errorf("flush api logs: %w", err))
-			rt.requeueLogs(batch)
-			return errors.Join(errs...)
-		}
-	nextBatch:
-	}
-}
-
-func (rt *apiKeyRuntime) requeueLogs(batch []CreateAPILogCommand) {
-	for i := len(batch) - 1; i >= 0; i-- {
-		select {
-		case rt.logs <- batch[i]:
-		default:
-			return
-		}
-	}
-}
-
 func (w *apiKeySlidingWindow) allow(now time.Time, limit int) bool {
 	if limit <= 0 {
 		return true
@@ -352,6 +300,6 @@ func (w *apiKeySlidingWindow) allow(now time.Time, limit int) bool {
 }
 
 func cloneAPIKey(key domain.APIKey) *domain.APIKey {
-	copy := key
-	return &copy
+	cloned := key
+	return &cloned
 }

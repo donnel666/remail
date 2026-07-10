@@ -17,23 +17,39 @@ func NewRetentionRepo(db *gorm.DB) *RetentionRepo {
 	return &RetentionRepo{db: db}
 }
 
-func (r *RetentionRepo) DeleteAPILogsBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
-	return r.deleteBySQL(ctx, "DELETE FROM api_logs WHERE created_at < ? LIMIT ?", before, limit)
-}
-
 func (r *RetentionRepo) DeleteIdempotencyKeysBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	return r.deleteBySQL(ctx, "DELETE FROM idempotency_keys WHERE created_at < ? LIMIT ?", before, limit)
 }
 
-func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, status string, limit int) (int64, error) {
-	if status != "" {
-		return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE status = ? AND received_at < ? LIMIT ?", status, before, limit)
+func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error) {
+	if resourceType != "microsoft" && resourceType != "domain" {
+		return 0, fmt.Errorf("delete mailmatch messages: invalid resource type")
 	}
-	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE received_at < ? LIMIT ?", before, limit)
+	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE resource_type = ? AND received_at < ? ORDER BY received_at, id LIMIT ?", resourceType, before, limit)
 }
 
 func (r *RetentionRepo) DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_fetch_jobs WHERE status IN ('succeeded', 'failed', 'skipped') AND updated_at < ? LIMIT ?", before, limit)
+}
+
+func (r *RetentionRepo) DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, "DELETE FROM allocation_daily_usages WHERE usage_date < ? ORDER BY usage_date LIMIT ?", before.UTC().Format("2006-01-02"), limit)
+}
+
+func (r *RetentionRepo) DeleteResourceValidationJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, "DELETE FROM resource_validation_jobs WHERE status IN ('succeeded', 'failed') AND updated_at < ? LIMIT ?", before, limit)
+}
+
+func (r *RetentionRepo) DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, "DELETE FROM proxy_check_jobs WHERE status IN ('succeeded', 'failed') AND updated_at < ? LIMIT ?", before, limit)
+}
+
+func (r *RetentionRepo) DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, "DELETE FROM outbound_mails WHERE status IN ('sent', 'failed') AND updated_at < ? LIMIT ?", before, limit)
+}
+
+func (r *RetentionRepo) DeleteSystemLogsBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	return r.deleteBySQL(ctx, "DELETE FROM system_logs WHERE created_at < ? ORDER BY created_at, id LIMIT ?", before, limit)
 }
 
 func (r *RetentionRepo) ListInboundMailObjectsBefore(ctx context.Context, before time.Time, limit int) ([]governanceapp.RetentionInboundMailObject, error) {

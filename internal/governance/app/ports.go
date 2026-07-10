@@ -22,5 +22,5 @@ type FilePort interface {
 	SavePrivateStream(ctx context.Context, file domain.PrivateFileStream) (*domain.StoredPrivateFile, error)
 	ReadPrivate(ctx context.Context, objectKey string) (*domain.PrivateFile, error)
 	DeletePrivate(ctx context.Context, objectKey string) error
-	ListPrivate(ctx context.Context, prefix string, limit int) ([]domain.PrivateObject, error)
+	ListPrivate(ctx context.Context, prefix string, startAfter string, limit int) ([]domain.PrivateObject, error)
 }

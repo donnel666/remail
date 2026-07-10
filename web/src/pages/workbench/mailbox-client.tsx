@@ -17,7 +17,7 @@ const { Text } = Typography;
 function matchesMail(message: WorkbenchMessage, search: string) {
   const q = search.trim().toLowerCase();
   if (!q) return true;
-  return [message.subject, message.body]
+  return [message.subject, message.preview, message.body]
     .join(" ")
     .toLowerCase()
     .includes(q);
@@ -37,11 +37,17 @@ function messageStatusLabel(status: WorkbenchMessage["status"], t: (key: string)
 
 export function MailboxClient({
   email,
+  fetchEnabled = true,
+  fetchKey,
   messages,
+  onLoadMessage,
   onFetch,
 }: {
   email: string;
+  fetchEnabled?: boolean;
+  fetchKey: string;
   messages: WorkbenchMessage[];
+  onLoadMessage?: (messageId: string) => Promise<string>;
   onFetch: FetchHandler;
 }) {
   const { t } = useTranslation();
@@ -50,14 +56,16 @@ export function MailboxClient({
     () => messages.filter((message) => matchesMail(message, search)),
     [messages, search]
   );
-  const hasVerificationCode = messages.some((message) => message.verificationCode);
   const [selectedMessageId, setSelectedMessageId] = useState("");
+  const [loadedBodies, setLoadedBodies] = useState<Record<string, string>>({});
+  const loadingBodyIdsRef = useRef(new Set<string>());
   const previousEmailRef = useRef(email);
 
   useEffect(() => {
     const emailChanged = previousEmailRef.current !== email;
     previousEmailRef.current = email;
     if (emailChanged) {
+      setLoadedBodies({});
       setSelectedMessageId(filteredMessages[0]?.id ?? "");
       return;
     }
@@ -73,6 +81,36 @@ export function MailboxClient({
   const selectedMessage =
     filteredMessages.find((message) => message.id === selectedMessageId) ??
     filteredMessages[0];
+  const selectedBody = selectedMessage
+    ? (loadedBodies[selectedMessage.id] ?? selectedMessage.body)
+    : "";
+
+  useEffect(() => {
+    if (
+      !selectedMessage ||
+      selectedBody ||
+      !onLoadMessage ||
+      loadingBodyIdsRef.current.has(selectedMessage.id)
+    ) {
+      return;
+    }
+    let active = true;
+    loadingBodyIdsRef.current.add(selectedMessage.id);
+    void onLoadMessage(selectedMessage.id)
+      .then((body) => {
+        if (!active) return;
+        setLoadedBodies((current) => ({ ...current, [selectedMessage.id]: body }));
+      })
+      .catch(() => {
+        if (active) setLoadedBodies((current) => ({ ...current, [selectedMessage.id]: selectedMessage.preview }));
+      })
+      .finally(() => {
+        loadingBodyIdsRef.current.delete(selectedMessage.id);
+      });
+    return () => {
+      active = false;
+    };
+  }, [onLoadMessage, selectedBody, selectedMessage]);
 
   function handleMessageKeyDown(
     event: KeyboardEvent<HTMLDivElement>,
@@ -90,7 +128,11 @@ export function MailboxClient({
           <div className="mailbox-client-address font-mono-data">
             <OverflowTooltip content={email}>{email}</OverflowTooltip>
           </div>
-          <FetchControl autoEnabled={!hasVerificationCode} compact onFetch={onFetch} />
+          {fetchEnabled ? (
+            <FetchControl autoEnabled compact fetchKey={fetchKey} onFetch={onFetch} />
+          ) : (
+            <Text type="tertiary">{t("SMTP push")}</Text>
+          )}
         </div>
         <Input
           className="resources-search-input mailbox-client-search"
@@ -114,6 +156,7 @@ export function MailboxClient({
                 onClick={() => setSelectedMessageId(message.id)}
                 onKeyDown={(event) => handleMessageKeyDown(event, message.id)}
                 role="button"
+                aria-selected={selectedMessage?.id === message.id}
                 tabIndex={0}
               >
                 <span className="mailbox-client-item-head">
@@ -201,7 +244,9 @@ export function MailboxClient({
                 </div>
               ) : null}
             </div>
-            <pre className="mailbox-client-body">{selectedMessage.body}</pre>
+            <pre className="mailbox-client-body">
+              {selectedBody || selectedMessage.preview}
+            </pre>
           </>
         ) : (
           <div className="mailbox-client-empty">
@@ -216,14 +261,20 @@ export function MailboxClient({
 
 export function MailboxClientModal({
   email,
+  fetchEnabled = true,
+  fetchKey,
   messages = [],
   onClose,
   onFetch,
+  onLoadMessage,
 }: {
   email?: string;
+  fetchEnabled?: boolean;
+  fetchKey?: string;
   messages?: WorkbenchMessage[];
   onClose: () => void;
   onFetch: FetchHandler;
+  onLoadMessage?: (messageId: string) => Promise<string>;
 }) {
   const open = Boolean(email);
 
@@ -240,7 +291,14 @@ export function MailboxClientModal({
       width="min(1120px, calc(100vw - 64px))"
     >
       {email ? (
-        <MailboxClient email={email} messages={messages} onFetch={onFetch} />
+        <MailboxClient
+          email={email}
+          fetchEnabled={fetchEnabled}
+          fetchKey={fetchKey ?? email}
+          messages={messages}
+          onFetch={onFetch}
+          onLoadMessage={onLoadMessage}
+        />
       ) : null}
     </Modal>
   );

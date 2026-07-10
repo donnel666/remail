@@ -116,7 +116,7 @@ func (s *MinIOFileStore) DeletePrivate(ctx context.Context, objectKey string) er
 	return nil
 }
 
-func (s *MinIOFileStore) ListPrivate(ctx context.Context, prefix string, limit int) ([]domain.PrivateObject, error) {
+func (s *MinIOFileStore) ListPrivate(ctx context.Context, prefix string, startAfter string, limit int) ([]domain.PrivateObject, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -125,8 +125,10 @@ func (s *MinIOFileStore) ListPrivate(ctx context.Context, prefix string, limit i
 	}
 	out := make([]domain.PrivateObject, 0, limit)
 	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
-		Prefix:    prefix,
-		Recursive: true,
+		Prefix:     prefix,
+		Recursive:  true,
+		MaxKeys:    limit,
+		StartAfter: startAfter,
 	}) {
 		if object.Err != nil {
 			return nil, fmt.Errorf("list private files: %w", object.Err)
@@ -135,9 +137,6 @@ func (s *MinIOFileStore) ListPrivate(ctx context.Context, prefix string, limit i
 			ObjectKey:    object.Key,
 			LastModified: object.LastModified,
 		})
-		if len(out) >= limit {
-			break
-		}
 	}
 	return out, nil
 }

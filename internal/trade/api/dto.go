@@ -22,6 +22,7 @@ type OrderResponse struct {
 	ServiceMode          string     `json:"serviceMode"`
 	SupplyPolicy         string     `json:"supplyPolicy"`
 	Status               string     `json:"status"`
+	FailureCode          string     `json:"failureCode,omitempty"`
 	PayAmount            string     `json:"payAmount"`
 	RefundAmount         string     `json:"refundAmount"`
 	AllocationType       string     `json:"allocationType,omitempty"`
@@ -35,16 +36,19 @@ type OrderResponse struct {
 	APIKeyID             *uint      `json:"apiKeyId,omitempty"`
 	ServiceCleanupStatus string     `json:"serviceCleanupStatus"`
 	ServiceToken         string     `json:"serviceToken,omitempty"`
+	HasDelivery          bool       `json:"hasDelivery"`
+	VerificationCode     string     `json:"verificationCode,omitempty"`
+	LastMailReceivedAt   *time.Time `json:"lastMailReceivedAt,omitempty"`
 	ArchivedAt           *time.Time `json:"archivedAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 type OrderListResponse struct {
-	Items  []OrderResponse `json:"items"`
-	Total  int64           `json:"total"`
-	Offset int             `json:"offset"`
-	Limit  int             `json:"limit"`
+	Items       []OrderResponse `json:"items"`
+	NextAfterID *uint           `json:"nextAfterId,omitempty"`
+	HasNext     bool            `json:"hasNext"`
+	Limit       int             `json:"limit"`
 }
 
 type OrderEventResponse struct {
@@ -70,5 +74,7 @@ type ExpireOrdersResponse struct {
 	PurchaseActivationCompleted int `json:"purchaseActivationCompleted"`
 	PurchaseWarrantyCompleted   int `json:"purchaseWarrantyCompleted"`
 	CodeCleaned                 int `json:"codeCleaned"`
+	CleanupRetried              int `json:"cleanupRetried"`
+	DeliveryReconciled          int `json:"deliveryReconciled"`
 	Failed                      int `json:"failed"`
 }

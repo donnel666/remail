@@ -13,7 +13,9 @@ import (
 )
 
 const (
-	captchaTTL = 300 // 5 minutes
+	captchaTTL        = 300 // 5 minutes
+	captchaOperandMin = 1
+	captchaOperandMax = 9
 )
 
 // CaptchaUseCase handles captcha creation.
@@ -107,11 +109,11 @@ func generateCaptchaExpression() (captchaExpression, error) {
 }
 
 func additionExpression() (captchaExpression, error) {
-	left, err := cryptoRandRange(1, 9)
+	left, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
-	right, err := cryptoRandRange(1, 9)
+	right, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
@@ -119,11 +121,11 @@ func additionExpression() (captchaExpression, error) {
 }
 
 func subtractionExpression() (captchaExpression, error) {
-	left, err := cryptoRandRange(1, 9)
+	left, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
-	right, err := cryptoRandRange(1, left)
+	right, err := cryptoRandRange(captchaOperandMin, left)
 	if err != nil {
 		return captchaExpression{}, err
 	}
@@ -131,11 +133,11 @@ func subtractionExpression() (captchaExpression, error) {
 }
 
 func multiplicationExpression() (captchaExpression, error) {
-	left, err := cryptoRandRange(1, 9)
+	left, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
-	right, err := cryptoRandRange(1, 9)
+	right, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
@@ -143,11 +145,11 @@ func multiplicationExpression() (captchaExpression, error) {
 }
 
 func divisionExpression() (captchaExpression, error) {
-	divisor, err := cryptoRandRange(1, 9)
+	divisor, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}
-	answer, err := cryptoRandRange(1, 9)
+	answer, err := cryptoRandRange(captchaOperandMin, captchaOperandMax)
 	if err != nil {
 		return captchaExpression{}, err
 	}

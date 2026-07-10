@@ -3348,108 +3348,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/admin/projects/{projectId}/candidates:
-    get:
-      operationId: getAdminProjectCandidates
-      summary: List routing candidates for a project
-      tags:
-        - Allocation
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: type
-          in: query
-          schema:
-            type: string
-            enum: [microsoft, domain]
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-      responses:
-        "200":
-          description: Routing candidate list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RoutingCandidateListResponse"
-        "400":
-          description: Invalid path or query parameters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: Invalid candidate type
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/admin/projects/{projectId}/candidates/refresh:
-    post:
-      operationId: postAdminProjectCandidatesRefresh
-      summary: Refresh routing candidates for a project
-      tags:
-        - Allocation
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CsrfToken"
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "202":
-          description: Candidate refresh job accepted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CandidateRefreshResponse"
-        "400":
-          description: Invalid path parameters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Permission denied
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   # --- OpenAPI Credentials ---
   /v1/apikeys/usage:
     get:
@@ -3777,11 +3675,11 @@ paths:
           in: query
           schema:
             type: string
-        - name: offset
+        - name: afterId
           in: query
           schema:
             type: integer
-            default: 0
+            description: Last order id from the previous page.
         - name: limit
           in: query
           schema:
@@ -4244,6 +4142,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          description: Pickup rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Mail service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/pickup/messages/{messageId}:
+    get:
+      operationId: getPickupMessage
+      summary: Read one mail body with service email and token
+      tags:
+        - MailMatch
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Token scoped mail message detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailContentDetailResponse"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Invalid or expired credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Message not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Order is not available for mail reading
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Pickup rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # --- Billing Wallet ---
   /v1/wallet:
@@ -4352,11 +4330,11 @@ paths:
           in: query
           schema:
             type: string
-        - name: offset
+        - name: afterId
           in: query
           schema:
             type: integer
-            default: 0
+            description: Last transaction id from the previous page.
         - name: limit
           in: query
           schema:
@@ -5558,7 +5536,7 @@ components:
           type: string
         keyPlain:
           type: string
-          description: Plain API key, only returned immediately after creation or on detail view.
+          description: Plain API key returned to its owner on create, list, and detail views.
         enabled:
           type: boolean
         rateLimitPerMinute:
@@ -5664,6 +5642,8 @@ components:
         - purchaseActivationCompleted
         - purchaseWarrantyCompleted
         - codeCleaned
+        - cleanupRetried
+        - deliveryReconciled
         - failed
       properties:
         codeTimedOut:
@@ -5673,6 +5653,10 @@ components:
         purchaseWarrantyCompleted:
           type: integer
         codeCleaned:
+          type: integer
+        cleanupRetried:
+          type: integer
+        deliveryReconciled:
           type: integer
         failed:
           type: integer
@@ -5695,6 +5679,7 @@ components:
         - deliveryEmail
         - clientChannel
         - serviceCleanupStatus
+        - hasDelivery
         - createdAt
         - updatedAt
       properties:
@@ -5720,6 +5705,15 @@ components:
         status:
           type: string
           enum: [pending_payment, paid, active, completed, refunded, failed, closed]
+        failureCode:
+          type: string
+          enum:
+            - unknown
+            - insufficient_inventory
+            - insufficient_balance
+            - allocation_failed
+            - service_token_failed
+            - activation_failed
         payAmount:
           type: string
         refundAmount:
@@ -5758,6 +5752,17 @@ components:
         serviceToken:
           type: string
           description: Service credential used by pickup URLs and later mail-result APIs.
+        hasDelivery:
+          type: boolean
+          description: Whether the order already has a matched verification-code delivery.
+        verificationCode:
+          type: string
+          description: Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery.
+        lastMailReceivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Provider receive time of the delivered message.
         archivedAt:
           type: string
           format: date-time
@@ -5774,18 +5779,17 @@ components:
       type: object
       required:
         - items
-        - total
-        - offset
+        - hasNext
         - limit
       properties:
         items:
           type: array
           items:
             $ref: "#/components/schemas/OrderResponse"
-        total:
+        nextAfterId:
           type: integer
-        offset:
-          type: integer
+        hasNext:
+          type: boolean
         limit:
           type: integer
       additionalProperties: false
@@ -5842,12 +5846,15 @@ components:
     MailContentResponse:
       type: object
       required:
+        - id
         - sender
         - recipient
         - receivedAt
         - subject
-        - body
+        - bodyPreview
       properties:
+        id:
+          type: integer
         sender:
           type: string
         recipient:
@@ -5857,11 +5864,21 @@ components:
           format: date-time
         subject:
           type: string
-        body:
+        bodyPreview:
           type: string
         verificationCode:
           type: string
       additionalProperties: false
+
+    MailContentDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/MailContentResponse"
+        - type: object
+          required:
+            - body
+          properties:
+            body:
+              type: string
 
     FetchStateResponse:
       type: object
@@ -6018,18 +6035,17 @@ components:
       type: object
       required:
         - items
-        - total
-        - offset
+        - hasNext
         - limit
       properties:
         items:
           type: array
           items:
             $ref: "#/components/schemas/TransactionItem"
-        total:
+        nextAfterId:
           type: integer
-        offset:
-          type: integer
+        hasNext:
+          type: boolean
         limit:
           type: integer
       additionalProperties: false
@@ -8316,98 +8332,6 @@ components:
           type: integer
         totalAvailable:
           type: integer
-      additionalProperties: false
-
-    RoutingCandidate:
-      type: object
-      required:
-        - id
-        - type
-        - projectId
-        - resourceId
-        - address
-        - domainSuffix
-        - forSale
-        - qualityScore
-        - status
-        - bucket
-        - createdAt
-        - updatedAt
-      properties:
-        id:
-          type: integer
-        type:
-          type: string
-          enum: [microsoft, domain]
-        projectId:
-          type: integer
-        resourceId:
-          type: integer
-        address:
-          type: string
-        domainSuffix:
-          type: string
-        forSale:
-          type: boolean
-        qualityScore:
-          type: integer
-        status:
-          type: string
-          enum: [normal, abnormal, disabled]
-        bucket:
-          type: integer
-        lastAllocatedAt:
-          type: string
-          format: date-time
-          nullable: true
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      additionalProperties: false
-
-    RoutingCandidateListResponse:
-      type: object
-      required:
-        - items
-        - total
-        - offset
-        - limit
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/RoutingCandidate"
-        total:
-          type: integer
-        offset:
-          type: integer
-        limit:
-          type: integer
-      additionalProperties: false
-
-    CandidateRefreshResponse:
-      type: object
-      required:
-        - jobId
-        - projectId
-        - status
-        - created
-        - message
-      properties:
-        jobId:
-          type: integer
-        projectId:
-          type: integer
-        status:
-          type: string
-          enum: [pending, queued, running, succeeded, failed]
-        created:
-          type: boolean
-        message:
-          type: string
       additionalProperties: false
 
     ProxyBindingListResponse:

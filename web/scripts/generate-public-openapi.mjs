@@ -49,6 +49,21 @@ const paginationParams = [
   },
 ];
 
+const cursorPaginationParams = [
+  {
+    name: "afterId",
+    in: "query",
+    schema: { type: "integer", minimum: 1 },
+    description: "上一页最后一条记录的 ID。",
+  },
+  {
+    name: "limit",
+    in: "query",
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    description: "每页数量，最大 100。",
+  },
+];
+
 const idempotencyHeader = {
   name: "Idempotency-Key",
   in: "header",
@@ -237,11 +252,11 @@ const schemas = {
     type: "object",
     properties: {
       items: listOf("Order"),
-      total: { type: "integer", example: 3 },
-      offset: { type: "integer", example: 0 },
+      nextAfterId: { type: "integer", example: 3019 },
+      hasNext: { type: "boolean", example: true },
       limit: { type: "integer", example: 20 },
     },
-    required: ["items", "total", "offset", "limit"],
+    required: ["items", "hasNext", "limit"],
   },
   Order: {
     type: "object",
@@ -255,6 +270,14 @@ const schemas = {
       serviceMode: stringEnum(["code", "purchase"]),
       supplyPolicy: stringEnum(["private_first", "public_only"]),
       status: stringEnum(["pending_payment", "paid", "active", "completed", "refunded", "failed", "closed"]),
+      failureCode: stringEnum([
+        "unknown",
+        "insufficient_inventory",
+        "insufficient_balance",
+        "allocation_failed",
+        "service_token_failed",
+        "activation_failed",
+      ]),
       payAmount: { type: "string", example: "0.80" },
       refundAmount: { type: "string", example: "0.00" },
       allocationType: { type: "string", example: "microsoft" },
@@ -268,6 +291,9 @@ const schemas = {
       apiKeyId: nullable("integer"),
       serviceCleanupStatus: stringEnum(["none", "succeeded", "partial_failure"]),
       serviceToken: { type: "string", example: "st_550e8400-e29b-41d4-a716-446655440000" },
+      hasDelivery: { type: "boolean", example: true },
+      verificationCode: { type: "string", example: "829104" },
+      lastMailReceivedAt: { ...nullable("string"), format: "date-time" },
       archivedAt: nullable("string"),
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -287,6 +313,7 @@ const schemas = {
       "deliveryEmail",
       "clientChannel",
       "serviceCleanupStatus",
+      "hasDelivery",
       "createdAt",
       "updatedAt",
     ],
@@ -302,14 +329,27 @@ const schemas = {
   MailMessage: {
     type: "object",
     properties: {
+      id: { type: "integer", example: 5012 },
       sender: { type: "string", example: "account-security-noreply@accountprotection.microsoft.com" },
       recipient: { type: "string", example: "mateo.richards@outlook.com" },
       receivedAt: { type: "string", format: "date-time" },
       subject: { type: "string", example: "Microsoft account security code" },
-      body: { type: "string", example: "Your security code is 829104." },
+      bodyPreview: { type: "string", example: "Your security code is 829104." },
       verificationCode: { type: "string", example: "829104" },
     },
-    required: ["sender", "recipient", "receivedAt", "subject", "body"],
+    required: ["id", "sender", "recipient", "receivedAt", "subject", "bodyPreview"],
+  },
+  MailMessageDetail: {
+    allOf: [
+      ref("MailMessage"),
+      {
+        type: "object",
+        properties: {
+          body: { type: "string", example: "Your security code is 829104." },
+        },
+        required: ["body"],
+      },
+    ],
   },
   FetchState: {
     type: "object",
@@ -348,11 +388,11 @@ const schemas = {
     type: "object",
     properties: {
       items: listOf("Transaction"),
-      total: { type: "integer" },
-      offset: { type: "integer" },
+      nextAfterId: { type: "integer" },
+      hasNext: { type: "boolean" },
       limit: { type: "integer" },
     },
-    required: ["items", "total", "offset", "limit"],
+    required: ["items", "hasNext", "limit"],
   },
   Transaction: {
     type: "object",
@@ -645,6 +685,7 @@ const spec = {
       Conflict: { description: "请求与已有业务事实冲突。", ...json(ref("ErrorResponse")) },
       UnprocessableEntity: { description: "业务校验未通过。", ...json(ref("ErrorResponse")) },
       TooManyRequests: { description: "请求超过 API Key 限制。", ...json(ref("ErrorResponse")) },
+      ServiceUnavailable: { description: "邮件服务暂时不可用。", ...json(ref("ErrorResponse")) },
       InternalError: { description: "服务端异常。", ...json(ref("ErrorResponse")) },
     },
     schemas,
@@ -722,7 +763,7 @@ const spec = {
         summary: "查询订单",
         security: apiKeySecurity,
         parameters: [
-          ...paginationParams,
+          ...cursorPaginationParams,
           { name: "status", in: "query", schema: { type: "string" } },
           { name: "serviceMode", in: "query", schema: stringEnum(["purchase", "code"]) },
           { name: "search", in: "query", schema: { type: "string" } },
@@ -760,6 +801,25 @@ const spec = {
         responses: {
           "200": ok(ref("PickupMailResponse")),
           ...errorResponses,
+          "503": { $ref: "#/components/responses/ServiceUnavailable" },
+        },
+      },
+    },
+    "/v1/pickup/messages/{messageId}": {
+      get: {
+        tags: ["Core"],
+        operationId: "getPickupMessage",
+        summary: "读取单封邮件正文",
+        description: "取件接口不使用 API Key。仅允许读取当前服务凭证所属订单的邮件。",
+        security: [],
+        parameters: [
+          { name: "messageId", in: "path", required: true, schema: { type: "integer" } },
+          { name: "email", in: "query", required: true, schema: { type: "string", format: "email" } },
+          { name: "token", in: "query", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": ok(ref("MailMessageDetail")),
+          ...errorResponses,
         },
       },
     },
@@ -781,7 +841,7 @@ const spec = {
         operationId: "listWalletTransactions",
         summary: "查询钱包流水",
         security: apiKeySecurity,
-        parameters: [...paginationParams, { name: "search", in: "query", schema: { type: "string" } }],
+        parameters: [...cursorPaginationParams, { name: "search", in: "query", schema: { type: "string" } }],
         responses: {
           "200": ok(ref("TransactionListResponse")),
           ...errorResponses,

@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"log/slog"
+	stdmail "net/mail"
 	"strings"
+	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
@@ -20,6 +24,14 @@ type ResourceValidationAdapter struct {
 	fetcher   *mailinfra.MicrosoftMailFetchClient
 	dns       *mailinfra.DomainDNSValidator
 	bindings  *mailinfra.MicrosoftBindingRepo
+	history   mailapp.HistoricalProjectMatcher
+}
+
+func (a *ResourceValidationAdapter) SetHistoricalProjectMatcher(matcher mailapp.HistoricalProjectMatcher) {
+	if a == nil {
+		return
+	}
+	a.history = matcher
 }
 
 func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
@@ -75,6 +87,14 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		last = toCoreMicrosoftResult(rawResult)
 		_ = a.recordBindingResult(ctx, req, rawResult)
 		if rawResult.Valid {
+			if err := a.matchHistoricalProjects(ctx, req, rawResult); err != nil {
+				slog.Warn(
+					"microsoft validation history matching failed",
+					"resource_id", req.ResourceID,
+					"request_id", req.RequestID,
+					"error", err,
+				)
+			}
 			_ = a.reportProxySuccess(ctx, proxyID)
 			return last, nil
 		}
@@ -98,6 +118,58 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		}
 	}
 	return last, nil
+}
+
+func (a *ResourceValidationAdapter) matchHistoricalProjects(ctx context.Context, req coreapp.MicrosoftValidationRequest, result mailinfra.MicrosoftOAuthResult) error {
+	if a == nil || a.history == nil || result.MailFetch == nil || len(result.MailFetch.Messages) == 0 {
+		return nil
+	}
+	messages := make([]mailapp.HistoricalProjectMessage, 0, len(result.MailFetch.Messages))
+	for _, item := range result.MailFetch.Messages {
+		messages = append(messages, mailapp.HistoricalProjectMessage{
+			Recipients:        historicalRecipients(item.To),
+			Sender:            strings.TrimSpace(item.From),
+			Subject:           strings.TrimSpace(item.Subject),
+			Body:              strings.TrimSpace(item.Body),
+			BodyPreview:       strings.TrimSpace(item.Preview),
+			MessageIDHeader:   strings.TrimSpace(item.InternetMessageID),
+			ProviderMessageID: strings.TrimSpace(item.ID),
+			Protocol:          strings.TrimSpace(item.Protocol),
+			Folder:            strings.TrimSpace(item.FolderLabel),
+			ReceivedAt:        item.ReceivedAt.UTC(),
+		})
+	}
+	return a.history.MatchMicrosoftHistory(ctx, mailapp.HistoricalProjectMatchRequest{
+		ResourceID:   req.ResourceID,
+		EmailAddress: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		Messages:     messages,
+		ScannedAt:    time.Now().UTC(),
+	})
+}
+
+func historicalRecipients(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	addresses, err := stdmail.ParseAddressList(value)
+	if err == nil {
+		result := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			if normalized := strings.ToLower(strings.TrimSpace(address.Address)); normalized != "" {
+				result = append(result, normalized)
+			}
+		}
+		return result
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if normalized := strings.ToLower(strings.TrimSpace(part)); normalized != "" {
+			result = append(result, normalized)
+		}
+	}
+	return result
 }
 
 func (a *ResourceValidationAdapter) ValidateDomain(ctx context.Context, req coreapp.DomainValidationRequest) (coreapp.DomainValidationResult, error) {

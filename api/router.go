@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
@@ -32,11 +33,17 @@ import (
 // feFS is the embedded frontend dist filesystem (nil in development mode).
 func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Context), error) {
 	r := gin.New()
-	cleanup := func(context.Context) {}
+	cleanupFuncs := make([]func(context.Context), 0, 4)
+	cleanup := func(ctx context.Context) {
+		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
+			cleanupFuncs[i](ctx)
+		}
+	}
 
 	// Global middleware
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID())
+	r.Use(platform.HTTPMetricsMiddleware())
 	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
 	r.Use(middleware.CORS("http://localhost:3000", "http://127.0.0.1:3000"))
 
@@ -44,13 +51,14 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	h := health.NewHandler(p)
 	r.GET("/healthz", h.Healthz)
 	r.GET("/readyz", h.Readyz)
+	if sqlDB, err := p.DB.DB(); err == nil {
+		platform.SetMetricsDB(sqlDB)
+	}
+	r.GET("/metrics", gin.WrapH(platform.MetricsHandler()))
 
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
-	tradeCleanup := func(context.Context) {}
-	openapiCleanup := func(context.Context) {}
-	retentionCleanup := func(context.Context) {}
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
@@ -64,8 +72,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			fileStore,
 			governanceinfra.NewSystemLogRepo(p.DB),
 		)
-		retentionCleanup = retentionService.StartDaily(context.Background(), retentionLocation)
-		cleanup = retentionCleanup
+		cleanupFuncs = append(cleanupFuncs, retentionService.StartDaily(context.Background(), retentionLocation))
 
 		// Proxy module is initialized before MailTransport so Microsoft ACL can
 		// use the proxy pool through a port instead of bypassing BC-PROXY.
@@ -116,7 +123,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
-		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
@@ -126,28 +132,22 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// OpenAPI credentials and order service tokens.
 		openapiMod := openapiapi.NewModule(p.DB)
-		openapiCleanup = func(ctx context.Context) {
-			_ = openapiMod.UseCase.Close(ctx)
-		}
-		cleanup = func(ctx context.Context) {
-			openapiCleanup(ctx)
-			retentionCleanup(ctx)
-		}
+		cleanupFuncs = append(cleanupFuncs, func(ctx context.Context) {
+			if err := openapiMod.UseCase.Close(ctx); err != nil {
+				slog.Error("failed to flush OpenAPI runtime state during shutdown", "error", err)
+			}
+		})
 		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher)
 
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
-		tradeCleanup = tradeapi.StartLifecycleScanner(tradeMod)
-		cleanup = func(ctx context.Context) {
-			tradeCleanup(ctx)
-			openapiCleanup(ctx)
-			retentionCleanup(ctx)
-		}
+		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
-		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, openapiMod.UseCase)
+		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
 		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
+		mailMod.SetHistoricalProjectMatcher(mailmatchapi.NewHistoricalProjectMatcherAdapter(mailmatchMod.UseCase))
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 
@@ -162,19 +162,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		return nil, cleanup, err
 	}
 	if mailMod != nil {
-		mailCleanup := mailMod.Start(context.Background())
-		cleanup = func(ctx context.Context) {
-			tradeCleanup(ctx)
-			openapiCleanup(ctx)
-			mailCleanup(ctx)
-			retentionCleanup(ctx)
-		}
-	} else {
-		cleanup = func(ctx context.Context) {
-			tradeCleanup(ctx)
-			openapiCleanup(ctx)
-			retentionCleanup(ctx)
-		}
+		cleanupFuncs = append(cleanupFuncs, mailMod.Start(context.Background()))
 	}
 
 	// Serve embedded frontend SPA if available

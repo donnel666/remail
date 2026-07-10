@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -44,8 +44,10 @@ import {
   publishDomainResource,
   publishDomainResourcesByFilter,
   publishDomainResourcesBatch,
+  validateResource,
   validateDomainResourcesBatch,
   validateDomainResourcesByFilter,
+  waitForResourceValidation,
   type ResourceBulkFilter,
   type ResourceListResponse,
   type ResourceListFilter,
@@ -122,6 +124,15 @@ export default function DomainEmails() {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
+  const validationControllersRef = useRef(new Set<AbortController>());
+
+  useEffect(() => {
+    const controllers = validationControllersRef.current;
+    return () => {
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+    };
+  }, []);
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const [publishingResourceID, setPublishingResourceID] = useState<
@@ -317,13 +328,29 @@ export default function DomainEmails() {
   }, []);
 
   const handleCheckResource = useCallback(async (record: DomainResource) => {
+    const controller = new AbortController();
+    validationControllersRef.current.add(controller);
     try {
-      await validateDomainResourcesBatch([record.id]);
+      const submitted = await validateResource(record.id, controller.signal);
       Toast.success(t("Resource validation submitted."));
+      const completed = await waitForResourceValidation(submitted.validationId, {
+        signal: controller.signal,
+      });
+      await refresh();
+      if (completed.status === "failed") {
+        Toast.error(
+          completed.lastSafeError || t("Resource validation failed.")
+        );
+      } else {
+        Toast.success(t("Resource validation succeeded."));
+      }
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+    } finally {
+      validationControllersRef.current.delete(controller);
     }
-  }, [t]);
+  }, [refresh, t]);
 
   const queueResourceChecks = useCallback(async (resourceIds: number[]) => {
     const ids = Array.from(new Set(resourceIds.filter((id) => id > 0)));

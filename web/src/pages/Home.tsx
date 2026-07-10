@@ -27,9 +27,9 @@ const FEATURES = [
   },
 ];
 
-const endpoint = "/v1/orders";
-const examplePayload = '{"orderKind":"code","projectId":1,"selectedEmailType":"outlook"}';
-const curlRaw = `curl -X POST ${endpoint} -H "Authorization: Bearer <YOUR_KEY>" -d '${examplePayload}'`;
+const endpoint = "/v1/open/orders?serviceMode=code&supply=public_only";
+const examplePayload = '{"projectId":1,"productId":1,"emailSuffix":"outlook.com"}';
+const curlRaw = `curl -X POST "${endpoint}" -H "Authorization: Bearer <YOUR_KEY>" -H "Idempotency-Key: <UNIQUE_KEY>" -H "Content-Type: application/json" -d '${examplePayload}'`;
 const titleBrandGradient =
   "bg-gradient-to-r from-[#8a4a34] via-[#c6533c] to-[#f4513b] bg-clip-text text-transparent dark:from-[#ffd0a3] dark:via-[#ff8a5c] dark:to-[#ff5a82]";
 const titleHotGradient =
@@ -49,6 +49,16 @@ function TerminalCode({ responseLabel }: { responseLabel: string }) {
           "Authorization: Bearer &lt;YOUR_KEY&gt;"
         </span>
         {"\n  "}
+        <span className="text-[var(--terminal-flag)]">-H</span>{" "}
+        <span className="text-[var(--terminal-string)]">
+          "Idempotency-Key: &lt;UNIQUE_KEY&gt;"
+        </span>
+        {"\n  "}
+        <span className="text-[var(--terminal-flag)]">-H</span>{" "}
+        <span className="text-[var(--terminal-string)]">
+          "Content-Type: application/json"
+        </span>
+        {"\n  "}
         <span className="text-[var(--terminal-flag)]">-d</span>{" "}
         <span className="text-[var(--terminal-string)]">'{examplePayload}'</span>
         {"\n\n"}
@@ -63,10 +73,10 @@ function TerminalCode({ responseLabel }: { responseLabel: string }) {
         {"\n  "}
         <span className="text-[var(--terminal-key)]">"status"</span>
         <span className="text-[var(--terminal-muted)]">: </span>
-        <span className="text-[var(--terminal-string)]">"fulfilling"</span>
+        <span className="text-[var(--terminal-string)]">"active"</span>
         <span className="text-[var(--terminal-muted)]">,</span>
         {"\n  "}
-        <span className="text-[var(--terminal-key)]">"email"</span>
+        <span className="text-[var(--terminal-key)]">"deliveryEmail"</span>
         <span className="text-[var(--terminal-muted)]">: </span>
         <span className="text-[var(--terminal-string)]">"user_abc@outlook.com"</span>
         {"\n"}

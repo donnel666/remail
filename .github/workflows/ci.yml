@@ -4,8 +4,14 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -17,9 +23,14 @@ env:
   NODE_VERSION: "22"
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   backend-static:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -30,33 +41,8 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        working-directory: web
-        run: corepack enable
-
-      - name: Resolve pnpm store
-        id: pnpm-store
-        working-directory: web
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
-
       - name: Install dependencies
         run: go mod download
-
-      - name: Install frontend dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
 
       - name: Check Go formatting
         run: |
@@ -71,12 +57,6 @@ jobs:
           go generate ./api
           git diff --exit-code -- api/openapi.gen.go
 
-      - name: Verify OpenAPI TypeScript schema
-        working-directory: web
-        run: |
-          pnpm generate:api
-          git diff --exit-code -- src/lib/openapi/schema.ts
-
       - name: Run go vet
         run: go vet ./...
 
@@ -85,32 +65,17 @@ jobs:
         with:
           version: v2.12.2
 
-  backend-test:
+  backend-test-shard:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: remail
-          MYSQL_USER: remail
-          MYSQL_PASSWORD: remail
-        options: >-
-          --health-cmd "mysqladmin ping -h localhost"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 3306:3306
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: core
+            packages: ./internal/core/... ./internal/iam/... ./internal/mailtransport/...
+          - shard: services
+            packages: ./api/... ./cmd/benchseed/... ./internal/alloc/... ./internal/billing/... ./internal/governance/... ./internal/mailmatch/... ./internal/openapi/... ./internal/platform/... ./internal/proxy/... ./internal/trade/...
 
     steps:
       - uses: actions/checkout@v4
@@ -124,42 +89,21 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Start MinIO
-        run: |
-          docker rm -f remail-ci-minio >/dev/null 2>&1 || true
-          docker run -d \
-            --name remail-ci-minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=remail \
-            -e MINIO_ROOT_PASSWORD=remail_secret \
-            minio/minio:latest server /data --console-address ":9001"
-          for _ in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
-              exit 0
-            fi
-            if ! docker ps --format '{{.Names}}' | grep -qx remail-ci-minio; then
-              docker logs remail-ci-minio
-              exit 1
-            fi
-            sleep 1
-          done
-          docker logs remail-ci-minio
-          exit 1
+      - name: Run ${{ matrix.shard }} tests
+        run: go test ${{ matrix.packages }} -count=1 -timeout=15m
 
-      - name: Run tests
-        run: go test ./... -v -count=1
-        env:
-          MYSQL_DSN: "remail:remail@tcp(127.0.0.1:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
-          REDIS_ADDR: "127.0.0.1:6379"
-          MINIO_ENDPOINT: "127.0.0.1:9000"
-          MINIO_ACCESS_KEY: "remail"
-          MINIO_SECRET_KEY: "remail_secret"
-          MINIO_USE_SSL: "false"
-          MINIO_BUCKET: "remail"
-          SESSION_SECRET: "ci-test-secret"
+  backend-test:
+    if: always()
+    needs: [backend-test-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all backend test shards
+        run: test "${{ needs.backend-test-shard.result }}" = "success"
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -167,37 +111,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        run: corepack enable && pnpm --version
-
-      - name: Resolve pnpm store
-        id: pnpm-store
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify OpenAPI TypeScript schema
+        run: |
+          pnpm generate:api
+          git diff --exit-code -- src/lib/openapi/schema.ts
+
+      - name: Verify public OpenAPI schema
+        run: |
+          pnpm generate:public-openapi
+          git diff --exit-code -- public/openapi.json
+
       - name: Type check
         run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
 
       - name: Build
         run: pnpm build
 
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 1
+
   smoke:
+    if: github.event_name != 'pull_request'
     needs: [backend-static, backend-test, frontend]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.0
@@ -232,34 +190,11 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@v4
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        working-directory: web
-        run: corepack enable
-
-      - name: Resolve pnpm store
-        id: pnpm-store
-        working-directory: web
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
-
-      - name: Build frontend for embed
-        working-directory: web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-          mkdir -p ../cmd/server/webdist
-          cp -r dist/* ../cmd/server/webdist/
+          name: web-dist
+          path: cmd/server/webdist
 
       - name: Start MinIO
         run: |
@@ -326,14 +261,16 @@ jobs:
           test "$HTTP_CODE" = "200"
           echo "$BODY" | grep -q '"ok"'
 
-      - name: Verify goose migration table exists
+      - name: Verify migrations and critical tables
         run: |
+          LATEST=$(mysql -h 127.0.0.1 -u remail -premail remail -N -e \
+            "SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1;")
+          echo "Latest applied migration: $LATEST"
+          test "$LATEST" -ge 26
           mysql -h 127.0.0.1 -u remail -premail remail -e \
-            "SELECT version_id, is_applied FROM goose_db_version ORDER BY version_id DESC LIMIT 1;"
-          VERSIONS=$(mysql -h 127.0.0.1 -u remail -premail remail -N -e \
-            "SELECT COUNT(*) FROM goose_db_version WHERE is_applied = 1;")
-          echo "Applied migrations: $VERSIONS"
-          test "$VERSIONS" -ge 1
+            "SELECT 1 FROM mailmatch_order_delivery_heads LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT 1 FROM microsoft_resource_project_matches LIMIT 1;"
 
       - name: Shutdown server
         if: always()
@@ -341,10 +278,17 @@ jobs:
 
   docker:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    needs: [smoke]
+    needs: [backend-static, backend-test, frontend]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
 
       - uses: docker/setup-buildx-action@v3
 
@@ -352,6 +296,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.ci
           push: false
           tags: remail:ci
           cache-from: type=gha,scope=remail-docker
@@ -361,9 +306,16 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [smoke]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
 
       - uses: docker/setup-buildx-action@v3
 
@@ -393,6 +345,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.ci
           push: true
           tags: ${{ steps.image.outputs.tags }}
           cache-from: type=gha,scope=remail-docker
@@ -402,6 +355,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [image]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
 
@@ -414,33 +368,14 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@v4
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        working-directory: web
-        run: corepack enable
-
-      - name: Resolve pnpm store
-        id: pnpm-store
-        working-directory: web
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-pnpm-
+          name: web-dist
+          path: cmd/server/webdist
 
       - name: Build release artifact
         run: |
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web build
-          mkdir -p cmd/server/webdist
-          cp -r web/dist/* cmd/server/webdist/
           mkdir -p dist/remail
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
           cp -r migrations dist/remail/migrations
@@ -466,6 +401,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [image]
     runs-on: [self-hosted, linux, x64, remail-test]
+    timeout-minutes: 15
     concurrency:
       group: remail-test-deploy
       cancel-in-progress: false
@@ -526,7 +462,7 @@ jobs:
           SMTP_INBOUND_ADDR=:2525
           SMTP_INBOUND_DOMAIN=mx.aishop6.com
           SMTP_INBOUND_MAX_MESSAGE_BYTES=10485760
-          PPROF_ADDR=:6060
+          PPROF_ADDR=127.0.0.1:6060
           EOF
           sed -i 's/^          //' /opt/remail/.env
           chmod 600 /opt/remail/.env
@@ -593,7 +529,9 @@ jobs:
 
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
 
+          CURRENT_IMAGE="$(awk -F= '$1 == "APP_IMAGE" {print $2}' .env)"
           PREVIOUS_IMAGE="$(docker compose --env-file .env -f compose.yml ps -q server | xargs -r docker inspect --format '{{.Config.Image}}' | head -n1 || true)"
+          echo "Current target image: ${CURRENT_IMAGE}"
           echo "Previous server image: ${PREVIOUS_IMAGE:-none}"
 
           deploy_status=0
@@ -605,21 +543,24 @@ jobs:
           if [ "$deploy_status" -eq 0 ] && wait_for_health; then
             docker compose --env-file .env -f compose.yml ps
             docker logout ghcr.io >/dev/null 2>&1 || true
-            docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
+            docker image prune -f >/dev/null 2>&1 || true
             exit 0
           fi
 
           echo "New deployment failed; collecting logs before rollback" >&2
           docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
-          if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$APP_IMAGE" ]; then
+          if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$CURRENT_IMAGE" ]; then
             echo "Rolling back to previous image: $PREVIOUS_IMAGE" >&2
             set_app_image "$PREVIOUS_IMAGE"
-            docker compose --env-file .env -f compose.yml up -d --remove-orphans || true
-            if wait_for_health; then
+            docker compose --env-file .env -f compose.yml pull server || \
+              echo "Previous image is unavailable remotely; trying the local image cache" >&2
+            rollback_status=0
+            docker compose --env-file .env -f compose.yml up -d --remove-orphans || rollback_status=$?
+            if [ "$rollback_status" -eq 0 ] && wait_for_health; then
               echo "Rollback completed; previous image is healthy" >&2
               docker compose --env-file .env -f compose.yml ps
             else
-              echo "Rollback failed health check" >&2
+              echo "Rollback failed to start or pass health check" >&2
               docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
             fi
           else

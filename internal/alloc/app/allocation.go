@@ -253,18 +253,18 @@ func inventoryCacheKey(projectID uint, buyerUserID uint) string {
 }
 
 func cloneInventoryStats(stats InventoryStats) *InventoryStats {
-	copy := stats
-	return &copy
+	cloned := stats
+	return &cloned
 }
 
 func cloneProductInventoryTotals(totals ProjectProductInventoryTotals) *ProjectProductInventoryTotals {
-	copy := totals
-	copy.Items = make([]ProductInventoryTotal, len(totals.Items))
+	cloned := totals
+	cloned.Items = make([]ProductInventoryTotal, len(totals.Items))
 	for i := range totals.Items {
-		copy.Items[i] = totals.Items[i]
-		copy.Items[i].Suffixes = append([]ProductInventorySuffixTotal(nil), totals.Items[i].Suffixes...)
+		cloned.Items[i] = totals.Items[i]
+		cloned.Items[i].Suffixes = append([]ProductInventorySuffixTotal(nil), totals.Items[i].Suffixes...)
 	}
-	return &copy
+	return &cloned
 }
 
 func (uc *UseCase) ProcessCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error {
@@ -398,7 +398,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 	if bucket == nil {
 		limit = globalCandidateWindow
 	}
-	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
+	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
 		return nil, false, err
 	}
@@ -419,7 +419,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
+	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +529,7 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, orderNo string
 			return nil, err
 		}
 	}
-	if err := uc.repo.TouchMicrosoftAllocated(ctx, config.ProjectID, resourceID, now); err != nil {
+	if err := uc.repo.TouchMicrosoftAllocated(ctx, resourceID, now); err != nil {
 		return nil, err
 	}
 	return &domain.UnifiedAllocation{

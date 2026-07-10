@@ -241,7 +241,7 @@ function SemiLocaleWrapper({ children }: { children: ReactNode }) {
   return <LocaleProvider locale={locale}>{children}</LocaleProvider>;
 }
 
-const EXTRA_PROTECTED_ROUTES = ["/invite", "/recharge"];
+const EXTRA_PROTECTED_ROUTES = ["/projects", "/invite", "/recharge"];
 const PROTECTED_ROUTES = Array.from(
   new Set([...ROUTES_WITH_SIDEBAR, ...EXTRA_PROTECTED_ROUTES])
 );

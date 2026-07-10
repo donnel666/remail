@@ -60,14 +60,6 @@ func main() {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
-	resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
-	if _, err := p.SQLDB.ExecContext(resetCtx, "UPDATE api_keys SET active_requests = 0 WHERE active_requests > 0"); err != nil {
-		resetCancel()
-		slog.Error("failed to reset api key active requests", "error", err)
-		os.Exit(1)
-	}
-	resetCancel()
-
 	// Get embedded frontend filesystem (subdirectory)
 	var feFS fs.FS
 	if sub, err := fs.Sub(frontendFS, "webdist"); err == nil {
@@ -86,7 +78,6 @@ func main() {
 		slog.Error("router setup failed", "error", err)
 		os.Exit(1)
 	}
-	defer routerCleanup(context.Background())
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -123,6 +114,7 @@ func main() {
 		slog.Error("server forced to shutdown", "error", err)
 	}
 	routerCleanup(shutdownCtx)
+	p.ShutdownWorkers()
 	stopRuntimeDiagnostics()
 	shutdownPprofServer(shutdownCtx, pprofSrv)
 

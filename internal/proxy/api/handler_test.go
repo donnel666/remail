@@ -536,7 +536,7 @@ func TestPostProxyImportsContract(t *testing.T) {
 	repo := &fakeProxyRepo{}
 	queue := &fakeProxyCheckQueue{}
 	handler := newTestProxyHandlerWithQueue(repo, queue)
-	body := []byte(`{"pool":"system","urls":["http://127.0.0.1:18080","http://127.0.0.1:18081"],"expireAt":"2026-07-10T00:00:00Z"}`)
+	body := []byte(`{"pool":"system","urls":["http://127.0.0.1:18080","http://127.0.0.1:18081"],"expireAt":"2099-07-10T00:00:00Z"}`)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/admin/proxies/imports", bytes.NewReader(body))

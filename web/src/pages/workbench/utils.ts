@@ -1,3 +1,5 @@
+import i18n from "@/i18n/config";
+
 import type {
   InventoryScope,
   ProductType,
@@ -15,7 +17,8 @@ export function formatDateTime(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("zh-CN", {
+  const locale = i18n.resolvedLanguage?.startsWith("en") ? "en-GB" : "zh-CN";
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
@@ -113,7 +116,7 @@ export function serviceStateMeta(
     return { color: "grey" as const, label: t("Refunded") };
   }
   if (state === "warranty_ended") {
-    return { color: "grey" as const, label: t("Warranty ended") };
+    return { color: "green" as const, label: t("Warranty ended, service active") };
   }
   return { color: "grey" as const, label: t("Read expired") };
 }

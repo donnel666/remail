@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "rsbuild dev",
     "build": "pnpm generate:public-openapi && rsbuild build",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "generate:api": "openapi-typescript ../api/openapi.yaml -o src/lib/openapi/schema.ts",
     "generate:public-openapi": "node scripts/generate-public-openapi.mjs"
@@ -37,12 +38,16 @@
     "@rsbuild/core": "^1.3.0",
     "@rsbuild/plugin-react": "^1.1.0",
     "@tailwindcss/postcss": "^4.1.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "https-proxy-agent": "^9.1.0",
+    "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
     "swagger-ui-dist": "^5.32.8",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.10"
   }
 }

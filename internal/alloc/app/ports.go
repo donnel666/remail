@@ -196,9 +196,9 @@ type Repository interface {
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint) (*ProductAllocationConfig, error)
 
-	ListMicrosoftSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
-	LockMicrosoftCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
+	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 
 	FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*AliasCandidate, error)
@@ -215,7 +215,7 @@ type Repository interface {
 
 	CreateMicrosoftAllocation(ctx context.Context, allocation *domain.MicrosoftAllocation) error
 	CreateDomainAllocation(ctx context.Context, allocation *domain.GeneratedMailboxAllocation) error
-	TouchMicrosoftAllocated(ctx context.Context, projectID uint, resourceID uint, allocatedAt time.Time) error
+	TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
 	TouchDomainAllocated(ctx context.Context, resourceID uint, mailboxID uint, allocatedAt time.Time) error
 
 	ReleaseByOrder(ctx context.Context, orderNo string, releasedAt time.Time) (*domain.UnifiedAllocation, error)

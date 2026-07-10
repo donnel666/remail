@@ -680,15 +680,13 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 			)
 		}
 		if filter.Search != "" {
-			like := "%" + filter.Search + "%"
-			normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+			prefix := filter.Search + "%"
 			q = q.Where(
-				"(LOWER(ms_filter.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms_filter.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms_filter.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ? OR LOWER(dr_filter.domain) LIKE ? OR LOWER(dr_filter.domain_tld) LIKE ?)",
-				like,
-				like,
-				normalized,
-				like,
-				like,
+				"(ms_filter.email_address LIKE ? OR ms_filter.email_domain LIKE ? OR dr_filter.domain LIKE ? OR dr_filter.domain_tld LIKE ?)",
+				prefix,
+				prefix,
+				prefix,
+				prefix,
 			)
 		}
 	case domain.ResourceTypeMicrosoft:
@@ -710,13 +708,11 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 			q = q.Where("ms_filter.email_domain = ?", filter.Suffix)
 		}
 		if filter.Search != "" {
-			like := "%" + filter.Search + "%"
-			normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+			prefix := filter.Search + "%"
 			q = q.Where(
-				"(LOWER(ms_filter.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms_filter.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms_filter.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)",
-				like,
-				like,
-				normalized,
+				"(ms_filter.email_address LIKE ? OR ms_filter.email_domain LIKE ?)",
+				prefix,
+				prefix,
 			)
 		}
 	case domain.ResourceTypeDomain:
@@ -732,8 +728,8 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 			q = q.Where("dr_filter.domain_tld = ?", filter.TLD)
 		}
 		if filter.Search != "" {
-			like := "%" + filter.Search + "%"
-			q = q.Where("(LOWER(dr_filter.domain) LIKE ? OR LOWER(dr_filter.domain_tld) LIKE ?)", like, like)
+			prefix := filter.Search + "%"
+			q = q.Where("(dr_filter.domain LIKE ? OR dr_filter.domain_tld LIKE ?)", prefix, prefix)
 		}
 	default:
 		q = q.Where("1 = 0")
@@ -947,7 +943,7 @@ func (r *ResourceRepo) resourceDomainPrivateFacets(ctx context.Context, ownerUse
 
 func resourceFacetsCacheKey(ownerUserID uint, filter coreapp.ResourceListFilter) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("owner=%d", ownerUserID))
+	fmt.Fprintf(&b, "owner=%d", ownerUserID)
 	b.WriteString("|type=")
 	b.WriteString(string(filter.ResourceType))
 	b.WriteString("|search=")
@@ -1479,13 +1475,11 @@ func applyMicrosoftBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.Reso
 		}
 	}
 	if filter.Search != "" {
-		like := "%" + filter.Search + "%"
-		normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+		prefix := filter.Search + "%"
 		q = q.Where(
-			"(LOWER(ms.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)",
-			like,
-			like,
-			normalized,
+			"(ms.email_address LIKE ? OR ms.email_domain LIKE ?)",
+			prefix,
+			prefix,
 		)
 	}
 	return q
@@ -1520,13 +1514,9 @@ func applyDomainBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.Resourc
 		}
 	}
 	if filter.Search != "" {
-		q = q.Where("LOWER(dr.domain) LIKE ?", "%"+filter.Search+"%")
+		q = q.Where("dr.domain LIKE ?", filter.Search+"%")
 	}
 	return q
-}
-
-func normalizeEmailTypeSearch(value string) string {
-	return strings.NewReplacer(".", "_", "-", "_", "@", "").Replace(value)
 }
 
 // PublishDomainWithLog publishes one owned private domain resource and writes an

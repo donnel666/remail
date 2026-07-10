@@ -36,7 +36,6 @@ func startPprofServer(cfg platform.DiagnosticsConfig) *http.Server {
 		slog.Info("pprof server listening", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("pprof server error", "error", err)
-			os.Exit(1)
 		}
 	}()
 

@@ -133,23 +133,49 @@ export async function getResourceImportStatus(
   );
 }
 
-export async function validateResource(resourceId: number) {
+export async function validateResource(resourceId: number, signal?: AbortSignal) {
   return unwrap<ResourceValidationResponse>(
     await client.POST("/v1/resources/{resourceId}/validate", {
       params: {
         header: csrfHeader(),
         path: { resourceId },
       },
+      signal,
     })
   );
 }
 
-export async function getResourceValidationStatus(validationId: number) {
+export async function getResourceValidationStatus(
+  validationId: number,
+  signal?: AbortSignal
+) {
   return unwrap<ResourceValidationResponse>(
     await client.GET("/v1/resources/validations/{validationId}", {
       params: { path: { validationId } },
+      signal,
     })
   );
+}
+
+export async function waitForResourceValidation(
+  validationId: number,
+  options: {
+    intervalMs?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  } = {}
+) {
+  const intervalMs = options.intervalMs ?? 2000;
+  const maxAttempts = options.maxAttempts ?? 30;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfAborted(options.signal);
+    const status = await getResourceValidationStatus(validationId, options.signal);
+    if (status.status === "succeeded" || status.status === "failed") {
+      return status;
+    }
+    await abortableDelay(intervalMs, options.signal);
+  }
+  return getResourceValidationStatus(validationId, options.signal);
 }
 
 export async function validateResourcesBatch(

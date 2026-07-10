@@ -41,7 +41,11 @@ import {
 
 const { Text } = Typography;
 
-function getPrice(product: WorkbenchProduct, serviceMode: ServiceMode, quantity: number) {
+function getPrice(
+  product: WorkbenchProduct,
+  serviceMode: ServiceMode,
+  quantity: number,
+) {
   return serviceMode === "code"
     ? product.codePrice * Math.max(1, quantity)
     : product.purchasePrice * Math.max(1, quantity);
@@ -57,8 +61,15 @@ function OrderAccordionItem({
   project,
 }: {
   expanded: boolean;
-  onFetchMail: (order: WorkbenchOrder, source: FetchSource) => FetchResult | Promise<FetchResult>;
-  onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
+  onFetchMail: (
+    order: WorkbenchOrder,
+    source: FetchSource,
+  ) => FetchResult | Promise<FetchResult>;
+  onOpenMailbox: (params: {
+    email: string;
+    orderNo: string;
+    token: string;
+  }) => void;
   onToggle: () => void;
   order: WorkbenchOrder;
   product?: WorkbenchProduct;
@@ -71,7 +82,7 @@ function OrderAccordionItem({
   const maskedPickupUrl = maskMiddle(
     buildPickupUrl(order.deliveryEmail, maskedToken),
     24,
-    12
+    12,
   );
   const openMailbox = () =>
     onOpenMailbox({
@@ -87,11 +98,22 @@ function OrderAccordionItem({
   return (
     <div className={cn("workbench-order-item", expanded && "is-expanded")}>
       <div className="workbench-order-summary">
-        <button className="workbench-order-summary-info" onClick={onToggle} type="button">
-          <ProjectIcon name={project?.name ?? "-"} logoUrl={project?.logoUrl} size={24} />
+        <button
+          className="workbench-order-summary-info"
+          onClick={onToggle}
+          type="button"
+        >
+          <ProjectIcon
+            name={project?.name ?? "-"}
+            logoUrl={project?.logoUrl}
+            size={24}
+          />
           <span className="workbench-order-summary-main">
             <span className="workbench-order-summary-title">
-              <OverflowTooltip className="truncate" content={project?.name ?? "-"}>
+              <OverflowTooltip
+                className="truncate"
+                content={project?.name ?? "-"}
+              >
                 {project?.name ?? "-"}
               </OverflowTooltip>
               <Tag color="orange" shape="circle" size="small">
@@ -113,7 +135,9 @@ function OrderAccordionItem({
               >
                 {order.deliveryEmail}
               </OverflowTooltip>
-              <OverflowTooltip content={order.orderNo}>{order.orderNo}</OverflowTooltip>
+              <OverflowTooltip content={order.orderNo}>
+                {order.orderNo}
+              </OverflowTooltip>
             </span>
           </span>
         </button>
@@ -127,11 +151,17 @@ function OrderAccordionItem({
         >
           {t("Open mailbox")}
         </Button>
-        <button className="workbench-order-summary-state" onClick={onToggle} type="button">
+        <button
+          className="workbench-order-summary-state"
+          onClick={onToggle}
+          type="button"
+        >
           <span className="workbench-order-summary-side">
             <strong>
               {order.verificationCode ??
-                (order.serviceMode === "purchase" ? formatMoney(order.payAmount) : t("Waiting"))}
+                (order.serviceMode === "purchase"
+                  ? formatMoney(order.payAmount)
+                  : t("Waiting"))}
             </strong>
             <small>{formatRemainingDuration(order.afterSaleUntil)}</small>
           </span>
@@ -144,10 +174,15 @@ function OrderAccordionItem({
           <div className="workbench-order-detail-grid">
             <div className="workbench-delivery-line">
               <div className="min-w-0">
-                <div className="workbench-mini-label">{t("Delivery email")}</div>
+                <div className="workbench-mini-label">
+                  {t("Delivery email")}
+                </div>
                 <Text
                   className="workbench-copyable-value font-mono-data text-[14px] font-bold"
-                  copyable={createCopyableConfig(order.deliveryEmail, t("Copied"))}
+                  copyable={createCopyableConfig(
+                    order.deliveryEmail,
+                    t("Copied"),
+                  )}
                 >
                   <OverflowTooltip content={order.deliveryEmail}>
                     {order.deliveryEmail}
@@ -167,24 +202,34 @@ function OrderAccordionItem({
                   <Text
                     className={cn(
                       "workbench-inline-code",
-                      !order.verificationCode && "is-empty"
+                      !order.verificationCode && "is-empty",
                     )}
                     copyable={
                       order.verificationCode
-                        ? createCopyableConfig(order.verificationCode, t("Copied"))
+                        ? createCopyableConfig(
+                            order.verificationCode,
+                            t("Copied"),
+                          )
                         : false
                     }
                   >
                     {order.verificationCode ?? t("Waiting")}
                   </Text>
                 </div>
-                {!order.verificationCode ? (
+                {order.productType !== "domain" &&
+                (!order.hasDelivery || order.serviceMode === "purchase") ? (
                   <FetchControl
                     actionLabelKey="Refresh"
+                    autoEnabled={order.serviceMode === "purchase" || !order.hasDelivery}
                     compact
+                    fetchKey={order.orderNo}
                     onFetch={(source) => onFetchMail(order, source)}
                     variant="code"
                   />
+                ) : order.productType === "domain" ? (
+                  <Tag color="blue" shape="circle" size="small">
+                    {t("SMTP push")}
+                  </Tag>
                 ) : null}
               </div>
             </div>
@@ -230,9 +275,12 @@ function OrderAccordionItem({
 
 export function OrderPanel({
   creating = false,
+  hasMoreOrders = false,
   inventoryScope,
+  loadingMoreOrders = false,
   onCreateOrder,
   onFetchOrderMail,
+  onLoadMoreOrders,
   onOpenMailbox,
   onQuantityChange,
   onSearchChange,
@@ -249,13 +297,20 @@ export function OrderPanel({
   serviceMode,
 }: {
   creating?: boolean;
+  hasMoreOrders?: boolean;
   inventoryScope: InventoryScope;
+  loadingMoreOrders?: boolean;
   onCreateOrder: () => void;
   onFetchOrderMail: (
     order: WorkbenchOrder,
-    source: FetchSource
+    source: FetchSource,
   ) => FetchResult | Promise<FetchResult>;
-  onOpenMailbox: (params: { email: string; orderNo: string; token: string }) => void;
+  onLoadMoreOrders?: () => void;
+  onOpenMailbox: (params: {
+    email: string;
+    orderNo: string;
+    token: string;
+  }) => void;
   onQuantityChange: (value: number) => void;
   onSearchChange: (value: string) => void;
   onSelectOrder: (orderNo: string) => void;
@@ -282,7 +337,7 @@ export function OrderPanel({
   const stockText = `${t("Stock")} ${inventory}`;
   const visibleOrders = useMemo(
     () => orders.filter((order) => order.status !== "refunded"),
-    [orders]
+    [orders],
   );
   const minQuantity = inventory > 0 ? 1 : 0;
 
@@ -309,7 +364,9 @@ export function OrderPanel({
                 ? `${selectedProduct?.codeWindowMinutes ?? 0}m`
                 : `${selectedProduct?.warrantyHours ?? 0}h`}
             </span>
-            <strong className="workbench-quick-price">{formatMoney(totalPrice)}</strong>
+            <strong className="workbench-quick-price">
+              {formatMoney(totalPrice)}
+            </strong>
             <InputNumber
               className="workbench-quantity-input"
               disabled={!selectedProduct || inventory <= 0 || creating}
@@ -317,7 +374,9 @@ export function OrderPanel({
               min={minQuantity}
               onChange={(value) => {
                 const parsed = Number(value);
-                onQuantityChange(Number.isFinite(parsed) ? parsed : minQuantity);
+                onQuantityChange(
+                  Number.isFinite(parsed) ? parsed : minQuantity,
+                );
               }}
               precision={0}
               showClear={false}
@@ -327,8 +386,19 @@ export function OrderPanel({
             />
             <Button
               className="workbench-create-order-button"
-              disabled={!selectedProject || !selectedProduct || inventory <= 0 || creating}
-              icon={serviceMode === "code" ? <Zap size={16} /> : <ShoppingCart size={16} />}
+              disabled={
+                !selectedProject ||
+                !selectedProduct ||
+                inventory <= 0 ||
+                creating
+              }
+              icon={
+                serviceMode === "code" ? (
+                  <Zap size={16} />
+                ) : (
+                  <ShoppingCart size={16} />
+                )
+              }
               loading={creating}
               onClick={onCreateOrder}
               theme="solid"
@@ -372,6 +442,18 @@ export function OrderPanel({
               ))
             )}
           </div>
+          {hasMoreOrders ? (
+            <Button
+              block
+              className="workbench-load-more-orders"
+              loading={loadingMoreOrders}
+              onClick={onLoadMoreOrders}
+              theme="outline"
+              type="tertiary"
+            >
+              {t("Load more orders")}
+            </Button>
+          ) : null}
         </section>
       </div>
     </Card>

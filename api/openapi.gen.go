@@ -142,33 +142,6 @@ func (e AllocationItemType) Valid() bool {
 	}
 }
 
-// Defines values for CandidateRefreshResponseStatus.
-const (
-	CandidateRefreshResponseStatusFailed    CandidateRefreshResponseStatus = "failed"
-	CandidateRefreshResponseStatusPending   CandidateRefreshResponseStatus = "pending"
-	CandidateRefreshResponseStatusQueued    CandidateRefreshResponseStatus = "queued"
-	CandidateRefreshResponseStatusRunning   CandidateRefreshResponseStatus = "running"
-	CandidateRefreshResponseStatusSucceeded CandidateRefreshResponseStatus = "succeeded"
-)
-
-// Valid indicates whether the value is a known member of the CandidateRefreshResponseStatus enum.
-func (e CandidateRefreshResponseStatus) Valid() bool {
-	switch e {
-	case CandidateRefreshResponseStatusFailed:
-		return true
-	case CandidateRefreshResponseStatusPending:
-		return true
-	case CandidateRefreshResponseStatusQueued:
-		return true
-	case CandidateRefreshResponseStatusRunning:
-		return true
-	case CandidateRefreshResponseStatusSucceeded:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CardKeyStatus.
 const (
 	CardKeyStatusDisabled CardKeyStatus = "disabled"
@@ -412,6 +385,36 @@ func (e OrderResponseClientChannel) Valid() bool {
 	case ApiKey:
 		return true
 	case Console:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderResponseFailureCode.
+const (
+	ActivationFailed      OrderResponseFailureCode = "activation_failed"
+	AllocationFailed      OrderResponseFailureCode = "allocation_failed"
+	InsufficientBalance   OrderResponseFailureCode = "insufficient_balance"
+	InsufficientInventory OrderResponseFailureCode = "insufficient_inventory"
+	ServiceTokenFailed    OrderResponseFailureCode = "service_token_failed"
+	Unknown               OrderResponseFailureCode = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the OrderResponseFailureCode enum.
+func (e OrderResponseFailureCode) Valid() bool {
+	switch e {
+	case ActivationFailed:
+		return true
+	case AllocationFailed:
+		return true
+	case InsufficientBalance:
+		return true
+	case InsufficientInventory:
+		return true
+	case ServiceTokenFailed:
+		return true
+	case Unknown:
 		return true
 	default:
 		return false
@@ -1117,45 +1120,6 @@ func (e ResourceValidationResponseStatus) Valid() bool {
 	}
 }
 
-// Defines values for RoutingCandidateStatus.
-const (
-	RoutingCandidateStatusAbnormal RoutingCandidateStatus = "abnormal"
-	RoutingCandidateStatusDisabled RoutingCandidateStatus = "disabled"
-	RoutingCandidateStatusNormal   RoutingCandidateStatus = "normal"
-)
-
-// Valid indicates whether the value is a known member of the RoutingCandidateStatus enum.
-func (e RoutingCandidateStatus) Valid() bool {
-	switch e {
-	case RoutingCandidateStatusAbnormal:
-		return true
-	case RoutingCandidateStatusDisabled:
-		return true
-	case RoutingCandidateStatusNormal:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RoutingCandidateType.
-const (
-	RoutingCandidateTypeDomain    RoutingCandidateType = "domain"
-	RoutingCandidateTypeMicrosoft RoutingCandidateType = "microsoft"
-)
-
-// Valid indicates whether the value is a known member of the RoutingCandidateType enum.
-func (e RoutingCandidateType) Valid() bool {
-	switch e {
-	case RoutingCandidateTypeDomain:
-		return true
-	case RoutingCandidateTypeMicrosoft:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for SupplierApplicationResponseStatus.
 const (
 	SupplierApplicationResponseStatusApproved  SupplierApplicationResponseStatus = "approved"
@@ -1417,24 +1381,6 @@ func (e GetAdminCardsParamsStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetAdminProjectCandidatesParamsType.
-const (
-	GetAdminProjectCandidatesParamsTypeDomain    GetAdminProjectCandidatesParamsType = "domain"
-	GetAdminProjectCandidatesParamsTypeMicrosoft GetAdminProjectCandidatesParamsType = "microsoft"
-)
-
-// Valid indicates whether the value is a known member of the GetAdminProjectCandidatesParamsType enum.
-func (e GetAdminProjectCandidatesParamsType) Valid() bool {
-	switch e {
-	case GetAdminProjectCandidatesParamsTypeDomain:
-		return true
-	case GetAdminProjectCandidatesParamsTypeMicrosoft:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for GetAdminProxiesParamsPool.
 const (
 	GetAdminProxiesParamsPoolResource GetAdminProxiesParamsPool = "resource"
@@ -1563,25 +1509,25 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
-	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
-	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
-	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	Checking GetAdminProxyStatsParamsStatus = "checking"
+	Disabled GetAdminProxyStatsParamsStatus = "disabled"
+	Expired  GetAdminProxyStatsParamsStatus = "expired"
+	Normal   GetAdminProxyStatsParamsStatus = "normal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsStatusAbnormal:
+	case Abnormal:
 		return true
-	case GetAdminProxyStatsParamsStatusChecking:
+	case Checking:
 		return true
-	case GetAdminProxyStatsParamsStatusDisabled:
+	case Disabled:
 		return true
-	case GetAdminProxyStatsParamsStatusExpired:
+	case Expired:
 		return true
-	case GetAdminProxyStatsParamsStatusNormal:
+	case Normal:
 		return true
 	default:
 		return false
@@ -1791,25 +1737,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	Callback   GetRechargesParamsStatus = "callback"
-	Credited   GetRechargesParamsStatus = "credited"
-	Failed     GetRechargesParamsStatus = "failed"
-	Paying     GetRechargesParamsStatus = "paying"
-	Reconciled GetRechargesParamsStatus = "reconciled"
+	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
+	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
+	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
+	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
+	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case Callback:
+	case GetRechargesParamsStatusCallback:
 		return true
-	case Credited:
+	case GetRechargesParamsStatusCredited:
 		return true
-	case Failed:
+	case GetRechargesParamsStatusFailed:
 		return true
-	case Paying:
+	case GetRechargesParamsStatusPaying:
 		return true
-	case Reconciled:
+	case GetRechargesParamsStatusReconciled:
 		return true
 	default:
 		return false
@@ -1935,7 +1881,7 @@ type APIKeyResponse struct {
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Id               int        `json:"id"`
 
-	// KeyPlain Plain API key, only returned immediately after creation or on detail view.
+	// KeyPlain Plain API key returned to its owner on create, list, and detail views.
 	KeyPlain           *string    `json:"keyPlain,omitempty"`
 	KeyPrefix          string     `json:"keyPrefix"`
 	LastUsedAt         *time.Time `json:"lastUsedAt,omitempty"`
@@ -2083,18 +2029,6 @@ type AllocationListResponse struct {
 	Offset int              `json:"offset"`
 	Total  int              `json:"total"`
 }
-
-// CandidateRefreshResponse defines model for CandidateRefreshResponse.
-type CandidateRefreshResponse struct {
-	Created   bool                           `json:"created"`
-	JobId     int                            `json:"jobId"`
-	Message   string                         `json:"message"`
-	ProjectId int                            `json:"projectId"`
-	Status    CandidateRefreshResponseStatus `json:"status"`
-}
-
-// CandidateRefreshResponseStatus defines model for CandidateRefreshResponse.Status.
-type CandidateRefreshResponseStatus string
 
 // CaptchaResponse defines model for CaptchaResponse.
 type CaptchaResponse struct {
@@ -2372,8 +2306,10 @@ type Error struct {
 
 // ExpireOrdersResponse defines model for ExpireOrdersResponse.
 type ExpireOrdersResponse struct {
+	CleanupRetried              int `json:"cleanupRetried"`
 	CodeCleaned                 int `json:"codeCleaned"`
 	CodeTimedOut                int `json:"codeTimedOut"`
+	DeliveryReconciled          int `json:"deliveryReconciled"`
 	Failed                      int `json:"failed"`
 	PurchaseActivationCompleted int `json:"purchaseActivationCompleted"`
 	PurchaseWarrantyCompleted   int `json:"purchaseWarrantyCompleted"`
@@ -2470,9 +2406,22 @@ type LoginResponse struct {
 	User UserResponse `json:"user"`
 }
 
+// MailContentDetailResponse defines model for MailContentDetailResponse.
+type MailContentDetailResponse struct {
+	Body             string    `json:"body"`
+	BodyPreview      string    `json:"bodyPreview"`
+	Id               int       `json:"id"`
+	ReceivedAt       time.Time `json:"receivedAt"`
+	Recipient        string    `json:"recipient"`
+	Sender           string    `json:"sender"`
+	Subject          string    `json:"subject"`
+	VerificationCode *string   `json:"verificationCode,omitempty"`
+}
+
 // MailContentResponse defines model for MailContentResponse.
 type MailContentResponse struct {
-	Body             string    `json:"body"`
+	BodyPreview      string    `json:"bodyPreview"`
+	Id               int       `json:"id"`
 	ReceivedAt       time.Time `json:"receivedAt"`
 	Recipient        string    `json:"recipient"`
 	Sender           string    `json:"sender"`
@@ -2554,10 +2503,10 @@ type OrderEventResponseOperatorType string
 
 // OrderListResponse defines model for OrderListResponse.
 type OrderListResponse struct {
-	Items  []OrderResponse `json:"items"`
-	Limit  int             `json:"limit"`
-	Offset int             `json:"offset"`
-	Total  int             `json:"total"`
+	HasNext     bool            `json:"hasNext"`
+	Items       []OrderResponse `json:"items"`
+	Limit       int             `json:"limit"`
+	NextAfterId *int            `json:"nextAfterId,omitempty"`
 }
 
 // OrderMailResponse defines model for OrderMailResponse.
@@ -2568,26 +2517,33 @@ type OrderMailResponse struct {
 
 // OrderResponse defines model for OrderResponse.
 type OrderResponse struct {
-	ActivatedAt          *time.Time                   `json:"activatedAt,omitempty"`
-	AfterSaleUntil       *time.Time                   `json:"afterSaleUntil,omitempty"`
-	AllocationId         *int                         `json:"allocationId,omitempty"`
-	AllocationType       *OrderResponseAllocationType `json:"allocationType,omitempty"`
-	ApiKeyId             *int                         `json:"apiKeyId,omitempty"`
-	ArchivedAt           *time.Time                   `json:"archivedAt,omitempty"`
-	ClientChannel        OrderResponseClientChannel   `json:"clientChannel"`
-	CreatedAt            time.Time                    `json:"createdAt"`
-	DeliveryEmail        string                       `json:"deliveryEmail"`
-	Id                   int                          `json:"id"`
-	OrderNo              string                       `json:"orderNo"`
-	PayAmount            string                       `json:"payAmount"`
-	ProductType          OrderResponseProductType     `json:"productType"`
-	ProjectId            int                          `json:"projectId"`
-	ProjectProductId     int                          `json:"projectProductId"`
-	ReceiveStartedAt     *time.Time                   `json:"receiveStartedAt,omitempty"`
-	ReceiveUntil         *time.Time                   `json:"receiveUntil,omitempty"`
-	RefundAmount         string                       `json:"refundAmount"`
-	ServiceCleanupStatus string                       `json:"serviceCleanupStatus"`
-	ServiceMode          OrderResponseServiceMode     `json:"serviceMode"`
+	ActivatedAt    *time.Time                   `json:"activatedAt,omitempty"`
+	AfterSaleUntil *time.Time                   `json:"afterSaleUntil,omitempty"`
+	AllocationId   *int                         `json:"allocationId,omitempty"`
+	AllocationType *OrderResponseAllocationType `json:"allocationType,omitempty"`
+	ApiKeyId       *int                         `json:"apiKeyId,omitempty"`
+	ArchivedAt     *time.Time                   `json:"archivedAt,omitempty"`
+	ClientChannel  OrderResponseClientChannel   `json:"clientChannel"`
+	CreatedAt      time.Time                    `json:"createdAt"`
+	DeliveryEmail  string                       `json:"deliveryEmail"`
+	FailureCode    *OrderResponseFailureCode    `json:"failureCode,omitempty"`
+
+	// HasDelivery Whether the order already has a matched verification-code delivery.
+	HasDelivery bool `json:"hasDelivery"`
+	Id          int  `json:"id"`
+
+	// LastMailReceivedAt Provider receive time of the delivered message.
+	LastMailReceivedAt   *time.Time               `json:"lastMailReceivedAt,omitempty"`
+	OrderNo              string                   `json:"orderNo"`
+	PayAmount            string                   `json:"payAmount"`
+	ProductType          OrderResponseProductType `json:"productType"`
+	ProjectId            int                      `json:"projectId"`
+	ProjectProductId     int                      `json:"projectProductId"`
+	ReceiveStartedAt     *time.Time               `json:"receiveStartedAt,omitempty"`
+	ReceiveUntil         *time.Time               `json:"receiveUntil,omitempty"`
+	RefundAmount         string                   `json:"refundAmount"`
+	ServiceCleanupStatus string                   `json:"serviceCleanupStatus"`
+	ServiceMode          OrderResponseServiceMode `json:"serviceMode"`
 
 	// ServiceToken Service credential used by pickup URLs and later mail-result APIs.
 	ServiceToken *string                   `json:"serviceToken,omitempty"`
@@ -2595,6 +2551,9 @@ type OrderResponse struct {
 	SupplyPolicy OrderResponseSupplyPolicy `json:"supplyPolicy"`
 	UpdatedAt    time.Time                 `json:"updatedAt"`
 	UserId       int                       `json:"userId"`
+
+	// VerificationCode Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery.
+	VerificationCode *string `json:"verificationCode,omitempty"`
 }
 
 // OrderResponseAllocationType defines model for OrderResponse.AllocationType.
@@ -2602,6 +2561,9 @@ type OrderResponseAllocationType string
 
 // OrderResponseClientChannel defines model for OrderResponse.ClientChannel.
 type OrderResponseClientChannel string
+
+// OrderResponseFailureCode defines model for OrderResponse.FailureCode.
+type OrderResponseFailureCode string
 
 // OrderResponseProductType defines model for OrderResponse.ProductType.
 type OrderResponseProductType string
@@ -3296,37 +3258,6 @@ type ResourceValidationsResponse struct {
 	Requested int `json:"requested"`
 }
 
-// RoutingCandidate defines model for RoutingCandidate.
-type RoutingCandidate struct {
-	Address         string                 `json:"address"`
-	Bucket          int                    `json:"bucket"`
-	CreatedAt       time.Time              `json:"createdAt"`
-	DomainSuffix    string                 `json:"domainSuffix"`
-	ForSale         bool                   `json:"forSale"`
-	Id              int                    `json:"id"`
-	LastAllocatedAt *time.Time             `json:"lastAllocatedAt,omitempty"`
-	ProjectId       int                    `json:"projectId"`
-	QualityScore    int                    `json:"qualityScore"`
-	ResourceId      int                    `json:"resourceId"`
-	Status          RoutingCandidateStatus `json:"status"`
-	Type            RoutingCandidateType   `json:"type"`
-	UpdatedAt       time.Time              `json:"updatedAt"`
-}
-
-// RoutingCandidateStatus defines model for RoutingCandidate.Status.
-type RoutingCandidateStatus string
-
-// RoutingCandidateType defines model for RoutingCandidate.Type.
-type RoutingCandidateType string
-
-// RoutingCandidateListResponse defines model for RoutingCandidateListResponse.
-type RoutingCandidateListResponse struct {
-	Items  []RoutingCandidate `json:"items"`
-	Limit  int                `json:"limit"`
-	Offset int                `json:"offset"`
-	Total  int                `json:"total"`
-}
-
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
 	CreatedAt     time.Time `json:"createdAt"`
@@ -3414,10 +3345,10 @@ type TransactionItemTransactionType string
 
 // TransactionListResponse defines model for TransactionListResponse.
 type TransactionListResponse struct {
-	Items  []TransactionItem `json:"items"`
-	Limit  int               `json:"limit"`
-	Offset int               `json:"offset"`
-	Total  int               `json:"total"`
+	HasNext     bool              `json:"hasNext"`
+	Items       []TransactionItem `json:"items"`
+	Limit       int               `json:"limit"`
+	NextAfterId *int              `json:"nextAfterId,omitempty"`
 }
 
 // UpdateCardRequest defines model for UpdateCardRequest.
@@ -3715,22 +3646,6 @@ type PostAdminProjectApproveParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// GetAdminProjectCandidatesParams defines parameters for GetAdminProjectCandidates.
-type GetAdminProjectCandidatesParams struct {
-	Type   *GetAdminProjectCandidatesParamsType `form:"type,omitempty" json:"type,omitempty"`
-	Offset *int                                 `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
-// GetAdminProjectCandidatesParamsType defines parameters for GetAdminProjectCandidates.
-type GetAdminProjectCandidatesParamsType string
-
-// PostAdminProjectCandidatesRefreshParams defines parameters for PostAdminProjectCandidatesRefresh.
-type PostAdminProjectCandidatesRefreshParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // PostAdminProjectDelistParams defines parameters for PostAdminProjectDelist.
 type PostAdminProjectDelistParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -3991,7 +3906,7 @@ type GetOrdersParams struct {
 	Status      *GetOrdersParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
 	ServiceMode *GetOrdersParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
 	Search      *string                     `form:"search,omitempty" json:"search,omitempty"`
-	Offset      *int                        `form:"offset,omitempty" json:"offset,omitempty"`
+	AfterId     *int                        `form:"afterId,omitempty" json:"afterId,omitempty"`
 	Limit       *int                        `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -4042,6 +3957,12 @@ type PatchPasswordParams struct {
 
 // GetPickupMessagesParams defines parameters for GetPickupMessages.
 type GetPickupMessagesParams struct {
+	Email string `form:"email" json:"email"`
+	Token string `form:"token" json:"token"`
+}
+
+// GetPickupMessageParams defines parameters for GetPickupMessage.
+type GetPickupMessageParams struct {
 	Email string `form:"email" json:"email"`
 	Token string `form:"token" json:"token"`
 }
@@ -4246,10 +4167,10 @@ type PostWalletReferralTransferParams struct {
 
 // GetWalletTransactionsParams defines parameters for GetWalletTransactions.
 type GetWalletTransactionsParams struct {
-	Scope  *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
-	Search *string                           `form:"search,omitempty" json:"search,omitempty"`
-	Offset *int                              `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+	Scope   *GetWalletTransactionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Search  *string                           `form:"search,omitempty" json:"search,omitempty"`
+	AfterId *int                              `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *int                              `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetWalletTransactionsParamsScope defines parameters for GetWalletTransactions.
@@ -4988,12 +4909,6 @@ type ServerInterface interface {
 	// Approve a reviewing project application
 	// (POST /v1/admin/projects/{projectId}/approve)
 	PostAdminProjectApprove(c *gin.Context, projectId int, params PostAdminProjectApproveParams)
-	// List routing candidates for a project
-	// (GET /v1/admin/projects/{projectId}/candidates)
-	GetAdminProjectCandidates(c *gin.Context, projectId int, params GetAdminProjectCandidatesParams)
-	// Refresh routing candidates for a project
-	// (POST /v1/admin/projects/{projectId}/candidates/refresh)
-	PostAdminProjectCandidatesRefresh(c *gin.Context, projectId int, params PostAdminProjectCandidatesRefreshParams)
 	// Delist a listed project
 	// (POST /v1/admin/projects/{projectId}/delist)
 	PostAdminProjectDelist(c *gin.Context, projectId int, params PostAdminProjectDelistParams)
@@ -5144,6 +5059,9 @@ type ServerInterface interface {
 	// Read mail messages with service email and token
 	// (GET /v1/pickup)
 	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
+	// Read one mail body with service email and token
+	// (GET /v1/pickup/messages/{messageId})
+	GetPickupMessage(c *gin.Context, messageId int, params GetPickupMessageParams)
 	// List visible, owned or admin-visible projects
 	// (GET /v1/projects)
 	GetProjects(c *gin.Context, params GetProjectsParams)
@@ -6622,114 +6540,6 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectApprove(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProjectApprove(c, projectId, params)
-}
-
-// GetAdminProjectCandidates operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminProjectCandidates(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAdminProjectCandidatesParams
-
-	// ------------- Optional query parameter "type" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "offset" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminProjectCandidates(c, projectId, params)
-}
-
-// PostAdminProjectCandidatesRefresh operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminProjectCandidatesRefresh(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminProjectCandidatesRefreshParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostAdminProjectCandidatesRefresh(c, projectId, params)
 }
 
 // PostAdminProjectDelist operation middleware
@@ -8729,11 +8539,11 @@ func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 		return
 	}
 
-	// ------------- Optional query parameter "offset" -------------
+	// ------------- Optional query parameter "afterId" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -9067,6 +8877,50 @@ func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
 	}
 
 	siw.Handler.GetPickupMessages(c, params)
+}
+
+// GetPickupMessage operation middleware
+func (siw *ServerInterfaceWrapper) GetPickupMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", c.Param("messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter messageId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPickupMessageParams
+
+	// ------------- Required query parameter "email" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "email", c.Request.URL.Query(), &params.Email, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter email: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "token", c.Request.URL.Query(), &params.Token, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetPickupMessage(c, messageId, params)
 }
 
 // GetProjects operation middleware
@@ -10315,11 +10169,11 @@ func (siw *ServerInterfaceWrapper) GetWalletTransactions(c *gin.Context) {
 		return
 	}
 
-	// ------------- Optional query parameter "offset" -------------
+	// ------------- Optional query parameter "afterId" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -10398,8 +10252,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/access", wrapper.PostAdminProjectAccess)
 	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId/access/:userId", wrapper.DeleteAdminProjectAccess)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/approve", wrapper.PostAdminProjectApprove)
-	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/candidates", wrapper.GetAdminProjectCandidates)
-	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/candidates/refresh", wrapper.PostAdminProjectCandidatesRefresh)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/delist", wrapper.PostAdminProjectDelist)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/duplicate", wrapper.PostAdminProjectDuplicate)
 	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/inventory", wrapper.GetAdminProjectInventory)
@@ -10450,6 +10302,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
+	router.GET(options.BaseURL+"/v1/pickup/messages/:messageId", wrapper.GetPickupMessage)
 	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
 	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)
 	router.GET(options.BaseURL+"/v1/projects/logos/:logoKey", wrapper.GetProjectLogo)

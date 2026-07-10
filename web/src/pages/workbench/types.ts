@@ -72,12 +72,15 @@ export interface WorkbenchOrder {
   activatedAt?: string;
   createdAt: string;
   deliveryEmail: string;
+  hasDelivery: boolean;
   id: string;
   inventoryScope: InventoryScope;
   lastFetchedAt: string;
+  lastMailReceivedAt?: string;
   messages: WorkbenchMessage[];
   orderNo: string;
   payAmount: number;
+  productType: ProductType;
   productId: string;
   projectId: string;
   quantity: number;

@@ -1,12 +1,13 @@
 import { Button, Empty, Toast } from "@douyinfe/semi-ui";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Mail } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { IamApiError } from "@/lib/api-client";
 import {
   readPickupMail,
+  readPickupMessage,
   type OrderMailResponse,
 } from "@/lib/mailmatch-api";
 
@@ -14,12 +15,11 @@ import { MailboxClient } from "./workbench/mailbox-client";
 import type { FetchSource, WorkbenchMessage } from "./workbench/types";
 
 function toPickupMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
-  return items.map((item, index) => {
-    const body = item.body ?? "";
+  return items.map((item) => {
     return {
-      body,
-      id: `${item.receivedAt}-${index}-${item.sender}-${item.subject}`,
-      preview: body.replace(/\s+/g, " ").trim().slice(0, 180),
+      body: "",
+      id: String(item.id),
+      preview: item.bodyPreview,
       receivedAt: item.receivedAt,
       sender: item.sender,
       status: item.verificationCode ? "matched" : "received",
@@ -59,17 +59,27 @@ export default function Pickup() {
       const result = await readPickupMail(email, token);
       if (loadSeqRef.current !== seq) return;
       setMessages(toPickupMessages(result.items));
+      if (result.fetch?.nextFetchAllowedAt) {
+        return Math.max(
+          1,
+          Math.ceil(
+            (Date.parse(result.fetch.nextFetchAllowedAt) - Date.now()) / 1000
+          )
+        );
+      }
+      return 5;
     } catch (err) {
       if (err instanceof IamApiError && err.status === 429) {
         return err.retryAfterSeconds;
       }
-      Toast.error(err instanceof Error ? err.message : t("An unexpected error occurred."));
+      if (source === "manual") {
+        Toast.error(
+          err instanceof Error ? err.message : t("An unexpected error occurred.")
+        );
+      }
+      return 30;
     }
   }
-
-  useEffect(() => {
-    void loadPickup("auto");
-  }, [email, token]);
 
   if (!email || !token) {
     return (
@@ -90,7 +100,12 @@ export default function Pickup() {
     <div className="pickup-page">
       <MailboxClient
         email={email}
+        fetchKey={`pickup:${token}`}
         messages={messages}
+        onLoadMessage={async (messageId) => {
+          const detail = await readPickupMessage(email, token, Number(messageId));
+          return detail.body;
+        }}
         onFetch={loadPickup}
       />
     </div>

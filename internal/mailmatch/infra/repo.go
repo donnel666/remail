@@ -23,6 +23,7 @@ type MessageModel struct {
 	ID                uint           `gorm:"primaryKey;autoIncrement"`
 	EmailResourceID   uint           `gorm:"not null;column:email_resource_id"`
 	ResourceType      string         `gorm:"type:varchar(32);not null;column:resource_type"`
+	MatchedOrderID    *uint          `gorm:"column:matched_order_id"`
 	Recipient         string         `gorm:"type:varchar(255);not null"`
 	RecipientsJSON    sql.NullString `gorm:"type:json;column:recipients_json"`
 	Sender            string         `gorm:"type:varchar(255);not null;default:''"`
@@ -86,28 +87,21 @@ type FetchStateModel struct {
 
 func (FetchStateModel) TableName() string { return "mailmatch_resource_fetch_states" }
 
-type OrderSnapshotModel struct {
-	OrderNo          string         `gorm:"primaryKey;type:varchar(64);column:order_no"`
-	Sender           string         `gorm:"type:varchar(255);not null;default:''"`
-	Recipient        string         `gorm:"type:varchar(255);not null"`
-	ReceivedAt       time.Time      `gorm:"not null;column:received_at"`
-	Subject          string         `gorm:"type:varchar(500);not null;default:''"`
-	Body             sql.NullString `gorm:"type:mediumtext;column:body"`
-	VerificationCode string         `gorm:"type:varchar(64);not null;column:verification_code"`
-	CreatedAt        time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt        time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
+type OrderDeliveryHeadModel struct {
+	OrderID           uint      `gorm:"primaryKey;column:order_id"`
+	MessageID         *uint     `gorm:"column:message_id"`
+	MessageReceivedAt time.Time `gorm:"not null;column:message_received_at"`
 }
 
-func (OrderSnapshotModel) TableName() string { return "mailmatch_order_snapshots" }
+func (OrderDeliveryHeadModel) TableName() string { return "mailmatch_order_delivery_heads" }
 
 type Repo struct {
-	db         *gorm.DB
-	files      governanceapp.FilePort
-	rulesCache *platform.TTLCache[uint, []app.MailRule]
+	db    *gorm.DB
+	files governanceapp.FilePort
 }
 
 func NewRepo(db *gorm.DB, files governanceapp.FilePort) *Repo {
-	return &Repo{db: db, files: files, rulesCache: platform.NewTTLCache[uint, []app.MailRule]()}
+	return &Repo{db: db, files: files}
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -141,6 +135,22 @@ func (r *Repo) LoadOrderScopeForServiceToken(ctx context.Context, orderNo string
 	return r.loadOrderScope(ctx, orderNo)
 }
 
+func (r *Repo) LoadPickupScope(ctx context.Context, token string, email string) (*app.OrderScope, error) {
+	token = strings.TrimSpace(token)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if token == "" || email == "" {
+		return nil, domain.ErrPickupCredentialInvalid
+	}
+	var row orderScopeRow
+	if err := r.dbFor(ctx).Raw(pickupScopeSQL, token, email, email).Scan(&row).Error; err != nil {
+		return nil, fmt.Errorf("load pickup mail scope: %w", err)
+	}
+	if row.OrderNo == "" {
+		return nil, domain.ErrPickupCredentialInvalid
+	}
+	return row.toScope(nil), nil
+}
+
 func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderScope, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
@@ -162,6 +172,7 @@ func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderSc
 }
 
 type orderScopeRow struct {
+	OrderID           uint
 	OrderNo           string
 	UserID            uint
 	ProjectID         uint
@@ -185,6 +196,7 @@ type orderScopeRow struct {
 
 const orderScopeSQL = `
 SELECT
+	    o.id AS order_id,
     o.order_no,
     o.user_id,
     o.project_id,
@@ -219,8 +231,51 @@ WHERE o.order_no = ?
 	  )
 	LIMIT 1`
 
+const pickupScopeSQL = `
+SELECT
+    o.id AS order_id,
+    o.order_no,
+    o.user_id,
+    o.project_id,
+    o.project_product_id AS product_id,
+    o.service_mode,
+    o.status AS order_status,
+    o.allocation_type,
+    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, 0) AS allocation_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
+      ELSE 'exact'
+    END AS recipient_kind,
+    CASE WHEN o.allocation_type = 'microsoft' THEN ma.resource_id ELSE da.resource_id END AS email_resource_id,
+    CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
+    o.receive_started_at,
+    o.receive_until,
+    o.activated_at,
+    o.after_sale_until,
+    p.loose_match,
+    '' AS microsoft_email,
+    '' AS microsoft_client_id,
+    '' AS microsoft_rt
+FROM order_tokens t
+JOIN orders o ON o.order_no = t.order_no
+JOIN projects p ON p.id = o.project_id
+LEFT JOIN microsoft_allocations ma
+  ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
+LEFT JOIN domain_allocations da
+  ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
+WHERE t.token_plain = ?
+  AND t.enabled = 1
+  AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
+  AND (
+    (o.allocation_type = 'microsoft' AND ma.order_no = o.order_no AND ma.email = ?)
+    OR
+    (o.allocation_type = 'domain' AND da.order_no = o.order_no AND da.email = ?)
+  )
+LIMIT 1`
+
 const microsoftMatchingScopesSQL = `
 SELECT
+	    o.id AS order_id,
     o.order_no,
     o.user_id,
     o.project_id,
@@ -247,23 +302,21 @@ JOIN microsoft_resources mr ON mr.id = ma.resource_id
 WHERE ma.resource_id = ?
   AND ma.email = ?
   AND ma.status = 'allocated'
-  AND o.status = 'active'
-  AND p.status = 'listed'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
-    (o.service_mode = 'code' AND (o.receive_until IS NULL OR ? <= o.receive_until))
+    (
+      o.service_mode = 'code'
+      AND o.status = 'active'
+      AND (o.receive_until IS NULL OR ? <= o.receive_until)
+    )
     OR
-    (o.service_mode <> 'code' AND (
-      (o.activated_at IS NULL AND (o.receive_until IS NULL OR ? <= o.receive_until))
-      OR
-      (o.activated_at IS NOT NULL AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
-    ))
+    (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
   )
-ORDER BY o.created_at ASC, o.id ASC
-LIMIT 20`
+ORDER BY o.created_at ASC, o.id ASC`
 
 const domainMatchingScopesSQL = `
 SELECT
+	    o.id AS order_id,
     o.order_no,
     o.user_id,
     o.project_id,
@@ -289,23 +342,21 @@ JOIN projects p ON p.id = o.project_id
 WHERE da.resource_id = ?
   AND da.email = ?
   AND da.status = 'allocated'
-  AND o.status = 'active'
-  AND p.status = 'listed'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
-    (o.service_mode = 'code' AND (o.receive_until IS NULL OR ? <= o.receive_until))
+    (
+      o.service_mode = 'code'
+      AND o.status = 'active'
+      AND (o.receive_until IS NULL OR ? <= o.receive_until)
+    )
     OR
-    (o.service_mode <> 'code' AND (
-      (o.activated_at IS NULL AND (o.receive_until IS NULL OR ? <= o.receive_until))
-      OR
-      (o.activated_at IS NOT NULL AND (o.after_sale_until IS NULL OR ? <= o.after_sale_until))
-    ))
+    (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
   )
-ORDER BY o.created_at ASC, o.id ASC
-LIMIT 20`
+ORDER BY o.created_at ASC, o.id ASC`
 
 func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 	return &app.OrderScope{
+		OrderID:           r.OrderID,
 		OrderNo:           r.OrderNo,
 		UserID:            r.UserID,
 		ProjectID:         r.ProjectID,
@@ -329,14 +380,7 @@ func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 	}
 }
 
-const mailRulesCacheTTL = 10 * time.Second
-
 func (r *Repo) loadMailRules(ctx context.Context, projectID uint) ([]app.MailRule, error) {
-	if r.rulesCache != nil {
-		if cached, ok := r.rulesCache.Get(projectID); ok {
-			return cloneMailRules(cached), nil
-		}
-	}
 	var rows []struct {
 		RuleType string
 		Pattern  string
@@ -353,46 +397,34 @@ func (r *Repo) loadMailRules(ctx context.Context, projectID uint) ([]app.MailRul
 	for i := range rows {
 		rules[i] = app.MailRule{Type: app.MailRuleType(rows[i].RuleType), Pattern: rows[i].Pattern, Enabled: rows[i].Enabled}
 	}
-	if r.rulesCache != nil {
-		r.rulesCache.Set(projectID, cloneMailRules(rules), mailRulesCacheTTL)
-	}
-	return cloneMailRules(rules), nil
-}
-
-func cloneMailRules(rules []app.MailRule) []app.MailRule {
-	if len(rules) == 0 {
-		return nil
-	}
-	out := make([]app.MailRule, len(rules))
-	copy(out, rules)
-	return out
+	return rules, nil
 }
 
 func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limit int) ([]domain.Message, error) {
 	if limit <= 0 {
 		limit = 30
 	}
-	start := time.Time{}
-	if scope.ReceiveStartedAt != nil {
-		start = scope.ReceiveStartedAt.Add(-2 * time.Minute)
+	now := time.Now().UTC()
+	start := now.Add(-30 * 24 * time.Hour)
+	if scope.AllocationType == domain.ResourceTypeMicrosoft {
+		start = now.Add(-3 * 24 * time.Hour)
 	}
-	end := time.Now().UTC()
+	if scope.ReceiveStartedAt != nil {
+		serviceStart := scope.ReceiveStartedAt.Add(-2 * time.Minute)
+		if serviceStart.After(start) {
+			start = serviceStart
+		}
+	}
+	end := now
 	if scope.ServiceMode == "code" {
 		if scope.ReceiveUntil != nil {
 			end = *scope.ReceiveUntil
 		}
-	} else if scope.ActivatedAt == nil {
-		if scope.ReceiveUntil != nil {
-			end = *scope.ReceiveUntil
-		}
-	} else if scope.AfterSaleUntil != nil {
-		end = *scope.AfterSaleUntil
 	}
 	query := r.dbFor(ctx).Model(&MessageModel{}).
-		Select("id, email_resource_id, resource_type, recipient, recipients_json, sender, subject, raw_body, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
-		Where("email_resource_id = ? AND resource_type = ? AND received_at >= ? AND received_at <= ?",
-			scope.EmailResourceID,
-			string(scope.AllocationType),
+		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
+		Where("matched_order_id = ? AND received_at >= ? AND received_at <= ?",
+			scope.OrderID,
 			start,
 			end,
 		).
@@ -409,63 +441,94 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 	return items, nil
 }
 
-func (r *Repo) FindOrderSnapshot(ctx context.Context, orderNo string) (*domain.OrderSnapshot, error) {
-	var model OrderSnapshotModel
-	err := r.dbFor(ctx).First(&model, "order_no = ?", strings.TrimSpace(orderNo)).Error
+func (r *Repo) FindOrderMessage(ctx context.Context, orderID uint, messageID uint) (*domain.Message, error) {
+	if orderID == 0 || messageID == 0 {
+		return nil, domain.ErrInvalidRequest
+	}
+	var model MessageModel
+	if err := r.dbFor(ctx).
+		Where("id = ? AND matched_order_id = ?", messageID, orderID).
+		First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrMessageNotFound
+		}
+		return nil, fmt.Errorf("find order mail message: %w", err)
+	}
+	item := messageModelToDomain(model)
+	return &item, nil
+}
+
+func (r *Repo) FindOrderDelivery(ctx context.Context, orderID uint) (*app.OrderDelivery, error) {
+	if orderID == 0 {
+		return nil, domain.ErrInvalidRequest
+	}
+	var head OrderDeliveryHeadModel
+	err := r.dbFor(ctx).
+		Where("order_id = ?", orderID).
+		Take(&head).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("find order mail snapshot: %w", err)
+		return nil, fmt.Errorf("find order mail delivery: %w", err)
 	}
-	item := orderSnapshotModelToDomain(model)
-	return &item, nil
+	delivery := &app.OrderDelivery{ReceivedAt: head.MessageReceivedAt}
+	if head.MessageID == nil {
+		return delivery, nil
+	}
+	var model MessageModel
+	if err := r.dbFor(ctx).
+		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
+		First(&model, "id = ?", *head.MessageID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return delivery, nil
+		}
+		return nil, fmt.Errorf("find delivered mail message: %w", err)
+	}
+	item := messageModelToDomain(model)
+	delivery.Message = &item
+	return delivery, nil
 }
 
-func (r *Repo) CreateOrderSnapshotOnce(ctx context.Context, snapshot domain.OrderSnapshot) error {
-	model := orderSnapshotModelFromDomain(snapshot)
-	if model.OrderNo == "" || model.Recipient == "" || model.VerificationCode == "" {
+func (r *Repo) CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
+	if orderID == 0 || message.ID == 0 || strings.TrimSpace(message.VerificationCode) == "" || message.ReceivedAt.IsZero() {
 		return domain.ErrInvalidRequest
+	}
+	model := OrderDeliveryHeadModel{
+		OrderID:           orderID,
+		MessageID:         &message.ID,
+		MessageReceivedAt: message.ReceivedAt.UTC(),
 	}
 	if err := r.dbFor(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&model).Error; err != nil {
-		return fmt.Errorf("create order mail snapshot: %w", err)
+		return fmt.Errorf("create code order delivery: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) UpsertLatestOrderSnapshot(ctx context.Context, snapshot domain.OrderSnapshot) error {
-	model := orderSnapshotModelFromDomain(snapshot)
-	if model.OrderNo == "" || model.Recipient == "" || model.VerificationCode == "" {
+func (r *Repo) AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
+	if orderID == 0 || message.ID == 0 || strings.TrimSpace(message.VerificationCode) == "" || message.ReceivedAt.IsZero() {
 		return domain.ErrInvalidRequest
 	}
-	body := any(nil)
-	if model.Body.Valid {
-		body = model.Body.String
-	}
 	err := r.dbFor(ctx).Exec(`
-INSERT INTO mailmatch_order_snapshots (
-    order_no, sender, recipient, received_at, subject, body, verification_code
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO mailmatch_order_delivery_heads (
+    order_id, message_id, message_received_at
+) VALUES (?, ?, ?)
 ON DUPLICATE KEY UPDATE
-    sender = IF(VALUES(received_at) >= received_at, VALUES(sender), sender),
-    recipient = IF(VALUES(received_at) >= received_at, VALUES(recipient), recipient),
-    subject = IF(VALUES(received_at) >= received_at, VALUES(subject), subject),
-    body = IF(VALUES(received_at) >= received_at, VALUES(body), body),
-    verification_code = IF(VALUES(received_at) >= received_at, VALUES(verification_code), verification_code),
-    received_at = IF(VALUES(received_at) >= received_at, VALUES(received_at), received_at),
-    updated_at = IF(VALUES(received_at) >= received_at, CURRENT_TIMESTAMP, updated_at)`,
-		model.OrderNo,
-		model.Sender,
-		model.Recipient,
-		model.ReceivedAt.UTC(),
-		model.Subject,
-		body,
-		model.VerificationCode,
+	    message_id = IF(
+	        VALUES(message_received_at) > message_received_at
+	        OR (VALUES(message_received_at) = message_received_at AND VALUES(message_id) > message_id),
+	        VALUES(message_id),
+	        message_id
+	    ),
+	    message_received_at = GREATEST(VALUES(message_received_at), message_received_at)`,
+		orderID,
+		message.ID,
+		message.ReceivedAt.UTC(),
 	).Error
 	if err != nil {
-		return fmt.Errorf("upsert latest order mail snapshot: %w", err)
+		return fmt.Errorf("advance purchase order delivery: %w", err)
 	}
 	return nil
 }
@@ -482,9 +545,9 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 	var err error
 	switch resourceType {
 	case domain.ResourceTypeMicrosoft:
-		err = r.dbFor(ctx).Raw(microsoftMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
+		err = r.dbFor(ctx).Raw(microsoftMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeDomain:
-		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt, receivedAt, receivedAt).Scan(&rows).Error
+		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	default:
 		return nil, nil
 	}
@@ -759,9 +822,9 @@ func (r *Repo) UpdateFetchStateCompleted(ctx context.Context, emailResourceID ui
 	return nil
 }
 
-func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) (int, error) {
+func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error) {
 	if len(messages) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	models := make([]MessageModel, len(messages))
 	for i := range messages {
@@ -769,28 +832,55 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) (i
 	}
 	err := r.dbFor(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "email_resource_id"}, {Name: "dedupe_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"recipient",
-			"recipients_json",
-			"sender",
-			"subject",
-			"raw_body",
-			"body_preview",
-			"verification_code",
-			"message_id_header",
-			"provider_message_id",
-			"protocol",
-			"folder",
-			"status",
-			"match_diagnostic",
-			"received_at",
-			"updated_at",
+		DoUpdates: clause.Assignments(map[string]any{
+			"recipient":           gorm.Expr("VALUES(recipient)"),
+			"recipients_json":     gorm.Expr("VALUES(recipients_json)"),
+			"sender":              gorm.Expr("VALUES(sender)"),
+			"subject":             gorm.Expr("VALUES(subject)"),
+			"matched_order_id":    gorm.Expr("COALESCE(matched_order_id, VALUES(matched_order_id))"),
+			"raw_body":            gorm.Expr("IF(NULLIF(TRIM(VALUES(raw_body)), '') IS NULL, raw_body, VALUES(raw_body))"),
+			"body_preview":        gorm.Expr("IF(NULLIF(TRIM(VALUES(body_preview)), '') IS NULL, body_preview, VALUES(body_preview))"),
+			"verification_code":   gorm.Expr("IF(verification_code <> '', verification_code, VALUES(verification_code))"),
+			"message_id_header":   gorm.Expr("VALUES(message_id_header)"),
+			"provider_message_id": gorm.Expr("VALUES(provider_message_id)"),
+			"protocol":            gorm.Expr("VALUES(protocol)"),
+			"folder":              gorm.Expr("VALUES(folder)"),
+			"status":              gorm.Expr("CASE WHEN status = 'matched' OR VALUES(status) = 'matched' THEN 'matched' WHEN status = 'ignored' OR VALUES(status) = 'ignored' THEN 'ignored' ELSE 'received' END"),
+			"match_diagnostic":    gorm.Expr("IF(status = 'matched' AND VALUES(status) <> 'matched', match_diagnostic, VALUES(match_diagnostic))"),
+			"received_at":         gorm.Expr("VALUES(received_at)"),
+			"updated_at":          gorm.Expr("CURRENT_TIMESTAMP"),
 		}),
 	}).Create(&models).Error
 	if err != nil {
-		return 0, fmt.Errorf("upsert mailmatch messages: %w", err)
+		return nil, fmt.Errorf("upsert mailmatch messages: %w", err)
 	}
-	return len(models), nil
+
+	storedByIdentity := make(map[string]domain.Message, len(models))
+	dedupeKeysByResource := make(map[uint][]string)
+	for i := range models {
+		dedupeKeysByResource[models[i].EmailResourceID] = append(dedupeKeysByResource[models[i].EmailResourceID], models[i].DedupeKey)
+	}
+	for resourceID, dedupeKeys := range dedupeKeysByResource {
+		var rows []MessageModel
+		if err := r.dbFor(ctx).Model(&MessageModel{}).
+			Where("email_resource_id = ? AND dedupe_key IN ?", resourceID, dedupeKeys).
+			Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("resolve upserted mailmatch messages: %w", err)
+		}
+		for _, row := range rows {
+			item := messageModelToDomain(row)
+			storedByIdentity[messageIdentity(item.EmailResourceID, item.DedupeKey)] = item
+		}
+	}
+	stored := make([]domain.Message, len(messages))
+	for i := range messages {
+		item, ok := storedByIdentity[messageIdentity(messages[i].EmailResourceID, messages[i].DedupeKey)]
+		if !ok || item.ID == 0 {
+			return nil, fmt.Errorf("resolve upserted mailmatch message: %w", domain.ErrMessageNotFound)
+		}
+		stored[i] = item
+	}
+	return stored, nil
 }
 
 func (r *Repo) UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint, refreshToken string) error {
@@ -824,6 +914,7 @@ func messageModelToDomain(model MessageModel) domain.Message {
 		ID:                model.ID,
 		EmailResourceID:   model.EmailResourceID,
 		ResourceType:      domain.ResourceType(model.ResourceType),
+		MatchedOrderID:    model.MatchedOrderID,
 		Recipient:         model.Recipient,
 		Recipients:        decodeRecipients(model.RecipientsJSON),
 		Sender:            model.Sender,
@@ -851,6 +942,7 @@ func messageModelFromDomain(item domain.Message) MessageModel {
 	return MessageModel{
 		EmailResourceID:   item.EmailResourceID,
 		ResourceType:      string(item.ResourceType),
+		MatchedOrderID:    item.MatchedOrderID,
 		Recipient:         strings.ToLower(strings.TrimSpace(item.Recipient)),
 		RecipientsJSON:    recipientsJSON,
 		Sender:            truncate(item.Sender, 255),
@@ -869,38 +961,8 @@ func messageModelFromDomain(item domain.Message) MessageModel {
 	}
 }
 
-func orderSnapshotModelToDomain(model OrderSnapshotModel) domain.OrderSnapshot {
-	body := ""
-	if model.Body.Valid {
-		body = model.Body.String
-	}
-	return domain.OrderSnapshot{
-		OrderNo:          model.OrderNo,
-		Sender:           model.Sender,
-		Recipient:        model.Recipient,
-		ReceivedAt:       model.ReceivedAt,
-		Subject:          model.Subject,
-		Body:             body,
-		VerificationCode: model.VerificationCode,
-		CreatedAt:        model.CreatedAt,
-		UpdatedAt:        model.UpdatedAt,
-	}
-}
-
-func orderSnapshotModelFromDomain(item domain.OrderSnapshot) OrderSnapshotModel {
-	body := sql.NullString{String: strings.TrimSpace(item.Body), Valid: strings.TrimSpace(item.Body) != ""}
-	if item.ReceivedAt.IsZero() {
-		item.ReceivedAt = time.Now().UTC()
-	}
-	return OrderSnapshotModel{
-		OrderNo:          strings.TrimSpace(item.OrderNo),
-		Sender:           truncate(item.Sender, 255),
-		Recipient:        strings.ToLower(strings.TrimSpace(item.Recipient)),
-		ReceivedAt:       item.ReceivedAt.UTC(),
-		Subject:          truncate(item.Subject, 500),
-		Body:             body,
-		VerificationCode: truncate(item.VerificationCode, 64),
-	}
+func messageIdentity(resourceID uint, dedupeKey string) string {
+	return fmt.Sprintf("%d:%s", resourceID, strings.TrimSpace(dedupeKey))
 }
 
 func encodeRecipients(recipients []string, primary string) sql.NullString {
@@ -1012,11 +1074,6 @@ func fetchStateModelToDomain(model FetchStateModel) domain.FetchState {
 
 func safeDiagnostic(value string) string {
 	return truncate(strings.Join(strings.Fields(strings.TrimSpace(value)), " "), 500)
-}
-
-func bodyPreview(value string) string {
-	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	return truncate(value, 1000)
 }
 
 func truncate(value string, limit int) string {

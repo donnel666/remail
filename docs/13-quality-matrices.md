@@ -8,6 +8,7 @@
 | 2026-07-03 | V1.1 | Codex | 补充同步/异步边界验收项；仅增加异步任务审查维度，不改变既有矩阵策略。 |
 | 2026-07-03 | V1.2 | Codex | 纠正代理错误隔离矩阵：运行期和检测失败只置 `abnormal`，`disabled` 仅允许管理员显式操作。 |
 | 2026-07-05 | V1.3 | Codex | 补充批量检测异步验收项：批量检测必须由后端批量提交任务，前端不得循环调用单资源检测接口；不改变既有异步边界策略。 |
+| 2026-07-10 | V2.0 | Cursor | 按现有实现重做上线红线：永久购买、邮件唯一归属、3/30 天保留、cursor、大规模 SQL 与 300/3000 混压。未实现售后、结算、显式别名远端创建不作为当前版本红线。 |
 
 > 本矩阵用于写之前、写之中、写之后的自审。目标不是堆流程，而是用最少证据证明系统能上线、能维护、能扩展、能重构。
 
@@ -95,7 +96,7 @@
 | 编号 | 测试项 | 必测内容 | 证据 |
 |------|--------|----------|------|
 | T1 | 状态机 | 合法流转、非法流转、终态拒绝、重试路径 | 单元测试 |
-| T2 | 领域规则 | 权重、窗口、项目规则、售后、结算 | 单元测试 |
+| T2 | 领域规则 | 权重、窗口、项目规则、永久购买与退款释放 | 单元测试 |
 | T3 | API 契约 | HTTP 状态、错误体、OpenAPI、鉴权主体、路径命名 | Handler/契约测试 |
 | T4 | SQL 约束 | 唯一、外键、CHECK、条件更新 | Testcontainers MySQL |
 | T5 | 幂等 | 同 key 重放、不同指纹冲突 | 集成测试 |
@@ -121,10 +122,9 @@
 | Alloc | 一个订单只能一个分配、main/alias/mailbox allocated 唯一、释放条件更新。 |
 | Billing | 钱包行锁、流水不可变、余额非负、卡密兑换并发唯一、提现冻结不重复。 |
 | Trade | orderNo 唯一、幂等键唯一、分配外键二选一、状态条件更新。 |
-| MailMatch | 同资源 Message-ID 去重、收件人/状态/时间索引、窗口查询索引。 |
+| MailMatch | 同资源 Message-ID 去重、唯一订单归属、历史项目关系幂等、收件人/状态/时间索引。 |
 | Proxy | 代理池和 URL 唯一、binding key + ip 有效绑定唯一、expireAt/status 索引、错误计数条件更新。 |
 | OpenAPI | API Key/OrderToken 前缀索引、幂等键唯一、并发占用释放可恢复。 |
-| Aftersale | ticketNo 唯一、状态约束、附件归属约束。 |
 | Governance | 日志索引、任务状态 claim 索引、配置 key 唯一。 |
 
 每个模块合并前必须给出 migration 文件和至少一个 Testcontainers MySQL 约束测试。
@@ -310,3 +310,87 @@ API/SDK：
 | ADR-QM-3 | SDK 复用作为验收项 | 避免重新走接口重复建设。 |
 | ADR-QM-4 | 快速上线不等于无约束 | 边界、SQL 和并发兜底是后续可维护的基础。 |
 | ADR-QM-5 | Go 显式事务单列验收 | Go 没有注解事务兜底，必须靠 tx wrapper、测试和代码审查证明事务性。 |
+
+---
+
+## 12. 当前版本实际验收清单
+
+### 12.1 当前范围
+
+必须验收：IAM、资源/项目、分配、钱包、订单、API Key、MailMatch、Microsoft Fetch、自建 SMTP、Proxy、Governance 和现有 Web 页面。
+
+不作为本版红线：售后工单、供应商结算/提现、显式别名远端创建、在线支付、多活部署。相关代码不得伪造“已完成”状态，前端不得展示可点击占位入口。
+
+### 12.2 功能与一致性
+
+- [ ] 接码唯一命中后完成订单；读取期结束释放 Allocation、禁用 Token。
+- [ ] 接码超时无交付头时只退款一次；存在交付头时绝不退款。
+- [ ] purchase 质保结束可变为 `completed`，但 Allocation、Token、收新邮件和读取最近消息继续有效。
+- [ ] purchase 管理员退款/终止后释放 Allocation 并禁用 Token。
+- [ ] 项目下架只阻止新订单，已有订单继续使用项目最新邮件规则。
+- [ ] 多项目规则同时命中时 `matched_order_id` 为空，任一 Pickup 均不可读取该消息，诊断可查。
+- [ ] 同幂等键重放保持相同业务结果；不同请求指纹返回 409。
+- [ ] API Key 创建、列表、详情均允许 owner 查看明文；普通日志不得出现 Key、Token、RT、密码或正文。
+- [ ] Microsoft 验证完成全量 Inbox/Junk 扫描；旧项目关系按 `(resource_id, project_id)` 幂等写入，匹配失败不改变资源健康，后续分配排除同项目资源。
+
+### 12.3 数据保留
+
+- [ ] Microsoft `mailmatch_messages` 超过 3 天可持续批删。
+- [ ] Domain `mailmatch_messages`、`inbound_mails` 和 MinIO `.eml` 超过 30 天可持续清理。
+- [ ] delivery head 的正文被删除后仍保留交付事实，且不会阻断批删。
+- [ ] order、order_events、allocations、wallet_transactions 长期保留。
+- [ ] allocation_daily_usages 保留 14 天；终态任务/SystemLog 按 14–30 天清理。
+- [ ] 成功 API/Pickup 请求不逐条写 MySQL 日志。
+
+### 12.4 并发与故障
+
+- [ ] 同幂等键 100 并发只产生 1 个订单、1 次扣款、1 个 Allocation。
+- [ ] 同一 main/alias/dot/plus 100 并发不超卖；数据库 active unique key 是最终兜底。
+- [ ] 钱包并发扣款余额不为负；单用户吞吐串行化属于正确性成本。
+- [ ] MarkFailed 中途失败时整个 Checkout 回滚，不留下 pending 脏单。
+- [ ] cleanup partial_failure 无需人工即可被生命周期扫描恢复。
+- [ ] NotifyMatchedCode 首次失败后由 delivery head 补偿推进。
+- [ ] Fetch 仍按 email_resource_id 单飞；Redis/worker 重启后 durable job 可重派。
+- [ ] 重复验证不会重复创建旧项目关系；历史项目资源在候选查询与行锁重校验两处均被排除。
+
+### 12.5 SQL 与性能
+
+执行入口：
+
+- 数据生成：`cmd/benchseed`
+- SQL 计划：`scripts/perf/explain.sql`
+- 混合压测：`scripts/perf/k6.js`
+- 操作说明：`scripts/perf/README.md`
+
+数据规模：100 万 Microsoft 主资源、独立 profile 的 1000 万 explicit_aliases、1 万 Domain（Domain 可用真实导入数据）、1000 万 orders/allocations/wallet_transactions、3000 万 order_events，以及按 3/30 天窗口生成的消息。
+
+通过标准：
+
+- [ ] 300 下单/s + 3000 Pickup/s 持续 15 分钟：下单 P95 ≤300ms、P99 ≤800ms；Pickup P95 ≤50ms、P99 ≤100ms。
+- [ ] 600/6000 持续 5 分钟用于余量验证；不能出现重复业务事实、连接耗尽或 lock wait timeout。
+- [ ] 非业务 5xx <0.1%。
+- [ ] Microsoft 模拟 Graph 到可见 P95 ≤10 秒；SMTP 到可见 P95 ≤2 秒。
+- [ ] 候选选择、active key、Token+scope、matched_order_id、生命周期、保留 DELETE、cursor 查询均保存 `EXPLAIN ANALYZE`。
+
+当前仓库只提供可重复执行的生成器与压测脚本；没有附生产同等硬件实测数据时，本节性能项必须保持“待验证”，不得填写通过。
+
+### 12.6 前端与契约
+
+- [ ] 同一订单的面板与邮箱弹窗共用一个自动轮询和一个 in-flight 请求。
+- [ ] 自动轮询严格服从 `nextFetchAllowedAt`，页面隐藏时暂停。
+- [ ] purchase 首码和质保结束后仍可刷新；Domain 明确显示 SMTP push。
+- [ ] 邮件列表只取摘要，用户打开邮件时才读取正文。
+- [ ] 快速切换 serviceMode/筛选时旧响应不能覆盖新状态。
+- [ ] 资源验证完成后自动刷新状态并显示安全错误。
+- [ ] 导航不展示未实现页面；在线支付入口隐藏，卡密兑换保留。
+- [ ] `api/openapi.yaml` 为唯一契约源；Go、TypeScript、公开 OpenAPI 生成后 CI diff 必须为空。
+- [ ] 前端至少运行 `pnpm typecheck`、`pnpm test`、`pnpm build`。
+
+### 12.7 CI/CD 最终门禁
+
+- [ ] `backend-static` 覆盖 gofmt、OpenAPI 生成漂移、go vet、golangci-lint。
+- [ ] `backend-test` 聚合两个并行 Testcontainers 分片，任一失败均阻止后续发布。
+- [ ] `frontend` 覆盖 TypeScript 契约漂移、typecheck、Vitest、生产 build，并产出唯一 `web-dist`。
+- [ ] PR 必须通过 Dockerfile.ci 构建；main/tag 必须通过真实 MySQL/Redis/MinIO smoke 后才允许发布镜像。
+- [ ] 同分支旧流水线自动取消；tag 不取消；所有长任务有 timeout。
+- [ ] GHCR 和 Actions Cache 都只保留最近 3 个版本，Cleanup dry-run 可审查且删除错误必须失败。

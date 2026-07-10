@@ -65,7 +65,7 @@ export async function listRecharges(
 
 export async function listWalletTransactions(
   filter: { search?: string } = {},
-  offset = 0,
+  afterId?: number,
   limit = 20
 ) {
   return unwrap<TransactionListResponse>(
@@ -73,7 +73,7 @@ export async function listWalletTransactions(
       params: {
         query: {
           ...filter,
-          offset,
+          afterId,
           limit,
         },
       },

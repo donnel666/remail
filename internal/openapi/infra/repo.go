@@ -29,9 +29,6 @@ type APIKeyModel struct {
 	ConcurrencyLimit   int        `gorm:"not null;column:concurrency_limit"`
 	QuotaLimit         *int64     `gorm:"column:quota_limit"`
 	QuotaUsed          int64      `gorm:"not null;column:quota_used"`
-	ActiveRequests     int        `gorm:"not null;column:active_requests"`
-	WindowStartedAt    *time.Time `gorm:"column:window_started_at"`
-	WindowRequestCount int        `gorm:"not null;column:window_request_count"`
 	ExpireAt           *time.Time `gorm:"column:expire_at"`
 	LastUsedAt         *time.Time `gorm:"column:last_used_at"`
 	CreatedAt          time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
@@ -54,22 +51,6 @@ type OrderTokenModel struct {
 }
 
 func (OrderTokenModel) TableName() string { return "order_tokens" }
-
-type APILogModel struct {
-	ID             uint      `gorm:"primaryKey;autoIncrement"`
-	PrincipalType  string    `gorm:"type:varchar(32);not null;column:principal_type"`
-	PrincipalID    uint      `gorm:"not null;column:principal_id"`
-	UserID         *uint     `gorm:"column:user_id"`
-	Path           string    `gorm:"type:varchar(255);not null"`
-	Method         string    `gorm:"type:varchar(16);not null"`
-	IdempotencyKey string    `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
-	HTTPStatus     int       `gorm:"not null;column:http_status"`
-	DurationMs     int       `gorm:"not null;column:duration_ms"`
-	RequestID      string    `gorm:"type:varchar(64);not null;default:'';column:request_id"`
-	CreatedAt      time.Time `gorm:"not null;autoCreateTime;column:created_at"`
-}
-
-func (APILogModel) TableName() string { return "api_logs" }
 
 type idempotencyKeyModel struct {
 	ID                 uint           `gorm:"primaryKey;autoIncrement"`
@@ -294,9 +275,8 @@ func (r *Repo) DeleteAPIKey(ctx context.Context, userID uint, keyID uint, delete
 	result := r.db.WithContext(ctx).Model(&APIKeyModel{}).
 		Where("id = ? AND user_id = ? AND deleted_at IS NULL", keyID, userID).
 		Updates(map[string]any{
-			"enabled":         false,
-			"active_requests": 0,
-			"deleted_at":      deletedAt,
+			"enabled":    false,
+			"deleted_at": deletedAt,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("delete api key: %w", result.Error)
@@ -409,59 +389,6 @@ func (r *Repo) ExtendOrderToken(ctx context.Context, orderNo string, expireAt ti
 	return nil
 }
 
-func (r *Repo) CreateAPILog(ctx context.Context, cmd openapiapp.CreateAPILogCommand) error {
-	var userID *uint
-	if cmd.UserID > 0 {
-		userID = &cmd.UserID
-	}
-	model := APILogModel{
-		PrincipalType:  strings.TrimSpace(cmd.PrincipalType),
-		PrincipalID:    cmd.PrincipalID,
-		UserID:         userID,
-		Path:           strings.TrimSpace(cmd.Path),
-		Method:         strings.TrimSpace(cmd.Method),
-		IdempotencyKey: strings.TrimSpace(cmd.IdempotencyKey),
-		HTTPStatus:     cmd.HTTPStatus,
-		DurationMs:     cmd.DurationMs,
-		RequestID:      strings.TrimSpace(cmd.RequestID),
-		CreatedAt:      cmd.Now,
-	}
-	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
-		return fmt.Errorf("create api log: %w", err)
-	}
-	return nil
-}
-
-func (r *Repo) CreateAPILogs(ctx context.Context, commands []openapiapp.CreateAPILogCommand) error {
-	if len(commands) == 0 {
-		return nil
-	}
-	models := make([]APILogModel, 0, len(commands))
-	for _, cmd := range commands {
-		var userID *uint
-		if cmd.UserID > 0 {
-			value := cmd.UserID
-			userID = &value
-		}
-		models = append(models, APILogModel{
-			PrincipalType:  strings.TrimSpace(cmd.PrincipalType),
-			PrincipalID:    cmd.PrincipalID,
-			UserID:         userID,
-			Path:           strings.TrimSpace(cmd.Path),
-			Method:         strings.TrimSpace(cmd.Method),
-			IdempotencyKey: strings.TrimSpace(cmd.IdempotencyKey),
-			HTTPStatus:     cmd.HTTPStatus,
-			DurationMs:     cmd.DurationMs,
-			RequestID:      strings.TrimSpace(cmd.RequestID),
-			CreatedAt:      cmd.Now,
-		})
-	}
-	if err := r.db.WithContext(ctx).CreateInBatches(models, 500).Error; err != nil {
-		return fmt.Errorf("create api logs: %w", err)
-	}
-	return nil
-}
-
 func withIdempotencyInTx(ctx context.Context, tx *gorm.DB, ownerUserID uint, operation string, idempotencyKey string, fingerprint string, run func(*gorm.DB) ([]byte, error)) ([]byte, bool, error) {
 	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(fingerprint) == "" {
 		return nil, false, domain.ErrIdempotencyRequired
@@ -514,7 +441,7 @@ func apiKeyModelToDomain(model APIKeyModel) domain.APIKey {
 		ConcurrencyLimit:   model.ConcurrencyLimit,
 		QuotaLimit:         model.QuotaLimit,
 		QuotaUsed:          model.QuotaUsed,
-		ActiveRequests:     model.ActiveRequests,
+		ActiveRequests:     0,
 		ExpireAt:           model.ExpireAt,
 		LastUsedAt:         model.LastUsedAt,
 		CreatedAt:          model.CreatedAt,

@@ -3,12 +3,18 @@ package api
 import "time"
 
 type MailContentResponse struct {
+	ID               uint      `json:"id"`
 	Sender           string    `json:"sender"`
 	Recipient        string    `json:"recipient"`
 	ReceivedAt       time.Time `json:"receivedAt"`
 	Subject          string    `json:"subject"`
-	Body             string    `json:"body"`
+	BodyPreview      string    `json:"bodyPreview"`
 	VerificationCode string    `json:"verificationCode,omitempty"`
+}
+
+type MailContentDetailResponse struct {
+	MailContentResponse
+	Body string `json:"body"`
 }
 
 type OrderMailResponse struct {

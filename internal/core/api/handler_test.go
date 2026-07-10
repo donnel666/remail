@@ -1262,10 +1262,10 @@ func (s *mockFileStore) DeletePrivate(_ context.Context, objectKey string) error
 	return nil
 }
 
-func (s *mockFileStore) ListPrivate(_ context.Context, prefix string, limit int) ([]governancedomain.PrivateObject, error) {
+func (s *mockFileStore) ListPrivate(_ context.Context, prefix string, startAfter string, limit int) ([]governancedomain.PrivateObject, error) {
 	items := make([]governancedomain.PrivateObject, 0)
 	for objectKey := range s.files {
-		if strings.HasPrefix(objectKey, prefix) {
+		if strings.HasPrefix(objectKey, prefix) && (startAfter == "" || objectKey > startAfter) {
 			items = append(items, governancedomain.PrivateObject{ObjectKey: objectKey})
 		}
 	}

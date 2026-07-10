@@ -47,6 +47,7 @@ services:
   server:
     image: ${APP_IMAGE}
     environment:
+      APP_ENV: "production"
       SERVER_ADDR: ":8080"
       MYSQL_DSN: "${MYSQL_DSN}"
       REDIS_ADDR: redis:6379
@@ -88,6 +89,7 @@ services:
       - /opt/remail/secrets/smtp-dkim-private-key.pem:/run/secrets/smtp-dkim-private-key.pem:ro
     ports:
       - "25:2525"
+      - "127.0.0.1:8080:8080"
       - "127.0.0.1:6060:6060"
     depends_on:
       mysql:

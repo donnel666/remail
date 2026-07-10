@@ -30,6 +30,7 @@ import (
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
+	tradeinfra "github.com/donnel666/remail/internal/trade/infra"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -238,16 +239,29 @@ func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
 		RequestID:      "req-trade-refund",
 	})
 	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
+	_, replayErr := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-refund",
+		RequestID:      "req-trade-refund-replay",
+	})
+	require.ErrorIs(t, replayErr, tradedomain.ErrInsufficientInventory)
 
 	var order struct {
 		OrderNo      string
 		Status       string
+		FailureCode  string
 		DebitTxID    *uint
 		RefundTxID   *uint
 		RefundAmount string
 	}
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-refund").Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
+	require.Equal(t, string(tradedomain.OrderFailureInsufficientInventory), order.FailureCode)
 	require.Nil(t, order.DebitTxID)
 	require.Nil(t, order.RefundTxID)
 	require.Equal(t, "0.00", order.RefundAmount)
@@ -258,6 +272,50 @@ func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
 	summary, err := billinginfra.NewBillingRepo(db).GetOrCreateWalletSummary(context.Background(), 2)
 	require.NoError(t, err)
 	require.Equal(t, "10.00", summary.Wallet.ConsumerBalance)
+}
+
+func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	creditBuyer(t, db, 2, "10.00")
+	baseRepo := tradeinfra.NewRepo(db)
+	projects := coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db))
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	alloc := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	tokens := openapiapp.NewUseCase(openapiinfra.NewRepo(db))
+	uc := tradeapp.NewUseCase(
+		&markFailedErrorRepo{Repository: baseRepo},
+		coreOrderingAdapter{projects: projects},
+		billingWalletAdapter{wallet: wallet},
+		allocationAdapter{alloc: alloc},
+		orderTokenAdapter{tokens: tokens},
+	)
+	_, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-mark-failed-rollback",
+		RequestID:      "req-mark-failed-rollback",
+	})
+	require.Error(t, err)
+	require.NotErrorIs(t, err, tradedomain.ErrInsufficientInventory)
+
+	var orderCount int64
+	require.NoError(t, db.Table("orders").
+		Where("idempotency_key = ?", "order-idem-mark-failed-rollback").
+		Count(&orderCount).Error)
+	require.Zero(t, orderCount)
+}
+
+type markFailedErrorRepo struct {
+	tradeapp.Repository
+}
+
+func (r *markFailedErrorRepo) MarkFailed(context.Context, tradeapp.MarkFailedCommand) (*tradedomain.Order, error) {
+	return nil, fmt.Errorf("forced mark failed error")
 }
 
 func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
@@ -277,16 +335,29 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 		RequestID:      "req-insufficient-balance",
 	})
 	require.ErrorIs(t, err, tradedomain.ErrInsufficientBalance)
+	_, replayErr := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "code",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-idem-insufficient-balance",
+		RequestID:      "req-insufficient-balance-replay",
+	})
+	require.ErrorIs(t, replayErr, tradedomain.ErrInsufficientBalance)
 
 	var order struct {
 		OrderNo      string
 		Status       string
+		FailureCode  string
 		DebitTxID    *uint
 		RefundTxID   *uint
 		RefundAmount string
 	}
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-insufficient-balance").Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
+	require.Equal(t, string(tradedomain.OrderFailureInsufficientBalance), order.FailureCode)
 	require.Nil(t, order.DebitTxID)
 	require.Nil(t, order.RefundTxID)
 	require.Equal(t, "0.00", order.RefundAmount)
@@ -325,6 +396,7 @@ func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 	expired, err := uc.ExpireDueOrders(context.Background(), 200)
 	require.NoError(t, err)
 	require.Equal(t, 1, expired.CodeTimedOut)
+	require.Equal(t, 0, expired.DeliveryReconciled)
 	require.Equal(t, 0, expired.Failed)
 
 	var order struct {
@@ -371,7 +443,7 @@ func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 	require.EqualValues(t, 1, refundCount)
 }
 
-func TestExpireDueOrdersCompletesExpiredCodeWithSnapshotWithoutRefundMySQL(t *testing.T) {
+func TestExpireDueOrdersCompletesExpiredCodeWithDeliveryWithoutRefundMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
@@ -385,8 +457,8 @@ func TestExpireDueOrdersCompletesExpiredCodeWithSnapshotWithoutRefundMySQL(t *te
 		ServiceMode:    "code",
 		SupplyPolicy:   "public_only",
 		ClientChannel:  tradedomain.ClientChannelConsole,
-		IdempotencyKey: "order-idem-expired-code-snapshot",
-		RequestID:      "req-expired-code-snapshot",
+		IdempotencyKey: "order-idem-expired-code-delivery",
+		RequestID:      "req-expired-code-delivery",
 	})
 	require.NoError(t, err)
 	past := time.Now().UTC().Add(-time.Minute)
@@ -394,17 +466,50 @@ func TestExpireDueOrdersCompletesExpiredCodeWithSnapshotWithoutRefundMySQL(t *te
 	require.NoError(t, db.Table("orders").
 		Where("order_no = ?", result.Order.OrderNo).
 		Updates(map[string]any{"receive_until": past, "after_sale_until": past}).Error)
+	var resourceID uint
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("resource_id").
+		Where("id = ?", result.Order.MicrosoftAllocID).
+		Scan(&resourceID).Error)
+	require.NotZero(t, resourceID)
 	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_order_snapshots(order_no, sender, recipient, received_at, subject, body, verification_code)
-VALUES (?, 'noreply@example.com', ?, ?, 'Code', 'Your code is 123456', '123456')`,
-		result.Order.OrderNo,
+INSERT INTO mailmatch_messages(
+    email_resource_id, resource_type, recipient, sender, subject, raw_body,
+    verification_code, dedupe_key, status, received_at
+) VALUES (?, 'microsoft', ?, 'noreply@example.com', 'Code', 'Your code is 123456',
+          '123456', REPEAT('d', 64), 'matched', ?)`,
+		resourceID,
 		result.Order.DeliveryEmail,
 		receivedAt,
 	).Error)
+	var messageID uint
+	require.NoError(t, db.Table("mailmatch_messages").
+		Select("id").
+		Where("email_resource_id = ? AND dedupe_key = REPEAT('d', 64)", resourceID).
+		Scan(&messageID).Error)
+	require.NotZero(t, messageID)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
+VALUES (?, ?, ?)`, result.Order.ID, messageID, receivedAt).Error)
+
+	detail, err := uc.GetOrder(context.Background(), result.Order.OrderNo, result.Order.UserID, false)
+	require.NoError(t, err)
+	require.True(t, detail.HasDelivery)
+	require.Equal(t, "123456", detail.VerificationCode)
+	require.NotNil(t, detail.LastMailReceivedAt)
+	require.WithinDuration(t, receivedAt, *detail.LastMailReceivedAt, time.Second)
+
+	listed, nextAfterID, err := uc.ListOrders(context.Background(), tradeapp.OrderListFilter{UserID: result.Order.UserID}, 0, 20)
+	require.NoError(t, err)
+	require.Nil(t, nextAfterID)
+	require.Len(t, listed, 1)
+	require.True(t, listed[0].HasDelivery)
+	require.Equal(t, "123456", listed[0].VerificationCode)
 
 	expired, err := uc.ExpireDueOrders(context.Background(), 200)
 	require.NoError(t, err)
-	require.Equal(t, 1, expired.CodeTimedOut)
+	require.Equal(t, 0, expired.CodeTimedOut)
+	require.Equal(t, 1, expired.DeliveryReconciled)
 	require.Equal(t, 0, expired.Failed)
 
 	var order struct {
@@ -505,7 +610,7 @@ func TestAdminOrderRefundRouteWritesOperationLogMySQL(t *testing.T) {
 		UserID:         2,
 		ProjectID:      10,
 		ProductID:      20,
-		ServiceMode:    "code",
+		ServiceMode:    "purchase",
 		SupplyPolicy:   "public_only",
 		ClientChannel:  tradedomain.ClientChannelConsole,
 		IdempotencyKey: "order-idem-admin-refund",
@@ -533,6 +638,47 @@ func TestAdminOrderRefundRouteWritesOperationLogMySQL(t *testing.T) {
 		Where("operator_user_id = ? AND operation_type = ? AND resource_id = ? AND result = ?", 1, "trade.order.refund", result.Order.OrderNo, "success").
 		Count(&logCount).Error)
 	require.EqualValues(t, 1, logCount)
+	var allocationStatus string
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&allocationStatus).Error)
+	require.Equal(t, "released", allocationStatus)
+	var tokenEnabled bool
+	require.NoError(t, db.Table("order_tokens").
+		Select("enabled").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&tokenEnabled).Error)
+	require.False(t, tokenEnabled)
+
+	require.NoError(t, db.Table("microsoft_allocations").
+		Where("order_no = ?", result.Order.OrderNo).
+		Update("status", "allocated").Error)
+	require.NoError(t, db.Table("order_tokens").
+		Where("order_no = ?", result.Order.OrderNo).
+		Updates(map[string]any{
+			"enabled":         true,
+			"disabled_at":     nil,
+			"disabled_reason": "",
+		}).Error)
+	require.NoError(t, db.Table("orders").
+		Where("order_no = ?", result.Order.OrderNo).
+		Update("service_cleanup_status", "partial_failure").Error)
+
+	retried, err := uc.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, retried.CleanupRetried)
+	require.Equal(t, 0, retried.Failed)
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("status").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&allocationStatus).Error)
+	require.Equal(t, "released", allocationStatus)
+	require.NoError(t, db.Table("order_tokens").
+		Select("enabled").
+		Where("order_no = ?", result.Order.OrderNo).
+		Scan(&tokenEnabled).Error)
+	require.False(t, tokenEnabled)
 }
 
 func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
@@ -589,29 +735,6 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
 	require.Len(t, listResp.Items, 1)
 	require.Empty(t, listResp.Items[0].ServiceToken)
-
-	require.NoError(t, openapiMod.UseCase.FlushRuntime(context.Background()))
-	var apiLogs []struct {
-		Path           string
-		Method         string
-		IdempotencyKey string
-		HTTPStatus     int
-		RequestID      string
-	}
-	require.NoError(t, db.Table("api_logs").
-		Select("path, method, idempotency_key, http_status, request_id").
-		Where("principal_type = ? AND principal_id = ? AND user_id = ?", "api_key", key.ID, 2).
-		Order("id ASC").
-		Scan(&apiLogs).Error)
-	require.Len(t, apiLogs, 2)
-	require.Equal(t, "/v1/open/orders", apiLogs[0].Path)
-	require.Equal(t, http.MethodPost, apiLogs[0].Method)
-	require.Equal(t, "route-order-idem", apiLogs[0].IdempotencyKey)
-	require.Equal(t, http.StatusCreated, apiLogs[0].HTTPStatus)
-	require.NotEmpty(t, apiLogs[0].RequestID)
-	require.Equal(t, "/v1/open/orders", apiLogs[1].Path)
-	require.Equal(t, http.MethodGet, apiLogs[1].Method)
-	require.Equal(t, http.StatusOK, apiLogs[1].HTTPStatus)
 }
 
 func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {
@@ -740,11 +863,11 @@ func TestFailedOrderDetailDoesNotExposeServiceTokenMySQL(t *testing.T) {
 	require.NoError(t, db.Exec(`
 INSERT INTO orders(
     order_no, user_id, project_id, project_product_id, product_type, service_mode,
-    supply_policy, status, pay_amount, refund_amount, delivery_email,
+    supply_policy, status, failure_code, pay_amount, refund_amount, delivery_email,
     client_channel, idempotency_key, request_fingerprint, service_cleanup_status
 ) VALUES (
     'OR_FAILED_TOKEN', 2, 10, 20, 'microsoft', 'code',
-    'public_only', 'failed', 1.00, 0.00, '',
+    'public_only', 'failed', 'unknown', 1.00, 0.00, '',
     'console', 'failed-token-idem', REPEAT('a', 64), 'none'
 )`).Error)
 	require.NoError(t, db.Exec(`
@@ -786,9 +909,6 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
 	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 	require.ErrorIs(t, err, openapidomain.ErrAPIKeyRateLimited)
 
-	var activeRequests int
-	require.NoError(t, db.Table("api_keys").Select("active_requests").Where("id = ?", key.ID).Scan(&activeRequests).Error)
-	require.Equal(t, 0, activeRequests)
 }
 
 func TestAPIKeyQuotaAndNullableLimitsMySQL(t *testing.T) {
@@ -931,9 +1051,6 @@ func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 	var orderCount int64
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "route-order-disabled-owner").Count(&orderCount).Error)
 	require.EqualValues(t, 0, orderCount)
-	var activeRequests int
-	require.NoError(t, db.Table("api_keys").Select("active_requests").Where("id = ?", key.ID).Scan(&activeRequests).Error)
-	require.Equal(t, 0, activeRequests)
 }
 
 func TestOrderAPIKeyOwnerConstraintMySQL(t *testing.T) {
@@ -1024,9 +1141,6 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	var allocationCount int64
 	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", orderRow.OrderNo).Count(&allocationCount).Error)
 	require.EqualValues(t, 1, allocationCount)
-	var activeRequests int
-	require.NoError(t, db.Table("api_keys").Select("active_requests").Where("id = ?", key.ID).Scan(&activeRequests).Error)
-	require.Equal(t, 0, activeRequests)
 }
 
 func newTradeUseCase(db *gorm.DB) *tradeapp.UseCase {

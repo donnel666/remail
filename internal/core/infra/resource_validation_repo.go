@@ -596,13 +596,11 @@ func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.D
 		}
 	}
 	if filter.Search != "" {
-		like := "%" + strings.ToLower(strings.TrimSpace(filter.Search)) + "%"
-		normalized := "%" + normalizeEmailTypeSearch(filter.Search) + "%"
+		prefix := strings.ToLower(strings.TrimSpace(filter.Search)) + "%"
 		q = q.Where(
-			"(LOWER(ms.email_address) LIKE ? OR LOWER(SUBSTRING_INDEX(ms.email_address, '@', -1)) LIKE ? OR LOWER(REPLACE(REPLACE(SUBSTRING_INDEX(ms.email_address, '@', -1), '.', '_'), '-', '_')) LIKE ?)",
-			like,
-			like,
-			normalized,
+			"(ms.email_address LIKE ? OR ms.email_domain LIKE ?)",
+			prefix,
+			prefix,
 		)
 	}
 
@@ -645,7 +643,7 @@ func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, 
 		q = q.Where("dr.domain_tld = ?", filter.TLD)
 	}
 	if filter.Search != "" {
-		q = q.Where("LOWER(dr.domain) LIKE ?", "%"+strings.ToLower(strings.TrimSpace(filter.Search))+"%")
+		q = q.Where("dr.domain LIKE ?", strings.ToLower(strings.TrimSpace(filter.Search))+"%")
 	}
 
 	var rows []validationCandidateRow
