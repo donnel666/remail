@@ -45,22 +45,24 @@ func setOrderCreatedAt(t *testing.T, db *gorm.DB, orderNo string, createdAt time
 func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
-	// Quality controls allocation order, so each checkout maps to one email.
-	seedTradeMicrosoftResource(t, db, 1, 1001, "a1@outlook.test", "outlook.test", 100, true)
-	seedTradeMicrosoftResource(t, db, 1, 1002, "a2@outlook.test", "outlook.test", 99, true)
-	seedTradeMicrosoftResource(t, db, 1, 1003, "b1@hotmail.test", "hotmail.test", 98, true)
-	seedTradeMicrosoftResource(t, db, 1, 1004, "b2@hotmail.test", "hotmail.test", 97, true)
-	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
 	creditBuyer(t, db, 2, "50.00")
 	creditBuyer(t, db, 3, "50.00")
 
 	uc := newTradeUseCase(db)
 	ctx := context.Background()
 
+	// Seed exactly one available resource before each checkout so the
+	// delivery email mapping stays deterministic regardless of the
+	// allocation picking strategy.
+	seedTradeMicrosoftResource(t, db, 1, 1001, "a1@outlook.test", "outlook.test", 100, true)
 	first := checkoutListOrder(t, uc, 2, "code", "order-list-1")
+	seedTradeMicrosoftResource(t, db, 1, 1002, "a2@outlook.test", "outlook.test", 99, true)
 	second := checkoutListOrder(t, uc, 2, "code", "order-list-2")
+	seedTradeMicrosoftResource(t, db, 1, 1003, "b1@hotmail.test", "hotmail.test", 98, true)
 	third := checkoutListOrder(t, uc, 2, "purchase", "order-list-3")
+	seedTradeMicrosoftResource(t, db, 1, 1004, "b2@hotmail.test", "hotmail.test", 97, true)
 	fourth := checkoutListOrder(t, uc, 2, "purchase", "order-list-4")
+	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
 	other := checkoutListOrder(t, uc, 3, "code", "order-list-other")
 
 	require.Equal(t, "a1@outlook.test", first.Order.DeliveryEmail)
