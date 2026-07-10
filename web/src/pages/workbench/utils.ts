@@ -8,10 +8,11 @@ import type {
   WorkbenchOrder,
 } from "./types";
 
-export function formatMoney(value: number) {
-  if (!Number.isFinite(value)) return "￥0";
-  return `￥${value.toFixed(2).replace(/\.00$/, "")}`;
-}
+export {
+  formatCompactNumber,
+  formatMoney,
+  formatMoneyExact,
+} from "./money";
 
 export function formatDateTime(value?: string) {
   if (!value) return "-";

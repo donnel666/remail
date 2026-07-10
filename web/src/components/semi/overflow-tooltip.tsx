@@ -13,6 +13,7 @@ interface OverflowTooltipProps {
   children: ReactNode;
   className?: string;
   content?: ReactNode;
+  force?: boolean;
   mouseEnterDelay?: number;
   position?: ComponentProps<typeof Tooltip>["position"];
   wrapperClassName?: string;
@@ -22,6 +23,7 @@ export function OverflowTooltip({
   children,
   className,
   content,
+  force = false,
   mouseEnterDelay = 0,
   position = "top",
   wrapperClassName,
@@ -58,7 +60,7 @@ export function OverflowTooltip({
   return (
     <Tooltip
       className="remail-overflow-tooltip"
-      condition={overflowed}
+      condition={force || overflowed}
       content={content ?? children}
       mouseEnterDelay={mouseEnterDelay}
       position={position}

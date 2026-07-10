@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 )
 
 // ProjectStatus represents the Core project lifecycle.
@@ -227,9 +227,9 @@ func NormalizeMoney(value string) (string, bool) {
 	if trimmed == "" {
 		trimmed = "0"
 	}
-	amount, err := decimal.NewFromString(trimmed)
+	amount, err := moneyfmt.Parse(trimmed)
 	if err != nil || amount.IsNegative() {
 		return "", false
 	}
-	return amount.StringFixedBank(6), true
+	return amount.StringFixedBank(moneyfmt.Scale), true
 }

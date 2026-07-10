@@ -9,10 +9,16 @@ const defaultFetchDelaySeconds = 5;
 
 interface SharedFetch {
   autoSubscribers: number;
-  handler: FetchHandler;
+  handlers: Map<symbol, SharedFetchHandler>;
   inFlight?: Promise<number | void>;
+  lastSource?: FetchSource;
   listeners: Set<() => void>;
   nextAt: number;
+}
+
+interface SharedFetchHandler {
+  autoEnabled: boolean;
+  handler: FetchHandler;
 }
 
 const sharedFetches = new Map<string, SharedFetch>();
@@ -30,7 +36,7 @@ function ensureTicker() {
           now >= entry.nextAt &&
           !entry.inFlight
         ) {
-          void runSharedFetch(key, "auto");
+          void runSharedFetch(key, "auto").catch(() => undefined);
         }
       }
     }, 1000);
@@ -39,8 +45,8 @@ function ensureTicker() {
 
 function stopTickerWhenIdle() {
   if (sharedFetches.size === 0 && tickerID !== undefined) {
-      window.clearInterval(tickerID);
-      tickerID = undefined;
+    window.clearInterval(tickerID);
+    tickerID = undefined;
   }
 }
 
@@ -55,25 +61,56 @@ function notify(entry: SharedFetch) {
   for (const listener of entry.listeners) listener();
 }
 
-function runSharedFetch(key: string, source: FetchSource) {
+function resolveHandler(
+  entry: SharedFetch,
+  source: FetchSource,
+  subscriberID?: symbol,
+): FetchHandler | undefined {
+  if (subscriberID) {
+    return entry.handlers.get(subscriberID)?.handler;
+  }
+
+  let handler: FetchHandler | undefined;
+  for (const subscriber of entry.handlers.values()) {
+    if (source === "auto" && !subscriber.autoEnabled) continue;
+    handler = subscriber.handler;
+  }
+  return handler;
+}
+
+function runSharedFetch(
+  key: string,
+  source: FetchSource,
+  subscriberID?: symbol,
+) {
   const entry = sharedFetches.get(key);
   if (!entry) return Promise.resolve();
   if (entry.inFlight) return entry.inFlight;
+  const handler = resolveHandler(entry, source, subscriberID);
+  if (!handler) return Promise.resolve();
+  entry.lastSource = source;
 
-  const request = Promise.resolve(entry.handler(source))
+  const request = Promise.resolve()
+    .then(() => handler(source))
     .then((delay) => {
-      entry.nextAt = Date.now() + retryDelaySeconds(delay) * 1000;
+      entry.nextAt =
+        source === "auto" && entry.autoSubscribers === 0
+          ? Date.now()
+          : Date.now() + retryDelaySeconds(delay) * 1000;
       return delay;
     })
     .catch((error: unknown) => {
-      entry.nextAt = Date.now() + defaultFetchDelaySeconds * 1000;
+      entry.nextAt =
+        source === "auto" && entry.autoSubscribers === 0
+          ? Date.now()
+          : Date.now() + defaultFetchDelaySeconds * 1000;
       throw error;
     })
     .finally(() => {
       entry.inFlight = undefined;
       notify(entry);
       if (entry.listeners.size === 0) {
-        sharedFetches.delete(key);
+        if (sharedFetches.get(key) === entry) sharedFetches.delete(key);
         stopTickerWhenIdle();
       }
     });
@@ -99,6 +136,7 @@ export function FetchControl({
 }) {
   const { t } = useTranslation();
   const [, forceRender] = useState(0);
+  const [subscriberID] = useState(() => Symbol("fetch-control"));
   const isCodeVariant = variant === "code";
 
   useEffect(() => {
@@ -107,13 +145,13 @@ export function FetchControl({
     if (!entry) {
       entry = {
         autoSubscribers: 0,
-        handler: onFetch,
+        handlers: new Map(),
         listeners: new Set(),
         nextAt: Date.now(),
       };
       sharedFetches.set(fetchKey, entry);
     }
-    entry.handler = onFetch;
+    entry.handlers.set(subscriberID, { autoEnabled, handler: onFetch });
     if (autoEnabled) entry.autoSubscribers += 1;
     const listener = () => forceRender((value) => value + 1);
     entry.listeners.add(listener);
@@ -123,18 +161,29 @@ export function FetchControl({
       const current = sharedFetches.get(fetchKey);
       if (!current) return;
       current.listeners.delete(listener);
-      if (autoEnabled) current.autoSubscribers = Math.max(0, current.autoSubscribers - 1);
+      current.handlers.delete(subscriberID);
+      if (autoEnabled) {
+        current.autoSubscribers = Math.max(0, current.autoSubscribers - 1);
+        if (
+          current.autoSubscribers === 0 &&
+          current.lastSource === "auto"
+        ) {
+          current.nextAt = Date.now();
+          notify(current);
+        }
+      }
       if (current.listeners.size === 0 && !current.inFlight) {
         sharedFetches.delete(fetchKey);
       }
       stopTickerWhenIdle();
     };
-  }, [autoEnabled, fetchKey]);
+  }, [autoEnabled, fetchKey, subscriberID]);
 
   useEffect(() => {
     const current = sharedFetches.get(fetchKey);
-    if (current) current.handler = onFetch;
-  }, [fetchKey, onFetch]);
+    const subscriber = current?.handlers.get(subscriberID);
+    if (subscriber) subscriber.handler = onFetch;
+  }, [fetchKey, onFetch, subscriberID]);
 
   const entry = sharedFetches.get(fetchKey);
   const fetching = Boolean(entry?.inFlight);
@@ -143,10 +192,10 @@ export function FetchControl({
     : 0;
 
   const submitManual = useCallback(() => {
-    void runSharedFetch(fetchKey, "manual").catch(() => {
+    void runSharedFetch(fetchKey, "manual", subscriberID).catch(() => {
       Toast.error(t("Fetch failed"));
     });
-  }, [fetchKey, t]);
+  }, [fetchKey, subscriberID, t]);
 
   return (
     <div className={`workbench-fetch-control ${isCodeVariant ? "is-code" : ""}`}>

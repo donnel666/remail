@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
@@ -28,8 +29,8 @@ type OrderModel struct {
 	SupplyPolicy         string     `gorm:"type:varchar(32);not null;column:supply_policy"`
 	Status               string     `gorm:"type:varchar(32);not null"`
 	FailureCode          string     `gorm:"type:varchar(32);not null;default:'';column:failure_code"`
-	PayAmount            string     `gorm:"type:decimal(18,2);not null;column:pay_amount"`
-	RefundAmount         string     `gorm:"type:decimal(18,2);not null;column:refund_amount"`
+	PayAmount            string     `gorm:"type:decimal(18,6);not null;column:pay_amount"`
+	RefundAmount         string     `gorm:"type:decimal(18,6);not null;column:refund_amount"`
 	DebitTxID            *uint      `gorm:"column:debit_tx_id"`
 	RefundTxID           *uint      `gorm:"column:refund_tx_id"`
 	AllocationType       *string    `gorm:"type:varchar(32);column:allocation_type"`
@@ -834,8 +835,8 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		SupplyPolicy:         domain.SupplyPolicy(model.SupplyPolicy),
 		Status:               domain.OrderStatus(model.Status),
 		FailureCode:          domain.OrderFailureCode(model.FailureCode),
-		PayAmount:            model.PayAmount,
-		RefundAmount:         model.RefundAmount,
+		PayAmount:            normalizeStoredMoney(model.PayAmount),
+		RefundAmount:         normalizeStoredMoney(model.RefundAmount),
 		DebitTxID:            model.DebitTxID,
 		RefundTxID:           model.RefundTxID,
 		AllocationType:       allocationType,
@@ -856,6 +857,14 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		UpdatedAt:            model.UpdatedAt,
 		Version:              model.Version,
 	}
+}
+
+func normalizeStoredMoney(value string) string {
+	normalized, err := moneyfmt.Normalize(value)
+	if err != nil {
+		return value
+	}
+	return normalized
 }
 
 func eventModelToDomain(model OrderEventModel) domain.OrderEvent {

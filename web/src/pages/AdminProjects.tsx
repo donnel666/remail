@@ -145,20 +145,21 @@ function createDefaultMailRules(): MailRuleDraft[] {
 }
 
 function createDefaultProduct(type: ProjectProductType): ProductDraft {
+  const isMicrosoft = type === "microsoft";
   return {
     activationWindowMinutes: "60",
     codeEnabled: true,
-    codePrice: type === "microsoft" ? "0.10" : "0.08",
-    codeSupplierPrice: type === "microsoft" ? "0.05" : "0.04",
+    codePrice: isMicrosoft ? "0.008" : "0.08",
+    codeSupplierPrice: isMicrosoft ? "0.005" : "0.04",
     codeWindowMinutes: "10",
     dotWeight: "0",
-    mainWeight: type === "microsoft" ? "1" : "0",
+    mainWeight: isMicrosoft ? "1" : "0",
     plusWeight: "0",
-    purchaseEnabled: false,
-    purchasePrice: "0",
-    purchaseSupplierPrice: "0",
+    purchaseEnabled: isMicrosoft,
+    purchasePrice: isMicrosoft ? "0.01" : "0",
+    purchaseSupplierPrice: isMicrosoft ? "0.007" : "0",
     type,
-    warrantyMinutes: "60",
+    warrantyMinutes: isMicrosoft ? "1440" : "60",
   };
 }
 
@@ -244,6 +245,12 @@ function moneyToDraft(value?: string) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return value;
   return parsed.toString();
+}
+
+function moneyForDisplay(value?: string) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return value ?? "0";
+  return parsed.toFixed(3).replace(/\.?0+$/, "");
 }
 
 function updateProduct(
@@ -1325,11 +1332,11 @@ function ProjectDetailSheet({
                   <div className="grid gap-2 text-sm sm:grid-cols-3">
                     <InfoItem
                       label={t("Code price")}
-                      value={product.codeEnabled ? product.codePrice : t("Disabled")}
+                      value={product.codeEnabled ? moneyForDisplay(product.codePrice) : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Purchase price")}
-                      value={product.purchaseEnabled ? product.purchasePrice : t("Disabled")}
+                      value={product.purchaseEnabled ? moneyForDisplay(product.purchasePrice) : t("Disabled")}
                     />
                     <InfoItem
                       label={t("Service window")}

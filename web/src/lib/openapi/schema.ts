@@ -1764,6 +1764,12 @@ export interface components {
             deliveryReconciled: number;
             failed: number;
         };
+        /** @description Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6). */
+        LedgerAmount: string;
+        /** @description Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6). */
+        NonNegativeLedgerAmount: string;
+        /** @description External payment-channel amount limited to 2 decimal places. */
+        PaymentAmount: string;
         OrderResponse: {
             id: number;
             orderNo: string;
@@ -1780,8 +1786,8 @@ export interface components {
             status: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
             /** @enum {string} */
             failureCode?: "unknown" | "insufficient_inventory" | "insufficient_balance" | "allocation_failed" | "service_token_failed" | "activation_failed";
-            payAmount: string;
-            refundAmount: string;
+            payAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            refundAmount: components["schemas"]["NonNegativeLedgerAmount"];
             /** @enum {string} */
             allocationType?: "microsoft" | "domain";
             allocationId?: number;
@@ -1872,29 +1878,23 @@ export interface components {
         };
         WalletResponse: {
             userId: number;
-            /** @description Consumer balance, fixed to 2 decimals. */
-            consumerBalance: string;
-            /** @description Supplier available balance, fixed to 2 decimals. */
-            supplierAvailable: string;
-            /** @description Supplier frozen balance, fixed to 2 decimals. */
-            supplierFrozen: string;
-            /** @description Consumer outflow total, fixed to 2 decimals. */
-            historicalSpend: string;
+            consumerBalance: components["schemas"]["NonNegativeLedgerAmount"];
+            supplierAvailable: components["schemas"]["NonNegativeLedgerAmount"];
+            supplierFrozen: components["schemas"]["NonNegativeLedgerAmount"];
+            historicalSpend: components["schemas"]["NonNegativeLedgerAmount"];
             orderCount: number;
             /** Format: date-time */
             updatedAt: string;
         };
         WalletReferralResponse: {
             inviteCount: number;
-            /** @description Referral rewards not yet transferred, fixed to 2 decimals. */
-            pendingRewards: string;
-            /** @description Total historical referral rewards, fixed to 2 decimals. */
-            totalEarned: string;
+            pendingRewards: components["schemas"]["NonNegativeLedgerAmount"];
+            totalEarned: components["schemas"]["NonNegativeLedgerAmount"];
         };
         WalletReferralTransferResponse: {
             wallet: components["schemas"]["WalletResponse"];
             transaction: components["schemas"]["TransactionItem"];
-            transferredAmount: string;
+            transferredAmount: components["schemas"]["NonNegativeLedgerAmount"];
             transferredCount: number;
         };
         TransactionItem: {
@@ -1907,9 +1907,9 @@ export interface components {
             balanceBucket: "consumer" | "supplier_available" | "supplier_frozen";
             /** @enum {string} */
             direction: "in" | "out";
-            amount: string;
-            balanceBefore: string;
-            balanceAfter: string;
+            amount: components["schemas"]["LedgerAmount"];
+            balanceBefore: components["schemas"]["NonNegativeLedgerAmount"];
+            balanceAfter: components["schemas"]["NonNegativeLedgerAmount"];
             bizType: string;
             bizId: string;
             /** Format: date-time */
@@ -1926,8 +1926,8 @@ export interface components {
             rechargeNo: string;
             userId: number;
             paymentMethod: string;
-            rechargeQuota: string;
-            paymentAmount: string;
+            rechargeQuota: components["schemas"]["NonNegativeLedgerAmount"];
+            paymentAmount: components["schemas"]["PaymentAmount"];
             /** @enum {string} */
             status: "paying" | "callback" | "reconciled" | "credited" | "failed";
             /** Format: date-time */
@@ -1954,12 +1954,12 @@ export interface components {
             transaction: components["schemas"]["TransactionItem"];
         };
         AdminAdjustWalletRequest: {
-            amount: string;
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
             reason: string;
         };
         CardKey: {
             cardKey: string;
-            amount: string;
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
             /** @enum {string} */
             status: "enabled" | "disabled";
             maxRedemptions: number;
@@ -1979,7 +1979,7 @@ export interface components {
             limit: number;
         };
         CreateCardsRequest: {
-            amount: string;
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
             count?: number;
             maxRedemptions?: number;
             /** Format: date-time */
@@ -2386,10 +2386,10 @@ export interface components {
             status: "enabled" | "disabled";
             codeEnabled: boolean;
             purchaseEnabled: boolean;
-            codePrice?: string;
-            purchasePrice?: string;
-            codeSupplierPrice?: string;
-            purchaseSupplierPrice?: string;
+            codePrice?: components["schemas"]["NonNegativeLedgerAmount"];
+            purchasePrice?: components["schemas"]["NonNegativeLedgerAmount"];
+            codeSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
+            purchaseSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
             codeWindowMinutes?: number;
             activationWindowMinutes?: number;
             warrantyMinutes?: number;
@@ -2468,8 +2468,8 @@ export interface components {
             status: "enabled" | "disabled";
             codeEnabled: boolean;
             purchaseEnabled: boolean;
-            codePrice: string;
-            purchasePrice: string;
+            codePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
             codeWindowMinutes: number;
             activationWindowMinutes: number;
             warrantyMinutes: number;
@@ -2502,10 +2502,10 @@ export interface components {
             status: "enabled" | "disabled";
             codeEnabled: boolean;
             purchaseEnabled: boolean;
-            codePrice: string;
-            purchasePrice: string;
-            codeSupplierPrice?: string;
-            purchaseSupplierPrice?: string;
+            codePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            codeSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
+            purchaseSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
             codeWindowMinutes: number;
             activationWindowMinutes: number;
             warrantyMinutes: number;

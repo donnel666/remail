@@ -112,7 +112,7 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 		Select("amount").
 		Where("id = ?", *first.Order.DebitTxID).
 		Scan(&debitAmount).Error)
-	require.Equal(t, "-2.00", debitAmount)
+	require.Equal(t, "-2.000000", debitAmount)
 	var allocationCount int64
 	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", first.Order.OrderNo).Count(&allocationCount).Error)
 	require.EqualValues(t, 1, allocationCount)
@@ -168,9 +168,9 @@ func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {
 		Select("amount, balance_before, balance_after").
 		Where("id = ?", *result.Order.DebitTxID).
 		Take(&tx).Error)
-	require.Equal(t, "0.00", tx.Amount)
-	require.Equal(t, "0.00", tx.BalanceBefore)
-	require.Equal(t, "0.00", tx.BalanceAfter)
+	require.Equal(t, "0.000000", tx.Amount)
+	require.Equal(t, "0.000000", tx.BalanceBefore)
+	require.Equal(t, "0.000000", tx.BalanceAfter)
 	var supplyScope string
 	require.NoError(t, db.Table("microsoft_allocations").
 		Select("supply_scope").
@@ -211,9 +211,9 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 		Select("amount, balance_before, balance_after").
 		Where("id = ?", *result.Order.DebitTxID).
 		Take(&tx).Error)
-	require.Equal(t, "0.00", tx.Amount)
-	require.Equal(t, "0.00", tx.BalanceBefore)
-	require.Equal(t, "0.00", tx.BalanceAfter)
+	require.Equal(t, "0.000000", tx.Amount)
+	require.Equal(t, "0.000000", tx.BalanceBefore)
+	require.Equal(t, "0.000000", tx.BalanceAfter)
 	var supplyScope string
 	require.NoError(t, db.Table("domain_allocations").
 		Select("supply_scope").
@@ -264,7 +264,7 @@ func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
 	require.Equal(t, string(tradedomain.OrderFailureInsufficientInventory), order.FailureCode)
 	require.Nil(t, order.DebitTxID)
 	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.00", order.RefundAmount)
+	require.Equal(t, "0.000000", order.RefundAmount)
 	var guardCount int64
 	require.NoError(t, db.Table("allocation_order_guards").Where("order_no = ?", order.OrderNo).Count(&guardCount).Error)
 	require.EqualValues(t, 0, guardCount)
@@ -360,7 +360,7 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 	require.Equal(t, string(tradedomain.OrderFailureInsufficientBalance), order.FailureCode)
 	require.Nil(t, order.DebitTxID)
 	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.00", order.RefundAmount)
+	require.Equal(t, "0.000000", order.RefundAmount)
 
 	var allocation struct {
 		Status string
@@ -372,8 +372,14 @@ func TestCheckoutInsufficientBalanceReleasesAllocationMySQL(t *testing.T) {
 func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").
+		Where("id = ?", 20).
+		Updates(map[string]any{
+			"code_price":          "0.008",
+			"code_supplier_price": "0.005",
+		}).Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
-	creditBuyer(t, db, 2, "10.00")
+	creditBuyer(t, db, 2, "1.00")
 
 	uc := newTradeUseCase(db)
 	result, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
@@ -388,6 +394,7 @@ func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, "0.008", result.Order.PayAmount)
 	past := time.Now().UTC().Add(-time.Minute)
 	require.NoError(t, db.Table("orders").
 		Where("order_no = ?", result.Order.OrderNo).
@@ -411,7 +418,7 @@ func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 		Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusRefunded), order.Status)
 	require.NotNil(t, order.RefundTxID)
-	require.Equal(t, "1.00", order.RefundAmount)
+	require.Equal(t, "0.008000", order.RefundAmount)
 	require.Equal(t, "succeeded", order.ServiceCleanupStatus)
 
 	var allocationStatus string
@@ -433,6 +440,10 @@ func TestExpireDueOrdersRefundsExpiredCodeAndCleansServiceMySQL(t *testing.T) {
 		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, "refund", "order:"+result.Order.OrderNo).
 		Count(&refundCount).Error)
 	require.EqualValues(t, 1, refundCount)
+
+	summary, err := billinginfra.NewBillingRepo(db).GetOrCreateWalletSummary(context.Background(), 2)
+	require.NoError(t, err)
+	require.Equal(t, "1.00", summary.Wallet.ConsumerBalance)
 
 	replayed, err := uc.ExpireDueOrders(context.Background(), 200)
 	require.NoError(t, err)
@@ -524,7 +535,7 @@ VALUES (?, ?, ?)`, result.Order.ID, messageID, receivedAt).Error)
 		Take(&order).Error)
 	require.Equal(t, string(tradedomain.OrderStatusCompleted), order.Status)
 	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.00", order.RefundAmount)
+	require.Equal(t, "0.000000", order.RefundAmount)
 	require.NotNil(t, order.AfterSale)
 	require.InDelta(t, int64(time.Hour.Seconds()), int64(order.AfterSale.Sub(receivedAt).Seconds()), 1)
 
@@ -848,7 +859,7 @@ func TestCheckoutEmailSuffixMismatchDoesNotDebitMySQL(t *testing.T) {
 	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
 	require.Nil(t, order.DebitTxID)
 	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.00", order.RefundAmount)
+	require.Equal(t, "0.000000", order.RefundAmount)
 	var txCount int64
 	require.NoError(t, db.Table("wallet_transactions").
 		Where("biz_id = ?", "order:"+order.OrderNo).

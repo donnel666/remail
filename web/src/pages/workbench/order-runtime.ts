@@ -1,5 +1,18 @@
 import type { WorkbenchOrder } from "./types";
 
+export function shouldShowQuickFetchControl(
+  order: Pick<
+    WorkbenchOrder,
+    "hasDelivery" | "productType" | "serviceMode" | "verificationCode"
+  >,
+) {
+  return (
+    order.productType !== "domain" &&
+    !order.verificationCode &&
+    (!order.hasDelivery || order.serviceMode === "purchase")
+  );
+}
+
 export function mergeOrderRuntimeState(
   next: WorkbenchOrder,
   current?: WorkbenchOrder

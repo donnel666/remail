@@ -139,6 +139,31 @@ func TestProjectUseCaseAdminCreateListedRejectsInvalidEnums(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
 }
 
+func TestNormalizeOrderingAmountPreservesLedgerPrecision(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		input           string
+		requirePositive bool
+		want            string
+	}{
+		{input: "10", requirePositive: true, want: "10.00"},
+		{input: "0.008000", requirePositive: true, want: "0.008"},
+		{input: "0.005000", requirePositive: false, want: "0.005"},
+		{input: "0.007000", requirePositive: false, want: "0.007"},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := normalizeOrderingAmount(test.input, test.requirePositive)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+
+	_, err := normalizeOrderingAmount("0.0000001", true)
+	require.ErrorIs(t, err, domain.ErrInvalidProduct)
+}
+
 func TestProjectUseCaseAdminCreateListedRejectsIncompleteRulesAndInvalidWeights(t *testing.T) {
 	uc := NewProjectUseCase(&fakeProjectRepo{})
 

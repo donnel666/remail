@@ -16,6 +16,7 @@ import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
 import { FetchControl } from "./fetch-control";
+import { shouldShowQuickFetchControl } from "./order-runtime";
 import { ProjectIcon } from "./project-icon";
 import type {
   FetchResult,
@@ -28,8 +29,10 @@ import type {
 } from "./types";
 import {
   buildPickupUrl,
+  formatCompactNumber,
   formatDateTime,
   formatMoney,
+  formatMoneyExact,
   formatRemainingDuration,
   inventoryScopeLabel,
   maskMiddle,
@@ -216,11 +219,9 @@ function OrderAccordionItem({
                     {order.verificationCode ?? t("Waiting")}
                   </Text>
                 </div>
-                {order.productType !== "domain" &&
-                (!order.hasDelivery || order.serviceMode === "purchase") ? (
+                {shouldShowQuickFetchControl(order) ? (
                   <FetchControl
                     actionLabelKey="Refresh"
-                    autoEnabled={order.serviceMode === "purchase" || !order.hasDelivery}
                     compact
                     fetchKey={order.orderNo}
                     onFetch={(source) => onFetchMail(order, source)}
@@ -333,8 +334,13 @@ export function OrderPanel({
   const totalPrice = selectedProduct
     ? getPrice(selectedProduct, serviceMode, safeQuantity)
     : 0;
+  const totalPriceText = formatMoney(totalPrice);
+  const totalPriceExactText = formatMoneyExact(totalPrice);
+  const totalPriceIsCompact = totalPriceText !== totalPriceExactText;
   const inventory = selectedProductInventory;
-  const stockText = `${t("Stock")} ${inventory}`;
+  const stockText = `${t("Stock")} ${formatCompactNumber(inventory)}`;
+  const createOrderLabel =
+    serviceMode === "code" ? t("Order code now") : t("Buy now");
   const visibleOrders = useMemo(
     () => orders.filter((order) => order.status !== "refunded"),
     [orders],
@@ -364,10 +370,19 @@ export function OrderPanel({
                 ? `${selectedProduct?.codeWindowMinutes ?? 0}m`
                 : `${selectedProduct?.warrantyHours ?? 0}h`}
             </span>
-            <strong className="workbench-quick-price">
-              {formatMoney(totalPrice)}
+            <strong
+              aria-label={totalPriceExactText}
+              className="workbench-quick-price"
+            >
+              <OverflowTooltip
+                content={totalPriceExactText}
+                force={totalPriceIsCompact}
+              >
+                {totalPriceText}
+              </OverflowTooltip>
             </strong>
             <InputNumber
+              aria-label={t("Quantity")}
               className="workbench-quantity-input"
               disabled={!selectedProduct || inventory <= 0 || creating}
               max={inventory}
@@ -381,10 +396,10 @@ export function OrderPanel({
               precision={0}
               showClear={false}
               step={1}
-              style={{ width: "100%" }}
               value={safeQuantity}
             />
             <Button
+              aria-label={createOrderLabel}
               className="workbench-create-order-button"
               disabled={
                 !selectedProject ||
@@ -404,7 +419,9 @@ export function OrderPanel({
               theme="solid"
               type="primary"
             >
-              {serviceMode === "code" ? t("Order code now") : t("Buy now")}
+              <OverflowTooltip content={createOrderLabel}>
+                {createOrderLabel}
+              </OverflowTooltip>
             </Button>
           </div>
         </section>

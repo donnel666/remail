@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeOrderRuntimeState } from "./order-runtime";
+import {
+  mergeOrderRuntimeState,
+  shouldShowQuickFetchControl,
+} from "./order-runtime";
 import type { WorkbenchOrder } from "./types";
 
 function order(overrides: Partial<WorkbenchOrder> = {}): WorkbenchOrder {
@@ -55,5 +58,33 @@ describe("mergeOrderRuntimeState", () => {
     expect(merged.token).toBe("st_token");
     expect(merged.verificationCode).toBe("123456");
     expect(merged.serviceState).toBe("code_received");
+  });
+});
+
+describe("shouldShowQuickFetchControl", () => {
+  it("stops the purchase-order quick fetch control once a code is received", () => {
+    const waiting = order({
+      hasDelivery: true,
+      serviceMode: "purchase",
+    });
+
+    expect(shouldShowQuickFetchControl(waiting)).toBe(true);
+    expect(
+      shouldShowQuickFetchControl({
+        ...waiting,
+        verificationCode: "123456",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not show the quick fetch control for domain orders", () => {
+    expect(
+      shouldShowQuickFetchControl(
+        order({
+          productType: "domain",
+          serviceMode: "purchase",
+        }),
+      ),
+    ).toBe(false);
   });
 });

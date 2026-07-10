@@ -13,7 +13,7 @@ function formatBalance(value: string | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "￥-";
   return `￥${numeric.toLocaleString("zh-CN", {
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 3,
     minimumFractionDigits: 2,
   })}`;
 }

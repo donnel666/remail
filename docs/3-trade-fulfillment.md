@@ -7,6 +7,7 @@
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-09 | V1.1 | Codex | 补充分配优先于扣款的私有库存语义：实际分配到 `owned` 库存时订单应付为 `0.00`，仍必须创建 0 元消费流水。 |
 | 2026-07-09 | V1.2 | Codex | 补充购买服务窗口约束：未激活购买订单只使用 `receiveUntil` 表达激活截止，`afterSaleUntil` 只表达激活后的质保截止。 |
+| 2026-07-10 | V1.3 | Codex | 订单实付和退款金额改用六位小数账本精度，保证分以下商品价格精确扣款与退款。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -131,6 +132,7 @@ stateDiagram-v2
 | INV-T11 | 退款必须先经 Trade 状态机，不允许 Billing 或 Aftersale 直接改钱包和订单状态。 |
 | INV-T12 | 供应商结算冻结、取消、入账均由 Trade 根据订单事件触发。 |
 | INV-T13 | 购买订单未激活时 `activatedAt/afterSaleUntil` 必须为空；激活窗口只由 `receiveStartedAt/receiveUntil` 表达，首次匹配后才写 `activatedAt/afterSaleUntil`。 |
+| INV-T14 | 公开库存订单必须按商品六位小数价格精确扣款；订单实付、钱包流水和退款金额不得在领域边界提前舍入到两位小数。 |
 
 ---
 

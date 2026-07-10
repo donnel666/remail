@@ -36,6 +36,7 @@ function messageStatusLabel(status: WorkbenchMessage["status"], t: (key: string)
 }
 
 export function MailboxClient({
+  autoFetchEnabled = true,
   email,
   fetchEnabled = true,
   fetchKey,
@@ -43,6 +44,7 @@ export function MailboxClient({
   onLoadMessage,
   onFetch,
 }: {
+  autoFetchEnabled?: boolean;
   email: string;
   fetchEnabled?: boolean;
   fetchKey: string;
@@ -129,7 +131,12 @@ export function MailboxClient({
             <OverflowTooltip content={email}>{email}</OverflowTooltip>
           </div>
           {fetchEnabled ? (
-            <FetchControl autoEnabled compact fetchKey={fetchKey} onFetch={onFetch} />
+            <FetchControl
+              autoEnabled={autoFetchEnabled}
+              compact
+              fetchKey={fetchKey}
+              onFetch={onFetch}
+            />
           ) : (
             <Text type="tertiary">{t("SMTP push")}</Text>
           )}
@@ -260,6 +267,7 @@ export function MailboxClient({
 }
 
 export function MailboxClientModal({
+  autoFetchEnabled = true,
   email,
   fetchEnabled = true,
   fetchKey,
@@ -268,6 +276,7 @@ export function MailboxClientModal({
   onFetch,
   onLoadMessage,
 }: {
+  autoFetchEnabled?: boolean;
   email?: string;
   fetchEnabled?: boolean;
   fetchKey?: string;
@@ -292,6 +301,7 @@ export function MailboxClientModal({
     >
       {email ? (
         <MailboxClient
+          autoFetchEnabled={autoFetchEnabled}
           email={email}
           fetchEnabled={fetchEnabled}
           fetchKey={fetchKey ?? email}

@@ -23,10 +23,10 @@ import (
 
 type WalletModel struct {
 	UserID            uint      `gorm:"primaryKey;column:user_id"`
-	ConsumerBalance   string    `gorm:"type:decimal(18,2);not null;default:0;column:consumer_balance"`
-	SupplierAvailable string    `gorm:"type:decimal(18,2);not null;default:0;column:supplier_available"`
-	SupplierFrozen    string    `gorm:"type:decimal(18,2);not null;default:0;column:supplier_frozen"`
-	TotalSpend        string    `gorm:"type:decimal(18,2);not null;default:0;column:total_spend"`
+	ConsumerBalance   string    `gorm:"type:decimal(18,6);not null;default:0;column:consumer_balance"`
+	SupplierAvailable string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_available"`
+	SupplierFrozen    string    `gorm:"type:decimal(18,6);not null;default:0;column:supplier_frozen"`
+	TotalSpend        string    `gorm:"type:decimal(18,6);not null;default:0;column:total_spend"`
 	SpendCount        int64     `gorm:"not null;default:0;column:spend_count"`
 	CreatedAt         time.Time `gorm:"not null;autoCreateTime;column:created_at"`
 	UpdatedAt         time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
@@ -43,9 +43,9 @@ type WalletTransactionModel struct {
 	TransactionType string    `gorm:"type:varchar(32);not null;column:transaction_type"`
 	BalanceBucket   string    `gorm:"type:varchar(32);not null;column:balance_bucket"`
 	Direction       string    `gorm:"type:varchar(8);not null"`
-	Amount          string    `gorm:"type:decimal(18,2);not null"`
-	BalanceBefore   string    `gorm:"type:decimal(18,2);not null;column:balance_before"`
-	BalanceAfter    string    `gorm:"type:decimal(18,2);not null;column:balance_after"`
+	Amount          string    `gorm:"type:decimal(18,6);not null"`
+	BalanceBefore   string    `gorm:"type:decimal(18,6);not null;column:balance_before"`
+	BalanceAfter    string    `gorm:"type:decimal(18,6);not null;column:balance_after"`
 	BizType         string    `gorm:"type:varchar(32);not null;column:biz_type"`
 	BizID           string    `gorm:"type:varchar(128);not null;column:biz_id"`
 	IdempotencyKey  string    `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
@@ -78,7 +78,7 @@ type RechargeModel struct {
 	RechargeNo    string    `gorm:"type:varchar(64);not null;column:recharge_no"`
 	UserID        uint      `gorm:"not null;column:user_id"`
 	PaymentMethod string    `gorm:"type:varchar(32);not null;column:payment_method"`
-	RechargeQuota string    `gorm:"type:decimal(18,2);not null;column:recharge_quota"`
+	RechargeQuota string    `gorm:"type:decimal(18,6);not null;column:recharge_quota"`
 	PaymentAmount string    `gorm:"type:decimal(18,2);not null;column:payment_amount"`
 	Status        string    `gorm:"type:varchar(32);not null;default:'paying'"`
 	CreatedAt     time.Time `gorm:"not null;autoCreateTime;column:created_at"`
@@ -91,7 +91,7 @@ func (RechargeModel) TableName() string {
 
 type CardKeyModel struct {
 	Key             string     `gorm:"primaryKey;type:varchar(128);column:card_key"`
-	Amount          string     `gorm:"type:decimal(18,2);not null"`
+	Amount          string     `gorm:"type:decimal(18,6);not null"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'enabled'"`
 	MaxRedemptions  int        `gorm:"not null;default:1;column:max_redemptions"`
 	RedeemedCount   int        `gorm:"not null;default:0;column:redeemed_count"`
@@ -125,8 +125,8 @@ type ReferralRewardModel struct {
 	InviteCode            string     `gorm:"type:varchar(64);not null;column:invite_code"`
 	SourceTransactionID   uint       `gorm:"not null;column:source_transaction_id"`
 	TransferTransactionID *uint      `gorm:"column:transfer_transaction_id"`
-	SourceAmount          string     `gorm:"type:decimal(18,2);not null;column:source_amount"`
-	RewardAmount          string     `gorm:"type:decimal(18,2);not null;column:reward_amount"`
+	SourceAmount          string     `gorm:"type:decimal(18,6);not null;column:source_amount"`
+	RewardAmount          string     `gorm:"type:decimal(18,6);not null;column:reward_amount"`
 	Status                string     `gorm:"type:varchar(32);not null;default:'available'"`
 	TransferredAt         *time.Time `gorm:"column:transferred_at"`
 	CreatedAt             time.Time  `gorm:"not null;autoCreateTime;column:created_at"`

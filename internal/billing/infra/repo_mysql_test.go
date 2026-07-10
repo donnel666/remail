@@ -430,6 +430,80 @@ func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInsufficientBalance)
 }
 
+func TestBillingRepoConsumerBalanceSixDecimalPrecisionMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "precision@example.com")
+	repo := NewBillingRepo(db)
+	now := time.Now().UTC()
+
+	credited, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "0.024",
+		Reason:             "precision credit",
+		TransactionType:    domain.TransactionTypeCredit,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-precision-credit",
+		RequestFingerprint: "fingerprint-precision-credit",
+		RequestID:          "req-precision-credit",
+		Now:                now,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.024", credited.Wallet.ConsumerBalance)
+
+	debited, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "0.008",
+		Reason:             "precision debit",
+		TransactionType:    domain.TransactionTypeDebit,
+		Direction:          domain.TransactionDirectionOut,
+		IdempotencyKey:     "idem-precision-debit",
+		RequestFingerprint: "fingerprint-precision-debit",
+		RequestID:          "req-precision-debit",
+		Now:                now,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.016", debited.Wallet.ConsumerBalance)
+	require.Equal(t, "-0.008", debited.Transaction.Amount)
+	require.Equal(t, "0.024", debited.Transaction.BalanceBefore)
+	require.Equal(t, "0.016", debited.Transaction.BalanceAfter)
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "0.016", summary.Wallet.ConsumerBalance)
+	require.Equal(t, "0.008", summary.HistoricalSpend)
+	require.EqualValues(t, 1, summary.OrderCount)
+
+	var storedDebit WalletTransactionModel
+	require.NoError(t, db.First(&storedDebit, "id = ?", debited.Transaction.ID).Error)
+	require.Equal(t, "-0.008000", storedDebit.Amount)
+	require.Equal(t, "0.024000", storedDebit.BalanceBefore)
+	require.Equal(t, "0.016000", storedDebit.BalanceAfter)
+
+	refunded, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "0.008",
+		Reason:             "precision refund",
+		TransactionType:    domain.TransactionTypeRefund,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-precision-refund",
+		RequestFingerprint: "fingerprint-precision-refund",
+		RequestID:          "req-precision-refund",
+		Now:                now,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.024", refunded.Wallet.ConsumerBalance)
+	require.Equal(t, "0.008", refunded.Transaction.Amount)
+	require.Equal(t, "0.016", refunded.Transaction.BalanceBefore)
+	require.Equal(t, "0.024", refunded.Transaction.BalanceAfter)
+
+	finalSummary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "0.024", finalSummary.Wallet.ConsumerBalance)
+	require.Equal(t, "0.008", finalSummary.HistoricalSpend)
+	require.EqualValues(t, 1, finalSummary.OrderCount)
+}
+
 func TestBillingRepoCreateCardsIdempotencyMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()

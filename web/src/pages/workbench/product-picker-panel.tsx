@@ -12,7 +12,11 @@ import type {
   WorkbenchProduct,
   WorkbenchProject,
 } from "./types";
-import { formatMoney, productTypeLabel } from "./utils";
+import {
+  formatCompactNumber,
+  formatMoney,
+  productTypeLabel,
+} from "./utils";
 
 function getInventory(product: WorkbenchProduct, serviceMode: ServiceMode) {
   return serviceMode === "code"
@@ -150,7 +154,7 @@ export function ProductPickerPanel({
                     {formatMoney(getPrice(product, serviceMode))}
                   </span>
                   <span className="workbench-product-stock">
-                    {t("Stock")} {inventory}
+                    {t("Stock")} {formatCompactNumber(inventory)}
                   </span>
                 </span>
               </button>

@@ -118,7 +118,7 @@ function formatTime(value: string) {
 function money(value?: string) {
   const numberValue = Number(value ?? 0);
   if (!Number.isFinite(numberValue) || numberValue <= 0) return "-";
-  return numberValue.toFixed(2).replace(/\.00$/, "");
+  return numberValue.toFixed(3).replace(/\.?0+$/, "");
 }
 
 function productTypeLabel(type: string, t: (key: string) => string) {

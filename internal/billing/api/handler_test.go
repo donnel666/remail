@@ -121,7 +121,7 @@ func TestBillingAdminWalletCreditWritesOperationLog(t *testing.T) {
 
 	var wallet billinginfra.WalletModel
 	require.NoError(t, db.First(&wallet, "user_id = ?", targetUserID).Error)
-	require.Equal(t, "5.00", wallet.ConsumerBalance)
+	require.Equal(t, "5.000000", wallet.ConsumerBalance)
 
 	var logs int64
 	require.NoError(t, db.Model(&governanceinfra.OperationLogModel{}).

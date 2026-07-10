@@ -1001,6 +1001,7 @@ export default function Dashboard() {
       </div>
 
       <MailboxClientModal
+        autoFetchEnabled={!mailClientOrder?.verificationCode}
         email={mailClientParams?.email}
         fetchEnabled={mailClientOrder?.productType !== "domain"}
         fetchKey={mailClientParams?.orderNo}

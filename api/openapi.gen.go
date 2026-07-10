@@ -1917,8 +1917,9 @@ type ActivationResponse struct {
 
 // AdminAdjustWalletRequest defines model for AdminAdjustWalletRequest.
 type AdminAdjustWalletRequest struct {
-	Amount string `json:"amount"`
-	Reason string `json:"reason"`
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount NonNegativeLedgerAmount `json:"amount"`
+	Reason string                  `json:"reason"`
 }
 
 // AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
@@ -2041,15 +2042,16 @@ type CaptchaResponse struct {
 
 // CardKey defines model for CardKey.
 type CardKey struct {
-	Amount          string        `json:"amount"`
-	CardKey         string        `json:"cardKey"`
-	CreatedAt       time.Time     `json:"createdAt"`
-	CreatedByUserId *int          `json:"createdByUserId,omitempty"`
-	ExpireAt        *time.Time    `json:"expireAt"`
-	MaxRedemptions  int           `json:"maxRedemptions"`
-	RedeemedCount   int           `json:"redeemedCount"`
-	Status          CardKeyStatus `json:"status"`
-	UpdatedAt       time.Time     `json:"updatedAt"`
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount          NonNegativeLedgerAmount `json:"amount"`
+	CardKey         string                  `json:"cardKey"`
+	CreatedAt       time.Time               `json:"createdAt"`
+	CreatedByUserId *int                    `json:"createdByUserId,omitempty"`
+	ExpireAt        *time.Time              `json:"expireAt"`
+	MaxRedemptions  int                     `json:"maxRedemptions"`
+	RedeemedCount   int                     `json:"redeemedCount"`
+	Status          CardKeyStatus           `json:"status"`
+	UpdatedAt       time.Time               `json:"updatedAt"`
 }
 
 // CardKeyStatus defines model for CardKey.Status.
@@ -2114,11 +2116,12 @@ type CheckProxiesResponse struct {
 
 // CreateCardsRequest defines model for CreateCardsRequest.
 type CreateCardsRequest struct {
-	Amount         string     `json:"amount"`
-	CardKeys       *[]string  `json:"cardKeys,omitempty"`
-	Count          *int       `json:"count,omitempty"`
-	ExpireAt       *time.Time `json:"expireAt,omitempty"`
-	MaxRedemptions *int       `json:"maxRedemptions,omitempty"`
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount         NonNegativeLedgerAmount `json:"amount"`
+	CardKeys       *[]string               `json:"cardKeys,omitempty"`
+	Count          *int                    `json:"count,omitempty"`
+	ExpireAt       *time.Time              `json:"expireAt,omitempty"`
+	MaxRedemptions *int                    `json:"maxRedemptions,omitempty"`
 }
 
 // CreateCardsResponse defines model for CreateCardsResponse.
@@ -2393,6 +2396,9 @@ type InviteResponse struct {
 	Used      int        `json:"used"`
 }
 
+// LedgerAmount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
+type LedgerAmount = string
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	CaptchaAnswer string              `json:"captchaAnswer"`
@@ -2478,6 +2484,9 @@ type MicrosoftResourceDetail struct {
 	Status          string     `json:"status"`
 }
 
+// NonNegativeLedgerAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+type NonNegativeLedgerAmount = string
+
 // OrderEventListResponse defines model for OrderEventListResponse.
 type OrderEventListResponse struct {
 	Items  []OrderEventResponse `json:"items"`
@@ -2533,15 +2542,19 @@ type OrderResponse struct {
 	Id          int  `json:"id"`
 
 	// LastMailReceivedAt Provider receive time of the delivered message.
-	LastMailReceivedAt   *time.Time               `json:"lastMailReceivedAt,omitempty"`
-	OrderNo              string                   `json:"orderNo"`
-	PayAmount            string                   `json:"payAmount"`
-	ProductType          OrderResponseProductType `json:"productType"`
-	ProjectId            int                      `json:"projectId"`
-	ProjectProductId     int                      `json:"projectProductId"`
-	ReceiveStartedAt     *time.Time               `json:"receiveStartedAt,omitempty"`
-	ReceiveUntil         *time.Time               `json:"receiveUntil,omitempty"`
-	RefundAmount         string                   `json:"refundAmount"`
+	LastMailReceivedAt *time.Time `json:"lastMailReceivedAt,omitempty"`
+	OrderNo            string     `json:"orderNo"`
+
+	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PayAmount        NonNegativeLedgerAmount  `json:"payAmount"`
+	ProductType      OrderResponseProductType `json:"productType"`
+	ProjectId        int                      `json:"projectId"`
+	ProjectProductId int                      `json:"projectProductId"`
+	ReceiveStartedAt *time.Time               `json:"receiveStartedAt,omitempty"`
+	ReceiveUntil     *time.Time               `json:"receiveUntil,omitempty"`
+
+	// RefundAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RefundAmount         NonNegativeLedgerAmount  `json:"refundAmount"`
 	ServiceCleanupStatus string                   `json:"serviceCleanupStatus"`
 	ServiceMode          OrderResponseServiceMode `json:"serviceMode"`
 
@@ -2590,6 +2603,9 @@ type PasswordResetRequest struct {
 	Email       openapi_types.Email `json:"email"`
 	NewPassword string              `json:"newPassword"`
 }
+
+// PaymentAmount External payment-channel amount limited to 2 decimal places.
+type PaymentAmount = string
 
 // PermissionCatalogItemResponse defines model for PermissionCatalogItemResponse.
 type PermissionCatalogItemResponse struct {
@@ -2803,12 +2819,16 @@ type ProjectMatchFacets struct {
 
 // ProjectProduct defines model for ProjectProduct.
 type ProjectProduct struct {
-	ActivationWindowMinutes int       `json:"activationWindowMinutes"`
-	CodeEnabled             bool      `json:"codeEnabled"`
-	CodePrice               string    `json:"codePrice"`
-	CodeSupplierPrice       *string   `json:"codeSupplierPrice,omitempty"`
-	CodeWindowMinutes       int       `json:"codeWindowMinutes"`
-	CreatedAt               time.Time `json:"createdAt"`
+	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
+	CodeEnabled             bool `json:"codeEnabled"`
+
+	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CodePrice NonNegativeLedgerAmount `json:"codePrice"`
+
+	// CodeSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CodeSupplierPrice *NonNegativeLedgerAmount `json:"codeSupplierPrice,omitempty"`
+	CodeWindowMinutes int                      `json:"codeWindowMinutes"`
+	CreatedAt         time.Time                `json:"createdAt"`
 
 	// DotWeight Internal allocation weight; only returned to project admins.
 	DotWeight *int `json:"dotWeight,omitempty"`
@@ -2818,15 +2838,19 @@ type ProjectProduct struct {
 	MainWeight *int `json:"mainWeight,omitempty"`
 
 	// PlusWeight Internal allocation weight; only returned to project admins.
-	PlusWeight            *int                 `json:"plusWeight,omitempty"`
-	ProjectId             int                  `json:"projectId"`
-	PurchaseEnabled       bool                 `json:"purchaseEnabled"`
-	PurchasePrice         string               `json:"purchasePrice"`
-	PurchaseSupplierPrice *string              `json:"purchaseSupplierPrice,omitempty"`
-	Status                ProjectProductStatus `json:"status"`
-	Type                  ProjectProductType   `json:"type"`
-	UpdatedAt             time.Time            `json:"updatedAt"`
-	WarrantyMinutes       int                  `json:"warrantyMinutes"`
+	PlusWeight      *int `json:"plusWeight,omitempty"`
+	ProjectId       int  `json:"projectId"`
+	PurchaseEnabled bool `json:"purchaseEnabled"`
+
+	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PurchasePrice NonNegativeLedgerAmount `json:"purchasePrice"`
+
+	// PurchaseSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PurchaseSupplierPrice *NonNegativeLedgerAmount `json:"purchaseSupplierPrice,omitempty"`
+	Status                ProjectProductStatus     `json:"status"`
+	Type                  ProjectProductType       `json:"type"`
+	UpdatedAt             time.Time                `json:"updatedAt"`
+	WarrantyMinutes       int                      `json:"warrantyMinutes"`
 }
 
 // ProjectProductStatus defines model for ProjectProduct.Status.
@@ -2845,20 +2869,28 @@ type ProjectProductInventoryTotal struct {
 
 // ProjectProductRequest defines model for ProjectProductRequest.
 type ProjectProductRequest struct {
-	ActivationWindowMinutes *int                         `json:"activationWindowMinutes,omitempty"`
-	CodeEnabled             bool                         `json:"codeEnabled"`
-	CodePrice               *string                      `json:"codePrice,omitempty"`
-	CodeSupplierPrice       *string                      `json:"codeSupplierPrice,omitempty"`
-	CodeWindowMinutes       *int                         `json:"codeWindowMinutes,omitempty"`
-	DotWeight               *int                         `json:"dotWeight,omitempty"`
-	MainWeight              *int                         `json:"mainWeight,omitempty"`
-	PlusWeight              *int                         `json:"plusWeight,omitempty"`
-	PurchaseEnabled         bool                         `json:"purchaseEnabled"`
-	PurchasePrice           *string                      `json:"purchasePrice,omitempty"`
-	PurchaseSupplierPrice   *string                      `json:"purchaseSupplierPrice,omitempty"`
-	Status                  *ProjectProductRequestStatus `json:"status,omitempty"`
-	Type                    ProjectProductRequestType    `json:"type"`
-	WarrantyMinutes         *int                         `json:"warrantyMinutes,omitempty"`
+	ActivationWindowMinutes *int `json:"activationWindowMinutes,omitempty"`
+	CodeEnabled             bool `json:"codeEnabled"`
+
+	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CodePrice *NonNegativeLedgerAmount `json:"codePrice,omitempty"`
+
+	// CodeSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CodeSupplierPrice *NonNegativeLedgerAmount `json:"codeSupplierPrice,omitempty"`
+	CodeWindowMinutes *int                     `json:"codeWindowMinutes,omitempty"`
+	DotWeight         *int                     `json:"dotWeight,omitempty"`
+	MainWeight        *int                     `json:"mainWeight,omitempty"`
+	PlusWeight        *int                     `json:"plusWeight,omitempty"`
+	PurchaseEnabled   bool                     `json:"purchaseEnabled"`
+
+	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PurchasePrice *NonNegativeLedgerAmount `json:"purchasePrice,omitempty"`
+
+	// PurchaseSupplierPrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PurchaseSupplierPrice *NonNegativeLedgerAmount     `json:"purchaseSupplierPrice,omitempty"`
+	Status                *ProjectProductRequestStatus `json:"status,omitempty"`
+	Type                  ProjectProductRequestType    `json:"type"`
+	WarrantyMinutes       *int                         `json:"warrantyMinutes,omitempty"`
 }
 
 // ProjectProductRequestStatus defines model for ProjectProductRequest.Status.
@@ -2869,18 +2901,22 @@ type ProjectProductRequestType string
 
 // ProjectProductSummary defines model for ProjectProductSummary.
 type ProjectProductSummary struct {
-	ActivationWindowMinutes int    `json:"activationWindowMinutes"`
-	CodeEnabled             bool   `json:"codeEnabled"`
-	CodePrice               string `json:"codePrice"`
-	CodeWindowMinutes       int    `json:"codeWindowMinutes"`
-	Id                      int    `json:"id"`
+	ActivationWindowMinutes int  `json:"activationWindowMinutes"`
+	CodeEnabled             bool `json:"codeEnabled"`
+
+	// CodePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	CodePrice         NonNegativeLedgerAmount `json:"codePrice"`
+	CodeWindowMinutes int                     `json:"codeWindowMinutes"`
+	Id                int                     `json:"id"`
 
 	// PublicAvailable User-safe public inventory currently available for this product summary.
-	PublicAvailable int64                       `json:"publicAvailable"`
-	PurchaseEnabled bool                        `json:"purchaseEnabled"`
-	PurchasePrice   string                      `json:"purchasePrice"`
-	Status          ProjectProductSummaryStatus `json:"status"`
-	Suffixes        *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
+	PublicAvailable int64 `json:"publicAvailable"`
+	PurchaseEnabled bool  `json:"purchaseEnabled"`
+
+	// PurchasePrice Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PurchasePrice NonNegativeLedgerAmount     `json:"purchasePrice"`
+	Status        ProjectProductSummaryStatus `json:"status"`
+	Suffixes      *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
 
 	// TotalAvailable User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
 	TotalAvailable  int64                     `json:"totalAvailable"`
@@ -3030,15 +3066,19 @@ type ReadyzResponse struct {
 
 // RechargeItem defines model for RechargeItem.
 type RechargeItem struct {
-	CreatedAt     time.Time          `json:"createdAt"`
-	Id            int                `json:"id"`
-	PaymentAmount string             `json:"paymentAmount"`
-	PaymentMethod string             `json:"paymentMethod"`
-	RechargeNo    string             `json:"rechargeNo"`
-	RechargeQuota string             `json:"rechargeQuota"`
-	Status        RechargeItemStatus `json:"status"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
-	UserId        int                `json:"userId"`
+	CreatedAt time.Time `json:"createdAt"`
+	Id        int       `json:"id"`
+
+	// PaymentAmount External payment-channel amount limited to 2 decimal places.
+	PaymentAmount PaymentAmount `json:"paymentAmount"`
+	PaymentMethod string        `json:"paymentMethod"`
+	RechargeNo    string        `json:"rechargeNo"`
+
+	// RechargeQuota Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RechargeQuota NonNegativeLedgerAmount `json:"rechargeQuota"`
+	Status        RechargeItemStatus      `json:"status"`
+	UpdatedAt     time.Time               `json:"updatedAt"`
+	UserId        int                     `json:"userId"`
 }
 
 // RechargeItemStatus defines model for RechargeItem.Status.
@@ -3320,9 +3360,14 @@ type SupplierApplicationResponseStatus string
 
 // TransactionItem defines model for TransactionItem.
 type TransactionItem struct {
-	Amount          string                         `json:"amount"`
-	BalanceAfter    string                         `json:"balanceAfter"`
-	BalanceBefore   string                         `json:"balanceBefore"`
+	// Amount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
+	Amount LedgerAmount `json:"amount"`
+
+	// BalanceAfter Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BalanceAfter NonNegativeLedgerAmount `json:"balanceAfter"`
+
+	// BalanceBefore Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BalanceBefore   NonNegativeLedgerAmount        `json:"balanceBefore"`
 	BalanceBucket   TransactionItemBalanceBucket   `json:"balanceBucket"`
 	BizId           string                         `json:"bizId"`
 	BizType         string                         `json:"bizType"`
@@ -3421,37 +3466,39 @@ type WalletAdjustmentResponse struct {
 type WalletReferralResponse struct {
 	InviteCount int `json:"inviteCount"`
 
-	// PendingRewards Referral rewards not yet transferred, fixed to 2 decimals.
-	PendingRewards string `json:"pendingRewards"`
+	// PendingRewards Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PendingRewards NonNegativeLedgerAmount `json:"pendingRewards"`
 
-	// TotalEarned Total historical referral rewards, fixed to 2 decimals.
-	TotalEarned string `json:"totalEarned"`
+	// TotalEarned Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	TotalEarned NonNegativeLedgerAmount `json:"totalEarned"`
 }
 
 // WalletReferralTransferResponse defines model for WalletReferralTransferResponse.
 type WalletReferralTransferResponse struct {
-	Transaction       TransactionItem `json:"transaction"`
-	TransferredAmount string          `json:"transferredAmount"`
-	TransferredCount  int             `json:"transferredCount"`
-	Wallet            WalletResponse  `json:"wallet"`
+	Transaction TransactionItem `json:"transaction"`
+
+	// TransferredAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	TransferredAmount NonNegativeLedgerAmount `json:"transferredAmount"`
+	TransferredCount  int                     `json:"transferredCount"`
+	Wallet            WalletResponse          `json:"wallet"`
 }
 
 // WalletResponse defines model for WalletResponse.
 type WalletResponse struct {
-	// ConsumerBalance Consumer balance, fixed to 2 decimals.
-	ConsumerBalance string `json:"consumerBalance"`
+	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	ConsumerBalance NonNegativeLedgerAmount `json:"consumerBalance"`
 
-	// HistoricalSpend Consumer outflow total, fixed to 2 decimals.
-	HistoricalSpend string `json:"historicalSpend"`
-	OrderCount      int    `json:"orderCount"`
+	// HistoricalSpend Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	HistoricalSpend NonNegativeLedgerAmount `json:"historicalSpend"`
+	OrderCount      int                     `json:"orderCount"`
 
-	// SupplierAvailable Supplier available balance, fixed to 2 decimals.
-	SupplierAvailable string `json:"supplierAvailable"`
+	// SupplierAvailable Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	SupplierAvailable NonNegativeLedgerAmount `json:"supplierAvailable"`
 
-	// SupplierFrozen Supplier frozen balance, fixed to 2 decimals.
-	SupplierFrozen string    `json:"supplierFrozen"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-	UserId         int       `json:"userId"`
+	// SupplierFrozen Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
+	UpdatedAt      time.Time               `json:"updatedAt"`
+	UserId         int                     `json:"userId"`
 }
 
 // CsrfToken defines model for CsrfToken.

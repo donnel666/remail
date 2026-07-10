@@ -8,7 +8,7 @@ import (
 
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	"github.com/shopspring/decimal"
+	moneyfmt "github.com/donnel666/remail/internal/money"
 )
 
 const (
@@ -835,14 +835,14 @@ func requiredMailRuleTypes(looseMatch bool) []domain.MailRuleType {
 }
 
 func normalizeOrderingAmount(value string, requirePositive bool) (string, error) {
-	amount, err := decimal.NewFromString(strings.TrimSpace(value))
+	amount, err := moneyfmt.Parse(value)
 	if err != nil || amount.IsNegative() {
 		return "", domain.ErrInvalidProduct
 	}
 	if requirePositive && !amount.IsPositive() {
 		return "", domain.ErrInvalidProduct
 	}
-	return amount.StringFixedBank(2), nil
+	return moneyfmt.Format(amount), nil
 }
 
 func projectOperationLog(operatorUserID uint, requestID, path, operationType, resourceType, resourceID, result, summary string) *governancedomain.OperationLog {

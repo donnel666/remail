@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/shopspring/decimal"
 )
 
@@ -200,7 +201,7 @@ func ParseMoney(value string) (decimal.Decimal, error) {
 	if trimmed == "" {
 		return decimal.Zero, ErrInvalidAmount
 	}
-	amount, err := decimal.NewFromString(trimmed)
+	amount, err := moneyfmt.Parse(trimmed)
 	if err != nil {
 		return decimal.Zero, ErrInvalidAmount
 	}
@@ -208,5 +209,5 @@ func ParseMoney(value string) (decimal.Decimal, error) {
 }
 
 func MoneyString(amount decimal.Decimal) string {
-	return amount.StringFixedBank(2)
+	return moneyfmt.Format(amount)
 }
