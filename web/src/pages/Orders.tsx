@@ -34,11 +34,26 @@ import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+import { IamApiError } from "@/lib/api-client";
 import { copyText } from "@/lib/clipboard";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  readPickupMail,
+  readPickupMessage,
+  type OrderMailResponse,
+} from "@/lib/mailmatch-api";
+import {
+  getOrder,
+  listOrders,
+  type OrderListFacets,
+  type OrderListFilter,
+  type OrderResponse,
+  type OrderServiceMode,
+  type OrderStatus,
+} from "@/lib/orders-api";
 import { MailboxClientModal } from "@/pages/workbench/mailbox-client";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
-import type { WorkbenchMessage } from "@/pages/workbench/types";
+import type { FetchSource, WorkbenchMessage } from "@/pages/workbench/types";
 import { buildPickupUrl } from "@/pages/workbench/utils";
 
 import {
@@ -54,26 +69,51 @@ import {
   ORDER_STATUS_VALUES,
   formatLedgerAmount,
   formatOrderDateTime,
+  getOrderDomain,
   orderStatusLabel,
   renderOrderStatusTag,
   renderServiceModeTag,
   serviceModeLabel,
 } from "./orders/order-meta";
 import { useSelectionNotification } from "./resources/use-selection-notification";
-import {
-  fetchMockOrderMail,
-  getMockOrderMessages,
-  getOrderDomain,
-  listMockOrders,
-  type MockOrder,
-  type MockOrderFacets,
-  type MockOrderListFilter,
-  type MockOrderStatus,
-  type MockServiceMode,
-} from "./orders/orders-mock";
 
-type StatusFilter = "all" | MockOrderStatus;
-type ServiceModeFilter = "all" | MockServiceMode;
+type StatusFilter = "all" | OrderStatus;
+type ServiceModeFilter = "all" | OrderServiceMode;
+
+const DEFAULT_FETCH_COOLDOWN_SECONDS = 5;
+
+function orderCanUseService(order: OrderResponse) {
+  return order.status === "active" || order.status === "completed";
+}
+
+function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
+  return items
+    .map<WorkbenchMessage>((item) => ({
+      body: "",
+      id: String(item.id),
+      preview: item.bodyPreview,
+      receivedAt: item.receivedAt,
+      sender: item.sender,
+      status: item.verificationCode ? "matched" : "received",
+      subject: item.subject || "(No subject)",
+      verificationCode: item.verificationCode,
+    }))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.receivedAt);
+      const rightTime = Date.parse(right.receivedAt);
+      return (
+        (Number.isFinite(rightTime) ? rightTime : 0) -
+        (Number.isFinite(leftTime) ? leftTime : 0)
+      );
+    });
+}
+
+function cooldownSecondsFrom(nextFetchAllowedAt?: string | null) {
+  if (!nextFetchAllowedAt) return DEFAULT_FETCH_COOLDOWN_SECONDS;
+  const next = Date.parse(nextFetchAllowedAt);
+  if (!Number.isFinite(next)) return DEFAULT_FETCH_COOLDOWN_SECONDS;
+  return Math.max(1, Math.ceil((next - Date.now()) / 1000));
+}
 
 export default function Orders() {
   const { t } = useTranslation();
@@ -89,18 +129,29 @@ export default function Orders() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
-  const [orderFacets, setOrderFacets] = useState<MockOrderFacets | null>(null);
-  const [detailOrder, setDetailOrder] = useState<MockOrder | null>(null);
+  const [orderFacets, setOrderFacets] = useState<OrderListFacets | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [mailboxOrder, setMailboxOrder] = useState<MockOrder | null>(null);
+  const [detailOrder, setDetailOrder] = useState<OrderResponse | null>(null);
+  const [detailLoadingOrderNo, setDetailLoadingOrderNo] = useState<string | null>(
+    null
+  );
+  const [viewLoadingOrderNo, setViewLoadingOrderNo] = useState<string | null>(
+    null
+  );
+  const [pickupLoadingOrderNo, setPickupLoadingOrderNo] = useState<
+    string | null
+  >(null);
+  const [mailboxOrder, setMailboxOrder] = useState<OrderResponse | null>(null);
   const [mailboxMessages, setMailboxMessages] = useState<WorkbenchMessage[]>([]);
   const mailboxOrderNoRef = useRef<string | null>(null);
+  const mailboxFetchInFlightRef = useRef<Promise<number | void> | null>(null);
+  const orderDetailCacheRef = useRef(new Map<string, OrderResponse>());
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
 
-  const orderStatsFilter = useMemo<MockOrderListFilter>(() => {
-    const filter: MockOrderListFilter = {};
+  const orderStatsFilter = useMemo<OrderListFilter>(() => {
+    const filter: OrderListFilter = {};
     const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
@@ -112,19 +163,19 @@ export default function Orders() {
     return filter;
   }, [createdAtRange, debouncedSearchKeyword, serviceModeFilter, statusFilter]);
 
-  const orderListFilter = useMemo<MockOrderListFilter>(() => {
+  const orderListFilter = useMemo<OrderListFilter>(() => {
     if (activeDomain === "all") return orderStatsFilter;
     return { ...orderStatsFilter, domain: activeDomain };
   }, [activeDomain, orderStatsFilter]);
 
   const loadOrderBlock = useCallback(
     async (offset: number, limit: number, cursor?: { afterId?: number }) => {
-      const response = await listMockOrders(
-        orderListFilter,
+      const response = await listOrders({
+        ...orderListFilter,
         offset,
         limit,
-        cursor?.afterId
-      );
+        afterId: cursor?.afterId,
+      });
       return {
         items: response.items,
         nextAfterId: response.nextAfterId,
@@ -139,7 +190,7 @@ export default function Orders() {
     pagedItems,
     refresh: refreshList,
     total,
-  } = useBlockPagedList<MockOrder>({
+  } = useBlockPagedList<OrderResponse>({
     activePage,
     filterKey: JSON.stringify(orderListFilter),
     loadBlock: loadOrderBlock,
@@ -151,8 +202,8 @@ export default function Orders() {
 
   const refreshStats = useCallback(async () => {
     try {
-      const response = await listMockOrders(orderStatsFilter, 0, 1);
-      setOrderFacets(response.facets);
+      const response = await listOrders({ ...orderStatsFilter, limit: 1 });
+      setOrderFacets(response.facets ?? null);
     } catch {
       // Keep the previous tabs stable; the next refresh will retry stats.
     }
@@ -163,6 +214,7 @@ export default function Orders() {
   }, [refreshStats]);
 
   const refresh = useCallback(async () => {
+    orderDetailCacheRef.current.clear();
     await Promise.all([refreshStats(), refreshList()]);
   }, [refreshList, refreshStats]);
 
@@ -242,21 +294,91 @@ export default function Orders() {
     setSelectedKeys([]);
   };
 
-  const openOrderMailbox = useCallback(
-    async (record: MockOrder) => {
-      mailboxOrderNoRef.current = record.orderNo;
-      setMailboxOrder(record);
-      setMailboxMessages([]);
-      try {
-        const messages = await getMockOrderMessages(record.orderNo);
-        if (mailboxOrderNoRef.current === record.orderNo) {
+  // List rows omit the service token, so hydrate details on demand.
+  const resolveOrderDetail = useCallback(
+    async (orderNo: string, options?: { force?: boolean }) => {
+      if (!options?.force) {
+        const cached = orderDetailCacheRef.current.get(orderNo);
+        if (cached) return cached;
+      }
+      const detail = await getOrder(orderNo);
+      orderDetailCacheRef.current.set(orderNo, detail);
+      return detail;
+    },
+    []
+  );
+
+  const runMailboxFetch = useCallback(
+    async (source: FetchSource) => {
+      const existing = mailboxFetchInFlightRef.current;
+      if (existing) return existing;
+
+      const request = (async (): Promise<number | void> => {
+        const orderNo = mailboxOrderNoRef.current;
+        if (!orderNo) return;
+        try {
+          const detail = await resolveOrderDetail(orderNo);
+          if (!detail.serviceToken) {
+            if (source === "manual") {
+              Toast.error(t("Service credential is unavailable."));
+            }
+            return;
+          }
+          const result = await readPickupMail(
+            detail.deliveryEmail,
+            detail.serviceToken
+          );
+          if (mailboxOrderNoRef.current !== orderNo) return;
+          const messages = toMailboxMessages(result.items);
           setMailboxMessages(messages);
+          const latestCode = messages.find(
+            (message) => message.verificationCode
+          )?.verificationCode;
+          if (latestCode && latestCode !== detail.verificationCode) {
+            const refreshed = await resolveOrderDetail(orderNo, { force: true });
+            if (mailboxOrderNoRef.current === orderNo) {
+              setMailboxOrder(refreshed);
+            }
+            void refresh();
+          }
+          return cooldownSecondsFrom(result.fetch?.nextFetchAllowedAt);
+        } catch (error) {
+          if (error instanceof IamApiError && error.status === 429) {
+            return error.retryAfterSeconds;
+          }
+          if (source === "manual") {
+            Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+          }
+        } finally {
+          mailboxFetchInFlightRef.current = null;
         }
+      })();
+      mailboxFetchInFlightRef.current = request;
+      return request;
+    },
+    [refresh, resolveOrderDetail, t]
+  );
+
+  const openOrderMailbox = useCallback(
+    async (record: OrderResponse) => {
+      setViewLoadingOrderNo(record.orderNo);
+      try {
+        const detail = await resolveOrderDetail(record.orderNo);
+        if (!detail.serviceToken) {
+          Toast.error(t("Service credential is unavailable."));
+          return;
+        }
+        mailboxOrderNoRef.current = record.orderNo;
+        setMailboxOrder(detail);
+        setMailboxMessages([]);
+        void runMailboxFetch("auto");
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+      } finally {
+        setViewLoadingOrderNo(null);
       }
     },
-    [t]
+    [resolveOrderDetail, runMailboxFetch, t]
   );
 
   const closeOrderMailbox = useCallback(() => {
@@ -265,32 +387,54 @@ export default function Orders() {
     setMailboxMessages([]);
   }, []);
 
-  const handleMailboxFetch = useCallback(async () => {
-    const orderNo = mailboxOrderNoRef.current;
-    if (!orderNo) return;
-    const result = await fetchMockOrderMail(orderNo);
-    if (mailboxOrderNoRef.current === orderNo) {
-      setMailboxMessages(result.messages);
-      setMailboxOrder(result.order);
-    }
-    if (result.delivered) {
-      Toast.success(t("Code received"));
-      void refresh();
-    }
-    return result.cooldownSeconds;
-  }, [refresh, t]);
+  const loadMailboxMessageBody = useCallback(
+    async (messageId: string) => {
+      const orderNo = mailboxOrderNoRef.current;
+      if (!orderNo) return "";
+      const detail = await resolveOrderDetail(orderNo);
+      if (!detail.serviceToken) return "";
+      const response = await readPickupMessage(
+        detail.deliveryEmail,
+        detail.serviceToken,
+        Number(messageId)
+      );
+      return response.body;
+    },
+    [resolveOrderDetail]
+  );
 
   const copyOrderPickupUrl = useCallback(
-    async (record: MockOrder) => {
-      if (!record.serviceToken) return;
+    async (record: OrderResponse) => {
+      setPickupLoadingOrderNo(record.orderNo);
       try {
-        await copyText(buildPickupUrl(record.deliveryEmail, record.serviceToken));
+        const detail = await resolveOrderDetail(record.orderNo);
+        if (!detail.serviceToken) {
+          Toast.error(t("Service credential is unavailable."));
+          return;
+        }
+        await copyText(buildPickupUrl(detail.deliveryEmail, detail.serviceToken));
         Toast.success(t("Copied"));
-      } catch {
-        Toast.error(t("Copy failed."));
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Copy failed."));
+      } finally {
+        setPickupLoadingOrderNo(null);
       }
     },
-    [t]
+    [resolveOrderDetail, t]
+  );
+
+  const openOrderDetail = useCallback(
+    async (record: OrderResponse) => {
+      setDetailLoadingOrderNo(record.orderNo);
+      try {
+        setDetailOrder(await resolveOrderDetail(record.orderNo));
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Orders load failed."));
+      } finally {
+        setDetailLoadingOrderNo(null);
+      }
+    },
+    [resolveOrderDetail, t]
   );
 
   // Reserved entry: after-sales tickets are not wired to the backend yet.
@@ -327,11 +471,11 @@ export default function Orders() {
           title: t("Project"),
           dataIndex: "projectName",
           width: 150,
-          render: (name: string) => (
+          render: (name: string | undefined) => (
             <span className="flex min-w-0 items-center gap-2">
-              <ProjectIcon name={name} size={18} />
-              <OverflowTooltip className="truncate" content={name}>
-                {name}
+              <ProjectIcon name={name || "-"} size={18} />
+              <OverflowTooltip className="truncate" content={name || "-"}>
+                {name || "-"}
               </OverflowTooltip>
             </span>
           ),
@@ -341,20 +485,26 @@ export default function Orders() {
           title: t("Domain"),
           dataIndex: "deliveryEmail",
           width: 130,
-          render: (email: string) => (
-            <Tag color="white" shape="circle">
-              {getOrderDomain(email)}
-            </Tag>
-          ),
+          render: (email: string) =>
+            email ? (
+              <Tag color="white" shape="circle">
+                {getOrderDomain(email)}
+              </Tag>
+            ) : (
+              <span className="text-[var(--semi-color-text-3)]">-</span>
+            ),
         },
         {
           key: "email",
           title: t("Delivery email"),
           dataIndex: "deliveryEmail",
           width: 240,
-          render: (text: string) => (
-            <CopyableTableText copiedText={t("Copied")} text={text} />
-          ),
+          render: (text: string) =>
+            text ? (
+              <CopyableTableText copiedText={t("Copied")} text={text} />
+            ) : (
+              <span className="text-[var(--semi-color-text-3)]">-</span>
+            ),
         },
         {
           key: "orderNo",
@@ -370,21 +520,21 @@ export default function Orders() {
           title: t("Service mode"),
           dataIndex: "serviceMode",
           width: 110,
-          render: (mode: MockServiceMode) => renderServiceModeTag(mode, t),
+          render: (mode: OrderServiceMode) => renderServiceModeTag(mode, t),
         },
         {
           key: "status",
           title: t("Status"),
           dataIndex: "status",
           width: 110,
-          render: (status: MockOrderStatus) => renderOrderStatusTag(status, t),
+          render: (status: OrderStatus) => renderOrderStatusTag(status, t),
         },
         {
           key: "code",
           title: t("Code"),
           dataIndex: "verificationCode",
           width: 130,
-          render: (code: string | undefined, record: MockOrder) => {
+          render: (code: string | undefined, record: OrderResponse) => {
             if (code) {
               return <CopyableTableText copiedText={t("Copied")} text={code} />;
             }
@@ -403,7 +553,7 @@ export default function Orders() {
           title: t("Amount"),
           dataIndex: "payAmount",
           width: 100,
-          render: (amount: number) => (
+          render: (amount: string) => (
             <span className="font-mono-data">{formatLedgerAmount(amount)}</span>
           ),
         },
@@ -424,12 +574,13 @@ export default function Orders() {
           dataIndex: "operate",
           width: 240,
           fixed: "right",
-          render: (_: unknown, record: MockOrder) => (
+          render: (_: unknown, record: OrderResponse) => (
             <Space spacing={4} wrap={false}>
               <Button
+                loading={detailLoadingOrderNo === record.orderNo}
                 type="tertiary"
                 size="small"
-                onClick={() => setDetailOrder(record)}
+                onClick={() => void openOrderDetail(record)}
               >
                 {t("Details")}
               </Button>
@@ -440,7 +591,8 @@ export default function Orders() {
                 position="top"
               >
                 <Button
-                  disabled={!record.serviceToken}
+                  disabled={!orderCanUseService(record)}
+                  loading={viewLoadingOrderNo === record.orderNo}
                   type="tertiary"
                   size="small"
                   onClick={() => void openOrderMailbox(record)}
@@ -455,7 +607,8 @@ export default function Orders() {
                 position="top"
               >
                 <Button
-                  disabled={!record.serviceToken}
+                  disabled={!orderCanUseService(record)}
+                  loading={pickupLoadingOrderNo === record.orderNo}
                   type="tertiary"
                   size="small"
                   onClick={() => void copyOrderPickupUrl(record)}
@@ -474,7 +627,16 @@ export default function Orders() {
           ),
         },
       ] as any[],
-    [copyOrderPickupUrl, openOrderMailbox, submitTicket, t]
+    [
+      copyOrderPickupUrl,
+      detailLoadingOrderNo,
+      openOrderDetail,
+      openOrderMailbox,
+      pickupLoadingOrderNo,
+      submitTicket,
+      t,
+      viewLoadingOrderNo,
+    ]
   );
 
   const rowSelection = {
@@ -745,7 +907,8 @@ export default function Orders() {
         fetchKey={mailboxOrder?.orderNo}
         messages={mailboxMessages}
         onClose={closeOrderMailbox}
-        onFetch={handleMailboxFetch}
+        onFetch={runMailboxFetch}
+        onLoadMessage={loadMailboxMessageBody}
       />
     </div>
   );

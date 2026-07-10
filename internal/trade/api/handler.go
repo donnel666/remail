@@ -3,8 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -84,7 +86,7 @@ func (h *Handler) GetOrders(c *gin.Context) {
 	if !ok {
 		return
 	}
-	_, limit, ok := parseOffsetLimit(c)
+	offset, limit, ok := parseOrderListOffsetLimit(c)
 	if !ok {
 		return
 	}
@@ -107,28 +109,49 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
+	domainFilter, ok := parseOrderDomain(c.Query("domain"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	createdFrom, ok := parseOptionalTime(c.Query("createdFrom"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	createdTo, ok := parseOptionalTime(c.Query("createdTo"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
 	role, _ := middleware.GetCurrentRole(c)
 	isAdmin := role.HasAdminAccess()
-	items, nextAfterID, err := h.mod.UseCase.ListOrders(c.Request.Context(), tradeapp.OrderListFilter{
+	result, err := h.mod.UseCase.ListOrders(c.Request.Context(), tradeapp.OrderListFilter{
 		UserID:      userID,
 		IsAdmin:     isAdmin,
 		Scope:       strings.TrimSpace(c.DefaultQuery("scope", "mine")),
 		Status:      status,
 		ServiceMode: serviceMode,
 		Search:      strings.TrimSpace(c.Query("search")),
-	}, afterID, limit)
+		Domain:      domainFilter,
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+	}, offset, afterID, limit)
 	if err != nil {
 		writeTradeError(c, err)
 		return
 	}
 	resp := OrderListResponse{
-		Items:       make([]OrderResponse, len(items)),
-		NextAfterID: nextAfterID,
-		HasNext:     nextAfterID != nil,
+		Items:       make([]OrderResponse, len(result.Items)),
+		Total:       result.Total,
+		Offset:      offset,
+		NextAfterID: result.NextAfterID,
+		HasNext:     result.NextAfterID != nil,
 		Limit:       limit,
+		Facets:      toOrderListFacetsResponse(result.Facets),
 	}
-	for i := range items {
-		resp.Items[i] = orderResponse(items[i])
+	for i := range result.Items {
+		resp.Items[i] = orderResponse(result.Items[i])
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -357,6 +380,15 @@ func parseOffsetLimit(c *gin.Context) (int, int, bool) {
 	})
 }
 
+// parseOrderListOffsetLimit allows larger pages than parseOffsetLimit because
+// the console order list loads 1000-row blocks.
+func parseOrderListOffsetLimit(c *gin.Context) (int, int, bool) {
+	return middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     1000,
+	})
+}
+
 func parseOrderStatus(raw string) (domain.OrderStatus, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -378,6 +410,63 @@ func parseServiceMode(raw string) (domain.ServiceMode, bool) {
 	return domain.NormalizeServiceMode(raw)
 }
 
+var orderDomainPattern = regexp.MustCompile(`^[A-Za-z0-9.-]{1,255}$`)
+
+func parseOrderDomain(raw string) (string, bool) {
+	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "@")
+	if normalized == "" {
+		return "", true
+	}
+	if !orderDomainPattern.MatchString(normalized) {
+		return "", false
+	}
+	return normalized, true
+}
+
+func parseOptionalTime(raw string) (*time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, false
+	}
+	utc := parsed.UTC()
+	return &utc, true
+}
+
+func toOrderListFacetsResponse(facets *tradeapp.OrderListFacets) *OrderListFacetsResponse {
+	if facets == nil {
+		return nil
+	}
+	domains := make([]OrderKeyFacetResponse, len(facets.Domains))
+	for i := range facets.Domains {
+		domains[i] = OrderKeyFacetResponse{
+			Key:   facets.Domains[i].Key,
+			Count: facets.Domains[i].Count,
+		}
+	}
+	return &OrderListFacetsResponse{
+		Status: OrderStatusFacetsResponse{
+			All:            facets.Status.All,
+			PendingPayment: facets.Status.PendingPayment,
+			Paid:           facets.Status.Paid,
+			Active:         facets.Status.Active,
+			Completed:      facets.Status.Completed,
+			Refunded:       facets.Status.Refunded,
+			Failed:         facets.Status.Failed,
+			Closed:         facets.Status.Closed,
+		},
+		ServiceMode: OrderServiceModeFacetsResponse{
+			All:      facets.ServiceMode.All,
+			Code:     facets.ServiceMode.Code,
+			Purchase: facets.ServiceMode.Purchase,
+		},
+		Domains: domains,
+	}
+}
+
 func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 	order := result.Order
 	allocationType := ""
@@ -396,6 +485,7 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		OrderNo:              order.OrderNo,
 		UserID:               order.UserID,
 		ProjectID:            order.ProjectID,
+		ProjectName:          result.ProjectName,
 		ProjectProductID:     order.ProjectProductID,
 		ProductType:          string(order.ProductType),
 		ServiceMode:          string(order.ServiceMode),

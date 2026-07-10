@@ -37,11 +37,40 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 		orderTokenAdapter{tokens: tokens},
 	)
 	uc.SetOrderDeliveryPort(orderDeliveryAdapter{db: db})
+	uc.SetProjectNamePort(projectNameAdapter{db: db})
 	uc.SetSystemLogPort(systemLogs)
 	return &Module{
 		UseCase:       uc,
 		OperationLogs: operationLogs,
 	}
+}
+
+// projectNameAdapter is a read-model helper that resolves project display
+// names for order listings, mirroring orderDeliveryAdapter's approach.
+type projectNameAdapter struct {
+	db *gorm.DB
+}
+
+func (a projectNameAdapter) ProjectNames(ctx context.Context, projectIDs []uint) (map[uint]string, error) {
+	result := make(map[uint]string, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ID   uint   `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := a.db.WithContext(ctx).
+		Table("projects").
+		Select("id, name").
+		Where("id IN ?", projectIDs).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ID] = row.Name
+	}
+	return result, nil
 }
 
 type orderDeliveryAdapter struct {

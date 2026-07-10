@@ -106,6 +106,11 @@ type SystemLogPort interface {
 	Create(ctx context.Context, log *governancedomain.SystemLog) error
 }
 
+// ProjectNamePort resolves project display names for order read models.
+type ProjectNamePort interface {
+	ProjectNames(ctx context.Context, projectIDs []uint) (map[uint]string, error)
+}
+
 type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error)
@@ -120,7 +125,9 @@ type Repository interface {
 	CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
 	MarkServiceCleanup(ctx context.Context, orderNo string, status string) error
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
-	ListOrders(ctx context.Context, filter OrderListFilter, afterID uint, limit int) ([]domain.Order, *uint, error)
+	ListOrders(ctx context.Context, filter OrderListFilter, offset int, afterID uint, limit int) ([]domain.Order, *uint, error)
+	CountOrders(ctx context.Context, filter OrderListFilter) (int64, error)
+	OrderFacets(ctx context.Context, filter OrderListFilter) (*OrderListFacets, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
 	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
 	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error)
@@ -187,6 +194,47 @@ type OrderListFilter struct {
 	Status      domain.OrderStatus
 	ServiceMode domain.ServiceMode
 	Search      string
+	// Domain filters by the delivery email domain without the "@" prefix.
+	Domain      string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
+type OrderStatusFacets struct {
+	All            int64
+	PendingPayment int64
+	Paid           int64
+	Active         int64
+	Completed      int64
+	Refunded       int64
+	Failed         int64
+	Closed         int64
+}
+
+type OrderServiceModeFacets struct {
+	All      int64
+	Code     int64
+	Purchase int64
+}
+
+type OrderKeyFacet struct {
+	Key   string
+	Count int64
+}
+
+// OrderListFacets aggregates list counts; each dimension is computed with the
+// list filter minus that dimension itself, mirroring the resource facets.
+type OrderListFacets struct {
+	Status      OrderStatusFacets
+	ServiceMode OrderServiceModeFacets
+	Domains     []OrderKeyFacet
+}
+
+type OrderListResult struct {
+	Items       []CheckoutResult
+	Total       int64
+	NextAfterID *uint
+	Facets      *OrderListFacets
 }
 
 type CheckoutRequest struct {
@@ -204,6 +252,7 @@ type CheckoutRequest struct {
 
 type CheckoutResult struct {
 	Order              domain.Order
+	ProjectName        string
 	ServiceToken       string
 	Created            bool
 	HasDelivery        bool
@@ -242,6 +291,7 @@ type UseCase struct {
 	tokens                     OrderTokenPort
 	deliveries                 OrderDeliveryPort
 	systemLogs                 SystemLogPort
+	projectNames               ProjectNamePort
 	now                        func() time.Time
 	deliveryNotificationCursor atomic.Uint64
 }
@@ -259,6 +309,10 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 
 func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
 	uc.deliveries = deliveries
+}
+
+func (uc *UseCase) SetProjectNamePort(projectNames ProjectNamePort) {
+	uc.projectNames = projectNames
 }
 
 func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
@@ -359,16 +413,32 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 	if err := uc.attachOrderDelivery(ctx, result); err != nil {
 		return nil, err
 	}
+	named := []CheckoutResult{*result}
+	if err := uc.attachProjectNames(ctx, named); err != nil {
+		return nil, err
+	}
+	result.ProjectName = named[0].ProjectName
 	return result, nil
 }
 
-func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, afterID uint, limit int) ([]CheckoutResult, *uint, error) {
-	if limit <= 0 || limit > 100 {
+func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offset int, afterID uint, limit int) (*OrderListResult, error) {
+	if limit <= 0 || limit > 1000 {
 		limit = 20
 	}
-	items, nextAfterID, err := uc.repo.ListOrders(ctx, filter, afterID, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	items, nextAfterID, err := uc.repo.ListOrders(ctx, filter, offset, afterID, limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	total, err := uc.repo.CountOrders(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	facets, err := uc.repo.OrderFacets(ctx, filter)
+	if err != nil {
+		return nil, err
 	}
 	results := make([]CheckoutResult, len(items))
 	orderIDs := make([]uint, len(items))
@@ -376,17 +446,58 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, after
 		results[i].Order = items[i]
 		orderIDs[i] = items[i].ID
 	}
-	if uc.deliveries == nil || len(orderIDs) == 0 {
-		return results, nextAfterID, nil
+	list := &OrderListResult{
+		Items:       results,
+		Total:       total,
+		NextAfterID: nextAfterID,
+		Facets:      facets,
 	}
-	deliveries, err := uc.deliveries.ListOrderDeliveries(ctx, orderIDs)
+	if len(orderIDs) == 0 {
+		return list, nil
+	}
+	if uc.deliveries != nil {
+		deliveries, err := uc.deliveries.ListOrderDeliveries(ctx, orderIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range results {
+			attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
+		}
+	}
+	if err := uc.attachProjectNames(ctx, results); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (uc *UseCase) attachProjectNames(ctx context.Context, results []CheckoutResult) error {
+	if uc.projectNames == nil || len(results) == 0 {
+		return nil
+	}
+	idSet := make(map[uint]struct{}, len(results))
+	ids := make([]uint, 0, len(results))
+	for i := range results {
+		id := results[i].Order.ProjectID
+		if id == 0 {
+			continue
+		}
+		if _, ok := idSet[id]; ok {
+			continue
+		}
+		idSet[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	names, err := uc.projectNames.ProjectNames(ctx, ids)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 	for i := range results {
-		attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
+		results[i].ProjectName = names[results[i].Order.ProjectID]
 	}
-	return results, nextAfterID, nil
+	return nil
 }
 
 func (uc *UseCase) attachOrderDelivery(ctx context.Context, result *CheckoutResult) error {

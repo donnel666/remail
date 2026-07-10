@@ -6,6 +6,7 @@ import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { copyText } from "@/lib/clipboard";
+import type { OrderResponse } from "@/lib/orders-api";
 import {
   buildPickupUrl,
   maskMiddle,
@@ -19,7 +20,6 @@ import {
   renderOrderStatusTag,
   renderServiceModeTag,
 } from "./order-meta";
-import type { MockOrder } from "./orders-mock";
 
 const { Text } = Typography;
 
@@ -104,7 +104,7 @@ export function OrderDetailModal({
   order,
 }: {
   onClose: () => void;
-  order: MockOrder | null;
+  order: OrderResponse | null;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -113,10 +113,9 @@ export function OrderDetailModal({
     order?.serviceMode === "purchase" && !order.activatedAt
       ? t("Activation until")
       : t("Receive until");
-  const pickupUrl =
-    order?.serviceToken !== undefined
-      ? buildPickupUrl(order.deliveryEmail, order.serviceToken)
-      : undefined;
+  const pickupUrl = order?.serviceToken
+    ? buildPickupUrl(order.deliveryEmail, order.serviceToken)
+    : undefined;
 
   return (
     <Modal
@@ -150,7 +149,7 @@ export function OrderDetailModal({
             label={t("Order No")}
             value={<CopyableValue copiedText={t("Copied")} text={order.orderNo} />}
           />
-          <DetailRow label={t("Project")} value={order.projectName} />
+          <DetailRow label={t("Project")} value={order.projectName || "-"} />
           <DetailRow
             label={t("Pay amount")}
             value={
@@ -159,7 +158,7 @@ export function OrderDetailModal({
               </span>
             }
           />
-          {order.refundAmount > 0 ? (
+          {Number(order.refundAmount) > 0 ? (
             <DetailRow
               label={t("Refund amount")}
               value={

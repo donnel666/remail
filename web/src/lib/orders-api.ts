@@ -5,6 +5,9 @@ import { notifyWalletUpdated } from "./wallet-events";
 export type CreateOrderRequest = components["schemas"]["CreateOrderRequest"];
 export type OrderResponse = components["schemas"]["OrderResponse"];
 export type OrderListResponse = components["schemas"]["OrderListResponse"];
+export type OrderListFacets = components["schemas"]["OrderListFacets"];
+export type OrderStatus = OrderResponse["status"];
+export type OrderServiceMode = OrderResponse["serviceMode"];
 
 export async function createOrder(
   payload: CreateOrderRequest,
@@ -33,23 +36,33 @@ export async function createOrder(
   return response;
 }
 
-export async function listOrders(filter: {
+export interface OrderListFilter {
   afterId?: number;
+  createdFrom?: string;
+  createdTo?: string;
+  domain?: string;
   limit?: number;
+  offset?: number;
   search?: string;
-  serviceMode?: "purchase" | "code";
-  status?: OrderResponse["status"];
-}) {
+  serviceMode?: OrderServiceMode;
+  status?: OrderStatus;
+}
+
+export async function listOrders(filter: OrderListFilter) {
   return unwrap<OrderListResponse>(
     await client.GET("/v1/orders", {
       params: {
         query: {
           scope: "mine",
           afterId: filter.afterId,
+          offset: filter.offset,
           limit: filter.limit ?? 100,
           search: filter.search,
           serviceMode: filter.serviceMode,
           status: filter.status,
+          domain: filter.domain,
+          createdFrom: filter.createdFrom,
+          createdTo: filter.createdTo,
         },
       },
     })

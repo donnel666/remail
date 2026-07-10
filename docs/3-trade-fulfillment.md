@@ -8,6 +8,7 @@
 | 2026-07-09 | V1.1 | Codex | 补充分配优先于扣款的私有库存语义：实际分配到 `owned` 库存时订单应付为 `0.00`，仍必须创建 0 元消费流水。 |
 | 2026-07-09 | V1.2 | Codex | 补充购买服务窗口约束：未激活购买订单只使用 `receiveUntil` 表达激活截止，`afterSaleUntil` 只表达激活后的质保截止。 |
 | 2026-07-10 | V1.3 | Codex | 订单实付和退款金额改用六位小数账本精度，保证分以下商品价格精确扣款与退款。 |
+| 2026-07-10 | V1.4 | Codex | 订单列表读模型支持交付域名/创建时间筛选、offset+total 分页与自排除 facets 聚合，并附带项目名称冗余展示。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -159,7 +160,7 @@ stateDiagram-v2
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `POST` | `/v1/orders` | 创建订单，必须带 `Idempotency-Key`；成功 `201 Created` 返回交付结果。 |
-| `GET` | `/v1/orders` | 订单列表；支持 `scope=mine/all`，普通用户只能 `mine`，管理员可 `all`。 |
+| `GET` | `/v1/orders` | 订单列表；支持 `scope=mine/all`（普通用户只能 `mine`）、`status/serviceMode/domain/createdFrom/createdTo/search` 筛选与 `offset/afterId` 分页，响应含 `total` 和自排除维度的 `facets`（状态/服务模式/交付域名）。 |
 | `GET` | `/v1/orders/{orderNo}` | 订单详情。 |
 | `GET` | `/v1/orders/{orderNo}/events` | 订单事件。 |
 | `POST` | `/v1/orders/{orderNo}/archive` | 用户归档已完成/退款/失败订单。 |

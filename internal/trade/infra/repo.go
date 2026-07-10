@@ -534,10 +534,12 @@ func (r *Repo) Archive(ctx context.Context, orderNo string, userID uint, archive
 	return &order, nil
 }
 
-func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, afterID uint, limit int) ([]domain.Order, *uint, error) {
+func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, offset int, afterID uint, limit int) ([]domain.Order, *uint, error) {
 	query := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), filter)
 	if afterID > 0 {
 		query = query.Where("id < ?", afterID)
+	} else if offset > 0 {
+		query = query.Offset(offset)
 	}
 	var models []OrderModel
 	if err := query.
@@ -557,6 +559,111 @@ func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, 
 		items[i] = orderModelToDomain(models[i])
 	}
 	return items, nextAfterID, nil
+}
+
+func (r *Repo) CountOrders(ctx context.Context, filter tradeapp.OrderListFilter) (int64, error) {
+	var total int64
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), filter).
+		Count(&total).Error; err != nil {
+		return 0, fmt.Errorf("count orders: %w", err)
+	}
+	return total, nil
+}
+
+// OrderFacets computes list aggregates; each dimension excludes its own
+// filter value so the console can render selectable counts.
+func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter) (*tradeapp.OrderListFacets, error) {
+	facets := &tradeapp.OrderListFacets{}
+
+	statusBase := filter
+	statusBase.Status = ""
+	var statusRow struct {
+		All            int64 `gorm:"column:all_count"`
+		PendingPayment int64 `gorm:"column:pending_payment_count"`
+		Paid           int64 `gorm:"column:paid_count"`
+		Active         int64 `gorm:"column:active_count"`
+		Completed      int64 `gorm:"column:completed_count"`
+		Refunded       int64 `gorm:"column:refunded_count"`
+		Failed         int64 `gorm:"column:failed_count"`
+		Closed         int64 `gorm:"column:closed_count"`
+	}
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), statusBase).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending_payment_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS paid_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS active_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS completed_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS refunded_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS failed_count,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS closed_count`,
+			string(domain.OrderStatusPendingPayment),
+			string(domain.OrderStatusPaid),
+			string(domain.OrderStatusActive),
+			string(domain.OrderStatusCompleted),
+			string(domain.OrderStatusRefunded),
+			string(domain.OrderStatusFailed),
+			string(domain.OrderStatusClosed),
+		).
+		Scan(&statusRow).Error; err != nil {
+		return nil, fmt.Errorf("order status facets: %w", err)
+	}
+	facets.Status = tradeapp.OrderStatusFacets{
+		All:            statusRow.All,
+		PendingPayment: statusRow.PendingPayment,
+		Paid:           statusRow.Paid,
+		Active:         statusRow.Active,
+		Completed:      statusRow.Completed,
+		Refunded:       statusRow.Refunded,
+		Failed:         statusRow.Failed,
+		Closed:         statusRow.Closed,
+	}
+
+	modeBase := filter
+	modeBase.ServiceMode = ""
+	var modeRow struct {
+		All      int64 `gorm:"column:all_count"`
+		Code     int64 `gorm:"column:code_count"`
+		Purchase int64 `gorm:"column:purchase_count"`
+	}
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), modeBase).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN service_mode = ? THEN 1 ELSE 0 END), 0) AS code_count,
+			COALESCE(SUM(CASE WHEN service_mode = ? THEN 1 ELSE 0 END), 0) AS purchase_count`,
+			string(domain.ServiceModeCode),
+			string(domain.ServiceModePurchase),
+		).
+		Scan(&modeRow).Error; err != nil {
+		return nil, fmt.Errorf("order service mode facets: %w", err)
+	}
+	facets.ServiceMode = tradeapp.OrderServiceModeFacets{
+		All:      modeRow.All,
+		Code:     modeRow.Code,
+		Purchase: modeRow.Purchase,
+	}
+
+	domainBase := filter
+	domainBase.Domain = ""
+	type keyRow struct {
+		Key   string `gorm:"column:facet_key"`
+		Count int64  `gorm:"column:count"`
+	}
+	rows := make([]keyRow, 0)
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), domainBase).
+		Select("SUBSTRING_INDEX(delivery_email, '@', -1) AS facet_key, COUNT(*) AS count").
+		Where("delivery_email LIKE ?", "%@%").
+		Group("facet_key").
+		Order("count DESC, facet_key ASC").
+		Limit(100).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("order domain facets: %w", err)
+	}
+	facets.Domains = make([]tradeapp.OrderKeyFacet, len(rows))
+	for i := range rows {
+		facets.Domains[i] = tradeapp.OrderKeyFacet{Key: rows[i].Key, Count: rows[i].Count}
+	}
+	return facets, nil
 }
 
 func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error) {
@@ -801,6 +908,12 @@ func (r *Repo) appendEvent(ctx context.Context, tx *gorm.DB, orderNo string, eve
 	return nil
 }
 
+var likePatternEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func escapeLikePattern(value string) string {
+	return likePatternEscaper.Replace(value)
+}
+
 func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB {
 	if !filter.IsAdmin || filter.Scope != "all" {
 		query = query.Where("user_id = ?", filter.UserID)
@@ -810,6 +923,15 @@ func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB 
 	}
 	if filter.ServiceMode != "" {
 		query = query.Where("service_mode = ?", string(filter.ServiceMode))
+	}
+	if domainFilter := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filter.Domain)), "@"); domainFilter != "" {
+		query = query.Where("delivery_email LIKE ?", "%@"+escapeLikePattern(domainFilter))
+	}
+	if filter.CreatedFrom != nil {
+		query = query.Where("created_at >= ?", filter.CreatedFrom.UTC())
+	}
+	if filter.CreatedTo != nil {
+		query = query.Where("created_at <= ?", filter.CreatedTo.UTC())
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		like := search + "%"

@@ -3675,6 +3675,27 @@ paths:
           in: query
           schema:
             type: string
+        - name: domain
+          in: query
+          description: Delivery email domain filter; the "@" prefix is optional.
+          schema:
+            type: string
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          description: Row offset used when afterId is absent.
+          schema:
+            type: integer
+            default: 0
         - name: afterId
           in: query
           schema:
@@ -5706,6 +5727,9 @@ components:
           type: integer
         projectId:
           type: integer
+        projectName:
+          type: string
+          description: Display name of the ordered project; omitted when the project no longer exists.
         projectProductId:
           type: integer
         productType:
@@ -5794,6 +5818,8 @@ components:
       type: object
       required:
         - items
+        - total
+        - offset
         - hasNext
         - limit
       properties:
@@ -5801,12 +5827,106 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OrderResponse"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
         nextAfterId:
           type: integer
         hasNext:
           type: boolean
         limit:
           type: integer
+        facets:
+          $ref: "#/components/schemas/OrderListFacets"
+      additionalProperties: false
+
+    OrderStatusFacets:
+      type: object
+      required:
+        - all
+        - pending_payment
+        - paid
+        - active
+        - completed
+        - refunded
+        - failed
+        - closed
+      properties:
+        all:
+          type: integer
+          format: int64
+        pending_payment:
+          type: integer
+          format: int64
+        paid:
+          type: integer
+          format: int64
+        active:
+          type: integer
+          format: int64
+        completed:
+          type: integer
+          format: int64
+        refunded:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        closed:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    OrderServiceModeFacets:
+      type: object
+      required:
+        - all
+        - code
+        - purchase
+      properties:
+        all:
+          type: integer
+          format: int64
+        code:
+          type: integer
+          format: int64
+        purchase:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    OrderKeyFacet:
+      type: object
+      required:
+        - key
+        - count
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    OrderListFacets:
+      type: object
+      description: List aggregates; each dimension is computed with the current filter minus that dimension itself.
+      required:
+        - status
+        - serviceMode
+        - domains
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatusFacets"
+        serviceMode:
+          $ref: "#/components/schemas/OrderServiceModeFacets"
+        domains:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderKeyFacet"
       additionalProperties: false
 
     OrderEventResponse:

@@ -1775,6 +1775,8 @@ export interface components {
             orderNo: string;
             userId: number;
             projectId: number;
+            /** @description Display name of the ordered project; omitted when the project no longer exists. */
+            projectName?: string;
             projectProductId: number;
             /** @enum {string} */
             productType: "microsoft" | "domain";
@@ -1824,9 +1826,50 @@ export interface components {
         };
         OrderListResponse: {
             items: components["schemas"]["OrderResponse"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
             nextAfterId?: number;
             hasNext: boolean;
             limit: number;
+            facets?: components["schemas"]["OrderListFacets"];
+        };
+        OrderStatusFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            pending_payment: number;
+            /** Format: int64 */
+            paid: number;
+            /** Format: int64 */
+            active: number;
+            /** Format: int64 */
+            completed: number;
+            /** Format: int64 */
+            refunded: number;
+            /** Format: int64 */
+            failed: number;
+            /** Format: int64 */
+            closed: number;
+        };
+        OrderServiceModeFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            code: number;
+            /** Format: int64 */
+            purchase: number;
+        };
+        OrderKeyFacet: {
+            key: string;
+            /** Format: int64 */
+            count: number;
+        };
+        /** @description List aggregates; each dimension is computed with the current filter minus that dimension itself. */
+        OrderListFacets: {
+            status: components["schemas"]["OrderStatusFacets"];
+            serviceMode: components["schemas"]["OrderServiceModeFacets"];
+            domains: components["schemas"]["OrderKeyFacet"][];
         };
         OrderEventResponse: {
             eventNo: string;
@@ -7235,6 +7278,12 @@ export interface operations {
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
                 search?: string;
+                /** @description Delivery email domain filter; the "@" prefix is optional. */
+                domain?: string;
+                createdFrom?: string;
+                createdTo?: string;
+                /** @description Row offset used when afterId is absent. */
+                offset?: number;
                 afterId?: number;
                 limit?: number;
             };

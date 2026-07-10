@@ -17,6 +17,7 @@ type OrderResponse struct {
 	OrderNo              string     `json:"orderNo"`
 	UserID               uint       `json:"userId"`
 	ProjectID            uint       `json:"projectId"`
+	ProjectName          string     `json:"projectName,omitempty"`
 	ProjectProductID     uint       `json:"projectProductId"`
 	ProductType          string     `json:"productType"`
 	ServiceMode          string     `json:"serviceMode"`
@@ -45,10 +46,41 @@ type OrderResponse struct {
 }
 
 type OrderListResponse struct {
-	Items       []OrderResponse `json:"items"`
-	NextAfterID *uint           `json:"nextAfterId,omitempty"`
-	HasNext     bool            `json:"hasNext"`
-	Limit       int             `json:"limit"`
+	Items       []OrderResponse          `json:"items"`
+	Total       int64                    `json:"total"`
+	Offset      int                      `json:"offset"`
+	NextAfterID *uint                    `json:"nextAfterId,omitempty"`
+	HasNext     bool                     `json:"hasNext"`
+	Limit       int                      `json:"limit"`
+	Facets      *OrderListFacetsResponse `json:"facets,omitempty"`
+}
+
+type OrderStatusFacetsResponse struct {
+	All            int64 `json:"all"`
+	PendingPayment int64 `json:"pending_payment"`
+	Paid           int64 `json:"paid"`
+	Active         int64 `json:"active"`
+	Completed      int64 `json:"completed"`
+	Refunded       int64 `json:"refunded"`
+	Failed         int64 `json:"failed"`
+	Closed         int64 `json:"closed"`
+}
+
+type OrderServiceModeFacetsResponse struct {
+	All      int64 `json:"all"`
+	Code     int64 `json:"code"`
+	Purchase int64 `json:"purchase"`
+}
+
+type OrderKeyFacetResponse struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+type OrderListFacetsResponse struct {
+	Status      OrderStatusFacetsResponse      `json:"status"`
+	ServiceMode OrderServiceModeFacetsResponse `json:"serviceMode"`
+	Domains     []OrderKeyFacetResponse        `json:"domains"`
 }
 
 type OrderEventResponse struct {

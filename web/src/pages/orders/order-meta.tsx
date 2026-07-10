@@ -1,10 +1,10 @@
 import { Tag } from "@douyinfe/semi-ui";
 
-import type { MockOrderStatus, MockServiceMode } from "./orders-mock";
+import type { OrderServiceMode, OrderStatus } from "@/lib/orders-api";
 
 type Translator = (key: string) => string;
 
-export const ORDER_STATUS_VALUES: MockOrderStatus[] = [
+export const ORDER_STATUS_VALUES: OrderStatus[] = [
   "pending_payment",
   "paid",
   "active",
@@ -15,7 +15,7 @@ export const ORDER_STATUS_VALUES: MockOrderStatus[] = [
 ];
 
 const STATUS_META: Record<
-  MockOrderStatus,
+  OrderStatus,
   { color: "amber" | "cyan" | "green" | "blue" | "grey" | "red" | "white"; labelKey: string }
 > = {
   pending_payment: { color: "amber", labelKey: "Pending payment" },
@@ -27,11 +27,11 @@ const STATUS_META: Record<
   closed: { color: "white", labelKey: "Closed" },
 };
 
-export function orderStatusLabel(status: MockOrderStatus, t: Translator) {
+export function orderStatusLabel(status: OrderStatus, t: Translator) {
   return t(STATUS_META[status].labelKey);
 }
 
-export function renderOrderStatusTag(status: MockOrderStatus, t: Translator) {
+export function renderOrderStatusTag(status: OrderStatus, t: Translator) {
   const meta = STATUS_META[status];
   return (
     <Tag color={meta.color} shape="circle">
@@ -40,11 +40,11 @@ export function renderOrderStatusTag(status: MockOrderStatus, t: Translator) {
   );
 }
 
-export function serviceModeLabel(mode: MockServiceMode, t: Translator) {
+export function serviceModeLabel(mode: OrderServiceMode, t: Translator) {
   return mode === "code" ? t("Code receiving") : t("Purchase");
 }
 
-export function renderServiceModeTag(mode: MockServiceMode, t: Translator) {
+export function renderServiceModeTag(mode: OrderServiceMode, t: Translator) {
   return (
     <Tag color={mode === "code" ? "orange" : "violet"} shape="circle">
       {serviceModeLabel(mode, t)}
@@ -52,13 +52,22 @@ export function renderServiceModeTag(mode: MockServiceMode, t: Translator) {
   );
 }
 
-export function formatLedgerAmount(value: number) {
-  if (!Number.isFinite(value)) return "￥0";
-  const text = value.toFixed(6).replace(/\.?0+$/, "");
-  return `￥${text || "0"}`;
+export function getOrderDomain(email: string) {
+  const index = email.lastIndexOf("@");
+  return index === -1 ? "" : email.slice(index).toLowerCase();
 }
 
-export function formatOrderDateTime(value?: string) {
+// Ledger amounts are 6-decimal strings; trim trailing zeros for display.
+export function formatLedgerAmount(value: string | number) {
+  const text = typeof value === "number" ? value.toFixed(6) : value.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return "￥0";
+  const trimmed = text.includes(".")
+    ? text.replace(/0+$/, "").replace(/\.$/, "")
+    : text;
+  return `￥${trimmed || "0"}`;
+}
+
+export function formatOrderDateTime(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
