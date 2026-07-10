@@ -76,14 +76,38 @@ import {
   serviceModeLabel,
 } from "./orders/order-meta";
 import { useSelectionNotification } from "./resources/use-selection-notification";
+import {
+  TICKET_CREATE_ORDER_STORAGE_KEY,
+  buildOrderRefFromOrder,
+} from "./tickets/tickets-mock";
 
 type StatusFilter = "all" | OrderStatus;
 type ServiceModeFilter = "all" | OrderServiceMode;
 
 const DEFAULT_FETCH_COOLDOWN_SECONDS = 5;
 
+function isFutureTime(value?: string | null) {
+  if (!value) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && time > Date.now();
+}
+
+// Mirrors the backend token lifecycle: active orders always hold a valid
+// token; completed purchase orders keep it, while completed code orders lose
+// it once the read window (receiveUntil) closes.
 function orderCanUseService(order: OrderResponse) {
-  return order.status === "active" || order.status === "completed";
+  if (order.status === "active") return true;
+  if (order.status !== "completed") return false;
+  if (order.serviceMode === "purchase") return true;
+  return isFutureTime(order.receiveUntil);
+}
+
+// Order tickets stay within the after-sale window (INV-AS1): active orders
+// can always raise one, completed orders only until afterSaleUntil passes.
+function orderCanSubmitTicket(order: OrderResponse) {
+  if (order.status === "active") return true;
+  if (order.status !== "completed") return false;
+  return isFutureTime(order.afterSaleUntil);
 }
 
 function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
@@ -437,13 +461,20 @@ export default function Orders() {
     [resolveOrderDetail, t]
   );
 
-  // Reserved entry: after-sales tickets are not wired to the backend yet.
+  // Hands the picked order over to the Tickets page for prefilled creation.
   const submitTicket = useCallback(
     (orderNos: string[]) => {
       if (orderNos.length === 0) return;
-      Toast.info(t("Ticket submission is coming soon."));
+      const order = pagedItems.find((item) => item.orderNo === orderNos[0]);
+      if (order) {
+        window.sessionStorage.setItem(
+          TICKET_CREATE_ORDER_STORAGE_KEY,
+          JSON.stringify(buildOrderRefFromOrder(order))
+        );
+      }
+      void navigate({ to: "/tickets" });
     },
-    [t]
+    [navigate, pagedItems]
   );
 
   const clearSelection = useCallback(() => {
@@ -617,6 +648,7 @@ export default function Orders() {
                 </Button>
               </Tooltip>
               <Button
+                disabled={!orderCanSubmitTicket(record)}
                 type="tertiary"
                 size="small"
                 onClick={() => submitTicket([record.orderNo])}
@@ -644,6 +676,11 @@ export default function Orders() {
     onChange: (keys?: Array<string | number>) => {
       setSelectedKeys((keys ?? []).map(String));
     },
+    // Batch action is ticket submission only, so rows past the after-sale
+    // window cannot be selected at all.
+    getCheckboxProps: (record?: OrderResponse) => ({
+      disabled: !record || !orderCanSubmitTicket(record),
+    }),
   };
 
   const tableColumns = useMemo(() => {
