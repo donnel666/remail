@@ -2510,12 +2510,29 @@ type OrderEventResponse struct {
 // OrderEventResponseOperatorType defines model for OrderEventResponse.OperatorType.
 type OrderEventResponseOperatorType string
 
+// OrderKeyFacet defines model for OrderKeyFacet.
+type OrderKeyFacet struct {
+	Count int64  `json:"count"`
+	Key   string `json:"key"`
+}
+
+// OrderListFacets List aggregates; each dimension is computed with the current filter minus that dimension itself.
+type OrderListFacets struct {
+	Domains     []OrderKeyFacet        `json:"domains"`
+	ServiceMode OrderServiceModeFacets `json:"serviceMode"`
+	Status      OrderStatusFacets      `json:"status"`
+}
+
 // OrderListResponse defines model for OrderListResponse.
 type OrderListResponse struct {
-	HasNext     bool            `json:"hasNext"`
-	Items       []OrderResponse `json:"items"`
-	Limit       int             `json:"limit"`
-	NextAfterId *int            `json:"nextAfterId,omitempty"`
+	// Facets List aggregates; each dimension is computed with the current filter minus that dimension itself.
+	Facets      *OrderListFacets `json:"facets,omitempty"`
+	HasNext     bool             `json:"hasNext"`
+	Items       []OrderResponse  `json:"items"`
+	Limit       int              `json:"limit"`
+	NextAfterId *int             `json:"nextAfterId,omitempty"`
+	Offset      int              `json:"offset"`
+	Total       int64            `json:"total"`
 }
 
 // OrderMailResponse defines model for OrderMailResponse.
@@ -2546,12 +2563,15 @@ type OrderResponse struct {
 	OrderNo            string     `json:"orderNo"`
 
 	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PayAmount        NonNegativeLedgerAmount  `json:"payAmount"`
-	ProductType      OrderResponseProductType `json:"productType"`
-	ProjectId        int                      `json:"projectId"`
-	ProjectProductId int                      `json:"projectProductId"`
-	ReceiveStartedAt *time.Time               `json:"receiveStartedAt,omitempty"`
-	ReceiveUntil     *time.Time               `json:"receiveUntil,omitempty"`
+	PayAmount   NonNegativeLedgerAmount  `json:"payAmount"`
+	ProductType OrderResponseProductType `json:"productType"`
+	ProjectId   int                      `json:"projectId"`
+
+	// ProjectName Display name of the ordered project; omitted when the project no longer exists.
+	ProjectName      *string    `json:"projectName,omitempty"`
+	ProjectProductId int        `json:"projectProductId"`
+	ReceiveStartedAt *time.Time `json:"receiveStartedAt,omitempty"`
+	ReceiveUntil     *time.Time `json:"receiveUntil,omitempty"`
 
 	// RefundAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	RefundAmount         NonNegativeLedgerAmount  `json:"refundAmount"`
@@ -2589,6 +2609,25 @@ type OrderResponseStatus string
 
 // OrderResponseSupplyPolicy defines model for OrderResponse.SupplyPolicy.
 type OrderResponseSupplyPolicy string
+
+// OrderServiceModeFacets defines model for OrderServiceModeFacets.
+type OrderServiceModeFacets struct {
+	All      int64 `json:"all"`
+	Code     int64 `json:"code"`
+	Purchase int64 `json:"purchase"`
+}
+
+// OrderStatusFacets defines model for OrderStatusFacets.
+type OrderStatusFacets struct {
+	Active         int64 `json:"active"`
+	All            int64 `json:"all"`
+	Closed         int64 `json:"closed"`
+	Completed      int64 `json:"completed"`
+	Failed         int64 `json:"failed"`
+	Paid           int64 `json:"paid"`
+	PendingPayment int64 `json:"pending_payment"`
+	Refunded       int64 `json:"refunded"`
+}
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
@@ -3953,8 +3992,16 @@ type GetOrdersParams struct {
 	Status      *GetOrdersParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
 	ServiceMode *GetOrdersParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
 	Search      *string                     `form:"search,omitempty" json:"search,omitempty"`
-	AfterId     *int                        `form:"afterId,omitempty" json:"afterId,omitempty"`
-	Limit       *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Domain Delivery email domain filter; the "@" prefix is optional.
+	Domain      *string    `form:"domain,omitempty" json:"domain,omitempty"`
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset  *int `form:"offset,omitempty" json:"offset,omitempty"`
+	AfterId *int `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetOrdersParamsScope defines parameters for GetOrders.
@@ -8583,6 +8630,38 @@ func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "domain" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "domain", c.Request.URL.Query(), &params.Domain, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domain: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
 		return
 	}
 
