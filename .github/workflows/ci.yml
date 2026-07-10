@@ -90,7 +90,7 @@ jobs:
         run: go mod download
 
       - name: Run ${{ matrix.shard }} tests
-        run: go test ${{ matrix.packages }} -count=1 -timeout=15m
+        run: go test -p 1 -parallel 1 ${{ matrix.packages }} -count=1 -timeout=15m
 
   backend-test:
     if: always()

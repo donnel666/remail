@@ -19,13 +19,16 @@ import (
 )
 
 type Server struct {
-	prefix    string
-	once      sync.Once
-	container testcontainers.Container
-	host      string
-	port      string
-	err       error
-	nextDB    uint64
+	prefix       string
+	once         sync.Once
+	container    testcontainers.Container
+	host         string
+	port         string
+	err          error
+	nextDB       uint64
+	templateOnce sync.Once
+	templateName string
+	templateErr  error
 }
 
 func New(prefix string) *Server {
@@ -39,9 +42,10 @@ func (s *Server) Database(t *testing.T, migrationsDir string) *gorm.DB {
 		s.start()
 	})
 	require.NoError(t, s.err)
+	require.NoError(t, s.ensureTemplate(migrationsDir))
 
 	dbName := fmt.Sprintf("%s_%d", s.prefix, atomic.AddUint64(&s.nextDB, 1))
-	adminDB, err := sql.Open("mysql", fmt.Sprintf("root:root@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", s.host, s.port))
+	adminDB, err := openAdminDB(s.host, s.port)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = adminDB.Exec("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName))
@@ -49,10 +53,9 @@ func (s *Server) Database(t *testing.T, migrationsDir string) *gorm.DB {
 	})
 
 	require.NoError(t, adminDB.Ping())
-	require.NoError(t, execSQL(adminDB, "CREATE DATABASE "+quoteIdentifier(dbName)+" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
-	require.NoError(t, execSQL(adminDB, "GRANT ALL PRIVILEGES ON "+quoteIdentifier(dbName)+".* TO 'remail'@'%'"))
+	require.NoError(t, cloneDatabase(adminDB, s.templateName, dbName))
 
-	dsn := fmt.Sprintf("remail:remail@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", s.host, s.port, dbName)
+	dsn := testDSN(s.host, s.port, dbName)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{TranslateError: true})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -60,8 +63,6 @@ func (s *Server) Database(t *testing.T, migrationsDir string) *gorm.DB {
 	t.Cleanup(func() {
 		require.NoError(t, sqlDB.Close())
 	})
-
-	require.NoError(t, platform.RunMigrations(sqlDB, migrationsDir))
 	return db
 }
 
@@ -70,6 +71,49 @@ func (s *Server) Close(ctx context.Context) error {
 		return nil
 	}
 	return s.container.Terminate(ctx)
+}
+
+func (s *Server) ensureTemplate(migrationsDir string) error {
+	s.templateOnce.Do(func() {
+		s.templateName = s.prefix + "_template"
+		adminDB, err := openAdminDB(s.host, s.port)
+		if err != nil {
+			s.templateErr = err
+			return
+		}
+		defer adminDB.Close()
+
+		if err := adminDB.Ping(); err != nil {
+			s.templateErr = err
+			return
+		}
+		if err := execSQL(adminDB, "CREATE DATABASE "+quoteIdentifier(s.templateName)+" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+			s.templateErr = err
+			return
+		}
+		if err := execSQL(adminDB, "GRANT ALL PRIVILEGES ON "+quoteIdentifier(s.templateName)+".* TO 'remail'@'%'"); err != nil {
+			s.templateErr = err
+			return
+		}
+
+		dsn := testDSN(s.host, s.port, s.templateName)
+		sqlDB, err := sql.Open("mysql", dsn)
+		if err != nil {
+			s.templateErr = err
+			return
+		}
+		defer sqlDB.Close()
+
+		sqlDB.SetMaxOpenConns(4)
+		sqlDB.SetConnMaxLifetime(2 * time.Minute)
+
+		if err := sqlDB.Ping(); err != nil {
+			s.templateErr = err
+			return
+		}
+		s.templateErr = platform.RunMigrations(sqlDB, migrationsDir)
+	})
+	return s.templateErr
 }
 
 func (s *Server) start() {
@@ -116,7 +160,7 @@ func (s *Server) start() {
 		if sqlDB != nil {
 			_ = sqlDB.Close()
 		}
-		sqlDB, lastErr = sql.Open("mysql", fmt.Sprintf("root:root@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local", s.host, s.port))
+		sqlDB, lastErr = openAdminDB(s.host, s.port)
 		if lastErr != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -131,6 +175,138 @@ func (s *Server) start() {
 		_ = sqlDB.Close()
 	}
 	s.err = fmt.Errorf("mysql did not become ready: %w", lastErr)
+}
+
+func openAdminDB(host, port string) (*sql.DB, error) {
+	dsn := fmt.Sprintf(
+		"root:root@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true&timeout=30s&readTimeout=120s&writeTimeout=120s",
+		host,
+		port,
+	)
+	return sql.Open("mysql", dsn)
+}
+
+func testDSN(host, port, dbName string) string {
+	return fmt.Sprintf(
+		"remail:remail@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s&readTimeout=60s&writeTimeout=60s",
+		host,
+		port,
+		dbName,
+	)
+}
+
+func cloneDatabase(adminDB *sql.DB, source, target string) (err error) {
+	if err := execSQL(adminDB, "CREATE DATABASE "+quoteIdentifier(target)+" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		return err
+	}
+	if err := execSQL(adminDB, "GRANT ALL PRIVILEGES ON "+quoteIdentifier(target)+".* TO 'remail'@'%'"); err != nil {
+		return err
+	}
+
+	tables, err := listTables(adminDB, source)
+	if err != nil {
+		return err
+	}
+	if len(tables) == 0 {
+		return fmt.Errorf("template database %s has no tables", source)
+	}
+
+	ctx := context.Background()
+	conn, err := adminDB.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "USE "+quoteIdentifier(target)); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
+		return err
+	}
+	defer func() {
+		if _, restoreErr := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 1"); err == nil && restoreErr != nil {
+			err = restoreErr
+		}
+	}()
+
+	sourceRef := quoteIdentifier(source)
+	targetRef := quoteIdentifier(target)
+	for _, table := range tables {
+		tableRef := quoteIdentifier(table)
+		var returnedTable, createStatement string
+		if err := conn.QueryRowContext(ctx, "SHOW CREATE TABLE "+sourceRef+"."+tableRef).Scan(&returnedTable, &createStatement); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, createStatement); err != nil {
+			return err
+		}
+		columns, err := listInsertableColumns(adminDB, source, table)
+		if err != nil {
+			return err
+		}
+		if len(columns) == 0 {
+			continue
+		}
+		columnList := strings.Join(columns, ", ")
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf(
+			"INSERT INTO %s.%s (%s) SELECT %s FROM %s.%s",
+			targetRef,
+			tableRef,
+			columnList,
+			columnList,
+			sourceRef,
+			tableRef,
+		)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func listInsertableColumns(adminDB *sql.DB, schema, table string) ([]string, error) {
+	rows, err := adminDB.Query(`
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = ?
+  AND table_name = ?
+  AND extra NOT LIKE '%GENERATED%'
+ORDER BY ordinal_position`, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			return nil, err
+		}
+		columns = append(columns, quoteIdentifier(column))
+	}
+	return columns, rows.Err()
+}
+
+func listTables(adminDB *sql.DB, schema string) ([]string, error) {
+	rows, err := adminDB.Query(
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE' ORDER BY table_name",
+		schema,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, err
+		}
+		tables = append(tables, table)
+	}
+	return tables, rows.Err()
 }
 
 func execSQL(db *sql.DB, query string) error {
