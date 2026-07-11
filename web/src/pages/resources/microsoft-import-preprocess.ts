@@ -26,8 +26,7 @@ export function preprocessMicrosoftImportContent(
   content: string,
   strategy: ImportErrorStrategy
 ): MicrosoftImportPreprocessResult {
-  const trimmedContent = content.trim();
-  if (trimmedContent.length === 0) {
+  if (content.trim().length === 0) {
     return {
       content: "",
       validCount: 0,
@@ -40,11 +39,11 @@ export function preprocessMicrosoftImportContent(
   const validLines: string[] = [];
   let skippedCount = 0;
 
-  const rawLines = trimmedContent.split("\n");
+  const rawLines = content.split("\n");
   for (let index = 0; index < rawLines.length; index += 1) {
     const lineNumber = index + 1;
-    const rawLine = rawLines[index]?.trim() ?? "";
-    if (rawLine.length === 0) continue;
+    const rawLine = (rawLines[index] ?? "").replace(/\r$/, "");
+    if (rawLine.trim().length === 0) continue;
 
     const parsed = parseMicrosoftImportLine(rawLine);
     if (!parsed) {
@@ -98,10 +97,10 @@ export function preprocessMicrosoftImportContent(
 }
 
 function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
-  const parts = line.split("----").map((part) => part.trim());
+  const parts = line.split("----");
   if (![2, 3, 4, 5].includes(parts.length)) return null;
 
-  const email = parts[0] ?? "";
+  const email = parts[0]?.trim() ?? "";
   const password = parts[1] ?? "";
   if (email.length === 0 || password.length === 0) return null;
 
@@ -114,20 +113,20 @@ function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
   };
 
   if (parts.length === 3) {
-    entry.bindingAddress = parts[2] ?? "";
+    entry.bindingAddress = parts[2]?.trim() ?? "";
     if (entry.bindingAddress.length === 0) return null;
   }
   if (parts.length === 4) {
-    entry.clientID = parts[2] ?? "";
-    entry.refreshToken = parts[3] ?? "";
+    entry.clientID = parts[2]?.trim() ?? "";
+    entry.refreshToken = parts[3]?.trim() ?? "";
     if (entry.clientID.length === 0 || entry.refreshToken.length === 0) {
       return null;
     }
   }
   if (parts.length === 5) {
-    entry.clientID = parts[2] ?? "";
-    entry.refreshToken = parts[3] ?? "";
-    entry.bindingAddress = parts[4] ?? "";
+    entry.clientID = parts[2]?.trim() ?? "";
+    entry.refreshToken = parts[3]?.trim() ?? "";
+    entry.bindingAddress = parts[4]?.trim() ?? "";
     if (
       entry.clientID.length === 0 ||
       entry.refreshToken.length === 0 ||

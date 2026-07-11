@@ -21,6 +21,10 @@ const MaxImportBytes = 100 * 1024 * 1024 // 100 MB
 // MaxProjectLogoBytes limits project logo uploads to small web-safe images.
 const MaxProjectLogoBytes = 2 * 1024 * 1024 // 2 MB
 
+// MaxResourceValidationRequestBytes bounds the explicit-ID selection before
+// JSON decoding. Ten thousand numeric IDs fit comfortably within this limit.
+const MaxResourceValidationRequestBytes = 1024 * 1024 // 1 MB
+
 // CoreHandler holds the Core HTTP handlers.
 type CoreHandler struct {
 	module            *CoreModule
@@ -449,6 +453,7 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxResourceValidationRequestBytes)
 	var req ValidateResourcesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -462,6 +467,16 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message":   "Invalid request body.",
 			"fields":    fields,
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if req.Selection.Mode == "ids" && len(req.Selection.ResourceIDs) > coreapp.ResourceValidationMaxExplicitIDs {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "Invalid request body.",
+			"fields": map[string]string{
+				"selection.resourceIds": "At most 10000 resource IDs are allowed; use filter mode for larger selections.",
+			},
 			"requestId": middleware.GetRequestID(c),
 		})
 		return
@@ -1940,6 +1955,11 @@ func writeCoreError(c *gin.Context, err error) {
 	case errors.Is(err, coredomain.ErrInvalidResourceFilter):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Invalid resource filter.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrResourceSelectionTooLarge):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Too many resource IDs; use filter mode for larger selections.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrResourceNotPrivate):

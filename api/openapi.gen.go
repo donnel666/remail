@@ -3330,10 +3330,10 @@ type ResourceValidationResponseStatus string
 
 // ResourceValidationsResponse defines model for ResourceValidationsResponse.
 type ResourceValidationsResponse struct {
-	// Queued Number of resources accepted for asynchronous validation. Existing active jobs are reused.
+	// Queued Number of explicit resource IDs accepted into the durable validation batch. Child jobs may not exist yet; zero for filter mode until expansion.
 	Queued int `json:"queued"`
 
-	// Requested Number of resources accepted by the selection after ownership and status checks.
+	// Requested Number of explicit resource IDs durably accepted for deferred expansion. Zero for filter mode because the match count is resolved asynchronously.
 	Requested int `json:"requested"`
 }
 

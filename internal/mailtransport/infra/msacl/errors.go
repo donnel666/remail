@@ -15,6 +15,7 @@ const (
 	AuthStatusPhoneVerification = "需要手机验证"
 	AuthStatusPasskeyRequired   = "需要通行密钥"
 	AuthStatusAccountLocked     = "账号已锁定"
+	AuthStatusRateLimited       = "频率受限"
 )
 
 type AuthError struct {

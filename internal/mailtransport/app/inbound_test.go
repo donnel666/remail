@@ -16,9 +16,10 @@ import (
 )
 
 type inboundRepoStub struct {
-	mu     sync.Mutex
-	nextID uint
-	mails  map[uint]*domain.InboundMail
+	mu       sync.Mutex
+	nextID   uint
+	mails    map[uint]*domain.InboundMail
+	onCreate func()
 }
 
 func newInboundRepoStub() *inboundRepoStub {
@@ -33,6 +34,9 @@ func (r *inboundRepoStub) CreateMany(_ context.Context, mails []domain.InboundMa
 		r.nextID++
 		clone := mails[i]
 		r.mails[clone.ID] = &clone
+	}
+	if r.onCreate != nil {
+		r.onCreate()
 	}
 	return nil
 }
@@ -118,7 +122,9 @@ func (r inboundResolverStub) ResolveInboundRecipient(_ context.Context, _ string
 }
 
 type fileStoreStub struct {
-	files map[string]governancedomain.PrivateFile
+	files   map[string]governancedomain.PrivateFile
+	saveErr error
+	onSave  func()
 }
 
 func newFileStoreStub() *fileStoreStub {
@@ -126,6 +132,12 @@ func newFileStoreStub() *fileStoreStub {
 }
 
 func (s *fileStoreStub) SavePrivate(_ context.Context, file governancedomain.PrivateFile) (*governancedomain.StoredPrivateFile, error) {
+	if s.onSave != nil {
+		s.onSave()
+	}
+	if s.saveErr != nil {
+		return nil, s.saveErr
+	}
 	s.files[file.ObjectKey] = file
 	return &governancedomain.StoredPrivateFile{
 		ObjectKey:   file.ObjectKey,
@@ -136,6 +148,12 @@ func (s *fileStoreStub) SavePrivate(_ context.Context, file governancedomain.Pri
 }
 
 func (s *fileStoreStub) SavePrivateStream(_ context.Context, file governancedomain.PrivateFileStream) (*governancedomain.StoredPrivateFile, error) {
+	if s.onSave != nil {
+		s.onSave()
+	}
+	if s.saveErr != nil {
+		return nil, s.saveErr
+	}
 	content, err := io.ReadAll(file.Content)
 	if err != nil {
 		return nil, err
@@ -225,6 +243,53 @@ func TestInboundServiceAcceptStoresRawMailAndEnqueuesPerRecipient(t *testing.T) 
 	assert.Contains(t, mails[0].SourceObjectKey, "mailtransport/inbound/2026/07/03/")
 	_, ok := files.files[mails[0].SourceObjectKey]
 	assert.True(t, ok)
+}
+
+func TestInboundServiceAcceptMakesMailboxRowVisibleBeforeObjectWrite(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	var events []string
+	repo.onCreate = func() { events = append(events, "database") }
+	files.onSave = func() { events = append(events, "object") }
+	service := NewInboundService(repo, inboundResolverStub{}, files, &inboundQueueStub{}, nil)
+
+	_, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients: []domain.InboundRecipient{{
+			Email:        "proof@example.com",
+			ResourceID:   10,
+			ResourceType: domain.InboundResourceDomain,
+			OwnerUserID:  1,
+		}},
+		ContentBytes: []byte("Subject: code\r\n\r\n123456"),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"database", "object"}, events)
+}
+
+func TestInboundServiceAcceptMarksVisibleRowsFailedWhenObjectWriteFails(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	files.saveErr = errors.New("object store unavailable")
+	service := NewInboundService(repo, inboundResolverStub{}, files, &inboundQueueStub{}, nil)
+
+	_, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients: []domain.InboundRecipient{{
+			Email:        "proof@example.com",
+			ResourceID:   10,
+			ResourceType: domain.InboundResourceDomain,
+			OwnerUserID:  1,
+		}},
+		ContentBytes: []byte("Subject: code\r\n\r\n123456"),
+	})
+
+	require.ErrorIs(t, err, domain.ErrInboundStorageUnavailable)
+	mail, findErr := repo.FindByID(context.Background(), 1)
+	require.NoError(t, findErr)
+	require.NotNil(t, mail)
+	require.Equal(t, domain.InboundStatusFailed, mail.Status)
 }
 
 func TestInboundServiceProcessMarksStoredWhenObjectReadable(t *testing.T) {

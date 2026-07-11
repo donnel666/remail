@@ -220,12 +220,13 @@ func (m DomainAllocationModel) unified() domain.UnifiedAllocation {
 }
 
 type ExplicitAliasModel struct {
-	ID         uint      `gorm:"primaryKey;autoIncrement"`
-	ResourceID uint      `gorm:"column:resource_id"`
-	Email      string    `gorm:"type:varchar(255);not null"`
-	Status     string    `gorm:"type:varchar(32);not null"`
-	CreatedAt  time.Time `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt  time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	ResourceID  uint      `gorm:"column:resource_id"`
+	OwnerUserID uint      `gorm:"not null;column:owner_user_id"`
+	Email       string    `gorm:"type:varchar(255);not null"`
+	Status      string    `gorm:"type:varchar(32);not null"`
+	CreatedAt   time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (ExplicitAliasModel) TableName() string { return "explicit_aliases" }

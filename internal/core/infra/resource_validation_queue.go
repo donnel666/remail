@@ -15,7 +15,7 @@ const (
 	TypeResourceValidation           = "core:resource_validation"
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
-	validationQueueName             = "default"
+	ResourceValidationQueueName     = "background_validation"
 	validationTaskMaxRetry          = 3
 	validationTaskTimeout           = 15 * time.Minute
 	validationDispatcherTaskTimeout = 30 * time.Second
@@ -33,6 +33,9 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 	if q == nil || q.client == nil {
 		return fmt.Errorf("resource validation queue is unavailable")
 	}
+	if task.JobID == 0 || task.DispatchToken == "" {
+		return fmt.Errorf("resource validation dispatch token is required")
+	}
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("marshal resource validation task: %w", err)
@@ -41,13 +44,13 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
-		asynq.Queue(validationQueueName),
-		asynq.TaskID(fmt.Sprintf("%s:%d", TypeResourceValidation, task.JobID)),
+		asynq.Queue(ResourceValidationQueueName),
+		asynq.TaskID(fmt.Sprintf("resource-validation:%d:%s", task.JobID, task.DispatchToken)),
 		asynq.MaxRetry(validationTaskMaxRetry),
 		asynq.Timeout(validationTaskTimeout),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
+		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue resource validation task: %w", err)
@@ -61,8 +64,8 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationDispatcher(ctx contex
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, nil)
 	options := []asynq.Option{
-		asynq.Queue(validationQueueName),
-		asynq.TaskID(TypeResourceValidationDispatcher),
+		asynq.Queue("default"),
+		asynq.Unique(15 * time.Second),
 		asynq.MaxRetry(0),
 		asynq.Timeout(validationDispatcherTaskTimeout),
 	}
@@ -71,7 +74,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationDispatcher(ctx contex
 	}
 	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
+		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue resource validation dispatcher task: %w", err)

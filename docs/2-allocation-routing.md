@@ -241,13 +241,13 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `microsoft_allocations` | active main 对 `resourceId` 唯一；active explicit alias 对 `explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
 | `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一。 |
 
-补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。以上是数据库兜底，不替代领域层校验。
+补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。`explicit_aliases.owner_user_id` 固定记录平台 `super_admin` 库存 owner，但显式别名的创建资格与供给范围解耦：`status=normal` 的私有主资源也会预创建别名，BC-ALLOC 仍按 alias 所属 `resource_id`、主资源的 `forSale + owner/buyer` 规则和 allocation 占用状态决定 `owned/public` 可用性，不把 alias owner 字段改造成新的供给过滤条件，也不因 alias 归超级管理员而把私有主资源变成公开供给。以上是数据库兜底，不替代领域层校验。
 
 别名和自建生成邮箱复用查询必须有明确索引：
 
 | 表 | 索引目标 |
 |----|----------|
-| `explicit_aliases` | `resourceId + status + id` 支撑显式别名复用。 |
+| `explicit_aliases` | `resourceId + status + id` 支撑显式别名复用；`ownerUserId` 索引支撑平台超级管理员所有权查询和外键。 |
 | `dot_aliases` | `resourceId + status + id` 支撑点别名复用。 |
 | `plus_aliases` | `resourceId + status + id` 支撑加号别名复用。 |
 | `generated_mailboxes` | `resourceId + status + lastAllocatedAt + id` 支撑自建生成邮箱 LRU 复用。 |

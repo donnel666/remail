@@ -9,6 +9,9 @@
 | 2026-07-03 | V1.2 | Codex | 纠正代理错误隔离矩阵：运行期和检测失败只置 `abnormal`，`disabled` 仅允许管理员显式操作。 |
 | 2026-07-05 | V1.3 | Codex | 补充批量检测异步验收项：批量检测必须由后端批量提交任务，前端不得循环调用单资源检测接口；不改变既有异步边界策略。 |
 | 2026-07-10 | V2.0 | Cursor | 按现有实现重做上线红线：永久购买、邮件唯一归属、3/30 天保留、cursor、大规模 SQL 与 300/3000 混压。未实现售后、结算、显式别名远端创建不作为当前版本红线。 |
+| 2026-07-10 | V2.1 | Cursor | 增加 Microsoft 显式别名异步创建、上海自然周/年配额、候选预占、远端结果对账和 fencing 验收项。 |
+| 2026-07-11 | V2.2 | Codex | 明确显式别名只为公开出售的正常 Microsoft 资源自动补货、成功库存统一归确定性的 `super_admin`，并按当前三 worker-pool 拓扑补充低优验证/别名任务的动态 dispatch 与 execution admission 验收口径。 |
+| 2026-07-11 | V2.3 | Codex | 将显式别名补货与 `forSale` 解耦：公开和私有的正常 Microsoft 资源都创建，出售状态切换不影响任务；非正常状态仍在领取和远端调用前被拦截。 |
 
 > 本矩阵用于写之前、写之中、写之后的自审。目标不是堆流程，而是用最少证据证明系统能上线、能维护、能扩展、能重构。
 
@@ -317,9 +320,9 @@ API/SDK：
 
 ### 12.1 当前范围
 
-必须验收：IAM、资源/项目、分配、钱包、订单、API Key、MailMatch、Microsoft Fetch、自建 SMTP、Proxy、Governance 和现有 Web 页面。
+必须验收：IAM、资源/项目、分配、钱包、订单、API Key、MailMatch、Microsoft Fetch、Microsoft 显式别名异步创建、自建 SMTP、Proxy、Governance 和现有 Web 页面。
 
-不作为本版红线：售后工单、供应商结算/提现、显式别名远端创建、在线支付、多活部署。相关代码不得伪造“已完成”状态，前端不得展示可点击占位入口。
+不作为本版红线：售后工单、供应商结算/提现、在线支付、多活部署。相关代码不得伪造“已完成”状态，前端不得展示可点击占位入口。
 
 ### 12.2 功能与一致性
 
@@ -332,6 +335,11 @@ API/SDK：
 - [ ] 同幂等键重放保持相同业务结果；不同请求指纹返回 409。
 - [ ] API Key 创建、列表、详情均允许 owner 查看明文；普通日志不得出现 Key、Token、RT、密码或正文。
 - [ ] Microsoft 验证完成全量 Inbox/Junk 扫描；旧项目关系按 `(resource_id, project_id)` 幂等写入，匹配失败不改变资源健康，后续分配排除同项目资源。
+- [ ] Microsoft 显式别名 dispatcher 无条件持续运行，为全部 `status=normal` 的公开和私有资源创建；`forSale` 切换不得暂停 schedule、取消 attempt 或阻止远端请求，非 `normal` 状态仍须在领取和远端调用前被拦截；按 Asia/Shanghai 自然周最多 2 个、自然年最多 10 个，运行中与结果不确定的候选预占额度，确认失败后释放，次年自动恢复。
+- [ ] 每条 `explicit_aliases.owner_user_id` 必须是成功事务中按 `users.id ASC` 确定并共享锁定的第一个 `role=super_admin`；不得继承主资源供应商 owner，不得为空，也不得降级给普通 admin。历史记录迁移和重复 alias 再确认都必须收敛到该 owner；系统没有 `super_admin` 时成功落库整体回滚。
+- [ ] 交易走同步请求路径即时成交；接码拉取额外获得 32-worker 专用实时池，长任务占满共享池时也保证有 worker 可用。
+- [ ] 异步执行分为 32-worker 接码实时池、64-worker 邮件交付/default 前台池和 32-worker 验证/显式别名后台池；后台两队列都有积压时按 3:1 调度，单队列可借满空闲容量。
+- [ ] 验证/显式别名 dispatch outstanding 水位按 idle/moderate/busy/critical 动态限制为 64/16/2/0；任务真正领取 durable job 或发起外部请求前还须经过全实例共享的 execution admission，执行上限为 32/8/2/0，繁忙时已经进入 Redis 的任务也必须让路。
 
 ### 12.3 数据保留
 
@@ -352,6 +360,7 @@ API/SDK：
 - [ ] NotifyMatchedCode 首次失败后由 delivery head 补偿推进。
 - [ ] Fetch 仍按 email_resource_id 单飞；Redis/worker 重启后 durable job 可重派。
 - [ ] 重复验证不会重复创建旧项目关系；历史项目资源在候选查询与行锁重校验两处均被排除。
+- [ ] 显式别名远端响应丢失、落库失败或 worker 过期后只对账并重试同一候选；旧 fencing token 不得覆盖新 worker，周/年额度不得超限。
 
 ### 12.5 SQL 与性能
 

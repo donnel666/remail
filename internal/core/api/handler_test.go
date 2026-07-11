@@ -1181,7 +1181,7 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
-func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource) error) ([]uint, error) {
+func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource, []uint) error) ([]uint, error) {
 	item := r.imports[id]
 	if item == nil {
 		return nil, coredomain.ErrResourceNotFound
@@ -1192,16 +1192,6 @@ func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Co
 	if err := r.resources.createMicrosoftBatch(ctx, resources, ms); err != nil {
 		return nil, err
 	}
-	if afterCreate != nil {
-		if err := afterCreate(ctx, ms); err != nil {
-			return nil, err
-		}
-	}
-	item.Status = coredomain.ResourceImportImported
-	item.ImportedCount = len(ms)
-	item.FailureObjectKey = failureObjectKey
-	item.LastSafeError = safeSummary
-	item.UpdatedAt = time.Now()
 	ids := make([]uint, 0, len(ms))
 	for _, row := range r.resources.microsoft {
 		for _, imported := range ms {
@@ -1212,6 +1202,16 @@ func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Co
 		}
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	if afterCreate != nil {
+		if err := afterCreate(ctx, ms, ids); err != nil {
+			return nil, err
+		}
+	}
+	item.Status = coredomain.ResourceImportImported
+	item.ImportedCount = len(ms)
+	item.FailureObjectKey = failureObjectKey
+	item.LastSafeError = safeSummary
+	item.UpdatedAt = time.Now()
 	return ids, nil
 }
 
@@ -1372,6 +1372,14 @@ func (r *mockValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUserID
 	return result, nil
 }
 
+func (r *mockValidationRepo) ResumeValidationBatches(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (r *mockValidationRepo) CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
+	return r.CreateBatchWithLog(ctx, ownerUserID, selection, log, requestID, path)
+}
+
 func (r *mockValidationRepo) validationCandidateIDs(ownerUserID uint, selection coreapp.ResourceBulkSelection) ([]uint, error) {
 	switch selection.Mode {
 	case coreapp.ResourceBulkSelectionIDs:
@@ -1485,7 +1493,7 @@ func (r *mockValidationRepo) FindByID(_ context.Context, id uint) (*coredomain.R
 	return nil, nil
 }
 
-func (r *mockValidationRepo) ClaimDispatchable(_ context.Context, _ int, _ time.Time) ([]coredomain.ResourceValidation, error) {
+func (r *mockValidationRepo) ClaimDispatchable(_ context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]coredomain.ResourceValidation, error) {
 	var jobs []coredomain.ResourceValidation
 	for _, job := range r.jobs {
 		if coredomain.IsTerminalValidationStatus(job.Status) {
@@ -1494,29 +1502,57 @@ func (r *mockValidationRepo) ClaimDispatchable(_ context.Context, _ int, _ time.
 		if job.Attempts >= job.MaxAttempts {
 			continue
 		}
+		if job.Status == coredomain.ResourceValidationRunning && !job.UpdatedAt.Before(runningStaleBefore) {
+			continue
+		}
+		if job.DispatchToken != "" && job.DispatchedAt != nil && !job.DispatchedAt.Before(queuedDispatchStaleBefore) {
+			continue
+		}
+		now := time.Now()
+		job.DispatchToken = fmt.Sprintf("dispatch-%d-%d", job.ID, now.UnixNano())
+		job.DispatchedAt = &now
 		jobs = append(jobs, *job)
+		if limit > 0 && len(jobs) >= limit {
+			break
+		}
 	}
 	return jobs, nil
 }
 
-func (r *mockValidationRepo) MarkRunning(_ context.Context, id uint) (bool, error) {
+func (r *mockValidationRepo) MarkRunning(_ context.Context, id uint, dispatchToken string) (string, bool, error) {
 	job := r.jobs[id]
 	if job == nil || coredomain.IsTerminalValidationStatus(job.Status) {
-		return false, nil
+		return "", false, nil
+	}
+	if dispatchToken == "" || job.DispatchToken != dispatchToken {
+		return "", false, nil
 	}
 	if job.Attempts >= job.MaxAttempts {
-		return false, nil
+		return "", false, nil
 	}
+	job.ClaimToken = fmt.Sprintf("claim-%d-%d", id, time.Now().UnixNano())
+	job.DispatchToken = ""
+	job.DispatchedAt = nil
 	job.Status = coredomain.ResourceValidationRunning
 	job.UpdatedAt = time.Now()
-	return true, nil
+	return job.ClaimToken, true, nil
 }
 
-func (r *mockValidationRepo) MarkFailed(_ context.Context, id uint, safeError string) error {
+func (r *mockValidationRepo) ReleaseDispatch(_ context.Context, id uint, dispatchToken string) error {
 	job := r.jobs[id]
-	if job == nil {
+	if job != nil && job.DispatchToken == dispatchToken {
+		job.DispatchToken = ""
+		job.DispatchedAt = nil
+	}
+	return nil
+}
+
+func (r *mockValidationRepo) MarkFailed(_ context.Context, id uint, claimToken string, safeError string) error {
+	job := r.jobs[id]
+	if job == nil || job.ClaimToken != claimToken {
 		return coredomain.ErrResourceNotFound
 	}
+	job.ClaimToken = ""
 	job.Status = coredomain.ResourceValidationFailed
 	job.LastSafeError = safeError
 	now := time.Now()
@@ -1525,11 +1561,12 @@ func (r *mockValidationRepo) MarkFailed(_ context.Context, id uint, safeError st
 	return nil
 }
 
-func (r *mockValidationRepo) MarkRetryableFailure(_ context.Context, id uint, safeError string) (bool, error) {
+func (r *mockValidationRepo) MarkRetryableFailure(_ context.Context, id uint, claimToken string, safeError string) (bool, error) {
 	job := r.jobs[id]
-	if job == nil {
+	if job == nil || job.ClaimToken != claimToken {
 		return false, coredomain.ErrResourceNotFound
 	}
+	job.ClaimToken = ""
 	job.Attempts++
 	if job.MaxAttempts <= 0 {
 		job.MaxAttempts = coredomain.ResourceValidationDefaultMaxAttempts
@@ -1547,11 +1584,30 @@ func (r *mockValidationRepo) MarkRetryableFailure(_ context.Context, id uint, sa
 	return false, nil
 }
 
-func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint, resourceID uint, result coreapp.MicrosoftValidationResult, _ *governancedomain.SystemLog) error {
+func (r *mockValidationRepo) SaveMicrosoftCredentials(_ context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
 	job := r.jobs[jobID]
-	if job == nil {
+	if job == nil || job.ClaimToken != claimToken {
+		return coredomain.ErrInvalidResourceStatus
+	}
+	if r.resources != nil {
+		if ms := r.resources.microsoft[resourceID]; ms != nil {
+			if strings.TrimSpace(clientID) != "" {
+				ms.ClientID = strings.TrimSpace(clientID)
+			}
+			if strings.TrimSpace(refreshToken) != "" {
+				ms.RefreshToken = strings.TrimSpace(refreshToken)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult, _ *governancedomain.SystemLog) error {
+	job := r.jobs[jobID]
+	if job == nil || job.ClaimToken != claimToken {
 		return coredomain.ErrResourceNotFound
 	}
+	job.ClaimToken = ""
 	if r.resources != nil {
 		ms := r.resources.microsoft[resourceID]
 		if ms == nil {
@@ -1601,11 +1657,12 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint,
 	return nil
 }
 
-func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, jobID uint, resourceID uint, result coreapp.DomainValidationResult, _ *governancedomain.SystemLog) error {
+func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.DomainValidationResult, _ *governancedomain.SystemLog) error {
 	job := r.jobs[jobID]
-	if job == nil {
+	if job == nil || job.ClaimToken != claimToken {
 		return coredomain.ErrResourceNotFound
 	}
+	job.ClaimToken = ""
 	if r.resources != nil {
 		dr := r.resources.domains[resourceID]
 		if dr == nil {
@@ -1645,21 +1702,41 @@ func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, jobID uint, re
 	return nil
 }
 
-func (r *mockValidationRepo) MarkDispatchFailed(_ context.Context, id uint, safeError string) error {
+func (r *mockValidationRepo) MarkDispatchFailed(_ context.Context, id uint, dispatchToken string, safeError string) error {
 	job := r.jobs[id]
-	if job != nil {
+	if job != nil && job.DispatchToken == dispatchToken {
+		job.DispatchToken = ""
+		job.DispatchedAt = nil
 		job.LastSafeError = safeError
-		job.UpdatedAt = time.Now()
 	}
 	return nil
+}
+
+func mockValidationTask(repo *mockValidationRepo, jobID uint) coreapp.ResourceValidationTask {
+	job := repo.jobs[jobID]
+	if job == nil {
+		return coreapp.ResourceValidationTask{JobID: jobID}
+	}
+	now := time.Now()
+	job.DispatchToken = fmt.Sprintf("dispatch-%d-%d", jobID, now.UnixNano())
+	job.DispatchedAt = &now
+	return coreapp.ResourceValidationTask{
+		JobID:         jobID,
+		DispatchToken: job.DispatchToken,
+		RequestID:     job.RequestID,
+	}
 }
 
 type mockValidationQueue struct {
 	tasks       []coreapp.ResourceValidationTask
 	dispatchers int
+	enqueueErr  error
 }
 
 func (q *mockValidationQueue) EnqueueResourceValidation(_ context.Context, task coreapp.ResourceValidationTask) error {
+	if q.enqueueErr != nil {
+		return q.enqueueErr
+	}
 	q.tasks = append(q.tasks, task)
 	return nil
 }
@@ -2242,6 +2319,46 @@ func TestCoreHandler_ValidateBatchQueuesAsyncJobs(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "secret")
 }
 
+func TestCoreHandler_ValidateBatchRejectsTooManyExplicitIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, _, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+	ids := make([]uint, coreapp.ResourceValidationMaxExplicitIDs+1)
+	for i := range ids {
+		ids[i] = uint(i + 1)
+	}
+	body, err := json.Marshal(ValidateResourcesRequest{Selection: ResourceBulkSelectionRequest{
+		Mode:        "ids",
+		ResourceIDs: ids,
+	}})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/resources/validations", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.PostResourceValidations(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "selection.resourceIds")
+}
+
+func TestResourceValidationUseCase_CreateBatchRejectsTooManyExplicitIDs(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{})
+
+	_, err := uc.CreateBatch(context.Background(), coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: make([]uint, coreapp.ResourceValidationMaxExplicitIDs+1),
+	}, 1, "req-too-large", "/v1/resources/validations")
+
+	require.ErrorIs(t, err, coredomain.ErrResourceSelectionTooLarge)
+}
+
 func TestQueueMicrosoftImportValidationsQueuesBatch(t *testing.T) {
 	mod, resourceRepo, _, _, _, _, _ := setupCoreTestModuleWithImportMocks()
 
@@ -2284,7 +2401,8 @@ func TestResourceValidationUseCase_CreateMovesAbnormalMicrosoftBackToPending(t *
 	require.Equal(t, coredomain.ResourceValidationQueued, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
 	require.Empty(t, resourceRepo.microsoft[root.ID].LastSafeError)
-	require.Len(t, validationQueue.tasks, 1)
+	require.Empty(t, validationQueue.tasks)
+	require.Equal(t, 1, validationQueue.dispatchers)
 }
 
 func TestResourceValidationUseCase_CreateReusesActiveValidationJob(t *testing.T) {
@@ -2303,8 +2421,70 @@ func TestResourceValidationUseCase_CreateReusesActiveValidationJob(t *testing.T)
 	require.NoError(t, err)
 
 	require.Equal(t, first.ValidationID, second.ValidationID)
-	require.Len(t, validationQueue.tasks, 1)
+	require.Empty(t, validationQueue.tasks)
+	require.Equal(t, 1, validationQueue.dispatchers)
 	require.Len(t, validationRepo.jobs, 1)
+}
+
+func TestResourceValidationUseCase_DispatchTokenFencesAndReleasesQueuedTask(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationQueue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{Valid: true},
+	})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "dispatch-fence@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-dispatch-fence", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	result, err := uc.DispatchPending(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Queued)
+	require.Len(t, validationQueue.tasks, 1)
+	firstTask := validationQueue.tasks[0]
+	require.NotEmpty(t, firstTask.DispatchToken)
+
+	result, err = uc.DispatchPending(context.Background(), 1)
+	require.NoError(t, err)
+	require.Zero(t, result.Attempted)
+
+	require.NoError(t, uc.ReleaseDispatch(context.Background(), firstTask))
+	require.Empty(t, validationRepo.jobs[job.ValidationID].DispatchToken)
+	result, err = uc.DispatchPending(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Queued)
+	require.Len(t, validationQueue.tasks, 2)
+	secondTask := validationQueue.tasks[1]
+	require.NotEqual(t, firstTask.DispatchToken, secondTask.DispatchToken)
+
+	// The released payload is stale and cannot start the newly dispatched job.
+	require.NoError(t, uc.Process(context.Background(), firstTask))
+	require.Equal(t, coredomain.ResourceValidationQueued, validationRepo.jobs[job.ValidationID].Status)
+	require.NoError(t, uc.Process(context.Background(), secondTask))
+	require.Equal(t, coredomain.ResourceValidationSucceeded, validationRepo.jobs[job.ValidationID].Status)
+}
+
+func TestResourceValidationUseCase_DispatchFailureReleasesTokenAndReturnsError(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationQueue := &mockValidationQueue{enqueueErr: errors.New("redis unavailable")}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "dispatch-failure@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-dispatch-failure", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	result, err := uc.DispatchPending(context.Background(), 1)
+	require.Error(t, err)
+	require.Equal(t, 1, result.Attempted)
+	require.Equal(t, 1, result.Failed)
+	require.Empty(t, validationRepo.jobs[job.ValidationID].DispatchToken)
+	require.Contains(t, validationRepo.jobs[job.ValidationID].LastSafeError, "queue is unavailable")
 }
 
 func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *testing.T) {
@@ -2326,9 +2506,9 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-ms-ok", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
-	require.Len(t, validationQueue.tasks, 1)
+	require.Equal(t, 1, validationQueue.dispatchers)
 
-	err = uc.Process(context.Background(), validationQueue.tasks[0])
+	err = uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID))
 	require.NoError(t, err)
 
 	require.Equal(t, coredomain.ResourceValidationSucceeded, validationRepo.jobs[job.ValidationID].Status)
@@ -2353,10 +2533,11 @@ func TestResourceValidationUseCase_ProcessMicrosoftTemporaryFailureKeepsResource
 
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-ms-temp", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
-	err = uc.Process(context.Background(), validationQueue.tasks[0])
+	err = uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID))
 
-	require.ErrorIs(t, err, coreapp.ErrValidationTemporaryUnavailable)
+	require.NoError(t, err)
 	require.Equal(t, coredomain.ResourceValidationQueued, validationRepo.jobs[job.ValidationID].Status)
+	require.Equal(t, 2, validationQueue.dispatchers, "durable retry should wake the dispatcher instead of retrying the stale Asynq payload")
 	require.Equal(t, "Microsoft mail service is temporarily unavailable.", validationRepo.jobs[job.ValidationID].LastSafeError)
 	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
 	require.Empty(t, resourceRepo.microsoft[root.ID].LastSafeError)
@@ -2380,9 +2561,9 @@ func TestResourceValidationUseCase_ProcessMicrosoftAuthTimeoutRetriesWithoutChan
 
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-ms-auth-timeout", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
-	err = uc.Process(context.Background(), validationQueue.tasks[0])
+	err = uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID))
 
-	require.ErrorIs(t, err, coreapp.ErrValidationTemporaryUnavailable)
+	require.NoError(t, err)
 	require.Equal(t, coredomain.ResourceValidationQueued, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, "Microsoft authorization timed out.", validationRepo.jobs[job.ValidationID].LastSafeError)
 	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
@@ -2404,9 +2585,9 @@ func TestResourceValidationUseCase_ProcessMicrosoftTemporaryFailureExhaustsJobWi
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-ms-temp-exhaust", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
 
-	require.ErrorIs(t, uc.Process(context.Background(), validationQueue.tasks[0]), coreapp.ErrValidationTemporaryUnavailable)
-	require.ErrorIs(t, uc.Process(context.Background(), validationQueue.tasks[0]), coreapp.ErrValidationTemporaryUnavailable)
-	require.NoError(t, uc.Process(context.Background(), validationQueue.tasks[0]))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
 
 	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, coredomain.ResourceValidationDefaultMaxAttempts, validationRepo.jobs[job.ValidationID].Attempts)
@@ -2433,7 +2614,7 @@ func TestResourceValidationUseCase_ProcessMicrosoftFailureWritesSafeDiagnostic(t
 
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-ms-fail", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
-	require.NoError(t, uc.Process(context.Background(), validationQueue.tasks[0]))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
 
 	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
@@ -2459,7 +2640,7 @@ func TestResourceValidationUseCase_ProcessDomainFailureWritesSafeDiagnostic(t *t
 
 	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-domain-fail", "/v1/resources/:resourceId/validate")
 	require.NoError(t, err)
-	require.NoError(t, uc.Process(context.Background(), validationQueue.tasks[0]))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
 
 	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, coredomain.DomainStatusAbnormal, resourceRepo.domains[root.ID].Status)
@@ -2480,7 +2661,7 @@ func TestResourceValidationUseCase_ProcessDeletedResourceMarksValidationFailed(t
 	require.NoError(t, err)
 	resourceRepo.microsoft[root.ID].Status = coredomain.MicrosoftStatusDeleted
 
-	require.NoError(t, uc.Process(context.Background(), validationQueue.tasks[0]))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
 
 	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
 	require.Equal(t, "Resource not found.", validationRepo.jobs[job.ValidationID].LastSafeError)

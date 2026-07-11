@@ -16,18 +16,19 @@ import (
 )
 
 const (
-	benchUserID      = int64(900_000_001)
-	benchProjectID   = int64(900_000_001)
-	benchProductID   = int64(900_000_001)
-	benchDebitID     = int64(900_000_001)
-	resourceIDBase   = int64(1_000_000_000)
-	aliasIDBase      = int64(2_000_000_000)
-	allocationIDBase = int64(3_000_000_000)
-	orderIDBase      = int64(4_000_000_000)
-	eventIDBase      = int64(5_000_000_000)
-	messageIDBase    = int64(6_000_000_000)
-	walletTxIDBase   = int64(7_000_000_000)
-	tokenIDBase      = int64(8_000_000_000)
+	benchSuperAdminID = int64(900_000_000)
+	benchUserID       = int64(900_000_001)
+	benchProjectID    = int64(900_000_001)
+	benchProductID    = int64(900_000_001)
+	benchDebitID      = int64(900_000_001)
+	resourceIDBase    = int64(1_000_000_000)
+	aliasIDBase       = int64(2_000_000_000)
+	allocationIDBase  = int64(3_000_000_000)
+	orderIDBase       = int64(4_000_000_000)
+	eventIDBase       = int64(5_000_000_000)
+	messageIDBase     = int64(6_000_000_000)
+	walletTxIDBase    = int64(7_000_000_000)
+	tokenIDBase       = int64(8_000_000_000)
 )
 
 func main() {
@@ -63,6 +64,7 @@ func main() {
 		must(seedFoundation(ctx, db))
 		must(seedResources(ctx, db, *count, *batchSize))
 	case "aliases":
+		must(seedFoundation(ctx, db))
 		must(seedAliases(ctx, db, *count, *resources, *batchSize))
 	case "orders":
 		must(seedFoundation(ctx, db))
@@ -77,8 +79,9 @@ func main() {
 
 func seedFoundation(ctx context.Context, db *sql.DB) error {
 	statements := []string{
-		`INSERT IGNORE INTO users(id,email,password_hash,nickname,enabled,role)
-		 VALUES (900000001,'bench@remail.local','bench','bench',TRUE,'supplier')`,
+		`INSERT IGNORE INTO users(id,email,password_hash,nickname,enabled,role) VALUES
+			 (900000000,'bench-super-admin@remail.local','bench','bench-super-admin',TRUE,'super_admin'),
+			 (900000001,'bench@remail.local','bench','bench',TRUE,'supplier')`,
 		`INSERT IGNORE INTO projects(id,name,target_platform,status,access_type,loose_match)
 		 VALUES (900000001,'Benchmark Project','benchmark','listed','public',TRUE)`,
 		`INSERT IGNORE INTO project_products(
@@ -140,10 +143,10 @@ func seedAliases(ctx context.Context, db *sql.DB, count, resources int64, batchS
 			return err
 		}
 		err = insertRows(ctx, tx,
-			"INSERT IGNORE INTO explicit_aliases(id,resource_id,email,status) VALUES ",
+			"INSERT IGNORE INTO explicit_aliases(id,resource_id,owner_user_id,email,status) VALUES ",
 			start, end, func(i int64) (string, []any) {
 				resourceID := resourceIDBase + i%resources
-				return "(?,?,?,'normal')", []any{aliasIDBase + i, resourceID, fmt.Sprintf("alias-%d@bench.local", i)}
+				return "(?,?,?,?,'normal')", []any{aliasIDBase + i, resourceID, benchSuperAdminID, fmt.Sprintf("alias-%d@bench.local", i)}
 			})
 		if err != nil {
 			_ = tx.Rollback()

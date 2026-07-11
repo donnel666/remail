@@ -55,6 +55,13 @@ func TestSmallBenchmarkProfiles(t *testing.T) {
 		require.NoError(t, gormDB.Table(table).Count(&count).Error)
 		require.Equal(t, expected, count, table)
 	}
+	var nonSuperAdminOwnedAliases int64
+	require.NoError(t, gormDB.Raw(`
+SELECT COUNT(*)
+FROM explicit_aliases AS alias_row
+JOIN users AS owner ON owner.id = alias_row.owner_user_id
+WHERE owner.role <> 'super_admin'`).Scan(&nonSuperAdminOwnedAliases).Error)
+	require.Zero(t, nonSuperAdminOwnedAliases)
 }
 
 func TestMigrationsReset(t *testing.T) {

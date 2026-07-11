@@ -42,6 +42,13 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 	// Global middleware
 	r.Use(gin.Recovery())
+	if p.BackgroundLoad != nil {
+		r.Use(func(c *gin.Context) {
+			done := p.BackgroundLoad.BeginForegroundRequest()
+			defer done()
+			c.Next()
+		})
+	}
 	r.Use(middleware.RequestID())
 	r.Use(platform.HTTPMetricsMiddleware())
 	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
@@ -59,6 +66,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
 	var mailMod *mailapi.MailTransportModule
+	var coreMod *coreapi.CoreModule
 	v1 := r.Group("/v1")
 	{
 		// IAM module (activation, auth, users)
@@ -105,6 +113,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		mailMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
 		mailapi.RegisterMailTransportTaskHandlers(taskMux, mailMod)
 
 		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailMod.DeliveryUseCase)
@@ -114,15 +123,17 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 
 		// Core module (resources, mail servers, domains)
-		coreMod, err := coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq, mailMod.ValidationUseCase, mailMod.BindingRecorder)
+		coreMod, err = coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq, mailMod.ValidationUseCase, mailMod.BindingRecorder)
 		if err != nil {
 			return nil, cleanup, err
 		}
+		coreMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
+		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
@@ -157,9 +168,23 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)
 		proxyapi.RegisterProxyRoutes(v1, proxyMod, iamSessionFetcher, iamMod.PermissionChecker)
 	}
-	if err := p.AsynqServer.Start(taskMux); err != nil {
+	if err := p.RealtimeAsynqServer.Start(taskMux); err != nil {
 		cleanup(context.Background())
 		return nil, cleanup, err
+	}
+	if err := p.AsynqServer.Start(taskMux); err != nil {
+		p.ShutdownWorkers()
+		cleanup(context.Background())
+		return nil, cleanup, err
+	}
+	if err := p.BackgroundAsynqServer.Start(taskMux); err != nil {
+		p.ShutdownWorkers()
+		cleanup(context.Background())
+		return nil, cleanup, err
+	}
+	p.MarkWorkersReady()
+	if coreMod != nil {
+		cleanupFuncs = append(cleanupFuncs, coreapi.StartResourceValidationDispatcher(context.Background(), coreMod))
 	}
 	if mailMod != nil {
 		cleanupFuncs = append(cleanupFuncs, mailMod.Start(context.Background()))

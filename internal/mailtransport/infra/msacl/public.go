@@ -67,6 +67,8 @@ func mapAuthError(err error, proxyFailure bool) Result {
 		return aclFailure("locked", "Microsoft account is locked.", false)
 	case AuthStatusAccountAbnormal:
 		return aclFailure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
+	case AuthStatusRateLimited:
+		return aclFailure("request", "Microsoft authorization is temporarily rate limited.", false)
 	case AuthStatusAlreadyBound:
 		result := aclFailure("already_bound", "Microsoft account is already bound to another recovery mailbox.", false)
 		result.BindingAddress = boundMailbox

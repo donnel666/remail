@@ -16,14 +16,18 @@ import (
 type ResourceValidationRepository interface {
 	CreateWithLog(ctx context.Context, job *domain.ResourceValidation, log *governancedomain.OperationLog) (bool, error)
 	CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
+	CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
 	FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error)
-	ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.ResourceValidation, error)
-	MarkRunning(ctx context.Context, id uint) (bool, error)
-	MarkFailed(ctx context.Context, id uint, safeError string) error
-	MarkRetryableFailure(ctx context.Context, id uint, safeError string) (bool, error)
-	ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
-	ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
-	MarkDispatchFailed(ctx context.Context, id uint, safeError string) error
+	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]domain.ResourceValidation, error)
+	ResumeValidationBatches(ctx context.Context, candidateLimit int) (int, error)
+	MarkRunning(ctx context.Context, id uint, dispatchToken string) (claimToken string, claimed bool, err error)
+	ReleaseDispatch(ctx context.Context, id uint, dispatchToken string) error
+	MarkFailed(ctx context.Context, id uint, claimToken string, safeError string) error
+	MarkRetryableFailure(ctx context.Context, id uint, claimToken string, safeError string) (bool, error)
+	SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error
+	ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
+	ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
+	MarkDispatchFailed(ctx context.Context, id uint, dispatchToken string, safeError string) error
 }
 
 // ResourceValidationQueue enqueues asynchronous resource validation work.
@@ -72,8 +76,9 @@ type DomainValidationResult struct {
 }
 
 type ResourceValidationTask struct {
-	JobID     uint   `json:"jobId"`
-	RequestID string `json:"requestId"`
+	JobID         uint   `json:"jobId"`
+	DispatchToken string `json:"dispatchToken"`
+	RequestID     string `json:"requestId"`
 }
 
 type DispatchResourceValidationJobsResult struct {
@@ -83,8 +88,10 @@ type DispatchResourceValidationJobsResult struct {
 }
 
 // ResourceBatchValidationResult reports a bulk validation submission.
-// Queued means accepted for validation; active jobs are reused instead of
-// creating duplicate validation facts.
+// For an explicit-ID selection, Requested and Queued count IDs durably
+// accepted into the deferred batch; they do not imply that child jobs were
+// expanded before the HTTP response. Filter counts remain unknown (zero) until
+// the dispatcher expands the batch. Created is an internal expansion count.
 type ResourceBatchValidationResult struct {
 	Requested int
 	Queued    int
@@ -108,6 +115,13 @@ type ResourceValidationUseCase struct {
 	validator   ResourceValidationPort
 	now         func() time.Time
 }
+
+const ResourceValidationMaxExplicitIDs = 10_000
+
+const (
+	resourceValidationRunningStaleAfter = 20 * time.Minute
+	resourceValidationQueuedLease       = time.Hour
+)
 
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
 
@@ -187,10 +201,7 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 		return validationView(job), nil
 	}
 
-	if err := uc.queue.EnqueueResourceValidation(ctx, ResourceValidationTask{JobID: job.ID, RequestID: requestID}); err != nil {
-		job.LastSafeError = "Resource validation queue is unavailable; dispatcher will retry."
-		_ = uc.validations.MarkDispatchFailed(ctx, job.ID, job.LastSafeError)
-	}
+	uc.ScheduleDispatcher(ctx, 0)
 
 	return validationView(job), nil
 }
@@ -198,6 +209,9 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchValidationResult, error) {
 	switch selection.Mode {
 	case ResourceBulkSelectionIDs:
+		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDs {
+			return nil, domain.ErrResourceSelectionTooLarge
+		}
 		ids := uniqueResourceIDs(selection.ResourceIDs)
 		if len(ids) == 0 {
 			return nil, domain.ErrResourceNotFound
@@ -233,6 +247,44 @@ func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection 
 	return result, nil
 }
 
+func (uc *ResourceValidationUseCase) CreateDeferredBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchValidationResult, error) {
+	switch selection.Mode {
+	case ResourceBulkSelectionIDs:
+		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDs {
+			return nil, domain.ErrResourceSelectionTooLarge
+		}
+		ids := uniqueResourceIDs(selection.ResourceIDs)
+		if len(ids) == 0 {
+			return nil, domain.ErrResourceNotFound
+		}
+		selection.ResourceIDs = ids
+	case ResourceBulkSelectionFilter:
+		filter, err := normalizeResourceBulkFilter(selection.Filter)
+		if err != nil {
+			return nil, err
+		}
+		selection.Filter = filter
+	default:
+		return nil, domain.ErrInvalidResourceType
+	}
+	log := &governancedomain.OperationLog{
+		OperatorUserID: userID,
+		OperationType:  "core.resource.validate_batch",
+		ResourceType:   "resource",
+		ResourceID:     "batch",
+		Path:           path,
+		Result:         "success",
+		SafeSummary:    "Resource validation batch accepted.",
+		RequestID:      requestID,
+	}
+	result, err := uc.validations.CreateDeferredBatchWithLog(ctx, userID, selection, log, requestID, path)
+	if err != nil {
+		return nil, err
+	}
+	uc.ScheduleDispatcher(ctx, 0)
+	return result, nil
+}
+
 func (uc *ResourceValidationUseCase) Get(ctx context.Context, validationID uint, userID uint, isAdmin bool) (*ValidationResultView, error) {
 	job, err := uc.validations.FindByID(ctx, validationID)
 	if err != nil {
@@ -251,6 +303,11 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 	if task.JobID == 0 {
 		return domain.ErrResourceNotFound
 	}
+	if strings.TrimSpace(task.DispatchToken) == "" {
+		// Payloads queued before durable dispatch fencing was introduced are
+		// harmless no-ops. The dispatcher will create a fresh fenced task.
+		return nil
+	}
 	job, err := uc.validations.FindByID(ctx, task.JobID)
 	if err != nil {
 		return err
@@ -262,43 +319,111 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 		return nil
 	}
 
-	claimed, err := uc.validations.MarkRunning(ctx, task.JobID)
+	claimToken, claimed, err := uc.validations.MarkRunning(ctx, task.JobID, task.DispatchToken)
 	if err != nil {
 		return err
 	}
 	if !claimed {
 		return nil
 	}
+	job.ClaimToken = claimToken
 
+	var processErr error
 	switch job.ResourceType {
 	case domain.ResourceTypeMicrosoft:
-		return uc.processMicrosoft(ctx, job)
+		processErr = uc.processMicrosoft(ctx, job)
 	case domain.ResourceTypeDomain:
-		return uc.processDomain(ctx, job)
+		processErr = uc.processDomain(ctx, job)
 	default:
-		return domain.ErrInvalidResourceType
+		processErr = domain.ErrInvalidResourceType
 	}
+	if processErr == nil {
+		return nil
+	}
+	if errors.Is(processErr, ErrValidationTemporaryUnavailable) {
+		uc.ScheduleDispatcher(ctx, time.Second)
+		// The durable job has already returned to queued with its attempt count
+		// updated. Retrying this Asynq payload would carry a consumed dispatch
+		// token and can only be a no-op; the dispatcher owns the next generation.
+		return nil
+	}
+
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, recoveryErr := uc.validations.MarkRetryableFailure(
+		recoveryCtx,
+		job.ID,
+		job.ClaimToken,
+		"Resource validation processing failed temporarily.",
+	); recoveryErr == nil || errors.Is(recoveryErr, domain.ErrInvalidResourceStatus) {
+		return nil
+	}
+	return processErr
 }
 
 func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceValidationJobsResult, error) {
+	if uc == nil || uc.validations == nil || uc.queue == nil {
+		return nil, ErrValidationTemporaryUnavailable
+	}
 	if limit <= 0 {
 		limit = 100
 	}
-	jobs, err := uc.validations.ClaimDispatchable(ctx, limit, uc.now().Add(-10*time.Minute))
+	now := uc.now()
+	jobs, err := uc.validations.ClaimDispatchable(
+		ctx,
+		limit,
+		now.Add(-resourceValidationRunningStaleAfter),
+		now.Add(-resourceValidationQueuedLease),
+	)
 	if err != nil {
 		return nil, err
 	}
+	var dispatchErrors []error
+	if remaining := limit - len(jobs); remaining > 0 {
+		if _, err := uc.validations.ResumeValidationBatches(ctx, remaining); err != nil {
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("expand resource validation batches: %w", err))
+		} else {
+			expandedJobs, err := uc.validations.ClaimDispatchable(
+				ctx,
+				remaining,
+				now.Add(-resourceValidationRunningStaleAfter),
+				now.Add(-resourceValidationQueuedLease),
+			)
+			if err != nil {
+				dispatchErrors = append(dispatchErrors, fmt.Errorf("claim expanded resource validations: %w", err))
+			} else {
+				jobs = append(jobs, expandedJobs...)
+			}
+		}
+	}
 	result := &DispatchResourceValidationJobsResult{Attempted: len(jobs)}
 	for _, job := range jobs {
-		err := uc.queue.EnqueueResourceValidation(ctx, ResourceValidationTask{JobID: job.ID, RequestID: job.RequestID})
+		err := uc.queue.EnqueueResourceValidation(ctx, ResourceValidationTask{
+			JobID:         job.ID,
+			DispatchToken: job.DispatchToken,
+			RequestID:     job.RequestID,
+		})
 		if err != nil {
 			result.Failed++
-			_ = uc.validations.MarkDispatchFailed(ctx, job.ID, "Resource validation queue is unavailable; dispatcher will retry.")
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue validation job %d: %w", job.ID, err))
+			if releaseErr := uc.validations.MarkDispatchFailed(ctx, job.ID, job.DispatchToken, "Resource validation queue is unavailable; dispatcher will retry."); releaseErr != nil {
+				dispatchErrors = append(dispatchErrors, fmt.Errorf("release validation job %d after enqueue failure: %w", job.ID, releaseErr))
+			}
 			continue
 		}
 		result.Queued++
 	}
-	return result, nil
+	return result, errors.Join(dispatchErrors...)
+}
+
+// ReleaseDispatch returns a fenced task to the durable dispatcher without
+// changing its validation lifecycle. It is used when runtime admission control
+// decides that background work should yield before the job starts.
+func (uc *ResourceValidationUseCase) ReleaseDispatch(ctx context.Context, task ResourceValidationTask) error {
+	if uc == nil || uc.validations == nil || task.JobID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+		return nil
+	}
+	return uc.validations.ReleaseDispatch(ctx, task.JobID, task.DispatchToken)
 }
 
 func (uc *ResourceValidationUseCase) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
@@ -314,14 +439,14 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 		return err
 	}
 	if ms == nil || ms.Status == domain.MicrosoftStatusDeleted {
-		return uc.markValidationFailed(ctx, job.ID, "Resource not found.")
+		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource not found.")
 	}
 	if ms.Status == domain.MicrosoftStatusDisabled {
-		return uc.markValidationFailed(ctx, job.ID, "Resource status does not allow validation.")
+		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource status does not allow validation.")
 	}
 	var result MicrosoftValidationResult
 	if uc.validator == nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, "Microsoft mail service is temporarily unavailable.")
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Microsoft mail service is temporarily unavailable.")
 	}
 	result, err = uc.validator.ValidateMicrosoft(ctx, MicrosoftValidationRequest{
 		ResourceID:   job.ResourceID,
@@ -333,7 +458,7 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 		RequestID:    job.RequestID,
 	})
 	if err != nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, "Microsoft mail service is temporarily unavailable.")
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Microsoft mail service is temporarily unavailable.")
 	}
 	if result.SafeMessage == "" {
 		if result.Valid {
@@ -342,10 +467,23 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 			result.SafeMessage = "Microsoft mail service is temporarily unavailable."
 		}
 	}
-	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		return uc.markValidationRetryableFailure(ctx, job.ID, result.SafeMessage)
+	if !result.Valid && isRetryableValidationCategory(result.Category) &&
+		(strings.TrimSpace(result.ClientID) != "" || strings.TrimSpace(result.RefreshToken) != "") {
+		if err := uc.validations.SaveMicrosoftCredentials(
+			ctx,
+			job.ID,
+			job.ResourceID,
+			job.ClaimToken,
+			result.ClientID,
+			result.RefreshToken,
+		); err != nil {
+			return err
+		}
 	}
-	return uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
+	if isRetryableValidationCategory(result.Category) && !result.Valid {
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
+	}
+	return uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
 }
 
 func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *domain.ResourceValidation) error {
@@ -354,14 +492,14 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *dom
 		return err
 	}
 	if dr == nil || dr.Status == domain.DomainStatusDeleted {
-		return uc.markValidationFailed(ctx, job.ID, "Resource not found.")
+		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource not found.")
 	}
 	if dr.Status == domain.DomainStatusDisabled {
-		return uc.markValidationFailed(ctx, job.ID, "Resource status does not allow validation.")
+		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource status does not allow validation.")
 	}
 	var result DomainValidationResult
 	if uc.validator == nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, "Domain DNS service is temporarily unavailable.")
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Domain DNS service is temporarily unavailable.")
 	}
 	result, err = uc.validator.ValidateDomain(ctx, DomainValidationRequest{
 		ResourceID: job.ResourceID,
@@ -369,7 +507,7 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *dom
 		RequestID:  job.RequestID,
 	})
 	if err != nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, "Domain DNS service is temporarily unavailable.")
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Domain DNS service is temporarily unavailable.")
 	}
 	if result.SafeMessage == "" {
 		if result.Valid {
@@ -379,20 +517,20 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *dom
 		}
 	}
 	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		return uc.markValidationRetryableFailure(ctx, job.ID, result.SafeMessage)
+		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
 	}
-	return uc.validations.ApplyDomainResult(ctx, job.ID, job.ResourceID, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
+	return uc.validations.ApplyDomainResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
 }
 
-func (uc *ResourceValidationUseCase) markValidationFailed(ctx context.Context, jobID uint, safeError string) error {
-	if err := uc.validations.MarkFailed(ctx, jobID, safeError); err != nil {
+func (uc *ResourceValidationUseCase) markValidationFailed(ctx context.Context, jobID uint, claimToken string, safeError string) error {
+	if err := uc.validations.MarkFailed(ctx, jobID, claimToken, safeError); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (uc *ResourceValidationUseCase) markValidationRetryableFailure(ctx context.Context, jobID uint, safeError string) error {
-	exhausted, err := uc.validations.MarkRetryableFailure(ctx, jobID, safeError)
+func (uc *ResourceValidationUseCase) markValidationRetryableFailure(ctx context.Context, jobID uint, claimToken string, safeError string) error {
+	exhausted, err := uc.validations.MarkRetryableFailure(ctx, jobID, claimToken, safeError)
 	if err != nil {
 		return err
 	}
@@ -404,7 +542,7 @@ func (uc *ResourceValidationUseCase) markValidationRetryableFailure(ctx context.
 
 func isRetryableValidationCategory(category string) bool {
 	switch strings.TrimSpace(category) {
-	case "request", "auth_timeout":
+	case "request", "auth_timeout", "code_timeout", "code_error":
 		return true
 	default:
 		return false

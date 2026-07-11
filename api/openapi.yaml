@@ -2840,11 +2840,13 @@ paths:
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
       description: >
-        Creates or reuses durable validation jobs for the selected resources and
-        returns immediately. Microsoft OAuth/Graph checks and domain DNS checks
-        run asynchronously in the backend worker. This endpoint is the batch
-        counterpart of POST /v1/resources/{resourceId}/validate and avoids
-        client-side request loops.
+        Persists the selection as a durable batch and returns immediately; child
+        validation jobs are expanded later under the current background-work
+        budget. Filter batches capture an inclusive resource-ID high-water mark,
+        so resources created after acceptance are excluded. Microsoft OAuth/Graph
+        checks and domain DNS checks run asynchronously in backend workers. This
+        endpoint is the batch counterpart of POST
+        /v1/resources/{resourceId}/validate and avoids client-side request loops.
       requestBody:
         required: true
         content:
@@ -7832,10 +7834,10 @@ components:
       properties:
         requested:
           type: integer
-          description: Number of resources accepted by the selection after ownership and status checks.
+          description: Number of explicit resource IDs durably accepted for deferred expansion. Zero for filter mode because the match count is resolved asynchronously.
         queued:
           type: integer
-          description: Number of resources accepted for asynchronous validation. Existing active jobs are reused.
+          description: Number of explicit resource IDs accepted into the durable validation batch. Child jobs may not exist yet; zero for filter mode until expansion.
       additionalProperties: false
 
     PublishResourcesRequest:
@@ -7888,6 +7890,7 @@ components:
             resourceIds:
               type: array
               minItems: 1
+              maxItems: 10000
               items:
                 type: integer
                 minimum: 1
@@ -7908,6 +7911,7 @@ components:
         resourceIds:
           type: array
           minItems: 1
+          maxItems: 10000
           items:
             type: integer
             minimum: 1

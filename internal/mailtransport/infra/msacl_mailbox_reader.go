@@ -111,6 +111,9 @@ func (r *MSACLMailboxReader) rowsToEmailObjects(ctx context.Context, rows []Inbo
 	for _, row := range rows {
 		stored, err := r.files.ReadPrivate(ctx, row.SourceObjectKey)
 		if err != nil {
+			// Preserve the row identity in mailbox snapshots. If the object
+			// becomes readable later, an old message must not look newly arrived.
+			emails = append(emails, newMSACLInboundEmail(row))
 			continue
 		}
 		email := parseMSACLInboundEmail(row, stored.ContentBytes)
@@ -119,8 +122,8 @@ func (r *MSACLMailboxReader) rowsToEmailObjects(ctx context.Context, rows []Inbo
 	return emails, nil
 }
 
-func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
-	email := msacl.EmailObj{
+func newMSACLInboundEmail(row InboundMailModel) msacl.EmailObj {
+	return msacl.EmailObj{
 		ID:         row.ID,
 		ReceivedAt: row.CreatedAt.UTC().Format(time.RFC3339),
 		To:         row.Recipient,
@@ -130,6 +133,10 @@ func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
 			"status":          row.Status,
 		},
 	}
+}
+
+func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
+	email := newMSACLInboundEmail(row)
 
 	msg, err := stdmail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {

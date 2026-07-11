@@ -63,6 +63,13 @@ func (h *Handler) Readyz(c *gin.Context) {
 		deps["minio"] = "healthy"
 	}
 
+	if !h.platform.WorkersReady() {
+		deps["workers"] = "unhealthy"
+		allHealthy = false
+	} else {
+		deps["workers"] = "healthy"
+	}
+
 	if !allHealthy {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":       "error",

@@ -64,7 +64,7 @@ func (c *MicrosoftOAuthClient) RefreshToken(ctx context.Context, req MicrosoftOA
 
 func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOAuthRequest) (MicrosoftOAuthResult, error) {
 	email := strings.TrimSpace(req.EmailAddress)
-	password := strings.TrimSpace(req.Password)
+	password := req.Password
 	if email == "" || password == "" {
 		return microsoftOAuthFailure("password", "Microsoft account or password is missing.", false), nil
 	}

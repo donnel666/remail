@@ -180,17 +180,35 @@ func postEmptyForm(session *Session, rawURL string, referer ...string) (*HTTPRes
 	if len(referer) > 0 && referer[0] != "" {
 		headers["Referer"] = referer[0]
 	}
-	return requestWithRetryPost(session, rawURL, "空表单提交", "", requestOptions{
+	resp, err := session.Post(rawURL, requestOptions{
 		Data:              map[string]string{},
 		Headers:           headers,
 		AllowRedirects:    true,
 		HasAllowRedirects: true,
 	})
+	if err != nil {
+		return nil, wrapAuthError(fmt.Sprintf("空表单提交请求异常: %s", err), AuthStatusRequestError, err)
+	}
+	return resp, nil
 }
 
 func isInterruptPage(rawURL string) bool {
 	low := strings.ToLower(rawURL)
 	return strings.Contains(low, "account.live.com") && (strings.Contains(low, "/proofs/") || strings.Contains(low, "/interrupt/") || strings.Contains(low, "/identity/") || strings.Contains(low, "/cancel"))
+}
+
+func accountVerificationPageKinds(page, rawURL, action string) (identity, proofs bool) {
+	lowURL := strings.ToLower(rawURL)
+	resolvedAction := action
+	if resolvedAction != "" && resolvedAction != "#" {
+		resolvedAction = resolveURL(rawURL, resolvedAction)
+	}
+	identity = strings.Contains(lowURL, "/identity/") ||
+		(strings.Contains(page, "apiCanary") && strings.Contains(page, "rawProofList"))
+	proofs = strings.Contains(lowURL, "/proofs/") ||
+		strings.Contains(strings.ToLower(resolvedAction), "/proofs/") ||
+		isAddEmailPage(page, resolvedAction)
+	return identity, proofs
 }
 
 func isAccountRecoverURL(rawURL string) bool {
@@ -260,14 +278,13 @@ func alreadyBoundError(display, boundMailbox string) *AuthError {
 
 func handleIdentityPage(session *Session, page, rawURL, proxy, email string, proofData []ProofData, allowExistingProofVerification bool, preferredBindingAddress string) (string, string, string, error) {
 	skipURL := extractSkipURL(page)
-	if skipURL != "" && (strings.Contains(skipURL, "res=success") || strings.Contains(skipURL, "res=cancel")) {
+	if skipURL != "" && strings.Contains(skipURL, "res=success") {
 		resp, err := postEmptyForm(session, skipURL, rawURL)
 		if err != nil {
 			return "", "", "", err
 		}
 		return resp.Body, resp.URL, "", nil
 	}
-
 	otherProof := detectExistingProofInPage(page)
 	if otherProof != "" && !isProjectMailboxAddress(otherProof) {
 		logWarning("identity 页: 已绑定辅助邮箱 %s, 跳过", otherProof)
@@ -286,6 +303,16 @@ func handleIdentityPage(session *Session, page, rawURL, proxy, email string, pro
 			return "", "", "", alreadyBoundError(display, boundMailbox)
 		}
 		return handleOTPVerification(session, page, rawURL, email, proxy, proofData, preferredBindingAddress)
+	}
+	if skipURL != "" && strings.Contains(skipURL, "res=cancel") {
+		if allowExistingProofVerification {
+			return "", "", "", newAuthError("Microsoft identity verification has no usable proof.", AuthStatusVerifyCodeError)
+		}
+		resp, err := postEmptyForm(session, skipURL, rawURL)
+		if err != nil {
+			return "", "", "", err
+		}
+		return resp.Body, resp.URL, "", nil
 	}
 
 	logWarning("identity 页无法处理 (无 proof_data), 页面关键词: %v", pageKeywordSubset(page, []string{"SendOtt", "VerifyCode", "AddProof", "EmailAddress", "iOttText", "验证", "代码", "安全代码"}))
@@ -331,7 +358,10 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 	logInfo("OTP 验证: 已匹配真实邮箱")
 	logDebug("OTP 验证: real_mailbox=%s", realMailbox)
 
-	seenKeys := snapshotMailboxKeys(session.context(), realMailbox, proxy)
+	seenKeys, err := snapshotMailboxKeys(session.context(), realMailbox, proxy)
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("读取验证码邮箱基线失败: %s", err), AuthStatusRequestError, err, realMailbox)
+	}
 	var code string
 	var lastErr error
 	for ottAttempt := 1; ottAttempt <= 3; ottAttempt++ {
@@ -339,11 +369,14 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 			if err := session.sleep(2 * time.Second); err != nil {
 				return "", "", "", wrapAuthError(fmt.Sprintf("OTP 重试取消: %s", err), AuthStatusRequestError, err)
 			}
-			seenKeys = snapshotMailboxKeys(session.context(), realMailbox, proxy)
+			seenKeys, err = snapshotMailboxKeys(session.context(), realMailbox, proxy)
+			if err != nil {
+				return "", "", "", wrapAuthError(fmt.Sprintf("刷新验证码邮箱基线失败: %s", err), AuthStatusRequestError, err, realMailbox)
+			}
 			logInfo("OTP 重试 #%d: 重新发送验证码 (排除旧邮件)", ottAttempt)
 		}
 		watcher := startCodeWatcher(session.context(), realMailbox, proxy, 0, seenKeys)
-		resp, err := requestWithRetryPost(session, "https://account.live.com/API/Proofs/SendOtt", "SendOtt", realMailbox, requestOptions{
+		resp, err := session.Post("https://account.live.com/API/Proofs/SendOtt", requestOptions{
 			JSON: map[string]any{
 				"token":                  token,
 				"purpose":                purpose,
@@ -366,9 +399,12 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 			}),
 		})
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", wrapAuthError(fmt.Sprintf("SendOtt 请求异常: %s", err), AuthStatusRequestError, err, realMailbox)
 		}
 		logInfo("SendOtt 响应: status=%d", resp.StatusCode)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
+		}
 		var result map[string]any
 		if err := resp.JSON(&result); err != nil {
 			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 返回非 JSON (HTTP %d)", resp.StatusCode))
@@ -407,7 +443,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, lastErr), status, realMailbox)
 	}
 
-	resp, err := requestWithRetryPost(session, "https://account.live.com/API/Proofs/VerifyCode", "VerifyCode", realMailbox, requestOptions{
+	resp, err := session.Post("https://account.live.com/API/Proofs/VerifyCode", requestOptions{
 		JSON: map[string]any{
 			"code":         code,
 			"action":       "IptVerify",
@@ -423,18 +459,28 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		}),
 	})
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", wrapAuthError(fmt.Sprintf("VerifyCode 请求异常: %s", err), AuthStatusRequestError, err, realMailbox)
 	}
 	logInfo("OTP 验证码提交响应: status=%d", resp.StatusCode)
 	logDebug("OTP 验证码提交响应 url=%s", resp.URL)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, realMailbox)
+	}
 	var verifyResult map[string]any
 	if err := resp.JSON(&verifyResult); err != nil {
-		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 返回非 JSON (HTTP %d)", resp.StatusCode))
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 返回非 JSON (HTTP %d)", resp.StatusCode), AuthStatusRequestError, realMailbox)
 	}
-	if errMap := asMap(verifyResult["error"]); errMap != nil {
-		logWarning("VerifyCode 失败: code=%s message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"])))
+	if rawError, exists := verifyResult["error"]; exists && rawError != nil {
+		errMap := asMap(rawError)
+		code := asString(rawError)
+		message := ""
+		if errMap != nil {
+			code = asString(errMap["code"])
+			message = firstNonEmpty(asString(errMap["message"]), asString(errMap["description"]))
+		}
+		logWarning("VerifyCode 失败: code=%s message=%s", code, message)
 		logDebug("VerifyCode 失败响应 keys=%v", sortedAnyKeys(verifyResult))
-		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", asString(errMap["code"]), firstNonEmpty(asString(errMap["message"]), asString(errMap["description"]))), AuthStatusVerifyCodeError)
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", code, message), AuthStatusVerifyCodeError, realMailbox)
 	}
 	route := asString(verifyResult["route"])
 	finalURL := returnURL
@@ -797,7 +843,7 @@ func submitSLTFormIfPresent(session *Session, page, rawURL, boundMailbox, label 
 	sltAction = resolveURL(rawURL, sltAction)
 	logInfo("%s accepted, submitting SLT form", label)
 	logDebug("SLT form action=%s fields=%v", sltAction, sortedKeys(sltFields))
-	resp, err := requestWithRetryPost(session, sltAction, "SLT submit", boundMailbox, requestOptions{
+	resp, err := session.Post(sltAction, requestOptions{
 		Data: sltFields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
@@ -808,7 +854,7 @@ func submitSLTFormIfPresent(session *Session, page, rawURL, boundMailbox, label 
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, wrapAuthError(fmt.Sprintf("SLT submit 请求异常: %s", err), AuthStatusRequestError, err, boundMailbox)
 	}
 	logInfo("SLT submit response: status=%d", resp.StatusCode)
 	logDebug("SLT submit response url=%s", resp.URL)
@@ -817,7 +863,11 @@ func submitSLTFormIfPresent(session *Session, page, rawURL, boundMailbox, label 
 
 func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail string, preferredBindingAddress string) (string, string, string, error) {
 	action := extractFormAction(page)
-	if action == "" || action == "#" || !strings.HasPrefix(action, "http") {
+	if action == "" || action == "#" {
+		return "", "", "", newAuthError("绑定页无法解析 form")
+	}
+	action = resolveURL(rawURL, action)
+	if !strings.HasPrefix(action, "http") {
 		return "", "", "", newAuthError("绑定页无法解析 form")
 	}
 	canary := extractHiddenInputs(page)["canary"]
@@ -832,12 +882,16 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 		return "", "", "", err
 	}
 	logDebug("已创建临时邮箱: %s (代理: %s)", tempMail, firstNonEmpty(proxy, "默认"))
-	watcher := startCodeWatcher(session.context(), tempMail, proxy, 0, nil)
+	seenKeys, err := snapshotMailboxKeys(session.context(), tempMail, proxy)
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("读取辅助邮箱基线失败: %s", err), AuthStatusRequestError, err, tempMail)
+	}
+	watcher := startCodeWatcher(session.context(), tempMail, proxy, 0, seenKeys)
 	logDebug("已启动后台收码线程, 监听邮箱: %s", tempMail)
 
 	logInfo("提交临时邮箱到 AddProof")
 	logDebug("AddProof: mailbox=%s, action=%s", tempMail, action)
-	resp, err := requestWithRetryPost(session, action, "AddProof", tempMail, requestOptions{
+	resp, err := session.Post(action, requestOptions{
 		Data: map[string]string{
 			"iProofOptions":          "Email",
 			"DisplayPhoneCountryISO": "CN",
@@ -857,7 +911,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", wrapAuthError(fmt.Sprintf("AddProof 请求异常: %s", err), AuthStatusRequestError, err, tempMail)
 	}
 	verifyPage := resp.Body
 	verifyURL := resp.URL
@@ -907,7 +961,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 		verifyFields["GeneralVerify"] = "0"
 	}
 	logDebug("VerifyProof fields=%v", sortedKeys(verifyFields))
-	resp, err = requestWithRetryPost(session, verifyAction, "VerifyProof", tempMail, requestOptions{
+	resp, err = session.Post(verifyAction, requestOptions{
 		Data: verifyFields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
@@ -918,7 +972,7 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", wrapAuthError(fmt.Sprintf("VerifyProof 请求异常: %s", err), AuthStatusRequestError, err, tempMail)
 	}
 	verifyResponseURL := resp.URL
 	logInfo("VerifyProof 响应: status=%d", resp.StatusCode)
@@ -958,7 +1012,7 @@ func trySkipProofsPage(session *Session, page, rawURL, action string) (string, s
 	if fields["EmailAddress"] == "" {
 		fields["EmailAddress"] = ""
 	}
-	resp, err := requestWithRetryPost(session, action, "Skip proofs", "", requestOptions{
+	resp, err := session.Post(action, requestOptions{
 		Data: fields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
@@ -967,14 +1021,17 @@ func trySkipProofsPage(session *Session, page, rawURL, action string) (string, s
 		}),
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", wrapAuthError(fmt.Sprintf("Skip proofs 请求异常: %s", err), AuthStatusRequestError, err)
 	}
 	return resp.Body, resp.URL, nil
 }
 
 func handleProofsPage(session *Session, page, rawURL, action, proxy string, alreadyBound bool, email string, preferredBindingAddress string) (string, string, string, error) {
+	if action != "" && action != "#" {
+		action = resolveURL(rawURL, action)
+	}
 	skipURL := extractSkipURL(page)
-	if skipURL != "" && (strings.Contains(skipURL, "res=success") || strings.Contains(skipURL, "res=cancel")) {
+	if skipURL != "" && strings.Contains(skipURL, "res=success") {
 		logInfo("尝试通过 skip URL 跳过安全证明页")
 		resp, err := postEmptyForm(session, skipURL, rawURL)
 		if err != nil {
@@ -985,9 +1042,6 @@ func handleProofsPage(session *Session, page, rawURL, action, proxy string, alre
 
 	isAddEmail := isAddEmailPage(page, action)
 	isSPA := len(page) > 50000
-	if isAddEmail && !alreadyBound {
-		return bindAuxiliaryEmail(session, page, rawURL, proxy, email, preferredBindingAddress)
-	}
 	if !isSPA && action != "" && action != "#" && strings.HasPrefix(action, "http") {
 		logInfo("尝试跳过安全证明页")
 		skippedPage, skippedURL, err := trySkipProofsPage(session, page, rawURL, action)
@@ -995,13 +1049,22 @@ func handleProofsPage(session *Session, page, rawURL, action, proxy string, alre
 			return "", "", "", err
 		}
 		skippedAction := extractFormAction(skippedPage)
+		if skippedAction != "" && skippedAction != "#" {
+			skippedAction = resolveURL(skippedURL, skippedAction)
+		}
 		if isAddEmail && !alreadyBound && isAddEmailPage(skippedPage, skippedAction) {
 			logInfo("安全证明页无法跳过, 改为绑定辅助邮箱")
 			return bindAuxiliaryEmail(session, skippedPage, skippedURL, proxy, email, preferredBindingAddress)
 		}
+		if skippedURL == rawURL && skippedPage == page {
+			return "", "", "", newAuthError("Microsoft security proof skip was not accepted.", AuthStatusAuthTimeout)
+		}
 		return skippedPage, skippedURL, "", nil
 	}
 
+	if isAddEmail && !alreadyBound {
+		return bindAuxiliaryEmail(session, page, rawURL, proxy, email, preferredBindingAddress)
+	}
 	if alreadyBound && isAddEmail {
 		logInfo("已绑定过辅助邮箱, 跳过后续 proofs 页面 (Skip)")
 	}
@@ -1028,7 +1091,7 @@ func handleAutoSubmit(session *Session, page, rawURL, action string) (string, st
 	if strings.Contains(strings.ToLower(action), "consent") {
 		fields["ucaccept"] = "Yes"
 	}
-	resp, err := requestWithRetryPost(session, action, "自动跳转", "", requestOptions{
+	resp, err := session.Post(action, requestOptions{
 		Data: fields,
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
@@ -1037,12 +1100,16 @@ func handleAutoSubmit(session *Session, page, rawURL, action string) (string, st
 		}),
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", wrapAuthError(fmt.Sprintf("自动跳转请求异常: %s", err), AuthStatusRequestError, err)
 	}
 	return resp.Body, resp.URL, nil
 }
 
 func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds int, email string, proofData []ProofData, preferredBindingAddress string) (string, string, string, error) {
+	return handleAccountPagesWithOptions(session, page, rawURL, proxy, maxRounds, email, proofData, false, preferredBindingAddress)
+}
+
+func handleAccountPagesWithOptions(session *Session, page, rawURL, proxy string, maxRounds int, email string, proofData []ProofData, allowExistingProofVerification bool, preferredBindingAddress string) (string, string, string, error) {
 	if maxRounds <= 0 {
 		maxRounds = 10
 	}
@@ -1050,7 +1117,8 @@ func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds 
 	for roundNum := 1; roundNum <= maxRounds; roundNum++ {
 		low := strings.ToLower(rawURL)
 		action := extractFormAction(page)
-		isInterrupt := isInterruptPage(rawURL)
+		isIdentity, isProofs := accountVerificationPageKinds(page, rawURL, action)
+		isInterrupt := isInterruptPage(rawURL) || isIdentity || isProofs
 		isAuto := isAutoSubmitPage(page, action)
 
 		if isAccountRecoverURL(rawURL) || isAccountRecoverURL(action) {
@@ -1063,9 +1131,9 @@ func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds 
 		}
 
 		pageKind := "登录后续页面"
-		if strings.Contains(low, "/identity/") {
+		if isIdentity {
 			pageKind = "身份验证页"
-		} else if strings.Contains(low, "/proofs/") {
+		} else if isProofs {
 			pageKind = "安全证明页"
 		} else if strings.Contains(low, "/interrupt/") || strings.Contains(low, "passkey") {
 			pageKind = "中断跳过页"
@@ -1075,8 +1143,8 @@ func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds 
 		logInfo("处理%s #%d", pageKind, roundNum)
 		logDebug("中断页循环 #%d: url=%s, is_interrupt=%t, is_auto=%t, action=%s", roundNum, rawURL, isInterrupt, isAuto, action)
 
-		if strings.Contains(low, "/identity/") && strings.Contains(low, "account.live.com") {
-			nextPage, nextURL, tempMail, err := handleIdentityPage(session, page, rawURL, proxy, email, proofData, false, preferredBindingAddress)
+		if isIdentity && strings.Contains(low, "account.live.com") {
+			nextPage, nextURL, tempMail, err := handleIdentityPage(session, page, rawURL, proxy, email, proofData, allowExistingProofVerification, preferredBindingAddress)
 			if err != nil {
 				return "", "", "", err
 			}
@@ -1119,7 +1187,7 @@ func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds 
 			continue
 		}
 
-		if strings.Contains(low, "/proofs/") {
+		if isProofs {
 			nextPage, nextURL, tempMail, err := handleProofsPage(session, page, rawURL, action, proxy, boundMailbox != "", email, preferredBindingAddress)
 			if err != nil {
 				return "", "", "", err
@@ -1131,6 +1199,11 @@ func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds 
 			continue
 		}
 		break
+	}
+	action := extractFormAction(page)
+	isIdentity, isProofs := accountVerificationPageKinds(page, rawURL, action)
+	if isInterruptPage(rawURL) || isIdentity || isProofs || isAutoSubmitPage(page, action) {
+		return "", "", "", newAuthError("Microsoft account page flow did not complete.", AuthStatusAuthTimeout, boundMailbox)
 	}
 	return page, rawURL, boundMailbox, nil
 }

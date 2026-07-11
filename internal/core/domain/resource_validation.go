@@ -24,9 +24,12 @@ type ResourceValidation struct {
 	Status        ResourceValidationStatus
 	Attempts      int
 	MaxAttempts   int
+	ClaimToken    string
+	DispatchToken string
 	LastSafeError string
 	RequestID     string
 	Path          string
+	DispatchedAt  *time.Time
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
 	CreatedAt     time.Time

@@ -95,7 +95,7 @@ type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
 	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
-	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource) error) ([]uint, error)
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error) ([]uint, error)
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
@@ -108,6 +108,10 @@ type ResourceImportQueue interface {
 // binding state machine remains in BC-MAILTRANSPORT.
 type MicrosoftBindingInputRecorder interface {
 	RecordMicrosoftBindingInputs(ctx context.Context, inputs []MicrosoftBindingInput) error
+}
+
+type ImportedValidationCreator interface {
+	CreateImportedValidationJobs(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error
 }
 
 type MicrosoftBindingInput struct {
@@ -156,12 +160,19 @@ type TXTParser interface {
 
 // ImportUseCase handles supplier resource import operations.
 type ImportUseCase struct {
-	resources       EmailResourceRepository
-	imports         ResourceImportRepository
-	parser          TXTParser
-	files           governanceapp.FilePort
-	queue           ResourceImportQueue
-	bindingRecorder MicrosoftBindingInputRecorder
+	resources         EmailResourceRepository
+	imports           ResourceImportRepository
+	parser            TXTParser
+	files             governanceapp.FilePort
+	queue             ResourceImportQueue
+	bindingRecorder   MicrosoftBindingInputRecorder
+	validationCreator ImportedValidationCreator
+}
+
+func (uc *ImportUseCase) SetImportedValidationCreator(creator ImportedValidationCreator) {
+	if uc != nil {
+		uc.validationCreator = creator
+	}
 }
 
 // NewImportUseCase creates a new ImportUseCase.
@@ -354,14 +365,26 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	for _, line := range lines {
 		linesByEmail[microsoftEmailKey(line.Email)] = line
 	}
-	afterCreate := func(txCtx context.Context, created []domain.MicrosoftResource) error {
+	afterCreate := func(txCtx context.Context, created []domain.MicrosoftResource, createdIDs []uint) error {
 		chunkLines := make([]domain.MicrosoftImportLine, 0, len(created))
 		for _, item := range created {
 			if line, ok := linesByEmail[microsoftEmailKey(item.EmailAddress)]; ok {
 				chunkLines = append(chunkLines, line)
 			}
 		}
-		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines)
+		if err := uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines); err != nil {
+			return err
+		}
+		if uc.validationCreator != nil {
+			return uc.validationCreator.CreateImportedValidationJobs(
+				txCtx,
+				task.OwnerUserID,
+				createdIDs,
+				task.RequestID,
+				"/v1/resources/imports",
+			)
+		}
+		return nil
 	}
 	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate)
 	if err != nil {

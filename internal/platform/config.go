@@ -122,7 +122,7 @@ func Load() (*Config, error) {
 		},
 		MySQL: MySQLConfig{
 			DSN:          getEnv("MYSQL_DSN", ""),
-			MaxOpenConns: getInt("MYSQL_MAX_OPEN_CONNS", 150),
+			MaxOpenConns: getInt("MYSQL_MAX_OPEN_CONNS", 200),
 			MaxIdleConns: getInt("MYSQL_MAX_IDLE_CONNS", 50),
 		},
 		Redis: RedisConfig{

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
@@ -14,7 +15,11 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-const resourceValidationDispatcherInterval = 15 * time.Second
+const (
+	resourceValidationDispatcherInterval = 15 * time.Second
+	resourceValidationDispatchMinimum    = 8
+	resourceValidationDispatchMaximum    = 64
+)
 
 // StartCoreWorkers registers Core task handlers and starts the Asynq server.
 func StartCoreWorkers(server *asynq.Server, module *CoreModule) error {
@@ -28,11 +33,24 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
-		defer module.ValidationUseCase.ScheduleDispatcher(context.Background(), resourceValidationDispatcherInterval)
-		result, err := module.ValidationUseCase.DispatchPending(ctx, 0)
+		limit := resourceValidationDispatchMaximum
+		releaseBudget := func() {}
+		if module.BackgroundDispatch != nil {
+			limit, releaseBudget = module.BackgroundDispatch.AcquireDispatchBudget(
+				ctx,
+				coreinfra.ResourceValidationQueueName,
+				resourceValidationDispatchMinimum,
+				resourceValidationDispatchMaximum,
+			)
+		}
+		defer releaseBudget()
+		if limit <= 0 {
+			return nil
+		}
+		result, err := module.ValidationUseCase.DispatchPending(ctx, limit)
 		if err != nil {
 			slog.Warn("resource validation dispatcher failed", "error", err)
-			return err
+			return nil
 		}
 		if result != nil && result.Attempted > 0 {
 			slog.Info(
@@ -44,15 +62,25 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		return nil
 	})
-	if module != nil && module.ValidationUseCase != nil {
-		module.ValidationUseCase.ScheduleDispatcher(context.Background(), 0)
-		startResourceValidationDispatcherSeeder(module)
-	}
-
 	mux.HandleFunc(coreinfra.TypeResourceValidation, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.ValidationUseCase == nil {
+			return nil
+		}
 		var payload coreapp.ResourceValidationTask
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode resource validation task: %w: %w", err, asynq.SkipRetry)
+		}
+		if payload.JobID != 0 && payload.DispatchToken != "" && module.BackgroundDispatch != nil {
+			admitted, release := module.BackgroundDispatch.TryAcquireExecution(ctx, coreinfra.ResourceValidationQueueName)
+			if !admitted {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := module.ValidationUseCase.ReleaseDispatch(releaseCtx, payload); err != nil {
+					return fmt.Errorf("release resource validation after admission denial: %w", err)
+				}
+				return nil
+			}
+			defer release()
 		}
 
 		slog.Info(
@@ -137,30 +165,47 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, pa
 	if module == nil || module.ValidationUseCase == nil || result == nil || len(result.ImportedResourceIDs) == 0 {
 		return 0, nil
 	}
-	validationResult, err := module.ValidationUseCase.CreateBatch(ctx, coreapp.ResourceBulkSelection{
-		Mode:        coreapp.ResourceBulkSelectionIDs,
-		ResourceIDs: result.ImportedResourceIDs,
-	}, payload.OwnerUserID, payload.RequestID, "/v1/resources/imports")
-	if err != nil {
-		return 0, err
-	}
-	if validationResult == nil {
-		return 0, nil
-	}
-	return validationResult.Queued, nil
+	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+	return len(result.ImportedResourceIDs), nil
 }
 
-func startResourceValidationDispatcherSeeder(module *CoreModule) {
+// StartResourceValidationDispatcher seeds the durable validation dispatcher
+// until the returned cleanup function is called.
+func StartResourceValidationDispatcher(ctx context.Context, module *CoreModule) func(context.Context) {
+	return startResourceValidationDispatcher(ctx, module, resourceValidationDispatcherInterval)
+}
+
+func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, interval time.Duration) func(context.Context) {
 	if module == nil || module.ValidationUseCase == nil {
-		return
+		return func(context.Context) {}
 	}
+	if interval <= 0 {
+		interval = resourceValidationDispatcherInterval
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
 	go func() {
-		ticker := time.NewTicker(resourceValidationDispatcherInterval)
+		defer close(done)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			module.ValidationUseCase.ScheduleDispatcher(context.Background(), 0)
+		for {
+			select {
+			case <-ticker.C:
+				module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
+	var once sync.Once
+	return func(shutdownCtx context.Context) {
+		once.Do(cancel)
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+		}
+	}
 }
 
 func isFinalAttempt(ctx context.Context) bool {

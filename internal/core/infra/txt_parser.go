@@ -22,10 +22,9 @@ func NewTXTParser() *TXTParser {
 //	email----password----clientId----refreshToken
 //	email----password----clientId----refreshToken----bindingAddress
 //
-// Empty lines are skipped.
+// Empty lines are skipped. Password bytes between delimiters are preserved.
 func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error) {
-	content = strings.TrimSpace(content)
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		return nil, nil, domain.ErrInvalidImportFormat
 	}
 	if strategy == "" {
@@ -37,8 +36,8 @@ func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportE
 	var failures []domain.ImportLineError
 	for i, line := range lines {
 		lineNumber := i + 1
-		line = strings.TrimSpace(line)
-		if line == "" {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 
@@ -68,7 +67,7 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 	}
 
 	email := strings.TrimSpace(parts[0])
-	password := strings.TrimSpace(parts[1])
+	password := parts[1]
 	if email == "" || password == "" {
 		return nil, importLineError(lineNumber, parts)
 	}

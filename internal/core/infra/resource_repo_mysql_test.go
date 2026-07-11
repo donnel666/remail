@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -248,6 +249,8 @@ func TestResourceListIndexesMySQL(t *testing.T) {
 	requireIndexExists(t, db, "resource_imports", "idx_resource_imports_owner_created")
 	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_created_id")
 	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_type_created_id")
+	requireIndexExists(t, db, "email_resources", "idx_email_resources_owner_type_id")
+	requireIndexExists(t, db, "resource_validation_jobs", "idx_resource_validation_dispatch")
 	requireIndexExists(t, db, "email_resources", "idx_email_resources_type_created_id")
 	requireIndexExists(t, db, "email_resources", "idx_email_resources_created_id")
 	requireIndexExists(t, db, "mail_servers", "idx_mail_servers_owner_created")
@@ -1724,7 +1727,13 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Requested)
 	require.Equal(t, 2, result.Queued)
-	require.Equal(t, 1, result.Created)
+	require.Zero(t, result.Created)
+	var jobsBeforeExpansion int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobsBeforeExpansion).Error)
+	require.EqualValues(t, 1, jobsBeforeExpansion, "the request must not synchronously expand the deferred batch")
+	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, processed)
 
 	var normalActiveJobs int64
 	require.NoError(t, db.Raw(
@@ -1783,7 +1792,7 @@ func TestResourceValidationRepoMarkRunningIncrementsStaleRunningAttemptMySQL(t *
 		"SELECT id FROM resource_validation_jobs WHERE resource_id = ?",
 		resource.ID,
 	).Row().Scan(&jobID))
-	staleUpdatedAt := time.Now().UTC().Add(-11 * time.Minute)
+	staleUpdatedAt := time.Now().UTC().Add(-21 * time.Minute)
 	require.NoError(t, db.Exec(
 		"UPDATE resource_validation_jobs SET status = ?, attempts = ?, updated_at = ? WHERE id = ?",
 		string(domain.ResourceValidationRunning),
@@ -1791,10 +1800,20 @@ func TestResourceValidationRepoMarkRunningIncrementsStaleRunningAttemptMySQL(t *
 		staleUpdatedAt,
 		jobID,
 	).Error)
+	var executionUpdatedAt time.Time
+	require.NoError(t, db.Raw("SELECT updated_at FROM resource_validation_jobs WHERE id = ?", jobID).Row().Scan(&executionUpdatedAt))
 
-	claimed, err := validationRepo.MarkRunning(ctx, jobID)
+	now := time.Now().UTC()
+	dispatched, err := validationRepo.ClaimDispatchable(ctx, 1, now.Add(-20*time.Minute), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, dispatched, 1)
+	var updatedAfterDispatch time.Time
+	require.NoError(t, db.Raw("SELECT updated_at FROM resource_validation_jobs WHERE id = ?", jobID).Row().Scan(&updatedAfterDispatch))
+	require.Equal(t, executionUpdatedAt, updatedAfterDispatch, "dispatch metadata must not refresh the running execution lease")
+	claimToken, claimed, err := validationRepo.MarkRunning(ctx, jobID, dispatched[0].DispatchToken)
 	require.NoError(t, err)
 	require.True(t, claimed)
+	require.NotEmpty(t, claimToken)
 
 	var attempts int
 	require.NoError(t, db.Raw(
@@ -1802,9 +1821,241 @@ func TestResourceValidationRepoMarkRunningIncrementsStaleRunningAttemptMySQL(t *
 		jobID,
 	).Row().Scan(&attempts))
 	require.Equal(t, 2, attempts)
+
+	require.NoError(t, db.Exec(
+		"UPDATE resource_validation_jobs SET status = ?, attempts = ?, updated_at = ? WHERE id = ?",
+		string(domain.ResourceValidationRunning),
+		2,
+		staleUpdatedAt,
+		jobID,
+	).Error)
+	now = time.Now().UTC()
+	dispatched, err = validationRepo.ClaimDispatchable(ctx, 1, now.Add(-20*time.Minute), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, dispatched, 1)
+	claimToken, claimed, err = validationRepo.MarkRunning(ctx, jobID, dispatched[0].DispatchToken)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Empty(t, claimToken)
+
+	var status string
+	require.NoError(t, db.Raw(
+		"SELECT status, attempts FROM resource_validation_jobs WHERE id = ?",
+		jobID,
+	).Row().Scan(&status, &attempts))
+	require.Equal(t, string(domain.ResourceValidationFailed), status)
+	require.Equal(t, 3, attempts)
 }
 
-func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCreateMySQL(t *testing.T) {
+func TestResourceValidationRepoDispatchTokenFencingAndStaleRecoveryMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"dispatch-owner@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	resource := &domain.MicrosoftResource{
+		EmailAddress: "dispatch-fencing@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, resource))
+	job := &domain.ResourceValidation{
+		ResourceID:   resource.ID,
+		ResourceType: domain.ResourceTypeMicrosoft,
+		OwnerUserID:  1,
+		Status:       domain.ResourceValidationQueued,
+		MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
+		RequestID:    "req-dispatch-fencing",
+	}
+	created, err := validationRepo.CreateWithLog(ctx, job, nil)
+	require.NoError(t, err)
+	require.True(t, created)
+	now := time.Now().UTC()
+	runningStaleBefore := now.Add(-20 * time.Minute)
+	queuedDispatchStaleBefore := now.Add(-time.Hour)
+
+	first, err := validationRepo.ClaimDispatchable(ctx, 1, runningStaleBefore, queuedDispatchStaleBefore)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.NotEmpty(t, first[0].DispatchToken)
+	duplicate, err := validationRepo.ClaimDispatchable(ctx, 1, runningStaleBefore, queuedDispatchStaleBefore)
+	require.NoError(t, err)
+	require.Empty(t, duplicate, "a pending Redis task must not be dispatched again")
+
+	claimToken, claimed, err := validationRepo.MarkRunning(ctx, job.ID, "wrong-token")
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Empty(t, claimToken)
+	require.NoError(t, validationRepo.ReleaseDispatch(ctx, job.ID, first[0].DispatchToken))
+
+	second, err := validationRepo.ClaimDispatchable(ctx, 1, runningStaleBefore, queuedDispatchStaleBefore)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.NotEqual(t, first[0].DispatchToken, second[0].DispatchToken)
+	claimToken, claimed, err = validationRepo.MarkRunning(ctx, job.ID, first[0].DispatchToken)
+	require.NoError(t, err)
+	require.False(t, claimed, "a released payload must not start a newer dispatch generation")
+	require.Empty(t, claimToken)
+
+	require.NoError(t, db.Model(&ResourceValidationModel{}).
+		Where("id = ?", job.ID).
+		UpdateColumn("dispatched_at", time.Now().UTC().Add(-21*time.Minute)).Error)
+	stillPending, err := validationRepo.ClaimDispatchable(ctx, 1, runningStaleBefore, queuedDispatchStaleBefore)
+	require.NoError(t, err)
+	require.Empty(t, stillPending, "a low-priority task may legitimately wait in Redis longer than the running timeout")
+	require.NoError(t, db.Model(&ResourceValidationModel{}).
+		Where("id = ?", job.ID).
+		UpdateColumn("dispatched_at", time.Now().UTC().Add(-61*time.Minute)).Error)
+	recovered, err := validationRepo.ClaimDispatchable(ctx, 1, runningStaleBefore, queuedDispatchStaleBefore)
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
+	require.NotEqual(t, second[0].DispatchToken, recovered[0].DispatchToken, "an expired task may be archived, so recovery must use a fresh TaskID")
+	claimToken, claimed, err = validationRepo.MarkRunning(ctx, job.ID, second[0].DispatchToken)
+	require.NoError(t, err)
+	require.False(t, claimed, "the expired payload must be fenced after token rotation")
+	require.Empty(t, claimToken)
+	claimToken, claimed, err = validationRepo.MarkRunning(ctx, job.ID, recovered[0].DispatchToken)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotEmpty(t, claimToken)
+}
+
+func TestResourceValidationRepoClaimDispatchableIsAtomicMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"dispatch-race@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	resource := &domain.MicrosoftResource{EmailAddress: "dispatch-race@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, resource))
+	created, err := validationRepo.CreateWithLog(ctx, &domain.ResourceValidation{
+		ResourceID: resource.ID, ResourceType: domain.ResourceTypeMicrosoft, OwnerUserID: 1,
+		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
+	}, nil)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	start := make(chan struct{})
+	results := make(chan []domain.ResourceValidation, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			now := time.Now().UTC()
+			jobs, claimErr := validationRepo.ClaimDispatchable(ctx, 1, now.Add(-20*time.Minute), now.Add(-time.Hour))
+			results <- jobs
+			errs <- claimErr
+		}()
+	}
+	close(start)
+	total := 0
+	for i := 0; i < 2; i++ {
+		require.NoError(t, <-errs)
+		total += len(<-results)
+	}
+	require.Equal(t, 1, total)
+}
+
+func TestResourceValidationRepoResumesDurableFilterBatchMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"batch-owner@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	resource := &domain.MicrosoftResource{
+		EmailAddress: "durable-batch@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(
+		ctx,
+		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
+		resource,
+	))
+	selectionJSON, err := json.Marshal(coreapp.ResourceBulkSelection{
+		Mode:   coreapp.ResourceBulkSelectionFilter,
+		Filter: coreapp.ResourceBulkFilter{ResourceType: domain.ResourceTypeMicrosoft},
+	})
+	require.NoError(t, err)
+	batch := &ResourceValidationBatchModel{
+		OwnerUserID:   1,
+		SelectionJSON: selectionJSON,
+		ThroughID:     resource.ID,
+		Status:        "pending",
+		RequestID:     "req-durable-filter",
+		Path:          "/v1/resources/validations",
+	}
+	require.NoError(t, db.Create(batch).Error)
+
+	processed, err := validationRepo.ResumeValidationBatches(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+
+	require.NoError(t, db.First(batch, batch.ID).Error)
+	require.Equal(t, "succeeded", batch.Status)
+	require.JSONEq(t, `{}`, string(batch.SelectionJSON))
+	require.Equal(t, 1, batch.Requested)
+	require.Equal(t, 1, batch.Created)
+	var jobs int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).
+		Where("resource_id = ?", resource.ID).
+		Count(&jobs).Error)
+	require.EqualValues(t, 1, jobs)
+
+	second := &domain.MicrosoftResource{
+		EmailAddress: "durable-id-batch@outlook.com",
+		Password:     "secret",
+		Status:       domain.MicrosoftStatusPending,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(
+		ctx,
+		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
+		second,
+	))
+	idSelectionJSON, err := json.Marshal(coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: []uint{second.ID},
+	})
+	require.NoError(t, err)
+	idBatch := &ResourceValidationBatchModel{
+		OwnerUserID:   1,
+		SelectionJSON: idSelectionJSON,
+		Status:        "pending",
+		RequestID:     "req-durable-ids",
+		Path:          "/v1/resources/imports",
+	}
+	require.NoError(t, db.Create(idBatch).Error)
+	processed, err = validationRepo.ResumeValidationBatches(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	require.NoError(t, db.First(idBatch, idBatch.ID).Error)
+	require.Equal(t, "succeeded", idBatch.Status)
+	require.JSONEq(t, `{}`, string(idBatch.SelectionJSON))
+	require.Equal(t, 1, idBatch.Created)
+}
+
+func TestResourceValidationRepoDeferredBatchSkipsNonOwnerMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	validationRepo := NewResourceValidationRepo(db)
@@ -1835,11 +2086,15 @@ func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCr
 	}
 	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 2}, other))
 
-	_, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
+	result, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
 		Mode:        coreapp.ResourceBulkSelectionIDs,
 		ResourceIDs: []uint{owned.ID, other.ID},
 	}, nil, "req-batch-forbidden", "/v1/resources/validations")
-	require.ErrorIs(t, err, domain.ErrForbiddenResource)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Queued)
+	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, processed)
 
 	var activeJobs int64
 	require.NoError(t, db.Raw(
@@ -1847,7 +2102,10 @@ func TestResourceValidationRepoCreateBatchWithLogRejectsNonOwnerWithoutPartialCr
 		string(domain.ResourceValidationQueued),
 		string(domain.ResourceValidationRunning),
 	).Scan(&activeJobs).Error)
-	require.Zero(t, activeJobs)
+	require.EqualValues(t, 1, activeJobs)
+	var foreignJobs int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", other.ID).Count(&foreignJobs).Error)
+	require.Zero(t, foreignJobs)
 }
 
 func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL(t *testing.T) {
@@ -1920,18 +2178,34 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 		},
 	}, nil, "req-domain-validation-filter", "/v1/resources/validations")
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Requested)
-	require.Equal(t, 1, result.Created)
+	require.Zero(t, result.Requested)
+	require.Zero(t, result.Created)
+	createdAfterAcceptance := &domain.MailDomainResource{
+		Domain:       "future-private-validation.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeNotSale,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(
+		ctx,
+		&domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1},
+		createdAfterAcceptance,
+	))
+	processed, err := validationRepo.ResumeValidationBatches(ctx, 64)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
 
-	var privateJobs, saleJobs, bindingJobs, oldJobs int64
+	var privateJobs, saleJobs, bindingJobs, oldJobs, futureJobs int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", privateDomain.ID).Scan(&privateJobs).Error)
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", saleDomain.ID).Scan(&saleJobs).Error)
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", bindingDomain.ID).Scan(&bindingJobs).Error)
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", oldPrivateDomain.ID).Scan(&oldJobs).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", createdAfterAcceptance.ID).Scan(&futureJobs).Error)
 	require.EqualValues(t, 1, privateJobs)
 	require.Zero(t, saleJobs)
 	require.Zero(t, bindingJobs)
 	require.Zero(t, oldJobs)
+	require.Zero(t, futureJobs, "resources created after filter acceptance must not enter the existing batch")
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

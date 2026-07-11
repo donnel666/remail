@@ -375,12 +375,13 @@ const (
 )
 
 type ExplicitAlias struct {
-	ID         uint
-	ResourceID uint
-	Email      string
-	Status     AliasStatus
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID          uint
+	ResourceID  uint
+	OwnerUserID uint
+	Email       string
+	Status      AliasStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type DotAlias struct {

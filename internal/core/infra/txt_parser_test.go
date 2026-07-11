@@ -59,6 +59,24 @@ func TestTXTParser_ParseMicrosoftImport_Blanks(t *testing.T) {
 	assertLine(t, result[0], "user@example.com", "pass123", "", "", "")
 }
 
+func TestTXTParser_ParseMicrosoftImport_PreservesPasswordWhitespace(t *testing.T) {
+	parser := NewTXTParser()
+	content := "user@example.com----  pass with spaces  \r\nuser2@example.com---- leading-and-trailing ----aux@example.net"
+
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(result))
+	}
+	assertLine(t, result[0], "user@example.com", "  pass with spaces  ", "", "", "")
+	assertLine(t, result[1], "user2@example.com", " leading-and-trailing ", "", "", "aux@example.net")
+}
+
 func TestTXTParser_ParseMicrosoftImport_AllCommentsReturnsError(t *testing.T) {
 	parser := NewTXTParser()
 
@@ -92,7 +110,7 @@ func TestTXTParser_ParseMicrosoftImport_InvalidLineReturnsError(t *testing.T) {
 	}
 }
 
-func TestTXTParser_ParseMicrosoftImport_TrimsWhitespace(t *testing.T) {
+func TestTXTParser_ParseMicrosoftImport_TrimsNonPasswordWhitespace(t *testing.T) {
 	parser := NewTXTParser()
 	content := "  user@example.com ---- pass123 ---- aux@example.net  \n\tuser2@test.com----pass456\n"
 
@@ -106,7 +124,7 @@ func TestTXTParser_ParseMicrosoftImport_TrimsWhitespace(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(result))
 	}
-	assertLine(t, result[0], "user@example.com", "pass123", "", "", "aux@example.net")
+	assertLine(t, result[0], "user@example.com", " pass123 ", "", "", "aux@example.net")
 	assertLine(t, result[1], "user2@test.com", "pass456", "", "", "")
 }
 

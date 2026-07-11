@@ -337,16 +337,16 @@ func mailMessageKey(email EmailObj) string {
 	return strings.Join([]string{email.ReceivedAt, email.Subject, preview}, "|")
 }
 
-func snapshotMailboxKeys(ctx context.Context, mailbox, proxy string) map[string]struct{} {
+func snapshotMailboxKeys(ctx context.Context, mailbox, proxy string) (map[string]struct{}, error) {
 	emails, err := mailList(ctx, mailbox, proxy, 20, false)
 	if err != nil {
-		return map[string]struct{}{}
+		return nil, err
 	}
 	keys := map[string]struct{}{}
 	for _, email := range emails {
 		keys[mailMessageKey(email)] = struct{}{}
 	}
-	return keys
+	return keys, nil
 }
 
 func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenKeys map[string]struct{}) (string, error) {

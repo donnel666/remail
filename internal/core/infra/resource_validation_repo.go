@@ -2,8 +2,10 @@ package infra
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -23,6 +26,9 @@ type ResourceValidationModel struct {
 	Status        string     `gorm:"type:varchar(32);not null;default:'queued'"`
 	Attempts      int        `gorm:"not null;default:0"`
 	MaxAttempts   int        `gorm:"not null;default:3;column:max_attempts"`
+	ClaimToken    string     `gorm:"type:char(36);not null;default:'';column:claim_token"`
+	DispatchToken string     `gorm:"type:char(36);not null;default:'';column:dispatch_token"`
+	DispatchedAt  *time.Time `gorm:"column:dispatched_at"`
 	LastSafeError string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	RequestID     string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
 	Path          string     `gorm:"type:varchar(255);not null;default:''"`
@@ -30,6 +36,28 @@ type ResourceValidationModel struct {
 	FinishedAt    *time.Time `gorm:"column:finished_at"`
 	CreatedAt     time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime"`
+}
+
+type ResourceValidationBatchModel struct {
+	ID            uint       `gorm:"primaryKey;autoIncrement"`
+	OwnerUserID   uint       `gorm:"not null;column:owner_user_id"`
+	SelectionJSON []byte     `gorm:"type:json;not null;column:selection_json"`
+	AfterID       uint       `gorm:"not null;default:0;column:after_id"`
+	ThroughID     uint       `gorm:"not null;default:0;column:through_id"`
+	Status        string     `gorm:"type:varchar(32);not null;default:'pending'"`
+	Requested     int        `gorm:"not null;default:0"`
+	Queued        int        `gorm:"not null;default:0"`
+	Created       int        `gorm:"not null;default:0"`
+	RequestID     string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
+	Path          string     `gorm:"type:varchar(255);not null;default:''"`
+	LastSafeError string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	FinishedAt    *time.Time `gorm:"column:finished_at"`
+	CreatedAt     time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime"`
+}
+
+func (ResourceValidationBatchModel) TableName() string {
+	return "resource_validation_batches"
 }
 
 func (ResourceValidationModel) TableName() string {
@@ -45,6 +73,9 @@ func validationModel(job *domain.ResourceValidation) *ResourceValidationModel {
 		Status:        string(job.Status),
 		Attempts:      job.Attempts,
 		MaxAttempts:   normalizeValidationMaxAttempts(job.MaxAttempts),
+		ClaimToken:    job.ClaimToken,
+		DispatchToken: job.DispatchToken,
+		DispatchedAt:  job.DispatchedAt,
 		LastSafeError: job.LastSafeError,
 		RequestID:     job.RequestID,
 		Path:          job.Path,
@@ -64,6 +95,9 @@ func (m *ResourceValidationModel) toDomain() *domain.ResourceValidation {
 		Status:        domain.ResourceValidationStatus(m.Status),
 		Attempts:      m.Attempts,
 		MaxAttempts:   normalizeValidationMaxAttempts(m.MaxAttempts),
+		ClaimToken:    m.ClaimToken,
+		DispatchToken: m.DispatchToken,
+		DispatchedAt:  m.DispatchedAt,
 		LastSafeError: m.LastSafeError,
 		RequestID:     m.RequestID,
 		Path:          m.Path,
@@ -80,8 +114,8 @@ type ResourceValidationRepo struct {
 }
 
 const (
-	resourceValidationBatchInsertSize   = 1000
-	resourceValidationCandidatePageSize = 1000
+	resourceValidationBatchInsertSize = 1000
+	resourceValidationMaxPageSize     = 1000
 )
 
 func NewResourceValidationRepo(db *gorm.DB) *ResourceValidationRepo {
@@ -134,71 +168,80 @@ func (r *ResourceValidationRepo) CreateWithLog(ctx context.Context, job *domain.
 }
 
 func (r *ResourceValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
-	result := &coreapp.ResourceBatchValidationResult{}
 	switch selection.Mode {
-	case coreapp.ResourceBulkSelectionIDs:
-		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			candidates, err := selectValidationCandidatesByIDs(ctx, tx, ownerUserID, selection.ResourceIDs)
-			if err != nil {
-				return err
-			}
-			if err := createValidationCandidateJobsTx(ctx, tx, candidates, requestID, path, result); err != nil {
-				return err
-			}
-			if log != nil {
-				if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
-					return fmt.Errorf("create operation log: %w", err)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	case coreapp.ResourceBulkSelectionFilter:
-		afterID := uint(0)
-		for {
-			candidateCount := 0
-			err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-				candidates, err := selectValidationCandidatesByFilter(ctx, tx, ownerUserID, selection.Filter, afterID, resourceValidationCandidatePageSize)
-				if err != nil {
-					return err
-				}
-				candidateCount = len(candidates)
-				if len(candidates) == 0 {
-					return nil
-				}
-				if err := createValidationCandidateJobsTx(ctx, tx, candidates, requestID, path, result); err != nil {
-					return err
-				}
-				afterID = candidates[len(candidates)-1].ID
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-			if candidateCount == 0 {
-				break
-			}
-		}
-		if log != nil {
-			log.SafeSummary = resourceValidationBulkSummary(log.SafeSummary, result.Requested, result.Created)
-			if err := r.operationLogs.Create(ctx, log); err != nil {
-				return nil, fmt.Errorf("create operation log: %w", err)
-			}
-		}
+	case coreapp.ResourceBulkSelectionIDs, coreapp.ResourceBulkSelectionFilter:
+		return r.CreateDeferredBatchWithLog(ctx, ownerUserID, selection, log, requestID, path)
 	default:
 		return nil, domain.ErrInvalidResourceType
+	}
+}
+
+func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
+	selectionJSON, err := json.Marshal(selection)
+	if err != nil {
+		return nil, fmt.Errorf("marshal resource validation selection: %w", err)
+	}
+	batch := &ResourceValidationBatchModel{
+		OwnerUserID:   ownerUserID,
+		SelectionJSON: selectionJSON,
+		Status:        "pending",
+		RequestID:     strings.TrimSpace(requestID),
+		Path:          strings.TrimSpace(path),
+	}
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if selection.Mode == coreapp.ResourceBulkSelectionFilter {
+			if err := tx.Table("email_resources").
+				Select("COALESCE(MAX(id), 0)").
+				Where("owner_user_id = ? AND type = ?", ownerUserID, string(selection.Filter.ResourceType)).
+				Row().Scan(&batch.ThroughID); err != nil {
+				return fmt.Errorf("capture resource validation batch high-water mark: %w", err)
+			}
+		}
+		if err := tx.Create(batch).Error; err != nil {
+			return fmt.Errorf("create resource validation batch: %w", err)
+		}
+		if log != nil {
+			log.SafeSummary = "Resource validation batch accepted for durable expansion."
+			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+				return fmt.Errorf("create operation log: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	result := &coreapp.ResourceBatchValidationResult{}
+	if selection.Mode == coreapp.ResourceBulkSelectionIDs {
+		// The IDs are durably accepted here but are intentionally resolved by the
+		// dispatcher so the HTTP request performs no resource expansion work.
+		result.Requested = len(selection.ResourceIDs)
+		result.Queued = len(selection.ResourceIDs)
 	}
 	return result, nil
 }
 
-func resourceValidationBulkSummary(summary string, requested int, created int) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(summary), ".")
-	if trimmed == "" {
-		trimmed = "Resource validation batch submitted"
+func (r *ResourceValidationRepo) CreateImportedValidationJobs(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error {
+	if len(resourceIDs) == 0 {
+		return nil
 	}
-	return fmt.Sprintf("%s requested=%d created=%d.", trimmed, requested, created)
+	create := func(tx *gorm.DB) error {
+		candidates, err := selectValidationCandidatesByIDs(ctx, tx, ownerUserID, resourceIDs)
+		if err != nil {
+			return err
+		}
+		return createValidationCandidateJobsTx(
+			ctx,
+			tx,
+			candidates,
+			requestID,
+			path,
+			&coreapp.ResourceBatchValidationResult{},
+		)
+	}
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		return create(tx)
+	}
+	return r.db.WithContext(ctx).Transaction(create)
 }
 
 func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow, requestID, path string, result *coreapp.ResourceBatchValidationResult) error {
@@ -240,6 +283,189 @@ func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidate
 	return nil
 }
 
+func (r *ResourceValidationRepo) ResumeValidationBatches(ctx context.Context, candidateLimit int) (int, error) {
+	if candidateLimit <= 0 {
+		return 0, nil
+	}
+	processed := 0
+	// Empty or already-complete batches do not consume candidate budget. Bound
+	// the number inspected so corrupted/stale rows cannot monopolize a dispatch.
+	maxBatchScans := candidateLimit + 16
+	for scans := 0; processed < candidateLimit && scans < maxBatchScans; scans++ {
+		var batch ResourceValidationBatchModel
+		err := r.db.WithContext(ctx).
+			Where("status = ?", "pending").
+			Order("updated_at ASC, id ASC").
+			First(&batch).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return processed, nil
+		}
+		if err != nil {
+			return processed, fmt.Errorf("find pending resource validation batch: %w", err)
+		}
+		pageLimit := candidateLimit - processed
+		if pageLimit > resourceValidationMaxPageSize {
+			pageLimit = resourceValidationMaxPageSize
+		}
+		_, pageProcessed, err := r.expandValidationBatchPage(ctx, batch.ID, pageLimit)
+		if err != nil {
+			return processed, err
+		}
+		processed += pageProcessed
+	}
+	return processed, nil
+}
+
+func (r *ResourceValidationRepo) expandValidationBatchPage(ctx context.Context, batchID uint, limit int) (bool, int, error) {
+	if limit <= 0 {
+		return false, 0, nil
+	}
+	done := false
+	processed := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch ResourceValidationBatchModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ?", batchID, "pending").
+			First(&batch).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			done = true
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock resource validation batch: %w", err)
+		}
+		var selection coreapp.ResourceBulkSelection
+		if err := json.Unmarshal(batch.SelectionJSON, &selection); err != nil {
+			now := time.Now().UTC()
+			done = true
+			return tx.Model(&ResourceValidationBatchModel{}).
+				Where("id = ? AND status = ?", batch.ID, "pending").
+				Updates(map[string]any{
+					"status":          "failed",
+					"selection_json":  gorm.Expr("JSON_OBJECT()"),
+					"last_safe_error": "Resource validation batch filter is invalid.",
+					"finished_at":     now,
+					"updated_at":      now,
+				}).Error
+		}
+		var candidates []validationCandidateRow
+		nextAfterID := batch.AfterID
+		pageDone := false
+		switch selection.Mode {
+		case coreapp.ResourceBulkSelectionFilter:
+			candidates, err = selectValidationCandidatesByFilter(
+				ctx,
+				tx,
+				batch.OwnerUserID,
+				selection.Filter,
+				batch.AfterID,
+				batch.ThroughID,
+				limit+1,
+			)
+			pageDone = len(candidates) <= limit
+			if len(candidates) > limit {
+				candidates = candidates[:limit]
+			}
+			processed = len(candidates)
+			if len(candidates) == 0 {
+				pageDone = true
+			} else {
+				nextAfterID = candidates[len(candidates)-1].ID
+			}
+		case coreapp.ResourceBulkSelectionIDs:
+			pageIDs := validationBatchIDPage(selection.ResourceIDs, batch.AfterID, limit+1)
+			pageDone = len(pageIDs) <= limit
+			if len(pageIDs) > limit {
+				pageIDs = pageIDs[:limit]
+			}
+			processed = len(pageIDs)
+			if len(pageIDs) > 0 {
+				candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, batch.OwnerUserID, pageIDs)
+				nextAfterID = pageIDs[len(pageIDs)-1]
+			}
+		default:
+			now := time.Now().UTC()
+			done = true
+			return tx.Model(&ResourceValidationBatchModel{}).
+				Where("id = ? AND status = ?", batch.ID, "pending").
+				Updates(map[string]any{
+					"status":          "failed",
+					"selection_json":  gorm.Expr("JSON_OBJECT()"),
+					"last_safe_error": "Resource validation batch selection is invalid.",
+					"finished_at":     now,
+					"updated_at":      now,
+				}).Error
+		}
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 && pageDone {
+			now := time.Now().UTC()
+			done = true
+			return tx.Model(&ResourceValidationBatchModel{}).
+				Where("id = ? AND status = ?", batch.ID, "pending").
+				Updates(map[string]any{
+					"status":         "succeeded",
+					"selection_json": gorm.Expr("JSON_OBJECT()"),
+					"finished_at":    now,
+					"updated_at":     now,
+				}).Error
+		}
+
+		pageResult := &coreapp.ResourceBatchValidationResult{}
+		if len(candidates) > 0 {
+			if err := createValidationCandidateJobsTx(ctx, tx, candidates, batch.RequestID, batch.Path, pageResult); err != nil {
+				return err
+			}
+		}
+		if nextAfterID == batch.AfterID {
+			return fmt.Errorf("resource validation batch made no progress")
+		}
+		done = pageDone
+		updates := map[string]any{
+			"after_id":        nextAfterID,
+			"requested":       gorm.Expr("requested + ?", pageResult.Requested),
+			"queued":          gorm.Expr("queued + ?", pageResult.Queued),
+			"created":         gorm.Expr("created + ?", pageResult.Created),
+			"last_safe_error": "",
+			"updated_at":      time.Now().UTC(),
+		}
+		if done {
+			now := time.Now().UTC()
+			updates["status"] = "succeeded"
+			updates["selection_json"] = gorm.Expr("JSON_OBJECT()")
+			updates["finished_at"] = now
+			updates["updated_at"] = now
+		}
+		return tx.Model(&ResourceValidationBatchModel{}).
+			Where("id = ? AND status = ?", batch.ID, "pending").
+			Updates(updates).Error
+	})
+	return done, processed, err
+}
+
+func validationBatchIDPage(values []uint, afterID uint, limit int) []uint {
+	ids := append([]uint(nil), values...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	capacity := len(ids)
+	if limit > 0 && capacity > limit {
+		capacity = limit
+	}
+	result := make([]uint, 0, capacity)
+	var previous uint
+	for _, id := range ids {
+		if id == 0 || id == previous || id <= afterID {
+			continue
+		}
+		previous = id
+		result = append(result, id)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
 func (r *ResourceValidationRepo) FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error) {
 	var model ResourceValidationModel
 	err := r.db.WithContext(ctx).First(&model, id).Error
@@ -252,20 +478,84 @@ func (r *ResourceValidationRepo) FindByID(ctx context.Context, id uint) (*domain
 	return model.toDomain(), nil
 }
 
-func (r *ResourceValidationRepo) ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.ResourceValidation, error) {
+func (r *ResourceValidationRepo) ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]domain.ResourceValidation, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var models []ResourceValidationModel
-	err := r.db.WithContext(ctx).
-		Where("(status = ? OR (status = ? AND updated_at < ?)) AND attempts < max_attempts",
-			string(domain.ResourceValidationQueued),
-			string(domain.ResourceValidationRunning),
-			staleBefore,
-		).
-		Order("id ASC").
-		Limit(limit).
-		Find(&models).Error
+	now := time.Now().UTC()
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockMore := func(query *gorm.DB, description string) error {
+			remaining := limit - len(models)
+			if remaining <= 0 {
+				return nil
+			}
+			var locked []ResourceValidationModel
+			if err := query.
+				Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Limit(remaining).
+				Find(&locked).Error; err != nil {
+				return fmt.Errorf("lock %s: %w", description, err)
+			}
+			models = append(models, locked...)
+			return nil
+		}
+
+		// Recover timed-out executions before admitting new jobs so a continuous
+		// queued backlog cannot starve durable running work.
+		if err := lockMore(
+			tx.Where("status = ? AND updated_at < ?", string(domain.ResourceValidationRunning), runningStaleBefore).
+				Where("dispatched_at IS NULL").
+				Order("updated_at ASC, id ASC"),
+			"stale running resource validation jobs",
+		); err != nil {
+			return err
+		}
+		if err := lockMore(
+			tx.Where("status = ? AND updated_at < ?", string(domain.ResourceValidationRunning), runningStaleBefore).
+				Where("dispatched_at < ?", queuedDispatchStaleBefore).
+				Order("updated_at ASC, id ASC"),
+			"expired stale-running validation dispatches",
+		); err != nil {
+			return err
+		}
+		if err := lockMore(
+			tx.Where("status = ? AND attempts < max_attempts", string(domain.ResourceValidationQueued)).
+				Where("dispatched_at IS NULL").
+				Order("id ASC"),
+			"queued resource validation jobs",
+		); err != nil {
+			return err
+		}
+		if err := lockMore(
+			tx.Where("status = ? AND attempts < max_attempts", string(domain.ResourceValidationQueued)).
+				Where("dispatched_at < ?", queuedDispatchStaleBefore).
+				Order("dispatched_at ASC, id ASC"),
+			"expired queued resource validation dispatches",
+		); err != nil {
+			return err
+		}
+
+		for i := range models {
+			dispatchToken := platform.NewUUIDV4String()
+			result := tx.Model(&ResourceValidationModel{}).
+				Where("id = ?", models[i].ID).
+				UpdateColumns(map[string]any{
+					"dispatch_token": dispatchToken,
+					"dispatched_at":  now,
+					"updated_at":     gorm.Expr("updated_at"),
+				})
+			if result.Error != nil {
+				return fmt.Errorf("claim resource validation dispatch: %w", result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("claim resource validation dispatch: job %d changed concurrently", models[i].ID)
+			}
+			models[i].DispatchToken = dispatchToken
+			models[i].DispatchedAt = &now
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("claim dispatchable resource validation jobs: %w", err)
 	}
@@ -276,47 +566,120 @@ func (r *ResourceValidationRepo) ClaimDispatchable(ctx context.Context, limit in
 	return result, nil
 }
 
-func (r *ResourceValidationRepo) MarkRunning(ctx context.Context, id uint) (bool, error) {
-	now := time.Now().UTC()
-	staleBefore := now.Add(-10 * time.Minute)
-	result := r.db.WithContext(ctx).
-		Model(&ResourceValidationModel{}).
-		Where("id = ? AND attempts < max_attempts AND (status = ? OR (status = ? AND updated_at < ?))",
-			id,
-			string(domain.ResourceValidationQueued),
-			string(domain.ResourceValidationRunning),
-			staleBefore,
-		).
-		Updates(map[string]interface{}{
-			"status":          string(domain.ResourceValidationRunning),
-			"attempts":        gorm.Expr("CASE WHEN status = ? AND updated_at < ? THEN attempts + 1 ELSE attempts END", string(domain.ResourceValidationRunning), staleBefore),
-			"last_safe_error": "",
-			"started_at":      now,
-			"updated_at":      now,
-		})
-	if result.Error != nil {
-		return false, fmt.Errorf("mark resource validation running: %w", result.Error)
+func (r *ResourceValidationRepo) MarkRunning(ctx context.Context, id uint, dispatchToken string) (string, bool, error) {
+	dispatchToken = strings.TrimSpace(dispatchToken)
+	if dispatchToken == "" {
+		return "", false, nil
 	}
-	return result.RowsAffected > 0, nil
+	now := time.Now().UTC()
+	staleBefore := now.Add(-20 * time.Minute)
+	claimToken := platform.NewUUIDV4String()
+	claimed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var job ResourceValidationModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&job, id).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock resource validation job: %w", err)
+		}
+		job.MaxAttempts = normalizeValidationMaxAttempts(job.MaxAttempts)
+		if job.DispatchToken != dispatchToken {
+			return nil
+		}
+		isQueued := job.Status == string(domain.ResourceValidationQueued)
+		isStale := job.Status == string(domain.ResourceValidationRunning) && job.UpdatedAt.Before(staleBefore)
+		if !isQueued && !isStale {
+			return nil
+		}
+
+		nextAttempts := job.Attempts
+		if isStale {
+			nextAttempts++
+		}
+		if nextAttempts >= job.MaxAttempts {
+			return tx.Model(&ResourceValidationModel{}).
+				Where("id = ? AND status IN ?", id, []string{
+					string(domain.ResourceValidationQueued),
+					string(domain.ResourceValidationRunning),
+				}).
+				Updates(map[string]any{
+					"status":          string(domain.ResourceValidationFailed),
+					"attempts":        nextAttempts,
+					"claim_token":     "",
+					"dispatch_token":  "",
+					"dispatched_at":   nil,
+					"last_safe_error": "Resource validation retry attempts exhausted.",
+					"finished_at":     now,
+					"updated_at":      now,
+				}).Error
+		}
+
+		result := tx.Model(&ResourceValidationModel{}).
+			Where("id = ? AND status = ? AND dispatch_token = ?", id, job.Status, dispatchToken).
+			Updates(map[string]any{
+				"status":          string(domain.ResourceValidationRunning),
+				"attempts":        nextAttempts,
+				"claim_token":     claimToken,
+				"dispatch_token":  "",
+				"dispatched_at":   nil,
+				"last_safe_error": "",
+				"started_at":      now,
+				"updated_at":      now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mark resource validation running: %w", result.Error)
+		}
+		claimed = result.RowsAffected > 0
+		return nil
+	})
+	if !claimed {
+		claimToken = ""
+	}
+	return claimToken, claimed, err
 }
 
-func (r *ResourceValidationRepo) MarkFailed(ctx context.Context, id uint, safeError string) error {
+func (r *ResourceValidationRepo) ReleaseDispatch(ctx context.Context, id uint, dispatchToken string) error {
+	dispatchToken = strings.TrimSpace(dispatchToken)
+	if id == 0 || dispatchToken == "" {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&ResourceValidationModel{}).
+		Where(
+			"id = ? AND dispatch_token = ? AND status IN ?",
+			id,
+			dispatchToken,
+			[]string{string(domain.ResourceValidationQueued), string(domain.ResourceValidationRunning)},
+		).
+		UpdateColumns(map[string]any{
+			"dispatch_token": "",
+			"dispatched_at":  nil,
+			"updated_at":     gorm.Expr("updated_at"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("release resource validation dispatch: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *ResourceValidationRepo) MarkFailed(ctx context.Context, id uint, claimToken string, safeError string) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := finishValidationJobTx(tx, id, string(domain.ResourceValidationFailed), safeValidationMessage(safeError), now); err != nil {
+		if err := finishValidationJobTx(tx, id, claimToken, string(domain.ResourceValidationFailed), safeValidationMessage(safeError), now); err != nil {
 			return err
 		}
 		return nil
 	})
 }
 
-func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id uint, safeError string) (bool, error) {
+func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id uint, claimToken string, safeError string) (bool, error) {
 	now := time.Now().UTC()
 	exhausted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var job ResourceValidationModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ?", id, string(domain.ResourceValidationRunning)).
+			Where("id = ? AND status = ? AND claim_token = ?", id, string(domain.ResourceValidationRunning), claimToken).
 			First(&job).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -330,6 +693,7 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 		updates := map[string]interface{}{
 			"attempts":        nextAttempts,
 			"status":          nextStatus,
+			"claim_token":     "",
 			"last_safe_error": safeValidationMessage(safeError),
 			"updated_at":      now,
 		}
@@ -339,7 +703,7 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 			updates["finished_at"] = now
 		}
 		result := tx.Model(&ResourceValidationModel{}).
-			Where("id = ? AND status = ?", id, string(domain.ResourceValidationRunning)).
+			Where("id = ? AND status = ? AND claim_token = ?", id, string(domain.ResourceValidationRunning), claimToken).
 			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("mark resource validation retryable failure: %w", result.Error)
@@ -364,25 +728,53 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 	return exhausted, err
 }
 
-func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {
+func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
+	updates := map[string]any{"updated_at": time.Now().UTC()}
+	if clientID = strings.TrimSpace(clientID); clientID != "" {
+		updates["client_id"] = clientID
+	}
+	if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" {
+		updates["refresh_token"] = refreshToken
+	}
+	if len(updates) == 1 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
+			return err
+		}
+		result := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND status <> ?", resourceID, string(domain.MicrosoftStatusDeleted)).
+			Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("save refreshed microsoft credentials: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrResourceNotFound
+		}
+		return nil
+	})
+}
+
+func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		if err := lockRunningValidationJob(tx, jobID); err != nil {
+		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
 			return err
 		}
 		var ms MicrosoftResourceModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ms, resourceID).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return markValidationJobFailedTx(tx, jobID, "Resource not found.", now)
+				return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
 			}
 			return fmt.Errorf("lock microsoft resource for validation: %w", err)
 		}
 		switch domain.MicrosoftResourceStatus(ms.Status) {
 		case domain.MicrosoftStatusDeleted:
-			return markValidationJobFailedTx(tx, jobID, "Resource not found.", now)
+			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
 		case domain.MicrosoftStatusDisabled:
-			return markValidationJobFailedTx(tx, jobID, "Resource status does not allow validation.", now)
+			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource status does not allow validation.", now)
 		}
 
 		safeMessage := safeValidationMessage(result.SafeMessage)
@@ -418,32 +810,32 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 			Updates(updates).Error; err != nil {
 			return fmt.Errorf("apply microsoft validation result: %w", err)
 		}
-		if err := finishValidationJobTx(tx, jobID, jobStatus, safeMessage, now); err != nil {
+		if err := finishValidationJobTx(tx, jobID, claimToken, jobStatus, safeMessage, now); err != nil {
 			return err
 		}
 		return createSystemLogInTx(ctx, tx, systemLog)
 	})
 }
 
-func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, result coreapp.DomainValidationResult, systemLog *governancedomain.SystemLog) error {
+func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.DomainValidationResult, systemLog *governancedomain.SystemLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		if err := lockRunningValidationJob(tx, jobID); err != nil {
+		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
 			return err
 		}
 		var dr DomainResourceModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&dr, resourceID).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return markValidationJobFailedTx(tx, jobID, "Resource not found.", now)
+				return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
 			}
 			return fmt.Errorf("lock domain resource for validation: %w", err)
 		}
 		switch domain.MailDomainStatus(dr.Status) {
 		case domain.DomainStatusDeleted:
-			return markValidationJobFailedTx(tx, jobID, "Resource not found.", now)
+			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
 		case domain.DomainStatusDisabled:
-			return markValidationJobFailedTx(tx, jobID, "Resource status does not allow validation.", now)
+			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource status does not allow validation.", now)
 		}
 
 		safeMessage := safeValidationMessage(result.SafeMessage)
@@ -463,31 +855,41 @@ func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID ui
 			}).Error; err != nil {
 			return fmt.Errorf("apply domain validation result: %w", err)
 		}
-		if err := finishValidationJobTx(tx, jobID, jobStatus, safeMessage, now); err != nil {
+		if err := finishValidationJobTx(tx, jobID, claimToken, jobStatus, safeMessage, now); err != nil {
 			return err
 		}
 		return createSystemLogInTx(ctx, tx, systemLog)
 	})
 }
 
-func (r *ResourceValidationRepo) MarkDispatchFailed(ctx context.Context, id uint, safeError string) error {
-	now := time.Now().UTC()
-	err := r.db.WithContext(ctx).Model(&ResourceValidationModel{}).
-		Where("id = ? AND status IN ?", id, []string{string(domain.ResourceValidationQueued), string(domain.ResourceValidationRunning)}).
-		Updates(map[string]interface{}{
+func (r *ResourceValidationRepo) MarkDispatchFailed(ctx context.Context, id uint, dispatchToken string, safeError string) error {
+	dispatchToken = strings.TrimSpace(dispatchToken)
+	if id == 0 || dispatchToken == "" {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&ResourceValidationModel{}).
+		Where(
+			"id = ? AND dispatch_token = ? AND status IN ?",
+			id,
+			dispatchToken,
+			[]string{string(domain.ResourceValidationQueued), string(domain.ResourceValidationRunning)},
+		).
+		UpdateColumns(map[string]any{
+			"dispatch_token":  "",
+			"dispatched_at":   nil,
 			"last_safe_error": safeValidationMessage(safeError),
-			"updated_at":      now,
-		}).Error
-	if err != nil {
-		return fmt.Errorf("mark resource validation dispatch failed: %w", err)
+			"updated_at":      gorm.Expr("updated_at"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark resource validation dispatch failed: %w", result.Error)
 	}
 	return nil
 }
 
-func lockRunningValidationJob(tx *gorm.DB, id uint) error {
+func lockRunningValidationJob(tx *gorm.DB, id uint, claimToken string) error {
 	var job ResourceValidationModel
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND status = ?", id, string(domain.ResourceValidationRunning)).
+		Where("id = ? AND status = ? AND claim_token = ?", id, string(domain.ResourceValidationRunning), claimToken).
 		First(&job).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -498,15 +900,16 @@ func lockRunningValidationJob(tx *gorm.DB, id uint) error {
 	return nil
 }
 
-func markValidationJobFailedTx(tx *gorm.DB, jobID uint, safeError string, now time.Time) error {
-	return finishValidationJobTx(tx, jobID, string(domain.ResourceValidationFailed), safeValidationMessage(safeError), now)
+func markValidationJobFailedTx(tx *gorm.DB, jobID uint, claimToken string, safeError string, now time.Time) error {
+	return finishValidationJobTx(tx, jobID, claimToken, string(domain.ResourceValidationFailed), safeValidationMessage(safeError), now)
 }
 
-func finishValidationJobTx(tx *gorm.DB, jobID uint, status string, safeError string, now time.Time) error {
+func finishValidationJobTx(tx *gorm.DB, jobID uint, claimToken string, status string, safeError string, now time.Time) error {
 	result := tx.Model(&ResourceValidationModel{}).
-		Where("id = ? AND status = ?", jobID, string(domain.ResourceValidationRunning)).
+		Where("id = ? AND status = ? AND claim_token = ?", jobID, string(domain.ResourceValidationRunning), claimToken).
 		Updates(map[string]interface{}{
 			"status":          status,
+			"claim_token":     "",
 			"last_safe_error": safeError,
 			"finished_at":     now,
 			"updated_at":      now,
@@ -549,23 +952,63 @@ func selectValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUser
 	return validateValidationCandidateRows(rows)
 }
 
-func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, limit int) ([]validationCandidateRow, error) {
+// Deferred batches are accepted against a point-in-time selection. Resources
+// may be deleted, disabled, or transferred before a later page expands; those
+// rows are skipped so one stale ID cannot poison the global dispatcher.
+func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint) ([]validationCandidateRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []validationCandidateRow
+	if err := tx.WithContext(ctx).
+		Table("email_resources AS er").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
+		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
+		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
+		Where("er.id IN ? AND er.owner_user_id = ?", ids, ownerUserID).
+		Order("er.id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("select deferred validation resources: %w", err)
+	}
+	result := make([]validationCandidateRow, 0, len(rows))
+	for _, row := range rows {
+		switch domain.ResourceType(row.ResourceType) {
+		case domain.ResourceTypeMicrosoft:
+			status := domain.MicrosoftResourceStatus(row.MicrosoftStatus)
+			if status == "" || status == domain.MicrosoftStatusDeleted || status == domain.MicrosoftStatusDisabled {
+				continue
+			}
+		case domain.ResourceTypeDomain:
+			status := domain.MailDomainStatus(row.DomainStatus)
+			if status == "" || status == domain.DomainStatusDeleted || status == domain.DomainStatusDisabled {
+				continue
+			}
+		default:
+			continue
+		}
+		result = append(result, row)
+	}
+	return result, nil
+}
+
+func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	switch filter.ResourceType {
 	case domain.ResourceTypeMicrosoft:
-		return selectMicrosoftValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, limit)
+		return selectMicrosoftValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, throughID, limit)
 	case domain.ResourceTypeDomain:
-		return selectDomainValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, limit)
+		return selectDomainValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, throughID, limit)
 	default:
 		return nil, domain.ErrInvalidResourceType
 	}
 }
 
-func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, limit int) ([]validationCandidateRow, error) {
+func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
 		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.status AS microsoft_status, '' AS domain_status").
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
+		Where("er.id <= ?", throughID).
 		Where("ms.status NOT IN ?", []string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)})
 
 	if afterID > 0 {
@@ -615,12 +1058,13 @@ func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.D
 	return validateValidationCandidateRows(rows)
 }
 
-func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, limit int) ([]validationCandidateRow, error) {
+func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
 		Select("er.id, er.type AS resource_type, er.owner_user_id, '' AS microsoft_status, dr.status AS domain_status").
 		Joins("JOIN domain_resources AS dr ON dr.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeDomain)).
+		Where("er.id <= ?", throughID).
 		Where("dr.owner_user_id = ?", ownerUserID).
 		Where("dr.status NOT IN ?", []string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)})
 

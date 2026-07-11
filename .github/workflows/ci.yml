@@ -266,11 +266,23 @@ jobs:
           LATEST=$(mysql -h 127.0.0.1 -u remail -premail remail -N -e \
             "SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1;")
           echo "Latest applied migration: $LATEST"
-          test "$LATEST" -eq 2
+          test "$LATEST" -eq 8
           mysql -h 127.0.0.1 -u remail -premail remail -e \
             "SELECT 1 FROM mailmatch_order_delivery_heads LIMIT 1;"
           mysql -h 127.0.0.1 -u remail -premail remail -e \
             "SELECT 1 FROM microsoft_resource_project_matches LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT blocked_resource_signature, blocked_resource_updated_at, blocked_last_allocated_at FROM microsoft_alias_schedules LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT was_attempted, uncertain_since, negative_confirmations, last_negative_confirmation_at FROM microsoft_alias_attempts LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT owner_user_id FROM explicit_aliases LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT through_id, selection_json FROM resource_validation_batches LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT claim_token, dispatch_token, dispatched_at FROM resource_validation_jobs LIMIT 1;"
+          mysql -h 127.0.0.1 -u remail -premail remail -e \
+            "SELECT owner_user_id FROM explicit_aliases LIMIT 1;"
 
       - name: Shutdown server
         if: always()
@@ -506,7 +518,7 @@ jobs:
 
           wait_for_health() {
             for _ in $(seq 1 60); do
-              if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/healthz | grep -q '"ok"'; then
+              if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/readyz | grep -q '"ok"'; then
                 return 0
               fi
               sleep 2

@@ -111,11 +111,6 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 
 	now := s.now().UTC()
 	objectKey := inboundObjectKey(now, platform.NewUUIDV7String())
-	stored, err := s.saveRawMessage(ctx, objectKey, message)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
-	}
-
 	mails := make([]domain.InboundMail, 0, len(message.Recipients))
 	for _, recipient := range message.Recipients {
 		if normalizeEmailAddress(recipient.Email) == "" ||
@@ -127,11 +122,24 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 		mails = append(mails, *domain.NewInboundMail(
 			normalizeEmailAddress(message.EnvelopeFrom),
 			recipient,
-			stored.ObjectKey,
+			objectKey,
 			now,
 		))
 	}
 	if err := s.repo.CreateMany(ctx, mails); err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+	}
+	stored, err := s.saveRawMessage(ctx, objectKey, message)
+	if err != nil || stored == nil || stored.ObjectKey != objectKey {
+		reason := "Inbound mail object could not be stored."
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		for _, mail := range mails {
+			_ = s.repo.MarkFailed(cleanupCtx, mail.ID, reason)
+		}
+		if err == nil {
+			err = fmt.Errorf("stored inbound object key mismatch")
+		}
 		return nil, fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
 	}
 

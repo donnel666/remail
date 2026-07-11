@@ -109,7 +109,7 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource) error) ([]uint, error) {
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error) ([]uint, error) {
 	if len(resources) != len(ms) {
 		return nil, fmt.Errorf("create microsoft resources and mark import succeeded: resource count mismatch")
 	}
@@ -148,8 +148,8 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 				return err
 			}
 			if afterCreate != nil {
-				if err := afterCreate(platform.WithGormTx(ctx, tx), chunkMicrosoft); err != nil {
-					return fmt.Errorf("record microsoft binding inputs: %w", err)
+				if err := afterCreate(platform.WithGormTx(ctx, tx), chunkMicrosoft, chunkIDs); err != nil {
+					return fmt.Errorf("finalize imported microsoft resources: %w", err)
 				}
 			}
 			if err := tx.Model(&ResourceImportModel{}).

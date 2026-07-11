@@ -77,12 +77,16 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 
 		rawResult, err := a.runMicrosoftValidation(ctx, req, proxyURL, preferredBindingAddress)
 		if err != nil {
-			rawResult = mailinfra.MicrosoftOAuthResult{
-				Valid:        false,
-				Category:     "request",
-				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
-				ProxyFailure: proxyID != 0,
-			}
+			rawResult.Valid = false
+			rawResult.Category = "request"
+			rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
+			rawResult.ProxyFailure = proxyID != 0
+		}
+		if strings.TrimSpace(rawResult.ClientID) != "" {
+			req.ClientID = strings.TrimSpace(rawResult.ClientID)
+		}
+		if strings.TrimSpace(rawResult.RefreshToken) != "" {
+			req.RefreshToken = strings.TrimSpace(rawResult.RefreshToken)
 		}
 		last = toCoreMicrosoftResult(rawResult)
 		_ = a.recordBindingResult(ctx, req, rawResult)

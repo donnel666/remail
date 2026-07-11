@@ -324,8 +324,8 @@ func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 	INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status)
 	VALUES (2001, 1, 'wrong@d2001.example.com', 'normal')`).Error)
 	require.NoError(t, db.Exec(`
-	INSERT INTO explicit_aliases(resource_id, email, status)
-	VALUES (1001, 'alias1001@example.com', 'normal')`).Error)
+		INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+		VALUES (1001, 4, 'alias1001@example.com', 'normal')`).Error)
 	var explicitAliasID uint
 	require.NoError(t, db.Raw("SELECT id FROM explicit_aliases WHERE resource_id = 1001").Scan(&explicitAliasID).Error)
 	var mailboxID uint
@@ -661,9 +661,10 @@ func seedAllocBase(t *testing.T, db *gorm.DB, productType string, mainWeight, do
 	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
-    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
+	    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+	    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+	    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user'),
+	    (4, 'alias-owner@test.local', 'hash', 'alias-owner', TRUE, 'super_admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'Alloc Project', 'alloc', 'listed', 'public', TRUE)`).Error)

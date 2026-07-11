@@ -229,13 +229,16 @@ func checkPassword(session *Session, email, password, uaid string, maxRetries in
 				}
 				continue
 			}
-			return "", newAuthError(fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter))
+			return "", newAuthError(fmt.Sprintf("密码验证频率受限 (429), 请 %ds 后重试", retryAfter), AuthStatusRateLimited)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", newAuthError(fmt.Sprintf("密码验证请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 		}
 		var result map[string]any
 		if err := resp.JSON(&result); err != nil {
 			logError("checkpassword 返回非 JSON 响应: status=%d", resp.StatusCode)
 			logDebug("checkpassword 非 JSON 响应: body_len=%d", len(resp.Body))
-			return "", newAuthError(fmt.Sprintf("密码验证返回异常响应 (HTTP %d)", resp.StatusCode))
+			return "", newAuthError(fmt.Sprintf("密码验证返回异常响应 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 		}
 		logDebug("步骤5: checkpassword validation=%s error=%s", asString(result["validationresult"]), asString(result["error"]))
 		if asString(result["validationresult"]) != "succeed" {
@@ -298,13 +301,9 @@ func submitCredentials(session *Session, email, password, ppft, postURL, vanguar
 	return resp.Body, resp.URL, nil
 }
 
-func declineKMSI(session *Session, page, rawURL, postURL string) (string, string, string, error) {
+func declineKMSI(session *Session, page, rawURL, referer string) (string, string, string, error) {
 	logDebug("KMSI 检查: 当前 url=%s", rawURL)
-	isKMSI := strings.Contains(page, `"sPageId":"i5245"`) ||
-		(strings.Contains(page, "LoginOptions") && strings.Contains(page, "type") && extractPPFT(page) != "") ||
-		strings.Contains(page, "保持登录状态") ||
-		strings.Contains(page, "保持登录")
-	if !isKMSI {
+	if !isKMSIPage(page) {
 		logInfo("KMSI: 无需处理")
 		return page, rawURL, "", nil
 	}
@@ -327,7 +326,7 @@ func declineKMSI(session *Session, page, rawURL, postURL string) (string, string
 		Headers: navHeaders(session, map[string]string{
 			"Content-Type": "application/x-www-form-urlencoded",
 			"Origin":       "https://login.live.com",
-			"Referer":      postURL,
+			"Referer":      referer,
 		}),
 	})
 	if err != nil {
@@ -336,6 +335,18 @@ func declineKMSI(session *Session, page, rawURL, postURL string) (string, string
 	logInfo("KMSI: 已拒绝保持登录")
 	logDebug("KMSI: 拒绝后 url=%s", resp.URL)
 	return resp.Body, resp.URL, "", nil
+}
+
+func isKMSIPage(page string) bool {
+	pageID := strings.ToLower(strings.TrimSpace(extractPageID(page)))
+	isKMSI := pageID == "i5245"
+	if pageID == "" {
+		lowerPage := strings.ToLower(page)
+		isKMSI = strings.Contains(page, "保持登录状态") ||
+			strings.Contains(page, "保持登录") ||
+			strings.Contains(lowerPage, "stay signed in")
+	}
+	return isKMSI
 }
 
 func handleJSPollingPage(session *Session, page, rawURL string) (string, string, error) {
@@ -454,7 +465,10 @@ func handleConsent(session *Session, page, rawURL string) (string, string, error
 			action = "https://account.live.com" + action
 		}
 		fields := extractHiddenInputs(page)
-		if strings.Contains(strings.ToLower(action), "consent") {
+		if strings.Contains(strings.ToLower(action), "consent") ||
+			strings.Contains(page, "ucaccept") ||
+			strings.Contains(page, "pprid") ||
+			strings.Contains(strings.ToLower(rawURL), "consent") {
 			fields["ucaccept"] = "Yes"
 		}
 		resp, err := session.Post(action, requestOptions{
@@ -596,7 +610,7 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 	if err != nil {
 		return nil, err
 	}
-	page, currentURL, bound2, err := declineKMSI(session, page, currentURL, postURL)
+	page, currentURL, bound2, err := declineKMSI(session, page, currentURL, currentURL)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package msacl
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,16 @@ import (
 
 type fakeMailboxReader struct {
 	calls atomic.Int32
+}
+
+type failingMailboxReader struct{}
+
+func (failingMailboxReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
+	return nil, errors.New("mailbox unavailable")
+}
+
+func (failingMailboxReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
+	return nil, errors.New("mailbox unavailable")
 }
 
 func (r *fakeMailboxReader) List(_ context.Context, mailbox string, _ int, _ bool) ([]EmailObj, error) {
@@ -64,4 +75,14 @@ func TestMailWatcherDefaultWaitIncludesLateArrivalGrace(t *testing.T) {
 	watcher := &MailWatcher{timeout: 60}
 
 	require.Equal(t, 79, watcher.defaultCodeWaitTimeout())
+}
+
+func TestSnapshotMailboxKeysReturnsBaselineFailure(t *testing.T) {
+	previousReader := activeMailboxReader()
+	defer SetMailboxReader(previousReader)
+	SetMailboxReader(failingMailboxReader{})
+
+	keys, err := snapshotMailboxKeys(context.Background(), "code@example.com", "")
+	require.Error(t, err)
+	require.Nil(t, keys)
 }

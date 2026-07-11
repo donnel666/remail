@@ -26,13 +26,19 @@ var proxySchemes = []string{
 }
 
 type Session struct {
-	client      tlsclient.HttpClient
+	client      sessionHTTPClient
 	ctx         context.Context
 	navHeaders  map[string]string
 	corsHeaders map[string]string
 	userAgent   string
 	dcInterval  int
 	dcExpiresIn int
+}
+
+type sessionHTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+	SetFollowRedirect(followRedirect bool)
+	GetFollowRedirect() bool
 }
 
 type HTTPResponse struct {
@@ -366,24 +372,6 @@ func corsHeaders(session *Session, extra map[string]string) map[string]string {
 		return cloneStringMap(extra)
 	}
 	return mergeHeaders(session.corsHeaders, extra)
-}
-
-func requestWithRetryPost(session *Session, rawURL, label, boundMailbox string, opts requestOptions) (*HTTPResponse, error) {
-	for attempt := 1; attempt <= 2; attempt++ {
-		resp, err := session.Post(rawURL, opts)
-		if err == nil {
-			return resp, nil
-		}
-		if attempt == 1 && isTransientRequestError(err) {
-			logWarning("%s 请求异常, 准备重试: %s", label, err)
-			if err := session.sleep(500 * time.Millisecond); err != nil {
-				return nil, wrapAuthError(fmt.Sprintf("%s 请求取消: %s", label, err), AuthStatusRequestError, err, boundMailbox)
-			}
-			continue
-		}
-		return nil, wrapAuthError(fmt.Sprintf("%s 请求异常: %s", label, err), AuthStatusRequestError, err, boundMailbox)
-	}
-	return nil, newAuthError(label+" 请求异常", AuthStatusRequestError, boundMailbox)
 }
 
 func requestWithRetryGet(session *Session, rawURL, label, boundMailbox string, opts requestOptions) (*HTTPResponse, error) {
