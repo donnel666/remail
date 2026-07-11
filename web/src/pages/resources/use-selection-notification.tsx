@@ -4,6 +4,14 @@ import { Button, Notification, Space, Typography } from "@douyinfe/semi-ui";
 const { Text } = Typography;
 const selectionNoticeId = "resources-batch-actions";
 
+interface SelectionExtraAction {
+  key: string;
+  labelKey: string;
+  onClick: () => void;
+  loading?: boolean;
+  type?: "primary" | "secondary" | "tertiary" | "warning" | "danger";
+}
+
 interface UseSelectionNotificationOptions {
   onCheck?: () => void;
   selectedCount: number;
@@ -14,6 +22,7 @@ interface UseSelectionNotificationOptions {
   onSell?: () => void;
   deleteLoading?: boolean;
   deleteLabelKey?: string;
+  extraActions?: SelectionExtraAction[];
   selectionDescriptionKey?: string;
   sellLoading?: boolean;
   sellLabelKey?: string;
@@ -30,6 +39,7 @@ export function useSelectionNotification({
   onSell,
   deleteLoading = false,
   deleteLabelKey = "Delete",
+  extraActions,
   selectionDescriptionKey = "Selected resources",
   sellLoading = false,
   sellLabelKey = "Sell",
@@ -65,6 +75,18 @@ export function useSelectionNotification({
                 {t(sellLabelKey)}
               </Button>
             ) : null}
+            {extraActions?.map((action) => (
+              <Button
+                key={action.key}
+                loading={action.loading}
+                onClick={action.onClick}
+                size="small"
+                theme="solid"
+                type={action.type ?? "tertiary"}
+              >
+                {t(action.labelKey)}
+              </Button>
+            ))}
             {onDelete ? (
               <Button
                 loading={deleteLoading}
@@ -99,6 +121,7 @@ export function useSelectionNotification({
     checkLoading,
     checkLabelKey,
     deleteLabelKey,
+    extraActions,
     onCheck,
     onClear,
     onDelete,
