@@ -2369,11 +2369,11 @@ func TestQueueMicrosoftImportValidationsQueuesBatch(t *testing.T) {
 	secondMS := &coredomain.MicrosoftResource{EmailAddress: "import-second@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), second, secondMS))
 
-	queued, err := queueMicrosoftImportValidations(context.Background(), mod, coreapp.MicrosoftImportTask{
-		ImportID:    99,
-		OwnerUserID: 1,
-		RequestID:   "request-import-validation",
-	}, &coreapp.MicrosoftImportProcessResult{ImportedResourceIDs: []uint{first.ID, second.ID}})
+	queued, err := queueMicrosoftImportValidations(
+		context.Background(),
+		mod,
+		&coreapp.MicrosoftImportProcessResult{ImportedResourceIDs: []uint{first.ID, second.ID}},
+	)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, queued)

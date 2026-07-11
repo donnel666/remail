@@ -134,14 +134,14 @@ func TestAddSingleExplicitAliasReconcilesSameCandidateAfterLostResponse(t *testi
 		alias  = prefix + "@outlook.com"
 	)
 	firstSession, firstClient := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>other123456@outlook.com</div>`, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			page := `<input type="hidden" name="canary" value="fresh-canary"><input name="AddAssocIdOptions" value="LIVE">`
 			return scriptedResponse(req, 200, addAssocIDURL, page, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, addAssocIDURL)
 			return nil, io.ErrUnexpectedEOF
 		},
@@ -153,7 +153,7 @@ func TestAddSingleExplicitAliasReconcilesSameCandidateAfterLostResponse(t *testi
 	firstClient.requireDone()
 
 	retrySession, retryClient := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
 			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>`+alias+`</div>`, nil), nil
 		},
@@ -169,11 +169,11 @@ func TestAddSingleExplicitAliasReconcilesSameCandidateAfterLostResponse(t *testi
 
 func TestReconcileExplicitAliasesDoesNotSubmitAddAssocIDAgain(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
 			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>first123456@outlook.com</div>`, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
 			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>first123456@outlook.com</div>`, nil), nil
 		},
@@ -193,7 +193,7 @@ func TestReconcileExplicitAliasesDoesNotSubmitAddAssocIDAgain(t *testing.T) {
 
 func TestGetExplicitAliasCredentialTypeKeepsOptionalProofsForLaterChallenge(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			require.Equal(t, http.MethodPost, req.Method)
 			require.Equal(t, "login.live.com", req.URL.Hostname())
 			require.Equal(t, "/GetCredentialType.srf", req.URL.Path)
@@ -232,7 +232,7 @@ func TestGetExplicitAliasCredentialTypeKeepsOptionalProofsForLaterChallenge(t *t
 
 func TestHandleProofsPageTriesSkipBeforeBinding(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://account.live.com/proofs/Add")
 			body, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestHandleProofsPageResolvesRelativeActionBeforeBindingFallback(t *testing.
 	defer SetMailboxReader(previousReader)
 
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			body, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			fields, err := url.ParseQuery(string(body))
@@ -288,7 +288,7 @@ func TestHandleProofsPageResolvesRelativeActionBeforeBindingFallback(t *testing.
 			require.Equal(t, "Skip", fields.Get("action"))
 			return scriptedResponse(req, 200, "https://account.live.com/proofs/Add", page, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			body, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			fields, err := url.ParseQuery(string(body))
@@ -351,7 +351,7 @@ func TestOTPSequenceStartsWatcherBeforeSendAndRefreshesCanary(t *testing.T) {
 	defer SetMailboxReader(previousReader)
 
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://account.live.com/API/Proofs/SendOtt")
 			select {
 			case <-reader.watcherStarted:
@@ -362,7 +362,7 @@ func TestOTPSequenceStartsWatcherBeforeSendAndRefreshesCanary(t *testing.T) {
 			require.Equal(t, "initial-canary", req.Header.Get("canary"))
 			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"refreshed-canary"}`, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://account.live.com/API/Proofs/VerifyCode")
 			require.Equal(t, "refreshed-canary", req.Header.Get("canary"))
 			var payload map[string]any
@@ -370,7 +370,7 @@ func TestOTPSequenceStartsWatcherBeforeSendAndRefreshesCanary(t *testing.T) {
 			require.Equal(t, "654321", payload["code"])
 			return scriptedResponse(req, 200, req.URL.String(), `{"route":"verified"}`, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, "https://account.live.com/return?route=verified")
 			return scriptedResponse(req, 200, req.URL.String(), `<html>verified</html>`, nil), nil
 		},
@@ -409,7 +409,7 @@ func TestOTPVerifyLostResponseRemainsRetryable(t *testing.T) {
 	defer SetMailboxReader(previousReader)
 
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			select {
 			case <-reader.watcherStarted:
 			case <-time.After(time.Second):
@@ -418,7 +418,7 @@ func TestOTPVerifyLostResponseRemainsRetryable(t *testing.T) {
 			close(reader.sendStarted)
 			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"refreshed-canary"}`, nil), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			return scriptedResponse(req, 503, req.URL.String(), `{"error":{"code":"temporary"}}`, nil), nil
 		},
 	)
@@ -448,7 +448,7 @@ func TestOTPVerifyLostResponseRemainsRetryable(t *testing.T) {
 
 func TestExplicitAliasPasswordCheckTreatsServerFailureAsRetryable(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://login.live.com/checkpassword.srf")
 			return scriptedResponse(req, 503, req.URL.String(), `{"validationresult":"failed"}`, nil), nil
 		},
@@ -471,7 +471,7 @@ func TestExplicitAliasPasswordCheckTreatsServerFailureAsRetryable(t *testing.T) 
 
 func TestDevicePasswordCheckTreatsServerFailureAsRetryable(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://login.live.com/checkpassword.srf")
 			return scriptedResponse(req, 503, req.URL.String(), `{"validationresult":"failed"}`, nil), nil
 		},
@@ -489,7 +489,7 @@ func TestDevicePasswordCheckTreatsServerFailureAsRetryable(t *testing.T) {
 func TestDeclineKMSIUsesCurrentPromptAsReferer(t *testing.T) {
 	const kmsiURL = "https://login.live.com/ppsecure/post.srf?kmsi=1"
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			require.Equal(t, kmsiURL, req.Header.Get("Referer"))
 			return scriptedResponse(req, 200, "https://account.live.com/auth/redirect", `<html>continued</html>`, nil), nil
 		},
@@ -506,7 +506,7 @@ func TestDeclineKMSIUsesCurrentPromptAsReferer(t *testing.T) {
 
 func TestOneTimeFormPostIsNotReplayedAfterLostResponse(t *testing.T) {
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
+		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodPost, "https://account.live.com/identity/continue")
 			return nil, io.ErrUnexpectedEOF
 		},

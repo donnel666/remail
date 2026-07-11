@@ -140,7 +140,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			}
 			return err
 		}
-		queuedValidations, err := queueMicrosoftImportValidations(ctx, module, payload, result)
+		queuedValidations, err := queueMicrosoftImportValidations(ctx, module, result)
 		if err != nil {
 			slog.Warn(
 				"microsoft import validation queue failed",
@@ -161,7 +161,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 	})
 }
 
-func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, payload coreapp.MicrosoftImportTask, result *coreapp.MicrosoftImportProcessResult) (int, error) {
+func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, result *coreapp.MicrosoftImportProcessResult) (int, error) {
 	if module == nil || module.ValidationUseCase == nil || result == nil || len(result.ImportedResourceIDs) == 0 {
 		return 0, nil
 	}

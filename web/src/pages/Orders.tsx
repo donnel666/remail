@@ -79,7 +79,7 @@ import { useSelectionNotification } from "./resources/use-selection-notification
 import {
   TICKET_CREATE_ORDER_STORAGE_KEY,
   buildOrderRefFromOrder,
-} from "./tickets/tickets-mock";
+} from "./orders/ticket-order-handoff";
 
 type StatusFilter = "all" | OrderStatus;
 type ServiceModeFilter = "all" | OrderServiceMode;

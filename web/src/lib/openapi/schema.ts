@@ -896,7 +896,7 @@ export interface paths {
         put?: never;
         /**
          * Queue asynchronous resource validations in batch
-         * @description Creates or reuses durable validation jobs for the selected resources and returns immediately. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in the backend worker. This endpoint is the batch counterpart of POST /v1/resources/{resourceId}/validate and avoids client-side request loops.
+         * @description Persists the selection as a durable batch and returns immediately; child validation jobs are expanded later under the current background-work budget. Filter batches capture an inclusive resource-ID high-water mark, so resources created after acceptance are excluded. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in backend workers. This endpoint is the batch counterpart of POST /v1/resources/{resourceId}/validate and avoids client-side request loops.
          */
         post: operations["postResourceValidations"];
         delete?: never;
@@ -2595,9 +2595,9 @@ export interface components {
             accesses?: components["schemas"]["ProjectAccess"][];
         };
         ResourceValidationsResponse: {
-            /** @description Number of resources accepted by the selection after ownership and status checks. */
+            /** @description Number of explicit resource IDs durably accepted for deferred expansion. Zero for filter mode because the match count is resolved asynchronously. */
             requested: number;
-            /** @description Number of resources accepted for asynchronous validation. Existing active jobs are reused. */
+            /** @description Number of explicit resource IDs accepted into the durable validation batch. Child jobs may not exist yet; zero for filter mode until expansion. */
             queued: number;
         };
         PublishResourcesRequest: {
