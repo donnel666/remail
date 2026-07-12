@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Empty,
@@ -20,8 +20,21 @@ import { useTranslation } from "react-i18next";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+import {
+  createAdminMicrosoftExplicitAlias,
+  fetchAdminMicrosoftMail,
+  getAdminMicrosoftBindingMessage,
+  getAdminMicrosoftMessage,
+  listAdminMicrosoftAliases,
+  listAdminMicrosoftBindingMessages,
+  listAdminMicrosoftMessages,
+  listAdminMicrosoftTasks,
+  refreshAdminMicrosoftToken,
+  validateAdminMicrosoftResource,
+} from "@/lib/admin-microsoft-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
 import {
@@ -50,22 +63,24 @@ import {
   renderTokenTag,
   taskKindLabel,
 } from "./microsoft-meta";
-import {
-  createAdminMicrosoftExplicitAlias,
-  fetchAdminMicrosoftMail,
-  refreshAdminMicrosoftToken,
-  validateAdminMicrosoftResource,
-  type AdminMicrosoftAliasSample,
-  type AdminMicrosoftAllocation,
-  type AdminMicrosoftAllocationStatus,
-  type AdminMicrosoftAsyncTask,
-  type AdminMicrosoftAsyncTaskKind,
-  type AdminMicrosoftAsyncTaskStatus,
-  type AdminMicrosoftMailboxKind,
-  type AdminMicrosoftMessage,
-  type AdminMicrosoftResourceDetail,
-  type AdminMicrosoftSupplyScope,
-} from "./admin-microsoft-mock";
+import type {
+  AdminMicrosoftAliasListResponse,
+  AdminMicrosoftAliasSample,
+  AdminMicrosoftAllocation,
+  AdminMicrosoftAllocationStatus,
+  AdminMicrosoftAsyncTask,
+  AdminMicrosoftAsyncTaskKind,
+  AdminMicrosoftAsyncTaskStatus,
+  AdminMicrosoftAuxiliaryMessageDetail,
+  AdminMicrosoftAuxiliaryMessageSummary,
+  AdminMicrosoftMailboxKind,
+  AdminMicrosoftMessageDetail,
+  AdminMicrosoftMessageSummary,
+  AdminMicrosoftResourceDetail,
+  AdminMicrosoftSupplyScope,
+  AdminMicrosoftTaskListResponse,
+} from "./admin-microsoft-types";
+import { useAdminMicrosoftAllocationPage } from "./use-admin-microsoft-allocation-page";
 
 const { Text } = Typography;
 
@@ -93,10 +108,7 @@ function ResourceOverview({
             label={t("Auxiliary email")}
             value={
               detail.bindingAddress ? (
-                <CopyableTableText
-                  copiedText={t("Copied")}
-                  text={detail.bindingAddress}
-                />
+                <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} />
               ) : (
                 <span className="text-[var(--semi-color-text-2)]">
                   {t("Not configured")}
@@ -106,20 +118,11 @@ function ResourceOverview({
           />
           <InfoItem
             label={t("Owner")}
-            value={
-              <OwnerIdentity
-                ownerEmail={detail.ownerEmail}
-                ownerGroupName={detail.ownerGroupName}
-                ownerId={detail.ownerId}
-                ownerNickname={detail.ownerNickname}
-                ownerRole={detail.ownerRole}
-                t={t}
-              />
-            }
+            value={<OwnerIdentity owner={detail.owner} t={t} />}
           />
           <InfoItem
             label={t("Status")}
-            value={renderStatusTag(detail.status, t, detail.lastSafeError)}
+            value={renderStatusTag(detail.status, t, detail.lastSafeError ?? undefined)}
           />
           <InfoItem
             label={t("Private")}
@@ -137,10 +140,7 @@ function ResourceOverview({
               </Tag>
             }
           />
-          <InfoItem
-            label={t("Mail protocol")}
-            value={renderProtocolTag(detail, t)}
-          />
+          <InfoItem label={t("Mail protocol")} value={renderProtocolTag(detail, t)} />
           <InfoItem label={t("Quality score")} value={`${detail.qualityScore}/100`} />
           <InfoItem label={t("Created at")} value={formatTime(detail.createdAt)} />
           <InfoItem label={t("Updated at")} value={formatTime(detail.updatedAt)} />
@@ -172,8 +172,8 @@ function ResourceOverview({
           <InfoItem
             label={t("Latest task")}
             value={
-              detail.activeTaskStatus ? (
-                renderTaskStatusTag(detail.activeTaskStatus, t)
+              detail.activeTask ? (
+                renderTaskStatusTag(detail.activeTask.status, t)
               ) : (
                 <Tag color="grey" shape="circle" size="small">
                   {t("Idle")}
@@ -301,22 +301,158 @@ function CredentialDiagnostics({
   );
 }
 
-function ExplicitAliasesPanel({
-  detail,
+function ServerPaginatedDrawerTable({
+  columns,
+  dataSource,
+  emptyDescription,
+  extraOffset = 0,
+  loading,
+  onPageChange,
+  onPageSizeChange,
+  page,
+  pageSize,
+  rowKey = "id",
+  scrollX,
+  t,
+  total,
+}: {
+  columns: any[];
+  dataSource: any[];
+  emptyDescription: string;
+  extraOffset?: number;
+  loading: boolean;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  page: number;
+  pageSize: number;
+  rowKey?: string;
+  scrollX?: number;
+  t: TFunction;
+  total: number;
+}) {
+  const isMobile = useIsMobile();
+  const panelHeight = extraOffset
+    ? `calc(${DRAWER_PANEL_HEIGHT} - ${extraOffset}px)`
+    : DRAWER_PANEL_HEIGHT;
+  const tableScrollY = extraOffset
+    ? `calc(${DRAWER_TABLE_SCROLL_Y} - ${extraOffset}px)`
+    : DRAWER_TABLE_SCROLL_Y;
+
+  return (
+    <div className="flex flex-col" style={{ height: panelHeight }}>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {loading && dataSource.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <Spin size="large" />
+          </div>
+        ) : dataSource.length === 0 ? (
+          <Empty description={emptyDescription} style={{ padding: 24 }} />
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={dataSource}
+            loading={loading}
+            pagination={false}
+            rowKey={rowKey}
+            scroll={{ x: scrollX, y: tableScrollY }}
+            size="small"
+          />
+        )}
+      </div>
+      {total > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--semi-color-border)] pt-3">
+          {createCardProPagination({
+            currentPage: page,
+            isMobile,
+            onPageChange,
+            onPageSizeChange,
+            pageSize,
+            pageSizeOpts: [10, 20, 50, 100],
+            showSizeChanger: true,
+            t,
+            total,
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AliasPanel({
+  kind,
+  resourceId,
   t,
 }: {
-  detail: AdminMicrosoftResourceDetail;
+  kind: "explicit" | "other";
+  resourceId: number;
   t: TFunction;
 }) {
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [page, setPage] = useState(1);
+  const [response, setResponse] = useState<AdminMicrosoftAliasListResponse>({
+    items: [],
+    limit: pageSize,
+    offset: 0,
+    schedule: null,
+    total: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => setPage(1), [kind, resourceId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    void listAdminMicrosoftAliases(
+      resourceId,
+      kind,
+      (page - 1) * pageSize,
+      pageSize,
+      controller.signal
+    )
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(next.total / pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setResponse(next);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          Toast.error(getIamErrorMessage(t, error, "Microsoft alias load failed."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [kind, page, pageSize, resourceId, t]);
+
   const columns = useMemo(
     () =>
       [
         {
           dataIndex: "emailAddress",
-          title: t("Explicit alias"),
-          render: (value: unknown) => (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ),
+          title: kind === "explicit" ? t("Explicit alias") : t("Alias"),
+          render: (value: unknown, record: AdminMicrosoftAliasSample) =>
+            kind === "explicit" ? (
+              <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+            ) : (
+              <Text
+                className="font-mono-data"
+                copyable={createCopyableConfig(String(value), t("Copied"))}
+              >
+                <span
+                  style={{
+                    color: MAILBOX_TEXT_COLOR[record.kind === "dot" ? "dot" : "plus"],
+                  }}
+                >
+                  {String(value)}
+                </span>
+              </Text>
+            ),
         },
         {
           dataIndex: "createdAt",
@@ -325,84 +461,202 @@ function ExplicitAliasesPanel({
           render: (value: unknown) => formatTime(String(value)),
         },
       ] as any[],
-    [t]
+    [kind, t]
   );
 
+  const schedule = response.schedule;
+  const extraOffset = kind === "explicit" ? 88 : 0;
   return (
     <div>
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <InfoItem
-          label={t("Weekly quota")}
-          value={`${detail.aliasSchedule.weekCreated}/${detail.aliasSchedule.weekLimit}`}
-        />
-        <InfoItem
-          label={t("Yearly quota")}
-          value={`${detail.aliasSchedule.yearCreated}/${detail.aliasSchedule.yearLimit}`}
-        />
-        <InfoItem
-          label={t("Next run at")}
-          value={formatTime(detail.aliasSchedule.nextRunAt)}
-        />
-      </div>
-      <PaginatedDrawerTable
+      {kind === "explicit" ? (
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <InfoItem
+            label={t("Weekly quota")}
+            value={schedule ? `${schedule.weekCreated}/${schedule.weekLimit}` : "-"}
+          />
+          <InfoItem
+            label={t("Yearly quota")}
+            value={schedule ? `${schedule.yearCreated}/${schedule.yearLimit}` : "-"}
+          />
+          <InfoItem
+            label={t("Next run at")}
+            value={formatTime(schedule?.nextRunAt)}
+          />
+        </div>
+      ) : null}
+      <ServerPaginatedDrawerTable
         columns={columns}
-        dataSource={detail.aliasSamples.explicit}
+        dataSource={response.items}
         emptyDescription={t("No aliases yet")}
-        extraOffset={88}
+        extraOffset={extraOffset}
+        loading={loading}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        page={page}
+        pageSize={pageSize}
         t={t}
+        total={response.total}
       />
     </div>
   );
 }
 
-function OtherAliasesPanel({
-  detail,
-  t,
-}: {
-  detail: AdminMicrosoftResourceDetail;
-  t: TFunction;
-}) {
-  const rows = useMemo(
-    () => [...detail.aliasSamples.dot, ...detail.aliasSamples.plus],
-    [detail]
-  );
+function RelatedOrdersTable({ resourceId, t }: { resourceId: number; t: TFunction }) {
+  const pageState = useAdminMicrosoftAllocationPage(resourceId);
+
+  useEffect(() => {
+    if (pageState.error) {
+      Toast.error(getIamErrorMessage(t, pageState.error, "Related orders load failed."));
+    }
+  }, [pageState.error, t]);
+
   const columns = useMemo(
     () =>
       [
         {
-          dataIndex: "emailAddress",
-          title: t("Alias"),
-          render: (value: unknown, record: AdminMicrosoftAliasSample) => (
+          dataIndex: "orderNo",
+          title: t("Order No"),
+          width: 150,
+          render: (value: unknown) => (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ),
+        },
+        {
+          dataIndex: "projectName",
+          title: t("Project"),
+          width: 180,
+          render: (_: unknown, record: AdminMicrosoftAllocation) => (
+            <div className="flex min-w-0 items-center gap-2">
+              <ProjectIcon
+                logoUrl={record.projectLogoUrl ?? undefined}
+                name={record.projectName}
+                size={18}
+              />
+              <span className="truncate text-sm text-[var(--semi-color-text-0)]">
+                {record.projectName}
+              </span>
+            </div>
+          ),
+        },
+        {
+          dataIndex: "deliveryEmail",
+          title: t("Delivery email"),
+          width: 260,
+          render: (value: unknown, record: AdminMicrosoftAllocation) => (
             <Text
               className="font-mono-data"
               copyable={createCopyableConfig(String(value), t("Copied"))}
             >
-              <span
-                style={{
-                  color: MAILBOX_TEXT_COLOR[record.kind === "dot" ? "dot" : "plus"],
-                }}
-              >
+              <span style={{ color: MAILBOX_TEXT_COLOR[record.mailbox as AdminMicrosoftMailboxKind] }}>
                 {String(value)}
               </span>
             </Text>
           ),
         },
         {
+          dataIndex: "supplyScope",
+          title: t("Supply scope"),
+          width: 110,
+          render: (value: unknown) => {
+            const meta = SUPPLY_SCOPE_META[value as AdminMicrosoftSupplyScope];
+            return <Tag color={meta.color} shape="circle" size="small">{t(meta.label)}</Tag>;
+          },
+        },
+        {
+          dataIndex: "serviceMode",
+          title: t("Service mode"),
+          width: 130,
+          render: (_: unknown, record: AdminMicrosoftAllocation) =>
+            renderServiceModeTag(record.serviceMode, t),
+        },
+        {
+          dataIndex: "orderStatus",
+          title: t("Status"),
+          width: 130,
+          render: (_: unknown, record: AdminMicrosoftAllocation) =>
+            renderOrderStatusTag(record.orderStatus, t),
+        },
+        {
+          dataIndex: "status",
+          title: t("Allocated"),
+          width: 110,
+          render: (value: unknown) => {
+            const meta = ALLOCATION_STATUS_META[value as AdminMicrosoftAllocationStatus];
+            return <Tag color={meta.color} shape="circle" size="small">{t(meta.label)}</Tag>;
+          },
+        },
+        {
+          dataIndex: "buyerEmail",
+          title: t("Buyer"),
+          width: 210,
+          render: (value: unknown) => (
+            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
+          ),
+        },
+        {
+          dataIndex: "payAmount",
+          title: t("Pay amount"),
+          width: 110,
+          render: (value: unknown) => (
+            <span className="whitespace-nowrap font-mono text-sm font-medium tabular-nums">
+              {formatLedgerAmount(String(value))}
+            </span>
+          ),
+        },
+        {
+          dataIndex: "verificationCode",
+          title: t("Verification code"),
+          width: 130,
+          render: (_: unknown, record: AdminMicrosoftAllocation) =>
+            record.verificationCode ? (
+              <Text
+                className="font-mono-data"
+                copyable={createCopyableConfig(record.verificationCode, t("Copied"))}
+                style={{ color: "var(--semi-color-success)" }}
+              >
+                {record.verificationCode}
+              </Text>
+            ) : record.orderStatus === "active" ? (
+              <Tag color="grey" shape="circle" size="small">{t("Waiting")}</Tag>
+            ) : (
+              <span className="text-[var(--semi-color-text-3)]">-</span>
+            ),
+        },
+        {
           dataIndex: "createdAt",
           title: t("Created at"),
-          width: 220,
+          width: 170,
           render: (value: unknown) => formatTime(String(value)),
+        },
+        {
+          dataIndex: "receiveUntil",
+          title: t("Receive until"),
+          width: 170,
+          render: (value: unknown) => formatTime(value ? String(value) : undefined),
         },
       ] as any[],
     [t]
   );
 
   return (
-    <PaginatedDrawerTable
+    <ServerPaginatedDrawerTable
       columns={columns}
-      dataSource={rows}
-      emptyDescription={t("No aliases yet")}
+      dataSource={pageState.items}
+      emptyDescription={t("No related orders")}
+      loading={pageState.loading}
+      onPageChange={pageState.setPage}
+      onPageSizeChange={(size) => {
+        pageState.setPageSize(size);
+        pageState.setPage(1);
+      }}
+      page={pageState.page}
+      pageSize={pageState.pageSize}
+      scrollX={1720}
       t={t}
+      total={pageState.total}
     />
   );
 }
@@ -419,24 +673,63 @@ function TaskDiagnostics({
   t: TFunction;
 }) {
   const [busy, setBusy] = useState<TaskActionKey | null>(null);
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [page, setPage] = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [response, setResponse] = useState<AdminMicrosoftTaskListResponse>({
+    items: [],
+    limit: pageSize,
+    offset: 0,
+    succeeded: 0,
+    total: 0,
+  });
 
-  const tasks = useMemo(
-    () =>
-      [
-        ...detail.asyncTasks.validations,
-        ...detail.asyncTasks.imports,
-        ...detail.asyncTasks.aliases,
-        ...detail.asyncTasks.tokens,
-        ...detail.asyncTasks.fetches,
-      ].sort(
-        (left, right) =>
-          right.updatedAt.localeCompare(left.updatedAt) || right.id - left.id
-      ),
-    [detail]
-  );
+  useEffect(() => setPage(1), [detail.id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let pollTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+    setLoading(true);
+    void listAdminMicrosoftTasks(
+      detail.id,
+      (page - 1) * pageSize,
+      pageSize,
+      controller.signal
+    )
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(next.total / pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setResponse(next);
+        if (
+          next.items.some(
+            (task) => task.status === "queued" || task.status === "running"
+          )
+        ) {
+          pollTimer = globalThis.setTimeout(() => {
+            setRefreshKey((value) => value + 1);
+          }, 1_500);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          Toast.error(getIamErrorMessage(t, error, "Microsoft task load failed."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => {
+      controller.abort();
+      if (pollTimer) globalThis.clearTimeout(pollTimer);
+    };
+  }, [detail.id, page, pageSize, refreshKey, t]);
 
-  const total = tasks.length;
-  const succeeded = tasks.filter((task) => task.status === "succeeded").length;
+  const total = response.total;
+  const succeeded = response.succeeded;
   const successRate = total > 0 ? Math.round((succeeded / total) * 100) : 0;
   const deleted = detail.status === "deleted";
 
@@ -448,10 +741,20 @@ function TaskDiagnostics({
     setBusy(key);
     try {
       await action(detail.id);
-      Toast.success(t(successKey));
-      await onRefresh();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
+      setBusy(null);
+      return;
+    }
+    Toast.success(t(successKey));
+    setPage(1);
+    setRefreshKey((value) => value + 1);
+    try {
+      await onRefresh();
+    } catch (error) {
+      Toast.error(
+        getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+      );
     } finally {
       setBusy(null);
     }
@@ -464,8 +767,7 @@ function TaskDiagnostics({
           dataIndex: "kind",
           title: t("Type"),
           width: 140,
-          render: (value: unknown) =>
-            t(taskKindLabel(value as AdminMicrosoftAsyncTaskKind)),
+          render: (value: unknown) => t(taskKindLabel(value as AdminMicrosoftAsyncTaskKind)),
         },
         {
           dataIndex: "status",
@@ -475,13 +777,11 @@ function TaskDiagnostics({
             renderTaskStatusTag(value as AdminMicrosoftAsyncTaskStatus, t),
         },
         {
-          dataIndex: "attempts",
+          dataIndex: "remainingAttempts",
           title: t("Remaining attempts"),
           width: 120,
           render: (_: unknown, record: AdminMicrosoftAsyncTask) => (
-            <span className="font-mono tabular-nums">
-              {Math.max(0, record.maxAttempts - record.attempts)}
-            </span>
+            <span className="font-mono tabular-nums">{record.remainingAttempts}</span>
           ),
         },
         {
@@ -544,341 +844,206 @@ function TaskDiagnostics({
     },
   ];
 
-  const header = (
-    <div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <InfoItem
-          label={t("Total tasks")}
-          value={<span className="font-mono tabular-nums">{total}</span>}
-        />
-        <InfoItem
-          label={t("Succeeded tasks")}
-          value={<span className="font-mono tabular-nums">{succeeded}</span>}
-        />
-        <InfoItem
-          label={t("Success rate")}
-          value={<span className="font-mono tabular-nums">{successRate}%</span>}
-        />
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {actions.map((item) => (
-          <Button
-            disabled={deleted || (busy !== null && busy !== item.key)}
-            key={item.key}
-            loading={busy === item.key}
-            onClick={() => void runAction(item.key, item.action, item.successKey)}
-            size="small"
-            type="tertiary"
-          >
-            {t(item.label)}
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-
   return (
     <div>
-      <div className="mb-4">{header}</div>
-      <PaginatedDrawerTable
+      <div className="mb-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <InfoItem label={t("Total tasks")} value={<span className="font-mono tabular-nums">{total}</span>} />
+          <InfoItem label={t("Succeeded tasks")} value={<span className="font-mono tabular-nums">{succeeded}</span>} />
+          <InfoItem label={t("Success rate")} value={<span className="font-mono tabular-nums">{successRate}%</span>} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {actions.map((item) => (
+            <Button
+              disabled={deleted || (busy !== null && busy !== item.key)}
+              key={item.key}
+              loading={busy === item.key}
+              onClick={() => void runAction(item.key, item.action, item.successKey)}
+              size="small"
+              type="tertiary"
+            >
+              {t(item.label)}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <ServerPaginatedDrawerTable
         columns={columns}
-        dataSource={tasks}
+        dataSource={response.items}
         emptyDescription={t("No task records")}
         extraOffset={150}
+        loading={loading}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        page={page}
+        pageSize={pageSize}
+        rowKey="taskId"
         scrollX={1050}
         t={t}
+        total={response.total}
       />
     </div>
   );
 }
 
-// Shared paginated table for the detail drawer: fills the panel height, keeps a
-// consistent scroll body, uses the globally shared page size, and pins the
-// pagination bar (with size changer) to the bottom. `extraOffset` reserves room
-// for content rendered above the table in the same tab (e.g. a quota summary).
-function PaginatedDrawerTable({
-  columns,
-  dataSource,
-  emptyDescription,
-  extraOffset = 0,
-  rowKey = "id",
-  scrollX,
-  t,
-}: {
-  columns: any[];
-  dataSource: any[];
-  emptyDescription: string;
-  extraOffset?: number;
-  rowKey?: string;
-  scrollX?: number;
-  t: TFunction;
-}) {
-  const isMobile = useIsMobile();
-  const [pageSize, setPageSize] = useSharedPageSize();
-  const [page, setPage] = useState(1);
+type MailSummary =
+  | AdminMicrosoftMessageSummary
+  | AdminMicrosoftAuxiliaryMessageSummary;
+type MailDetail =
+  | AdminMicrosoftMessageDetail
+  | AdminMicrosoftAuxiliaryMessageDetail;
 
-  useEffect(() => {
-    setPage(1);
-  }, [dataSource]);
-
-  const panelHeight = extraOffset
-    ? `calc(${DRAWER_PANEL_HEIGHT} - ${extraOffset}px)`
-    : DRAWER_PANEL_HEIGHT;
-  const tableScrollY = extraOffset
-    ? `calc(${DRAWER_TABLE_SCROLL_Y} - ${extraOffset}px)`
-    : DRAWER_TABLE_SCROLL_Y;
-
-  const safePage = Math.min(page, Math.max(1, Math.ceil(dataSource.length / pageSize)));
-  const pageRows = dataSource.slice((safePage - 1) * pageSize, safePage * pageSize);
-
-  return (
-    <div className="flex flex-col" style={{ height: panelHeight }}>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {dataSource.length === 0 ? (
-          <Empty description={emptyDescription} style={{ padding: 24 }} />
-        ) : (
-          <Table
-            columns={columns}
-            dataSource={pageRows}
-            pagination={false}
-            rowKey={rowKey}
-            scroll={{ x: scrollX, y: tableScrollY }}
-            size="small"
-          />
-        )}
-      </div>
-      {dataSource.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--semi-color-border)] pt-3">
-          {createCardProPagination({
-            currentPage: safePage,
-            isMobile,
-            onPageChange: setPage,
-            onPageSizeChange: (size) => {
-              setPageSize(size);
-              setPage(1);
-            },
-            pageSize,
-            pageSizeOpts: [10, 20, 50, 100],
-            showSizeChanger: true,
-            t,
-            total: dataSource.length,
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RelatedOrdersTable({
-  allocations,
-  t,
-}: {
-  allocations: AdminMicrosoftAllocation[];
-  t: TFunction;
-}) {
-  const columns = useMemo(
-    () =>
-      [
-        {
-          dataIndex: "orderNo",
-          title: t("Order No"),
-          width: 150,
-          render: (value: unknown) => (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ),
-        },
-        {
-          dataIndex: "projectName",
-          title: t("Project"),
-          width: 180,
-          render: (_: unknown, record: AdminMicrosoftAllocation) => (
-            <div className="flex min-w-0 items-center gap-2">
-              <ProjectIcon
-                logoUrl={record.projectLogoUrl}
-                name={record.projectName}
-                size={18}
-              />
-              <span className="truncate text-sm text-[var(--semi-color-text-0)]">
-                {record.projectName}
-              </span>
-            </div>
-          ),
-        },
-        {
-          dataIndex: "deliveryEmail",
-          title: t("Delivery email"),
-          width: 260,
-          render: (value: unknown, record: AdminMicrosoftAllocation) => (
-            <Text
-              className="font-mono-data"
-              copyable={createCopyableConfig(String(value), t("Copied"))}
-            >
-              <span style={{ color: MAILBOX_TEXT_COLOR[record.mailbox] }}>
-                {String(value)}
-              </span>
-            </Text>
-          ),
-        },
-        {
-          dataIndex: "supplyScope",
-          title: t("Supply scope"),
-          width: 110,
-          render: (value: unknown) => {
-            const meta = SUPPLY_SCOPE_META[value as AdminMicrosoftSupplyScope];
-            return (
-              <Tag color={meta.color} shape="circle" size="small">
-                {t(meta.label)}
-              </Tag>
-            );
-          },
-        },
-        {
-          dataIndex: "serviceMode",
-          title: t("Service mode"),
-          width: 130,
-          render: (_: unknown, record: AdminMicrosoftAllocation) =>
-            renderServiceModeTag(record.serviceMode, t),
-        },
-        {
-          dataIndex: "orderStatus",
-          title: t("Status"),
-          width: 130,
-          render: (_: unknown, record: AdminMicrosoftAllocation) =>
-            renderOrderStatusTag(record.orderStatus, t),
-        },
-        {
-          dataIndex: "status",
-          title: t("Allocated"),
-          width: 110,
-          render: (value: unknown) => {
-            const meta = ALLOCATION_STATUS_META[value as AdminMicrosoftAllocationStatus];
-            return (
-              <Tag color={meta.color} shape="circle" size="small">
-                {t(meta.label)}
-              </Tag>
-            );
-          },
-        },
-        {
-          dataIndex: "buyerEmail",
-          title: t("Buyer"),
-          width: 210,
-          render: (value: unknown) => (
-            <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-          ),
-        },
-        {
-          dataIndex: "payAmount",
-          title: t("Pay amount"),
-          width: 110,
-          render: (value: unknown) => (
-            <span className="whitespace-nowrap font-mono text-sm font-medium tabular-nums">
-              {formatLedgerAmount(String(value))}
-            </span>
-          ),
-        },
-        {
-          dataIndex: "verificationCode",
-          title: t("Verification code"),
-          width: 130,
-          render: (_: unknown, record: AdminMicrosoftAllocation) =>
-            record.verificationCode ? (
-              <Text
-                className="font-mono-data"
-                copyable={createCopyableConfig(record.verificationCode, t("Copied"))}
-                style={{ color: "var(--semi-color-success)" }}
-              >
-                {record.verificationCode}
-              </Text>
-            ) : record.orderStatus === "active" ? (
-              <Tag color="grey" shape="circle" size="small">
-                {t("Waiting")}
-              </Tag>
-            ) : (
-              <span className="text-[var(--semi-color-text-3)]">-</span>
-            ),
-        },
-        {
-          dataIndex: "createdAt",
-          title: t("Created at"),
-          width: 170,
-          render: (value: unknown) => formatTime(String(value)),
-        },
-        {
-          dataIndex: "receiveUntil",
-          title: t("Receive until"),
-          width: 170,
-          render: (value: unknown) => formatTime(value ? String(value) : undefined),
-        },
-      ] as any[],
-    [t]
-  );
-
-  return (
-    <PaginatedDrawerTable
-      columns={columns}
-      dataSource={allocations}
-      emptyDescription={t("No related orders")}
-      scrollX={1720}
-      t={t}
-    />
-  );
+function mailboxOf(message: MailSummary): AdminMicrosoftMailboxKind {
+  return "mailbox" in message ? message.mailbox : "main";
 }
 
 function ResourceMailsPanel({
+  auxiliary = false,
   emptyDescription,
   extraOffset = 0,
   hideMailboxMeta = false,
-  messages,
+  resourceId,
   t,
 }: {
+  auxiliary?: boolean;
   emptyDescription?: string;
   extraOffset?: number;
   hideMailboxMeta?: boolean;
-  messages: AdminMicrosoftMessage[];
+  resourceId: number;
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
+  const [debouncedSearch] = useDebouncedValue(search);
   const [addressFilter, setAddressFilter] = useState("all");
+  const [messages, setMessages] = useState<MailSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<MailDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    setMessages([]);
+    setTotal(0);
+    setOffset(0);
+    setSelectedId(null);
+    setSelectedDetail(null);
+    setAddressFilter("all");
+  }, [auxiliary, debouncedSearch, resourceId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setListLoading(true);
+    const request = auxiliary
+      ? listAdminMicrosoftBindingMessages(
+          resourceId,
+          debouncedSearch,
+          offset,
+          100,
+          controller.signal
+        )
+      : listAdminMicrosoftMessages(
+          resourceId,
+          debouncedSearch,
+          offset,
+          100,
+          controller.signal
+        );
+    void request
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setTotal(response.total);
+        setMessages((current) => {
+          const next = offset === 0 ? response.items : [...current, ...response.items];
+          return Array.from(new Map(next.map((message) => [message.id, message])).values());
+        });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          Toast.error(getIamErrorMessage(t, error, "Microsoft mail load failed."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setListLoading(false);
+      });
+    return () => controller.abort();
+  }, [auxiliary, debouncedSearch, offset, resourceId, t]);
 
   const addresses = useMemo(() => {
     const map = new Map<string, AdminMicrosoftMailboxKind>();
     for (const message of messages) {
-      if (!map.has(message.recipient)) map.set(message.recipient, message.mailbox);
+      if (!map.has(message.recipient)) map.set(message.recipient, mailboxOf(message));
     }
     return Array.from(map.entries());
   }, [messages]);
 
-  const filtered = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return messages.filter((message) => {
-      if (addressFilter !== "all" && message.recipient !== addressFilter) return false;
-      if (!keyword) return true;
-      return [
-        message.subject,
-        message.sender,
-        message.preview,
-        message.body,
-        message.recipient,
-        message.verificationCode ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword);
-    });
-  }, [addressFilter, messages, search]);
+  const filtered = useMemo(
+    () =>
+      addressFilter === "all"
+        ? messages
+        : messages.filter((message) => message.recipient === addressFilter),
+    [addressFilter, messages]
+  );
 
-  const selected =
-    filtered.find((message) => message.id === selectedId) ?? filtered[0] ?? null;
+  useEffect(() => {
+    setSelectedId((current) =>
+      current && filtered.some((message) => message.id === current)
+        ? current
+        : filtered[0]?.id ?? null
+    );
+  }, [filtered]);
+
+  const selected = filtered.find((message) => message.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedDetail(null);
+      return;
+    }
+    const controller = new AbortController();
+    setSelectedDetail(null);
+    setDetailLoading(true);
+    const request = auxiliary
+      ? getAdminMicrosoftBindingMessage(resourceId, selectedId, controller.signal)
+      : getAdminMicrosoftMessage(resourceId, selectedId, controller.signal);
+    void request
+      .then((message) => {
+        if (!controller.signal.aborted) setSelectedDetail(message);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          Toast.error(getIamErrorMessage(t, error, "Microsoft mail detail load failed."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDetailLoading(false);
+      });
+    return () => controller.abort();
+  }, [auxiliary, resourceId, selectedId, t]);
+
+  const loadMore = useCallback(
+    (element: HTMLDivElement) => {
+      if (listLoading || messages.length >= total) return;
+      const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
+      if (remaining < 80) setOffset(messages.length);
+    },
+    [listLoading, messages.length, total]
+  );
+
+  if (listLoading && messages.length === 0) {
+    return (
+      <div className="flex items-center justify-center" style={{ height: DRAWER_PANEL_HEIGHT }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   if (messages.length === 0) {
-    return (
-      <Empty
-        description={emptyDescription ?? t("No mails yet")}
-        style={{ padding: 32 }}
-      />
-    );
+    return <Empty description={emptyDescription ?? t("No mails yet")} style={{ padding: 32 }} />;
   }
 
   return (
@@ -916,7 +1081,10 @@ function ResourceMailsPanel({
             </Select>
           )}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          className="min-h-0 flex-1 overflow-auto"
+          onScroll={(event) => loadMore(event.currentTarget)}
+        >
           {filtered.length === 0 ? (
             <Empty description={t("No matched mail")} style={{ padding: 24 }} />
           ) : (
@@ -940,13 +1108,11 @@ function ResourceMailsPanel({
                       {message.verificationCode}
                     </span>
                   ) : (
-                    <span className="shrink-0">
-                      {renderMessageStatusTag(message.status, t)}
-                    </span>
+                    <span className="shrink-0">{renderMessageStatusTag(message.status, t)}</span>
                   )}
                 </div>
                 <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                  {hideMailboxMeta ? null : renderMailboxTag(message.mailbox, t)}
+                  {hideMailboxMeta ? null : renderMailboxTag(mailboxOf(message), t)}
                   <span className="min-w-0 flex-1 truncate text-xs text-[var(--semi-color-text-2)]">
                     {message.recipient}
                   </span>
@@ -958,6 +1124,9 @@ function ResourceMailsPanel({
               </button>
             ))
           )}
+          {listLoading && messages.length > 0 ? (
+            <div className="flex justify-center p-3"><Spin /></div>
+          ) : null}
         </div>
       </aside>
 
@@ -969,7 +1138,7 @@ function ResourceMailsPanel({
                 {selected.subject}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--semi-color-text-2)]">
-                {hideMailboxMeta ? null : renderMailboxTag(selected.mailbox, t)}
+                {hideMailboxMeta ? null : renderMailboxTag(mailboxOf(selected), t)}
                 {renderMessageStatusTag(selected.status, t)}
                 <span>{selected.sender}</span>
                 <span>·</span>
@@ -979,18 +1148,13 @@ function ResourceMailsPanel({
             <div className="grid gap-2 sm:grid-cols-2">
               <InfoItem
                 label={t("Recipient")}
-                value={
-                  <CopyableTableText copiedText={t("Copied")} text={selected.recipient} />
-                }
+                value={<CopyableTableText copiedText={t("Copied")} text={selected.recipient} />}
               />
               <InfoItem
                 label={t("Verification code")}
                 value={
                   selected.verificationCode ? (
-                    <CopyableTableText
-                      copiedText={t("Copied")}
-                      text={selected.verificationCode}
-                    />
+                    <CopyableTableText copiedText={t("Copied")} text={selected.verificationCode} />
                   ) : (
                     "-"
                   )
@@ -999,19 +1163,17 @@ function ResourceMailsPanel({
               {selected.orderNo ? (
                 <InfoItem
                   label={t("Order No")}
-                  value={
-                    <CopyableTableText copiedText={t("Copied")} text={selected.orderNo} />
-                  }
+                  value={<CopyableTableText copiedText={t("Copied")} text={selected.orderNo} />}
                 />
               ) : null}
             </div>
-            {selected.matchDiagnostic ? (
+            {selectedDetail?.matchDiagnostic ? (
               <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs text-[var(--semi-color-text-1)]">
-                {t("Match diagnostic")}: {selected.matchDiagnostic}
+                {t("Match diagnostic")}: {selectedDetail.matchDiagnostic}
               </div>
             ) : null}
             <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
-              {selected.body}
+              {detailLoading ? <Spin /> : selectedDetail?.body ?? selected.preview}
             </div>
           </div>
         ) : (
@@ -1055,8 +1217,6 @@ export function MicrosoftDetailSheet({
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("basic");
 
-  // Reset to the first tab only when a different resource is opened, so an
-  // in-drawer refresh (e.g. after submitting a task) keeps the current tab.
   useEffect(() => {
     setActiveTab("basic");
   }, [detail?.id]);
@@ -1077,12 +1237,7 @@ export function MicrosoftDetailSheet({
       {detail ? (
         <div className="flex min-h-full flex-col">
           <div className="sticky top-0 z-10 bg-[var(--semi-color-bg-2)] px-5 pt-2">
-            <Tabs
-              activeKey={activeTab}
-              collapsible
-              onChange={setActiveTab}
-              type="line"
-            >
+            <Tabs activeKey={activeTab} collapsible onChange={setActiveTab} type="line">
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
               <Tabs.TabPane itemKey="orders" tab={t("Orders")} />
               <Tabs.TabPane itemKey="explicit" tab={t("Explicit aliases")} />
@@ -1097,70 +1252,47 @@ export function MicrosoftDetailSheet({
             {activeTab === "basic" ? (
               <div className="space-y-6">
                 <ResourceOverview detail={detail} t={t} />
-                <CredentialDiagnostics
-                  detail={detail}
-                  onReplace={onReplaceCredentials}
-                  t={t}
-                />
+                <CredentialDiagnostics detail={detail} onReplace={onReplaceCredentials} t={t} />
               </div>
             ) : null}
-            {activeTab === "orders" ? (
-              <RelatedOrdersTable allocations={detail.allocations} t={t} />
-            ) : null}
-            {activeTab === "explicit" ? (
-              <ExplicitAliasesPanel detail={detail} t={t} />
-            ) : null}
-            {activeTab === "other" ? (
-              <OtherAliasesPanel detail={detail} t={t} />
-            ) : null}
+            {activeTab === "orders" ? <RelatedOrdersTable resourceId={detail.id} t={t} /> : null}
+            {activeTab === "explicit" ? <AliasPanel kind="explicit" resourceId={detail.id} t={t} /> : null}
+            {activeTab === "other" ? <AliasPanel kind="other" resourceId={detail.id} t={t} /> : null}
             {activeTab === "tasks" ? (
               <TaskDiagnostics detail={detail} onRefresh={onRefresh} t={t} />
             ) : null}
             {activeTab === "mails" ? (
-              <ResourceMailsPanel hideMailboxMeta messages={detail.messages} t={t} />
+              <ResourceMailsPanel hideMailboxMeta resourceId={detail.id} t={t} />
             ) : null}
             {activeTab === "auxiliary" ? (
               detail.bindingAddress ? (
                 <>
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-[var(--semi-color-text-2)]">
-                      {t("Auxiliary email")}
-                    </span>
-                    <CopyableTableText
-                      copiedText={t("Copied")}
-                      text={detail.bindingAddress}
-                    />
+                    <span className="text-[var(--semi-color-text-2)]">{t("Auxiliary email")}</span>
+                    <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} />
                   </div>
                   <ResourceMailsPanel
+                    auxiliary
                     emptyDescription={t("No auxiliary mail yet")}
                     extraOffset={40}
                     hideMailboxMeta
-                    messages={detail.auxiliaryMessages}
+                    resourceId={detail.id}
                     t={t}
                   />
                 </>
               ) : (
-                <Empty
-                  description={t("No auxiliary mailbox configured")}
-                  style={{ padding: 32 }}
-                />
+                <Empty description={t("No auxiliary mailbox configured")} style={{ padding: 32 }} />
               )
             ) : null}
           </div>
 
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">
             {detail.status === "deleted" ? (
-              <Button loading={busy} onClick={onRecover} type="primary">
-                {t("Recover")}
-              </Button>
+              <Button loading={busy} onClick={onRecover} type="primary">{t("Recover")}</Button>
             ) : (
               <>
-                <Button loading={busy} onClick={onValidate} type="tertiary">
-                  {t("Check")}
-                </Button>
-                <Button disabled={busy} onClick={onEdit} type="tertiary">
-                  {t("Edit")}
-                </Button>
+                <Button loading={busy} onClick={onValidate} type="tertiary">{t("Check")}</Button>
+                <Button disabled={busy} onClick={onEdit} type="tertiary">{t("Edit")}</Button>
                 <Button loading={busy} onClick={onTogglePublish} type="tertiary">
                   {detail.forSale ? t("Convert to private") : t("Put on sale")}
                 </Button>
@@ -1170,17 +1302,13 @@ export function MicrosoftDetailSheet({
                 <Button loading={busy} onClick={onToggleDisabled} type="tertiary">
                   {detail.status === "disabled" ? t("Enable") : t("Disable")}
                 </Button>
-                <Button loading={busy} onClick={onDelete} type="danger">
-                  {t("Delete")}
-                </Button>
+                <Button loading={busy} onClick={onDelete} type="danger">{t("Delete")}</Button>
               </>
             )}
           </div>
         </div>
       ) : (
-        <div className="flex h-40 items-center justify-center">
-          <Spin size="large" />
-        </div>
+        <div className="flex h-40 items-center justify-center"><Spin size="large" /></div>
       )}
     </SideSheet>
   );

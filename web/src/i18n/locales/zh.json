@@ -1036,6 +1036,7 @@
   "Succeeded": "已成功",
   "Token diagnostics": "Token 诊断",
   "Uncertain": "结果不确定",
+  "Canceled": "已取消",
   "Valid": "有效",
   "Validation": "资源验证",
   "Weekly quota": "本周配额",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -34,6 +34,26 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  deleteAdminMicrosoftResource,
+  deleteAdminMicrosoftResourcesByFilter,
+  deleteAdminMicrosoftResourcesByIds,
+  disableAdminMicrosoftResource,
+  disableAdminMicrosoftResourcesByIds,
+  enableAdminMicrosoftResource,
+  getAdminMicrosoftResourceDetail,
+  listAdminMicrosoftOwners,
+  listAdminMicrosoftResources,
+  publishAdminMicrosoftResource,
+  recoverAdminMicrosoftResource,
+  setAdminMicrosoftResourcesForSaleByFilter,
+  setAdminMicrosoftResourcesForSaleByIds,
+  unpublishAdminMicrosoftResource,
+  validateAdminMicrosoftResource,
+  validateAdminMicrosoftResourcesByFilter,
+  validateAdminMicrosoftResourcesByIds,
+  type AdminMicrosoftBulkCommandResponse,
+} from "@/lib/admin-microsoft-api";
 
 import {
   DATE_RANGE_DROPDOWN_CLASS,
@@ -57,33 +77,34 @@ import {
   ReplaceCredentialsModal,
 } from "./admin-microsoft/microsoft-modals";
 import { MicrosoftDetailSheet } from "./admin-microsoft/microsoft-detail-sheet";
-import {
-  deleteAdminMicrosoftResource,
-  deleteAdminMicrosoftResourcesByIds,
-  deleteAdminMicrosoftResourcesByFilter,
-  disableAdminMicrosoftResourcesByIds,
-  getAdminMicrosoftResourceDetail,
-  listAdminMicrosoftOwners,
-  listAdminMicrosoftResources,
-  recoverAdminMicrosoftResource,
-  setAdminMicrosoftResourcesForSaleByFilter,
-  setAdminMicrosoftResourcesForSaleByIds,
-  updateAdminMicrosoftResource,
-  validateAdminMicrosoftResource,
-  validateAdminMicrosoftResourcesByFilter,
-  validateAdminMicrosoftResourcesByIds,
-  type AdminMicrosoftFacets,
-  type AdminMicrosoftListFilter,
-  type AdminMicrosoftOwner,
-  type AdminMicrosoftResourceDetail,
-  type AdminMicrosoftResourceItem,
-  type AdminMicrosoftResourceStatus,
-  type AdminMicrosoftTokenHealth,
-} from "./admin-microsoft/admin-microsoft-mock";
+import type {
+  AdminMicrosoftFacets,
+  AdminMicrosoftListFilter,
+  AdminMicrosoftOwner,
+  AdminMicrosoftResourceDetail,
+  AdminMicrosoftResourceItem,
+  AdminMicrosoftResourceStatus,
+  AdminMicrosoftTokenHealth,
+} from "./admin-microsoft/admin-microsoft-types";
 
 type StatusFilter = "all" | AdminMicrosoftResourceStatus;
 type BooleanFilter = "all" | "yes" | "no";
 type TokenHealthFilter = "all" | AdminMicrosoftTokenHealth;
+
+function bulkOutcome(response: AdminMicrosoftBulkCommandResponse) {
+  if ("affected" in response) {
+    return {
+      reasonCounts: response.reasonCounts,
+      skipped: response.skipped,
+      succeeded: response.affected,
+    };
+  }
+  return {
+    reasonCounts: response.task.progress?.reasonCounts ?? [],
+    skipped: response.task.progress?.skipped ?? 0,
+    succeeded: response.task.progress?.succeeded ?? 0,
+  };
+}
 
 export default function AdminMicrosoftEmails() {
   const { t } = useTranslation();
@@ -113,6 +134,7 @@ export default function AdminMicrosoftEmails() {
   const [detail, setDetail] = useState<AdminMicrosoftResourceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
+  const detailRequestRef = useRef<AbortController | null>(null);
   const [rowBusy, setRowBusy] = useState<{
     action: "check" | "delete" | "publish" | "recover" | "toggle";
     id: number;
@@ -126,18 +148,23 @@ export default function AdminMicrosoftEmails() {
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
 
   useEffect(() => {
-    let cancelled = false;
-    void listAdminMicrosoftOwners("")
+    const controller = new AbortController();
+    void listAdminMicrosoftOwners("", controller.signal)
       .then((items) => {
-        if (!cancelled) setOwners(items);
+        if (!controller.signal.aborted) setOwners(items);
       })
       .catch(() => {
         // Owner choices are optional UI data; the resource list remains usable.
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, []);
+
+  useEffect(
+    () => () => {
+      detailRequestRef.current?.abort();
+    },
+    []
+  );
 
   const statsFilter = useMemo<AdminMicrosoftListFilter>(() => {
     const filter: AdminMicrosoftListFilter = {};
@@ -167,6 +194,7 @@ export default function AdminMicrosoftEmails() {
     if (activeSuffix === "all") return statsFilter;
     return { ...statsFilter, suffix: activeSuffix };
   }, [activeSuffix, statsFilter]);
+  const listFilterKey = JSON.stringify(listFilter);
 
   const loadMicrosoftBlock = useCallback(
     async (offset: number, limit: number, cursor?: { afterId?: number }) => {
@@ -178,6 +206,7 @@ export default function AdminMicrosoftEmails() {
       );
       return {
         items: response.items,
+        meta: response.facets,
         nextAfterId: response.nextAfterId,
         total: response.total,
       };
@@ -185,55 +214,94 @@ export default function AdminMicrosoftEmails() {
     [listFilter]
   );
 
+  const acceptMicrosoftBlock = useCallback(
+    (response: { meta?: AdminMicrosoftFacets }) => {
+      if (response.meta) setFacets(response.meta);
+    },
+    []
+  );
+
   const {
     loading,
     pagedItems,
     refresh: refreshList,
     total,
-  } = useBlockPagedList<AdminMicrosoftResourceItem>({
+  } = useBlockPagedList<AdminMicrosoftResourceItem, AdminMicrosoftFacets>({
     activePage,
-    filterKey: JSON.stringify(listFilter),
+    blockSize: 100,
+    filterKey: listFilterKey,
     loadBlock: loadMicrosoftBlock,
     onError: (error) => {
       Toast.error(getIamErrorMessage(t, error, "Admin Microsoft resources load failed."));
     },
+    onLoaded: acceptMicrosoftBlock,
     pageSize,
   });
-
-  const refreshStats = useCallback(async () => {
-    try {
-      const response = await listAdminMicrosoftResources(listFilter, 0, 1);
-      setFacets(response.facets);
-    } catch {
-      // Preserve the current facets; a later refresh retries the mock query.
-    }
-  }, [listFilter]);
-
-  useEffect(() => {
-    void refreshStats();
-  }, [refreshStats]);
-
-  const refresh = useCallback(async () => {
-    await Promise.all([refreshStats(), refreshList()]);
-  }, [refreshList, refreshStats]);
 
   const refreshOpenDetail = useCallback(async (resourceId?: number) => {
     const id = resourceId ?? detail?.id;
     if (!id) return;
-    const nextDetail = await getAdminMicrosoftResourceDetail(id);
-    setDetail(nextDetail);
+    detailRequestRef.current?.abort();
+    const controller = new AbortController();
+    detailRequestRef.current = controller;
+    try {
+      const nextDetail = await getAdminMicrosoftResourceDetail(id, controller.signal);
+      if (!controller.signal.aborted) setDetail(nextDetail);
+    } finally {
+      if (detailRequestRef.current === controller) detailRequestRef.current = null;
+    }
   }, [detail?.id]);
 
+  const refreshAfterMutation = useCallback(
+    async (resourceId?: number) => {
+      try {
+        await refreshList();
+        if (resourceId) await refreshOpenDetail(resourceId);
+      } catch (error) {
+        Toast.error(
+          getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+        );
+      }
+    },
+    [refreshList, refreshOpenDetail, t]
+  );
+
+  const showBulkOutcome = useCallback(
+    (response: AdminMicrosoftBulkCommandResponse, successKey: string) => {
+      const outcome = bulkOutcome(response);
+      Toast.success(t(successKey, { count: outcome.succeeded }));
+      if (outcome.skipped === 0) return;
+      const reasons = outcome.reasonCounts
+        .map((item) => `${item.reason}: ${item.count}`)
+        .join(", ");
+      Toast.warning(
+        `${t("Succeeded")}: ${outcome.succeeded}/${outcome.succeeded + outcome.skipped}` +
+          (reasons ? ` · ${t("Reason")}: ${reasons}` : "")
+      );
+    },
+    [t]
+  );
+
   const openDetail = useCallback(async (resourceId: number) => {
+    detailRequestRef.current?.abort();
+    const controller = new AbortController();
+    detailRequestRef.current = controller;
     setDetailLoading(true);
     setDetail(null);
     try {
-      setDetail(await getAdminMicrosoftResourceDetail(resourceId));
+      const nextDetail = await getAdminMicrosoftResourceDetail(
+        resourceId,
+        controller.signal
+      );
+      if (!controller.signal.aborted) setDetail(nextDetail);
     } catch (error) {
+      if (controller.signal.aborted) return;
       Toast.error(getIamErrorMessage(t, error, "Microsoft resource detail load failed."));
-      setDetailLoading(false);
     } finally {
-      setDetailLoading(false);
+      if (detailRequestRef.current === controller) {
+        detailRequestRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }, [t]);
 
@@ -254,12 +322,9 @@ export default function AdminMicrosoftEmails() {
   const stats = useMemo(() => {
     if (facets) return facets;
     return {
-      activeTasks: 0,
-      failedTasks: 0,
       forSale: { all: total, no: 0, yes: 0 },
       graphAvailable: { all: total, no: 0, yes: 0 },
       longLived: { all: total, no: 0, yes: 0 },
-      owners: [],
       status: {
         abnormal: 0,
         all: total,
@@ -269,7 +334,6 @@ export default function AdminMicrosoftEmails() {
         pending: 0,
       },
       suffixes: [],
-      taskStatus: { all: total, failed: 0, idle: 0, queued: 0, running: 0 },
       tokenHealth: { all: total, expired: 0, expiring: 0, missing: 0, valid: 0 },
     } satisfies AdminMicrosoftFacets;
   }, [facets, total]);
@@ -324,15 +388,14 @@ export default function AdminMicrosoftEmails() {
       try {
         await operation();
         Toast.success(t(successKey));
-        await refresh();
-        if (detail?.id === record.id) await refreshOpenDetail(record.id);
+        await refreshAfterMutation(detail?.id === record.id ? record.id : undefined);
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
       } finally {
         setRowBusy(null);
       }
     },
-    [detail?.id, refresh, refreshOpenDetail, t]
+    [detail?.id, refreshAfterMutation, t]
   );
 
   const handleValidate = useCallback(
@@ -352,9 +415,9 @@ export default function AdminMicrosoftEmails() {
         record,
         "toggle",
         () =>
-          updateAdminMicrosoftResource(record.id, {
-            status: record.status === "disabled" ? "pending" : "disabled",
-          }),
+          record.status === "disabled"
+            ? enableAdminMicrosoftResource(record.id, record.version)
+            : disableAdminMicrosoftResource(record.id, record.version),
         record.status === "disabled"
           ? "Microsoft resource enabled and queued for validation."
           : "Microsoft resource disabled."
@@ -367,7 +430,7 @@ export default function AdminMicrosoftEmails() {
       runRowOperation(
         record,
         "recover",
-        () => recoverAdminMicrosoftResource(record.id),
+        () => recoverAdminMicrosoftResource(record.id, record.version),
         "Microsoft resource recovered and queued for validation."
       ),
     [runRowOperation]
@@ -378,7 +441,10 @@ export default function AdminMicrosoftEmails() {
       runRowOperation(
         record,
         "publish",
-        () => updateAdminMicrosoftResource(record.id, { forSale: !record.forSale }),
+        () =>
+          record.forSale
+            ? unpublishAdminMicrosoftResource(record.id, record.version)
+            : publishAdminMicrosoftResource(record.id, record.version),
         record.forSale
           ? "Microsoft resource converted to private."
           : "Microsoft resource published for public sale."
@@ -399,7 +465,7 @@ export default function AdminMicrosoftEmails() {
           runRowOperation(
             record,
             "delete",
-            () => deleteAdminMicrosoftResource(record.id),
+            () => deleteAdminMicrosoftResource(record.id, record.version),
             "Microsoft resource deleted."
           ),
         title: t("Confirm delete"),
@@ -415,15 +481,14 @@ export default function AdminMicrosoftEmails() {
       try {
         await operation();
         Toast.success(t(successKey));
-        await refresh();
-        await refreshOpenDetail(detail.id);
+        await refreshAfterMutation(detail.id);
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
       } finally {
         setDetailBusy(false);
       }
     },
-    [detail, refresh, refreshOpenDetail, t]
+    [detail, refreshAfterMutation, t]
   );
 
   const validateSelected = useCallback(async () => {
@@ -431,15 +496,15 @@ export default function AdminMicrosoftEmails() {
     setBulkBusy("check");
     try {
       const response = await validateAdminMicrosoftResourcesByIds(selectedKeys);
-      Toast.success(t("Resource validations submitted.", { count: response.queued }));
+      Toast.success(t("Resource validations submitted.", { count: response.accepted }));
       setSelectedKeys([]);
-      await refresh();
+      await refreshAfterMutation();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
     } finally {
       setBulkBusy(null);
     }
-  }, [refresh, selectedKeys, t]);
+  }, [refreshAfterMutation, selectedKeys, t]);
 
   const confirmDisableSelected = useCallback(() => {
     if (selectedKeys.length === 0) return;
@@ -453,9 +518,9 @@ export default function AdminMicrosoftEmails() {
         setBulkBusy("disable");
         try {
           const response = await disableAdminMicrosoftResourcesByIds(selectedKeys);
-          Toast.success(t("Microsoft resources disabled.", { count: response.affected }));
+          showBulkOutcome(response, "Microsoft resources disabled.");
           setSelectedKeys([]);
-          await refresh();
+          await refreshAfterMutation();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
         } finally {
@@ -464,7 +529,7 @@ export default function AdminMicrosoftEmails() {
       },
       title: t("Confirm disable selected"),
     });
-  }, [refresh, selectedKeys, t]);
+  }, [refreshAfterMutation, selectedKeys, showBulkOutcome, t]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedKeys.length === 0) return;
@@ -479,10 +544,10 @@ export default function AdminMicrosoftEmails() {
         setBulkBusy("delete");
         try {
           const response = await deleteAdminMicrosoftResourcesByIds(selectedKeys);
-          Toast.success(t("Microsoft resources deleted.", { count: response.affected }));
+          showBulkOutcome(response, "Microsoft resources deleted.");
           setSelectedKeys([]);
           setActivePage(1);
-          await refresh();
+          await refreshAfterMutation();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
         } finally {
@@ -491,7 +556,7 @@ export default function AdminMicrosoftEmails() {
       },
       title: t("Confirm delete selected"),
     });
-  }, [refresh, selectedKeys, t]);
+  }, [refreshAfterMutation, selectedKeys, showBulkOutcome, t]);
 
   const confirmValidateAll = useCallback(() => {
     if (total === 0) {
@@ -506,9 +571,9 @@ export default function AdminMicrosoftEmails() {
         setBulkBusy("check");
         try {
           const response = await validateAdminMicrosoftResourcesByFilter(listFilter);
-          Toast.success(t("Resource validations submitted.", { count: response.queued }));
+          Toast.success(t("Resource validations submitted.", { count: response.accepted }));
           setSelectedKeys([]);
-          await refresh();
+          await refreshAfterMutation();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
         } finally {
@@ -517,7 +582,7 @@ export default function AdminMicrosoftEmails() {
       },
       title: t("Confirm check all"),
     });
-  }, [listFilter, refresh, t, total]);
+  }, [listFilter, refreshAfterMutation, t, total]);
 
   const confirmDeleteAll = useCallback(() => {
     if (total === 0) {
@@ -533,10 +598,10 @@ export default function AdminMicrosoftEmails() {
         setBulkBusy("delete");
         try {
           const response = await deleteAdminMicrosoftResourcesByFilter(listFilter);
-          Toast.success(t("Microsoft resources deleted.", { count: response.affected }));
+          showBulkOutcome(response, "Microsoft resources deleted.");
           setSelectedKeys([]);
           setActivePage(1);
-          await refresh();
+          await refreshAfterMutation();
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
         } finally {
@@ -545,7 +610,7 @@ export default function AdminMicrosoftEmails() {
       },
       title: t("Confirm delete all"),
     });
-  }, [listFilter, refresh, t, total]);
+  }, [listFilter, refreshAfterMutation, showBulkOutcome, t, total]);
 
   const runBulkForSale = useCallback(
     async (forSale: boolean) => {
@@ -556,23 +621,21 @@ export default function AdminMicrosoftEmails() {
           selectedKeys,
           forSale
         );
-        Toast.success(
-          t(
-            forSale
-              ? "Microsoft resources published for public sale."
-              : "Microsoft resources converted to private.",
-            { count: response.affected }
-          )
+        showBulkOutcome(
+          response,
+          forSale
+            ? "Microsoft resources published for public sale."
+            : "Microsoft resources converted to private."
         );
         setSelectedKeys([]);
-        await refresh();
+        await refreshAfterMutation();
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "Microsoft resource operation failed."));
       } finally {
         setBulkBusy(null);
       }
     },
-    [refresh, selectedKeys, t]
+    [refreshAfterMutation, selectedKeys, showBulkOutcome, t]
   );
 
   const confirmForSaleAll = useCallback(
@@ -597,16 +660,14 @@ export default function AdminMicrosoftEmails() {
               listFilter,
               forSale
             );
-            Toast.success(
-              t(
-                forSale
-                  ? "Microsoft resources published for public sale."
-                  : "Microsoft resources converted to private.",
-                { count: response.affected }
-              )
+            showBulkOutcome(
+              response,
+              forSale
+                ? "Microsoft resources published for public sale."
+                : "Microsoft resources converted to private."
             );
             setSelectedKeys([]);
-            await refresh();
+            await refreshAfterMutation();
           } catch (error) {
             Toast.error(
               getIamErrorMessage(t, error, "Microsoft resource operation failed.")
@@ -618,7 +679,7 @@ export default function AdminMicrosoftEmails() {
         title: forSale ? t("Confirm put all on sale") : t("Confirm convert all to private"),
       });
     },
-    [listFilter, refresh, t, total]
+    [listFilter, refreshAfterMutation, showBulkOutcome, t, total]
   );
 
   useSelectionNotification({
@@ -792,11 +853,7 @@ export default function AdminMicrosoftEmails() {
           width: 310,
           render: (_: unknown, record: AdminMicrosoftResourceItem) => (
             <OwnerIdentity
-              ownerEmail={record.ownerEmail}
-              ownerGroupName={record.ownerGroupName}
-              ownerId={record.ownerId}
-              ownerNickname={record.ownerNickname}
-              ownerRole={record.ownerRole}
+              owner={record.owner}
               t={t}
             />
           ),
@@ -807,7 +864,11 @@ export default function AdminMicrosoftEmails() {
           title: t("Status"),
           width: 120,
           render: (value: unknown, record: AdminMicrosoftResourceItem) =>
-            renderStatusTag(value as AdminMicrosoftResourceStatus, t, record.lastSafeError),
+            renderStatusTag(
+              value as AdminMicrosoftResourceStatus,
+              t,
+              record.lastSafeError ?? undefined
+            ),
         },
         {
           dataIndex: "forSale",
@@ -942,7 +1003,7 @@ export default function AdminMicrosoftEmails() {
         <Button
           className="remail-toolbar-fixed-button flex-1 md:flex-none"
           loading={loading}
-          onClick={() => void refresh()}
+          onClick={() => void refreshList()}
           size="small"
           type="tertiary"
         >
@@ -1237,7 +1298,7 @@ export default function AdminMicrosoftEmails() {
         onImported={async () => {
           setActivePage(1);
           setSelectedKeys([]);
-          await refresh();
+          await refreshAfterMutation();
         }}
         owners={owners}
         visible={importOpen}
@@ -1246,10 +1307,9 @@ export default function AdminMicrosoftEmails() {
       <EditMicrosoftModal
         onCancel={() => setEditTarget(null)}
         onSaved={async () => {
-          await refresh();
-          if (editTarget && detail?.id === editTarget.id) {
-            await refreshOpenDetail(editTarget.id);
-          }
+          await refreshAfterMutation(
+            editTarget && detail?.id === editTarget.id ? editTarget.id : undefined
+          );
         }}
         owners={owners}
         target={editTarget}
@@ -1258,7 +1318,7 @@ export default function AdminMicrosoftEmails() {
       <ReplaceCredentialsModal
         onCancel={() => setCredentialsTarget(null)}
         onSaved={async (nextDetail) => {
-          await refresh();
+          await refreshAfterMutation();
           if (detail?.id === nextDetail.id) setDetail(nextDetail);
         }}
         target={credentialsTarget}
@@ -1269,12 +1329,13 @@ export default function AdminMicrosoftEmails() {
         detail={detail}
         loading={detailLoading}
         onCancel={() => {
+          detailRequestRef.current?.abort();
+          detailRequestRef.current = null;
           setDetail(null);
           setDetailLoading(false);
         }}
         onRefresh={async () => {
-          await refresh();
-          if (detail) await refreshOpenDetail(detail.id);
+          await refreshAfterMutation(detail?.id);
         }}
         onDelete={() => {
           if (!detail) return;
@@ -1287,7 +1348,7 @@ export default function AdminMicrosoftEmails() {
             okText: t("Delete"),
             onOk: () =>
               runDetailOperation(
-                () => deleteAdminMicrosoftResource(detail.id),
+            () => deleteAdminMicrosoftResource(detail.id, detail.version),
                 "Microsoft resource deleted."
               ),
             title: t("Confirm delete"),
@@ -1299,7 +1360,7 @@ export default function AdminMicrosoftEmails() {
         onRecover={() => {
           if (!detail) return;
           void runDetailOperation(
-            () => recoverAdminMicrosoftResource(detail.id),
+            () => recoverAdminMicrosoftResource(detail.id, detail.version),
             "Microsoft resource recovered and queued for validation."
           );
         }}
@@ -1310,9 +1371,9 @@ export default function AdminMicrosoftEmails() {
           if (!detail) return;
           void runDetailOperation(
             () =>
-              updateAdminMicrosoftResource(detail.id, {
-                forSale: !detail.forSale,
-              }),
+              detail.forSale
+                ? unpublishAdminMicrosoftResource(detail.id, detail.version)
+                : publishAdminMicrosoftResource(detail.id, detail.version),
             detail.forSale
               ? "Microsoft resource converted to private."
               : "Microsoft resource published for public sale."
@@ -1322,9 +1383,9 @@ export default function AdminMicrosoftEmails() {
           if (!detail) return;
           void runDetailOperation(
             () =>
-              updateAdminMicrosoftResource(detail.id, {
-                status: detail.status === "disabled" ? "pending" : "disabled",
-              }),
+              detail.status === "disabled"
+                ? enableAdminMicrosoftResource(detail.id, detail.version)
+                : disableAdminMicrosoftResource(detail.id, detail.version),
             detail.status === "disabled"
               ? "Microsoft resource enabled and queued for validation."
               : "Microsoft resource disabled."

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 )
 
@@ -37,6 +38,9 @@ func NewOperationLogRepo(db *gorm.DB) *OperationLogRepo {
 }
 
 func (r *OperationLogRepo) Create(ctx context.Context, log *domain.OperationLog) error {
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		return r.CreateInTx(ctx, tx, log)
+	}
 	if err := r.db.WithContext(ctx).Create(operationLogModel(log)).Error; err != nil {
 		return fmt.Errorf("create operation log: %w", err)
 	}

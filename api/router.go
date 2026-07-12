@@ -14,6 +14,7 @@ import (
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
+	governanceapi "github.com/donnel666/remail/internal/governance/api"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	iamapi "github.com/donnel666/remail/internal/iam/api"
@@ -127,13 +128,25 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
+		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		coreMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
+		governanceMod := governanceapi.NewModule(p.DB)
+		governanceapi.RegisterRoutes(v1, governanceMod, iamSessionFetcher, iamMod.PermissionChecker)
+		mailapi.RegisterMailTransportRoutes(v1, mailMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
 		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
+		coreMod.SetAdminResourcePorts(
+			iamMod.AdminResourceOwners,
+			mailMod.BindingQuery,
+			mailMod.BindingAdmin,
+			allocMod.ResourceGuard,
+			governanceMod.CoreTaskQuery,
+			mailMod.AliasScheduleQuery,
+		)
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
@@ -157,10 +170,12 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
+		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
 		mailMod.SetHistoricalProjectMatcher(mailmatchapi.NewHistoricalProjectMatcherAdapter(mailmatchMod.UseCase))
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
+		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, iamMod.PermissionChecker)
 

@@ -13,6 +13,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -95,6 +96,13 @@ func (UserModel) TableName() string {
 
 func (UserGroupModel) TableName() string {
 	return "user_groups"
+}
+
+func (r *UserRepo) dbFor(ctx context.Context) *gorm.DB {
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		return tx.WithContext(ctx)
+	}
+	return r.db.WithContext(ctx)
 }
 
 // toDomain converts the GORM model to a domain entity.
@@ -347,7 +355,7 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 
 func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
 	var model UserModel
-	err := r.db.WithContext(ctx).Preload("UserGroup").First(&model, id).Error
+	err := r.dbFor(ctx).Preload("UserGroup").First(&model, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -433,7 +441,7 @@ func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]domain.User, 
 
 func (r *UserRepo) ListByFilter(ctx context.Context, filter domain.UserListFilter, offset, limit int) ([]domain.User, error) {
 	var models []UserModel
-	err := applyUserListFilter(r.db.WithContext(ctx).Preload("UserGroup").Model(&UserModel{}), filter).
+	err := applyUserListFilter(r.dbFor(ctx).Preload("UserGroup").Model(&UserModel{}), filter).
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
@@ -466,7 +474,7 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 		return nil, nil
 	}
 	var models []UserModel
-	err := r.db.WithContext(ctx).Preload("UserGroup").Where("id IN ?", ids).Find(&models).Error
+	err := r.dbFor(ctx).Preload("UserGroup").Where("id IN ?", ids).Find(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("find users by ids: %w", err)
 	}

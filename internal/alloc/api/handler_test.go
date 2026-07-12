@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,6 +42,7 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newAllocAPITestDB(t)
 	seedAllocationAPITestProject(t, db)
+	seedAdminAllocationReadComposition(t, db)
 
 	t.Run("unauthenticated", func(t *testing.T) {
 		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{}, fakePermissionChecker{allowed: true})
@@ -75,6 +77,39 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?type=invalid", true)
 		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
+	})
+
+	t.Run("enriched allocation list matches openapi", func(t *testing.T) {
+		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?type=microsoft&resourceId=1000&limit=20", true)
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
+		items, ok := payload["items"].([]any)
+		require.True(t, ok)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		for _, key := range []string{
+			"type", "id", "orderNo", "projectId", "projectName", "projectLogoUrl", "resourceId", "mailbox",
+			"supplyScope", "deliveryEmail", "serviceMode", "orderStatus", "status", "payAmount", "buyerEmail",
+			"verificationCode", "createdAt", "receiveUntil",
+		} {
+			require.Contains(t, item, key)
+		}
+		require.Equal(t, "Alloc API Project", item["projectName"])
+		require.Equal(t, "/v1/projects/logos/alloc-api", item["projectLogoUrl"])
+		require.Equal(t, "buyer-mailbox@example.com", item["deliveryEmail"])
+		require.Equal(t, "admin@test.local", item["buyerEmail"])
+		require.Equal(t, "654321", item["verificationCode"])
+		require.NotContains(t, item, "productId")
+		require.NotContains(t, item, "email")
+		require.NotContains(t, item, "releasedAt")
+	})
+
+	t.Run("allocation list rejects limit above contract", func(t *testing.T) {
+		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?limit=101", true)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	t.Run("inventory rejects unavailable project", func(t *testing.T) {
@@ -147,4 +182,45 @@ func seedAllocationAPITestProject(t *testing.T, db *gorm.DB) {
 	    code_window_minutes, activation_window_minutes, warranty_minutes,
 	    main_weight, dot_weight, plus_weight
 	) VALUES (20, 10, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+}
+
+func seedAdminAllocationReadComposition(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec("UPDATE projects SET logo_url = '/v1/projects/logos/alloc-api' WHERE id = 10").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (1000, 'microsoft', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resources(id, email_address, email_domain, password, status, for_sale, quality_score, alloc_bucket)
+VALUES (1000, 'admin-allocation@outlook.com', 'outlook.com', 'write-only', 'normal', FALSE, 100, MOD(1000, 64))`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
+    supply_policy, status, pay_amount, delivery_email, receive_until, client_channel,
+    idempotency_key, request_fingerprint
+) VALUES (
+    2000, 'ORD-ADMIN-ALLOC', 1, 10, 20, 'microsoft', 'code',
+    'private_first', 'pending_payment', 12.34, 'buyer-mailbox@example.com',
+    DATE_ADD(UTC_TIMESTAMP(), INTERVAL 10 MINUTE), 'console', 'admin-alloc-idem',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type) VALUES ('ORD-ADMIN-ALLOC', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    id, order_no, project_id, product_id, resource_id, supply_scope, mailbox, email, status
+) VALUES (
+    3000, 'ORD-ADMIN-ALLOC', 10, 20, 1000, 'owned', 'main', 'admin-allocation@outlook.com', 'allocated'
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_messages(
+    id, email_resource_id, resource_type, matched_order_id, recipient, sender, subject,
+    body_preview, verification_code, dedupe_key, status, received_at
+) VALUES (
+    4000, 1000, 'microsoft', 2000, 'admin-allocation@outlook.com', 'sender@example.com',
+    'Verification', 'Your code is 654321', '654321',
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'matched', UTC_TIMESTAMP()
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
+VALUES (2000, 4000, UTC_TIMESTAMP(3))`).Error)
 }

@@ -116,16 +116,17 @@ type FetchState struct {
 }
 
 var (
-	ErrInvalidRequest          = errors.New("mailmatch: invalid request")
-	ErrOrderNotFound           = errors.New("mailmatch: order not found")
-	ErrOrderForbidden          = errors.New("mailmatch: order forbidden")
-	ErrOrderUnavailable        = errors.New("mailmatch: order unavailable")
-	ErrPickupCredentialInvalid = errors.New("mailmatch: pickup credential invalid")
-	ErrMessageNotFound         = errors.New("mailmatch: message not found")
-	ErrFetchQueueUnavailable   = errors.New("mailmatch: fetch queue unavailable")
-	ErrFetchJobNotFound        = errors.New("mailmatch: fetch job not found")
-	ErrFetchJobConflict        = errors.New("mailmatch: fetch job conflict")
-	ErrMailServiceUnavailable  = errors.New("mailmatch: mail service unavailable")
+	ErrInvalidRequest               = errors.New("mailmatch: invalid request")
+	ErrOrderNotFound                = errors.New("mailmatch: order not found")
+	ErrOrderForbidden               = errors.New("mailmatch: order forbidden")
+	ErrOrderUnavailable             = errors.New("mailmatch: order unavailable")
+	ErrPickupCredentialInvalid      = errors.New("mailmatch: pickup credential invalid")
+	ErrMessageNotFound              = errors.New("mailmatch: message not found")
+	ErrAdminMessageResourceNotFound = errors.New("mailmatch: admin message resource not found")
+	ErrFetchQueueUnavailable        = errors.New("mailmatch: fetch queue unavailable")
+	ErrFetchJobNotFound             = errors.New("mailmatch: fetch job not found")
+	ErrFetchJobConflict             = errors.New("mailmatch: fetch job conflict")
+	ErrMailServiceUnavailable       = errors.New("mailmatch: mail service unavailable")
 )
 
 func NormalizeFetchPurpose(value string) FetchPurpose {

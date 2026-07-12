@@ -10,6 +10,14 @@
 | 2026-07-06 | V1.3 | Codex | 补充 P1-I5 并发落地要求：分配同步返回但事务内只做数据库短写，候选选中行锁、active 唯一约束和带抖动事务重试必须有测试证据；此为实现约束补充，不改变阶段范围。 |
 | 2026-07-06 | V1.4 | Codex | 补充 P1-I5 候选刷新落地要求：后台刷新入口只投递持久异步任务，worker 执行刷新并记录任务状态；此为矩阵异步边界补充，不改变阶段范围。 |
 | 2026-07-06 | V1.5 | Codex | 修正 P1-I5 候选刷新范围：Microsoft 与 Domain 候选都建表并由同一异步刷新任务维护；这是与阶段范围一致的设计纠偏。 |
+| 2026-07-12 | V1.6 | Codex | 增加管理员 Microsoft 资源管理专项批次：按设计文档、OpenAPI、数据/Port、查询、命令、前端接线、移除 mock、矩阵验收顺序实施；现有 UI 功能和 UI/UX 作为冻结约束。 |
+| 2026-07-12 | V1.7 | Codex | 回填管理员 Microsoft 专项当前实施状态：正式契约、migration/Port、含 Orders bounded enrichment 的查询/命令/任务、前端真实 API 与 mock 清理已落盘；全量权限/禁敏/并发、目标规模性能、E2E/视觉和重启演练继续作为退出门禁。 |
+| 2026-07-12 | V1.8 | Codex | 校准管理员 Microsoft 专项最终稳定门禁：两组串行 Go 全量测试、静态检查、OpenAPI 三生成物零漂移、前端构建与 mock 精确扫描已通过；目标规模性能、真实 E2E、视觉和重启演练仍未退出。 |
+| 2026-07-12 | V1.9 | Codex | 曾回填管理员 API 安全契约与 Redis 限流、同步命令及四类任务/导入/批量的 100 并发、事务失败与 panic rollback、前端 9 files/55 tests，以及 100k/1M 真实性能基准；后续 V1.12 已删除专项限流和性能 harness。辅助邮件 generated sort migration 因破坏历史 raw insert 兼容性被全仓测试拒绝并撤回。 |
+| 2026-07-12 | V1.10 | Codex | 固化管理员 Microsoft 的简单实现边界：移除写死索引提示、不能帮助当前排序的辅助邮件索引、无读取用例的 receipt 预留索引和死占位代码；性能数值改为观察参考，不以 10M 或全部 P95 变绿作为完成条件。 |
+| 2026-07-12 | V1.11 | Codex | 完成自动化代码交付收口：Core credential Port 消除 Token/Fetch 跨域直写，Alias expedite 收敛为唯一受审计入口，再删除五个无读取用例索引；async accepted/import queue 禁敏补齐。功能/事务/migration、前端 9/56、生成、vet/lint 和零 mock/直连扫描通过，不再把压测作为本次门禁。 |
+| 2026-07-12 | V1.12 | Codex | 按简单稳定优先收敛管理员 Microsoft：删除专项大规模性能 harness 和应用内 Redis 管理限流，保留分页上限、查询次数和普通 EXPLAIN smoke；MySQL 冲突重试收敛为 3 次；验收聚焦功能、事务、迁移、禁敏和 UI 契约。 |
+| 2026-07-12 | V1.13 | Codex | 将管理员 Microsoft 按冷接口实施：列表/详情/Tab 直接有界读取源表，不建缓存或投影表；移除 dead TaskView 批量查询、重复列表索引和固定高并发测试，最多按 10 个管理员同时提交验证事务、幂等和 single-flight。 |
 
 > 本文用于把 DDD 设计落到可执行节奏。
 >
@@ -190,6 +198,38 @@ flowchart LR
     E --> F[性能/并发/部署硬化]
 ```
 
+### 5.1 管理员 Microsoft 资源管理专项批次
+
+本专项属于二期跨上下文管理用例，不新建“管理员 Microsoft”业务域。已确认的主列表、后缀 Tabs、搜索、创建时间与五组交叉筛选、单项/选中项/全部匹配命令、三个弹窗、七个详情 Tab、四个手工任务，以及桌面/移动布局、文案和反馈方式全部冻结。mock 只作为已展示需求的线索，不作为 API、DTO 或状态机权威来源。
+
+实施必须严格按下表顺序推进；上一阶段退出条件未满足时，不提前删除 mock 或通过删 UI 缩小范围：
+
+| 阶段 | 产物 | 退出条件 |
+|------|------|----------|
+| AMR-1 设计文档 | 新增 [20-admin-microsoft-resource-management.md](20-admin-microsoft-resource-management.md) 和 [21-admin-microsoft-resource-matrices.md](21-admin-microsoft-resource-matrices.md)；同步 Core、Alloc、Trade、MailMatch、MailTransport、IAM、Governance、实施计划、质量矩阵和 Microsoft ACL 正式来源；为全部可见能力分配 `UI-AMR-*` | 辅助邮箱、恢复、owner 转移、原子编辑、资源 Fetch、别名加速、批量 selection 和任务归属均有唯一裁决；每个 UI-ID 可追踪到 API、BC、Port、权限、日志和测试。第一批提交只含文档。 |
+| AMR-2 OpenAPI | 先修改 `api/openapi.yaml`，再生成管理员 Go、TypeScript 契约；确定列表/facets、详情、导入、编辑、凭据、显式命令、批量和异步任务契约。独立 public spec 不包含管理员路径 | 管理员 OpenAPI 是唯一源；Go/TypeScript diff 为零；不得从 mock DTO、手改 `schema.ts` 或 public spec 反推正式契约。 |
+| AMR-3 数据与 Port | 补凭据 revision、durable bulk/task、owner 历史快照外键边界和普通查询需要的索引；定义必要的 Query Port、Command Port 和 ACL adapter | 空库、升级及数据安全的应用回滚路径通过；FK/唯一/CHECK/active-task 约束有证据；普通业务写入不跨 BC，管理员跨域读取只能使用显式、有界、无副作用的源表查询组合。 |
+| AMR-4 管理查询 | 实现资源列表与交叉 facets、基础详情、owner/binding 批量补充、Allocation/Order、Alias/Schedule、TaskView、主邮箱及辅助邮箱摘要/单封详情 | 无 N+1；详情按 Tab 懒加载；邮件摘要与正文分离；筛选、分页和 facets 与冻结 UI 一致；凭据和内部 token 永不返回，正文只由授权单封详情返回，验证码仅由已确认的授权 Orders/邮件摘要/详情字段返回且不进任务、错误或日志。 |
+| AMR-5 管理命令 | 实现管理员代导入、原子编辑、替换凭据、Validate/Enable/Disable/Publish/Unpublish/Delete/Recover、RT 刷新、alias schedule 加速、资源 Fetch 和 `ids/filter` 批量命令 | Handler 不写业务状态；写操作回到事实所有者；外部网络和大批量处理走 durable job；同资源同任务幂等；失败和 panic 回滚、active Allocation 保护、OperationLog/SystemLog 有证据。 |
+| AMR-6 前端真实 API | 生产组件只使用 OpenAPI 生成类型和薄 API adapter；完成 owner 查询、原子保存、Tab 懒加载、邮件按需正文、任务轮询、AbortSignal 与 stale response 防护 | 布局、样式、文案、Tab/按钮/弹窗数量和响应式行为不变；`pnpm generate:api`、typecheck、test、build 通过。 |
+| AMR-7 移除 mock | 所有 `UI-AMR-*` 已由真实 API 和 durable 任务覆盖后，删除管理员 Microsoft mock、mock DTO、生产 fallback，并把有效断言迁移到契约/adapter/组件/E2E 测试 | 生产和测试均无管理员 Microsoft mock import；刷新页面后数据完全来自数据库、对象存储受控读取和任务事实。 |
+| AMR-8 矩阵验收 | 填写专项追踪矩阵和本文件引用的 D1–D20、T1–T13、A1–A13 合并结论；执行 migration、事务、权限、禁敏、分页/查询次数、普通 EXPLAIN、前端和 E2E 验收 | 红线项非 0 且证据可复现；不以压测或极端规模 P95 作为本功能合并条件；七 Tab、四任务、三弹窗及桌面/移动主流程真实数据验收通过。 |
+
+当前实施快照（2026-07-12）：
+
+| 批次 | 当前状态 | 已有证据 | 尚未满足的退出条件 |
+|------|----------|----------|--------------------|
+| AMR-1 | 已完成 | docs 0/1/2/3/4/5/8/10/12/13/14/20/21 已同步；111 个 UI-ID、3 弹窗、7 Tab、4 任务已冻结 | 后续实现语义变化继续同步，不得改写 UI-ID 含义 |
+| AMR-2 | 已完成 | Q01–Q12/C01–C18 已进入 `api/openapi.yaml`，Q05 runtime DTO 已对齐；管理员 Go/TypeScript 生成物与 YAML 一致。独立 public spec 哈希及公开路由/enum 测试稳定，且不包含管理员路径 | 已满足；后续管理员契约变更继续以 YAML 为唯一源并重跑 Go/TypeScript 零漂移门禁 |
+| AMR-3 | 主体完成 | migration 00009/00010/00011；Owner/Binding/AllocationGuard/AdminAllocationEnrichment/Task/Alias/Message/Fetch 等 Port/Adapter 已落盘。generated sort column 因破坏历史 raw insert 被撤回；当前使用直接 `COALESCE(received_at,created_at)` 排序，并删除不能消除该 filesort 的两个辅助邮件预留索引、两个无真实查询的 receipt 次级索引、五个无 operator/requestId 读取用例的任务历史索引及管理员查询中的 `FORCE INDEX` | 不再为辅助邮箱或低频管理任务预建额外 DDL/强制索引；任何后续索引只依据真实业务量、具体 SQL、兼容性和简单性收益增加 |
+| AMR-4 | 代码完成 | Core list/facets/detail、Orders bounded enrichment、Alias/Schedule、TaskView、主/辅助邮件 summary/detail 已有功能、稳定分页、查询次数和普通 EXPLAIN tests；辅助邮件保持直接 `COALESCE` 排序，列表直接复用同一响应的 facets | 不维护专项百万数据性能 harness；真实慢查询出现后再用同一 SQL 和代表性数据评审局部索引，不引入缓存、物化统计、额外 DDL 或双写 |
+| AMR-5 | 主体完成、关键正确性门禁已补 | 原子 edit/credentials/state、validation fencing、import fencing/items、bulk checkpoint、Token/Alias/Fetch durable tasks 已落盘；rollback/panic/日志失败、active single-flight、分页续跑和锁序测试覆盖主要不变式。Import/Bulk 只对已知 1205/1213 做最多 3 次短事务重试 | 管理员同步查询与命令不新增 Redis 缓存、投影表或应用内限流依赖；Redis/Asynq 只沿用既有异步投递层，数据库 durable fact 仍是恢复依据。额外压力、全仓 race 和 chaos 仅在真实风险需要时执行，不作为本功能完成条件 |
+| AMR-6 | 组件门禁通过 | `pnpm typecheck`、Vitest、`pnpm build` 通过；真实路由、generated types、AbortSignal、active-task polling、异步受理元数据、7 Tab、4 手工任务、3 弹窗、desktop 940px/mobile 100% SideSheet 组件断言已覆盖 | 真实数据库 Playwright、桌面/移动/明暗主题截图或视觉回归和七 Tab 真数据验收作为后续发布证据，不属于本次代码/lint 交付门禁 |
+| AMR-7 | 代码清理完成 | 管理员 Microsoft mock 文件删除；专项 `rg` 零引用；无生产 fallback | 页面刷新、API/worker 重启和任务重派后仍完全真实的 E2E/演练 |
+| AMR-8 | 自动化代码交付完成 | [21-admin-microsoft-resource-matrices.md](21-admin-microsoft-resource-matrices.md) 已回填契约、Core credential Port、Alias 唯一入口、mock、功能/事务/migration 测试、生成、前端和 lint 证据；性能只作容量观察 | 本次只宣告代码实现/自动化门禁完成，不宣告浏览器人工验收或生产上线；Playwright、视觉与重启/重派演练继续作为后续发布证据 |
+
+专项提交建议保持可审查边界：`docs(amr)`、`contract(amr)`、`backend(amr-read)`、`backend(amr-command)`、`frontend(amr-api)`、`cleanup(amr-mock)`、`test(amr-matrix)`。任何阶段发现正式领域文档与冻结 UI 冲突，先回到 AMR-1 形成裁决和修订记录，不以临时前端分支或跨域 SQL 绕过。
+
 ---
 
 ## 6. 代码组织
@@ -320,3 +360,4 @@ api        Gin handler、DTO、OpenAPI tags
 | ADR-PLAN-3 | 一期做减法但基础必须扎实 | 速度服务于闭环，不代表可以牺牲资源、分配、订单、资金的不变式。 |
 | ADR-PLAN-4 | 二期画龙点睛 | 管理后台、售后、供应商结算和治理需要建立在稳定核心闭环上。 |
 | ADR-PLAN-5 | 每个迭代都动态验证 | 敏捷开发必须持续跑通闭环，不能等最后一次性集成。 |
+| ADR-PLAN-6 | 管理员 Microsoft 资源按文档到矩阵的单向阶段推进 | 冻结 UI 与任意 mock 契约必须解耦，先确定领域所有权和正式契约，再接真实 API，最后删除 mock。 |

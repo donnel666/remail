@@ -520,6 +520,32 @@ LIMIT ?`
 	return rows, nil
 }
 
+// LockResourceRoot establishes the cross-context lock order shared with Core:
+// email_resources first, then the resource subtype and allocation-owned rows.
+// The root row is already a selected candidate, so wait for the short
+// administrator transaction instead of treating a temporarily locked resource
+// as missing inventory. Candidate-pool scans may still use SKIP LOCKED.
+func (r *Repo) LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
+	if resourceID == 0 || !domain.IsValidAllocationType(allocationType) {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	if _, ok := platform.GormTxFromContext(ctx); !ok {
+		return false, domain.ErrAllocationTxRequired
+	}
+	var row struct {
+		ID uint `gorm:"column:id"`
+	}
+	if err := r.dbFor(ctx).Raw(`
+SELECT id
+FROM email_resources
+WHERE id = ? AND type = ?
+LIMIT 1
+FOR UPDATE`, resourceID, string(allocationType)).Scan(&row).Error; err != nil {
+		return false, fmt.Errorf("lock allocation resource root: %w", err)
+	}
+	return row.ID != 0, nil
+}
+
 func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
 	args := []any{resourceID, projectID}
 	where := []string{
@@ -627,6 +653,45 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUs
 		return nil, nil
 	}
 	return &row, nil
+}
+
+// AssertNoActiveAllocations participates in the caller's existing transaction.
+// Core owns and locks the email_resources roots before invoking this guard;
+// locking reads here then observe the latest committed allocation state and
+// serialize with release without reversing the root-first order.
+func (r *Repo) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error {
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	if _, ok := platform.GormTxFromContext(ctx); !ok {
+		return domain.ErrAllocationTxRequired
+	}
+	queries := []struct {
+		table string
+		label string
+	}{
+		{table: "microsoft_allocations", label: "microsoft"},
+		{table: "domain_allocations", label: "domain"},
+	}
+	for _, query := range queries {
+		var row struct {
+			ID uint `gorm:"column:id"`
+		}
+		statement := fmt.Sprintf(`
+SELECT id
+FROM %s
+WHERE resource_id IN ? AND status = 'allocated'
+ORDER BY resource_id ASC, id ASC
+LIMIT 1
+FOR UPDATE`, query.table)
+		if err := r.dbFor(ctx).Raw(statement, resourceIDs).Scan(&row).Error; err != nil {
+			return fmt.Errorf("check active %s allocations: %w", query.label, err)
+		}
+		if row.ID != 0 {
+			return domain.ErrActiveAllocation
+		}
+	}
+	return nil
 }
 
 func (r *Repo) FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*allocapp.AliasCandidate, error) {

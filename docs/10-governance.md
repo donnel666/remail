@@ -5,6 +5,8 @@
 | 日期 | 版本 | 修订人 | 说明 |
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
+| 2026-07-12 | V1.1 | Codex | 补充管理员 Microsoft 资源的 TaskView 聚合、命令级 OperationLog、外部失败 SystemLog、批量审计和敏感邮件正文读取审计；不改变业务任务事实归属。 |
+| 2026-07-12 | V1.2 | Codex | 对齐当前模块化单体：TaskView 可用一个直接源表、只读、有界的 SQL `UNION` 查询组合同库任务事实，不建立投影表、不提前建设空转 TaskSourcePort，且绝不接管来源任务写入。 |
 
 > 通用域。治理域提供配置、日志、通知、内容运营、任务可观测和后台命令入口，不直接拥有业务状态机。
 
@@ -30,7 +32,7 @@
 | `Notification` | `userId`、`type`、`title`、`content`、`refType/refId`、`readAt` |
 | `SystemLog` | `level`、`module`、`eventType`、`requestId`、`bizType/bizId`、`message`、`detail` |
 | `OperationLog` | `operatorUserId`、`operationType`、`type/resourceId`、`path`、`result`、`safeSummary` |
-| `TaskView` | 从 Asynq/业务任务表聚合出的任务视图，不必是单一聚合 |
+| `TaskView` | 从 Asynq/各 BC durable 任务事实聚合出的只读任务视图；统一展示标识、业务关联、类型、状态、进度、安全诊断和时间，不复制任务状态机。 |
 
 ---
 
@@ -60,6 +62,18 @@
 | 触发拉取/健康检查 | 服务端固定摘要。 |
 | 资源重新验证 | 服务端固定摘要。 |
 
+管理员 Microsoft 资源管理的日志补充规则：
+
+| 场景 | 规则 |
+|------|------|
+| 单资源命令 | Validate、Enable、Disable、Publish、Unpublish、Delete、Recover、ReplaceCredentials、RefreshToken、ExpediteAliasSchedule、FetchMail 成功和失败都写一条 OperationLog；记录 operator、resourceId、command、result、requestId 和安全摘要。 |
+| 批量命令 | `ids/filter` 一次提交只写命令级 OperationLog，记录 selection 模式、过滤摘要、接收时高水位、预计/实际影响数和 taskId；不得为大批量资源逐条写日志。 |
+| 外部或 worker 失败 | Microsoft、Graph、IMAP、代理、Redis/Asynq、MinIO 失败写 SystemLog，关联 `bizType/bizId/taskId/requestId`；detail 必须先禁敏。 |
+| 邮件摘要查询 | 普通分页/搜索不逐条写 OperationLog，避免审计表被高频读放大。 |
+| 敏感正文读取 | 管理员读取单封主邮箱或辅助邮箱正文时写定向读取审计，记录 operator、资源/消息标识、入口、结果和 requestId，不记录正文、搜索词、验证码或 objectKey。 |
+
+任何日志和任务视图都不得包含密码、Client ID 原值、RT、AT、验证码、邮件正文、RFC822 objectKey、claim/dispatch token、代理凭据或 Microsoft 原始页面/响应。上游原始错误必须先经 ACL 分类和禁敏，再进入受控 SystemLog 诊断字段；对外只返回安全 message。
+
 ---
 
 ## 4. 后台能力模型
@@ -78,6 +92,20 @@
 | OpenAPI | API Key、服务凭证、请求日志。 |
 | Aftersale | 工单认领、改派、驳回、解决、SLA。 |
 | Ops | 系统配置、任务、日志、运行健康、公告、通知、帮助。 |
+
+管理员 Microsoft 资源的 `TaskView` 是跨上下文管理读模型，不是新的任务聚合。任务事实及重试规则仍由命令所有者维护：
+
+| TaskView 类型 | 事实所有者 | 统一业务关联 |
+|---------------|------------|--------------|
+| import/validation/token refresh/bulk resource command | Core | `bizType=microsoft_resource`、`bizId=resourceId`；批量任务另带安全 selection 摘要。 |
+| alias schedule/attempt | MailTransport | 同一 Microsoft resource 业务关联，并保留 quota、attempt 和 fencing 的安全状态。 |
+| manual resource fetch | MailMatch | 同一 Microsoft resource 业务关联，并保留资源级 single-flight 结果。 |
+
+TaskView 只做状态翻译和分页筛选，稳定状态并集为 `queued/running/succeeded/failed/uncertain/canceled`；某类任务不支持取消时不产生 `canceled`，任何来源都不能把取消或结果未知伪装成成功。来源 BC 的 taskId、幂等键、lease、attempt、fencing 和重试策略保持权威；Governance 不通过任务重试/取消接口直接更新其他 BC 表，而是调用对应 Command Port。管理员 Microsoft TaskView 的必需来源暂时不可用时，当前 Tab 返回安全 `503` 并允许重试，不用旧缓存或不完整集合伪造成功状态。
+
+TaskView 对外 `taskId` 使用 source-qualified 或等价全局唯一的安全字符串，避免多个来源自增 ID 冲突；它不能包含表名、claim/lease/fencing token，也不能让通用 Task API 绕过来源 Command Port 修改任务事实。
+
+项目当前是共享数据库的模块化单体。TaskView 基础设施可以通过一个明确标识、直接读取源表、只读且有界的 SQL `UNION` 查询组合读取各任务事实；这是管理员诊断读模型的窄例外，不等于 Governance 拥有来源任务，不建立投影表，也不允许通过该 repository 更新其他 BC 表。若未来任务事实迁出同库，再以来源 Query Port 替换该查询组合，不提前建设空转适配层。
 
 ---
 
@@ -102,6 +130,7 @@
 | `FilePort` | 入站自全域 | 保存/读取私有文件。 |
 | `DeliveryPort` | 出站到 BC-MAILTRANSPORT | 外发通知邮件。 |
 | `CommandPort` | 出站到业务域 | 后台命令入口规范，不直接改表。 |
+| `TaskQueryPort` | 入站自后台组合查询 | 按 `bizType/bizId/kind/status` 分页读取统一 TaskView。 |
 
 ---
 
@@ -129,7 +158,7 @@
 | `GET` | `/v1/admin/logs/operations` | 操作日志。 |
 | `GET/PUT` | `/v1/admin/settings` | 系统配置。 |
 | `GET` | `/v1/admin/health` | 运行健康。 |
-| `GET` | `/v1/admin/tasks` | 任务查询。 |
+| `GET` | `/v1/admin/tasks` | 任务查询；支持 `bizType/bizId/kind/status`，管理员 Microsoft 详情使用 `bizType=microsoft_resource` 和资源 ID。 |
 | `POST` | `/v1/admin/tasks/{taskId}/retry` | 任务重试。 |
 | `POST` | `/v1/admin/tasks/{taskId}/cancel` | 任务取消。 |
 
@@ -143,3 +172,4 @@
 | ADR-GOV-2 | 后台不直改业务表 | 避免绕过领域状态机。 |
 | ADR-GOV-3 | 操作日志和系统日志分离 | 分别回答“谁做了什么”和“系统发生了什么”。 |
 | ADR-GOV-4 | 私有文件只经受控接口读取 | 避免 MinIO objectKey 泄露。 |
+| ADR-GOV-5 | TaskView 只组合各 BC 的 durable 任务事实 | 后台需要统一诊断视图，但任务状态机、幂等、重试和 fencing 必须继续由事实所有者控制。 |

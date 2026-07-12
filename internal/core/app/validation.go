@@ -99,13 +99,19 @@ type ResourceBatchValidationResult struct {
 }
 
 type ValidationResultView struct {
-	ValidationID  uint      `json:"validationId"`
-	ResourceID    uint      `json:"resourceId"`
-	ResourceType  string    `json:"resourceType"`
-	Status        string    `json:"status"`
-	LastSafeError string    `json:"lastSafeError,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ValidationID       uint       `json:"validationId"`
+	ResourceID         uint       `json:"resourceId"`
+	ResourceType       string     `json:"resourceType"`
+	Status             string     `json:"status"`
+	CredentialRevision uint64     `json:"credentialRevision,omitempty"`
+	Attempts           int        `json:"attempts"`
+	MaxAttempts        int        `json:"maxAttempts"`
+	LastSafeError      string     `json:"lastSafeError,omitempty"`
+	RequestID          string     `json:"requestId"`
+	StartedAt          *time.Time `json:"startedAt,omitempty"`
+	FinishedAt         *time.Time `json:"finishedAt,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 type ResourceValidationUseCase struct {
@@ -124,6 +130,12 @@ const (
 )
 
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
+
+// ErrValidationResultStale means the durable job was fenced off because the
+// resource credentials or command state changed while the external Microsoft
+// call was in flight. The repository has already made the job terminal; the
+// worker must not retry the stale payload or overwrite the newer state.
+var ErrValidationResultStale = errors.New("resource validation result is stale")
 
 func NewResourceValidationUseCase(resources EmailResourceRepository, validations ResourceValidationRepository, queue ResourceValidationQueue, validator ResourceValidationPort) *ResourceValidationUseCase {
 	return &ResourceValidationUseCase{
@@ -477,13 +489,20 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 			result.ClientID,
 			result.RefreshToken,
 		); err != nil {
+			if errors.Is(err, ErrValidationResultStale) {
+				return nil
+			}
 			return err
 		}
 	}
 	if isRetryableValidationCategory(result.Category) && !result.Valid {
 		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
 	}
-	return uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
+	err = uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
+	if errors.Is(err, ErrValidationResultStale) {
+		return nil
+	}
+	return err
 }
 
 func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *domain.ResourceValidation) error {
@@ -585,13 +604,19 @@ func validationView(job *domain.ResourceValidation) *ValidationResultView {
 		return nil
 	}
 	return &ValidationResultView{
-		ValidationID:  job.ID,
-		ResourceID:    job.ResourceID,
-		ResourceType:  string(job.ResourceType),
-		Status:        string(job.Status),
-		LastSafeError: job.LastSafeError,
-		CreatedAt:     job.CreatedAt,
-		UpdatedAt:     job.UpdatedAt,
+		ValidationID:       job.ID,
+		ResourceID:         job.ResourceID,
+		ResourceType:       string(job.ResourceType),
+		Status:             string(job.Status),
+		CredentialRevision: job.ExpectedCredentialRevision,
+		Attempts:           job.Attempts,
+		MaxAttempts:        job.MaxAttempts,
+		LastSafeError:      job.LastSafeError,
+		RequestID:          job.RequestID,
+		StartedAt:          job.StartedAt,
+		FinishedAt:         job.FinishedAt,
+		CreatedAt:          job.CreatedAt,
+		UpdatedAt:          job.UpdatedAt,
 	}
 }
 

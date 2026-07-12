@@ -8,15 +8,19 @@ import (
 )
 
 type Module struct {
-	UseCase *allocapp.UseCase
-	Repo    *allocinfra.Repo
+	UseCase       *allocapp.UseCase
+	Repo          *allocinfra.Repo
+	ResourceGuard *ResourceAllocationGuardAdapter
 }
 
 func NewModule(db *gorm.DB, asynqClient *asynq.Client) *Module {
 	repo := allocinfra.NewRepo(db)
 	queue := allocinfra.NewCandidateRefreshQueue(asynqClient)
+	useCase := allocapp.NewUseCase(repo, queue)
+	useCase.SetAdminAllocationEnrichmentPort(allocinfra.NewAdminAllocationEnrichmentRepo(db))
 	return &Module{
-		UseCase: allocapp.NewUseCase(repo, queue),
-		Repo:    repo,
+		UseCase:       useCase,
+		Repo:          repo,
+		ResourceGuard: NewResourceAllocationGuardAdapter(useCase),
 	}
 }

@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 export const DEFAULT_BLOCK_PAGE_SIZE = 1_000;
 const PREFETCH_THRESHOLD = 0.8;
 
-export interface BlockPageResult<T> {
+export interface BlockPageResult<T, M = undefined> {
   items: T[];
+  meta?: M;
   nextAfterId?: number | null;
   total: number;
 }
@@ -13,7 +14,7 @@ export interface BlockLoadCursor {
   afterId?: number;
 }
 
-interface UseBlockPagedListOptions<T> {
+interface UseBlockPagedListOptions<T, M = undefined> {
   activePage: number;
   blockSize?: number;
   filterKey: string;
@@ -21,8 +22,9 @@ interface UseBlockPagedListOptions<T> {
     offset: number,
     limit: number,
     cursor?: BlockLoadCursor
-  ) => Promise<BlockPageResult<T>>;
+  ) => Promise<BlockPageResult<T, M>>;
   onError?: (error: unknown) => void;
+  onLoaded?: (response: BlockPageResult<T, M>) => void;
   pageSize: number;
 }
 
@@ -36,14 +38,15 @@ function blockOffsetForIndex(index: number, blockSize: number) {
   return Math.floor(Math.max(index, 0) / blockSize) * blockSize;
 }
 
-export function useBlockPagedList<T>({
+export function useBlockPagedList<T, M = undefined>({
   activePage,
   blockSize = DEFAULT_BLOCK_PAGE_SIZE,
   filterKey,
   loadBlock,
   onError,
+  onLoaded,
   pageSize,
-}: UseBlockPagedListOptions<T>) {
+}: UseBlockPagedListOptions<T, M>) {
   const cacheRef = useRef(new Map<number, CachedBlock<T>>());
   const pendingRef = useRef(new Map<number, Promise<void>>());
   const loadSeqRef = useRef(0);
@@ -85,6 +88,7 @@ export function useBlockPagedList<T>({
             total: response.total,
           });
           setTotal(response.total);
+          onLoaded?.(response);
           bumpVersion();
         })
         .catch((error) => {
@@ -100,7 +104,7 @@ export function useBlockPagedList<T>({
       pendingRef.current.set(offset, request);
       await request;
     },
-    [blockSize, bumpVersion, loadBlock, onError]
+    [blockSize, bumpVersion, loadBlock, onError, onLoaded]
   );
 
   const clear = useCallback(() => {

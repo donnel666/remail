@@ -109,6 +109,10 @@ func msaclReadableInboundStatuses() []string {
 func (r *MSACLMailboxReader) rowsToEmailObjects(ctx context.Context, rows []InboundMailModel) ([]msacl.EmailObj, error) {
 	emails := make([]msacl.EmailObj, 0, len(rows))
 	for _, row := range rows {
+		if row.ParsedAt != nil {
+			emails = append(emails, newMSACLInboundEmail(row))
+			continue
+		}
 		stored, err := r.files.ReadPrivate(ctx, row.SourceObjectKey)
 		if err != nil {
 			// Preserve the row identity in mailbox snapshots. If the object
@@ -123,14 +127,20 @@ func (r *MSACLMailboxReader) rowsToEmailObjects(ctx context.Context, rows []Inbo
 }
 
 func newMSACLInboundEmail(row InboundMailModel) msacl.EmailObj {
+	receivedAt := row.CreatedAt
+	if row.ReceivedAt != nil && !row.ReceivedAt.IsZero() {
+		receivedAt = *row.ReceivedAt
+	}
 	return msacl.EmailObj{
-		ID:         row.ID,
-		ReceivedAt: row.CreatedAt.UTC().Format(time.RFC3339),
-		To:         row.Recipient,
-		From:       row.EnvelopeFrom,
+		ID:               row.ID,
+		ReceivedAt:       receivedAt.UTC().Format(time.RFC3339),
+		Subject:          row.Subject,
+		Preview:          row.BodyPreview,
+		VerificationCode: row.VerificationCode,
+		To:               row.Recipient,
+		From:             row.HeaderFrom,
 		Raw: map[string]any{
-			"sourceObjectKey": row.SourceObjectKey,
-			"status":          row.Status,
+			"status": row.Status,
 		},
 	}
 }
@@ -148,6 +158,8 @@ func parseMSACLInboundEmail(row InboundMailModel, raw []byte) msacl.EmailObj {
 	email.Subject = decodeMIMEHeader(decoder, msg.Header.Get("Subject"))
 	if from := decodeMIMEHeader(decoder, msg.Header.Get("From")); from != "" {
 		email.From = from
+	} else if email.From == "" {
+		email.From = row.EnvelopeFrom
 	}
 	if to := decodeMIMEHeader(decoder, msg.Header.Get("To")); to != "" {
 		email.To = to

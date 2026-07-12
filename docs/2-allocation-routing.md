@@ -14,6 +14,8 @@
 | 2026-07-06 | V1.7 | Codex | 补充分配源表候选与候选读模型边界：P1-I5 分配以 Core 源表短锁重校验为准，候选读模型只做后台诊断和预热；此为实现边界补充，不改变分配不变式。 |
 | 2026-07-06 | V1.8 | Codex | 补充并纠正项目库存口径：库存按项目商品启用的分配形态计算；plus/domain 这类无限生成能力通过资源级日限量和按资源分散的 daily usage counter 形成库存；这会替代旧的“加号别名不计库存、不扣库存”口径，但不改变分配状态机。 |
 | 2026-07-09 | V1.9 | Codex | 补充 Domain 私有候选与分配事实 `supplyScope`：Domain 与 Microsoft 一样区分公开供给和 owner 私有供给；此为实现一致性补充，不改变分配状态机。 |
+| 2026-07-12 | V1.10 | Codex | 补充管理员 Microsoft 资源维度的分配/订单读模型和 `ResourceAllocationGuardPort`：Alloc 通过各事实所有者的批量 Query Port 丰富当前订单 Tab，危险身份变更和删除通过 active allocation guard 保护。 |
+| 2026-07-12 | V1.11 | Codex | 对齐简单实现：管理员订单 Tab 按当前页 orderNo 直接从源表执行有界只读查询组合补齐展示字段；不建设投影表或多组空转 Port，不改变 Trade/Core/MailMatch 的事实所有权或任何写边界。 |
 
 > 核心域。BC-ALLOC 只负责把订单绑定到一个邮箱使用权，不拥有资源验证、订单状态或钱包。
 
@@ -264,6 +266,20 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | 按收件人查询 | `email + status` 必须有索引，供 MailMatch 先按 recipient 定位 active 分配，禁止全项目扫描。主邮箱分配也必须冗余写入交付邮箱，提升匹配性能。 |
 | 用户商品库存 | `GET /v1/projects/{projectId}/inventory` 返回项目总库存、每个商品的 `totalAvailable/publicAvailable` 以及可选后缀或域名库存；不返回供应商、资源 ID、别名或生成邮箱等来源 breakdown。 |
 | 库存诊断 | `GET /v1/admin/projects/{projectId}/inventory` 返回项目商品、Microsoft 可分配统计、Domain 可分配统计和 active 分配统计。 |
+| 资源使用详情 | `AdminAllocationQueryPort` 按 `resourceId` 分页返回资源维度订单/分配读模型；通过批量 Port 丰富，不得为每条 allocation 单独查询订单、项目、买家或邮件。 |
+
+管理员 Microsoft 页面展示的是“资源维度订单/分配读模型”，但最终行不是 Alloc 新增的跨域聚合。边界固定如下：
+
+| 字段组 | 提供方 | 说明 |
+|--------|--------|------|
+| `allocationId/orderNo/projectId/productId/resourceId/mailbox/supplyScope/deliveryEmail/allocationStatus/createdAt/releasedAt` | BC-ALLOC | allocation 源事实；按 `createdAt DESC, id DESC` 稳定分页。 |
+| `serviceMode/orderStatus/payAmount/buyer` 和服务窗口 | BC-TRADE | 管理查询组合只按当前页最多 100 个唯一 orderNo 批量读取；不把字段复制进 Allocation。 |
+| 项目名称和 Logo | BC-CORE | 同一有界查询组合批量读取项目展示字段；allocation 只保留项目引用。 |
+| `verificationCode` 交付摘要 | BC-MAILMATCH | 同一有界查询组合只读取已确认订单 Tab 展示的验证码，不读取正文。mock-only `mailCount` 不进入一期契约。 |
+
+`AdminAllocationQueryPort` 拥有订单 Tab 当前可见列的管理读模型契约，但不因此拥有下游事实。它必须使用批量 Port 完成 ACL 翻译，任一必需依赖失败时返回可诊断的安全失败，不得用零值伪造金额、身份或邮件事实；未在已确认 UI 展示的额外资源使用聚合不进入一期契约。
+
+资源身份、owner 和删除保护使用独立的 `ResourceAllocationGuardPort`。该 Port 提供批量检查以及 tx-bound `AssertNoActiveAllocation(resourceId)`；Core 先锁资源根再调用，分配创建也按相同锁顺序先锁资源根后插入 allocation，避免“检查后又新建分配”的竞态。Disable/下架 `forSale=false` 只阻止后续候选或自动维护，不释放、不改写现有 allocation；既有服务生命周期和释放仍只能由 Trade 等所有者闭环处理。
 
 ---
 
@@ -278,6 +294,8 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | INV-A5 | 点别名、加号别名、自建生成邮箱必须优先复用。 |
 | INV-A6 | 分配结果必须返回交付邮箱；主邮箱分配也必须在 allocation 表冗余写入主邮箱地址。 |
 | INV-A7 | 不提供手工创建/编辑分配能力，避免绕过交易和钱包。 |
+| INV-A8 | Core 修改资源交付身份、owner 或执行删除前必须通过 `ResourceAllocationGuardPort` 原子确认无 active allocation；Disable/Unpublish 不改写既有 allocation，Core 也不能自行查询 allocation 表代替该契约。 |
+| INV-A9 | 普通 Alloc repository 不跨域 JOIN；资源维度管理员读模型可作为显式例外，在同一模块化单体数据库内按当前页 orderNo 做最多 100 条、只读、无副作用的受控源表查询组合，且不得建立投影表、返回 UI 未使用的事实或任何敏感正文。 |
 
 ---
 
@@ -288,6 +306,8 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `AllocationPort` | 入站自 BC-TRADE | 创建分配并返回交付邮箱。 |
 | `ReleasePort` | 入站自 BC-TRADE | 按订单释放分配。 |
 | `QueryPort` | 入站自 BC-MAILMATCH/BC-TRADE | 按订单、收件人、资源查询分配。 |
+| `AdminAllocationQueryPort` | 入站自 Alloc 管理 API | 按 resourceId 分页构造订单/分配管理读模型；当前页展示字段由基础设施层直接从源表执行有界只读查询组合一次批量补齐，不产生跨域写入。 |
+| `ResourceAllocationGuardPort` | 入站自 BC-CORE | 批量查询或在同一短事务内断言资源不存在 active allocation，保护 owner/地址迁移和删除；不把 Disable/Unpublish 扩大为分配写命令。 |
 | `ProductPort` | 出站到 BC-CORE | 查询商品和权重。 |
 | `ResourcePort` | 出站到 BC-CORE | 查询资源可用性。 |
 | `AliasPort` | 出站到 BC-CORE | 选择/创建/复用 Microsoft 别名。 |
@@ -304,6 +324,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `GET` | `/v1/admin/allocations` | 分配列表，按 `orderNo/projectId/resourceId/type/status/mailbox` 筛选。 |
 | `GET` | `/v1/admin/allocations/{allocationId}` | 分配详情，必须带 `type` 查询参数防止猜表。 |
 | `GET` | `/v1/admin/orders/{orderNo}/allocations` | 按订单查看分配。 |
+| `GET` | `/v1/admin/allocations?type=microsoft&resourceId={resourceId}` | 复用 Alloc 管理列表提供资源维度订单 Tab；基础设施只对当前页 orderNo 做有界只读丰富，不新增重复 nested API。 |
 | `GET` | `/v1/projects/{projectId}/inventory` | 普通用户/下单页读取项目商品库存、可选后缀或域名库存；不返回来源 breakdown。 |
 | `GET` | `/v1/admin/projects/{projectId}/inventory` | 项目库存和可用性诊断。 |
 | `GET` | `/v1/admin/projects/{projectId}/candidates` | 路由候选读模型；支持 `type=microsoft/domain`，不传则返回两类候选。 |
@@ -322,3 +343,4 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | ADR-ALLOC-3 | Microsoft 和 Domain 都建候选读模型 | 候选诊断、后台库存可见性和刷新任务保持一致；候选表只做读模型，不替代分配事务内的源表校验。 |
 | ADR-ALLOC-4 | 分配不拥有可复用邮箱生命周期 | 别名池和自建生成邮箱归资源上下文。 |
 | ADR-ALLOC-5 | 后台只查不改分配策略 | 后台不能绕过交易创建分配。 |
+| ADR-ALLOC-6 | 资源详情复用 Alloc-owned 管理读模型 | 保留管理员完整订单/分配视图；模块化单体允许一个明确标识、只读、单页有界的源表查询组合补齐展示字段，不新增投影表、多组空转 Port、重复 nested API 或跨域写入。 |

@@ -52,6 +52,77 @@ func NewMicrosoftBindingRepo(db *gorm.DB) *MicrosoftBindingRepo {
 	return &MicrosoftBindingRepo{db: db}
 }
 
+func (r *MicrosoftBindingRepo) FindByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]domain.MicrosoftBindingMailbox, error) {
+	ids := uniquePositiveBindingIDs(resourceIDs)
+	result := make(map[uint]domain.MicrosoftBindingMailbox, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
+	var models []MicrosoftBindingMailboxModel
+	if err := db.
+		Select("id, resource_id, owner_user_id, account_email, binding_address, purpose, status, code_msg_id, bound_display, category, last_safe_error, selected_at, code_sent_at, verified_at, expires_at, created_at, updated_at").
+		Where("resource_id IN ?", ids).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("find microsoft bindings by resources: %w", err)
+	}
+	for i := range models {
+		model := models[i]
+		result[model.ResourceID] = microsoftBindingToDomain(model)
+	}
+	return result, nil
+}
+
+// ReplaceAdminInput updates the current MailTransport-owned binding input in
+// the caller's short transaction. addressSet=false preserves the address and
+// protocol status; addressSet=true clears or replaces the current input and
+// therefore resets protocol-derived state to pending.
+func (r *MicrosoftBindingRepo) ReplaceAdminInput(ctx context.Context, resourceID, ownerUserID uint, accountEmail string, addressSet bool, bindingAddress *string) error {
+	accountEmail = normalizeBindingEmail(accountEmail)
+	if resourceID == 0 || ownerUserID == 0 || accountEmail == "" {
+		return fmt.Errorf("replace microsoft binding input: invalid command")
+	}
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
+	if !addressSet {
+		if err := db.Model(&MicrosoftBindingMailboxModel{}).
+			Where("resource_id = ?", resourceID).
+			Updates(map[string]any{
+				"owner_user_id": ownerUserID,
+				"account_email": accountEmail,
+				"updated_at":    time.Now().UTC(),
+			}).Error; err != nil {
+			return fmt.Errorf("synchronize microsoft binding owner: %w", err)
+		}
+		return nil
+	}
+
+	address := ""
+	if bindingAddress != nil {
+		address = normalizeBindingEmail(*bindingAddress)
+	}
+	if address == "" {
+		if err := db.Where("resource_id = ?", resourceID).Delete(&MicrosoftBindingMailboxModel{}).Error; err != nil {
+			return fmt.Errorf("clear microsoft binding input: %w", err)
+		}
+		return nil
+	}
+	return upsertMicrosoftBindingTx(db, &MicrosoftBindingMailboxModel{
+		ResourceID:     resourceID,
+		ResourceType:   "microsoft",
+		OwnerUserID:    ownerUserID,
+		AccountEmail:   accountEmail,
+		BindingAddress: address,
+		Purpose:        "validation",
+		Status:         string(domain.MicrosoftBindingPending),
+	})
+}
+
 func (r *MicrosoftBindingRepo) UpsertByEmail(ctx context.Context, inputs []MicrosoftBindingImportInput) error {
 	if len(inputs) == 0 {
 		return nil
@@ -319,4 +390,42 @@ func firstNonBlank(values ...string) string {
 
 func normalizeBindingEmail(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func microsoftBindingToDomain(model MicrosoftBindingMailboxModel) domain.MicrosoftBindingMailbox {
+	return domain.MicrosoftBindingMailbox{
+		ID:             model.ID,
+		ResourceID:     model.ResourceID,
+		OwnerUserID:    model.OwnerUserID,
+		AccountEmail:   model.AccountEmail,
+		BindingAddress: model.BindingAddress,
+		Purpose:        model.Purpose,
+		Status:         domain.MicrosoftBindingStatus(model.Status),
+		CodeMessageID:  model.CodeMessageID,
+		BoundDisplay:   model.BoundDisplay,
+		Category:       model.Category,
+		LastSafeError:  model.LastSafeError,
+		SelectedAt:     model.SelectedAt,
+		CodeSentAt:     model.CodeSentAt,
+		VerifiedAt:     model.VerifiedAt,
+		ExpiresAt:      model.ExpiresAt,
+		CreatedAt:      model.CreatedAt,
+		UpdatedAt:      model.UpdatedAt,
+	}
+}
+
+func uniquePositiveBindingIDs(values []uint) []uint {
+	result := make([]uint, 0, len(values))
+	seen := make(map[uint]struct{}, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }

@@ -6,6 +6,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -18,20 +19,43 @@ type BackgroundDispatchSizer interface {
 
 // CoreModule holds all wired dependencies for the Core (resource) module.
 type CoreModule struct {
-	ImportUseCase      *coreapp.ImportUseCase
-	ResourceUseCase    *coreapp.ResourceUseCase
-	ValidationUseCase  *coreapp.ResourceValidationUseCase
-	DomainUseCase      *coreapp.DomainUseCase
-	ServerUseCase      *coreapp.ServerUseCase
-	MailboxUseCase     *coreapp.DomainMailboxUseCase
-	ProjectUseCase     *coreapp.ProjectUseCase
-	ProjectAssets      *coreapp.ProjectAssetUseCase
-	BackgroundDispatch BackgroundDispatchSizer
+	ImportUseCase        *coreapp.ImportUseCase
+	ResourceUseCase      *coreapp.ResourceUseCase
+	ValidationUseCase    *coreapp.ResourceValidationUseCase
+	DomainUseCase        *coreapp.DomainUseCase
+	ServerUseCase        *coreapp.ServerUseCase
+	MailboxUseCase       *coreapp.DomainMailboxUseCase
+	ProjectUseCase       *coreapp.ProjectUseCase
+	ProjectAssets        *coreapp.ProjectAssetUseCase
+	AdminResourceQuery   *coreapp.AdminResourceQuery
+	AdminCommands        *coreapp.AdminResourceCommandService
+	AdminBulk            *coreapp.AdminResourceBulkService
+	MicrosoftCredentials coreapp.MicrosoftCredentialPort
+	BackgroundDispatch   BackgroundDispatchSizer
 }
 
 func (m *CoreModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
 	if m != nil {
 		m.BackgroundDispatch = sizer
+	}
+}
+
+func (m *CoreModule) SetAdminResourcePorts(
+	owners coreapp.OwnerQueryPort,
+	bindings coreapp.BindingQueryPort,
+	bindingAdmin coreapp.BindingAdminPort,
+	allocations coreapp.ResourceAllocationGuardPort,
+	tasks coreapp.TaskQueryPort,
+	aliases coreapp.AliasScheduleQueryPort,
+) {
+	if m == nil {
+		return
+	}
+	if m.AdminResourceQuery != nil {
+		m.AdminResourceQuery.SetPorts(owners, bindings, tasks, aliases)
+	}
+	if m.AdminCommands != nil {
+		m.AdminCommands.SetPorts(owners, bindings, bindingAdmin, allocations)
 	}
 }
 
@@ -48,15 +72,32 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 	projectRepo := coreinfra.NewProjectRepo(db)
 	importUseCase := coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue, bindingRecorder)
 	importUseCase.SetImportedValidationCreator(validationRepo)
+	validationUseCase := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator)
+	adminRepo := coreinfra.NewAdminResourceRepo(db)
+	adminQuery := coreapp.NewAdminResourceQuery(adminRepo)
+	adminCommands := coreapp.NewAdminResourceCommandService(
+		adminRepo,
+		validationUseCase,
+		governanceinfra.NewOperationLogRepo(db),
+	)
+	adminBulk := coreapp.NewAdminResourceBulkService(
+		coreinfra.NewAdminResourceBulkRepo(db),
+		coreinfra.NewAdminResourceBulkQueue(asynqClient),
+		adminCommands,
+	)
 
 	return &CoreModule{
-		ImportUseCase:     importUseCase,
-		ResourceUseCase:   coreapp.NewResourceUseCase(resourceRepo),
-		ValidationUseCase: coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator),
-		DomainUseCase:     coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
-		ServerUseCase:     coreapp.NewServerUseCase(mailServerRepo),
-		MailboxUseCase:    coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
-		ProjectUseCase:    coreapp.NewProjectUseCase(projectRepo),
-		ProjectAssets:     coreapp.NewProjectAssetUseCase(files),
+		ImportUseCase:        importUseCase,
+		ResourceUseCase:      coreapp.NewResourceUseCase(resourceRepo),
+		ValidationUseCase:    validationUseCase,
+		DomainUseCase:        coreapp.NewDomainUseCase(resourceRepo, mailServerRepo, mailboxRepo),
+		ServerUseCase:        coreapp.NewServerUseCase(mailServerRepo),
+		MailboxUseCase:       coreapp.NewDomainMailboxUseCase(mailboxRepo, resourceRepo),
+		ProjectUseCase:       coreapp.NewProjectUseCase(projectRepo),
+		ProjectAssets:        coreapp.NewProjectAssetUseCase(files),
+		AdminResourceQuery:   adminQuery,
+		AdminCommands:        adminCommands,
+		AdminBulk:            adminBulk,
+		MicrosoftCredentials: coreapp.NewMicrosoftCredentialService(adminRepo),
 	}, nil
 }

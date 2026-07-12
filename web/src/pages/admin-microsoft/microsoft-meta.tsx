@@ -4,21 +4,46 @@ import type { TFunction } from "i18next";
 
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 
-import { avatarColor, userInitial } from "../admin-users/user-meta";
 import type {
-  AdminMicrosoftAliasInventoryStatus,
-  AdminMicrosoftAliasScheduleStatus,
   AdminMicrosoftAllocationStatus,
   AdminMicrosoftAsyncTaskKind,
   AdminMicrosoftAsyncTaskStatus,
   AdminMicrosoftMailboxKind,
   AdminMicrosoftMessageStatus,
+  AdminMicrosoftOwner,
   AdminMicrosoftOwnerRole,
   AdminMicrosoftResourceItem,
   AdminMicrosoftResourceStatus,
   AdminMicrosoftSupplyScope,
   AdminMicrosoftTokenHealth,
-} from "./admin-microsoft-mock";
+} from "./admin-microsoft-types";
+
+const OWNER_AVATAR_COLORS = [
+  "amber",
+  "blue",
+  "cyan",
+  "green",
+  "indigo",
+  "light-blue",
+  "light-green",
+  "lime",
+  "orange",
+  "pink",
+  "purple",
+  "red",
+  "teal",
+  "violet",
+  "yellow",
+] as const;
+
+function ownerAvatarColor(ownerId: number) {
+  return OWNER_AVATAR_COLORS[Math.abs(ownerId) % OWNER_AVATAR_COLORS.length];
+}
+
+function ownerInitial(owner: AdminMicrosoftOwner) {
+  const source = owner.nickname?.trim() || owner.email;
+  return (source[0] ?? "?").toUpperCase();
+}
 
 // Fill the detail drawer's height for single-table tabs: the table body keeps a
 // consistent height and only scrolls once the rows overflow it. The panel height
@@ -56,25 +81,7 @@ export const TASK_STATUS_META: Record<
   succeeded: { color: "green", label: "Succeeded" },
   failed: { color: "red", label: "Failed" },
   uncertain: { color: "orange", label: "Uncertain" },
-};
-
-export const ALIAS_INVENTORY_META: Record<
-  AdminMicrosoftAliasInventoryStatus,
-  { color: "green" | "blue" | "grey"; label: string }
-> = {
-  available: { color: "green", label: "Available" },
-  allocated: { color: "blue", label: "Allocated" },
-  disabled: { color: "grey", label: "Disabled" },
-};
-
-export const ALIAS_SCHEDULE_META: Record<
-  AdminMicrosoftAliasScheduleStatus,
-  { color: "green" | "orange" | "grey" | "blue"; label: string }
-> = {
-  pending: { color: "blue", label: "Pending" },
-  queued: { color: "blue", label: "Queued" },
-  running: { color: "orange", label: "Running" },
-  paused: { color: "grey", label: "Paused" },
+  canceled: { color: "grey", label: "Canceled" },
 };
 
 export const MESSAGE_STATUS_META: Record<
@@ -148,7 +155,7 @@ export function formatTime(value?: string | null) {
   return date.toLocaleString();
 }
 
-export function formatRemainingTime(value: string | undefined, t: TFunction) {
+export function formatRemainingTime(value: string | null | undefined, t: TFunction) {
   if (!value) return "-";
   const timestamp = new Date(value).getTime();
   if (Number.isNaN(timestamp)) return "-";
@@ -183,8 +190,16 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Alias replenishment";
     case "token":
       return "Token refresh";
-    default:
+    case "fetch":
       return "Mail fetch";
+    case "bulk_validation":
+      return "Validation";
+    case "bulk_publish":
+      return "Put on sale";
+    case "bulk_unpublish":
+      return "Convert to private";
+    case "bulk_delete":
+      return "Delete";
   }
 }
 
@@ -212,8 +227,8 @@ export function renderTokenTag(health: AdminMicrosoftTokenHealth, t: TFunction) 
 }
 
 export function renderProtocolTag(record: AdminMicrosoftResourceItem, t: TFunction) {
-  const graphAvailable = record.graphAvailable;
-  const imapFallback = record.status === "normal" && !graphAvailable;
+  const graphAvailable = record.mailProtocol === "graph";
+  const imapFallback = record.mailProtocol === "imap";
   return (
     <Tag
       color={graphAvailable ? "green" : imapFallback ? "blue" : "grey"}
@@ -246,25 +261,21 @@ export function InfoItem({ label, value }: { label: string; value: ReactNode }) 
 }
 
 export function OwnerIdentity({
-  ownerEmail,
-  ownerGroupName,
-  ownerId,
-  ownerNickname,
-  ownerRole,
+  owner,
   t,
-}: Pick<
-  AdminMicrosoftResourceItem,
-  "ownerEmail" | "ownerGroupName" | "ownerId" | "ownerNickname" | "ownerRole"
-> & { t: TFunction }) {
+}: {
+  owner: AdminMicrosoftOwner;
+  t: TFunction;
+}) {
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <Avatar className="shrink-0" color={avatarColor(ownerId)} size="extra-small">
-        {userInitial({ email: ownerEmail, nickname: ownerNickname })}
+      <Avatar className="shrink-0" color={ownerAvatarColor(owner.id)} size="extra-small">
+        {ownerInitial(owner)}
       </Avatar>
       <div className="min-w-0">
-        <CopyableTableText copiedText={t("Copied")} text={ownerEmail} />
+        <CopyableTableText copiedText={t("Copied")} text={owner.email} />
         <div className="truncate text-xs text-[var(--semi-color-text-2)]">
-          {ownerNickname || "-"} · {t(ownerRoleLabel(ownerRole))} · {ownerGroupName || "-"}
+          {owner.nickname || "-"} · {t(ownerRoleLabel(owner.role))} · {owner.groupName || "-"}
         </div>
       </div>
     </div>

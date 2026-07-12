@@ -19,6 +19,210 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for AdminAllocationItemMailbox.
+const (
+	AdminAllocationItemMailboxAlias  AdminAllocationItemMailbox = "alias"
+	AdminAllocationItemMailboxDomain AdminAllocationItemMailbox = "domain"
+	AdminAllocationItemMailboxDot    AdminAllocationItemMailbox = "dot"
+	AdminAllocationItemMailboxMain   AdminAllocationItemMailbox = "main"
+	AdminAllocationItemMailboxPlus   AdminAllocationItemMailbox = "plus"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemMailbox enum.
+func (e AdminAllocationItemMailbox) Valid() bool {
+	switch e {
+	case AdminAllocationItemMailboxAlias:
+		return true
+	case AdminAllocationItemMailboxDomain:
+		return true
+	case AdminAllocationItemMailboxDot:
+		return true
+	case AdminAllocationItemMailboxMain:
+		return true
+	case AdminAllocationItemMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAllocationItemOrderStatus.
+const (
+	AdminAllocationItemOrderStatusActive         AdminAllocationItemOrderStatus = "active"
+	AdminAllocationItemOrderStatusClosed         AdminAllocationItemOrderStatus = "closed"
+	AdminAllocationItemOrderStatusCompleted      AdminAllocationItemOrderStatus = "completed"
+	AdminAllocationItemOrderStatusFailed         AdminAllocationItemOrderStatus = "failed"
+	AdminAllocationItemOrderStatusPaid           AdminAllocationItemOrderStatus = "paid"
+	AdminAllocationItemOrderStatusPendingPayment AdminAllocationItemOrderStatus = "pending_payment"
+	AdminAllocationItemOrderStatusRefunded       AdminAllocationItemOrderStatus = "refunded"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemOrderStatus enum.
+func (e AdminAllocationItemOrderStatus) Valid() bool {
+	switch e {
+	case AdminAllocationItemOrderStatusActive:
+		return true
+	case AdminAllocationItemOrderStatusClosed:
+		return true
+	case AdminAllocationItemOrderStatusCompleted:
+		return true
+	case AdminAllocationItemOrderStatusFailed:
+		return true
+	case AdminAllocationItemOrderStatusPaid:
+		return true
+	case AdminAllocationItemOrderStatusPendingPayment:
+		return true
+	case AdminAllocationItemOrderStatusRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAllocationItemServiceMode.
+const (
+	AdminAllocationItemServiceModeCode     AdminAllocationItemServiceMode = "code"
+	AdminAllocationItemServiceModePurchase AdminAllocationItemServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemServiceMode enum.
+func (e AdminAllocationItemServiceMode) Valid() bool {
+	switch e {
+	case AdminAllocationItemServiceModeCode:
+		return true
+	case AdminAllocationItemServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAllocationItemStatus.
+const (
+	AdminAllocationItemStatusAllocated AdminAllocationItemStatus = "allocated"
+	AdminAllocationItemStatusReleased  AdminAllocationItemStatus = "released"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemStatus enum.
+func (e AdminAllocationItemStatus) Valid() bool {
+	switch e {
+	case AdminAllocationItemStatusAllocated:
+		return true
+	case AdminAllocationItemStatusReleased:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAllocationItemSupplyScope.
+const (
+	AdminAllocationItemSupplyScopeOwned  AdminAllocationItemSupplyScope = "owned"
+	AdminAllocationItemSupplyScopePublic AdminAllocationItemSupplyScope = "public"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemSupplyScope enum.
+func (e AdminAllocationItemSupplyScope) Valid() bool {
+	switch e {
+	case AdminAllocationItemSupplyScopeOwned:
+		return true
+	case AdminAllocationItemSupplyScopePublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAllocationItemType.
+const (
+	AdminAllocationItemTypeDomain    AdminAllocationItemType = "domain"
+	AdminAllocationItemTypeMicrosoft AdminAllocationItemType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the AdminAllocationItemType enum.
+func (e AdminAllocationItemType) Valid() bool {
+	switch e {
+	case AdminAllocationItemTypeDomain:
+		return true
+	case AdminAllocationItemTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAuxiliaryMessageDetailStatus.
+const (
+	AdminAuxiliaryMessageDetailStatusIgnored  AdminAuxiliaryMessageDetailStatus = "ignored"
+	AdminAuxiliaryMessageDetailStatusMatched  AdminAuxiliaryMessageDetailStatus = "matched"
+	AdminAuxiliaryMessageDetailStatusReceived AdminAuxiliaryMessageDetailStatus = "received"
+)
+
+// Valid indicates whether the value is a known member of the AdminAuxiliaryMessageDetailStatus enum.
+func (e AdminAuxiliaryMessageDetailStatus) Valid() bool {
+	switch e {
+	case AdminAuxiliaryMessageDetailStatusIgnored:
+		return true
+	case AdminAuxiliaryMessageDetailStatusMatched:
+		return true
+	case AdminAuxiliaryMessageDetailStatusReceived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminAuxiliaryMessageSummaryStatus.
+const (
+	AdminAuxiliaryMessageSummaryStatusIgnored  AdminAuxiliaryMessageSummaryStatus = "ignored"
+	AdminAuxiliaryMessageSummaryStatusMatched  AdminAuxiliaryMessageSummaryStatus = "matched"
+	AdminAuxiliaryMessageSummaryStatusReceived AdminAuxiliaryMessageSummaryStatus = "received"
+)
+
+// Valid indicates whether the value is a known member of the AdminAuxiliaryMessageSummaryStatus enum.
+func (e AdminAuxiliaryMessageSummaryStatus) Valid() bool {
+	switch e {
+	case AdminAuxiliaryMessageSummaryStatusIgnored:
+		return true
+	case AdminAuxiliaryMessageSummaryStatusMatched:
+		return true
+	case AdminAuxiliaryMessageSummaryStatusReceived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminBindingSummaryStatus.
+const (
+	AdminBindingSummaryStatusCodeSent AdminBindingSummaryStatus = "code_sent"
+	AdminBindingSummaryStatusExpired  AdminBindingSummaryStatus = "expired"
+	AdminBindingSummaryStatusFailed   AdminBindingSummaryStatus = "failed"
+	AdminBindingSummaryStatusPending  AdminBindingSummaryStatus = "pending"
+	AdminBindingSummaryStatusTimeout  AdminBindingSummaryStatus = "timeout"
+	AdminBindingSummaryStatusVerified AdminBindingSummaryStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the AdminBindingSummaryStatus enum.
+func (e AdminBindingSummaryStatus) Valid() bool {
+	switch e {
+	case AdminBindingSummaryStatusCodeSent:
+		return true
+	case AdminBindingSummaryStatusExpired:
+		return true
+	case AdminBindingSummaryStatusFailed:
+		return true
+	case AdminBindingSummaryStatusPending:
+		return true
+	case AdminBindingSummaryStatusTimeout:
+		return true
+	case AdminBindingSummaryStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminCreateProjectRequestAccessType.
 const (
 	AdminCreateProjectRequestAccessTypePrivate AdminCreateProjectRequestAccessType = "private"
@@ -31,6 +235,420 @@ func (e AdminCreateProjectRequestAccessType) Valid() bool {
 	case AdminCreateProjectRequestAccessTypePrivate:
 		return true
 	case AdminCreateProjectRequestAccessTypePublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMessageDetailMailbox.
+const (
+	AdminMessageDetailMailboxAlias AdminMessageDetailMailbox = "alias"
+	AdminMessageDetailMailboxDot   AdminMessageDetailMailbox = "dot"
+	AdminMessageDetailMailboxMain  AdminMessageDetailMailbox = "main"
+	AdminMessageDetailMailboxPlus  AdminMessageDetailMailbox = "plus"
+)
+
+// Valid indicates whether the value is a known member of the AdminMessageDetailMailbox enum.
+func (e AdminMessageDetailMailbox) Valid() bool {
+	switch e {
+	case AdminMessageDetailMailboxAlias:
+		return true
+	case AdminMessageDetailMailboxDot:
+		return true
+	case AdminMessageDetailMailboxMain:
+		return true
+	case AdminMessageDetailMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMessageDetailStatus.
+const (
+	AdminMessageDetailStatusIgnored  AdminMessageDetailStatus = "ignored"
+	AdminMessageDetailStatusMatched  AdminMessageDetailStatus = "matched"
+	AdminMessageDetailStatusReceived AdminMessageDetailStatus = "received"
+)
+
+// Valid indicates whether the value is a known member of the AdminMessageDetailStatus enum.
+func (e AdminMessageDetailStatus) Valid() bool {
+	switch e {
+	case AdminMessageDetailStatusIgnored:
+		return true
+	case AdminMessageDetailStatusMatched:
+		return true
+	case AdminMessageDetailStatusReceived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMessageSummaryMailbox.
+const (
+	AdminMessageSummaryMailboxAlias AdminMessageSummaryMailbox = "alias"
+	AdminMessageSummaryMailboxDot   AdminMessageSummaryMailbox = "dot"
+	AdminMessageSummaryMailboxMain  AdminMessageSummaryMailbox = "main"
+	AdminMessageSummaryMailboxPlus  AdminMessageSummaryMailbox = "plus"
+)
+
+// Valid indicates whether the value is a known member of the AdminMessageSummaryMailbox enum.
+func (e AdminMessageSummaryMailbox) Valid() bool {
+	switch e {
+	case AdminMessageSummaryMailboxAlias:
+		return true
+	case AdminMessageSummaryMailboxDot:
+		return true
+	case AdminMessageSummaryMailboxMain:
+		return true
+	case AdminMessageSummaryMailboxPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMessageSummaryStatus.
+const (
+	AdminMessageSummaryStatusIgnored  AdminMessageSummaryStatus = "ignored"
+	AdminMessageSummaryStatusMatched  AdminMessageSummaryStatus = "matched"
+	AdminMessageSummaryStatusReceived AdminMessageSummaryStatus = "received"
+)
+
+// Valid indicates whether the value is a known member of the AdminMessageSummaryStatus enum.
+func (e AdminMessageSummaryStatus) Valid() bool {
+	switch e {
+	case AdminMessageSummaryStatusIgnored:
+		return true
+	case AdminMessageSummaryStatusMatched:
+		return true
+	case AdminMessageSummaryStatusReceived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftAliasItemKind.
+const (
+	AdminMicrosoftAliasItemKindDot      AdminMicrosoftAliasItemKind = "dot"
+	AdminMicrosoftAliasItemKindExplicit AdminMicrosoftAliasItemKind = "explicit"
+	AdminMicrosoftAliasItemKindPlus     AdminMicrosoftAliasItemKind = "plus"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftAliasItemKind enum.
+func (e AdminMicrosoftAliasItemKind) Valid() bool {
+	switch e {
+	case AdminMicrosoftAliasItemKindDot:
+		return true
+	case AdminMicrosoftAliasItemKindExplicit:
+		return true
+	case AdminMicrosoftAliasItemKindPlus:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftBulkFilterType.
+const (
+	AdminMicrosoftBulkFilterTypeMicrosoft AdminMicrosoftBulkFilterType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftBulkFilterType enum.
+func (e AdminMicrosoftBulkFilterType) Valid() bool {
+	switch e {
+	case AdminMicrosoftBulkFilterTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftFilterSelectionMode.
+const (
+	AdminMicrosoftFilterSelectionModeFilter AdminMicrosoftFilterSelectionMode = "filter"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftFilterSelectionMode enum.
+func (e AdminMicrosoftFilterSelectionMode) Valid() bool {
+	switch e {
+	case AdminMicrosoftFilterSelectionModeFilter:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftIdsSelectionMode.
+const (
+	AdminMicrosoftIdsSelectionModeIds AdminMicrosoftIdsSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftIdsSelectionMode enum.
+func (e AdminMicrosoftIdsSelectionMode) Valid() bool {
+	switch e {
+	case AdminMicrosoftIdsSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftImportResponseStatus.
+const (
+	AdminMicrosoftImportResponseStatusFailed     AdminMicrosoftImportResponseStatus = "failed"
+	AdminMicrosoftImportResponseStatusImported   AdminMicrosoftImportResponseStatus = "imported"
+	AdminMicrosoftImportResponseStatusProcessing AdminMicrosoftImportResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftImportResponseStatus enum.
+func (e AdminMicrosoftImportResponseStatus) Valid() bool {
+	switch e {
+	case AdminMicrosoftImportResponseStatusFailed:
+		return true
+	case AdminMicrosoftImportResponseStatusImported:
+		return true
+	case AdminMicrosoftImportResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftOwnerSummaryRole.
+const (
+	AdminMicrosoftOwnerSummaryRoleAdmin      AdminMicrosoftOwnerSummaryRole = "admin"
+	AdminMicrosoftOwnerSummaryRoleSuperAdmin AdminMicrosoftOwnerSummaryRole = "super_admin"
+	AdminMicrosoftOwnerSummaryRoleSupplier   AdminMicrosoftOwnerSummaryRole = "supplier"
+	AdminMicrosoftOwnerSummaryRoleUser       AdminMicrosoftOwnerSummaryRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftOwnerSummaryRole enum.
+func (e AdminMicrosoftOwnerSummaryRole) Valid() bool {
+	switch e {
+	case AdminMicrosoftOwnerSummaryRoleAdmin:
+		return true
+	case AdminMicrosoftOwnerSummaryRoleSuperAdmin:
+		return true
+	case AdminMicrosoftOwnerSummaryRoleSupplier:
+		return true
+	case AdminMicrosoftOwnerSummaryRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftResourceDetailMailProtocol.
+const (
+	AdminMicrosoftResourceDetailMailProtocolGraph       AdminMicrosoftResourceDetailMailProtocol = "graph"
+	AdminMicrosoftResourceDetailMailProtocolImap        AdminMicrosoftResourceDetailMailProtocol = "imap"
+	AdminMicrosoftResourceDetailMailProtocolUnavailable AdminMicrosoftResourceDetailMailProtocol = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftResourceDetailMailProtocol enum.
+func (e AdminMicrosoftResourceDetailMailProtocol) Valid() bool {
+	switch e {
+	case AdminMicrosoftResourceDetailMailProtocolGraph:
+		return true
+	case AdminMicrosoftResourceDetailMailProtocolImap:
+		return true
+	case AdminMicrosoftResourceDetailMailProtocolUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftResourceDetailType.
+const (
+	AdminMicrosoftResourceDetailTypeMicrosoft AdminMicrosoftResourceDetailType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftResourceDetailType enum.
+func (e AdminMicrosoftResourceDetailType) Valid() bool {
+	switch e {
+	case AdminMicrosoftResourceDetailTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftResourceItemMailProtocol.
+const (
+	AdminMicrosoftResourceItemMailProtocolGraph       AdminMicrosoftResourceItemMailProtocol = "graph"
+	AdminMicrosoftResourceItemMailProtocolImap        AdminMicrosoftResourceItemMailProtocol = "imap"
+	AdminMicrosoftResourceItemMailProtocolUnavailable AdminMicrosoftResourceItemMailProtocol = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftResourceItemMailProtocol enum.
+func (e AdminMicrosoftResourceItemMailProtocol) Valid() bool {
+	switch e {
+	case AdminMicrosoftResourceItemMailProtocolGraph:
+		return true
+	case AdminMicrosoftResourceItemMailProtocolImap:
+		return true
+	case AdminMicrosoftResourceItemMailProtocolUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftResourceItemType.
+const (
+	AdminMicrosoftResourceItemTypeMicrosoft AdminMicrosoftResourceItemType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftResourceItemType enum.
+func (e AdminMicrosoftResourceItemType) Valid() bool {
+	switch e {
+	case AdminMicrosoftResourceItemTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftResourceStatus.
+const (
+	AdminMicrosoftResourceStatusAbnormal AdminMicrosoftResourceStatus = "abnormal"
+	AdminMicrosoftResourceStatusDeleted  AdminMicrosoftResourceStatus = "deleted"
+	AdminMicrosoftResourceStatusDisabled AdminMicrosoftResourceStatus = "disabled"
+	AdminMicrosoftResourceStatusNormal   AdminMicrosoftResourceStatus = "normal"
+	AdminMicrosoftResourceStatusPending  AdminMicrosoftResourceStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftResourceStatus enum.
+func (e AdminMicrosoftResourceStatus) Valid() bool {
+	switch e {
+	case AdminMicrosoftResourceStatusAbnormal:
+		return true
+	case AdminMicrosoftResourceStatusDeleted:
+		return true
+	case AdminMicrosoftResourceStatusDisabled:
+		return true
+	case AdminMicrosoftResourceStatusNormal:
+		return true
+	case AdminMicrosoftResourceStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMicrosoftTokenHealth.
+const (
+	AdminMicrosoftTokenHealthExpired  AdminMicrosoftTokenHealth = "expired"
+	AdminMicrosoftTokenHealthExpiring AdminMicrosoftTokenHealth = "expiring"
+	AdminMicrosoftTokenHealthMissing  AdminMicrosoftTokenHealth = "missing"
+	AdminMicrosoftTokenHealthValid    AdminMicrosoftTokenHealth = "valid"
+)
+
+// Valid indicates whether the value is a known member of the AdminMicrosoftTokenHealth enum.
+func (e AdminMicrosoftTokenHealth) Valid() bool {
+	switch e {
+	case AdminMicrosoftTokenHealthExpired:
+		return true
+	case AdminMicrosoftTokenHealthExpiring:
+		return true
+	case AdminMicrosoftTokenHealthMissing:
+		return true
+	case AdminMicrosoftTokenHealthValid:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminTaskBizType.
+const (
+	AdminTaskBizTypeMicrosoftResource       AdminTaskBizType = "microsoft_resource"
+	AdminTaskBizTypeMicrosoftResourceBulk   AdminTaskBizType = "microsoft_resource_bulk"
+	AdminTaskBizTypeMicrosoftResourceImport AdminTaskBizType = "microsoft_resource_import"
+)
+
+// Valid indicates whether the value is a known member of the AdminTaskBizType enum.
+func (e AdminTaskBizType) Valid() bool {
+	switch e {
+	case AdminTaskBizTypeMicrosoftResource:
+		return true
+	case AdminTaskBizTypeMicrosoftResourceBulk:
+		return true
+	case AdminTaskBizTypeMicrosoftResourceImport:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminTaskKind.
+const (
+	AdminTaskKindAlias          AdminTaskKind = "alias"
+	AdminTaskKindBulkDelete     AdminTaskKind = "bulk_delete"
+	AdminTaskKindBulkPublish    AdminTaskKind = "bulk_publish"
+	AdminTaskKindBulkUnpublish  AdminTaskKind = "bulk_unpublish"
+	AdminTaskKindBulkValidation AdminTaskKind = "bulk_validation"
+	AdminTaskKindFetch          AdminTaskKind = "fetch"
+	AdminTaskKindImport         AdminTaskKind = "import"
+	AdminTaskKindToken          AdminTaskKind = "token"
+	AdminTaskKindValidation     AdminTaskKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the AdminTaskKind enum.
+func (e AdminTaskKind) Valid() bool {
+	switch e {
+	case AdminTaskKindAlias:
+		return true
+	case AdminTaskKindBulkDelete:
+		return true
+	case AdminTaskKindBulkPublish:
+		return true
+	case AdminTaskKindBulkUnpublish:
+		return true
+	case AdminTaskKindBulkValidation:
+		return true
+	case AdminTaskKindFetch:
+		return true
+	case AdminTaskKindImport:
+		return true
+	case AdminTaskKindToken:
+		return true
+	case AdminTaskKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminTaskStatus.
+const (
+	AdminTaskStatusCanceled  AdminTaskStatus = "canceled"
+	AdminTaskStatusFailed    AdminTaskStatus = "failed"
+	AdminTaskStatusQueued    AdminTaskStatus = "queued"
+	AdminTaskStatusRunning   AdminTaskStatus = "running"
+	AdminTaskStatusSucceeded AdminTaskStatus = "succeeded"
+	AdminTaskStatusUncertain AdminTaskStatus = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the AdminTaskStatus enum.
+func (e AdminTaskStatus) Valid() bool {
+	switch e {
+	case AdminTaskStatusCanceled:
+		return true
+	case AdminTaskStatusFailed:
+		return true
+	case AdminTaskStatusQueued:
+		return true
+	case AdminTaskStatusRunning:
+		return true
+	case AdminTaskStatusSucceeded:
+		return true
+	case AdminTaskStatusUncertain:
 		return true
 	default:
 		return false
@@ -1302,16 +1920,16 @@ func (e GetAdminAllocationsParamsType) Valid() bool {
 
 // Defines values for GetAdminAllocationsParamsStatus.
 const (
-	GetAdminAllocationsParamsStatusAllocated GetAdminAllocationsParamsStatus = "allocated"
-	GetAdminAllocationsParamsStatusReleased  GetAdminAllocationsParamsStatus = "released"
+	Allocated GetAdminAllocationsParamsStatus = "allocated"
+	Released  GetAdminAllocationsParamsStatus = "released"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminAllocationsParamsStatus enum.
 func (e GetAdminAllocationsParamsStatus) Valid() bool {
 	switch e {
-	case GetAdminAllocationsParamsStatusAllocated:
+	case Allocated:
 		return true
-	case GetAdminAllocationsParamsStatusReleased:
+	case Released:
 		return true
 	default:
 		return false
@@ -1470,16 +2088,16 @@ func (e GetAdminProxyBindingsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsPool.
 const (
-	Resource GetAdminProxyStatsParamsPool = "resource"
-	System   GetAdminProxyStatsParamsPool = "system"
+	GetAdminProxyStatsParamsPoolResource GetAdminProxyStatsParamsPool = "resource"
+	GetAdminProxyStatsParamsPoolSystem   GetAdminProxyStatsParamsPool = "system"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
 func (e GetAdminProxyStatsParamsPool) Valid() bool {
 	switch e {
-	case Resource:
+	case GetAdminProxyStatsParamsPoolResource:
 		return true
-	case System:
+	case GetAdminProxyStatsParamsPoolSystem:
 		return true
 	default:
 		return false
@@ -1528,6 +2146,72 @@ func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	case Expired:
 		return true
 	case Normal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminMicrosoftResourcesParamsType.
+const (
+	GetAdminMicrosoftResourcesParamsTypeMicrosoft GetAdminMicrosoftResourcesParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminMicrosoftResourcesParamsType enum.
+func (e GetAdminMicrosoftResourcesParamsType) Valid() bool {
+	switch e {
+	case GetAdminMicrosoftResourcesParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy.
+const (
+	PostAdminMicrosoftResourceImportMultipartBodyErrorStrategyAbort PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy = "abort"
+	PostAdminMicrosoftResourceImportMultipartBodyErrorStrategySkip  PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy enum.
+func (e PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostAdminMicrosoftResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostAdminMicrosoftResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminMicrosoftResourceAliasesParamsKind.
+const (
+	Explicit GetAdminMicrosoftResourceAliasesParamsKind = "explicit"
+	Other    GetAdminMicrosoftResourceAliasesParamsKind = "other"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminMicrosoftResourceAliasesParamsKind enum.
+func (e GetAdminMicrosoftResourceAliasesParamsKind) Valid() bool {
+	switch e {
+	case Explicit:
+		return true
+	case Other:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminTasksParamsBizType.
+const (
+	GetAdminTasksParamsBizTypeMicrosoftResource GetAdminTasksParamsBizType = "microsoft_resource"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTasksParamsBizType enum.
+func (e GetAdminTasksParamsBizType) Valid() bool {
+	switch e {
+	case GetAdminTasksParamsBizTypeMicrosoftResource:
 		return true
 	default:
 		return false
@@ -1605,16 +2289,16 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 
 // Defines values for PostOrderParamsServiceMode.
 const (
-	Code     PostOrderParamsServiceMode = "code"
-	Purchase PostOrderParamsServiceMode = "purchase"
+	PostOrderParamsServiceModeCode     PostOrderParamsServiceMode = "code"
+	PostOrderParamsServiceModePurchase PostOrderParamsServiceMode = "purchase"
 )
 
 // Valid indicates whether the value is a known member of the PostOrderParamsServiceMode enum.
 func (e PostOrderParamsServiceMode) Valid() bool {
 	switch e {
-	case Code:
+	case PostOrderParamsServiceModeCode:
 		return true
-	case Purchase:
+	case PostOrderParamsServiceModePurchase:
 		return true
 	default:
 		return false
@@ -1683,16 +2367,16 @@ func (e GetProjectsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsAccessType.
 const (
-	GetProjectsParamsAccessTypePrivate GetProjectsParamsAccessType = "private"
-	GetProjectsParamsAccessTypePublic  GetProjectsParamsAccessType = "public"
+	Private GetProjectsParamsAccessType = "private"
+	Public  GetProjectsParamsAccessType = "public"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
 func (e GetProjectsParamsAccessType) Valid() bool {
 	switch e {
-	case GetProjectsParamsAccessTypePrivate:
+	case Private:
 		return true
-	case GetProjectsParamsAccessTypePublic:
+	case Public:
 		return true
 	default:
 		return false
@@ -1806,16 +2490,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case Abort:
+	case PostResourceImportMultipartBodyErrorStrategyAbort:
 		return true
-	case Skip:
+	case PostResourceImportMultipartBodyErrorStrategySkip:
 		return true
 	default:
 		return false
@@ -1922,6 +2606,112 @@ type AdminAdjustWalletRequest struct {
 	Reason string                  `json:"reason"`
 }
 
+// AdminAllocationItem defines model for AdminAllocationItem.
+type AdminAllocationItem struct {
+	BuyerEmail    openapi_types.Email `json:"buyerEmail"`
+	CreatedAt     time.Time           `json:"createdAt"`
+	DeliveryEmail openapi_types.Email `json:"deliveryEmail"`
+
+	// Id Allocation ID.
+	Id          int                            `json:"id"`
+	Mailbox     AdminAllocationItemMailbox     `json:"mailbox"`
+	OrderNo     string                         `json:"orderNo"`
+	OrderStatus AdminAllocationItemOrderStatus `json:"orderStatus"`
+
+	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PayAmount        NonNegativeLedgerAmount        `json:"payAmount"`
+	ProjectId        int                            `json:"projectId"`
+	ProjectLogoUrl   *string                        `json:"projectLogoUrl"`
+	ProjectName      string                         `json:"projectName"`
+	ReceiveUntil     *time.Time                     `json:"receiveUntil"`
+	ResourceId       int                            `json:"resourceId"`
+	ServiceMode      AdminAllocationItemServiceMode `json:"serviceMode"`
+	Status           AdminAllocationItemStatus      `json:"status"`
+	SupplyScope      AdminAllocationItemSupplyScope `json:"supplyScope"`
+	Type             AdminAllocationItemType        `json:"type"`
+	VerificationCode *string                        `json:"verificationCode"`
+}
+
+// AdminAllocationItemMailbox defines model for AdminAllocationItem.Mailbox.
+type AdminAllocationItemMailbox string
+
+// AdminAllocationItemOrderStatus defines model for AdminAllocationItem.OrderStatus.
+type AdminAllocationItemOrderStatus string
+
+// AdminAllocationItemServiceMode defines model for AdminAllocationItem.ServiceMode.
+type AdminAllocationItemServiceMode string
+
+// AdminAllocationItemStatus defines model for AdminAllocationItem.Status.
+type AdminAllocationItemStatus string
+
+// AdminAllocationItemSupplyScope defines model for AdminAllocationItem.SupplyScope.
+type AdminAllocationItemSupplyScope string
+
+// AdminAllocationItemType defines model for AdminAllocationItem.Type.
+type AdminAllocationItemType string
+
+// AdminAllocationListResponse defines model for AdminAllocationListResponse.
+type AdminAllocationListResponse struct {
+	Items  []AdminAllocationItem `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int64                 `json:"total"`
+}
+
+// AdminAuxiliaryMessageDetail defines model for AdminAuxiliaryMessageDetail.
+type AdminAuxiliaryMessageDetail struct {
+	Body             string                            `json:"body"`
+	Id               int                               `json:"id"`
+	MatchDiagnostic  *string                           `json:"matchDiagnostic"`
+	OrderNo          *string                           `json:"orderNo"`
+	Preview          string                            `json:"preview"`
+	ReceivedAt       time.Time                         `json:"receivedAt"`
+	Recipient        string                            `json:"recipient"`
+	Sender           string                            `json:"sender"`
+	Status           AdminAuxiliaryMessageDetailStatus `json:"status"`
+	Subject          string                            `json:"subject"`
+	VerificationCode *string                           `json:"verificationCode"`
+}
+
+// AdminAuxiliaryMessageDetailStatus defines model for AdminAuxiliaryMessageDetail.Status.
+type AdminAuxiliaryMessageDetailStatus string
+
+// AdminAuxiliaryMessageSummary defines model for AdminAuxiliaryMessageSummary.
+type AdminAuxiliaryMessageSummary struct {
+	Id               int                                `json:"id"`
+	OrderNo          *string                            `json:"orderNo"`
+	Preview          string                             `json:"preview"`
+	ReceivedAt       time.Time                          `json:"receivedAt"`
+	Recipient        string                             `json:"recipient"`
+	Sender           string                             `json:"sender"`
+	Status           AdminAuxiliaryMessageSummaryStatus `json:"status"`
+	Subject          string                             `json:"subject"`
+	VerificationCode *string                            `json:"verificationCode"`
+}
+
+// AdminAuxiliaryMessageSummaryStatus defines model for AdminAuxiliaryMessageSummary.Status.
+type AdminAuxiliaryMessageSummaryStatus string
+
+// AdminBindingMessageListResponse defines model for AdminBindingMessageListResponse.
+type AdminBindingMessageListResponse struct {
+	Binding *AdminBindingSummary           `json:"binding"`
+	Items   []AdminAuxiliaryMessageSummary `json:"items"`
+	Limit   int                            `json:"limit"`
+	Offset  int                            `json:"offset"`
+	Total   int64                          `json:"total"`
+}
+
+// AdminBindingSummary defines model for AdminBindingSummary.
+type AdminBindingSummary struct {
+	EmailAddress openapi_types.Email       `json:"emailAddress"`
+	Id           int                       `json:"id"`
+	Status       AdminBindingSummaryStatus `json:"status"`
+	UpdatedAt    time.Time                 `json:"updatedAt"`
+}
+
+// AdminBindingSummaryStatus defines model for AdminBindingSummary.Status.
+type AdminBindingSummaryStatus string
+
 // AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
 type AdminCreateInviteRequest struct {
 	Code     string     `json:"code"`
@@ -1950,8 +2740,440 @@ type AdminCreateProjectRequest struct {
 // AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
 type AdminCreateProjectRequestAccessType string
 
+// AdminMessageDetail defines model for AdminMessageDetail.
+type AdminMessageDetail struct {
+	// Body Authorized, safely rendered message body. Raw object keys and envelopes are never returned.
+	Body    string                    `json:"body"`
+	Id      int                       `json:"id"`
+	Mailbox AdminMessageDetailMailbox `json:"mailbox"`
+
+	// MatchDiagnostic Sanitized matching explanation without raw rules, secrets, stack traces, or upstream payloads.
+	MatchDiagnostic *string `json:"matchDiagnostic"`
+	OrderNo         *string `json:"orderNo"`
+
+	// Preview Bounded plain-text preview; never the complete body.
+	Preview          string                   `json:"preview"`
+	ReceivedAt       time.Time                `json:"receivedAt"`
+	Recipient        string                   `json:"recipient"`
+	Sender           string                   `json:"sender"`
+	Status           AdminMessageDetailStatus `json:"status"`
+	Subject          string                   `json:"subject"`
+	VerificationCode *string                  `json:"verificationCode"`
+}
+
+// AdminMessageDetailMailbox defines model for AdminMessageDetail.Mailbox.
+type AdminMessageDetailMailbox string
+
+// AdminMessageDetailStatus defines model for AdminMessageDetail.Status.
+type AdminMessageDetailStatus string
+
+// AdminMessageListResponse defines model for AdminMessageListResponse.
+type AdminMessageListResponse struct {
+	Items  []AdminMessageSummary `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int64                 `json:"total"`
+}
+
+// AdminMessageSummary defines model for AdminMessageSummary.
+type AdminMessageSummary struct {
+	Id      int                        `json:"id"`
+	Mailbox AdminMessageSummaryMailbox `json:"mailbox"`
+	OrderNo *string                    `json:"orderNo"`
+
+	// Preview Bounded plain-text preview; never the complete body.
+	Preview          string                    `json:"preview"`
+	ReceivedAt       time.Time                 `json:"receivedAt"`
+	Recipient        string                    `json:"recipient"`
+	Sender           string                    `json:"sender"`
+	Status           AdminMessageSummaryStatus `json:"status"`
+	Subject          string                    `json:"subject"`
+	VerificationCode *string                   `json:"verificationCode"`
+}
+
+// AdminMessageSummaryMailbox defines model for AdminMessageSummary.Mailbox.
+type AdminMessageSummaryMailbox string
+
+// AdminMessageSummaryStatus defines model for AdminMessageSummary.Status.
+type AdminMessageSummaryStatus string
+
+// AdminMicrosoftAliasCounts defines model for AdminMicrosoftAliasCounts.
+type AdminMicrosoftAliasCounts struct {
+	Dot      int64 `json:"dot"`
+	Explicit int64 `json:"explicit"`
+	Plus     int64 `json:"plus"`
+}
+
+// AdminMicrosoftAliasItem defines model for AdminMicrosoftAliasItem.
+type AdminMicrosoftAliasItem struct {
+	CreatedAt    time.Time                   `json:"createdAt"`
+	EmailAddress openapi_types.Email         `json:"emailAddress"`
+	Id           int                         `json:"id"`
+	Kind         AdminMicrosoftAliasItemKind `json:"kind"`
+}
+
+// AdminMicrosoftAliasItemKind defines model for AdminMicrosoftAliasItem.Kind.
+type AdminMicrosoftAliasItemKind string
+
+// AdminMicrosoftAliasListResponse defines model for AdminMicrosoftAliasListResponse.
+type AdminMicrosoftAliasListResponse struct {
+	Items  []AdminMicrosoftAliasItem `json:"items"`
+	Limit  int                       `json:"limit"`
+	Offset int                       `json:"offset"`
+
+	// Schedule Present for kind=explicit and null for kind=other.
+	Schedule *AdminMicrosoftAliasSchedule `json:"schedule"`
+	Total    int64                        `json:"total"`
+}
+
+// AdminMicrosoftAliasSchedule defines model for AdminMicrosoftAliasSchedule.
+type AdminMicrosoftAliasSchedule struct {
+	NextRunAt   *time.Time `json:"nextRunAt"`
+	WeekCreated int        `json:"weekCreated"`
+	WeekLimit   int        `json:"weekLimit"`
+	YearCreated int        `json:"yearCreated"`
+	YearLimit   int        `json:"yearLimit"`
+}
+
+// AdminMicrosoftBooleanFacet defines model for AdminMicrosoftBooleanFacet.
+type AdminMicrosoftBooleanFacet struct {
+	All int64 `json:"all"`
+	No  int64 `json:"no"`
+	Yes int64 `json:"yes"`
+}
+
+// AdminMicrosoftBulkCommandRequest defines model for AdminMicrosoftBulkCommandRequest.
+type AdminMicrosoftBulkCommandRequest struct {
+	Selection AdminMicrosoftBulkSelection `json:"selection"`
+}
+
+// AdminMicrosoftBulkFilter defines model for AdminMicrosoftBulkFilter.
+type AdminMicrosoftBulkFilter struct {
+	CreatedFrom    *time.Time                    `json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time                    `json:"createdTo,omitempty"`
+	ForSale        *bool                         `json:"forSale,omitempty"`
+	GraphAvailable *bool                         `json:"graphAvailable,omitempty"`
+	LongLived      *bool                         `json:"longLived,omitempty"`
+	Search         *string                       `json:"search,omitempty"`
+	Status         *AdminMicrosoftResourceStatus `json:"status,omitempty"`
+	Suffix         *string                       `json:"suffix,omitempty"`
+
+	// TokenHealth `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+	TokenHealth *AdminMicrosoftTokenHealth   `json:"tokenHealth,omitempty"`
+	Type        AdminMicrosoftBulkFilterType `json:"type"`
+}
+
+// AdminMicrosoftBulkFilterType defines model for AdminMicrosoftBulkFilter.Type.
+type AdminMicrosoftBulkFilterType string
+
+// AdminMicrosoftBulkResult defines model for AdminMicrosoftBulkResult.
+type AdminMicrosoftBulkResult struct {
+	Affected int `json:"affected"`
+
+	// AffectedResourceIds Present only for bounded ids mode.
+	AffectedResourceIds *[]int             `json:"affectedResourceIds,omitempty"`
+	ReasonCounts        []AdminReasonCount `json:"reasonCounts"`
+	Requested           int                `json:"requested"`
+	Skipped             int                `json:"skipped"`
+
+	// SkippedResourceIds Present only for bounded ids mode.
+	SkippedResourceIds *[]int `json:"skippedResourceIds,omitempty"`
+}
+
+// AdminMicrosoftBulkSelection defines model for AdminMicrosoftBulkSelection.
+type AdminMicrosoftBulkSelection struct {
+	union json.RawMessage
+}
+
+// AdminMicrosoftCredentialConfiguration Safe configured flags only. Password, client ID, refresh token, access token, and authorization codes are never returned.
+type AdminMicrosoftCredentialConfiguration struct {
+	ClientIdConfigured     bool       `json:"clientIdConfigured"`
+	PasswordConfigured     bool       `json:"passwordConfigured"`
+	RefreshTokenConfigured bool       `json:"refreshTokenConfigured"`
+	Revision               int        `json:"revision"`
+	UpdatedAt              *time.Time `json:"updatedAt"`
+}
+
+// AdminMicrosoftCredentialsInput Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision.
+type AdminMicrosoftCredentialsInput struct {
+	ClientId     *string `json:"clientId,omitempty"`
+	Password     *string `json:"password,omitempty"`
+	RefreshToken *string `json:"refreshToken,omitempty"`
+}
+
+// AdminMicrosoftFacets defines model for AdminMicrosoftFacets.
+type AdminMicrosoftFacets struct {
+	ForSale        AdminMicrosoftBooleanFacet `json:"forSale"`
+	GraphAvailable AdminMicrosoftBooleanFacet `json:"graphAvailable"`
+	LongLived      AdminMicrosoftBooleanFacet `json:"longLived"`
+	Status         AdminMicrosoftStatusFacet  `json:"status"`
+
+	// Suffixes Suffix-self-excluded counts sorted by count descending and key ascending.
+	Suffixes    []AdminMicrosoftSuffixFacet    `json:"suffixes"`
+	TokenHealth AdminMicrosoftTokenHealthFacet `json:"tokenHealth"`
+}
+
+// AdminMicrosoftFilterSelection defines model for AdminMicrosoftFilterSelection.
+type AdminMicrosoftFilterSelection struct {
+	Filter AdminMicrosoftBulkFilter          `json:"filter"`
+	Mode   AdminMicrosoftFilterSelectionMode `json:"mode"`
+}
+
+// AdminMicrosoftFilterSelectionMode defines model for AdminMicrosoftFilterSelection.Mode.
+type AdminMicrosoftFilterSelectionMode string
+
+// AdminMicrosoftIdsCommandRequest defines model for AdminMicrosoftIdsCommandRequest.
+type AdminMicrosoftIdsCommandRequest struct {
+	Selection AdminMicrosoftIdsSelection `json:"selection"`
+}
+
+// AdminMicrosoftIdsSelection defines model for AdminMicrosoftIdsSelection.
+type AdminMicrosoftIdsSelection struct {
+	Mode        AdminMicrosoftIdsSelectionMode `json:"mode"`
+	ResourceIds []int                          `json:"resourceIds"`
+}
+
+// AdminMicrosoftIdsSelectionMode defines model for AdminMicrosoftIdsSelection.Mode.
+type AdminMicrosoftIdsSelectionMode string
+
+// AdminMicrosoftImportResponse defines model for AdminMicrosoftImportResponse.
+type AdminMicrosoftImportResponse struct {
+	Accepted      int64     `json:"accepted"`
+	CreatedAt     time.Time `json:"createdAt"`
+	ImportId      int       `json:"importId"`
+	Imported      int64     `json:"imported"`
+	LastSafeError *string   `json:"lastSafeError"`
+
+	// RequestId Safe request identifier persisted on the durable import record.
+	RequestId string `json:"requestId"`
+
+	// Reused True only when the POST replayed an existing import; status GET responses return false.
+	Reused  bool                               `json:"reused"`
+	Skipped int64                              `json:"skipped"`
+	Status  AdminMicrosoftImportResponseStatus `json:"status"`
+	Task    AdminTaskView                      `json:"task"`
+
+	// TaskId Stable source-qualified identifier of the durable import task.
+	TaskId    string    `json:"taskId"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AdminMicrosoftImportResponseStatus defines model for AdminMicrosoftImportResponse.Status.
+type AdminMicrosoftImportResponseStatus string
+
+// AdminMicrosoftMutationResponse defines model for AdminMicrosoftMutationResponse.
+type AdminMicrosoftMutationResponse struct {
+	Resource AdminMicrosoftResourceDetail `json:"resource"`
+
+	// ValidationTask Durable validation task created or reused by this mutation; null when the edit did not require validation.
+	ValidationTask *AdminTaskView `json:"validationTask"`
+}
+
+// AdminMicrosoftOwnerSummary defines model for AdminMicrosoftOwnerSummary.
+type AdminMicrosoftOwnerSummary struct {
+	Email     openapi_types.Email            `json:"email"`
+	Enabled   bool                           `json:"enabled"`
+	GroupName string                         `json:"groupName"`
+	Id        int                            `json:"id"`
+	Nickname  string                         `json:"nickname"`
+	Role      AdminMicrosoftOwnerSummaryRole `json:"role"`
+}
+
+// AdminMicrosoftOwnerSummaryRole defines model for AdminMicrosoftOwnerSummary.Role.
+type AdminMicrosoftOwnerSummaryRole string
+
+// AdminMicrosoftReplaceCredentialsRequest Complete replacement. `clientId` and `refreshToken` must be supplied together or both omitted.
+type AdminMicrosoftReplaceCredentialsRequest struct {
+	ClientId     *string `json:"clientId,omitempty"`
+	Password     *string `json:"password,omitempty"`
+	RefreshToken *string `json:"refreshToken,omitempty"`
+
+	// Version Last observed resource version; stale writes return 409.
+	Version int `json:"version"`
+}
+
+// AdminMicrosoftResourceDetail defines model for AdminMicrosoftResourceDetail.
+type AdminMicrosoftResourceDetail struct {
+	ActiveTask  *AdminTaskSummary         `json:"activeTask"`
+	AliasCounts AdminMicrosoftAliasCounts `json:"aliasCounts"`
+
+	// BindingAddress Current auxiliary mailbox address from MailTransport, or null when not configured.
+	BindingAddress *openapi_types.Email `json:"bindingAddress"`
+	CreatedAt      time.Time            `json:"createdAt"`
+
+	// Credentials Safe configured flags only. Password, client ID, refresh token, access token, and authorization codes are never returned.
+	Credentials     AdminMicrosoftCredentialConfiguration `json:"credentials"`
+	EmailAddress    openapi_types.Email                   `json:"emailAddress"`
+	ForSale         bool                                  `json:"forSale"`
+	GraphAvailable  bool                                  `json:"graphAvailable"`
+	Id              int                                   `json:"id"`
+	LastAllocatedAt *time.Time                            `json:"lastAllocatedAt"`
+
+	// LastSafeError Sanitized resource diagnostic without secrets, upstream bodies, or stack traces.
+	LastSafeError *string `json:"lastSafeError"`
+	LongLived     bool    `json:"longLived"`
+
+	// MailProtocol Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+	MailProtocol AdminMicrosoftResourceDetailMailProtocol `json:"mailProtocol"`
+	Owner        AdminMicrosoftOwnerSummary               `json:"owner"`
+	QualityScore int                                      `json:"qualityScore"`
+
+	// RecentTasks Bounded safe summaries for the basic-information Tab; complete history is queried from `/v1/admin/tasks`.
+	RecentTasks []AdminTaskSummary           `json:"recentTasks"`
+	RtExpireAt  *time.Time                   `json:"rtExpireAt"`
+	Status      AdminMicrosoftResourceStatus `json:"status"`
+
+	// Suffix Backend-normalized display suffix including the leading `@`.
+	Suffix string                        `json:"suffix"`
+	Token  AdminMicrosoftTokenDiagnostic `json:"token"`
+
+	// TokenHealth `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+	TokenHealth AdminMicrosoftTokenHealth        `json:"tokenHealth"`
+	Type        AdminMicrosoftResourceDetailType `json:"type"`
+	UpdatedAt   time.Time                        `json:"updatedAt"`
+
+	// Version Monotonic resource version used by administrator mutation preconditions.
+	Version int `json:"version"`
+}
+
+// AdminMicrosoftResourceDetailMailProtocol Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+type AdminMicrosoftResourceDetailMailProtocol string
+
+// AdminMicrosoftResourceDetailType defines model for AdminMicrosoftResourceDetail.Type.
+type AdminMicrosoftResourceDetailType string
+
+// AdminMicrosoftResourceItem defines model for AdminMicrosoftResourceItem.
+type AdminMicrosoftResourceItem struct {
+	ActiveTask *AdminTaskSummary `json:"activeTask"`
+
+	// BindingAddress Current auxiliary mailbox address from MailTransport, or null when not configured.
+	BindingAddress  *openapi_types.Email `json:"bindingAddress"`
+	CreatedAt       time.Time            `json:"createdAt"`
+	EmailAddress    openapi_types.Email  `json:"emailAddress"`
+	ForSale         bool                 `json:"forSale"`
+	GraphAvailable  bool                 `json:"graphAvailable"`
+	Id              int                  `json:"id"`
+	LastAllocatedAt *time.Time           `json:"lastAllocatedAt"`
+
+	// LastSafeError Sanitized resource diagnostic without secrets, upstream bodies, or stack traces.
+	LastSafeError *string `json:"lastSafeError"`
+	LongLived     bool    `json:"longLived"`
+
+	// MailProtocol Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+	MailProtocol AdminMicrosoftResourceItemMailProtocol `json:"mailProtocol"`
+	Owner        AdminMicrosoftOwnerSummary             `json:"owner"`
+	QualityScore int                                    `json:"qualityScore"`
+	RtExpireAt   *time.Time                             `json:"rtExpireAt"`
+	Status       AdminMicrosoftResourceStatus           `json:"status"`
+
+	// Suffix Backend-normalized display suffix including the leading `@`.
+	Suffix string `json:"suffix"`
+
+	// TokenHealth `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+	TokenHealth AdminMicrosoftTokenHealth      `json:"tokenHealth"`
+	Type        AdminMicrosoftResourceItemType `json:"type"`
+	UpdatedAt   time.Time                      `json:"updatedAt"`
+
+	// Version Monotonic resource version used by administrator mutation preconditions.
+	Version int `json:"version"`
+}
+
+// AdminMicrosoftResourceItemMailProtocol Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+type AdminMicrosoftResourceItemMailProtocol string
+
+// AdminMicrosoftResourceItemType defines model for AdminMicrosoftResourceItem.Type.
+type AdminMicrosoftResourceItemType string
+
+// AdminMicrosoftResourceListResponse defines model for AdminMicrosoftResourceListResponse.
+type AdminMicrosoftResourceListResponse struct {
+	Facets      AdminMicrosoftFacets         `json:"facets"`
+	Items       []AdminMicrosoftResourceItem `json:"items"`
+	Limit       int                          `json:"limit"`
+	NextAfterId *int                         `json:"nextAfterId"`
+	Offset      int                          `json:"offset"`
+	Total       int64                        `json:"total"`
+}
+
+// AdminMicrosoftResourceStatus defines model for AdminMicrosoftResourceStatus.
+type AdminMicrosoftResourceStatus string
+
+// AdminMicrosoftStatusFacet defines model for AdminMicrosoftStatusFacet.
+type AdminMicrosoftStatusFacet struct {
+	Abnormal int64 `json:"abnormal"`
+
+	// All All matching non-deleted resources when the status dimension is ignored.
+	All      int64 `json:"all"`
+	Deleted  int64 `json:"deleted"`
+	Disabled int64 `json:"disabled"`
+	Normal   int64 `json:"normal"`
+	Pending  int64 `json:"pending"`
+}
+
+// AdminMicrosoftSuffixFacet defines model for AdminMicrosoftSuffixFacet.
+type AdminMicrosoftSuffixFacet struct {
+	Count int64 `json:"count"`
+
+	// Key Normalized suffix including the leading `@`.
+	Key string `json:"key"`
+}
+
+// AdminMicrosoftTokenDiagnostic defines model for AdminMicrosoftTokenDiagnostic.
+type AdminMicrosoftTokenDiagnostic struct {
+	// Health `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+	Health AdminMicrosoftTokenHealth `json:"health"`
+
+	// LastRefreshRequestId Safe correlation ID only; never an OAuth authorization code or token.
+	LastRefreshRequestId *string    `json:"lastRefreshRequestId"`
+	LastRefreshedAt      *time.Time `json:"lastRefreshedAt"`
+	LastSafeError        *string    `json:"lastSafeError"`
+
+	// RemainingSeconds Server-derived non-negative remaining lifetime, or null when expiry is unknown.
+	RemainingSeconds *int64     `json:"remainingSeconds"`
+	RtExpireAt       *time.Time `json:"rtExpireAt"`
+
+	// Scopes Microsoft ACL requested/configured scope allowlist. It is returned only when both Client ID and refresh token are configured; otherwise it is empty. It is not a provider-reported granted-scope result.
+	Scopes []string `json:"scopes"`
+}
+
+// AdminMicrosoftTokenHealth `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+type AdminMicrosoftTokenHealth string
+
+// AdminMicrosoftTokenHealthFacet defines model for AdminMicrosoftTokenHealthFacet.
+type AdminMicrosoftTokenHealthFacet struct {
+	All      int64 `json:"all"`
+	Expired  int64 `json:"expired"`
+	Expiring int64 `json:"expiring"`
+	Missing  int64 `json:"missing"`
+	Valid    int64 `json:"valid"`
+}
+
+// AdminMicrosoftUpdateRequest defines model for AdminMicrosoftUpdateRequest.
+type AdminMicrosoftUpdateRequest struct {
+	// BindingAddress Set or replace the auxiliary address; null clears the current input. Clients must not submit a binding status.
+	BindingAddress *openapi_types.Email `json:"bindingAddress,omitempty"`
+
+	// Credentials Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision.
+	Credentials  *AdminMicrosoftCredentialsInput `json:"credentials,omitempty"`
+	EmailAddress *openapi_types.Email            `json:"emailAddress,omitempty"`
+	ForSale      *bool                           `json:"forSale,omitempty"`
+	LongLived    *bool                           `json:"longLived,omitempty"`
+	OwnerId      *int                            `json:"ownerId,omitempty"`
+	QualityScore *int                            `json:"qualityScore,omitempty"`
+
+	// Version Last observed resource version; stale writes return 409.
+	Version int `json:"version"`
+}
+
 // AdminOrderCommandRequest defines model for AdminOrderCommandRequest.
 type AdminOrderCommandRequest struct {
+	Reason string `json:"reason"`
+}
+
+// AdminReasonCount defines model for AdminReasonCount.
+type AdminReasonCount struct {
+	Count int64 `json:"count"`
+
+	// Reason Stable safe reason bucket; never a raw database or upstream error.
 	Reason string `json:"reason"`
 }
 
@@ -1963,6 +3185,83 @@ type AdminRejectProjectRequest struct {
 // AdminRejectSupplierApplicationRequest defines model for AdminRejectSupplierApplicationRequest.
 type AdminRejectSupplierApplicationRequest struct {
 	ReviewReason string `json:"reviewReason"`
+}
+
+// AdminTaskAcceptedResponse defines model for AdminTaskAcceptedResponse.
+type AdminTaskAcceptedResponse struct {
+	// Accepted Safely displayable accepted count. A filter batch may report zero until expansion.
+	Accepted int64 `json:"accepted"`
+
+	// RequestId Safe request identifier persisted with the accepted durable fact.
+	RequestId string `json:"requestId"`
+
+	// Reused True when the command returned an already-active durable fact.
+	Reused bool            `json:"reused"`
+	Status AdminTaskStatus `json:"status"`
+	Task   AdminTaskView   `json:"task"`
+
+	// TaskId Stable source-qualified identifier of the accepted durable task.
+	TaskId string `json:"taskId"`
+}
+
+// AdminTaskBizType defines model for AdminTaskBizType.
+type AdminTaskBizType string
+
+// AdminTaskKind defines model for AdminTaskKind.
+type AdminTaskKind string
+
+// AdminTaskListResponse defines model for AdminTaskListResponse.
+type AdminTaskListResponse struct {
+	Items  []AdminTaskView `json:"items"`
+	Limit  int             `json:"limit"`
+	Offset int             `json:"offset"`
+
+	// Succeeded Succeeded count across the complete filtered result, not just the current page.
+	Succeeded int64 `json:"succeeded"`
+	Total     int64 `json:"total"`
+}
+
+// AdminTaskProgress defines model for AdminTaskProgress.
+type AdminTaskProgress struct {
+	Failed       int64              `json:"failed"`
+	Processed    int64              `json:"processed"`
+	ReasonCounts []AdminReasonCount `json:"reasonCounts"`
+	Skipped      int64              `json:"skipped"`
+	Succeeded    int64              `json:"succeeded"`
+	Total        int64              `json:"total"`
+}
+
+// AdminTaskStatus defines model for AdminTaskStatus.
+type AdminTaskStatus string
+
+// AdminTaskSummary defines model for AdminTaskSummary.
+type AdminTaskSummary struct {
+	// CredentialRevision Credential revision fixed when a validation, token, or fetch task was submitted; null for tasks that do not read credentials.
+	CredentialRevision *int            `json:"credentialRevision"`
+	Kind               AdminTaskKind   `json:"kind"`
+	Status             AdminTaskStatus `json:"status"`
+	TaskId             string          `json:"taskId"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
+}
+
+// AdminTaskView defines model for AdminTaskView.
+type AdminTaskView struct {
+	Attempts int              `json:"attempts"`
+	BizId    int              `json:"bizId"`
+	BizType  AdminTaskBizType `json:"bizType"`
+
+	// CredentialRevision Immutable credential revision captured at submission for validation, token, and fetch work; workers must not apply results to a different revision.
+	CredentialRevision *int               `json:"credentialRevision"`
+	FinishedAt         *time.Time         `json:"finishedAt"`
+	Kind               AdminTaskKind      `json:"kind"`
+	MaxAttempts        int                `json:"maxAttempts"`
+	Progress           *AdminTaskProgress `json:"progress"`
+	QueuedAt           time.Time          `json:"queuedAt"`
+	RemainingAttempts  int                `json:"remainingAttempts"`
+	StartedAt          *time.Time         `json:"startedAt"`
+	Status             AdminTaskStatus    `json:"status"`
+	TaskId             string             `json:"taskId"`
+	UpdatedAt          time.Time          `json:"updatedAt"`
 }
 
 // AdminUpdateInviteRequest defines model for AdminUpdateInviteRequest.
@@ -2022,14 +3321,6 @@ type AllocationItemSupplyScope string
 
 // AllocationItemType defines model for AllocationItem.Type.
 type AllocationItemType string
-
-// AllocationListResponse defines model for AllocationListResponse.
-type AllocationListResponse struct {
-	Items  []AllocationItem `json:"items"`
-	Limit  int              `json:"limit"`
-	Offset int              `json:"offset"`
-	Total  int              `json:"total"`
-}
 
 // CaptchaResponse defines model for CaptchaResponse.
 type CaptchaResponse struct {
@@ -3540,14 +4831,44 @@ type WalletResponse struct {
 	UserId         int                     `json:"userId"`
 }
 
+// AdminCommandIdempotencyKey defines model for AdminCommandIdempotencyKey.
+type AdminCommandIdempotencyKey = string
+
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
+
+// ExpectedAdminResourceVersion defines model for ExpectedAdminResourceVersion.
+type ExpectedAdminResourceVersion = int
 
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
 // OptionalCsrfToken defines model for OptionalCsrfToken.
 type OptionalCsrfToken = string
+
+// BadGateway defines model for BadGateway.
+type BadGateway = Error
+
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
+// Conflict defines model for Conflict.
+type Conflict = Error
+
+// Forbidden defines model for Forbidden.
+type Forbidden = Error
+
+// NotFound defines model for NotFound.
+type NotFound = Error
+
+// ServiceUnavailable defines model for ServiceUnavailable.
+type ServiceUnavailable = Error
+
+// Unauthorized defines model for Unauthorized.
+type Unauthorized = Error
+
+// UnprocessableEntity defines model for UnprocessableEntity.
+type UnprocessableEntity = Error
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
@@ -3583,6 +4904,19 @@ type GetAdminAllocationParams struct {
 
 // GetAdminAllocationParamsType defines parameters for GetAdminAllocation.
 type GetAdminAllocationParamsType string
+
+// GetAdminBindingsParams defines parameters for GetAdminBindings.
+type GetAdminBindingsParams struct {
+	ResourceId int     `form:"resourceId" json:"resourceId"`
+	Search     *string `form:"search,omitempty" json:"search,omitempty"`
+	Offset     *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminBindingMessageParams defines parameters for GetAdminBindingMessage.
+type GetAdminBindingMessageParams struct {
+	ResourceId int `form:"resourceId" json:"resourceId"`
+}
 
 // GetAdminCardsParams defines parameters for GetAdminCards.
 type GetAdminCardsParams struct {
@@ -3626,6 +4960,19 @@ type PostAdminInviteParams struct {
 type PatchAdminInviteParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminMessagesParams defines parameters for GetAdminMessages.
+type GetAdminMessagesParams struct {
+	ResourceId int     `form:"resourceId" json:"resourceId"`
+	Search     *string `form:"search,omitempty" json:"search,omitempty"`
+	Offset     *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminMessageParams defines parameters for GetAdminMessage.
+type GetAdminMessageParams struct {
+	ResourceId int `form:"resourceId" json:"resourceId"`
 }
 
 // PostAdminOrderTimeoutScanParams defines parameters for PostAdminOrderTimeoutScan.
@@ -3865,6 +5212,242 @@ type PostAdminProxyCheckParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminMicrosoftResourcesParams defines parameters for GetAdminMicrosoftResources.
+type GetAdminMicrosoftResourcesParams struct {
+	// Type This administrator query is limited to Microsoft resources.
+	Type GetAdminMicrosoftResourcesParamsType `form:"type" json:"type"`
+
+	// Search Case-insensitive search across resource ID, mailbox address, and owner display identity.
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+
+	// Suffix Exact normalized mailbox domain. Values with or without a leading `@` are accepted.
+	Suffix *string                       `form:"suffix,omitempty" json:"suffix,omitempty"`
+	Status *AdminMicrosoftResourceStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// ForSale Public-supply flag. The UI's private=true filter maps to forSale=false.
+	ForSale        *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
+	LongLived      *bool                      `form:"longLived,omitempty" json:"longLived,omitempty"`
+	GraphAvailable *bool                      `form:"graphAvailable,omitempty" json:"graphAvailable,omitempty"`
+	TokenHealth    *AdminMicrosoftTokenHealth `form:"tokenHealth,omitempty" json:"tokenHealth,omitempty"`
+
+	// CreatedFrom Inclusive ISO 8601 creation-time lower bound.
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+
+	// CreatedTo Exclusive ISO 8601 creation-time upper bound; must be later than createdFrom.
+	CreatedTo *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Offset    *int       `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// AfterId Optional seek cursor for the same stable `id DESC` ordering. When present, offset is ignored.
+	AfterId *int `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminMicrosoftResourcesParamsType defines parameters for GetAdminMicrosoftResources.
+type GetAdminMicrosoftResourcesParamsType string
+
+// PostAdminMicrosoftResourcesDeleteParams defines parameters for PostAdminMicrosoftResourcesDelete.
+type PostAdminMicrosoftResourcesDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourcesDisableParams defines parameters for PostAdminMicrosoftResourcesDisable.
+type PostAdminMicrosoftResourcesDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceImportMultipartBody defines parameters for PostAdminMicrosoftResourceImport.
+type PostAdminMicrosoftResourceImportMultipartBody struct {
+	ErrorStrategy PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
+
+	// File UTF-8 TXT using one of the four documented `----`-delimited credential line formats.
+	File      openapi_types.File `json:"file"`
+	LongLived bool               `json:"longLived"`
+	OwnerId   int                `json:"ownerId"`
+}
+
+// PostAdminMicrosoftResourceImportParams defines parameters for PostAdminMicrosoftResourceImport.
+type PostAdminMicrosoftResourceImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminMicrosoftResourceImport.
+type PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy string
+
+// PostAdminMicrosoftResourcesPublishParams defines parameters for PostAdminMicrosoftResourcesPublish.
+type PostAdminMicrosoftResourcesPublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourcesUnpublishParams defines parameters for PostAdminMicrosoftResourcesUnpublish.
+type PostAdminMicrosoftResourcesUnpublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceValidationsParams defines parameters for PostAdminMicrosoftResourceValidations.
+type PostAdminMicrosoftResourceValidationsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteAdminMicrosoftResourceParams defines parameters for DeleteAdminMicrosoftResource.
+type DeleteAdminMicrosoftResourceParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PatchAdminMicrosoftResourceParams defines parameters for PatchAdminMicrosoftResource.
+type PatchAdminMicrosoftResourceParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminMicrosoftResourceAliasesParams defines parameters for GetAdminMicrosoftResourceAliases.
+type GetAdminMicrosoftResourceAliasesParams struct {
+	Kind   GetAdminMicrosoftResourceAliasesParamsKind `form:"kind" json:"kind"`
+	Offset *int                                       `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                                       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminMicrosoftResourceAliasesParamsKind defines parameters for GetAdminMicrosoftResourceAliases.
+type GetAdminMicrosoftResourceAliasesParamsKind string
+
+// PostAdminMicrosoftResourceAliasParams defines parameters for PostAdminMicrosoftResourceAlias.
+type PostAdminMicrosoftResourceAliasParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PutAdminMicrosoftResourceCredentialsParams defines parameters for PutAdminMicrosoftResourceCredentials.
+type PutAdminMicrosoftResourceCredentialsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceDisableParams defines parameters for PostAdminMicrosoftResourceDisable.
+type PostAdminMicrosoftResourceDisableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceEnableParams defines parameters for PostAdminMicrosoftResourceEnable.
+type PostAdminMicrosoftResourceEnableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceMessagesFetchParams defines parameters for PostAdminMicrosoftResourceMessagesFetch.
+type PostAdminMicrosoftResourceMessagesFetchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourcePublishParams defines parameters for PostAdminMicrosoftResourcePublish.
+type PostAdminMicrosoftResourcePublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceRecoverParams defines parameters for PostAdminMicrosoftResourceRecover.
+type PostAdminMicrosoftResourceRecoverParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceTokenRefreshParams defines parameters for PostAdminMicrosoftResourceTokenRefresh.
+type PostAdminMicrosoftResourceTokenRefreshParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceUnpublishParams defines parameters for PostAdminMicrosoftResourceUnpublish.
+type PostAdminMicrosoftResourceUnpublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminMicrosoftResourceValidateParams defines parameters for PostAdminMicrosoftResourceValidate.
+type PostAdminMicrosoftResourceValidateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // GetAdminSupplierApplicationsParams defines parameters for GetAdminSupplierApplications.
 type GetAdminSupplierApplicationsParams struct {
 	Status *string `form:"status,omitempty" json:"status,omitempty"`
@@ -3883,6 +5466,21 @@ type PostAdminSupplierApplicationRejectParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
+
+// GetAdminTasksParams defines parameters for GetAdminTasks.
+type GetAdminTasksParams struct {
+	BizType GetAdminTasksParamsBizType `form:"bizType" json:"bizType"`
+
+	// BizId Microsoft resource ID.
+	BizId  int              `form:"bizId" json:"bizId"`
+	Kind   *AdminTaskKind   `form:"kind,omitempty" json:"kind,omitempty"`
+	Status *AdminTaskStatus `form:"status,omitempty" json:"status,omitempty"`
+	Offset *int             `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int             `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminTasksParamsBizType defines parameters for GetAdminTasks.
+type GetAdminTasksParamsBizType string
 
 // GetAdminUsersParams defines parameters for GetAdminUsers.
 type GetAdminUsersParams struct {
@@ -4345,6 +5943,30 @@ type PostAdminSystemProxyJSONRequestBody = CreateProxyRequest
 // PatchAdminProxyJSONRequestBody defines body for PatchAdminProxy for application/json ContentType.
 type PatchAdminProxyJSONRequestBody = UpdateProxyRequest
 
+// PostAdminMicrosoftResourcesDeleteJSONRequestBody defines body for PostAdminMicrosoftResourcesDelete for application/json ContentType.
+type PostAdminMicrosoftResourcesDeleteJSONRequestBody = AdminMicrosoftBulkCommandRequest
+
+// PostAdminMicrosoftResourcesDisableJSONRequestBody defines body for PostAdminMicrosoftResourcesDisable for application/json ContentType.
+type PostAdminMicrosoftResourcesDisableJSONRequestBody = AdminMicrosoftIdsCommandRequest
+
+// PostAdminMicrosoftResourceImportMultipartRequestBody defines body for PostAdminMicrosoftResourceImport for multipart/form-data ContentType.
+type PostAdminMicrosoftResourceImportMultipartRequestBody PostAdminMicrosoftResourceImportMultipartBody
+
+// PostAdminMicrosoftResourcesPublishJSONRequestBody defines body for PostAdminMicrosoftResourcesPublish for application/json ContentType.
+type PostAdminMicrosoftResourcesPublishJSONRequestBody = AdminMicrosoftBulkCommandRequest
+
+// PostAdminMicrosoftResourcesUnpublishJSONRequestBody defines body for PostAdminMicrosoftResourcesUnpublish for application/json ContentType.
+type PostAdminMicrosoftResourcesUnpublishJSONRequestBody = AdminMicrosoftBulkCommandRequest
+
+// PostAdminMicrosoftResourceValidationsJSONRequestBody defines body for PostAdminMicrosoftResourceValidations for application/json ContentType.
+type PostAdminMicrosoftResourceValidationsJSONRequestBody = AdminMicrosoftBulkCommandRequest
+
+// PatchAdminMicrosoftResourceJSONRequestBody defines body for PatchAdminMicrosoftResource for application/json ContentType.
+type PatchAdminMicrosoftResourceJSONRequestBody = AdminMicrosoftUpdateRequest
+
+// PutAdminMicrosoftResourceCredentialsJSONRequestBody defines body for PutAdminMicrosoftResourceCredentials for application/json ContentType.
+type PutAdminMicrosoftResourceCredentialsJSONRequestBody = AdminMicrosoftReplaceCredentialsRequest
+
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
 
@@ -4416,6 +6038,68 @@ type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// AsAdminMicrosoftIdsSelection returns the union data inside the AdminMicrosoftBulkSelection as a AdminMicrosoftIdsSelection
+func (t AdminMicrosoftBulkSelection) AsAdminMicrosoftIdsSelection() (AdminMicrosoftIdsSelection, error) {
+	var body AdminMicrosoftIdsSelection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminMicrosoftIdsSelection overwrites any union data inside the AdminMicrosoftBulkSelection as the provided AdminMicrosoftIdsSelection
+func (t *AdminMicrosoftBulkSelection) FromAdminMicrosoftIdsSelection(v AdminMicrosoftIdsSelection) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminMicrosoftIdsSelection performs a merge with any union data inside the AdminMicrosoftBulkSelection, using the provided AdminMicrosoftIdsSelection
+func (t *AdminMicrosoftBulkSelection) MergeAdminMicrosoftIdsSelection(v AdminMicrosoftIdsSelection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAdminMicrosoftFilterSelection returns the union data inside the AdminMicrosoftBulkSelection as a AdminMicrosoftFilterSelection
+func (t AdminMicrosoftBulkSelection) AsAdminMicrosoftFilterSelection() (AdminMicrosoftFilterSelection, error) {
+	var body AdminMicrosoftFilterSelection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminMicrosoftFilterSelection overwrites any union data inside the AdminMicrosoftBulkSelection as the provided AdminMicrosoftFilterSelection
+func (t *AdminMicrosoftBulkSelection) FromAdminMicrosoftFilterSelection(v AdminMicrosoftFilterSelection) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminMicrosoftFilterSelection performs a merge with any union data inside the AdminMicrosoftBulkSelection, using the provided AdminMicrosoftFilterSelection
+func (t *AdminMicrosoftBulkSelection) MergeAdminMicrosoftFilterSelection(v AdminMicrosoftFilterSelection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t AdminMicrosoftBulkSelection) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *AdminMicrosoftBulkSelection) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsCheckProxiesRequest0 returns the union data inside the CheckProxiesRequest as a CheckProxiesRequest0
 func (t CheckProxiesRequest) AsCheckProxiesRequest0() (CheckProxiesRequest0, error) {
@@ -4925,12 +6609,18 @@ type ServerInterface interface {
 	// Activate system and create first super_admin
 	// (POST /v1/activation)
 	PostActivation(c *gin.Context)
-	// List allocation records for diagnostics
+	// List enriched allocation and order records for administrators
 	// (GET /v1/admin/allocations)
 	GetAdminAllocations(c *gin.Context, params GetAdminAllocationsParams)
 	// Get one allocation record by table type and id
 	// (GET /v1/admin/allocations/{allocationId})
 	GetAdminAllocation(c *gin.Context, allocationId int, params GetAdminAllocationParams)
+	// Get a resource's current auxiliary binding and message summaries
+	// (GET /v1/admin/bindings)
+	GetAdminBindings(c *gin.Context, params GetAdminBindingsParams)
+	// Get one auxiliary-mailbox message body and diagnostic
+	// (GET /v1/admin/bindings/messages/{messageId})
+	GetAdminBindingMessage(c *gin.Context, messageId int, params GetAdminBindingMessageParams)
 	// List card keys
 	// (GET /v1/admin/cards)
 	GetAdminCards(c *gin.Context, params GetAdminCardsParams)
@@ -4949,6 +6639,12 @@ type ServerInterface interface {
 	// Update invite
 	// (PATCH /v1/admin/invites/{code})
 	PatchAdminInvite(c *gin.Context, code string, params PatchAdminInviteParams)
+	// List primary-mailbox message summaries for a resource
+	// (GET /v1/admin/messages)
+	GetAdminMessages(c *gin.Context, params GetAdminMessagesParams)
+	// Get one primary-mailbox message body and diagnostic
+	// (GET /v1/admin/messages/{messageId})
+	GetAdminMessage(c *gin.Context, messageId int, params GetAdminMessageParams)
 	// Run order timeout scan
 	// (POST /v1/admin/orders/timeouts/scan)
 	PostAdminOrderTimeoutScan(c *gin.Context, params PostAdminOrderTimeoutScanParams)
@@ -5051,6 +6747,72 @@ type ServerInterface interface {
 	// Check a proxy and update detected metadata
 	// (POST /v1/admin/proxies/{proxyId}/check)
 	PostAdminProxyCheck(c *gin.Context, proxyId int, params PostAdminProxyCheckParams)
+	// List Microsoft resources for the administrator console
+	// (GET /v1/admin/resources)
+	GetAdminMicrosoftResources(c *gin.Context, params GetAdminMicrosoftResourcesParams)
+	// Logically delete selected Microsoft resources
+	// (POST /v1/admin/resources/delete)
+	PostAdminMicrosoftResourcesDelete(c *gin.Context, params PostAdminMicrosoftResourcesDeleteParams)
+	// Disable explicitly selected Microsoft resources
+	// (POST /v1/admin/resources/disable)
+	PostAdminMicrosoftResourcesDisable(c *gin.Context, params PostAdminMicrosoftResourcesDisableParams)
+	// Import Microsoft resources for a selected owner
+	// (POST /v1/admin/resources/imports)
+	PostAdminMicrosoftResourceImport(c *gin.Context, params PostAdminMicrosoftResourceImportParams)
+	// Get an administrator Microsoft-resource import
+	// (GET /v1/admin/resources/imports/{importId})
+	GetAdminMicrosoftResourceImport(c *gin.Context, importId int)
+	// Publish selected Microsoft resources for sale
+	// (POST /v1/admin/resources/publish)
+	PostAdminMicrosoftResourcesPublish(c *gin.Context, params PostAdminMicrosoftResourcesPublishParams)
+	// Convert selected Microsoft resources to private supply
+	// (POST /v1/admin/resources/unpublish)
+	PostAdminMicrosoftResourcesUnpublish(c *gin.Context, params PostAdminMicrosoftResourcesUnpublishParams)
+	// Validate selected or all matching Microsoft resources
+	// (POST /v1/admin/resources/validations)
+	PostAdminMicrosoftResourceValidations(c *gin.Context, params PostAdminMicrosoftResourceValidationsParams)
+	// Logically delete one Microsoft resource
+	// (DELETE /v1/admin/resources/{resourceId})
+	DeleteAdminMicrosoftResource(c *gin.Context, resourceId int, params DeleteAdminMicrosoftResourceParams)
+	// Get a Microsoft resource administrator summary
+	// (GET /v1/admin/resources/{resourceId})
+	GetAdminMicrosoftResource(c *gin.Context, resourceId int)
+	// Atomically edit a Microsoft resource
+	// (PATCH /v1/admin/resources/{resourceId})
+	PatchAdminMicrosoftResource(c *gin.Context, resourceId int, params PatchAdminMicrosoftResourceParams)
+	// List a Microsoft resource's aliases
+	// (GET /v1/admin/resources/{resourceId}/aliases)
+	GetAdminMicrosoftResourceAliases(c *gin.Context, resourceId int, params GetAdminMicrosoftResourceAliasesParams)
+	// Expedite the explicit-alias schedule
+	// (POST /v1/admin/resources/{resourceId}/aliases)
+	PostAdminMicrosoftResourceAlias(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceAliasParams)
+	// Replace Microsoft credentials as one write-only set
+	// (PUT /v1/admin/resources/{resourceId}/credentials)
+	PutAdminMicrosoftResourceCredentials(c *gin.Context, resourceId int, params PutAdminMicrosoftResourceCredentialsParams)
+	// Disable one Microsoft resource
+	// (POST /v1/admin/resources/{resourceId}/disable)
+	PostAdminMicrosoftResourceDisable(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceDisableParams)
+	// Enable a disabled Microsoft resource
+	// (POST /v1/admin/resources/{resourceId}/enable)
+	PostAdminMicrosoftResourceEnable(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceEnableParams)
+	// Queue a resource-level Microsoft mail fetch
+	// (POST /v1/admin/resources/{resourceId}/messages/fetch)
+	PostAdminMicrosoftResourceMessagesFetch(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceMessagesFetchParams)
+	// Publish one Microsoft resource for sale
+	// (POST /v1/admin/resources/{resourceId}/publish)
+	PostAdminMicrosoftResourcePublish(c *gin.Context, resourceId int, params PostAdminMicrosoftResourcePublishParams)
+	// Recover a logically deleted Microsoft resource
+	// (POST /v1/admin/resources/{resourceId}/recover)
+	PostAdminMicrosoftResourceRecover(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceRecoverParams)
+	// Queue a Microsoft refresh-token diagnostic
+	// (POST /v1/admin/resources/{resourceId}/token/refresh)
+	PostAdminMicrosoftResourceTokenRefresh(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceTokenRefreshParams)
+	// Convert one Microsoft resource to private supply
+	// (POST /v1/admin/resources/{resourceId}/unpublish)
+	PostAdminMicrosoftResourceUnpublish(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceUnpublishParams)
+	// Validate one Microsoft resource
+	// (POST /v1/admin/resources/{resourceId}/validate)
+	PostAdminMicrosoftResourceValidate(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceValidateParams)
 	// List supplier applications
 	// (GET /v1/admin/suppliers/applications)
 	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
@@ -5060,6 +6822,12 @@ type ServerInterface interface {
 	// Reject supplier application
 	// (POST /v1/admin/suppliers/applications/{applicationId}/reject)
 	PostAdminSupplierApplicationReject(c *gin.Context, applicationId int, params PostAdminSupplierApplicationRejectParams)
+	// List normalized administrator tasks for a Microsoft resource
+	// (GET /v1/admin/tasks)
+	GetAdminTasks(c *gin.Context, params GetAdminTasksParams)
+	// Get one normalized administrator task
+	// (GET /v1/admin/tasks/{taskId})
+	GetAdminTask(c *gin.Context, taskId string)
 	// List all users (admin only)
 	// (GET /v1/admin/users)
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
@@ -5426,6 +7194,97 @@ func (siw *ServerInterfaceWrapper) GetAdminAllocation(c *gin.Context) {
 	siw.Handler.GetAdminAllocation(c, allocationId, params)
 }
 
+// GetAdminBindings operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminBindings(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminBindingsParams
+
+	// ------------- Required query parameter "resourceId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminBindings(c, params)
+}
+
+// GetAdminBindingMessage operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminBindingMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", c.Param("messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter messageId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminBindingMessageParams
+
+	// ------------- Required query parameter "resourceId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminBindingMessage(c, messageId, params)
+}
+
 // GetAdminCards operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminCards(c *gin.Context) {
 
@@ -5734,6 +7593,97 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminInvite(c, code, params)
+}
+
+// GetAdminMessages operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMessages(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminMessagesParams
+
+	// ------------- Required query parameter "resourceId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMessages(c, params)
+}
+
+// GetAdminMessage operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", c.Param("messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter messageId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminMessageParams
+
+	// ------------- Required query parameter "resourceId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMessage(c, messageId, params)
 }
 
 // PostAdminOrderTimeoutScan operation middleware
@@ -7515,6 +9465,1601 @@ func (siw *ServerInterfaceWrapper) PostAdminProxyCheck(c *gin.Context) {
 	siw.Handler.PostAdminProxyCheck(c, proxyId, params)
 }
 
+// GetAdminMicrosoftResources operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminMicrosoftResourcesParams
+
+	// ------------- Required query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "graphAvailable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "graphAvailable", c.Request.URL.Query(), &params.GraphAvailable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter graphAvailable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "tokenHealth" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tokenHealth", c.Request.URL.Query(), &params.TokenHealth, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter tokenHealth: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMicrosoftResources(c, params)
+}
+
+// PostAdminMicrosoftResourcesDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcesDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourcesDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourcesDelete(c, params)
+}
+
+// PostAdminMicrosoftResourcesDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcesDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourcesDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourcesDisable(c, params)
+}
+
+// PostAdminMicrosoftResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceImport(c, params)
+}
+
+// GetAdminMicrosoftResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMicrosoftResourceImport(c, importId)
+}
+
+// PostAdminMicrosoftResourcesPublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcesPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourcesPublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourcesPublish(c, params)
+}
+
+// PostAdminMicrosoftResourcesUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcesUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourcesUnpublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourcesUnpublish(c, params)
+}
+
+// PostAdminMicrosoftResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceValidations(c, params)
+}
+
+// DeleteAdminMicrosoftResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminMicrosoftResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminMicrosoftResourceParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminMicrosoftResource(c, resourceId, params)
+}
+
+// GetAdminMicrosoftResource operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMicrosoftResource(c, resourceId)
+}
+
+// PatchAdminMicrosoftResource operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminMicrosoftResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminMicrosoftResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminMicrosoftResource(c, resourceId, params)
+}
+
+// GetAdminMicrosoftResourceAliases operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResourceAliases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminMicrosoftResourceAliasesParams
+
+	// ------------- Required query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "kind", c.Request.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter kind: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminMicrosoftResourceAliases(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceAlias operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceAlias(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceAliasParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceAlias(c, resourceId, params)
+}
+
+// PutAdminMicrosoftResourceCredentials operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminMicrosoftResourceCredentials(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminMicrosoftResourceCredentialsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminMicrosoftResourceCredentials(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceDisableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceDisable(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceEnableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceEnable(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceMessagesFetch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceMessagesFetch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceMessagesFetchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceMessagesFetch(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourcePublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcePublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourcePublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourcePublish(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceRecover operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceRecover(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceRecoverParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceRecover(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceTokenRefresh operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceTokenRefresh(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceTokenRefreshParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceTokenRefresh(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceUnpublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceUnpublish(c, resourceId, params)
+}
+
+// PostAdminMicrosoftResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceValidate(c, resourceId, params)
+}
+
 // GetAdminSupplierApplications operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminSupplierApplications(c *gin.Context) {
 
@@ -7666,6 +11211,102 @@ func (siw *ServerInterfaceWrapper) PostAdminSupplierApplicationReject(c *gin.Con
 	}
 
 	siw.Handler.PostAdminSupplierApplicationReject(c, applicationId, params)
+}
+
+// GetAdminTasks operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminTasks(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminTasksParams
+
+	// ------------- Required query parameter "bizType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "bizType", c.Request.URL.Query(), &params.BizType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter bizType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "bizId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "bizId", c.Request.URL.Query(), &params.BizId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter bizId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", c.Request.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter kind: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminTasks(c, params)
+}
+
+// GetAdminTask operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminTask(c, taskId)
 }
 
 // GetAdminUsers operation middleware
@@ -10354,12 +13995,16 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
 	router.GET(options.BaseURL+"/v1/admin/allocations", wrapper.GetAdminAllocations)
 	router.GET(options.BaseURL+"/v1/admin/allocations/:allocationId", wrapper.GetAdminAllocation)
+	router.GET(options.BaseURL+"/v1/admin/bindings", wrapper.GetAdminBindings)
+	router.GET(options.BaseURL+"/v1/admin/bindings/messages/:messageId", wrapper.GetAdminBindingMessage)
 	router.GET(options.BaseURL+"/v1/admin/cards", wrapper.GetAdminCards)
 	router.POST(options.BaseURL+"/v1/admin/cards", wrapper.PostAdminCards)
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
+	router.GET(options.BaseURL+"/v1/admin/messages", wrapper.GetAdminMessages)
+	router.GET(options.BaseURL+"/v1/admin/messages/:messageId", wrapper.GetAdminMessage)
 	router.POST(options.BaseURL+"/v1/admin/orders/timeouts/scan", wrapper.PostAdminOrderTimeoutScan)
 	router.GET(options.BaseURL+"/v1/admin/orders/:orderNo/allocations", wrapper.GetAdminOrderAllocation)
 	router.POST(options.BaseURL+"/v1/admin/orders/:orderNo/cleanup/retry", wrapper.PostAdminOrderCleanupRetry)
@@ -10394,9 +14039,33 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/proxies/system", wrapper.PostAdminSystemProxy)
 	router.PATCH(options.BaseURL+"/v1/admin/proxies/:proxyId", wrapper.PatchAdminProxy)
 	router.POST(options.BaseURL+"/v1/admin/proxies/:proxyId/check", wrapper.PostAdminProxyCheck)
+	router.GET(options.BaseURL+"/v1/admin/resources", wrapper.GetAdminMicrosoftResources)
+	router.POST(options.BaseURL+"/v1/admin/resources/delete", wrapper.PostAdminMicrosoftResourcesDelete)
+	router.POST(options.BaseURL+"/v1/admin/resources/disable", wrapper.PostAdminMicrosoftResourcesDisable)
+	router.POST(options.BaseURL+"/v1/admin/resources/imports", wrapper.PostAdminMicrosoftResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/resources/imports/:importId", wrapper.GetAdminMicrosoftResourceImport)
+	router.POST(options.BaseURL+"/v1/admin/resources/publish", wrapper.PostAdminMicrosoftResourcesPublish)
+	router.POST(options.BaseURL+"/v1/admin/resources/unpublish", wrapper.PostAdminMicrosoftResourcesUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/resources/validations", wrapper.PostAdminMicrosoftResourceValidations)
+	router.DELETE(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.DeleteAdminMicrosoftResource)
+	router.GET(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.GetAdminMicrosoftResource)
+	router.PATCH(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.PatchAdminMicrosoftResource)
+	router.GET(options.BaseURL+"/v1/admin/resources/:resourceId/aliases", wrapper.GetAdminMicrosoftResourceAliases)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/aliases", wrapper.PostAdminMicrosoftResourceAlias)
+	router.PUT(options.BaseURL+"/v1/admin/resources/:resourceId/credentials", wrapper.PutAdminMicrosoftResourceCredentials)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/disable", wrapper.PostAdminMicrosoftResourceDisable)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/enable", wrapper.PostAdminMicrosoftResourceEnable)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/messages/fetch", wrapper.PostAdminMicrosoftResourceMessagesFetch)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/publish", wrapper.PostAdminMicrosoftResourcePublish)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/recover", wrapper.PostAdminMicrosoftResourceRecover)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/token/refresh", wrapper.PostAdminMicrosoftResourceTokenRefresh)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/unpublish", wrapper.PostAdminMicrosoftResourceUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/validate", wrapper.PostAdminMicrosoftResourceValidate)
 	router.GET(options.BaseURL+"/v1/admin/suppliers/applications", wrapper.GetAdminSupplierApplications)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
+	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
+	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)

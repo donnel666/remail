@@ -21,6 +21,7 @@ type InboundMailRepository interface {
 	FindByID(ctx context.Context, id uint) (*domain.InboundMail, error)
 	ClaimProcessing(ctx context.Context, id uint) (bool, error)
 	ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.InboundMail, error)
+	SaveParsedSummary(ctx context.Context, id uint, summary domain.InboundMailSummary) error
 	MarkPending(ctx context.Context, id uint, safeError string) error
 	MarkStored(ctx context.Context, id uint) error
 	MarkFailed(ctx context.Context, id uint, safeError string) error
@@ -206,15 +207,25 @@ func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, f
 	if err != nil || file == nil {
 		if finalAttempt {
 			_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail object unavailable.")
-			writeSystemLog(ctx, s.logs, "error", "mail.inbound_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing failed.", err)
+			writeSystemLog(ctx, s.logs, "error", "mail.inbound_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing failed.", "private object read failed")
 		} else {
 			_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail object unavailable.")
-			writeSystemLog(ctx, s.logs, "warning", "mail.inbound_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing will retry.", err)
-		}
-		if err != nil {
-			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+			writeSystemLog(ctx, s.logs, "warning", "mail.inbound_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing will retry.", "private object read failed")
 		}
 		return fmt.Errorf("%w: inbound mail object unavailable", domain.ErrInboundStorageUnavailable)
+	}
+	if mail.ParsedAt == nil {
+		parsed := parseInboundMessage(file.ContentBytes, mail.CreatedAt)
+		if err := s.repo.SaveParsedSummary(ctx, task.InboundMailID, parsed.Summary); err != nil {
+			if finalAttempt {
+				_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail summary could not be stored.")
+				writeSystemLog(ctx, s.logs, "error", "mail.inbound_summary_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail summary could not be stored.", err)
+			} else {
+				_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail summary could not be stored.")
+				writeSystemLog(ctx, s.logs, "warning", "mail.inbound_summary_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail summary persistence will retry.", err)
+			}
+			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+		}
 	}
 	if mail.ResourceType == domain.InboundResourceDomain && s.consumer != nil {
 		if err := s.consumer.IngestInboundMail(ctx, InboundConsumeRequest{

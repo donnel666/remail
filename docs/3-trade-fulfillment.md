@@ -9,6 +9,8 @@
 | 2026-07-09 | V1.2 | Codex | 补充购买服务窗口约束：未激活购买订单只使用 `receiveUntil` 表达激活截止，`afterSaleUntil` 只表达激活后的质保截止。 |
 | 2026-07-10 | V1.3 | Codex | 订单实付和退款金额改用六位小数账本精度，保证分以下商品价格精确扣款与退款。 |
 | 2026-07-10 | V1.4 | Codex | 订单列表读模型支持交付域名/创建时间筛选、offset+total 分页与自排除 facets 聚合，并附带项目名称冗余展示。 |
+| 2026-07-12 | V1.5 | Codex | 补充管理员 Microsoft 订单 Tab 的批量 `OrderSummaryQueryPort`；只发布 Trade 自有订单事实，不让 Alloc/Core 直接读订单表或复制订单状态。 |
+| 2026-07-12 | V1.6 | Codex | 将管理员订单 Tab 收敛为共享数据库内直接源表的单页有界只读查询组合；Trade 继续拥有订单事实，查询只返回安全展示字段且不形成写入口或投影表。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -150,6 +152,9 @@ stateDiagram-v2
 | `FetchTriggerPort` | 出站到 BC-MAILMATCH | 触发订单收件。 |
 | `MatchResultPort` | 入站自 BC-MAILMATCH | 接收邮件匹配结果。 |
 | `OrderPort/RefundPort` | 入站自 BC-AFTERSALE | 售后查订单和发起退款。 |
+| `OrderSummaryQueryPort` | 入站自 BC-ALLOC 管理查询 | 按去重 orderNo 集合批量返回 `buyerUserId/serviceMode/status/payAmount/receiveUntil/afterSaleUntil/createdAt` 等 Trade 自有安全摘要；金额保持 decimal 值并由 HTTP DTO 序列化为字符串。 |
+
+管理员 Microsoft 订单 Tab 继续由 `/v1/admin/allocations?type=microsoft&resourceId=...` 对外，Alloc Application Service 收集当前页 orderNo 后一次调用 `OrderSummaryQueryPort`。该 Port 只读、不推进订单状态、不访问 IAM 展示字段，也不返回钱包流水、服务 Token 或邮件正文；缺失/不可见订单必须返回明确的安全失败，不能用零金额或默认状态伪造。Core、Alloc 和管理 Handler 均不得为组合页面直接查询或更新 Trade GORM Model。
 
 ---
 
@@ -183,6 +188,7 @@ stateDiagram-v2
 |-----|------|------|
 | ADR-TRADE-1 | 单一 `Order` 模型 | 接码/购买差异是服务策略，不需要两套状态机。 |
 | ADR-TRADE-2 | 一单一资源 | 简化退款、分配、服务凭证和邮件读取边界。 |
-| ADR-TRADE-3 | 服务凭证生命周期由交易同步 | Token 本身不拥有服务状态，订单服务结束才禁用。 |
-| ADR-TRADE-4 | 退款只经交易域 | 防止钱包、售后、后台绕过订单状态机。 |
-| ADR-TRADE-5 | SDK 不另建订单接口 | API Key 通过统一鉴权中间件调用 `/v1/orders`，避免 `/open/orders` 重复实现。 |
+| ADR-TRADE-3 | 管理员资源订单视图允许直接源表的有界只读查询组合 | 保持订单事实归 Trade；共享数据库内可按当前页最多 100 个 orderNo 一次读取安全展示字段，不复制事实、不建立投影表、不开放写入，也不为单一页面提前建设多组空转 Port。 |
+| ADR-TRADE-4 | 服务凭证生命周期由交易同步 | Token 本身不拥有服务状态，订单服务结束才禁用。 |
+| ADR-TRADE-5 | 退款只经交易域 | 防止钱包、售后、后台绕过订单状态机。 |
+| ADR-TRADE-6 | SDK 不另建订单接口 | API Key 通过统一鉴权中间件调用 `/v1/orders`，避免 `/open/orders` 重复实现。 |

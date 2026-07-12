@@ -271,7 +271,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List all users (admin only) */
+        /**
+         * List all users (admin only)
+         * @description Requires `iam:user/read`. The Microsoft resource owner picker uses the existing paginated IAM query and must not infer owner eligibility client-side; mutation commands revalidate that the selected user exists and is enabled.
+         */
         get: operations["getAdminUsers"];
         put?: never;
         post?: never;
@@ -981,7 +984,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List allocation records for diagnostics */
+        /**
+         * List enriched allocation and order records for administrators
+         * @description Requires `alloc:allocation/read`. The Microsoft resource Orders Tab calls this endpoint with `type=microsoft&resourceId=...`. Alloc owns the page and enriches its bounded result through batch read ports for order, project, buyer, and authorized verification-code facts. Amounts are decimal strings. Mail bodies, service tokens, wallet facts, and mock-only mail-count/usage aggregates are never returned.
+         */
         get: operations["getAdminAllocations"];
         put?: never;
         post?: never;
@@ -1642,6 +1648,518 @@ export interface paths {
         put?: never;
         /** Check a proxy and update detected metadata */
         post: operations["postAdminProxyCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Microsoft resources for the administrator console
+         * @description Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
+         */
+        get: operations["getAdminMicrosoftResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Microsoft resources for a selected owner
+         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request only persists a private upload and a durable import fact before returning 202. Parsing, duplicate handling, resource creation/recovery, and validation run asynchronously. The original TXT, credentials, and private object key are never returned or written to ordinary logs.
+         */
+        post: operations["postAdminMicrosoftResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an administrator Microsoft-resource import
+         * @description Requires `core:resource/read`. Returns only safe counters, status, diagnostic text, and the durable task reference; it never returns uploaded text, credentials, or an object key.
+         */
+        get: operations["getAdminMicrosoftResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate selected or all matching Microsoft resources
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selection modes persist a durable batch before returning 202. Filter mode captures the normalized filter and an ID high-water mark; the client must not enumerate all matching IDs.
+         */
+        post: operations["postAdminMicrosoftResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable explicitly selected Microsoft resources
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Only `selection.mode=ids` is accepted in this release. The short transaction does not terminate or rewrite existing orders and allocations.
+         */
+        post: operations["postAdminMicrosoftResourcesDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish selected Microsoft resources for sale
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Owner eligibility is revalidated by the server.
+         */
+        post: operations["postAdminMicrosoftResourcesPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert selected Microsoft resources to private supply
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Existing orders and allocations are not released or changed.
+         */
+        post: operations["postAdminMicrosoftResourcesUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logically delete selected Microsoft resources
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
+         */
+        post: operations["postAdminMicrosoftResourcesDelete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a Microsoft resource administrator summary
+         * @description Requires `core:resource/read`. Returns the basic-information Tab result: resource and owner identity, current auxiliary address, safe state and timestamps, alias counts, recent task summaries, configured credential flags, and token diagnostics. These fields are composed from bounded direct queries; no administrator projection table is maintained. Aliases, task history, allocations, message lists, and message bodies are loaded through their owning APIs and are not embedded here.
+         */
+        get: operations["getAdminMicrosoftResource"];
+        put?: never;
+        post?: never;
+        /**
+         * Logically delete one Microsoft resource
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The command forces private supply and performs a logical delete while retaining historical facts. An active Allocation or stale version returns 409.
+         */
+        delete: operations["deleteAdminMicrosoftResource"];
+        options?: never;
+        head?: never;
+        /**
+         * Atomically edit a Microsoft resource
+         * @description Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`; supplying `bindingAddress` additionally requires `mailtransport:binding/write`. Session authentication, CSRF, and an idempotency key are required. Resource, owner, current binding input, optional complete credentials, validation fact, and OperationLog are committed atomically. `status`, derived health, task state, and binding verification state are not accepted. Email or owner changes conflict with an active Allocation.
+         */
+        patch: operations["patchAdminMicrosoftResource"];
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Microsoft credentials as one write-only set
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The complete credential set replaces the previous revision, clears derived token health, moves the resource to pending, and creates or reuses a durable validation fact in the same transaction. No credential value is returned.
+         */
+        put: operations["putAdminMicrosoftResourceCredentials"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate one Microsoft resource
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Creates or reuses the resource's active durable validation and returns only after that fact commits. Disabled and deleted resources return 409; Microsoft network work never runs in the HTTP transaction.
+         */
+        post: operations["postAdminMicrosoftResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable a disabled Microsoft resource
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Atomically changes `disabled` to `pending`, clears untrusted derived health, and creates or reuses a validation fact. The 200 response confirms the durable local state, not successful Microsoft validation.
+         */
+        post: operations["postAdminMicrosoftResourceEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable one Microsoft resource
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Disabling blocks new supply and automatic maintenance but does not terminate or modify existing orders and allocations. Repeating the command against an already-disabled resource is idempotent.
+         */
+        post: operations["postAdminMicrosoftResourceDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish one Microsoft resource for sale
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The owner must be enabled and have supplier, admin, or super-admin eligibility. Publishing only changes future supply eligibility and is idempotent when already public.
+         */
+        post: operations["postAdminMicrosoftResourcePublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert one Microsoft resource to private supply
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The command only affects future supply eligibility; existing Allocations are retained and alias scheduling is not paused. Repeating it against a private resource is idempotent.
+         */
+        post: operations["postAdminMicrosoftResourceUnpublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recover a logically deleted Microsoft resource
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Atomically changes a deleted resource to pending and private, clears derived health, and creates or reuses validation. A non-deleted resource, stale version, or reused email identity returns 409.
+         */
+        post: operations["postAdminMicrosoftResourceRecover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/token/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a Microsoft refresh-token diagnostic
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Creates or reuses a durable token task before returning 202. Disabled resources may be diagnosed, but the task never enables them automatically; deleted resources return 409. No token value is returned.
+         */
+        post: operations["postAdminMicrosoftResourceTokenRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a Microsoft resource's aliases
+         * @description Requires `core:resource/read`. `kind=explicit` returns explicit inventory plus the safe weekly/yearly schedule summary; `kind=other` returns dot and plus aliases and a null schedule. Attempt history, candidate addresses, fencing data, allocation status, order data, and mock-only diagnostics are not returned.
+         */
+        get: operations["getAdminMicrosoftResourceAliases"];
+        put?: never;
+        /**
+         * Expedite the explicit-alias schedule
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. This command advances the existing durable schedule or reuses an active attempt; it never inserts an alias directly and never bypasses quota, admission, reservation, fencing, or reconciliation rules.
+         */
+        post: operations["postAdminMicrosoftResourceAlias"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/messages/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a resource-level Microsoft mail fetch
+         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch persists or reuses a resource-level single-flight fetch job before returning 202. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+         */
+        post: operations["postAdminMicrosoftResourceMessagesFetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List normalized administrator tasks for a Microsoft resource
+         * @description Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
+         */
+        get: operations["getAdminTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one normalized administrator task
+         * @description Requires `governance:task/read`. The ID must be a source-qualified or equivalently globally unique safe reference. Polling reads the owning task fact only and does not grant cross-context write authority. A required source failure returns 503 rather than a stale or fabricated status.
+         */
+        get: operations["getAdminTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List primary-mailbox message summaries for a resource
+         * @description Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. Verification codes and order numbers are returned only as authorized safe display fields.
+         */
+        get: operations["getAdminMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one primary-mailbox message body and diagnostic
+         * @description Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw envelope, token, or upstream error body.
+         */
+        get: operations["getAdminMessage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a resource's current auxiliary binding and message summaries
+         * @description Requires `mailtransport:binding/read`. Directly queries the current binding fact and returns its safe summary plus a server-paginated auxiliary-message summary list. A resource with no configured auxiliary mailbox is a successful empty state with `binding=null`; it is not represented as 404. Message bodies, raw envelopes, and private object keys are not returned.
+         */
+        get: operations["getAdminBindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/bindings/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one auxiliary-mailbox message body and diagnostic
+         * @description Requires `mailtransport:binding/read`. The server verifies the resource, current/historical binding scope, and message association together; unknown and cross-resource IDs return the same safe 404. The response may contain the authorized body, code, order number, and sanitized diagnostic, but never a raw RFC822 object key, original envelope, secret, or upstream error body.
+         */
+        get: operations["getAdminBindingMessage"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2970,8 +3488,557 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /** @enum {string} */
+        AdminMicrosoftResourceStatus: "pending" | "normal" | "abnormal" | "disabled" | "deleted";
+        /**
+         * @description `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
+         * @enum {string}
+         */
+        AdminMicrosoftTokenHealth: "valid" | "expiring" | "expired" | "missing";
+        AdminMicrosoftOwnerSummary: {
+            id: number;
+            /** Format: email */
+            email: string;
+            nickname: string;
+            groupName: string;
+            /** @enum {string} */
+            role: "user" | "supplier" | "admin" | "super_admin";
+            enabled: boolean;
+        };
+        AdminMicrosoftResourceItem: {
+            id: number;
+            /** @enum {string} */
+            type: "microsoft";
+            /** @description Monotonic resource version used by administrator mutation preconditions. */
+            version: number;
+            /** Format: email */
+            emailAddress: string;
+            /**
+             * @description Backend-normalized display suffix including the leading `@`.
+             * @example @outlook.com
+             */
+            suffix: string;
+            /**
+             * Format: email
+             * @description Current auxiliary mailbox address from MailTransport, or null when not configured.
+             */
+            bindingAddress: string | null;
+            owner: components["schemas"]["AdminMicrosoftOwnerSummary"];
+            status: components["schemas"]["AdminMicrosoftResourceStatus"];
+            forSale: boolean;
+            longLived: boolean;
+            graphAvailable: boolean;
+            /**
+             * @description Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+             * @enum {string}
+             */
+            mailProtocol: "graph" | "imap" | "unavailable";
+            qualityScore: number;
+            tokenHealth: components["schemas"]["AdminMicrosoftTokenHealth"];
+            /** Format: date-time */
+            rtExpireAt: string | null;
+            /** Format: date-time */
+            lastAllocatedAt: string | null;
+            /** @description Sanitized resource diagnostic without secrets, upstream bodies, or stack traces. */
+            lastSafeError: string | null;
+            activeTask: components["schemas"]["AdminTaskSummary"] | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminMicrosoftStatusFacet: {
+            /**
+             * Format: int64
+             * @description All matching non-deleted resources when the status dimension is ignored.
+             */
+            all: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            deleted: number;
+        };
+        AdminMicrosoftBooleanFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            yes: number;
+            /** Format: int64 */
+            no: number;
+        };
+        AdminMicrosoftTokenHealthFacet: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            valid: number;
+            /** Format: int64 */
+            expiring: number;
+            /** Format: int64 */
+            expired: number;
+            /** Format: int64 */
+            missing: number;
+        };
+        AdminMicrosoftSuffixFacet: {
+            /** @description Normalized suffix including the leading `@`. */
+            key: string;
+            /** Format: int64 */
+            count: number;
+        };
+        AdminMicrosoftFacets: {
+            status: components["schemas"]["AdminMicrosoftStatusFacet"];
+            forSale: components["schemas"]["AdminMicrosoftBooleanFacet"];
+            longLived: components["schemas"]["AdminMicrosoftBooleanFacet"];
+            graphAvailable: components["schemas"]["AdminMicrosoftBooleanFacet"];
+            tokenHealth: components["schemas"]["AdminMicrosoftTokenHealthFacet"];
+            /** @description Suffix-self-excluded counts sorted by count descending and key ascending. */
+            suffixes: components["schemas"]["AdminMicrosoftSuffixFacet"][];
+        };
+        AdminMicrosoftResourceListResponse: {
+            items: components["schemas"]["AdminMicrosoftResourceItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+            nextAfterId: number | null;
+            facets: components["schemas"]["AdminMicrosoftFacets"];
+        };
+        AdminMicrosoftAliasCounts: {
+            /** Format: int64 */
+            explicit: number;
+            /** Format: int64 */
+            dot: number;
+            /** Format: int64 */
+            plus: number;
+        };
+        /** @description Safe configured flags only. Password, client ID, refresh token, access token, and authorization codes are never returned. */
+        AdminMicrosoftCredentialConfiguration: {
+            passwordConfigured: boolean;
+            clientIdConfigured: boolean;
+            refreshTokenConfigured: boolean;
+            revision: number;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        AdminMicrosoftTokenDiagnostic: {
+            health: components["schemas"]["AdminMicrosoftTokenHealth"];
+            /** Format: date-time */
+            rtExpireAt: string | null;
+            /**
+             * Format: int64
+             * @description Server-derived non-negative remaining lifetime, or null when expiry is unknown.
+             */
+            remainingSeconds: number | null;
+            /** Format: date-time */
+            lastRefreshedAt: string | null;
+            /** @description Microsoft ACL requested/configured scope allowlist. It is returned only when both Client ID and refresh token are configured; otherwise it is empty. It is not a provider-reported granted-scope result. */
+            scopes: string[];
+            /** @description Safe correlation ID only; never an OAuth authorization code or token. */
+            lastRefreshRequestId: string | null;
+            lastSafeError: string | null;
+        };
+        AdminMicrosoftResourceDetail: components["schemas"]["AdminMicrosoftResourceItem"] & {
+            aliasCounts: components["schemas"]["AdminMicrosoftAliasCounts"];
+            /** @description Bounded safe summaries for the basic-information Tab; complete history is queried from `/v1/admin/tasks`. */
+            recentTasks: components["schemas"]["AdminTaskSummary"][];
+            credentials: components["schemas"]["AdminMicrosoftCredentialConfiguration"];
+            token: components["schemas"]["AdminMicrosoftTokenDiagnostic"];
+        };
+        /** @description Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision. */
+        AdminMicrosoftCredentialsInput: {
+            /** Format: password */
+            password: string;
+            /** Format: password */
+            clientId?: string;
+            /** Format: password */
+            refreshToken?: string;
+        };
+        AdminMicrosoftUpdateRequest: {
+            /** @description Last observed resource version; stale writes return 409. */
+            version: number;
+            /** Format: email */
+            emailAddress?: string;
+            /**
+             * Format: email
+             * @description Set or replace the auxiliary address; null clears the current input. Clients must not submit a binding status.
+             */
+            bindingAddress?: string | null;
+            ownerId?: number;
+            qualityScore?: number;
+            forSale?: boolean;
+            longLived?: boolean;
+            credentials?: components["schemas"]["AdminMicrosoftCredentialsInput"];
+        };
+        /** @description Complete replacement. `clientId` and `refreshToken` must be supplied together or both omitted. */
+        AdminMicrosoftReplaceCredentialsRequest: {
+            /** @description Last observed resource version; stale writes return 409. */
+            version: number;
+            /** Format: password */
+            password: string;
+            /** Format: password */
+            clientId?: string;
+            /** Format: password */
+            refreshToken?: string;
+        };
+        AdminMicrosoftMutationResponse: {
+            resource: components["schemas"]["AdminMicrosoftResourceDetail"];
+            /** @description Durable validation task created or reused by this mutation; null when the edit did not require validation. */
+            validationTask: components["schemas"]["AdminTaskView"] | null;
+        };
+        AdminMicrosoftBulkFilter: {
+            /** @enum {string} */
+            type: "microsoft";
+            search?: string;
+            suffix?: string;
+            status?: components["schemas"]["AdminMicrosoftResourceStatus"];
+            forSale?: boolean;
+            longLived?: boolean;
+            graphAvailable?: boolean;
+            tokenHealth?: components["schemas"]["AdminMicrosoftTokenHealth"];
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        AdminMicrosoftIdsSelection: {
+            /** @enum {string} */
+            mode: "ids";
+            resourceIds: number[];
+        };
+        AdminMicrosoftFilterSelection: {
+            /** @enum {string} */
+            mode: "filter";
+            filter: components["schemas"]["AdminMicrosoftBulkFilter"];
+        };
+        AdminMicrosoftBulkSelection: components["schemas"]["AdminMicrosoftIdsSelection"] | components["schemas"]["AdminMicrosoftFilterSelection"];
+        AdminMicrosoftIdsCommandRequest: {
+            selection: components["schemas"]["AdminMicrosoftIdsSelection"];
+        };
+        AdminMicrosoftBulkCommandRequest: {
+            selection: components["schemas"]["AdminMicrosoftBulkSelection"];
+        };
+        AdminReasonCount: {
+            /** @description Stable safe reason bucket; never a raw database or upstream error. */
+            reason: string;
+            /** Format: int64 */
+            count: number;
+        };
+        AdminMicrosoftBulkResult: {
+            requested: number;
+            affected: number;
+            skipped: number;
+            /** @description Present only for bounded ids mode. */
+            affectedResourceIds?: number[];
+            /** @description Present only for bounded ids mode. */
+            skippedResourceIds?: number[];
+            reasonCounts: components["schemas"]["AdminReasonCount"][];
+        };
+        /** @enum {string} */
+        AdminTaskKind: "validation" | "import" | "alias" | "token" | "fetch" | "bulk_validation" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        /** @enum {string} */
+        AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
+        /** @enum {string} */
+        AdminTaskBizType: "microsoft_resource" | "microsoft_resource_import" | "microsoft_resource_bulk";
+        AdminTaskProgress: {
+            /** Format: int64 */
+            total: number;
+            /** Format: int64 */
+            processed: number;
+            /** Format: int64 */
+            succeeded: number;
+            /** Format: int64 */
+            skipped: number;
+            /** Format: int64 */
+            failed: number;
+            reasonCounts: components["schemas"]["AdminReasonCount"][];
+        };
+        AdminTaskSummary: {
+            taskId: string;
+            kind: components["schemas"]["AdminTaskKind"];
+            status: components["schemas"]["AdminTaskStatus"];
+            /** @description Credential revision fixed when a validation, token, or fetch task was submitted; null for tasks that do not read credentials. */
+            credentialRevision: number | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminTaskView: {
+            taskId: string;
+            bizType: components["schemas"]["AdminTaskBizType"];
+            bizId: number;
+            kind: components["schemas"]["AdminTaskKind"];
+            status: components["schemas"]["AdminTaskStatus"];
+            attempts: number;
+            maxAttempts: number;
+            remainingAttempts: number;
+            /** @description Immutable credential revision captured at submission for validation, token, and fetch work; workers must not apply results to a different revision. */
+            credentialRevision: number | null;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+            progress: components["schemas"]["AdminTaskProgress"] | null;
+        };
+        AdminTaskListResponse: {
+            items: components["schemas"]["AdminTaskView"][];
+            /** Format: int64 */
+            total: number;
+            /**
+             * Format: int64
+             * @description Succeeded count across the complete filtered result, not just the current page.
+             */
+            succeeded: number;
+            offset: number;
+            limit: number;
+        };
+        AdminTaskAcceptedResponse: {
+            /** @description Stable source-qualified identifier of the accepted durable task. */
+            taskId: string;
+            /** @description Safe request identifier persisted with the accepted durable fact. */
+            requestId: string;
+            status: components["schemas"]["AdminTaskStatus"];
+            /**
+             * Format: int64
+             * @description Safely displayable accepted count. A filter batch may report zero until expansion.
+             */
+            accepted: number;
+            task: components["schemas"]["AdminTaskView"];
+            /** @description True when the command returned an already-active durable fact. */
+            reused: boolean;
+        };
+        AdminMicrosoftImportResponse: {
+            importId: number;
+            /** @description Stable source-qualified identifier of the durable import task. */
+            taskId: string;
+            /** @description Safe request identifier persisted on the durable import record. */
+            requestId: string;
+            /** @enum {string} */
+            status: "processing" | "imported" | "failed";
+            /** Format: int64 */
+            accepted: number;
+            /** Format: int64 */
+            imported: number;
+            /** Format: int64 */
+            skipped: number;
+            lastSafeError: string | null;
+            task: components["schemas"]["AdminTaskView"];
+            /** @description True only when the POST replayed an existing import; status GET responses return false. */
+            reused: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminMicrosoftAliasItem: {
+            id: number;
+            /** @enum {string} */
+            kind: "explicit" | "dot" | "plus";
+            /** Format: email */
+            emailAddress: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminMicrosoftAliasSchedule: {
+            weekCreated: number;
+            weekLimit: number;
+            yearCreated: number;
+            yearLimit: number;
+            /** Format: date-time */
+            nextRunAt: string | null;
+        };
+        AdminMicrosoftAliasListResponse: {
+            items: components["schemas"]["AdminMicrosoftAliasItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+            /** @description Present for kind=explicit and null for kind=other. */
+            schedule: components["schemas"]["AdminMicrosoftAliasSchedule"] | null;
+        };
+        AdminMessageSummary: {
+            id: number;
+            /** @enum {string} */
+            mailbox: "main" | "alias" | "dot" | "plus";
+            recipient: string;
+            sender: string;
+            subject: string;
+            /** @description Bounded plain-text preview; never the complete body. */
+            preview: string;
+            /** @enum {string} */
+            status: "received" | "matched" | "ignored";
+            verificationCode: string | null;
+            orderNo: string | null;
+            /** Format: date-time */
+            receivedAt: string;
+        };
+        AdminMessageDetail: components["schemas"]["AdminMessageSummary"] & {
+            /** @description Authorized, safely rendered message body. Raw object keys and envelopes are never returned. */
+            body: string;
+            /** @description Sanitized matching explanation without raw rules, secrets, stack traces, or upstream payloads. */
+            matchDiagnostic: string | null;
+        };
+        AdminMessageListResponse: {
+            items: components["schemas"]["AdminMessageSummary"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        AdminBindingSummary: {
+            id: number;
+            /** Format: email */
+            emailAddress: string;
+            /** @enum {string} */
+            status: "pending" | "code_sent" | "verified" | "timeout" | "failed" | "expired";
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminAuxiliaryMessageSummary: {
+            id: number;
+            recipient: string;
+            sender: string;
+            subject: string;
+            preview: string;
+            /** @enum {string} */
+            status: "received" | "matched" | "ignored";
+            verificationCode: string | null;
+            orderNo: string | null;
+            /** Format: date-time */
+            receivedAt: string;
+        };
+        AdminAuxiliaryMessageDetail: components["schemas"]["AdminAuxiliaryMessageSummary"] & {
+            body: string;
+            matchDiagnostic: string | null;
+        };
+        AdminBindingMessageListResponse: {
+            binding: components["schemas"]["AdminBindingSummary"] | null;
+            items: components["schemas"]["AdminAuxiliaryMessageSummary"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        AdminAllocationItem: {
+            /** @enum {string} */
+            type: "microsoft" | "domain";
+            /** @description Allocation ID. */
+            id: number;
+            orderNo: string;
+            projectId: number;
+            projectName: string;
+            projectLogoUrl: string | null;
+            resourceId: number;
+            /** @enum {string} */
+            mailbox: "main" | "alias" | "dot" | "plus" | "domain";
+            /** @enum {string} */
+            supplyScope: "owned" | "public";
+            /** Format: email */
+            deliveryEmail: string;
+            /** @enum {string} */
+            serviceMode: "code" | "purchase";
+            /** @enum {string} */
+            orderStatus: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
+            /** @enum {string} */
+            status: "allocated" | "released";
+            payAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            /** Format: email */
+            buyerEmail: string;
+            verificationCode: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            receiveUntil: string | null;
+        };
+        AdminAllocationListResponse: {
+            items: components["schemas"]["AdminAllocationItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
     };
-    responses: never;
+    responses: {
+        /** @description Malformed JSON, path, query, pagination, enum, or multipart input */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Authentication required */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Permission denied */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The requested fact does not exist in the authorized scope */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description State, uniqueness, idempotency, active-allocation, or optimistic-concurrency conflict */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request is syntactically valid but violates field or domain constraints */
+        UnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description An authorized upstream content read failed safely */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description A required internal or upstream dependency is temporarily unavailable */
+        ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+    };
     parameters: {
         /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
         CsrfToken: string;
@@ -2979,6 +4046,10 @@ export interface components {
         OptionalCsrfToken: string;
         /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
         IdempotencyKey: string;
+        /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+        AdminCommandIdempotencyKey: string;
+        /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+        ExpectedAdminResourceVersion: number;
     };
     requestBodies: never;
     headers: never;
@@ -3718,6 +4789,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     patchAdminUser: {
@@ -6771,7 +7844,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AllocationListResponse"];
+                    "application/json": components["schemas"]["AdminAllocationListResponse"];
                 };
             };
             /** @description Invalid query parameters */
@@ -6801,6 +7874,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAdminAllocation: {
@@ -9350,6 +10425,999 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getAdminMicrosoftResources: {
+        parameters: {
+            query: {
+                /** @description This administrator query is limited to Microsoft resources. */
+                type: "microsoft";
+                /** @description Case-insensitive search across resource ID, mailbox address, and owner display identity. */
+                search?: string;
+                /** @description Exact normalized mailbox domain. Values with or without a leading `@` are accepted. */
+                suffix?: string;
+                status?: components["schemas"]["AdminMicrosoftResourceStatus"];
+                /** @description Public-supply flag. The UI's private=true filter maps to forSale=false. */
+                forSale?: boolean;
+                longLived?: boolean;
+                graphAvailable?: boolean;
+                tokenHealth?: components["schemas"]["AdminMicrosoftTokenHealth"];
+                /** @description Inclusive ISO 8601 creation-time lower bound. */
+                createdFrom?: string;
+                /** @description Exclusive ISO 8601 creation-time upper bound; must be later than createdFrom. */
+                createdTo?: string;
+                offset?: number;
+                /** @description Optional seek cursor for the same stable `id DESC` ordering. When present, offset is ignored. */
+                afterId?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated Microsoft resource list and server-side facets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftResourceListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description UTF-8 TXT using one of the four documented `----`-delimited credential line formats.
+                     */
+                    file: string;
+                    ownerId: number;
+                    longLived: boolean;
+                    /** @enum {string} */
+                    errorStrategy: "skip" | "abort";
+                };
+            };
+        };
+        responses: {
+            /** @description Durable import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminMicrosoftResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Durable validation batch accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourcesDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftIdsCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous ids-mode result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourcesPublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous ids-mode result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            /** @description Durable filter-mode batch accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourcesUnpublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous ids-mode result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            /** @description Durable filter-mode batch accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourcesDelete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous ids-mode result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            /** @description Durable filter-mode batch accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminMicrosoftResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Administrator-safe Microsoft resource summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftResourceDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminMicrosoftResource: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource logically deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    patchAdminMicrosoftResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Atomic edit committed; validationTask is null when no validation was required */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    putAdminMicrosoftResourceCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminMicrosoftReplaceCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential revision replaced and validation durably accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable validation accepted or an active validation reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceEnable: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource is pending and validation is durably accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceDisable: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource disabled or already disabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourcePublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource published or already public */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceUnpublish: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource made private or already private */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceRecover: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource recovered to pending and validation durably accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceTokenRefresh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable token task accepted or reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminMicrosoftResourceAliases: {
+        parameters: {
+            query: {
+                kind: "explicit" | "other";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated alias inventory and optional explicit-alias schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftAliasListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceAlias: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alias schedule task accepted or active attempt reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceMessagesFetch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable resource fetch accepted or reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminTasks: {
+        parameters: {
+            query: {
+                bizType: "microsoft_resource";
+                /** @description Microsoft resource ID. */
+                bizId: number;
+                kind?: components["schemas"]["AdminTaskKind"];
+                status?: components["schemas"]["AdminTaskStatus"];
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated normalized task view */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current normalized task state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskView"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminMessages: {
+        parameters: {
+            query: {
+                resourceId: number;
+                search?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated message summaries without bodies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMessageListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminMessage: {
+        parameters: {
+            query: {
+                resourceId: number;
+            };
+            header?: never;
+            path: {
+                messageId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized message body and safe diagnostic */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMessageDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminBindings: {
+        parameters: {
+            query: {
+                resourceId: number;
+                search?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current binding and paginated auxiliary-message summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBindingMessageListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminBindingMessage: {
+        parameters: {
+            query: {
+                resourceId: number;
+            };
+            header?: never;
+            path: {
+                messageId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized auxiliary message body and safe diagnostic */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuxiliaryMessageDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

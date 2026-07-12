@@ -21,7 +21,13 @@ func NewHandler(module *Module) *Handler {
 }
 
 func (h *Handler) GetAllocations(c *gin.Context) {
-	offset, limit, ok := parsePagination(c)
+	if !validateAdminAllocationLimit(c, 100) {
+		return
+	}
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
 	if !ok {
 		return
 	}
@@ -43,21 +49,45 @@ func (h *Handler) GetAllocations(c *gin.Context) {
 		return
 	}
 	filter.ResourceID = resourceID
-	result, err := h.module.UseCase.ListAllocations(c.Request.Context(), filter)
+	result, err := h.module.UseCase.ListAdminAllocations(c.Request.Context(), filter)
 	if err != nil {
 		writeAllocError(c, err)
 		return
 	}
-	items := make([]AllocationItemResponse, len(result.Items))
+	items := make([]AdminAllocationItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = allocationResponse(result.Items[i])
+		items[i] = adminAllocationResponse(result.Items[i])
 	}
-	c.JSON(http.StatusOK, AllocationListResponse{
+	c.JSON(http.StatusOK, AdminAllocationListResponse{
 		Items:  items,
 		Total:  result.Total,
 		Offset: result.Offset,
 		Limit:  result.Limit,
 	})
+}
+
+func validateAdminAllocationLimit(c *gin.Context, maximum int) bool {
+	raw := strings.TrimSpace(c.Query("limit"))
+	if raw == "" {
+		return true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > maximum {
+		writeBadRequest(c)
+		return false
+	}
+	return true
+}
+
+func adminAllocationResponse(item allocapp.AdminAllocationItem) AdminAllocationItemResponse {
+	return AdminAllocationItemResponse{
+		Type: string(item.Type), ID: item.ID, OrderNo: item.OrderNo,
+		ProjectID: item.ProjectID, ProjectName: item.ProjectName, ProjectLogoURL: item.ProjectLogoURL,
+		ResourceID: item.ResourceID, Mailbox: item.Mailbox, SupplyScope: string(item.SupplyScope),
+		DeliveryEmail: item.DeliveryEmail, ServiceMode: item.ServiceMode, OrderStatus: item.OrderStatus,
+		Status: string(item.Status), PayAmount: item.PayAmount, BuyerEmail: item.BuyerEmail,
+		VerificationCode: item.VerificationCode, CreatedAt: item.CreatedAt, ReceiveUntil: item.ReceiveUntil,
+	}
 }
 
 func (h *Handler) GetAllocation(c *gin.Context) {

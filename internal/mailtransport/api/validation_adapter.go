@@ -18,13 +18,144 @@ import (
 
 const maxMicrosoftProxyAttempts = 3
 
+type microsoftOAuthProtocol interface {
+	RefreshToken(ctx context.Context, req mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error)
+	AcquireToken(ctx context.Context, req mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error)
+}
+
 type ResourceValidationAdapter struct {
 	proxies   *proxyapp.ProxyUseCase
-	microsoft *mailinfra.MicrosoftOAuthClient
+	microsoft microsoftOAuthProtocol
 	fetcher   *mailinfra.MicrosoftMailFetchClient
 	dns       *mailinfra.DomainDNSValidator
 	bindings  *mailinfra.MicrosoftBindingRepo
 	history   mailapp.HistoricalProjectMatcher
+}
+
+// RefreshMicrosoftToken is the MailTransport ACL used by the durable
+// administrator token task. Access tokens and raw upstream bodies are consumed
+// inside this adapter and are never returned to the application service.
+func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
+	ctx context.Context,
+	request mailapp.MicrosoftTokenRefreshProtocolRequest,
+) (mailapp.MicrosoftTokenRefreshProtocolResult, error) {
+	if a == nil || a.microsoft == nil {
+		return unavailableMicrosoftTokenRefreshResult(), nil
+	}
+
+	var last mailapp.MicrosoftTokenRefreshProtocolResult
+	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+		proxyConfig, err := a.acquireMicrosoftTokenProxy(ctx, request, attempt)
+		if err != nil {
+			return unavailableMicrosoftTokenRefreshResult(), nil
+		}
+		proxyURL := ""
+		proxyID := uint(0)
+		if proxyConfig != nil && !proxyConfig.Direct {
+			proxyURL = proxyConfig.URL
+			proxyID = proxyConfig.ID
+		}
+
+		raw, refreshErr := a.microsoft.RefreshToken(ctx, mailinfra.MicrosoftOAuthRequest{
+			EmailAddress: request.EmailAddress,
+			ClientID:     request.ClientID,
+			RefreshToken: request.RefreshToken,
+			ProxyURL:     proxyURL,
+		})
+		if refreshErr != nil {
+			raw = mailinfra.MicrosoftOAuthResult{
+				Category:     "request",
+				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+				ProxyFailure: proxyID != 0,
+			}
+		}
+		last = safeMicrosoftTokenRefreshProtocolResult(raw)
+		if raw.Valid {
+			_ = a.reportProxySuccess(ctx, proxyID)
+			return last, nil
+		}
+		if raw.ProxyFailure && proxyID != 0 {
+			_ = a.reportProxyFailure(ctx, proxyID, last.SafeMessage)
+			continue
+		}
+		if raw.ProxyFailure && proxyID == 0 && attempt < maxMicrosoftProxyAttempts {
+			continue
+		}
+		if proxyID != 0 {
+			_ = a.reportProxySuccess(ctx, proxyID)
+		}
+		return last, nil
+	}
+	if strings.TrimSpace(last.SafeMessage) == "" {
+		last = unavailableMicrosoftTokenRefreshResult()
+	}
+	return last, nil
+}
+
+func (a *ResourceValidationAdapter) acquireMicrosoftTokenProxy(
+	ctx context.Context,
+	request mailapp.MicrosoftTokenRefreshProtocolRequest,
+	attempt int,
+) (*proxyapp.ProxyConfig, error) {
+	if a == nil || a.proxies == nil {
+		return &proxyapp.ProxyConfig{Direct: true}, nil
+	}
+	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
+		Key:                 strings.ToLower(strings.TrimSpace(request.EmailAddress)),
+		IPVersion:           proxydomain.ProxyIPv4,
+		Purpose:             proxydomain.ProxyPurposeAuth,
+		AllowSystemFallback: true,
+		Attempt:             attempt,
+		RequestID:           strings.TrimSpace(request.RequestID),
+	})
+}
+
+func safeMicrosoftTokenRefreshProtocolResult(raw mailinfra.MicrosoftOAuthResult) mailapp.MicrosoftTokenRefreshProtocolResult {
+	if raw.Valid {
+		return mailapp.MicrosoftTokenRefreshProtocolResult{
+			Valid:        true,
+			ClientID:     strings.TrimSpace(raw.ClientID),
+			RefreshToken: strings.TrimSpace(raw.RefreshToken),
+			SafeMessage:  "Microsoft refresh-token diagnostic succeeded.",
+		}
+	}
+	category := strings.ToLower(strings.TrimSpace(raw.Category))
+	result := mailapp.MicrosoftTokenRefreshProtocolResult{Category: category}
+	switch category {
+	case "oauth_invalid_grant":
+		result.SafeMessage = "Microsoft refresh token is invalid or expired."
+	case "oauth_client":
+		result.SafeMessage = "Microsoft OAuth client is invalid or not allowed."
+	case "oauth_permission":
+		result.SafeMessage = "Microsoft OAuth permission is not available."
+	case "mfa":
+		result.SafeMessage = "Microsoft account requires authenticator verification."
+	case "passkey":
+		result.SafeMessage = "Microsoft account requires passkey verification."
+	case "phone":
+		result.SafeMessage = "Microsoft account requires phone verification."
+	case "password":
+		result.SafeMessage = "Microsoft account password is incorrect."
+	case "unknown_mailbox":
+		result.SafeMessage = "Microsoft account does not exist or recovery mailbox is not supported."
+	case "locked":
+		result.SafeMessage = "Microsoft account is locked."
+	case "rate_limited":
+		result.SafeMessage = "Microsoft mail service is rate limited."
+	case "auth_timeout", "request":
+		result.SafeMessage = "Microsoft mail service is temporarily unavailable."
+	default:
+		result.Category = "request"
+		result.SafeMessage = "Microsoft mail service is temporarily unavailable."
+	}
+	return result
+}
+
+func unavailableMicrosoftTokenRefreshResult() mailapp.MicrosoftTokenRefreshProtocolResult {
+	return mailapp.MicrosoftTokenRefreshProtocolResult{
+		Category:    "request",
+		SafeMessage: "Microsoft mail service is temporarily unavailable.",
+	}
 }
 
 func (a *ResourceValidationAdapter) SetHistoricalProjectMatcher(matcher mailapp.HistoricalProjectMatcher) {

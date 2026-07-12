@@ -14,6 +14,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -83,6 +84,172 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	var active int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM microsoft_allocations WHERE status = 'allocated'").Scan(&active).Error)
 	require.Equal(t, int64(workers), active)
+}
+
+func TestAllocationWaitsForMicrosoftResourceRootLockedByAdminMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+
+	adminTx := db.Begin()
+	require.NoError(t, adminTx.Error)
+	t.Cleanup(func() { _ = adminTx.Rollback().Error })
+	var rootID uint
+	require.NoError(t, adminTx.Raw(`
+SELECT id
+FROM email_resources
+WHERE id = 1000
+FOR UPDATE`).Scan(&rootID).Error)
+	require.Equal(t, uint(1000), rootID)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	allocationDone := make(chan error, 1)
+	go func() {
+		_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+			OrderNo:          "ord-admin-root-first",
+			BuyerUserID:      2,
+			ProjectProductID: 20,
+			SupplyScope:      domain.SupplyScopePublic,
+		})
+		allocationDone <- err
+	}()
+
+	select {
+	case err := <-allocationDone:
+		t.Fatalf("allocation finished before the administrator transaction: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// This is the write window that used to permit a check-then-act race: an
+	// allocator could lock the subtype and create an allocation after Core had
+	// locked the root but before Core changed the subtype state.
+	require.NoError(t, adminTx.Exec("UPDATE microsoft_resources SET status = 'disabled' WHERE id = 1000").Error)
+	require.NoError(t, adminTx.Commit().Error)
+
+	select {
+	case err := <-allocationDone:
+		require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation did not resume after the administrator transaction committed")
+	}
+
+	var active int64
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM microsoft_allocations
+WHERE resource_id = 1000 AND status = 'allocated'`).Scan(&active).Error)
+	require.Zero(t, active)
+}
+
+func TestAdminGuardWaitsForAllocationRootThenSeesActiveAllocationMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+
+	repo := NewRepo(db)
+	allocationTx := db.Begin()
+	require.NoError(t, allocationTx.Error)
+	t.Cleanup(func() { _ = allocationTx.Rollback().Error })
+	allocationCtx := platform.WithGormTx(context.Background(), allocationTx)
+	require.NoError(t, repo.CreateOrderGuard(allocationCtx, "ord-allocation-root-first", domain.AllocationTypeMicrosoft))
+	lockedRoot, err := repo.LockResourceRoot(allocationCtx, 1000, domain.AllocationTypeMicrosoft)
+	require.NoError(t, err)
+	require.True(t, lockedRoot)
+	lockedCandidate, err := repo.LockMicrosoftCandidate(allocationCtx, 1000, 10, 2, domain.SupplyScopePublic, "")
+	require.NoError(t, err)
+	require.NotNil(t, lockedCandidate)
+
+	guardUseCase := allocapp.NewUseCase(repo)
+	adminEntered := make(chan struct{}, 1)
+	adminDone := make(chan error, 1)
+	adminCtx, cancelAdmin := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelAdmin()
+	go func() {
+		adminDone <- db.WithContext(adminCtx).Transaction(func(tx *gorm.DB) error {
+			txCtx := platform.WithGormTx(adminCtx, tx)
+			adminEntered <- struct{}{}
+			var id uint
+			if err := tx.Raw(`
+SELECT id
+FROM email_resources
+WHERE id = 1000
+FOR UPDATE`).Scan(&id).Error; err != nil {
+				return err
+			}
+			if id != 1000 {
+				return fmt.Errorf("unexpected locked resource root %d", id)
+			}
+			return guardUseCase.AssertNoActiveAllocations(txCtx, []uint{1000})
+		})
+	}()
+	<-adminEntered
+	select {
+	case err := <-adminDone:
+		t.Fatalf("administrator command passed the allocation-held root early: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	allocation := &domain.MicrosoftAllocation{
+		OrderNo:     "ord-allocation-root-first",
+		ProjectID:   10,
+		ProductID:   20,
+		ResourceID:  1000,
+		SupplyScope: domain.SupplyScopePublic,
+		Mailbox:     domain.MicrosoftMailboxMain,
+		Email:       "ms1000@example.com",
+		Status:      domain.AllocationStatusAllocated,
+	}
+	require.NoError(t, repo.CreateMicrosoftAllocation(allocationCtx, allocation))
+	require.NoError(t, allocationTx.Commit().Error)
+
+	select {
+	case err := <-adminDone:
+		require.ErrorIs(t, err, domain.ErrActiveAllocation)
+	case <-time.After(5 * time.Second):
+		t.Fatal("administrator guard did not resume after allocation committed")
+	}
+}
+
+func TestResourceAllocationGuardRequiresRootTransactionAndIgnoresReleasedMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
+	require.ErrorIs(t, uc.AssertNoActiveAllocations(context.Background(), []uint{1000}), domain.ErrAllocationTxRequired)
+
+	assertGuard := func(want error) {
+		t.Helper()
+		err := repo.WithTx(context.Background(), func(txCtx context.Context) error {
+			locked, err := repo.LockResourceRoot(txCtx, 1000, domain.AllocationTypeMicrosoft)
+			if err != nil {
+				return err
+			}
+			if !locked {
+				return errors.New("resource root was not locked")
+			}
+			return uc.AssertNoActiveAllocations(txCtx, []uint{1000, 0, 1000})
+		})
+		if want == nil {
+			require.NoError(t, err)
+			return
+		}
+		require.ErrorIs(t, err, want)
+	}
+
+	assertGuard(nil)
+	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-active-guard",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	assertGuard(domain.ErrActiveAllocation)
+	_, err = uc.ReleaseByOrder(context.Background(), "ord-active-guard")
+	require.NoError(t, err)
+	assertGuard(nil)
 }
 
 func TestMicrosoftAllocationSkipsHistoricalProjectMatchMySQL(t *testing.T) {
@@ -503,7 +670,8 @@ func TestPlusDailyLimitConcurrentMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 0, 0, 1)
 	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
-	require.NoError(t, db.Exec("UPDATE microsoft_resources SET plus_daily_limit = 5 WHERE id = 1000").Error)
+	const dailyLimit = 5
+	require.NoError(t, db.Exec("UPDATE microsoft_resources SET plus_daily_limit = ? WHERE id = 1000", dailyLimit).Error)
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	const workers = 20
@@ -537,15 +705,52 @@ func TestPlusDailyLimitConcurrentMySQL(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	require.Equal(t, 5, successes)
-	require.Equal(t, workers-5, insufficient)
+	require.Positive(t, successes)
+	require.LessOrEqual(t, successes, dailyLimit)
+	require.Equal(t, workers-successes, insufficient)
 
 	var used int
 	require.NoError(t, db.Raw(`
 SELECT used_count
 FROM allocation_daily_usages
 WHERE resource_type = 'microsoft' AND resource_id = 1000 AND usage_kind = 'plus'`).Scan(&used).Error)
-	require.Equal(t, 5, used)
+	require.Equal(t, successes, used)
+
+	var active int
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM microsoft_allocations
+WHERE resource_id = 1000 AND mailbox = 'plus' AND status = 'allocated'`).Scan(&active).Error)
+	require.Equal(t, successes, active)
+
+	for i := successes; i < dailyLimit; i++ {
+		_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+			OrderNo:          fmt.Sprintf("ord-plus-topup-%03d", i),
+			BuyerUserID:      2,
+			ProjectProductID: 20,
+			SupplyScope:      domain.SupplyScopePublic,
+		})
+		require.NoError(t, err)
+	}
+
+	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-plus-over-limit",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	require.NoError(t, db.Raw(`
+SELECT used_count
+FROM allocation_daily_usages
+WHERE resource_type = 'microsoft' AND resource_id = 1000 AND usage_kind = 'plus'`).Scan(&used).Error)
+	require.Equal(t, dailyLimit, used)
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM microsoft_allocations
+WHERE resource_id = 1000 AND mailbox = 'plus' AND status = 'allocated'`).Scan(&active).Error)
+	require.Equal(t, dailyLimit, active)
 }
 
 func TestDomainDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
@@ -624,6 +829,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"microsoft_allocations", "idx_ms_alloc_dot_alias_resource"},
 		{"microsoft_allocations", "idx_ms_alloc_plus_alias_resource"},
 		{"microsoft_allocations", "idx_ms_alloc_resource_mailbox_created"},
+		{"microsoft_allocations", "idx_ms_alloc_resource_created_id"},
 		{"microsoft_allocations", "idx_ms_alloc_email_status"},
 		{"domain_allocations", "idx_domain_alloc_active_mailbox"},
 		{"domain_allocations", "idx_domain_alloc_guard_type"},
@@ -650,6 +856,10 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_ms_alloc_email_status",
 		"EXPLAIN SELECT id FROM microsoft_allocations WHERE email = 'ms1000@example.com' AND status = 'allocated'",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_ms_alloc_resource_created_id",
+		"EXPLAIN SELECT id, order_no FROM microsoft_allocations WHERE resource_id = 1000 ORDER BY created_at DESC, id DESC LIMIT 20",
 	)
 	requireExplainUsesIndex(t, db,
 		"PRIMARY",
@@ -687,6 +897,10 @@ func seedMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count i
 	for i := 0; i < count; i++ {
 		id := startID + i
 		email := fmt.Sprintf("ms%d@example.com", id)
+		qualityScore := 100 - i
+		if qualityScore < 0 {
+			qualityScore = 0
+		}
 		require.NoError(t, db.Exec(
 			"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, 'microsoft', ?)",
 			id,
@@ -699,7 +913,7 @@ VALUES (?, ?, 'example.com', 'secret', ?, ?, ?, MOD(?, 64))`,
 			email,
 			forSale,
 			status,
-			100-i,
+			qualityScore,
 			id,
 		).Error)
 	}

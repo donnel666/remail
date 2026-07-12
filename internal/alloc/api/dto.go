@@ -24,6 +24,34 @@ type AllocationListResponse struct {
 	Limit  int                      `json:"limit"`
 }
 
+type AdminAllocationItemResponse struct {
+	Type             string     `json:"type"`
+	ID               uint       `json:"id"`
+	OrderNo          string     `json:"orderNo"`
+	ProjectID        uint       `json:"projectId"`
+	ProjectName      string     `json:"projectName"`
+	ProjectLogoURL   *string    `json:"projectLogoUrl"`
+	ResourceID       uint       `json:"resourceId"`
+	Mailbox          string     `json:"mailbox"`
+	SupplyScope      string     `json:"supplyScope"`
+	DeliveryEmail    string     `json:"deliveryEmail"`
+	ServiceMode      string     `json:"serviceMode"`
+	OrderStatus      string     `json:"orderStatus"`
+	Status           string     `json:"status"`
+	PayAmount        string     `json:"payAmount"`
+	BuyerEmail       string     `json:"buyerEmail"`
+	VerificationCode *string    `json:"verificationCode"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	ReceiveUntil     *time.Time `json:"receiveUntil"`
+}
+
+type AdminAllocationListResponse struct {
+	Items  []AdminAllocationItemResponse `json:"items"`
+	Total  int64                         `json:"total"`
+	Offset int                           `json:"offset"`
+	Limit  int                           `json:"limit"`
+}
+
 type ProjectInventoryResponse struct {
 	ProjectID                  uint                       `json:"projectId"`
 	Microsoft                  MicrosoftInventoryResponse `json:"microsoft"`

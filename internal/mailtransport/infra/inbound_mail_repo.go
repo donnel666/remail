@@ -13,17 +13,24 @@ import (
 )
 
 type InboundMailModel struct {
-	ID              uint      `gorm:"primaryKey;autoIncrement"`
-	EnvelopeFrom    string    `gorm:"type:varchar(320);not null;column:envelope_from"`
-	Recipient       string    `gorm:"type:varchar(320);not null"`
-	ResourceID      uint      `gorm:"not null;column:resource_id"`
-	ResourceType    string    `gorm:"type:varchar(32);not null;column:resource_type"`
-	OwnerUserID     uint      `gorm:"not null;column:owner_user_id"`
-	SourceObjectKey string    `gorm:"type:varchar(500);not null;column:source_object_key"`
-	Status          string    `gorm:"type:varchar(32);not null;default:'pending'"`
-	FailureReason   string    `gorm:"type:varchar(500);not null;default:'';column:failure_reason"`
-	CreatedAt       time.Time `gorm:"not null;autoCreateTime"`
-	UpdatedAt       time.Time `gorm:"not null;autoUpdateTime"`
+	ID               uint       `gorm:"primaryKey;autoIncrement"`
+	EnvelopeFrom     string     `gorm:"type:varchar(320);not null;column:envelope_from"`
+	HeaderFrom       string     `gorm:"type:varchar(320);not null;default:'';column:header_from"`
+	Recipient        string     `gorm:"type:varchar(320);not null"`
+	Subject          string     `gorm:"type:varchar(500);not null;default:''"`
+	BodyPreview      string     `gorm:"type:varchar(1000);not null;default:'';column:body_preview"`
+	VerificationCode string     `gorm:"type:varchar(64);not null;default:'';column:verification_code"`
+	MessageIDHeader  string     `gorm:"type:varchar(500);not null;default:'';column:message_id_header"`
+	ReceivedAt       *time.Time `gorm:"column:received_at"`
+	ParsedAt         *time.Time `gorm:"column:parsed_at"`
+	ResourceID       uint       `gorm:"not null;column:resource_id"`
+	ResourceType     string     `gorm:"type:varchar(32);not null;column:resource_type"`
+	OwnerUserID      uint       `gorm:"not null;column:owner_user_id"`
+	SourceObjectKey  string     `gorm:"type:varchar(500);not null;column:source_object_key"`
+	Status           string     `gorm:"type:varchar(32);not null;default:'pending'"`
+	FailureReason    string     `gorm:"type:varchar(500);not null;default:'';column:failure_reason"`
+	CreatedAt        time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt        time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 func (InboundMailModel) TableName() string {
@@ -32,33 +39,47 @@ func (InboundMailModel) TableName() string {
 
 func (m *InboundMailModel) toDomain() *domain.InboundMail {
 	return &domain.InboundMail{
-		ID:              m.ID,
-		EnvelopeFrom:    m.EnvelopeFrom,
-		Recipient:       m.Recipient,
-		ResourceID:      m.ResourceID,
-		ResourceType:    domain.InboundResourceType(m.ResourceType),
-		OwnerUserID:     m.OwnerUserID,
-		SourceObjectKey: m.SourceObjectKey,
-		Status:          domain.InboundStatus(m.Status),
-		FailureReason:   m.FailureReason,
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
+		ID:               m.ID,
+		EnvelopeFrom:     m.EnvelopeFrom,
+		HeaderFrom:       m.HeaderFrom,
+		Recipient:        m.Recipient,
+		Subject:          m.Subject,
+		BodyPreview:      m.BodyPreview,
+		VerificationCode: m.VerificationCode,
+		MessageIDHeader:  m.MessageIDHeader,
+		ReceivedAt:       m.ReceivedAt,
+		ParsedAt:         m.ParsedAt,
+		ResourceID:       m.ResourceID,
+		ResourceType:     domain.InboundResourceType(m.ResourceType),
+		OwnerUserID:      m.OwnerUserID,
+		SourceObjectKey:  m.SourceObjectKey,
+		Status:           domain.InboundStatus(m.Status),
+		FailureReason:    m.FailureReason,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
 	}
 }
 
 func inboundMailFromDomain(mail domain.InboundMail) *InboundMailModel {
 	return &InboundMailModel{
-		ID:              mail.ID,
-		EnvelopeFrom:    mail.EnvelopeFrom,
-		Recipient:       mail.Recipient,
-		ResourceID:      mail.ResourceID,
-		ResourceType:    string(mail.ResourceType),
-		OwnerUserID:     mail.OwnerUserID,
-		SourceObjectKey: mail.SourceObjectKey,
-		Status:          string(mail.Status),
-		FailureReason:   mail.FailureReason,
-		CreatedAt:       mail.CreatedAt,
-		UpdatedAt:       mail.UpdatedAt,
+		ID:               mail.ID,
+		EnvelopeFrom:     mail.EnvelopeFrom,
+		HeaderFrom:       mail.HeaderFrom,
+		Recipient:        mail.Recipient,
+		Subject:          mail.Subject,
+		BodyPreview:      mail.BodyPreview,
+		VerificationCode: mail.VerificationCode,
+		MessageIDHeader:  mail.MessageIDHeader,
+		ReceivedAt:       mail.ReceivedAt,
+		ParsedAt:         mail.ParsedAt,
+		ResourceID:       mail.ResourceID,
+		ResourceType:     string(mail.ResourceType),
+		OwnerUserID:      mail.OwnerUserID,
+		SourceObjectKey:  mail.SourceObjectKey,
+		Status:           string(mail.Status),
+		FailureReason:    mail.FailureReason,
+		CreatedAt:        mail.CreatedAt,
+		UpdatedAt:        mail.UpdatedAt,
 	}
 }
 
@@ -172,6 +193,35 @@ func (r *InboundMailRepo) ClaimDispatchable(ctx context.Context, limit int, stal
 
 func (r *InboundMailRepo) MarkPending(ctx context.Context, id uint, safeError string) error {
 	return r.updateStatus(ctx, id, domain.InboundStatusPending, []domain.InboundStatus{domain.InboundStatusPending, domain.InboundStatusProcessing}, safeDiagnostic(safeError))
+}
+
+func (r *InboundMailRepo) SaveParsedSummary(ctx context.Context, id uint, summary domain.InboundMailSummary) error {
+	if id == 0 || summary.ParsedAt.IsZero() {
+		return fmt.Errorf("save inbound mail summary: invalid summary")
+	}
+	receivedAt := summary.ReceivedAt.UTC()
+	if summary.ReceivedAt.IsZero() {
+		receivedAt = summary.ParsedAt.UTC()
+	}
+	result := r.db.WithContext(ctx).Model(&InboundMailModel{}).
+		Where("id = ? AND status = ?", id, string(domain.InboundStatusProcessing)).
+		Updates(map[string]any{
+			"header_from":       summary.HeaderFrom,
+			"subject":           summary.Subject,
+			"body_preview":      summary.BodyPreview,
+			"verification_code": summary.VerificationCode,
+			"message_id_header": summary.MessageIDHeader,
+			"received_at":       receivedAt,
+			"parsed_at":         summary.ParsedAt.UTC(),
+			"updated_at":        time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("save inbound mail summary: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("save inbound mail summary: inbound mail not found")
+	}
+	return nil
 }
 
 func (r *InboundMailRepo) MarkStored(ctx context.Context, id uint) error {

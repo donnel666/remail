@@ -8,6 +8,10 @@ import (
 var (
 	ErrInboundRecipientRejected  = errors.New("inbound recipient is not accepted")
 	ErrInboundStorageUnavailable = errors.New("inbound mail storage is temporarily unavailable")
+	ErrInvalidAuxiliaryMailQuery = errors.New("invalid auxiliary mail query")
+	ErrAuxiliaryResourceNotFound = errors.New("auxiliary mail resource not found")
+	ErrAuxiliaryMessageNotFound  = errors.New("auxiliary mail message not found")
+	ErrAuxiliaryMailUnavailable  = errors.New("auxiliary mail is temporarily unavailable")
 )
 
 type InboundStatus string
@@ -38,17 +42,37 @@ type InboundRecipient struct {
 }
 
 type InboundMail struct {
-	ID              uint                `json:"id"`
-	EnvelopeFrom    string              `json:"envelopeFrom"`
-	Recipient       string              `json:"recipient"`
-	ResourceID      uint                `json:"resourceId"`
-	ResourceType    InboundResourceType `json:"resourceType"`
-	OwnerUserID     uint                `json:"ownerUserId"`
-	SourceObjectKey string              `json:"sourceObjectKey"`
-	Status          InboundStatus       `json:"status"`
-	FailureReason   string              `json:"failureReason"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	UpdatedAt       time.Time           `json:"updatedAt"`
+	ID               uint                `json:"id"`
+	EnvelopeFrom     string              `json:"envelopeFrom"`
+	HeaderFrom       string              `json:"headerFrom"`
+	Recipient        string              `json:"recipient"`
+	Subject          string              `json:"subject"`
+	BodyPreview      string              `json:"bodyPreview"`
+	VerificationCode string              `json:"verificationCode"`
+	MessageIDHeader  string              `json:"messageIdHeader"`
+	ResourceID       uint                `json:"resourceId"`
+	ResourceType     InboundResourceType `json:"resourceType"`
+	OwnerUserID      uint                `json:"ownerUserId"`
+	SourceObjectKey  string              `json:"sourceObjectKey"`
+	Status           InboundStatus       `json:"status"`
+	FailureReason    string              `json:"failureReason"`
+	ReceivedAt       *time.Time          `json:"receivedAt"`
+	ParsedAt         *time.Time          `json:"parsedAt"`
+	CreatedAt        time.Time           `json:"createdAt"`
+	UpdatedAt        time.Time           `json:"updatedAt"`
+}
+
+// InboundMailSummary is the bounded, safe summary extracted from an RFC822
+// object during inbound processing. It deliberately excludes the raw message,
+// private object key, transport envelope, and any dispatch/claim secret.
+type InboundMailSummary struct {
+	HeaderFrom       string
+	Subject          string
+	BodyPreview      string
+	VerificationCode string
+	MessageIDHeader  string
+	ReceivedAt       time.Time
+	ParsedAt         time.Time
 }
 
 func NewInboundMail(envelopeFrom string, recipient InboundRecipient, sourceObjectKey string, now time.Time) *InboundMail {

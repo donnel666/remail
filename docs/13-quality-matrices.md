@@ -12,6 +12,14 @@
 | 2026-07-10 | V2.1 | Cursor | 增加 Microsoft 显式别名异步创建、上海自然周/年配额、候选预占、远端结果对账和 fencing 验收项。 |
 | 2026-07-11 | V2.2 | Codex | 明确显式别名只为公开出售的正常 Microsoft 资源自动补货、成功库存统一归确定性的 `super_admin`，并按当前三 worker-pool 拓扑补充低优验证/别名任务的动态 dispatch 与 execution admission 验收口径。 |
 | 2026-07-11 | V2.3 | Codex | 将显式别名补货与 `forSale` 解耦：公开和私有的正常 Microsoft 资源都创建，出售状态切换不影响任务；非正常状态仍在领取和远端调用前被拦截。 |
+| 2026-07-12 | V2.4 | Codex | 增加管理员 Microsoft 资源管理专项验收：UI 零删除、真实 API、mock 清除、跨 BC 组合读、显式命令、禁敏和 SQL/P95 证据；不修改 D1–D20、T1–T13、A1–A13 的编号、评分或红线规则。 |
+| 2026-07-12 | V2.5 | Codex | 回填管理员 Microsoft 专项阶段性证据：正式契约、migration/Port、含 Orders bounded enrichment 的查询/命令/任务、前端真实 API 和 mock 零引用已有实现；全权限/禁敏/并发、目标规模性能和真实 E2E/视觉/重启证据仍阻塞合并。 |
+| 2026-07-12 | V2.6 | Codex | 回填最终稳定工作树的 Go/静态/OpenAPI/前端/mock 门禁并校准专项自评为 D 30、T 13、A 17；T8、T12、A7 保持 0，性能、真实 E2E、视觉与重启演练仍禁止上线。 |
+| 2026-07-12 | V2.7 | Codex | 曾回填管理员 API 安全契约、Redis 限流、100 并发与 rollback/panic、前端 9 files/55 tests 和真实 100k/1M 基准；后续 V2.10 已删除专项限流和性能 harness。辅助邮件 generated sort migration 因全仓兼容性测试失败被撤回，体现简单稳定优先。 |
+| 2026-07-12 | V2.8 | Codex | 将性能数值统一为参考基线和容量观察，硬门禁聚焦正确性、有界查询、无 N+1 与可诊断性；不再指定缓存命中或把 10M/全部 P95 变绿作为管理员专项评分前提。 |
+| 2026-07-12 | V2.9 | Codex | 回填管理员 Microsoft 自动化代码交付结论：Core credential Port、Alias 唯一审计入口、无用索引清理、async accepted/import queue 禁敏已收口；功能/事务/migration、前端 9/56、生成、vet/lint 和零 mock/直连扫描通过。压测不属于本次门禁。 |
+| 2026-07-12 | V2.10 | Codex | 进一步落实简单稳定原则：管理员专项删除百万数据性能 harness 和应用内 Redis 管理限流，不再以 P95/压测评分推动缓存、投影表或额外可用性依赖；保留有界分页、无 N+1、普通 EXPLAIN 和必要索引证据，性能问题改由真实运行数据触发。 |
+| 2026-07-12 | V2.11 | Codex | 管理员专项并发口径收敛到实际不超过 10 个管理员：保留真实 MySQL 事务/唯一事实/锁序测试，删除固定 100 压力与全仓 race 门槛；同时移除重复列表索引、dead TaskView 查询和 AMR Redis/投影依赖。 |
 
 > 本矩阵用于写之前、写之中、写之后的自审。目标不是堆流程，而是用最少证据证明系统能上线、能维护、能扩展、能重构。
 
@@ -49,12 +57,14 @@
 | D14 | 日志诊断 | OperationLog/SystemLog 能排障 | 只能看 Docker 日志 | 普通查询全写操作日志 | 日志字段 |
 | D15 | 敏感信息 | 凭据/正文不进响应和普通日志 | 明文到处传 | 过度加密导致不可用 | 禁敏规则 |
 | D16 | 后台能力 | 管理员不用 SQL 修业务 | 异常状态只能手改库 | 后台绕过状态机 | 管理命令 |
-| D17 | 性能意识 | 查询有索引和 P95 目标 | 上线后才看慢 SQL | 过早分库分表 | EXPLAIN/压测 |
+| D17 | 性能意识 | 代表性查询有索引、EXPLAIN 和 P95 记录 | 上线后才看慢 SQL | 为极端目标过早分库分表、缓存或预聚合 | EXPLAIN/压测 |
 | D18 | 可重构性 | 模块内聚、Port 清楚 | 代码耦合到表和 handler | 抽象层太多 | 包依赖图 |
 | D19 | API 命名 | 常见短词、能省略先省略、默认不用连接符、无内部实现词 | URI 冷门词/表名/角色前缀/多词硬拼 | 为命名过度拆碎路径 | OpenAPI |
 | D20 | 同步/异步边界 | HTTP 同步链路只做快速校验、持久化和任务投递；外部网络、批量处理、可重试耗时检测默认用 Asynq 或等价后台任务；批量检测必须由后端批量提交任务，不允许前端循环请求单资源检测接口 | 耗时任务塞进请求导致超时和慢请求 | 查询也强行异步导致 UX 和一致性变差 | 同步/异步取舍说明、任务状态、日志 |
 
 红线：`D2/D4/D5/D6/D7/D9/D10/D11/D12/D14/D15/D16/D17/D19/D20`。
+
+`D15` 中“正文不进响应”指正文不得进入列表、批量响应、任务、错误、普通日志或无关详情；业务已确认且完成资源/消息关联及权限校验的单封邮件详情可以按需返回正文。验证码可出现在已确认的授权 Orders 行、邮件摘要和单封详情中，但不得进入任务、错误、OperationLog、SystemLog、普通日志或导出。密码、Client ID 原值、RT、AT 和内部任务 token 在任何管理响应中都没有例外。
 
 ---
 
@@ -144,11 +154,11 @@ SQL 证据必须包含：
 
 ---
 
-## 6. 性能验收矩阵
+## 6. 性能观察与验收矩阵
 
-默认上线指标先按单机 6C/16G 级别保守目标，后续按压测调整。
+以下数值先按单机 6C/16G 作为默认参考基线，用于发现回归和容量风险，实际上线门槛按真实预估峰值、数据分布和适度余量确定。
 
-| 指标 | 最低要求 |
+| 指标 | 参考目标 |
 |------|----------|
 | 登录/当前用户 | P95 < 150ms |
 | 项目列表/详情 | P95 < 200ms |
@@ -156,7 +166,7 @@ SQL 证据必须包含：
 | 钱包查询 | P95 < 200ms |
 | 订单列表 | P95 < 300ms，必须有索引和 limit/page 方案 |
 | 邮件列表 | P95 < 300ms，按 orderNo 链路和时间索引查询 |
-| API Key 鉴权 | P95 < 50ms，缓存命中 |
+| API Key 鉴权 | P95 参考值 < 50ms；优先保证查询有界且命中常规索引，是否使用缓存由真实瓶颈决定 |
 | 代理获取 | P95 < 80ms，命中绑定或最少绑定选择必须走索引 |
 | Asynq 任务失败可见性 | 任务失败 5 秒内可在后台任务/日志中查到 |
 | 慢 SQL | 无未解释的全表扫描；核心查询必须有 EXPLAIN 证据 |
@@ -167,7 +177,7 @@ SQL 证据必须包含：
 
 说明：列表接口可以使用简单 `page/pageSize`，不为了旧全量列表口径坚持全量返回。快速上线不等于允许大表全量扫。
 
-性能证据不要求一次性达到大规模系统标准，但每个模块上线前必须留下“测了什么、数据量多大、P95 多少、瓶颈在哪里”的记录。没有数据的性能结论视为 0 分。
+性能证据不要求一次性达到大规模系统标准，也不要求为全部参考值变绿引入额外机制；但每个模块上线前必须留下“测了什么、数据量多大、P95 多少、瓶颈在哪里”的记录。没有数据的性能结论视为 0 分。
 
 ---
 
@@ -362,6 +372,17 @@ API/SDK：
 - [ ] 重复验证不会重复创建旧项目关系；历史项目资源在候选查询与行锁重校验两处均被排除。
 - [ ] 显式别名远端响应丢失、落库失败或 worker 过期后只对账并重试同一候选；旧 fencing token 不得覆盖新 worker，周/年额度不得超限。
 
+管理员 Microsoft 专项已经补充的并发与事务证据如下；这些证据只关闭对应路径，不能替代上面订单、钱包等全局清单：
+
+- [x] 同一同步状态命令及相同 Idempotency-Key 在预期最多 10 个管理员同时提交下，只产生一个 command receipt、一次版本变化和一条 Core OperationLog。
+- [x] 管理员 import、filter bulk 在最多 10 个同时提交下各只创建一个 durable fact；bulk 只写一条命令级 OperationLog。
+- [x] Validation、Token Refresh、Alias Expedite、Resource Fetch 在最多 10 个同时提交下各只创建一个 active job/schedule 结果；重复请求按各自契约复用 task 或 durable receipt。
+- [x] 原子 Edit 在 Binding Port error 和 panic 时回滚 root/subtype、validation、receipt 与 OperationLog；Enable 在 OperationLog failure 时回滚状态、validation 与 receipt。
+- [x] bulk page 中段失败时资源状态与 checkpoint/progress 同事务回滚；Token/Alias 审计失败和 Fetch 完成期 SystemLog 失败均有对应回滚证据。
+- [x] Alloc 已有管理员先锁 root 与 Allocation 先锁 root 两个方向的锁序测试，并验证 active guard 不存在 check-then-act 窗口。
+- [x] Import/Bulk 仅对已复现的 MySQL 1205/1213 使用最多 3 次短事务重试；同场景验证最终只有一个 durable fact，失败页与 checkpoint/progress 保持同事务。
+- [ ] 同资源普通 Edit 不同 version/内容、Delete 与 Allocation create 的完整双向 barrier 仍待补；压测、全仓 `go test -race` 和 lock-wait 指标不作为管理员功能完成条件。
+
 ### 12.5 SQL 与性能
 
 执行入口：
@@ -371,17 +392,19 @@ API/SDK：
 - 混合压测：`scripts/perf/k6.js`
 - 操作说明：`scripts/perf/README.md`
 
-数据规模：100 万 Microsoft 主资源、独立 profile 的 1000 万 explicit_aliases、1 万 Domain（Domain 可用真实导入数据）、1000 万 orders/allocations/wallet_transactions、3000 万 order_events，以及按 3/30 天窗口生成的消息。
+容量 profile 可生成：100 万 Microsoft 主资源、独立 profile 的 1000 万 explicit_aliases、1 万 Domain（Domain 可用真实导入数据）、1000 万 orders/allocations/wallet_transactions、3000 万 order_events，以及按 3/30 天窗口生成的消息。上述 profile 用于容量观察和重审触发，不要求为了达到极致 P95 预先引入缓存、物化统计或双写；管理员低频查询优先保持简单、稳定、可诊断。
 
-通过标准：
+参考压测场景与硬不变式：
 
-- [ ] 300 下单/s + 3000 Pickup/s 持续 15 分钟：下单 P95 ≤300ms、P99 ≤800ms；Pickup P95 ≤50ms、P99 ≤100ms。
-- [ ] 600/6000 持续 5 分钟用于余量验证；不能出现重复业务事实、连接耗尽或 lock wait timeout。
-- [ ] 非业务 5xx <0.1%。
+- [ ] 300 下单/s + 3000 Pickup/s 持续 15 分钟作为容量参考：记录下单/Pickup P95、P99、错误率和资源占用，不把该固定档位套到低频管理员页面。
+- [ ] 600/6000 持续 5 分钟只在真实容量规划需要时做余量观察；任何档位都不能出现重复业务事实、连接耗尽或不可恢复的 lock wait timeout。
+- [ ] 非业务 5xx、超时和饱和点有记录；具体阈值按预计峰值和上线环境定稿，参考值为 <0.1%。
 - [ ] Microsoft 模拟 Graph 到可见 P95 ≤10 秒；SMTP 到可见 P95 ≤2 秒。
 - [ ] 候选选择、active key、Token+scope、matched_order_id、生命周期、保留 DELETE、cursor 查询均保存 `EXPLAIN ANALYZE`。
 
-当前仓库只提供可重复执行的生成器与压测脚本；没有附生产同等硬件实测数据时，本节性能项必须保持“待验证”，不得填写通过。
+管理员 Microsoft 是低频管理用例，本次不维护独立的百万数据压测 harness，也不以固定 P95 推动缓存、物化统计、额外索引或跨域双写。合并时只要求能直接证明复杂度受控的证据：服务端 page limit、稳定排序、无 N+1 的查询次数断言、关键 SQL 普通 `EXPLAIN` smoke，以及列表响应直接复用 facets。真实运行出现慢 SQL 后，再以实际 SQL、数据分布和调用频率做局部评审。
+
+因此专项 T8/A7 只按“已有有界查询和普通执行计划证据”保守评 1，不把历史开发机压测数字作为当前实现或生产容量承诺。性能优化必须能说明收益高于新增状态、缓存一致性和维护成本。
 
 ### 12.6 前端与契约
 
@@ -392,7 +415,7 @@ API/SDK：
 - [ ] 快速切换 serviceMode/筛选时旧响应不能覆盖新状态。
 - [ ] 资源验证完成后自动刷新状态并显示安全错误。
 - [ ] 导航不展示未实现页面；在线支付入口隐藏，卡密兑换保留。
-- [ ] `api/openapi.yaml` 为唯一契约源；Go、TypeScript、公开 OpenAPI 生成后 CI diff 必须为空。
+- [ ] `api/openapi.yaml` 为 Session/管理员 HTTP 契约源；Go、TypeScript 生成后 CI diff 必须为空。独立 public spec 只描述公开接口，按其生成脚本和路由/enum 契约测试校验，不反向定义管理员契约。
 - [ ] 前端至少运行 `pnpm typecheck`、`pnpm test`、`pnpm build`。
 
 ### 12.7 CI/CD 最终门禁
@@ -403,3 +426,41 @@ API/SDK：
 - [ ] PR 必须通过 Dockerfile.ci 构建；main/tag 必须通过真实 MySQL/Redis/MinIO smoke 后才允许发布镜像。
 - [ ] 同分支旧流水线自动取消；tag 不取消；所有长任务有 timeout。
 - [ ] GHCR 和 Actions Cache 都只保留最近 3 个版本，Cleanup dry-run 可审查且删除错误必须失败。
+
+### 12.8 管理员 Microsoft 资源管理专项验收
+
+本节是既有 D1–D20、T1–T13、A1–A13 的专项证据清单，不新增评分编号，也不放宽任何红线。详细 UI/API/BC/Port/权限/日志/测试追踪以 [21-admin-microsoft-resource-matrices.md](21-admin-microsoft-resource-matrices.md) 为准。
+
+| 类别 | 必须通过的专项验收 | 主要证据 |
+|------|--------------------|----------|
+| UI 零删除 | 每个已确认可见能力都有 `UI-AMR-*`：主列表、后缀 Tabs、搜索、创建时间、五组交叉筛选、单项/选中项/全部匹配动作、三个弹窗、七个详情 Tab、四个手工任务，以及桌面/移动布局、加载、空状态、Toast、确认、分页和选择清理；数量、文案和交互不能因后端实现而删改。 | UI 保留矩阵、runtime contract、桌面/移动组件测试、E2E 截图或录像。 |
+| 真实 API | 每个 UI-ID 都由已进入 `api/openapi.yaml` 的真实查询、命令或 durable task 支撑；管理员 Go、TypeScript 生成后无漂移，独立 public spec 不包含管理员路径，mock DTO 不作为契约源。 | OpenAPI diff、Handler/契约测试、前端生成类型引用、public admin-path 零检查。 |
+| mock 清除 | 生产和测试代码均不再 import 管理员 Microsoft mock；不存在生产 mock fallback、随机数据或刷新后回到内存状态；有价值的 mock 断言迁移为契约、adapter、组件或 E2E 测试。 | `rg` 零引用、构建产物检查、真实数据库 E2E。 |
+| 跨 BC 组合读 | 管理页面不形成新业务域或复制资源、owner、绑定、分配、订单、邮件、任务事实；按事实所有者通过批量 Query Port 或直接源表的有界只读查询组合读取，列表无 N+1，七个 Tab 按需分页/懒加载。 | 包依赖审查、Query Port 测试、SQL 查询计数、分页/取消旧请求测试。 |
+| 显式命令 | Validate、Enable、Disable、Publish、Unpublish、Delete、Recover、ReplaceCredentials、RefreshToken、ExpediteAliasSchedule、FetchMail 均进入事实所有者的 Application Service；不得用任意 `PATCH status` 或后台直接更新跨域表替代。active Allocation 必须阻止 email/owner/Delete，同时反向证明 Disable、Unpublish、凭据、qualityScore、longLived 和 binding 输入不会被通用 guard 误阻断。 | 状态机测试、active Allocation 正反向测试、Handler 路由审查、OperationLog 断言。 |
+| 原子编辑 | 一个编辑保存中的基础字段、owner、binding 输入、可选完整凭据、OperationLog 和验证任务事实处于明确的单一短事务；任一步错误或 panic 全回滚，Microsoft 外部调用只在提交后由 worker 执行。 | 正向/失败/panic rollback、tx 绑定与 dispatcher 恢复测试。 |
+| 批量与幂等 | 选中项使用 `selection.mode=ids`，全部匹配使用 `selection.mode=filter` 并记录接收时资源 ID 高水位；前端不拉全量 ID、不循环单资源 API；大批量分块执行、同命令重放幂等且只写命令级 OperationLog。 | Handler/usecase/worker、并发重放、批量日志行数和高水位测试。 |
+| 异步边界 | 验证、RT 刷新、alias schedule 加速、资源 Fetch 和大批量动作只在 HTTP 中校验、落 durable fact 并返回 `202`；同资源同类 active job 复用，Redis/Asynq 短暂失败可由 dispatcher 恢复。 | T13 测试、active-job 唯一约束、worker 重试/确定性失败/恢复测试。 |
+| 权限与审计 | 每个读写入口有 Casbin 权限和 CSRF 证据；owner 资格、资源状态和 active Allocation 由领域校验；单项/批量命令写 OperationLog，外部失败写 SystemLog，单封敏感正文读取有定向审计且摘要列表不刷屏。 | 权限/CSRF HTTP 测试、日志字段和数量断言。 |
+| 禁敏与安全错误 | 任何响应、任务视图、OperationLog、SystemLog、Toast 安全文案均不包含密码、Client ID 原值、RT、AT、RFC822 objectKey、claim/dispatch token、代理凭据或上游原始页面/响应；正文只有通过资源/消息关联及读取权限校验的单封邮件详情可以返回，验证码只允许出现在 UI 已确认的授权 Orders 行、邮件摘要和单封详情中，正文/验证码均不得进入任务、错误、日志或导出。不存在/越权用安全 404，临时上游失败用安全 502/503。 | JSON key 递归扫描、日志扫描、Orders/邮件摘要与单封正文授权测试、错误分类/MinIO 失败测试。 |
+| 邮件按需读取 | 主邮箱和辅助邮箱列表只返回摘要；仅在选中单封邮件时读取正文，切换资源/Tab 后旧响应不得覆盖新状态；辅助邮箱事实继续归 MailTransport。 | API payload 大小、summary/detail 契约、AbortSignal/stale response、受控正文读取测试。 |
+| SQL 与性能 | 资源列表、交叉 facets、owner/binding 批量补充和关键 Tab 查询必须有 page limit、稳定排序、查询次数与普通 `EXPLAIN` 证据；本专项不要求压测或固定 P95。 | SQL/索引清单、执行计划 smoke、查询次数和分页测试。 |
+| 数据迁移 | owner 转移相关约束区分当前 Binding owner 与 Validation/Inbound/OperationLog 历史 owner 快照；只新增 migration，不修改已部署历史 migration；空库、升级、唯一/FK/CHECK 路径通过。 | migration、Testcontainers 空库/升级/约束测试。 |
+| 全链路完成 | 七个详情 Tab、四个手工任务和三个弹窗全部接真实数据；页面刷新、服务/worker 重启和任务重派后结果仍来自数据库及受控对象存储，不依赖进程内 mock。 | 最小管理员 Microsoft E2E、重启/重派演练、前端 typecheck/test/build。 |
+
+专项合并结论必须在第 10 节模板中同时附上 UI 保留矩阵、mock 零引用、OpenAPI 生成漂移、跨 BC Port/有界只读查询组合、敏感字段扫描、列表/facets/Tab 分页与普通 EXPLAIN 证据；任一证据缺失时，对应既有 D/T/A 项仍按原评分规则处理。
+
+当前专项证据快照（2026-07-12；详细测试名见 [21-admin-microsoft-resource-matrices.md](21-admin-microsoft-resource-matrices.md) 第 13–17 节）：
+
+| 类别 | 当前证据 | 当前结论 |
+|------|----------|----------|
+| 静态/自动化门禁 | `gofmt -l api cmd internal` 无输出，`go vet ./...`、`golangci-lint run`（0 issues）、`git diff --check` 通过；Core credential、Token/Fetch/Alias、00009 migration 和受影响 API/app 功能/事务测试通过 | 本次自动化代码交付门禁完成；不把已中止的长时间混合源码分片或额外压测写成必要证据 |
+| UI/前端 | 111 个 UI-ID、3 弹窗、7 Tab、4 任务仍在 runtime contract；`/admin/microsoft` 必须指向真实 lazy page；adapter 使用 generated types；`pnpm typecheck`、Vitest、`pnpm build` 已实跑通过；组件测试覆盖懒加载、active-task polling、凭据成对校验/不回显、异步受理元数据、AbortSignal、desktop 940px 与 mobile 100% SideSheet | 组件/runtime 层已接线；这些测试不是浏览器 E2E 或截图/视觉回归，真实数据库 Playwright、桌面/移动/明暗视觉作为后续发布证据保留 |
+| 正式契约/mock | Q01–Q12/C01–C18 已进入 `api/openapi.yaml`；async accepted 固定 `taskId/requestId/status/accepted/reused`，import queue 不序列化 object key/claim token；管理员 Go/TS 生成哈希零漂移，mock 文件删除且 exact scan 零引用/零 fallback | 管理员生成漂移、异步受理、queue 禁敏和 mock 清理门禁已通过；完整运行时角色/权限组合与 502/503 parity 仍独立待验 |
+| 边界/后端 | Core 管理 query/command/import/bulk/validation、IAM Owner、Alloc guard/Orders bounded enrichment、Governance TaskView、MailTransport Binding/辅助邮件/Token/Alias、MailMatch message/Fetch 已按事实所有者或直接源表的有界只读查询组合落盘；Token/Fetch 经 Core credential Port，Alias 只有受审计入口 | 没有新 Admin BC、跨域直写、投影表或 Alias 管理旁路；Q01–Q12/C01–C18 运行契约已覆盖 UI 能力 |
+| 事务/幂等 | 原子编辑、Binding error/panic、OperationLog/SystemLog failure、Core credential caller-tx、Token/Fetch rotation/fencing、Alias receipt/audit rollback 均有自动化证据 | 核心短事务、durable single-flight、关键失败注入和跨域同 tx 已具备；额外并发压力、全仓 race 和 lock-wait 指标属于后续风险驱动验证，不是本次门禁 |
+| 权限/禁敏 | catalog/default policy、route middleware、write-only schema、safe DTO、message/binding relation 404、正文定向审计及多项 canary tests 已有；AMR OpenAPI 保留 401/403 等真实业务错误，不声明应用内 429，管理员同步路径不依赖 Redis 限流 | OpenAPI 安全契约验证 cookieAuth、401/403、CSRF/Idempotency-Key 和敏感字段边界；全 C/Q 运行时角色权限组合、仓库级 response/log/queue/Toast 递归扫描待补 |
+| SQL/性能 | 管理列表复用既有索引；migration 00009/00011 只保留 alias、dispatcher、active unique、FK resource/job 和 Orders resource page 等真实查询或约束需要的索引；专项性能 harness、重复列表索引、无效辅助排序索引和管理员 `FORCE INDEX` 已删除 | 本次不执行或要求压测，优先简单实现、事务正确和可维护性；真实慢 SQL 再触发局部优化 |
+| E2E/运维 | AbortSignal、dispatcher recovery 的若干专项 tests 已有 | 无真实数据库 Playwright、视觉、页面刷新、API/worker 重启/重派演练；T12 仍为 0 |
+
+按既有评分规则，当前专项保守自评为 D `30/40`、T `14/26`、A `18/26`。T8/A7 因已有 page limit、查询次数和普通 EXPLAIN 证据评 1；不使用压测数字把该项抬到 2。T12 的浏览器/重启证据仍为 0，因此本文只能支持“代码实现与自动化测试/lint 交付完成”的结论，不能据此宣告人工浏览器验收或生产上线。最终发布评审仍须用 CI/E2E/运维 artifact 重新填写第 10 节模板。

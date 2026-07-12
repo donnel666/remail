@@ -11,6 +11,7 @@
 | 2026-07-07 | V1.4 | Codex | 补充用户侧 aff 邀请链接能力；复用邀请码消费事务，不改变后台邀请码策略；GET 只读、POST 创建或获取，保持 safe method 语义。 |
 | 2026-07-08 | V1.5 | Codex | 强制纠偏：移除旧数字权限等级，改为 RBAC `role` + Casbin 权限；新增 `userGroup` 作为权益分组，不参与后台授权。 |
 | 2026-07-09 | V1.6 | Codex | 按接口命名清洁度要求规范 IAM URI：供应商申请改为 `/v1/suppliers/applications`，用户权益分组改为 `/v1/admin/users/groups`；只调整 URI 命名，不改变 RBAC、供应商申请和权益分组语义。 |
+| 2026-07-12 | V1.7 | Codex | 补充管理员 Microsoft 资源管理的 owner 批量查询、安全显示、转移/公开供给资格和组合权限规则；IAM 只提供身份与资格，不接管资源事实。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -152,7 +153,10 @@ eft = allow/deny
 |------|------|------|
 | `PermissionPort` | 入站自全域 | 判断用户是否具备某权限。 |
 | `UserPort` | 入站自全域 | 查询用户启用状态、RBAC 角色和权益分组。 |
+| `OwnerQueryPort` | 入站自后台组合查询 | 按去重后的用户 ID 批量返回安全 owner 视图，并校验资源 owner/公开供给资格；不返回密码、权限覆盖或会话信息。 |
 | `SessionPort` | 入站自管理命令 | 清理用户会话和权限缓存。 |
+
+管理员 Microsoft 资源管理通过 `OwnerQueryPort` 读取 IAM 事实。Core、Alloc 或其他组合查询不得直接访问 IAM GORM Model，也不得把 owner 邮箱、昵称、角色、用户组、启停状态复制成自身事实。Port 实现必须支持一次批量查询并按 `userId` 返回映射，避免列表页逐资源查询 IAM。
 
 ---
 
@@ -238,6 +242,29 @@ canceled
 | `POST` | `/v1/admin/suppliers/applications/{applicationId}/approve` | 审批通过供应商申请，将申请人提升为 supplier。 |
 | `POST` | `/v1/admin/suppliers/applications/{applicationId}/reject` | 驳回供应商申请，必须记录安全审核原因。 |
 
+管理员 Microsoft 资源 owner 组合规则：
+
+| 场景 | IAM 规则 |
+|------|----------|
+| 列表/详情显示 | 组合查询按 owner ID 批量读取 `id/email/nickname/role/userGroup/enabled` 安全视图；缺失用户返回缺失标记，由资源查询生成安全诊断，不回退为 N+1 单查。 |
+| owner 搜索与选择 | 复用 `GET /v1/admin/users`；`ids` 用于批量精确查询，`search` 用于邮箱、昵称或 ID 搜索，并继续使用服务端分页和上限。 |
+| 管理员代导入或转移私有资源 | 目标用户必须存在且 `enabled=true`；IAM 只判断身份资格，资源唯一性、活跃 Allocation 和状态约束仍由 Core/Alloc 边界处理。 |
+| 发布公开供给 | owner 必须存在、启用，且角色为 `supplier/admin/super_admin`；`user` 不能作为公开供给 owner。 |
+| owner 转移 | 只改变 Core 当前资源归属，不改写 IAM 用户，也不重写 Validation、InboundMail、OperationLog 等历史 owner 快照。 |
+
+组合权限规则：
+
+| 入口 | Casbin 与领域校验 |
+|------|------------------|
+| 管理资源列表/详情 | 入口检查 `core:resource/read`；服务端随后通过 `OwnerQueryPort` 补充该资源允许展示的安全 owner 字段，内部 Port 调用不构成权限升级。 |
+| owner 搜索下拉 | 直接调用 `/v1/admin/users` 时检查 `iam:user/read`；管理员基线策略必须同时覆盖已确认页面需要的资源管理与 owner 选择能力。 |
+| 编辑、导入、转移、发布 | 导入和基础字段编辑检查 `core:resource/write`；发布/下架/凭据等命令检查 `core:resource/operate`；同一原子 PATCH 同时包含基础字段与 `forSale/credentials` 时两项都必须具备，再由 IAM 校验目标 owner 资格。因为没有修改 IAM 用户，不额外要求 `iam:user/write`。 |
+| 订单、邮件、任务等详情 Tab | 各所属 API 继续检查自身权限，例如 `alloc:allocation/read`、`mailmatch:message/read`；`core:resource/read` 不传递成其他 BC 的通配权限。 |
+
+管理员 Microsoft 真实 API 落地时，permission catalog 必须确保存在 `mailmatch:message(read/operate)`、`mailtransport:binding(read/write)` 和 `governance:task(read)`；默认 admin/super_admin 策略应同时具备已确认页面所需权限。辅助邮箱地址修改仍从 Core 原子 PATCH 编排，但当请求包含 binding 输入时必须同时检查 `mailtransport:binding/write`；资源级手工 Fetch 检查 `mailmatch:message/operate`。新增权限必须进入 IAM 权限目录、Casbin middleware/组合校验、OpenAPI 说明和专项权限测试，不能只写在前端按钮条件中。
+
+资格失败使用安全业务错误，不暴露 Casbin policy 或目标用户内部状态组合；不存在或不可见的资源仍由资源 API 统一返回 `404 Resource not found.`。
+
 ---
 
 ## 9. ADR
@@ -248,3 +275,4 @@ canceled
 | ADR-IAM-2 | 引入 Casbin | 管理权限矩阵和用户覆盖用成熟库，避免自研。 |
 | ADR-IAM-3 | Casbin 不做数据归属 | 项目授权、订单归属、钱包归属是业务规则，应由业务域控制。 |
 | ADR-IAM-4 | 特权继承低权限能力 | 符合 `new-api` 思路，减少重复用户/管理员接口。 |
+| ADR-IAM-5 | owner 组合查询只暴露 IAM 安全视图 | 保持用户事实单一归属，同时允许后台资源列表批量补充身份字段而不产生 N+1 或跨域表访问。 |

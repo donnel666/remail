@@ -3,9 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,6 +33,13 @@ type fakeMicrosoftAliasStore struct {
 	ensureResult      int64
 	dispatchTasks     []MicrosoftAliasTask
 	markDispatchErr   error
+	adminSchedule     *MicrosoftAliasAdminSchedule
+	adminScheduleErr  error
+	expediteResult    *MicrosoftAliasExpediteResult
+	expediteErr       error
+	adminCommand      MicrosoftAliasExpediteCommand
+	adminCommandLog   *governancedomain.OperationLog
+	adminCommandReuse bool
 }
 
 func (f *fakeMicrosoftAliasStore) EnsureSchedules(context.Context, time.Time) (int64, error) {
@@ -90,6 +100,52 @@ func (f *fakeMicrosoftAliasStore) MarkDispatchFailed(context.Context, MicrosoftA
 	return f.markDispatchErr
 }
 
+func (f *fakeMicrosoftAliasStore) GetAdminSchedule(context.Context, uint, time.Time, time.Time, time.Time, time.Time) (*MicrosoftAliasAdminSchedule, error) {
+	if f.adminScheduleErr != nil {
+		return nil, f.adminScheduleErr
+	}
+	if f.adminSchedule == nil {
+		return &MicrosoftAliasAdminSchedule{}, nil
+	}
+	clone := *f.adminSchedule
+	return &clone, nil
+}
+
+func (f *fakeMicrosoftAliasStore) AcceptAdminAliasExpedite(
+	_ context.Context,
+	command MicrosoftAliasExpediteCommand,
+	_ time.Time,
+	operationLog *governancedomain.OperationLog,
+) (*MicrosoftAliasExpediteResult, bool, error) {
+	f.adminCommand = command
+	if operationLog != nil {
+		clone := *operationLog
+		f.adminCommandLog = &clone
+	}
+	if f.expediteErr != nil {
+		return nil, false, f.expediteErr
+	}
+	if f.expediteResult == nil {
+		return &MicrosoftAliasExpediteResult{}, f.adminCommandReuse, nil
+	}
+	clone := *f.expediteResult
+	return &clone, f.adminCommandReuse, nil
+}
+
+type fakeMicrosoftAliasAdminQueue struct {
+	dispatches int
+	err        error
+}
+
+func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAlias(context.Context, MicrosoftAliasTask) error {
+	return q.err
+}
+
+func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAliasDispatcher(context.Context, time.Duration) error {
+	q.dispatches++
+	return q.err
+}
+
 type fakeMicrosoftAliasCreator struct {
 	count         int
 	reconcileOnly bool
@@ -116,6 +172,92 @@ func (f *fakeMicrosoftAliasCreator) CreateMicrosoftAliases(_ context.Context, re
 
 func microsoftAliasTestTask(resourceID uint) MicrosoftAliasTask {
 	return MicrosoftAliasTask{ResourceID: resourceID, DispatchToken: "0123456789abcdef0123456789abcdef"}
+}
+
+func TestMicrosoftAliasAdminScheduleReturnsSafeUsageAndLimits(t *testing.T) {
+	nextRunAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{adminSchedule: &MicrosoftAliasAdminSchedule{
+		WeekCreated: 1,
+		YearCreated: 4,
+		NextRunAt:   &nextRunAt,
+	}}
+	service := NewMicrosoftAliasService(store, nil, nil)
+	service.now = func() time.Time { return time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC) }
+
+	schedule, err := service.GetAdminSchedule(context.Background(), 42)
+	require.NoError(t, err)
+	assert.Equal(t, 1, schedule.WeekCreated)
+	assert.Equal(t, MicrosoftAliasWeeklyLimit, schedule.WeekLimit)
+	assert.Equal(t, 4, schedule.YearCreated)
+	assert.Equal(t, MicrosoftAliasYearlyLimit, schedule.YearLimit)
+	assert.Equal(t, nextRunAt, *schedule.NextRunAt)
+}
+
+func TestMicrosoftAliasAdminCommandReturnsCanonicalTaskAndSafeAudit(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{expediteResult: &MicrosoftAliasExpediteResult{
+		ResourceID:     42,
+		Status:         "queued",
+		QueuedAt:       now,
+		UpdatedAt:      now,
+		WakeDispatcher: true,
+	}}
+	queue := &fakeMicrosoftAliasAdminQueue{err: errors.New("redis unavailable")}
+	service := NewMicrosoftAliasService(store, queue, nil)
+	service.now = func() time.Time { return now }
+
+	accepted, err := service.AcceptAdminExpedite(context.Background(), MicrosoftAliasExpediteCommand{
+		ResourceID:     42,
+		OperatorUserID: 7,
+		IdempotencyKey: " alias-expedite-key ",
+		RequestID:      "request-42",
+		Path:           "/v1/admin/resources/:resourceId/aliases",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, accepted)
+	assert.Equal(t, "alias_schedule:42", accepted.Task.TaskID())
+	assert.Equal(t, governanceapp.AdminTaskBizMicrosoftResource, accepted.Task.BizType)
+	assert.Equal(t, governanceapp.AdminTaskKindAlias, accepted.Task.Kind)
+	assert.Equal(t, governanceapp.AdminTaskStatusQueued, accepted.Task.Status)
+	assert.Equal(t, 1, accepted.Task.MaxAttempts)
+	assert.Equal(t, "alias-expedite-key", store.adminCommand.IdempotencyKey)
+	require.NotNil(t, store.adminCommandLog)
+	assert.Equal(t, uint(7), store.adminCommandLog.OperatorUserID)
+	assert.Equal(t, "42", store.adminCommandLog.ResourceID)
+	assert.NotContains(t, store.adminCommandLog.SafeSummary, "secret")
+	assert.Equal(t, 1, queue.dispatches)
+}
+
+func TestMicrosoftAliasAdminCommandReplaysReceiptAndValidatesIdempotency(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		adminCommandReuse: true,
+		expediteResult: &MicrosoftAliasExpediteResult{
+			ResourceID: 42,
+			Status:     "running",
+			QueuedAt:   now.Add(-time.Minute),
+			UpdatedAt:  now,
+		},
+	}
+	service := NewMicrosoftAliasService(store, nil, nil)
+	service.now = func() time.Time { return now }
+
+	accepted, err := service.AcceptAdminExpedite(context.Background(), MicrosoftAliasExpediteCommand{
+		ResourceID:     42,
+		OperatorUserID: 7,
+		IdempotencyKey: "same-key",
+	})
+	require.NoError(t, err)
+	assert.True(t, accepted.Reused)
+	assert.Equal(t, governanceapp.AdminTaskStatusRunning, accepted.Task.Status)
+	assert.Equal(t, 1, accepted.Task.Attempts)
+
+	_, err = service.AcceptAdminExpedite(context.Background(), MicrosoftAliasExpediteCommand{
+		ResourceID:     42,
+		OperatorUserID: 7,
+		IdempotencyKey: strings.Repeat("x", 129),
+	})
+	require.ErrorIs(t, err, ErrInvalidMicrosoftAliasExpedite)
 }
 
 func TestMicrosoftAliasDispatchThrottlesCompletedScheduleSweeps(t *testing.T) {

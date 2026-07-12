@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Input,
   InputNumber,
@@ -12,18 +12,21 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import {
+  importAdminMicrosoftResources,
+  listAdminMicrosoftOwners,
+  replaceAdminMicrosoftCredentials,
+  updateAdminMicrosoftResource,
+} from "@/lib/admin-microsoft-api";
 
 import { MICROSOFT_EMAIL_FORMAT_HINT } from "../resources/model";
 import { InfoItem, ownerRoleLabel } from "./microsoft-meta";
-import {
-  importAdminMicrosoftResources,
-  replaceAdminMicrosoftCredentials,
-  updateAdminMicrosoftResource,
-  type AdminMicrosoftImportErrorStrategy,
-  type AdminMicrosoftOwner,
-  type AdminMicrosoftResourceDetail,
-  type AdminMicrosoftResourceItem,
-} from "./admin-microsoft-mock";
+import type {
+  AdminMicrosoftImportErrorStrategy,
+  AdminMicrosoftOwner,
+  AdminMicrosoftResourceDetail,
+  AdminMicrosoftResourceItem,
+} from "./admin-microsoft-types";
 
 const { Text } = Typography;
 
@@ -38,6 +41,81 @@ function switchButtonClass(active: boolean) {
       ? "border-[var(--semi-color-primary)] bg-[var(--semi-color-primary-light-default)] text-[var(--semi-color-primary)]"
       : "border-[var(--semi-color-border)] bg-[var(--semi-color-bg-2)] text-[var(--semi-color-text-1)] hover:border-[var(--semi-color-primary)] hover:bg-[var(--semi-color-fill-0)]",
   ].join(" ");
+}
+
+function OwnerSelect({
+  onChange,
+  owners,
+  t,
+  value,
+}: {
+  onChange: (ownerId: number) => void;
+  owners: AdminMicrosoftOwner[];
+  t: ReturnType<typeof useTranslation>["t"];
+  value?: number;
+}) {
+  const [options, setOptions] = useState(owners);
+  const [loading, setLoading] = useState(false);
+  const requestSequence = useRef(0);
+  const searchDebounce = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+
+  useEffect(() => setOptions(owners), [owners]);
+  useEffect(
+    () => () => {
+      if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
+    },
+    []
+  );
+
+  const searchOwners = async (keyword: string) => {
+    const sequence = ++requestSequence.current;
+    setLoading(true);
+    try {
+      const result = await listAdminMicrosoftOwners(keyword);
+      if (requestSequence.current === sequence) {
+        const selected = owners.find((owner) => owner.id === value);
+        setOptions(
+          selected && !result.some((owner) => owner.id === selected.id)
+            ? [selected, ...result]
+            : result
+        );
+      }
+    } catch {
+      // Keep the previous bounded result; the next search retries IAM.
+    } finally {
+      if (requestSequence.current === sequence) setLoading(false);
+    }
+  };
+
+  const queueOwnerSearch = (keyword: string) => {
+    if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
+    searchDebounce.current = globalThis.setTimeout(() => {
+      void searchOwners(keyword);
+    }, 250);
+  };
+
+  return (
+    <Select
+      emptyContent={t("No users found")}
+      filter
+      loading={loading}
+      onChange={(next) => onChange(Number(next))}
+      onDropdownVisibleChange={(visible) => {
+        if (visible && options.length === 0) void searchOwners("");
+      }}
+      onSearch={queueOwnerSearch}
+      optionList={options.map((owner) => ({
+        disabled: !owner.enabled,
+        label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
+        value: owner.id,
+      }))}
+      placeholder={t("Search user by email, nickname or ID")}
+      remote
+      searchPosition="dropdown"
+      style={{ width: "100%" }}
+      value={value}
+    />
+  );
 }
 
 export function ImportMicrosoftModal({
@@ -58,18 +136,22 @@ export function ImportMicrosoftModal({
   const [errorStrategy, setErrorStrategy] =
     useState<AdminMicrosoftImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
+  const previousVisible = useRef(false);
 
   useEffect(() => {
-    if (!visible) {
-      setContent("");
-      setOwnerId(undefined);
-      return;
-    }
+    const opened = visible && !previousVisible.current;
+    previousVisible.current = visible;
+    if (!opened) return;
     setContent("");
-    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
+    setOwnerId(undefined);
     setLongLived(true);
     setErrorStrategy("skip");
-  }, [owners, visible]);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || ownerId !== undefined) return;
+    setOwnerId(owners.find((owner) => owner.enabled)?.id ?? owners[0]?.id);
+  }, [ownerId, owners, visible]);
 
   const lines = useMemo(
     () => content.split(/\r?\n/).filter((line) => line.trim().length > 0),
@@ -104,13 +186,21 @@ export function ImportMicrosoftModal({
       if (response.skipped > 0) {
         Toast.warning(t("Import skipped errors", { count: response.skipped }));
       }
-      await onImported();
-      onCancel();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
+      setSubmitting(false);
+      return;
+    }
+    try {
+      await onImported();
+    } catch (error) {
+      Toast.error(
+        getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+      );
     } finally {
       setSubmitting(false);
     }
+    onCancel();
   };
 
   return (
@@ -130,18 +220,7 @@ export function ImportMicrosoftModal({
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
             {t("Owner")} *
           </span>
-          <Select
-            filter
-            onChange={(value) => setOwnerId(Number(value))}
-            optionList={owners.map((owner) => ({
-              disabled: !owner.enabled,
-              label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
-              value: owner.id,
-            }))}
-            placeholder={t("Search user by email, nickname or ID")}
-            style={{ width: "100%" }}
-            value={ownerId}
-          />
+          <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
         </label>
 
         <div className="grid grid-cols-2 gap-2">
@@ -241,7 +320,7 @@ export function EditMicrosoftModal({
     if (!target) return;
     setEmailAddress(target.emailAddress);
     setBindingAddress(target.bindingAddress ?? "");
-    setOwnerId(target.ownerId);
+    setOwnerId(target.owner.id);
     setForSale(target.forSale);
     setLongLived(target.longLived);
     setQualityScore(target.qualityScore);
@@ -270,9 +349,20 @@ export function EditMicrosoftModal({
       }
     }
     setSubmitting(true);
+    const nextBindingAddress = bindingAddress.trim() || null;
+    const currentBindingAddress = target.bindingAddress?.trim() || null;
     try {
       await updateAdminMicrosoftResource(target.id, {
-        bindingAddress: bindingAddress.trim(),
+        ...(nextBindingAddress !== currentBindingAddress
+          ? { bindingAddress: nextBindingAddress }
+          : {}),
+        credentials: wantsCredentialChange
+          ? {
+              clientId: clientId.trim() || undefined,
+              password,
+              refreshToken: refreshToken.trim() || undefined,
+            }
+          : undefined,
         emailAddress: emailAddress.trim(),
         forSale,
         longLived,
@@ -281,22 +371,24 @@ export function EditMicrosoftModal({
           qualityScore === "" || !Number.isFinite(Number(qualityScore))
             ? undefined
             : Number(qualityScore),
+        version: target.version,
       });
-      if (wantsCredentialChange) {
-        await replaceAdminMicrosoftCredentials(target.id, {
-          clientId: clientId.trim() || undefined,
-          password,
-          refreshToken: refreshToken.trim() || undefined,
-        });
-      }
       Toast.success(t("Microsoft resource updated."));
-      await onSaved();
-      onCancel();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Microsoft resource update failed."));
+      setSubmitting(false);
+      return;
+    }
+    try {
+      await onSaved();
+    } catch (error) {
+      Toast.error(
+        getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+      );
     } finally {
       setSubmitting(false);
     }
+    onCancel();
   };
 
   return (
@@ -347,17 +439,7 @@ export function EditMicrosoftModal({
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
               {t("Owner")}
             </span>
-            <Select
-              filter
-              onChange={(value) => setOwnerId(Number(value))}
-              optionList={owners.map((owner) => ({
-                disabled: !owner.enabled,
-                label: `${owner.email} · ${owner.nickname} · ${t(ownerRoleLabel(owner.role))} · ${owner.groupName}`,
-                value: owner.id,
-              }))}
-              style={{ width: "100%" }}
-              value={ownerId}
-            />
+            <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -484,23 +566,33 @@ export function ReplaceCredentialsModal({
       return;
     }
     setSubmitting(true);
+    let nextDetail: AdminMicrosoftResourceDetail;
     try {
-      const detail = await replaceAdminMicrosoftCredentials(target.id, {
+      nextDetail = await replaceAdminMicrosoftCredentials(target.id, {
         clientId: clientId.trim() || undefined,
         password,
         refreshToken: refreshToken.trim() || undefined,
+        version: target.version,
       });
       Toast.success(t("Credentials replaced and validation queued."));
-      await onSaved(detail);
-      setPassword("");
-      setClientId("");
-      setRefreshToken("");
-      onCancel();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Credential replacement failed."));
+      setSubmitting(false);
+      return;
+    }
+    try {
+      await onSaved(nextDetail);
+    } catch (error) {
+      Toast.error(
+        getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+      );
     } finally {
       setSubmitting(false);
     }
+    setPassword("");
+    setClientId("");
+    setRefreshToken("");
+    onCancel();
   };
 
   return (

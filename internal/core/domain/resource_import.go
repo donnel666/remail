@@ -38,12 +38,26 @@ func NormalizeImportErrorStrategy(value string) (ImportErrorStrategy, bool) {
 type ResourceImport struct {
 	ID               uint
 	OwnerUserID      uint
+	OperatorUserID   uint
 	ResourceType     ResourceType
+	LongLived        bool
+	ErrorStrategy    ImportErrorStrategy
 	SourceObjectKey  string
 	FailureObjectKey string
 	Status           ResourceImportStatus
 	ImportedCount    int
+	AcceptedCount    int
+	SkippedCount     int
+	DispatchStatus   string
+	Attempts         int
+	MaxAttempts      int
+	ClaimToken       string
+	DispatchToken    string
+	DispatchedAt     *time.Time
 	LastSafeError    string
+	RequestID        string
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

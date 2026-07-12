@@ -29,6 +29,29 @@ func StartCoreWorkers(server *asynq.Server, module *CoreModule) error {
 }
 
 func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
+	mux.HandleFunc(coreinfra.TypeAdminResourceBulkDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		if module == nil || module.AdminBulk == nil {
+			return nil
+		}
+		if err := module.AdminBulk.DispatchPending(ctx, 32); err != nil {
+			slog.Warn("admin resource bulk dispatcher failed", "error", err)
+		}
+		return nil
+	})
+	mux.HandleFunc(coreinfra.TypeAdminResourceBulk, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.AdminBulk == nil {
+			return nil
+		}
+		var payload coreapp.AdminResourceBulkTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return fmt.Errorf("decode admin resource bulk task: %w: %w", err, asynq.SkipRetry)
+		}
+		if err := module.AdminBulk.Process(ctx, payload); err != nil {
+			slog.Warn("admin resource bulk task failed", "command_id", payload.CommandID, "error", err)
+			return err
+		}
+		return nil
+	})
 	mux.HandleFunc(coreinfra.TypeResourceValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
@@ -131,6 +154,12 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				"final_attempt", finalAttempt,
 				"error", err,
 			)
+			if payload.DispatchToken != "" {
+				// Administrator imports persist retry/terminal state under a fenced
+				// claim. Returning the error to Asynq would replay a consumed token;
+				// the periodic durable dispatcher issues a fresh token instead.
+				return nil
+			}
 			if isNonRetryableImportError(err) {
 				_ = module.ImportUseCase.MarkImportFailed(ctx, payload.ImportID, "Invalid import task.")
 				return fmt.Errorf("non-retryable microsoft import task failure: %w: %w", err, asynq.SkipRetry)
@@ -166,6 +195,14 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 		return 0, nil
 	}
 	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+	if module.AdminBulk != nil {
+		module.AdminBulk.ScheduleDispatcher(ctx, 0)
+	}
+	if module.ImportUseCase != nil {
+		if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
+			slog.Warn("administrator resource import dispatcher failed", "error", err)
+		}
+	}
 	return len(result.ImportedResourceIDs), nil
 }
 
@@ -193,6 +230,14 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 			select {
 			case <-ticker.C:
 				module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+				if module.AdminBulk != nil {
+					module.AdminBulk.ScheduleDispatcher(ctx, 0)
+				}
+				if module.ImportUseCase != nil {
+					if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
+						slog.Warn("administrator resource import dispatcher failed", "error", err)
+					}
+				}
 			case <-ctx.Done():
 				return
 			}

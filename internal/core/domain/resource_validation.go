@@ -17,23 +17,24 @@ const (
 // ResourceValidation records one asynchronous validation request.
 // The job stores only safe metadata; credentials stay in the resource sub-table.
 type ResourceValidation struct {
-	ID            uint
-	ResourceID    uint
-	ResourceType  ResourceType
-	OwnerUserID   uint
-	Status        ResourceValidationStatus
-	Attempts      int
-	MaxAttempts   int
-	ClaimToken    string
-	DispatchToken string
-	LastSafeError string
-	RequestID     string
-	Path          string
-	DispatchedAt  *time.Time
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                         uint
+	ResourceID                 uint
+	ResourceType               ResourceType
+	OwnerUserID                uint
+	ExpectedCredentialRevision uint64
+	Status                     ResourceValidationStatus
+	Attempts                   int
+	MaxAttempts                int
+	ClaimToken                 string
+	DispatchToken              string
+	LastSafeError              string
+	RequestID                  string
+	Path                       string
+	DispatchedAt               *time.Time
+	StartedAt                  *time.Time
+	FinishedAt                 *time.Time
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 func IsTerminalValidationStatus(status ResourceValidationStatus) bool {

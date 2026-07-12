@@ -6,6 +6,9 @@
 |------|------|--------|------|
 | 2026-06-29 | V1.0 | Codex | 形成 Go 版从 0 DDD 设计基线，作为一次 V1.0 变更。 |
 | 2026-07-02 | V1.1 | Codex | 补充 P1-I2 Domain 用途命名为 `not_sale/sale/binding`，中文仍展示辅助邮箱；对齐 Core 资源设计，不新增边界上下文。 |
+| 2026-07-12 | V1.2 | Codex | 补充管理员 Microsoft 邮箱跨上下文管理用例：以 Core 资源为锚点组合 IAM、Alloc、Trade、MailMatch、MailTransport 的 Query/Command Port，不新增后台业务 BC；明确组合契约和状态所有权边界。 |
+| 2026-07-12 | V1.3 | Codex | 收敛管理员协议结果边界：MailTransport Token 与 MailMatch Fetch 通过 Core `MicrosoftCredentialPort` 读取内部 scope/回写 revision、version 和诊断；Alias expedite 只保留带 receipt/audit 的唯一命令入口。 |
+| 2026-07-12 | V1.4 | Codex | 明确模块化单体的管理员有界只读查询组合例外：普通业务 repository 仍禁止跨域读写，只有文档明确、单页有界、无副作用的源表查询组合可读取同库安全字段；不建立投影表。 |
 
 > 本文是新项目 `/home/donnel/work/email/remail` 的 DDD 总览。
 >
@@ -43,6 +46,7 @@ flowchart LR
 | 邮件事实是真实服务 | 用户最终感知的是能否收到并识别验证码。 |
 | 交易是编排域 | 订单负责扣款、分配、凭证、窗口、退款和结算的有序编排。 |
 | 后台是命令入口 | 管理员不能手工 SQL 改状态；所有高风险动作走领域命令并写操作日志。 |
+| 后台详情是组合视图 | 管理员 Microsoft 邮箱页面是以资源为锚点的跨上下文管理用例，不是新的业务事实所有者；页面可组合多个 BC 的只读契约，但任何状态只能由原所属 BC 的命令修改。 |
 
 ---
 
@@ -97,6 +101,7 @@ graph TD
     MATCH[BC-MAILMATCH<br/>邮件匹配]
     OPENAPI[BC-OPENAPI<br/>开放凭证]
     AFTER[BC-AFTERSALE<br/>售后]
+    ADMINMS[管理员 Microsoft 跨上下文管理入口<br/>非 BC]
 
     IAM -->|PermissionPort| CORE
     IAM -->|PermissionPort| GOV
@@ -108,9 +113,11 @@ graph TD
     TRADE -->|OrderTokenPort| OPENAPI
     TRADE -->|FetchTriggerPort| MATCH
     MATCH -->|MatchResultPort| TRADE
-    MATCH -->|FetchPort| TRANSPORT
+    MATCH -->|MailTransportFetchPort| TRANSPORT
+    MATCH -->|MicrosoftCredentialPort| CORE
     TRANSPORT -->|InboundPort| MATCH
     TRANSPORT -->|ProxyPort| PROXY
+    TRANSPORT -->|MicrosoftCredentialPort| CORE
     CORE -->|ValidationPort| TRANSPORT
     AFTER -->|OrderPort / RefundPort| TRADE
     AFTER -->|HealthPort| MATCH
@@ -121,7 +128,30 @@ graph TD
     GOV -->|SystemLogPort / OperationLogPort / NotificationPort| BILL
     GOV -->|SystemLogPort / OperationLogPort / NotificationPort| MATCH
     PROXY -->|LogPort| GOV
+    ADMINMS -->|ResourceAdminCommand / ResourceQuery| CORE
+    ADMINMS -->|OwnerQueryPort| IAM
+    ADMINMS -->|AdminAllocationQuery / ResourceAllocationGuardPort| ALLOC
+    ADMINMS -->|OrderSummaryQueryPort| TRADE
+    ADMINMS -->|AdminMessageQuery / ResourceFetchCommandPort| MATCH
+    ADMINMS -->|BindingQuery / BindingAdmin / AliasExpediteCommand| TRANSPORT
+    ADMINMS -->|OperationLog / SystemLog| GOV
 ```
+
+### 4.1 管理员 Microsoft 跨上下文管理用例
+
+管理员 Microsoft 邮箱页面以 Core 的 `EmailResource.id` 为锚点，但不是由 Core 返回包含七个 Tab 的巨型详情。Core 的 `/v1/admin/resources/**` 负责列表、基本概要、原子编辑和资源命令；订单、邮件、Binding 和 Task Tab 优先复用事实所有者的管理员查询 API。整个页面是跨上下文管理用例，各 API/Application Service 只负责编排自身契约，不拥有新的聚合、状态机或跨域源表；不得新建 `BC-ADMIN-MICROSOFT`。普通业务 repository 不得任意跨 BC JOIN/UPDATE；共享数据库内经本文和矩阵明确、只读、单页有界且无副作用的管理员源表查询组合可以例外，但绝不允许借此跨域写入，也不得形成缓存或物化副本。
+
+| 页面事实/动作 | 契约提供方 | 所有权规则 |
+|--------------|------------|------------|
+| 资源基本信息、凭据配置标记、健康状态、导入和验证任务 | BC-CORE | Core 拥有资源和凭据事实；密码、RT 只写不读，组合响应只返回 configured/health 等安全字段。 |
+| owner 展示与可转移资格 | BC-IAM | IAM 通过 `OwnerQueryPort` 提供批量用户目录和资格查询；Core 只保存 `ownerUserId` 引用，不复制用户状态机。 |
+| 分配、资源维度订单读模型、active allocation 保护 | BC-ALLOC | Alloc 提供 `AdminAllocationQueryPort` 和 `ResourceAllocationGuardPort`；订单 Tab 可对当前页 orderNo 使用直接源表的有界只读查询组合，Core 仍不直接读写 allocation 表。 |
+| 订单状态、服务模式、金额和买家安全摘要 | BC-TRADE | Trade 继续拥有事实；共享数据库中的 Alloc 管理查询只按当前页 orderNo 读取安全展示字段，不复制订单判断或开放写入。 |
+| 主邮箱邮件摘要、正文和资源级拉取任务 | BC-MAILMATCH | MailMatch 拥有 Message/Fetch 事实；正文按需读取，资源级拉取复用 durable single-flight 事实；内部凭据 scope 与 rotated RT 只经 Core `MicrosoftCredentialPort` 处理。 |
+| 辅助邮箱绑定与收码邮件、RT 协议任务、远端别名 schedule/expedite | BC-MAILTRANSPORT | MailTransport 拥有绑定、协议执行 task 和远端别名调度事实；Core 凭据/revision/version 通过 `MicrosoftCredentialPort` 回写，alias expedite 只有 receipt/audit 命令入口；Core 不解释 Microsoft 页面状态。 |
+| 管理命令审计与上游失败诊断 | BC-GOVERNANCE | 高风险命令成功/失败写 OperationLog，任务或协议失败写 SystemLog，均使用同一 requestId 且禁敏。 |
+
+内部 Query Port 的响应类型由提供方 BC 定义，只返回该 BC 拥有或经明确 ACL 翻译的安全事实；对应的管理员 HTTP API 拥有自己的 OpenAPI DTO，页面在前端按 Tab 组合，不存在一个跨域“最终详情 DTO”作为事实源。查询优先通过批量 Port 丰富；对共享数据库中的低频管理员读模型，可以使用明确标识、输入数量有上限的直接源表查询组合，禁止 N+1、敏感字段和任何写入。跨域写入必须调用所属 BC 的显式 Command Port，不能通过 Query DTO 或查询结果回写。进程内组合不新增 `/v1/internal/**` HTTP 调用。
 
 ---
 
@@ -322,6 +352,7 @@ POST /v1/admin/resources/{resourceId}/validate
 | 供应商闭环 | 供应商上传资源出售，被购买后收入冻结，读取期结束或过保入账，可提现或转消费。 |
 | OpenAPI 高并发 | API Key 并发下单受限流、并发、余额、库存和幂等保护；OrderToken 读取订单结果。 |
 | 后台运营 | 管理员通过控制台处理项目、资源、订单、钱包、工单、日志和任务，不依赖 SQL。 |
+| 管理员 Microsoft 运维 | 管理员从同一资源详情查看 owner、分配/订单、主邮箱与辅助邮箱邮件、验证/别名/拉取任务，并通过所属 BC 的显式命令编辑、下架、恢复、检测、刷新 Token、加速别名或拉取邮件；视觉上的一个页面不改变状态所有权。 |
 
 ---
 
@@ -336,6 +367,7 @@ POST /v1/admin/resources/{resourceId}/validate
 | ADR-GLOBAL-5 | 凭据原值保存，授权接口重复查看明文 | 符合业务重复使用/展示需求；通过权限和禁敏控制风险。 |
 | ADR-GLOBAL-6 | Asynq 承接异步任务 | Go 技术栈下用 Redis-backed 任务队列覆盖后台任务、延迟任务、重试和任务可观测。 |
 | ADR-GLOBAL-7 | HTTP 状态码 + 最小错误体，不包业务响应码 | 去掉旧 API 包装和数字业务码，前端/SDK 直接按 HTTP 状态和安全 message 处理。 |
+| ADR-GLOBAL-8 | 管理员 Microsoft 页面采用 Core 锚定的跨上下文 Facade，不新增 BC | 页面是运营组合视图；由各 BC 通过 Query/Command Port 保持事实所有权，可保留完整 UI 能力而不形成跨域写表。 |
 
 ---
 
@@ -360,3 +392,6 @@ POST /v1/admin/resources/{resourceId}/validate
 | `15-proxy-pool.md` | BC-PROXY 代理池 |
 | `17-operations-runbook.md` | 生产监控、备份、恢复与安全停机 |
 | `18-cicd-quality-gates.md` | CI/CD 并行门禁、产物复用与 Cleanup |
+| `19-money-precision.md` | 金额精度、序列化与计算规则 |
+| `20-admin-microsoft-resource-management.md` | 管理员 Microsoft 邮箱跨上下文资源管理设计 |
+| `21-admin-microsoft-resource-matrices.md` | 管理员 Microsoft UI/API/BC/Port 与验收专项矩阵 |

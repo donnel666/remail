@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	coreapp "github.com/donnel666/remail/internal/core/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
@@ -37,6 +38,7 @@ type IAMModule struct {
 	SessionStore               app.SessionStore
 	CaptchaStore               app.CaptchaStore
 	EmailCodeStore             app.EmailCodeStore
+	AdminResourceOwners        coreapp.OwnerQueryPort
 }
 
 // NewIAMModule wires up all IAM dependencies.
@@ -77,5 +79,6 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		SessionStore:               sessionStore,
 		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,
+		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
 	}, nil
 }

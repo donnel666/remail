@@ -55,6 +55,7 @@ type EmailResource struct {
 	ID          uint
 	Type        ResourceType
 	OwnerUserID uint
+	Version     uint64
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -73,22 +74,26 @@ func IsValidPurpose(p ResourcePurpose) bool {
 
 // MicrosoftResource holds Microsoft-specific resource fields.
 type MicrosoftResource struct {
-	ID              uint // Shared PK = EmailResource.ID
-	EmailAddress    string
-	Password        string // Original value, never in API responses or logs
-	ClientID        string
-	RefreshToken    string // Original value, never in API responses or logs
-	LongLived       bool
-	GraphAvailable  bool
-	RTExpireAt      *time.Time
-	ForSale         bool
-	Status          MicrosoftResourceStatus
-	QualityScore    int
-	PlusDailyLimit  int
-	LastSafeError   string // Sanitized diagnostic summary
-	LastAllocatedAt *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                   uint // Shared PK = EmailResource.ID
+	EmailAddress         string
+	Password             string // Original value, never in API responses or logs
+	ClientID             string
+	RefreshToken         string // Original value, never in API responses or logs
+	CredentialRevision   uint64
+	CredentialUpdatedAt  time.Time
+	LongLived            bool
+	GraphAvailable       bool
+	RTExpireAt           *time.Time
+	TokenLastRefreshedAt *time.Time
+	TokenLastRequestID   string
+	ForSale              bool
+	Status               MicrosoftResourceStatus
+	QualityScore         int
+	PlusDailyLimit       int
+	LastSafeError        string // Sanitized diagnostic summary
+	LastAllocatedAt      *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // IsValidMicrosoftStatus returns true if the status is a valid state.
@@ -140,6 +145,132 @@ func (r *MicrosoftResource) MarkDeleted() error {
 	r.Status = MicrosoftStatusDeleted
 	r.LastSafeError = ""
 	r.LastAllocatedAt = nil
+	return nil
+}
+
+// EnableAdmin is the explicit administrator transition out of disabled. It
+// does not claim that Microsoft validation has succeeded; the resource must be
+// revalidated from pending before it can be allocated.
+func (r *MicrosoftResource) EnableAdmin() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Status != MicrosoftStatusDisabled {
+		return ErrInvalidResourceStatus
+	}
+	r.Status = MicrosoftStatusPending
+	r.GraphAvailable = false
+	r.QualityScore = 0
+	r.RTExpireAt = nil
+	r.TokenLastRefreshedAt = nil
+	r.TokenLastRequestID = ""
+	r.LastSafeError = ""
+	return nil
+}
+
+// DisableAdmin blocks new allocation and automatic maintenance. Existing
+// allocations remain owned by Alloc/Trade; this command deliberately does not
+// terminate or rewrite them.
+func (r *MicrosoftResource) DisableAdmin() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Status == MicrosoftStatusDisabled {
+		return nil
+	}
+	r.Status = MicrosoftStatusDisabled
+	return nil
+}
+
+func (r *MicrosoftResource) PublishAdmin() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	r.ForSale = true
+	return nil
+}
+
+func (r *MicrosoftResource) UnpublishAdmin() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	r.ForSale = false
+	return nil
+}
+
+// DeleteAdmin is the administrator logical-delete command. Unlike the
+// supplier self-service delete, it forcefully removes the resource from future
+// supply; active-allocation protection is enforced by the application port.
+func (r *MicrosoftResource) DeleteAdmin() error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrInvalidResourceStatus
+	}
+	r.Status = MicrosoftStatusDeleted
+	r.ForSale = false
+	r.GraphAvailable = false
+	r.QualityScore = 0
+	r.RTExpireAt = nil
+	r.TokenLastRefreshedAt = nil
+	r.TokenLastRequestID = ""
+	r.LastSafeError = ""
+	return nil
+}
+
+// RecoverAdmin restores only a logically deleted resource. Recovery is always
+// private and pending until a new validation result commits.
+func (r *MicrosoftResource) RecoverAdmin() error {
+	if r.Status != MicrosoftStatusDeleted {
+		return ErrInvalidResourceStatus
+	}
+	r.Status = MicrosoftStatusPending
+	r.ForSale = false
+	r.GraphAvailable = false
+	r.QualityScore = 0
+	r.RTExpireAt = nil
+	r.TokenLastRefreshedAt = nil
+	r.TokenLastRequestID = ""
+	r.LastSafeError = ""
+	return nil
+}
+
+// InvalidateMicrosoftIdentity advances the credential fence whenever the
+// mailbox identity or its complete credential set changes. Derived health is
+// no longer trustworthy and must be rebuilt asynchronously.
+func (r *MicrosoftResource) InvalidateMicrosoftIdentity(now time.Time) error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.CredentialRevision == 0 {
+		r.CredentialRevision = 1
+	}
+	r.CredentialRevision++
+	r.CredentialUpdatedAt = now.UTC()
+	r.Status = MicrosoftStatusPending
+	r.GraphAvailable = false
+	r.QualityScore = 0
+	r.RTExpireAt = nil
+	r.TokenLastRefreshedAt = nil
+	r.TokenLastRequestID = ""
+	r.LastSafeError = ""
+	return nil
+}
+
+// ReplaceCredentialsAdmin replaces the write-only credential set as one
+// logical value. A Microsoft client ID and refresh token are either both
+// configured or both omitted.
+func (r *MicrosoftResource) ReplaceCredentialsAdmin(password, clientID, refreshToken string, now time.Time) error {
+	passwordConfigured := strings.TrimSpace(password) != ""
+	clientIDConfigured := strings.TrimSpace(clientID) != ""
+	refreshTokenConfigured := strings.TrimSpace(refreshToken) != ""
+	if !passwordConfigured || clientIDConfigured != refreshTokenConfigured {
+		return ErrInvalidResourceCommand
+	}
+	if err := r.InvalidateMicrosoftIdentity(now); err != nil {
+		return err
+	}
+	r.Password = password
+	r.ClientID = clientID
+	r.RefreshToken = refreshToken
 	return nil
 }
 

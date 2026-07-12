@@ -56,6 +56,7 @@ const pageLoaders = {
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
+  adminMicrosoftEmails: () => import("./pages/AdminMicrosoftEmails"),
   adminProjects: () => import("./pages/AdminProjects"),
   proxyManagement: () => import("./pages/ProxyManagement"),
   invite: () => import("./pages/Invite"),
@@ -79,6 +80,7 @@ const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
+const AdminMicrosoftEmails = lazy(pageLoaders.adminMicrosoftEmails);
 const AdminProjects = lazy(pageLoaders.adminProjects);
 const ProxyManagement = lazy(pageLoaders.proxyManagement);
 const Invite = lazy(pageLoaders.invite);
@@ -98,6 +100,7 @@ const routePreloadPriority = [
   "wallet",
   "microsoftEmails",
   "domainEmails",
+  "adminMicrosoftEmails",
   "adminProjects",
   "proxyManagement",
   "consoleOverview",
@@ -209,10 +212,6 @@ function scheduleApiDocsPreload() {
     () => browserWindow.setTimeout(preload, 400),
     { once: true }
   );
-}
-
-function AdminMicrosoftEmails() {
-  return <PlaceholderPage titleKey="Admin Microsoft Emails" />;
 }
 
 function AdminDomainEmails() {

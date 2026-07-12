@@ -25,6 +25,7 @@ type EmailResourceModel struct {
 	ID          uint      `gorm:"primaryKey;autoIncrement"`
 	Type        string    `gorm:"type:varchar(32);not null"`
 	OwnerUserID uint      `gorm:"not null;column:owner_user_id"`
+	Version     uint64    `gorm:"not null;default:1"`
 	CreatedAt   time.Time `gorm:"not null;autoCreateTime"`
 	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime"`
 }
@@ -38,6 +39,7 @@ func (m *EmailResourceModel) toDomain() *domain.EmailResource {
 		ID:          m.ID,
 		Type:        domain.ResourceType(m.Type),
 		OwnerUserID: m.OwnerUserID,
+		Version:     m.Version,
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
 	}
@@ -45,24 +47,28 @@ func (m *EmailResourceModel) toDomain() *domain.EmailResource {
 
 // MicrosoftResourceModel is the GORM model for the microsoft_resources table.
 type MicrosoftResourceModel struct {
-	ID              uint       `gorm:"primaryKey"`
-	EmailAddress    string     `gorm:"type:varchar(255);not null;uniqueIndex;column:email_address"`
-	EmailDomain     string     `gorm:"type:varchar(255);not null;default:'';column:email_domain"`
-	Password        string     `gorm:"type:varchar(512);not null"`
-	ClientID        string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
-	RefreshToken    string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
-	LongLived       bool       `gorm:"not null;default:false;column:long_lived"`
-	GraphAvailable  bool       `gorm:"not null;default:false;column:graph_available"`
-	RTExpireAt      *time.Time `gorm:"column:rt_expire_at"`
-	ForSale         bool       `gorm:"not null;default:false;column:for_sale"`
-	Status          string     `gorm:"type:varchar(32);not null;default:'pending'"`
-	QualityScore    int        `gorm:"not null;default:0;column:quality_score"`
-	PlusDailyLimit  int        `gorm:"not null;default:10000;column:plus_daily_limit"`
-	AllocBucket     uint8      `gorm:"not null;default:0;column:alloc_bucket"`
-	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
-	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime"`
+	ID                   uint       `gorm:"primaryKey"`
+	EmailAddress         string     `gorm:"type:varchar(255);not null;uniqueIndex;column:email_address"`
+	EmailDomain          string     `gorm:"type:varchar(255);not null;default:'';column:email_domain"`
+	Password             string     `gorm:"type:varchar(512);not null"`
+	ClientID             string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
+	RefreshToken         string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
+	CredentialRevision   uint64     `gorm:"not null;default:1;column:credential_revision"`
+	CredentialUpdatedAt  time.Time  `gorm:"not null;column:credential_updated_at"`
+	LongLived            bool       `gorm:"not null;default:false;column:long_lived"`
+	GraphAvailable       bool       `gorm:"not null;default:false;column:graph_available"`
+	RTExpireAt           *time.Time `gorm:"column:rt_expire_at"`
+	TokenLastRefreshedAt *time.Time `gorm:"column:token_last_refreshed_at"`
+	TokenLastRequestID   string     `gorm:"type:varchar(64);not null;default:'';column:token_last_request_id"`
+	ForSale              bool       `gorm:"not null;default:false;column:for_sale"`
+	Status               string     `gorm:"type:varchar(32);not null;default:'pending'"`
+	QualityScore         int        `gorm:"not null;default:0;column:quality_score"`
+	PlusDailyLimit       int        `gorm:"not null;default:10000;column:plus_daily_limit"`
+	AllocBucket          uint8      `gorm:"not null;default:0;column:alloc_bucket"`
+	LastSafeError        string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	LastAllocatedAt      *time.Time `gorm:"column:last_allocated_at"`
+	CreatedAt            time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt            time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 func (MicrosoftResourceModel) TableName() string {
@@ -71,45 +77,61 @@ func (MicrosoftResourceModel) TableName() string {
 
 func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 	return &domain.MicrosoftResource{
-		ID:              m.ID,
-		EmailAddress:    m.EmailAddress,
-		Password:        m.Password,
-		ClientID:        m.ClientID,
-		RefreshToken:    m.RefreshToken,
-		LongLived:       m.LongLived,
-		GraphAvailable:  m.GraphAvailable,
-		RTExpireAt:      m.RTExpireAt,
-		ForSale:         m.ForSale,
-		Status:          domain.MicrosoftResourceStatus(m.Status),
-		QualityScore:    m.QualityScore,
-		PlusDailyLimit:  m.PlusDailyLimit,
-		LastSafeError:   m.LastSafeError,
-		LastAllocatedAt: m.LastAllocatedAt,
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
+		ID:                   m.ID,
+		EmailAddress:         m.EmailAddress,
+		Password:             m.Password,
+		ClientID:             m.ClientID,
+		RefreshToken:         m.RefreshToken,
+		CredentialRevision:   m.CredentialRevision,
+		CredentialUpdatedAt:  m.CredentialUpdatedAt,
+		LongLived:            m.LongLived,
+		GraphAvailable:       m.GraphAvailable,
+		RTExpireAt:           m.RTExpireAt,
+		TokenLastRefreshedAt: m.TokenLastRefreshedAt,
+		TokenLastRequestID:   m.TokenLastRequestID,
+		ForSale:              m.ForSale,
+		Status:               domain.MicrosoftResourceStatus(m.Status),
+		QualityScore:         m.QualityScore,
+		PlusDailyLimit:       m.PlusDailyLimit,
+		LastSafeError:        m.LastSafeError,
+		LastAllocatedAt:      m.LastAllocatedAt,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
 	}
 }
 
 func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
+	credentialRevision := ms.CredentialRevision
+	if credentialRevision == 0 {
+		credentialRevision = 1
+	}
+	credentialUpdatedAt := ms.CredentialUpdatedAt
+	if credentialUpdatedAt.IsZero() {
+		credentialUpdatedAt = time.Now().UTC()
+	}
 	return &MicrosoftResourceModel{
-		ID:              ms.ID,
-		EmailAddress:    ms.EmailAddress,
-		EmailDomain:     microsoftEmailDomain(ms.EmailAddress),
-		Password:        ms.Password,
-		ClientID:        ms.ClientID,
-		RefreshToken:    ms.RefreshToken,
-		LongLived:       ms.LongLived,
-		GraphAvailable:  ms.GraphAvailable,
-		RTExpireAt:      ms.RTExpireAt,
-		ForSale:         ms.ForSale,
-		Status:          string(ms.Status),
-		QualityScore:    ms.QualityScore,
-		PlusDailyLimit:  normalizeDailyLimit(ms.PlusDailyLimit, domain.DefaultPlusDailyLimit),
-		AllocBucket:     uint8(ms.ID % 64),
-		LastSafeError:   ms.LastSafeError,
-		LastAllocatedAt: ms.LastAllocatedAt,
-		CreatedAt:       ms.CreatedAt,
-		UpdatedAt:       ms.UpdatedAt,
+		ID:                   ms.ID,
+		EmailAddress:         ms.EmailAddress,
+		EmailDomain:          microsoftEmailDomain(ms.EmailAddress),
+		Password:             ms.Password,
+		ClientID:             ms.ClientID,
+		RefreshToken:         ms.RefreshToken,
+		CredentialRevision:   credentialRevision,
+		CredentialUpdatedAt:  credentialUpdatedAt,
+		LongLived:            ms.LongLived,
+		GraphAvailable:       ms.GraphAvailable,
+		RTExpireAt:           ms.RTExpireAt,
+		TokenLastRefreshedAt: ms.TokenLastRefreshedAt,
+		TokenLastRequestID:   ms.TokenLastRequestID,
+		ForSale:              ms.ForSale,
+		Status:               string(ms.Status),
+		QualityScore:         ms.QualityScore,
+		PlusDailyLimit:       normalizeDailyLimit(ms.PlusDailyLimit, domain.DefaultPlusDailyLimit),
+		AllocBucket:          uint8(ms.ID % 64),
+		LastSafeError:        ms.LastSafeError,
+		LastAllocatedAt:      ms.LastAllocatedAt,
+		CreatedAt:            ms.CreatedAt,
+		UpdatedAt:            ms.UpdatedAt,
 	}
 }
 
@@ -289,6 +311,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 		}
 
 		resource.ID = root.ID
+		resource.Version = root.Version
 		resource.CreatedAt = root.CreatedAt
 		resource.UpdatedAt = root.UpdatedAt
 		ms.ID = msModel.ID
@@ -390,6 +413,7 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 			return fmt.Errorf("create domain resource: %w", err)
 		}
 		resource.ID = root.ID
+		resource.Version = root.Version
 		resource.CreatedAt = root.CreatedAt
 		resource.UpdatedAt = root.UpdatedAt
 		dr.ID = domainModel.ID
@@ -501,6 +525,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 
 	for i := range resources {
 		resources[i].ID = rootModels[i].ID
+		resources[i].Version = rootModels[i].Version
 		resources[i].CreatedAt = rootModels[i].CreatedAt
 		resources[i].UpdatedAt = rootModels[i].UpdatedAt
 		ms[i].ID = msModels[i].ID

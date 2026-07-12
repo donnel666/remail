@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -14,47 +17,99 @@ import (
 
 // ResourceImportModel is the GORM model for resource_imports.
 type ResourceImportModel struct {
-	ID               uint      `gorm:"primaryKey;autoIncrement"`
-	OwnerUserID      uint      `gorm:"not null;column:owner_user_id"`
-	ResourceType     string    `gorm:"type:varchar(32);not null;column:resource_type"`
-	SourceObjectKey  string    `gorm:"type:varchar(500);not null;column:source_object_key"`
-	FailureObjectKey string    `gorm:"type:varchar(500);not null;default:'';column:failure_object_key"`
-	Status           string    `gorm:"type:varchar(32);not null;default:'processing'"`
-	ImportedCount    int       `gorm:"not null;default:0;column:imported_count"`
-	LastSafeError    string    `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	CreatedAt        time.Time `gorm:"not null;autoCreateTime"`
-	UpdatedAt        time.Time `gorm:"not null;autoUpdateTime"`
+	ID                 uint       `gorm:"primaryKey;autoIncrement"`
+	OwnerUserID        uint       `gorm:"not null;column:owner_user_id"`
+	OperatorUserID     *uint      `gorm:"column:operator_user_id"`
+	ResourceType       string     `gorm:"type:varchar(32);not null;column:resource_type"`
+	LongLived          bool       `gorm:"not null;default:false;column:long_lived"`
+	ErrorStrategy      string     `gorm:"type:varchar(16);not null;default:'skip';column:error_strategy"`
+	SourceObjectKey    string     `gorm:"type:varchar(500);not null;column:source_object_key"`
+	FailureObjectKey   string     `gorm:"type:varchar(500);not null;default:'';column:failure_object_key"`
+	Status             string     `gorm:"type:varchar(32);not null;default:'processing'"`
+	ImportedCount      int        `gorm:"not null;default:0;column:imported_count"`
+	AcceptedCount      int        `gorm:"not null;default:0;column:accepted_count"`
+	SkippedCount       int        `gorm:"not null;default:0;column:skipped_count"`
+	LastSafeError      string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	RequestID          string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
+	Path               string     `gorm:"type:varchar(255);not null;default:''"`
+	IdempotencyKey     string     `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
+	RequestFingerprint string     `gorm:"type:char(64);not null;default:'';column:request_fingerprint"`
+	DispatchStatus     string     `gorm:"type:varchar(32);not null;default:'legacy';column:dispatch_status"`
+	Attempts           int        `gorm:"not null;default:0"`
+	MaxAttempts        int        `gorm:"not null;default:3;column:max_attempts"`
+	ClaimToken         string     `gorm:"type:char(36);not null;default:'';column:claim_token"`
+	DispatchToken      string     `gorm:"type:char(36);not null;default:'';column:dispatch_token"`
+	DispatchedAt       *time.Time `gorm:"column:dispatched_at"`
+	StartedAt          *time.Time `gorm:"column:started_at"`
+	FinishedAt         *time.Time `gorm:"column:finished_at"`
+	CreatedAt          time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt          time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 func (ResourceImportModel) TableName() string {
 	return "resource_imports"
 }
 
+type ResourceImportItemModel struct {
+	ID            uint64    `gorm:"primaryKey;autoIncrement"`
+	ImportID      uint      `gorm:"not null;column:import_id"`
+	ResourceID    *uint     `gorm:"column:resource_id"`
+	LineNumber    int       `gorm:"not null;column:line_number"`
+	Outcome       string    `gorm:"type:varchar(32);not null"`
+	Category      string    `gorm:"type:varchar(64);not null;default:''"`
+	LastSafeError string    `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	CreatedAt     time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+}
+
+func (ResourceImportItemModel) TableName() string { return "resource_import_items" }
+
 func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel {
 	return &ResourceImportModel{
 		ID:               item.ID,
 		OwnerUserID:      item.OwnerUserID,
 		ResourceType:     string(item.ResourceType),
+		ErrorStrategy:    string(domain.ImportErrorStrategySkip),
 		SourceObjectKey:  item.SourceObjectKey,
 		FailureObjectKey: item.FailureObjectKey,
 		Status:           string(item.Status),
+		DispatchStatus:   "legacy",
+		MaxAttempts:      3,
 		ImportedCount:    item.ImportedCount,
 		LastSafeError:    item.LastSafeError,
+		RequestID:        item.RequestID,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
 }
 
 func (m *ResourceImportModel) toDomain() *domain.ResourceImport {
+	operatorUserID := uint(0)
+	if m.OperatorUserID != nil {
+		operatorUserID = *m.OperatorUserID
+	}
 	return &domain.ResourceImport{
 		ID:               m.ID,
 		OwnerUserID:      m.OwnerUserID,
+		OperatorUserID:   operatorUserID,
 		ResourceType:     domain.ResourceType(m.ResourceType),
+		LongLived:        m.LongLived,
+		ErrorStrategy:    domain.ImportErrorStrategy(m.ErrorStrategy),
 		SourceObjectKey:  m.SourceObjectKey,
 		FailureObjectKey: m.FailureObjectKey,
 		Status:           domain.ResourceImportStatus(m.Status),
 		ImportedCount:    m.ImportedCount,
+		AcceptedCount:    m.AcceptedCount,
+		SkippedCount:     m.SkippedCount,
+		DispatchStatus:   m.DispatchStatus,
+		Attempts:         m.Attempts,
+		MaxAttempts:      m.MaxAttempts,
+		ClaimToken:       m.ClaimToken,
+		DispatchToken:    m.DispatchToken,
+		DispatchedAt:     m.DispatchedAt,
 		LastSafeError:    m.LastSafeError,
+		RequestID:        m.RequestID,
+		StartedAt:        m.StartedAt,
+		FinishedAt:       m.FinishedAt,
 		CreatedAt:        m.CreatedAt,
 		UpdatedAt:        m.UpdatedAt,
 	}
@@ -62,12 +117,13 @@ func (m *ResourceImportModel) toDomain() *domain.ResourceImport {
 
 // ResourceImportRepo persists resource import metadata.
 type ResourceImportRepo struct {
-	db *gorm.DB
+	db            *gorm.DB
+	operationLogs *governanceinfra.OperationLogRepo
 }
 
 // NewResourceImportRepo creates a GORM-backed resource import repository.
 func NewResourceImportRepo(db *gorm.DB) *ResourceImportRepo {
-	return &ResourceImportRepo{db: db}
+	return &ResourceImportRepo{db: db, operationLogs: governanceinfra.NewOperationLogRepo(db)}
 }
 
 func (r *ResourceImportRepo) Create(ctx context.Context, item *domain.ResourceImport) error {
@@ -79,6 +135,278 @@ func (r *ResourceImportRepo) Create(ctx context.Context, item *domain.ResourceIm
 	item.CreatedAt = model.CreatedAt
 	item.UpdatedAt = model.UpdatedAt
 	return nil
+}
+
+func (r *ResourceImportRepo) FindAdminByIdempotency(ctx context.Context, operatorUserID uint, idempotencyKey string) (*domain.ResourceImport, string, error) {
+	var model ResourceImportModel
+	err := r.db.WithContext(ctx).
+		Where("operator_user_id = ? AND idempotency_key = ?", operatorUserID, idempotencyKey).
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("find administrator resource import idempotency key: %w", err)
+	}
+	return model.toDomain(), model.RequestFingerprint, nil
+}
+
+func (r *ResourceImportRepo) SetAdminImportCounts(ctx context.Context, importID uint, claimToken string, accepted, skipped int) error {
+	if accepted < 0 || skipped < 0 {
+		return domain.ErrInvalidImportFormat
+	}
+	query := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+		Where("id = ? AND operator_user_id IS NOT NULL AND status = ?", importID, string(domain.ResourceImportProcessing))
+	if claimToken != "" {
+		query = query.Where("dispatch_status = ? AND claim_token = ?", "running", claimToken)
+	}
+	result := query.
+		Updates(map[string]any{
+			"accepted_count": gorm.Expr("GREATEST(accepted_count, ?)", accepted),
+			"skipped_count":  gorm.Expr("GREATEST(skipped_count, ?)", skipped),
+			"updated_at":     time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update administrator resource import counts: %w", result.Error)
+	}
+	if claimToken != "" && result.RowsAffected == 0 {
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+			Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("verify administrator resource import claim: %w", err)
+		}
+		if count == 0 {
+			return domain.ErrResourceImportInvalidClaim
+		}
+	}
+	return nil
+}
+
+func (r *ResourceImportRepo) ListAdminImportProcessedLines(ctx context.Context, importID uint) (map[int]struct{}, error) {
+	var rows []struct {
+		LineNumber int `gorm:"column:line_number"`
+	}
+	if err := r.db.WithContext(ctx).Model(&ResourceImportItemModel{}).
+		Select("line_number").Where("import_id = ?", importID).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list administrator resource import processed lines: %w", err)
+	}
+	result := make(map[int]struct{}, len(rows))
+	for _, row := range rows {
+		result[row.LineNumber] = struct{}{}
+	}
+	return result, nil
+}
+
+func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	now := time.Now().UTC()
+	var claimed []coreapp.AdminResourceImportDispatchItem
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ResourceImportModel{}).
+			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND started_at < ? AND attempts >= max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
+			Updates(map[string]any{
+				"status":          string(domain.ResourceImportFailed),
+				"dispatch_status": "failed",
+				"claim_token":     "",
+				"dispatch_token":  "",
+				"last_safe_error": "Import processing retry limit was reached.",
+				"finished_at":     now,
+				"updated_at":      now,
+			}).Error; err != nil {
+			return fmt.Errorf("expire stale administrator imports: %w", err)
+		}
+		if err := tx.Model(&ResourceImportModel{}).
+			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND started_at < ? AND attempts < max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
+			Updates(map[string]any{
+				"dispatch_status": "queued",
+				"claim_token":     "",
+				"dispatch_token":  "",
+				"dispatched_at":   nil,
+				"updated_at":      now,
+			}).Error; err != nil {
+			return fmt.Errorf("recover stale administrator imports: %w", err)
+		}
+
+		var models []ResourceImportModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND attempts < max_attempts AND (dispatch_token = '' OR dispatched_at IS NULL OR dispatched_at < ?)", string(domain.ResourceImportProcessing), "queued", queuedDispatchStaleBefore).
+			Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
+			return fmt.Errorf("lock queued administrator resource imports: %w", err)
+		}
+		claimed = make([]coreapp.AdminResourceImportDispatchItem, 0, len(models))
+		for i := range models {
+			token := platform.NewUUIDV7String()
+			update := tx.Model(&ResourceImportModel{}).
+				Where("id = ? AND status = ? AND dispatch_status = ?", models[i].ID, string(domain.ResourceImportProcessing), "queued").
+				Updates(map[string]any{"dispatch_token": token, "dispatched_at": now, "updated_at": now})
+			if update.Error != nil {
+				return fmt.Errorf("claim administrator resource import dispatch: %w", update.Error)
+			}
+			if update.RowsAffected != 1 {
+				continue
+			}
+			claimed = append(claimed, coreapp.AdminResourceImportDispatchItem{
+				ImportID: models[i].ID, OwnerUserID: models[i].OwnerUserID,
+				LongLived: models[i].LongLived, ErrorStrategy: domain.ImportErrorStrategy(models[i].ErrorStrategy),
+				RequestID:     models[i].RequestID,
+				DispatchToken: token,
+			})
+		}
+		return nil
+	})
+	return claimed, err
+}
+
+func (r *ResourceImportRepo) MarkAdminImportRunning(ctx context.Context, importID uint, dispatchToken string) (string, bool, error) {
+	if importID == 0 || dispatchToken == "" {
+		return "", false, domain.ErrResourceImportInvalidClaim
+	}
+	now := time.Now().UTC()
+	claimToken := platform.NewUUIDV7String()
+	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+		Where("id = ? AND status = ? AND dispatch_status = ? AND dispatch_token = ? AND attempts < max_attempts", importID, string(domain.ResourceImportProcessing), "queued", dispatchToken).
+		Updates(map[string]any{
+			"dispatch_status": "running", "attempts": gorm.Expr("attempts + 1"),
+			"claim_token": claimToken, "dispatch_token": "", "started_at": now, "updated_at": now,
+		})
+	if result.Error != nil {
+		return "", false, fmt.Errorf("mark administrator resource import running: %w", result.Error)
+	}
+	return claimToken, result.RowsAffected == 1, nil
+}
+
+func (r *ResourceImportRepo) MarkAdminImportDispatchFailed(ctx context.Context, importID uint, dispatchToken, safeError string) error {
+	now := time.Now().UTC()
+	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+		Where("id = ? AND status = ? AND dispatch_status = ? AND dispatch_token = ?", importID, string(domain.ResourceImportProcessing), "queued", dispatchToken).
+		Updates(map[string]any{"dispatch_token": "", "dispatched_at": nil, "last_safe_error": safeError, "updated_at": now})
+	if result.Error != nil {
+		return fmt.Errorf("release administrator resource import dispatch: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *ResourceImportRepo) MarkAdminImportRetryableFailure(ctx context.Context, importID uint, claimToken, safeError string) (bool, error) {
+	if importID == 0 || claimToken == "" {
+		return false, domain.ErrResourceImportInvalidClaim
+	}
+	now := time.Now().UTC()
+	exhausted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model ResourceImportModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
+			First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceImportInvalidClaim
+			}
+			return fmt.Errorf("lock failed administrator resource import: %w", err)
+		}
+		exhausted = model.Attempts >= model.MaxAttempts
+		updates := map[string]any{
+			"claim_token": "", "dispatch_token": "", "dispatched_at": nil,
+			"last_safe_error": safeError, "updated_at": now,
+		}
+		if exhausted {
+			updates["status"] = string(domain.ResourceImportFailed)
+			updates["dispatch_status"] = "failed"
+			updates["finished_at"] = now
+		} else {
+			updates["dispatch_status"] = "queued"
+		}
+		return tx.Model(&ResourceImportModel{}).Where("id = ? AND claim_token = ?", importID, claimToken).Updates(updates).Error
+	})
+	return exhausted, err
+}
+
+func (r *ResourceImportRepo) MarkAdminImportFailed(ctx context.Context, importID uint, claimToken, failureObjectKey, safeError string) error {
+	if importID == 0 || claimToken == "" {
+		return domain.ErrResourceImportInvalidClaim
+	}
+	now := time.Now().UTC()
+	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+		Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
+		Updates(map[string]any{
+			"status": string(domain.ResourceImportFailed), "dispatch_status": "failed",
+			"claim_token": "", "dispatch_token": "", "failure_object_key": failureObjectKey,
+			"last_safe_error": safeError, "finished_at": now, "updated_at": now,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark administrator resource import failed: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return domain.ErrResourceImportInvalidClaim
+	}
+	return nil
+}
+
+func (r *ResourceImportRepo) CreateAdminWithLog(
+	ctx context.Context,
+	item *domain.ResourceImport,
+	metadata coreapp.AdminResourceImportMetadata,
+	log *governancedomain.OperationLog,
+) (*domain.ResourceImport, bool, error) {
+	var stored *domain.ResourceImport
+	created := false
+	err := withRetryableMySQLTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		stored = nil
+		created = false
+		var existing ResourceImportModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("operator_user_id = ? AND idempotency_key = ?", metadata.OperatorUserID, metadata.IdempotencyKey).
+			First(&existing).Error
+		if err == nil {
+			if existing.RequestFingerprint != metadata.RequestFingerprint {
+				return domain.ErrResourceIdempotencyConflict
+			}
+			stored = existing.toDomain()
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("lock administrator resource import idempotency key: %w", err)
+		}
+		operatorID := metadata.OperatorUserID
+		model := &ResourceImportModel{
+			OwnerUserID: item.OwnerUserID, OperatorUserID: &operatorID,
+			ResourceType: string(item.ResourceType), LongLived: metadata.LongLived,
+			ErrorStrategy:   string(metadata.ErrorStrategy),
+			SourceObjectKey: item.SourceObjectKey, Status: string(item.Status),
+			RequestID: metadata.RequestID, Path: metadata.Path,
+			IdempotencyKey: metadata.IdempotencyKey, RequestFingerprint: metadata.RequestFingerprint,
+			DispatchStatus: "queued", MaxAttempts: 3,
+		}
+		if err := tx.Create(model).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				var raced ResourceImportModel
+				if findErr := tx.Where("operator_user_id = ? AND idempotency_key = ?", metadata.OperatorUserID, metadata.IdempotencyKey).
+					First(&raced).Error; findErr != nil {
+					return fmt.Errorf("reload administrator resource import idempotency key: %w", findErr)
+				}
+				if raced.RequestFingerprint != metadata.RequestFingerprint {
+					return domain.ErrResourceIdempotencyConflict
+				}
+				stored = raced.toDomain()
+				return nil
+			}
+			return fmt.Errorf("create administrator resource import: %w", err)
+		}
+		stored = model.toDomain()
+		created = true
+		if log != nil {
+			log.ResourceID = fmt.Sprintf("import:%d", model.ID)
+			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return stored, created, err
 }
 
 func (r *ResourceImportRepo) FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error) {
@@ -94,6 +422,7 @@ func (r *ResourceImportRepo) FindByID(ctx context.Context, id uint) (*domain.Res
 }
 
 func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error {
+	now := time.Now().UTC()
 	err := r.db.WithContext(ctx).
 		Model(&ResourceImportModel{}).
 		Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
@@ -101,7 +430,9 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 			"status":             string(domain.ResourceImportFailed),
 			"failure_object_key": failureObjectKey,
 			"last_safe_error":    safeError,
-			"updated_at":         time.Now(),
+			"dispatch_status":    gorm.Expr("CASE WHEN dispatch_status = 'legacy' THEN 'legacy' ELSE 'failed' END"),
+			"finished_at":        now,
+			"updated_at":         now,
 		}).Error
 	if err != nil {
 		return fmt.Errorf("mark resource import failed: %w", err)
@@ -109,8 +440,19 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 	return nil
 }
 
-func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error) ([]uint, error) {
-	if len(resources) != len(ms) {
+func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(
+	ctx context.Context,
+	id uint,
+	claimToken string,
+	lines []domain.MicrosoftImportLine,
+	resources []domain.EmailResource,
+	ms []domain.MicrosoftResource,
+	skippedItems []coreapp.AdminResourceImportSkippedItem,
+	failureObjectKey string,
+	safeSummary string,
+	afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error,
+) ([]uint, error) {
+	if len(resources) != len(ms) || len(lines) != len(ms) {
 		return nil, fmt.Errorf("create microsoft resources and mark import succeeded: resource count mismatch")
 	}
 
@@ -130,14 +472,30 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 		}
 		chunkResources := resources[start:end]
 		chunkMicrosoft := ms[start:end]
+		chunkLines := lines[start:end]
 		var chunkIDs []uint
 		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			importModel, err := lockProcessingResourceImportTx(tx, id)
+			importModel, err := lockProcessingResourceImportTx(tx, id, claimToken)
 			if err != nil {
 				return err
 			}
 			if importModel == nil {
 				return nil
+			}
+
+			emails := make([]string, 0, len(chunkMicrosoft))
+			for i := range chunkMicrosoft {
+				emails = append(emails, chunkMicrosoft[i].EmailAddress)
+			}
+			existingBefore, err := findMicrosoftResourceModelsByEmails(tx, emails, true, true)
+			if err != nil {
+				return fmt.Errorf("find restorable microsoft resources: %w", err)
+			}
+			restored := make(map[string]struct{}, len(existingBefore))
+			for _, existing := range existingBefore {
+				if domain.MicrosoftResourceStatus(existing.Status) == domain.MicrosoftStatusDeleted {
+					restored[microsoftEmailKey(existing.EmailAddress)] = struct{}{}
+				}
 			}
 
 			if err := createMicrosoftBatchTx(tx, chunkResources, chunkMicrosoft); err != nil {
@@ -150,6 +508,26 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 			if afterCreate != nil {
 				if err := afterCreate(platform.WithGormTx(ctx, tx), chunkMicrosoft, chunkIDs); err != nil {
 					return fmt.Errorf("finalize imported microsoft resources: %w", err)
+				}
+			}
+			items := make([]ResourceImportItemModel, 0, len(chunkLines))
+			for i := range chunkLines {
+				if chunkLines[i].LineNumber <= 0 || i >= len(chunkIDs) {
+					return domain.ErrInvalidImportFormat
+				}
+				resourceID := chunkIDs[i]
+				outcome := "imported"
+				if _, ok := restored[microsoftEmailKey(chunkMicrosoft[i].EmailAddress)]; ok {
+					outcome = "restored"
+				}
+				items = append(items, ResourceImportItemModel{
+					ImportID: id, ResourceID: &resourceID, LineNumber: chunkLines[i].LineNumber,
+					Outcome: outcome,
+				})
+			}
+			if len(items) > 0 {
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&items).Error; err != nil {
+					return fmt.Errorf("record imported resource items: %w", err)
 				}
 			}
 			if err := tx.Model(&ResourceImportModel{}).
@@ -169,7 +547,7 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 	}
 
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		importModel, err := lockProcessingResourceImportTx(tx, id)
+		importModel, err := lockProcessingResourceImportTx(tx, id, claimToken)
 		if err != nil {
 			return err
 		}
@@ -177,16 +555,52 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx contex
 			return nil
 		}
 
-		now := time.Now()
+		if len(skippedItems) > 0 {
+			models := make([]ResourceImportItemModel, 0, len(skippedItems))
+			for _, item := range skippedItems {
+				if item.LineNumber <= 0 {
+					continue
+				}
+				models = append(models, ResourceImportItemModel{
+					ImportID: id, LineNumber: item.LineNumber, Outcome: "skipped",
+					Category: item.Category, LastSafeError: item.SafeError,
+				})
+			}
+			if len(models) > 0 {
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models).Error; err != nil {
+					return fmt.Errorf("record skipped resource import items: %w", err)
+				}
+			}
+		}
+		var counts struct {
+			Imported int `gorm:"column:imported"`
+			Skipped  int `gorm:"column:skipped"`
+		}
+		if err := tx.Model(&ResourceImportItemModel{}).
+			Select("COALESCE(SUM(CASE WHEN outcome IN ('imported', 'restored') THEN 1 ELSE 0 END), 0) AS imported, COALESCE(SUM(CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped").
+			Where("import_id = ?", id).Scan(&counts).Error; err != nil {
+			return fmt.Errorf("count resource import items: %w", err)
+		}
+
+		now := time.Now().UTC()
+		updates := map[string]interface{}{
+			"status":             string(domain.ResourceImportImported),
+			"imported_count":     counts.Imported,
+			"accepted_count":     gorm.Expr("GREATEST(accepted_count, ?)", counts.Imported),
+			"skipped_count":      counts.Skipped,
+			"failure_object_key": failureObjectKey,
+			"last_safe_error":    safeSummary,
+			"dispatch_status":    gorm.Expr("CASE WHEN dispatch_status = 'legacy' THEN 'legacy' ELSE 'succeeded' END"),
+			"finished_at":        now,
+			"updated_at":         now,
+		}
+		if claimToken != "" {
+			updates["claim_token"] = ""
+			updates["dispatch_token"] = ""
+		}
 		if err := tx.Model(&ResourceImportModel{}).
 			Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).
-			Updates(map[string]interface{}{
-				"status":             string(domain.ResourceImportImported),
-				"imported_count":     len(ms),
-				"failure_object_key": failureObjectKey,
-				"last_safe_error":    safeSummary,
-				"updated_at":         now,
-			}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			return fmt.Errorf("mark resource import succeeded: %w", err)
 		}
 		return nil
@@ -224,7 +638,7 @@ func (r *ResourceImportRepo) resourceImportAlreadyTerminal(ctx context.Context, 
 	return terminal, nil
 }
 
-func lockProcessingResourceImportTx(tx *gorm.DB, id uint) (*ResourceImportModel, error) {
+func lockProcessingResourceImportTx(tx *gorm.DB, id uint, claimToken string) (*ResourceImportModel, error) {
 	var importModel ResourceImportModel
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&importModel, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -236,6 +650,9 @@ func lockProcessingResourceImportTx(tx *gorm.DB, id uint) (*ResourceImportModel,
 	case domain.ResourceImportImported, domain.ResourceImportFailed:
 		return nil, nil
 	case domain.ResourceImportProcessing:
+		if claimToken != "" && (importModel.DispatchStatus != "running" || importModel.ClaimToken != claimToken) {
+			return nil, domain.ErrResourceImportInvalidClaim
+		}
 		return &importModel, nil
 	default:
 		return nil, domain.ErrInvalidResourceStatus
@@ -257,9 +674,17 @@ func findMicrosoftResourceIDsByImportRowsTx(tx *gorm.DB, rows []domain.Microsoft
 	if len(models) != len(uniqueMicrosoftEmails(emails)) {
 		return nil, domain.ErrResourceNotFound
 	}
-	ids := make([]uint, 0, len(models))
+	idsByEmail := make(map[string]uint, len(models))
 	for _, model := range models {
-		ids = append(ids, model.ID)
+		idsByEmail[microsoftEmailKey(model.EmailAddress)] = model.ID
+	}
+	ids := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		id, ok := idsByEmail[microsoftEmailKey(row.EmailAddress)]
+		if !ok {
+			return nil, domain.ErrResourceNotFound
+		}
+		ids = append(ids, id)
 	}
 	return ids, nil
 }

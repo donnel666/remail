@@ -39,12 +39,31 @@ func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task c
 		ctx,
 		asynqTask,
 		asynq.Queue(importQueueName),
-		asynq.TaskID(fmt.Sprintf("%s:%d", TypeMicrosoftImport, task.ImportID)),
-		asynq.MaxRetry(importTaskMaxRetry),
+		asynq.TaskID(importTaskID(task)),
+		asynq.MaxRetry(importMaxRetry(task)),
 		asynq.Timeout(importTaskTimeout),
 	)
+	if err == asynq.ErrTaskIDConflict {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("enqueue microsoft import task: %w", err)
 	}
 	return nil
+}
+
+func importTaskID(task coreapp.MicrosoftImportTask) string {
+	if task.DispatchToken != "" {
+		return fmt.Sprintf("%s:%d:%s", TypeMicrosoftImport, task.ImportID, task.DispatchToken)
+	}
+	return fmt.Sprintf("%s:%d", TypeMicrosoftImport, task.ImportID)
+}
+
+func importMaxRetry(task coreapp.MicrosoftImportTask) int {
+	// Administrator imports retry from their durable database fact with a new
+	// dispatch token. Replaying this Asynq payload would reuse a consumed token.
+	if task.DispatchToken != "" {
+		return 0
+	}
+	return importTaskMaxRetry
 }

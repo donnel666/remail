@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
@@ -95,7 +97,50 @@ type ResourceImportRepository interface {
 	Create(ctx context.Context, item *domain.ResourceImport) error
 	FindByID(ctx context.Context, id uint) (*domain.ResourceImport, error)
 	MarkFailed(ctx context.Context, id uint, failureObjectKey string, safeError string) error
-	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []domain.EmailResource, ms []domain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error) ([]uint, error)
+	CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, claimToken string, lines []domain.MicrosoftImportLine, resources []domain.EmailResource, ms []domain.MicrosoftResource, skippedItems []AdminResourceImportSkippedItem, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []domain.MicrosoftResource, []uint) error) ([]uint, error)
+}
+
+type AdminResourceImportMetadata struct {
+	OperatorUserID     uint
+	LongLived          bool
+	ErrorStrategy      domain.ImportErrorStrategy
+	RequestID          string
+	Path               string
+	IdempotencyKey     string
+	RequestFingerprint string
+}
+
+type AdminResourceImportRepository interface {
+	FindAdminByIdempotency(ctx context.Context, operatorUserID uint, idempotencyKey string) (*domain.ResourceImport, string, error)
+	CreateAdminWithLog(ctx context.Context, item *domain.ResourceImport, metadata AdminResourceImportMetadata, log *governancedomain.OperationLog) (*domain.ResourceImport, bool, error)
+}
+
+type AdminResourceImportProgressRepository interface {
+	SetAdminImportCounts(ctx context.Context, importID uint, claimToken string, accepted, skipped int) error
+	ListAdminImportProcessedLines(ctx context.Context, importID uint) (map[int]struct{}, error)
+}
+
+type AdminResourceImportSkippedItem struct {
+	LineNumber int
+	Category   string
+	SafeError  string
+}
+
+type AdminResourceImportDispatchItem struct {
+	ImportID      uint
+	OwnerUserID   uint
+	LongLived     bool
+	ErrorStrategy domain.ImportErrorStrategy
+	RequestID     string
+	DispatchToken string
+}
+
+type AdminResourceImportDispatchRepository interface {
+	ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]AdminResourceImportDispatchItem, error)
+	MarkAdminImportRunning(ctx context.Context, importID uint, dispatchToken string) (claimToken string, claimed bool, err error)
+	MarkAdminImportDispatchFailed(ctx context.Context, importID uint, dispatchToken, safeError string) error
+	MarkAdminImportRetryableFailure(ctx context.Context, importID uint, claimToken, safeError string) (exhausted bool, err error)
+	MarkAdminImportFailed(ctx context.Context, importID uint, claimToken, failureObjectKey, safeError string) error
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
@@ -121,13 +166,18 @@ type MicrosoftBindingInput struct {
 }
 
 // MicrosoftImportTask is the safe queue payload for a Microsoft resource import.
+// SourceObjectKey remains available only for legacy in-memory callers. Durable
+// workers resolve it from ResourceImport after dequeueing, so private storage
+// paths can never be serialized into Redis/Asynq.
 type MicrosoftImportTask struct {
 	ImportID        uint                       `json:"importId"`
 	OwnerUserID     uint                       `json:"ownerUserId"`
-	SourceObjectKey string                     `json:"sourceObjectKey"`
+	SourceObjectKey string                     `json:"-"`
 	LongLived       bool                       `json:"longLived"`
 	ErrorStrategy   domain.ImportErrorStrategy `json:"errorStrategy"`
 	RequestID       string                     `json:"requestId"`
+	DispatchToken   string                     `json:"dispatchToken,omitempty"`
+	ClaimToken      string                     `json:"-"`
 }
 
 // MicrosoftImportProcessResult reports resources created or restored by one import task.
@@ -168,6 +218,11 @@ type ImportUseCase struct {
 	bindingRecorder   MicrosoftBindingInputRecorder
 	validationCreator ImportedValidationCreator
 }
+
+const (
+	adminResourceImportRunningStale  = 45 * time.Minute
+	adminResourceImportDispatchLease = 60 * time.Minute
+)
 
 func (uc *ImportUseCase) SetImportedValidationCreator(creator ImportedValidationCreator) {
 	if uc != nil {
@@ -244,10 +299,167 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 	return &ImportResult{ImportID: importRecord.ID, Imported: 0}, nil
 }
 
+func (uc *ImportUseCase) AcceptAdminMicrosoftTXTFile(
+	ctx context.Context,
+	operatorUserID uint,
+	ownerUserID uint,
+	fileName string,
+	content []byte,
+	longLived bool,
+	errorStrategy domain.ImportErrorStrategy,
+	idempotencyKey string,
+	requestID string,
+	pathValue string,
+) (*ImportResult, error) {
+	adminImports, ok := uc.imports.(AdminResourceImportRepository)
+	if !ok || operatorUserID == 0 || ownerUserID == 0 {
+		return nil, domain.ErrResourceDependency
+	}
+	if len(content) == 0 {
+		return nil, domain.ErrInvalidImportFormat
+	}
+	normalizedStrategy, ok := domain.NormalizeImportErrorStrategy(string(errorStrategy))
+	if !ok {
+		return nil, domain.ErrInvalidImportFormat
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" || len(idempotencyKey) > 128 {
+		return nil, domain.ErrInvalidResourceCommand
+	}
+	fingerprint := adminImportFingerprint(ownerUserID, longLived, normalizedStrategy, content)
+	existing, existingFingerprint, err := adminImports.FindAdminByIdempotency(ctx, operatorUserID, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existingFingerprint != fingerprint {
+			return nil, domain.ErrResourceIdempotencyConflict
+		}
+		return &ImportResult{ImportID: existing.ID, Imported: existing.ImportedCount, Reused: true}, nil
+	}
+
+	now := time.Now().UTC()
+	sourceObjectKey := importObjectKey("source", ownerUserID, now, requestID, ".txt")
+	storedSource, err := uc.files.SavePrivate(ctx, governancedomain.PrivateFile{
+		ObjectKey: sourceObjectKey, FileName: cleanImportFileName(fileName),
+		ContentType: "text/plain; charset=utf-8", ContentBytes: content,
+	})
+	if err != nil {
+		return nil, domain.ErrFileStorageUnavailable
+	}
+	importRecord := &domain.ResourceImport{
+		OwnerUserID: ownerUserID, ResourceType: domain.ResourceTypeMicrosoft,
+		SourceObjectKey: storedSource.ObjectKey, Status: domain.ResourceImportProcessing,
+	}
+	stored, created, err := adminImports.CreateAdminWithLog(ctx, importRecord, AdminResourceImportMetadata{
+		OperatorUserID: operatorUserID, LongLived: longLived, ErrorStrategy: normalizedStrategy,
+		RequestID: strings.TrimSpace(requestID), Path: strings.TrimSpace(pathValue),
+		IdempotencyKey: idempotencyKey, RequestFingerprint: fingerprint,
+	}, &governancedomain.OperationLog{
+		OperatorUserID: operatorUserID, OperationType: "core.admin_resource.import",
+		ResourceType: "microsoft_resource_import", ResourceID: "pending", Path: strings.TrimSpace(pathValue),
+		Result: "success", SafeSummary: "Microsoft resource import accepted.", RequestID: strings.TrimSpace(requestID),
+	})
+	if err != nil {
+		_ = uc.files.DeletePrivate(ctx, storedSource.ObjectKey)
+		return nil, err
+	}
+	if !created {
+		_ = uc.files.DeletePrivate(ctx, storedSource.ObjectKey)
+		return &ImportResult{ImportID: stored.ID, Imported: stored.ImportedCount, Reused: true}, nil
+	}
+	// The database row is the durable source of truth. Claiming and enqueueing
+	// use a fenced dispatcher token, so a transient Redis failure or a worker
+	// racing the HTTP response cannot create an unfenced import execution.
+	_, _ = uc.DispatchAdminImports(ctx, 100)
+	return &ImportResult{ImportID: stored.ID}, nil
+}
+
+func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (int, error) {
+	dispatch, ok := uc.imports.(AdminResourceImportDispatchRepository)
+	if !ok || uc.queue == nil {
+		return 0, domain.ErrResourceDependency
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	now := time.Now().UTC()
+	items, err := dispatch.ClaimAdminImportDispatchable(
+		ctx,
+		limit,
+		now.Add(-adminResourceImportRunningStale),
+		now.Add(-adminResourceImportDispatchLease),
+	)
+	if err != nil {
+		return 0, err
+	}
+	queued := 0
+	var result error
+	for _, item := range items {
+		err := uc.queue.EnqueueMicrosoftImport(ctx, MicrosoftImportTask{
+			ImportID: item.ImportID, OwnerUserID: item.OwnerUserID,
+			LongLived: item.LongLived, ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID,
+			DispatchToken: item.DispatchToken,
+		})
+		if err != nil {
+			releaseErr := dispatch.MarkAdminImportDispatchFailed(
+				ctx,
+				item.ImportID,
+				item.DispatchToken,
+				"Import queue is temporarily unavailable; dispatcher will retry.",
+			)
+			result = errors.Join(result, err, releaseErr)
+			continue
+		}
+		queued++
+	}
+	return queued, result
+}
+
 // ProcessMicrosoftImport imports Microsoft resources from a stored TXT artifact.
 // Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
 func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (*MicrosoftImportProcessResult, error) {
-	if task.ImportID == 0 || task.OwnerUserID == 0 || strings.TrimSpace(task.SourceObjectKey) == "" {
+	dispatch, adminTask := uc.imports.(AdminResourceImportDispatchRepository)
+	if adminTask && strings.TrimSpace(task.DispatchToken) != "" {
+		claimToken, claimed, err := dispatch.MarkAdminImportRunning(ctx, task.ImportID, task.DispatchToken)
+		if err != nil {
+			return nil, err
+		}
+		if !claimed {
+			return &MicrosoftImportProcessResult{}, nil
+		}
+		task.ClaimToken = claimToken
+	}
+
+	result, err := uc.processMicrosoftImport(ctx, task)
+	if err == nil || strings.TrimSpace(task.ClaimToken) == "" || !adminTask {
+		return result, err
+	}
+
+	// A deterministic failure may already have atomically moved the import to
+	// failed. Only a still-running claim is eligible for durable retry.
+	current, findErr := uc.imports.FindByID(ctx, task.ImportID)
+	if findErr != nil {
+		return result, errors.Join(err, findErr)
+	}
+	if current == nil || current.Status == domain.ResourceImportImported || current.Status == domain.ResourceImportFailed {
+		return result, err
+	}
+	if isNonRetryableMicrosoftImportError(err) {
+		markErr := dispatch.MarkAdminImportFailed(ctx, task.ImportID, task.ClaimToken, "", "Invalid import task.")
+		return result, errors.Join(err, markErr)
+	}
+	_, retryErr := dispatch.MarkAdminImportRetryableFailure(
+		ctx,
+		task.ImportID,
+		task.ClaimToken,
+		"Import processing failed. Please retry later.",
+	)
+	return result, errors.Join(err, retryErr)
+}
+
+func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (*MicrosoftImportProcessResult, error) {
+	if task.ImportID == 0 || task.OwnerUserID == 0 {
 		return nil, domain.ErrInvalidImportFormat
 	}
 
@@ -261,9 +473,17 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	if importRecord.Status == domain.ResourceImportImported || importRecord.Status == domain.ResourceImportFailed {
 		return &MicrosoftImportProcessResult{}, nil
 	}
-	if importRecord.OwnerUserID != task.OwnerUserID || importRecord.SourceObjectKey != task.SourceObjectKey {
+	sourceObjectKey := importRecord.SourceObjectKey
+	if importRecord.OwnerUserID != task.OwnerUserID || strings.TrimSpace(sourceObjectKey) == "" {
 		return nil, domain.ErrInvalidImportFormat
 	}
+	// Direct in-memory invocations from older callers may still provide the
+	// private object key. Treat it only as a consistency check; serialized
+	// queue tasks intentionally omit it and always use the durable import fact.
+	if strings.TrimSpace(task.SourceObjectKey) != "" && task.SourceObjectKey != sourceObjectKey {
+		return nil, domain.ErrInvalidImportFormat
+	}
+	task.SourceObjectKey = sourceObjectKey
 
 	now := time.Now().UTC()
 	importID := strings.TrimSpace(task.RequestID)
@@ -282,11 +502,28 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 
 	lines, parseFailures, err := uc.parser.ParseMicrosoftImport(string(source.ContentBytes), errorStrategy)
 	if err != nil {
-		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailureFromError(err))
+		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, importFailureFromError(err))
+	}
+	processedLineCount := 0
+	if progress, ok := uc.imports.(AdminResourceImportProgressRepository); ok && strings.TrimSpace(task.ClaimToken) != "" {
+		processedLines, processedErr := progress.ListAdminImportProcessedLines(ctx, task.ImportID)
+		if processedErr != nil {
+			return nil, processedErr
+		}
+		if len(processedLines) > 0 {
+			processedLineCount = len(processedLines)
+			remaining := lines[:0]
+			for _, line := range lines {
+				if _, done := processedLines[line.LineNumber]; !done {
+					remaining = append(remaining, line)
+				}
+			}
+			lines = remaining
+		}
 	}
 	failures := importFailuresFromLineErrors(parseFailures)
-	if len(lines) == 0 && len(failures) == 0 {
-		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
+	if len(lines) == 0 && len(failures) == 0 && processedLineCount == 0 {
+		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, importFailure{
 			Line:        0,
 			Category:    "invalid_format",
 			SafeMessage: "Invalid import format.",
@@ -295,7 +532,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 
 	if errorStrategy == domain.ImportErrorStrategyAbort {
 		if failure, ok := uc.duplicateInFile(lines); ok {
-			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
+			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, failure)
 		}
 	} else {
 		var duplicateFailures []importFailure
@@ -323,7 +560,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 					Err:         domain.ErrDuplicateEmail,
 				}
 				if errorStrategy == domain.ImportErrorStrategyAbort {
-					return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, failure)
+					return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, failure)
 				}
 				failures = append(failures, failure)
 				continue
@@ -360,6 +597,22 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 	if err != nil {
 		return nil, err
 	}
+	if progress, ok := uc.imports.(AdminResourceImportProgressRepository); ok {
+		if err := progress.SetAdminImportCounts(ctx, task.ImportID, task.ClaimToken, len(lines), len(failures)); err != nil {
+			return nil, err
+		}
+	}
+	skippedItems := make([]AdminResourceImportSkippedItem, 0, len(failures))
+	for _, failure := range failures {
+		if failure.Line <= 0 {
+			continue
+		}
+		skippedItems = append(skippedItems, AdminResourceImportSkippedItem{
+			LineNumber: failure.Line,
+			Category:   failure.Category,
+			SafeError:  failure.SafeMessage,
+		})
+	}
 
 	linesByEmail := make(map[string]domain.MicrosoftImportLine, len(lines))
 	for _, line := range lines {
@@ -386,10 +639,21 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 		}
 		return nil
 	}
-	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(ctx, task.ImportID, resources, msResources, failureObjectKey, safeSummary, afterCreate)
+	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(
+		ctx,
+		task.ImportID,
+		task.ClaimToken,
+		lines,
+		resources,
+		msResources,
+		skippedItems,
+		failureObjectKey,
+		safeSummary,
+		afterCreate,
+	)
 	if err != nil {
 		if errors.Is(err, domain.ErrDuplicateEmail) {
-			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.OwnerUserID, now, importID, importFailure{
+			return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, importFailure{
 				Line:        0,
 				Category:    "duplicate_email",
 				SafeMessage: "An email address in the import already exists.",
@@ -403,6 +667,15 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 		ImportedResourceIDs: importedResourceIDs,
 		Imported:            len(importedResourceIDs),
 	}, nil
+}
+
+func isNonRetryableMicrosoftImportError(err error) bool {
+	return errors.Is(err, domain.ErrInvalidImportFormat) ||
+		errors.Is(err, domain.ErrDuplicateEmail) ||
+		errors.Is(err, domain.ErrResourceNotFound) ||
+		errors.Is(err, domain.ErrForbiddenResource) ||
+		errors.Is(err, domain.ErrInvalidResourceStatus) ||
+		errors.Is(err, domain.ErrResourceImportInvalidClaim)
 }
 
 func (uc *ImportUseCase) recordMicrosoftBindingInputs(ctx context.Context, ownerUserID uint, lines []domain.MicrosoftImportLine) error {
@@ -442,7 +715,43 @@ func (uc *ImportUseCase) GetImportStatus(ctx context.Context, ownerUserID uint, 
 		ImportID:      item.ID,
 		Status:        string(item.Status),
 		Imported:      item.ImportedCount,
+		Accepted:      item.AcceptedCount,
+		Skipped:       item.SkippedCount,
+		TaskStatus:    item.DispatchStatus,
+		Attempts:      item.Attempts,
+		MaxAttempts:   item.MaxAttempts,
+		StartedAt:     item.StartedAt,
+		FinishedAt:    item.FinishedAt,
 		LastSafeError: item.LastSafeError,
+		RequestID:     item.RequestID,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
+	}, nil
+}
+
+// GetAdminImportStatus returns only the safe durable import status summary. It does
+// not expose the uploaded object key, failure object key, or imported secrets.
+func (uc *ImportUseCase) GetAdminImportStatus(ctx context.Context, importID uint) (*ResourceImportStatusView, error) {
+	item, err := uc.imports.FindByID(ctx, importID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil || item.ResourceType != domain.ResourceTypeMicrosoft || item.OperatorUserID == 0 {
+		return nil, domain.ErrResourceNotFound
+	}
+	return &ResourceImportStatusView{
+		ImportID:      item.ID,
+		Status:        string(item.Status),
+		Imported:      item.ImportedCount,
+		Accepted:      item.AcceptedCount,
+		Skipped:       item.SkippedCount,
+		TaskStatus:    item.DispatchStatus,
+		Attempts:      item.Attempts,
+		MaxAttempts:   item.MaxAttempts,
+		StartedAt:     item.StartedAt,
+		FinishedAt:    item.FinishedAt,
+		LastSafeError: item.LastSafeError,
+		RequestID:     item.RequestID,
 		CreatedAt:     item.CreatedAt,
 		UpdatedAt:     item.UpdatedAt,
 	}, nil
@@ -452,16 +761,25 @@ func (uc *ImportUseCase) GetImportStatus(ctx context.Context, ownerUserID uint, 
 type ImportResult struct {
 	ImportID uint `json:"importId"`
 	Imported int  `json:"imported"`
+	Reused   bool `json:"reused"`
 }
 
 // ResourceImportStatusView is the API-safe import status view.
 type ResourceImportStatusView struct {
-	ImportID      uint      `json:"importId"`
-	Status        string    `json:"status"`
-	Imported      int       `json:"imported"`
-	LastSafeError string    `json:"lastSafeError,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ImportID      uint       `json:"importId"`
+	Status        string     `json:"status"`
+	Imported      int        `json:"imported"`
+	Accepted      int        `json:"accepted"`
+	Skipped       int        `json:"skipped"`
+	TaskStatus    string     `json:"taskStatus"`
+	Attempts      int        `json:"attempts"`
+	MaxAttempts   int        `json:"maxAttempts"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
+	LastSafeError string     `json:"lastSafeError,omitempty"`
+	RequestID     string     `json:"requestId"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type importFailure struct {
@@ -548,7 +866,7 @@ func importFailureFromError(err error) importFailure {
 	}
 }
 
-func (uc *ImportUseCase) failImport(ctx context.Context, importRecordID uint, ownerUserID uint, now time.Time, importID string, failure importFailure) error {
+func (uc *ImportUseCase) failImport(ctx context.Context, importRecordID uint, claimToken string, ownerUserID uint, now time.Time, importID string, failure importFailure) error {
 	if failure.Err == nil {
 		failure.Err = domain.ErrInvalidImportFormat
 	}
@@ -562,6 +880,16 @@ func (uc *ImportUseCase) failImport(ctx context.Context, importRecordID uint, ow
 	})
 	if err != nil {
 		return domain.ErrFileStorageUnavailable
+	}
+	if strings.TrimSpace(claimToken) != "" {
+		dispatch, ok := uc.imports.(AdminResourceImportDispatchRepository)
+		if !ok {
+			return domain.ErrResourceDependency
+		}
+		if err := dispatch.MarkAdminImportFailed(ctx, importRecordID, claimToken, storedFailure.ObjectKey, failure.SafeMessage); err != nil {
+			return err
+		}
+		return nil
 	}
 	if err := uc.imports.MarkFailed(ctx, importRecordID, storedFailure.ObjectKey, failure.SafeMessage); err != nil {
 		return err
@@ -622,6 +950,13 @@ func importObjectKey(kind string, ownerUserID uint, now time.Time, importID stri
 		safeObjectSegment(importID),
 		suffix,
 	)
+}
+
+func adminImportFingerprint(ownerUserID uint, longLived bool, strategy domain.ImportErrorStrategy, content []byte) string {
+	contentSum := sha256.Sum256(content)
+	payload := fmt.Sprintf("%d\x00%t\x00%s\x00%s", ownerUserID, longLived, strategy, hex.EncodeToString(contentSum[:]))
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
 }
 
 func cleanImportFileName(fileName string) string {

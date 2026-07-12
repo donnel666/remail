@@ -1181,7 +1181,7 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
-func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource, []uint) error) ([]uint, error) {
+func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, _ string, _ []coredomain.MicrosoftImportLine, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, _ []coreapp.AdminResourceImportSkippedItem, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource, []uint) error) ([]uint, error) {
 	item := r.imports[id]
 	if item == nil {
 		return nil, coredomain.ErrResourceNotFound

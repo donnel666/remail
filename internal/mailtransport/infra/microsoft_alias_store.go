@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -70,7 +71,8 @@ func (MicrosoftAliasAttemptModel) TableName() string {
 }
 
 type MicrosoftAliasStore struct {
-	db *gorm.DB
+	db            *gorm.DB
+	operationLogs operationLogTxWriter
 }
 
 const (
@@ -80,7 +82,10 @@ const (
 )
 
 func NewMicrosoftAliasStore(db *gorm.DB) *MicrosoftAliasStore {
-	return &MicrosoftAliasStore{db: db}
+	return &MicrosoftAliasStore{
+		db:            db,
+		operationLogs: governanceinfra.NewOperationLogRepo(db),
+	}
 }
 
 func (s *MicrosoftAliasStore) EnsureSchedules(ctx context.Context, now time.Time) (int64, error) {

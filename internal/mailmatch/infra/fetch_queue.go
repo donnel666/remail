@@ -13,6 +13,7 @@ import (
 
 const (
 	TypeMailmatchFetch           = "mailmatch:fetch"
+	TypeMailmatchResourceFetch   = "mailmatch:resource_fetch"
 	TypeMailmatchFetchDispatcher = "mailmatch:fetch_dispatcher"
 
 	mailmatchQueueName           = "mailfetch"
@@ -51,6 +52,32 @@ func (q *FetchQueue) EnqueueFetch(ctx context.Context, task app.FetchTask) error
 			return nil
 		}
 		return fmt.Errorf("enqueue mailmatch fetch task: %w", err)
+	}
+	return nil
+}
+
+func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.ResourceFetchTask) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("mailmatch resource fetch queue is unavailable")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal mailmatch resource fetch task: %w", err)
+	}
+	asynqTask := asynq.NewTask(TypeMailmatchResourceFetch, payload)
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynqTask,
+		asynq.Queue(mailmatchQueueName),
+		asynq.TaskID(fmt.Sprintf("%s:%d:%s", TypeMailmatchResourceFetch, task.JobID, task.DispatchToken)),
+		asynq.MaxRetry(mailmatchFetchTaskMaxRetry),
+		asynq.Timeout(mailmatchFetchTaskTimeout),
+	)
+	if err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		return fmt.Errorf("enqueue mailmatch resource fetch task: %w", err)
 	}
 	return nil
 }

@@ -607,6 +607,20 @@ func (c allowPermissionChecker) Reload(_ context.Context) error {
 	return nil
 }
 
+type recordingPermissionChecker struct {
+	allowed  bool
+	resource string
+	action   string
+}
+
+func (c *recordingPermissionChecker) Check(_ context.Context, _ uint, _ domain.Role, resource, action string) (bool, error) {
+	c.resource = resource
+	c.action = action
+	return c.allowed, nil
+}
+
+func (*recordingPermissionChecker) Reload(context.Context) error { return nil }
+
 type mockEmailCodeStore struct {
 	mu        sync.Mutex
 	codes     map[string]string
@@ -1114,6 +1128,25 @@ func TestAdminUsers_Unauthenticated(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+func TestAdminUsers_RequiresReadPermission(t *testing.T) {
+	h := newTestHandler()
+	checker := &recordingPermissionChecker{}
+	h.module.PermissionChecker = checker
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("GET", "/v1/admin/users", nil)
+	require.NoError(t, err)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "iam:user", checker.resource)
+	require.Equal(t, "read", checker.action)
+	require.Contains(t, w.Body.String(), "Permission denied.")
+}
+
 func TestAdminUsers_InvalidQuery(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
@@ -1128,13 +1161,21 @@ func TestAdminUsers_InvalidQuery(t *testing.T) {
 		TokenVersion: admin.TokenVersion,
 	}, 3600))
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/v1/admin/users?offset=bad", nil)
-	req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
-	r.ServeHTTP(w, req)
+	paths := []string{
+		"/v1/admin/users?offset=bad",
+		"/v1/admin/users?limit=101",
+		"/v1/admin/users?search=" + strings.Repeat("x", 121),
+	}
+	for _, path := range paths {
+		w := httptest.NewRecorder()
+		req, requestErr := http.NewRequest("GET", path, nil)
+		require.NoError(t, requestErr)
+		req.AddCookie(&http.Cookie{Name: "sid", Value: "admin-session"})
+		r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "Invalid query parameters.")
+		assert.Equal(t, http.StatusBadRequest, w.Code, path)
+		assert.Contains(t, w.Body.String(), "Invalid query parameters.", path)
+	}
 }
 
 func TestAdminUsers_SearchMatchesEmailNicknameAndID(t *testing.T) {

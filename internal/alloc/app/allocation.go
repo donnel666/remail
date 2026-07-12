@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,10 +25,17 @@ type AllocateCommand struct {
 }
 
 type UseCase struct {
-	repo                  Repository
-	queue                 CandidateRefreshQueue
-	inventoryStatsCache   *platform.TTLCache[string, InventoryStats]
-	productInventoryCache *platform.TTLCache[string, ProjectProductInventoryTotals]
+	repo                      Repository
+	queue                     CandidateRefreshQueue
+	adminAllocationEnrichment AdminAllocationEnrichmentPort
+	inventoryStatsCache       *platform.TTLCache[string, InventoryStats]
+	productInventoryCache     *platform.TTLCache[string, ProjectProductInventoryTotals]
+}
+
+func (uc *UseCase) SetAdminAllocationEnrichmentPort(port AdminAllocationEnrichmentPort) {
+	if uc != nil {
+		uc.adminAllocationEnrichment = port
+	}
 }
 
 func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
@@ -147,6 +156,77 @@ func (uc *UseCase) ListAllocations(ctx context.Context, filter AllocationFilter)
 	return uc.repo.ListAllocations(ctx, filter)
 }
 
+// ListAdminAllocations returns the OpenAPI administrator read composition. The
+// page boundary is established by Alloc first; cross-context display facts are
+// then loaded in one bounded batch and never written back into the allocation
+// fact.
+func (uc *UseCase) ListAdminAllocations(ctx context.Context, filter AllocationFilter) (*AdminAllocationListResult, error) {
+	if uc == nil || uc.repo == nil || uc.adminAllocationEnrichment == nil {
+		return nil, fmt.Errorf("administrator allocation query is unavailable")
+	}
+	if filter.Type != "" && !domain.IsValidAllocationType(filter.Type) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	if filter.Status != "" && !domain.IsValidAllocationStatus(filter.Status) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	if filter.Mailbox != "" && !isValidMailboxFilter(filter.Mailbox) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	if filter.Offset < 0 || filter.Limit < 1 || filter.Limit > 100 {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+
+	page, err := uc.repo.ListAllocations(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	result := &AdminAllocationListResult{
+		Items: make([]AdminAllocationItem, 0, len(page.Items)),
+		Total: page.Total, Offset: page.Offset, Limit: page.Limit,
+	}
+	if len(page.Items) == 0 {
+		return result, nil
+	}
+	orderNos := uniqueAllocationOrderNos(page.Items)
+	enrichments, err := uc.adminAllocationEnrichment.GetAdminAllocationEnrichments(ctx, orderNos)
+	if err != nil {
+		return nil, fmt.Errorf("load administrator allocation enrichments: %w", err)
+	}
+	for _, item := range page.Items {
+		enrichment, ok := enrichments[item.OrderNo]
+		if !ok {
+			return nil, fmt.Errorf("administrator allocation enrichment missing for order")
+		}
+		result.Items = append(result.Items, AdminAllocationItem{
+			Type: item.Type, ID: item.ID, OrderNo: item.OrderNo,
+			ProjectID: item.ProjectID, ProjectName: enrichment.ProjectName, ProjectLogoURL: enrichment.ProjectLogoURL,
+			ResourceID: item.ResourceID, Mailbox: item.Mailbox, SupplyScope: item.SupplyScope,
+			DeliveryEmail: enrichment.DeliveryEmail, ServiceMode: enrichment.ServiceMode, OrderStatus: enrichment.OrderStatus,
+			Status: item.Status, PayAmount: enrichment.PayAmount, BuyerEmail: enrichment.BuyerEmail,
+			VerificationCode: enrichment.VerificationCode, CreatedAt: item.CreatedAt, ReceiveUntil: enrichment.ReceiveUntil,
+		})
+	}
+	return result, nil
+}
+
+func uniqueAllocationOrderNos(items []domain.UnifiedAllocation) []string {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		orderNo := strings.TrimSpace(item.OrderNo)
+		if orderNo == "" {
+			continue
+		}
+		if _, exists := seen[orderNo]; exists {
+			continue
+		}
+		seen[orderNo] = struct{}{}
+		result = append(result, orderNo)
+	}
+	return result
+}
+
 func (uc *UseCase) FindAllocationDetail(ctx context.Context, allocationType domain.AllocationType, allocationID uint) (*domain.UnifiedAllocation, error) {
 	if allocationID == 0 || !domain.IsValidAllocationType(allocationType) {
 		return nil, domain.ErrInvalidAllocationRequest
@@ -168,6 +248,25 @@ func (uc *UseCase) ListActiveByRecipient(ctx context.Context, recipient string) 
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	return uc.repo.ListActiveByRecipient(ctx, recipient)
+}
+
+// AssertNoActiveAllocations is the Alloc-owned guard used by resource-state
+// owners before changing a delivered identity, transferring ownership, or
+// deleting a resource. The caller must already hold the corresponding
+// email_resources roots in ascending ID order in the tx-bound context. New
+// allocations acquire the same roots before any subtype/candidate lock.
+func (uc *UseCase) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error {
+	if uc == nil || uc.repo == nil {
+		return domain.ErrAllocationTxRequired
+	}
+	resourceIDs = normalizeResourceIDs(resourceIDs)
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	if !uc.repo.HasParentTx(ctx) {
+		return domain.ErrAllocationTxRequired
+	}
+	return uc.repo.AssertNoActiveAllocations(ctx, resourceIDs)
 }
 
 func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error) {
@@ -419,6 +518,14 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
+	lockedRoot, err := uc.repo.LockResourceRoot(ctx, candidate.ResourceID, domain.AllocationTypeMicrosoft)
+	if err != nil {
+		return nil, err
+	}
+	if !lockedRoot {
+		return nil, domain.ErrAllocationConflict
+	}
+
 	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
@@ -599,6 +706,14 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
+	lockedRoot, err := uc.repo.LockResourceRoot(ctx, candidate.ResourceID, domain.AllocationTypeDomain)
+	if err != nil {
+		return nil, err
+	}
+	if !lockedRoot {
+		return nil, domain.ErrAllocationConflict
+	}
+
 	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
@@ -806,4 +921,24 @@ func isValidMailboxFilter(value string) bool {
 	default:
 		return value == "domain"
 	}
+}
+
+func normalizeResourceIDs(ids []uint) []uint {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[uint]struct{}, len(ids))
+	result := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }

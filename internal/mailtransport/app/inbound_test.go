@@ -89,6 +89,25 @@ func (r *inboundRepoStub) MarkPending(_ context.Context, id uint, safeError stri
 	return r.update(id, domain.InboundStatusPending, safeError)
 }
 
+func (r *inboundRepoStub) SaveParsedSummary(_ context.Context, id uint, summary domain.InboundMailSummary) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mail, ok := r.mails[id]
+	if !ok {
+		return errors.New("not found")
+	}
+	mail.HeaderFrom = summary.HeaderFrom
+	mail.Subject = summary.Subject
+	mail.BodyPreview = summary.BodyPreview
+	mail.VerificationCode = summary.VerificationCode
+	mail.MessageIDHeader = summary.MessageIDHeader
+	receivedAt := summary.ReceivedAt
+	parsedAt := summary.ParsedAt
+	mail.ReceivedAt = &receivedAt
+	mail.ParsedAt = &parsedAt
+	return nil
+}
+
 func (r *inboundRepoStub) MarkStored(_ context.Context, id uint) error {
 	return r.update(id, domain.InboundStatusStored, "")
 }
@@ -122,9 +141,10 @@ func (r inboundResolverStub) ResolveInboundRecipient(_ context.Context, _ string
 }
 
 type fileStoreStub struct {
-	files   map[string]governancedomain.PrivateFile
-	saveErr error
-	onSave  func()
+	files     map[string]governancedomain.PrivateFile
+	saveErr   error
+	onSave    func()
+	readCount int
 }
 
 func newFileStoreStub() *fileStoreStub {
@@ -173,6 +193,7 @@ func (s *fileStoreStub) SavePrivateStream(_ context.Context, file governancedoma
 }
 
 func (s *fileStoreStub) ReadPrivate(_ context.Context, objectKey string) (*governancedomain.PrivateFile, error) {
+	s.readCount++
 	file, ok := s.files[objectKey]
 	if !ok {
 		return nil, errors.New("missing object")
@@ -311,6 +332,43 @@ func TestInboundServiceProcessMarksStoredWhenObjectReadable(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stored)
 	assert.Equal(t, domain.InboundStatusStored, stored.Status)
+	assert.Equal(t, "hi", stored.Subject)
+	assert.Equal(t, "body", stored.BodyPreview)
+	require.NotNil(t, stored.ParsedAt)
+}
+
+func TestInboundServiceProcessPersistsSafeAuxiliarySummary(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "bounce-secret@example.net",
+		Recipients: []domain.InboundRecipient{{
+			Email:        "proof@example.com",
+			ResourceID:   10,
+			ResourceType: domain.InboundResourceMicrosoft,
+			OwnerUserID:  1,
+		}},
+		ContentBytes: []byte("From: Microsoft Security <account-security-noreply@accountprotection.microsoft.com>\r\n" +
+			"Subject: Microsoft account security code\r\n" +
+			"Message-ID: <safe-message-id@example.com>\r\n" +
+			"Date: Fri, 03 Jul 2026 12:00:00 +0000\r\n\r\n" +
+			"Your Microsoft account security code is 654321."),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0], false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "account-security-noreply@accountprotection.microsoft.com", stored.HeaderFrom)
+	assert.Equal(t, "Microsoft account security code", stored.Subject)
+	assert.Equal(t, "Your Microsoft account security code is 654321.", stored.BodyPreview)
+	assert.Equal(t, "654321", stored.VerificationCode)
+	assert.Equal(t, "safe-message-id@example.com", stored.MessageIDHeader)
+	assert.NotContains(t, stored.BodyPreview, "bounce-secret")
 }
 
 func TestInboundServiceRejectsUnknownRecipient(t *testing.T) {

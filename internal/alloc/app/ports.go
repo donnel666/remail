@@ -169,6 +169,55 @@ type AllocationListResult struct {
 	Limit  int
 }
 
+// AdminAllocationEnrichment is a bounded, read-only composition of facts owned
+// by Trade, Core, IAM and MailMatch. Alloc first pages its own allocation facts
+// and then asks this port to enrich at most one API page, avoiding both N+1
+// reads and a second allocation aggregate.
+type AdminAllocationEnrichment struct {
+	OrderNo          string
+	ProjectName      string
+	ProjectLogoURL   *string
+	DeliveryEmail    string
+	ServiceMode      string
+	OrderStatus      string
+	PayAmount        string
+	BuyerEmail       string
+	VerificationCode *string
+	ReceiveUntil     *time.Time
+}
+
+type AdminAllocationEnrichmentPort interface {
+	GetAdminAllocationEnrichments(ctx context.Context, orderNos []string) (map[string]AdminAllocationEnrichment, error)
+}
+
+type AdminAllocationItem struct {
+	Type             domain.AllocationType
+	ID               uint
+	OrderNo          string
+	ProjectID        uint
+	ProjectName      string
+	ProjectLogoURL   *string
+	ResourceID       uint
+	Mailbox          string
+	SupplyScope      domain.SupplyScope
+	DeliveryEmail    string
+	ServiceMode      string
+	OrderStatus      string
+	Status           domain.AllocationStatus
+	PayAmount        string
+	BuyerEmail       string
+	VerificationCode *string
+	CreatedAt        time.Time
+	ReceiveUntil     *time.Time
+}
+
+type AdminAllocationListResult struct {
+	Items  []AdminAllocationItem
+	Total  int64
+	Offset int
+	Limit  int
+}
+
 type CandidateFilter struct {
 	ProjectID uint
 	Type      domain.AllocationType
@@ -198,8 +247,10 @@ type Repository interface {
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
+	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
+	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)

@@ -13,14 +13,100 @@ import (
 )
 
 const (
-	mailDispatcherInterval            = 15 * time.Second
-	microsoftAliasDispatcherInterval  = 15 * time.Second
-	microsoftAliasDispatchMinimum     = 4
-	microsoftAliasDispatchMaximum     = 64
-	microsoftAliasAdmissionRetryDelay = 30 * time.Second
+	mailDispatcherInterval                   = 15 * time.Second
+	microsoftAliasDispatcherInterval         = 15 * time.Second
+	microsoftTokenRefreshDispatcherInterval  = 15 * time.Second
+	microsoftAliasDispatchMinimum            = 4
+	microsoftAliasDispatchMaximum            = 64
+	microsoftAliasAdmissionRetryDelay        = 30 * time.Second
+	microsoftTokenRefreshDispatchMinimum     = 2
+	microsoftTokenRefreshDispatchMaximum     = 32
+	microsoftTokenRefreshAdmissionRetryDelay = 30 * time.Second
 )
 
 func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTransportModule) {
+	mux.HandleFunc(mailinfra.TypeMicrosoftTokenRefreshDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		if module == nil || module.TokenRefresh == nil {
+			return nil
+		}
+		limit := microsoftTokenRefreshDispatchMaximum
+		releaseBudget := func() {}
+		if module.BackgroundDispatch != nil {
+			limit, releaseBudget = module.BackgroundDispatch.AcquireDispatchBudget(
+				ctx,
+				mailinfra.MicrosoftTokenRefreshQueueName,
+				microsoftTokenRefreshDispatchMinimum,
+				microsoftTokenRefreshDispatchMaximum,
+			)
+		}
+		defer releaseBudget()
+		if limit <= 0 {
+			return nil
+		}
+		result, err := module.TokenRefresh.DispatchPending(ctx, limit)
+		if err != nil {
+			slog.Warn("microsoft token refresh dispatcher deferred")
+			return nil
+		}
+		if result != nil && result.Attempted > 0 {
+			slog.Info(
+				"microsoft token refresh dispatcher finished",
+				"attempted", result.Attempted,
+				"queued", result.Queued,
+				"failed", result.Failed,
+			)
+		}
+		return nil
+	})
+
+	mux.HandleFunc(mailinfra.TypeMicrosoftTokenRefresh, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.TokenRefresh == nil {
+			return nil
+		}
+		var payload mailapp.MicrosoftTokenRefreshTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return fmt.Errorf("decode microsoft token refresh task: invalid payload: %w", asynq.SkipRetry)
+		}
+		if payload.JobID == 0 || payload.ResourceID == 0 || payload.DispatchToken == "" {
+			return fmt.Errorf("decode microsoft token refresh task: identity is missing: %w", asynq.SkipRetry)
+		}
+		if module.BackgroundDispatch != nil {
+			admitted, release := module.BackgroundDispatch.TryAcquireExecution(ctx, mailinfra.MicrosoftTokenRefreshQueueName)
+			if !admitted {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := module.TokenRefresh.ReleaseDispatch(releaseCtx, payload); err != nil {
+					slog.Warn(
+						"microsoft token refresh admission release deferred",
+						"job_id", payload.JobID,
+						"resource_id", payload.ResourceID,
+						"request_id", payload.RequestID,
+					)
+					return nil
+				}
+				module.TokenRefresh.ScheduleDispatcher(releaseCtx, microsoftTokenRefreshAdmissionRetryDelay)
+				return nil
+			}
+			defer release()
+		}
+		if err := module.TokenRefresh.Process(ctx, payload); err != nil {
+			slog.Warn(
+				"microsoft token refresh task deferred",
+				"job_id", payload.JobID,
+				"resource_id", payload.ResourceID,
+				"request_id", payload.RequestID,
+			)
+			return nil
+		}
+		slog.Info(
+			"microsoft token refresh task finished",
+			"job_id", payload.JobID,
+			"resource_id", payload.ResourceID,
+			"request_id", payload.RequestID,
+		)
+		return nil
+	})
+
 	mux.HandleFunc(mailinfra.TypeMicrosoftAliasDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.MicrosoftAliases == nil {
 			return nil
@@ -200,5 +286,14 @@ func scheduleMicrosoftAliasDispatcher(ctx context.Context, module *MailTransport
 	}
 	if module.MicrosoftAliases != nil {
 		module.MicrosoftAliases.ScheduleDispatcher(ctx, delay)
+	}
+}
+
+func scheduleMicrosoftTokenRefreshDispatcher(ctx context.Context, module *MailTransportModule, delay time.Duration) {
+	if module == nil {
+		return
+	}
+	if module.TokenRefresh != nil {
+		module.TokenRefresh.ScheduleDispatcher(ctx, delay)
 	}
 }

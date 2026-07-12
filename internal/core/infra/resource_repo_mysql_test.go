@@ -475,7 +475,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 		{EmailAddress: "dup@test.local", Password: "secret", ForSale: true, Status: domain.MicrosoftStatusPending},
 	}
 
-	_, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	_, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, "", microsoftImportLinesForRepoTest(ms), resources, ms, nil, "", "", nil)
 	require.ErrorIs(t, err, domain.ErrDuplicateEmail)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
@@ -554,7 +554,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 		LastSafeError: "",
 	}}
 
-	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil)
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, "", microsoftImportLinesForRepoTest(msResources), resources, msResources, nil, "", "", nil)
 	require.NoError(t, err)
 	require.Len(t, importedIDs, 1)
 
@@ -636,7 +636,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftC
 		Status:       domain.MicrosoftStatusPending,
 	}}
 
-	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, msResources, "", "", nil)
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, "", microsoftImportLinesForRepoTest(msResources), resources, msResources, nil, "", "", nil)
 	require.NoError(t, err)
 	require.Len(t, importedIDs, 1)
 
@@ -682,7 +682,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 		{EmailAddress: "two@test.local", Password: "secret", Status: domain.MicrosoftStatusPending},
 	}
 
-	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	importedIDs, err := importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, "", microsoftImportLinesForRepoTest(ms), resources, ms, nil, "", "", nil)
 	require.NoError(t, err)
 	require.Len(t, importedIDs, 2)
 
@@ -691,7 +691,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededIsIdempotentMySQL(t *test
 	require.Equal(t, domain.ResourceImportImported, storedImport.Status)
 	require.Equal(t, 2, storedImport.ImportedCount)
 
-	importedIDs, err = importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, resources, ms, "", "", nil)
+	importedIDs, err = importRepo.CreateMicrosoftResourcesAndMarkSucceeded(context.Background(), importRecord.ID, "", microsoftImportLinesForRepoTest(ms), resources, ms, nil, "", "", nil)
 	require.NoError(t, err)
 	require.Empty(t, importedIDs)
 
@@ -772,8 +772,8 @@ func TestCoreListQueriesUseIndexesMySQL(t *testing.T) {
 		"idx_generated_mailboxes_resource_created",
 		"EXPLAIN SELECT * FROM generated_mailboxes WHERE resource_id = 101 AND owner_user_id = 1 ORDER BY created_at DESC LIMIT 20",
 	)
-	requireExplainUsesIndex(t, db,
-		"idx_microsoft_bulk_domain",
+	requireExplainUsesAnyIndex(t, db,
+		[]string{"idx_microsoft_bulk_domain"},
 		"EXPLAIN SELECT er.id FROM microsoft_resources AS ms STRAIGHT_JOIN email_resources AS er ON er.id = ms.id WHERE er.owner_user_id = 1 AND er.type = 'microsoft' AND ms.for_sale = 0 AND ms.status <> 'deleted' AND ms.email_domain = 'test.local' ORDER BY er.id ASC LIMIT 1000",
 	)
 	for i := 0; i < 50; i++ {
@@ -2220,6 +2220,14 @@ func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName s
 	require.Positive(t, count, "expected index %s on %s", indexName, tableName)
 }
 
+func microsoftImportLinesForRepoTest(resources []domain.MicrosoftResource) []domain.MicrosoftImportLine {
+	lines := make([]domain.MicrosoftImportLine, len(resources))
+	for i := range resources {
+		lines[i] = domain.MicrosoftImportLine{LineNumber: i + 1, Email: resources[i].EmailAddress}
+	}
+	return lines
+}
+
 func boolPtr(value bool) *bool {
 	return &value
 }
@@ -2247,4 +2255,33 @@ func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, quer
 		}
 	}
 	require.True(t, usedExpectedKey, "expected query to use index %s, saw %v: %s", expectedKey, seenKeys, query)
+}
+
+func requireExplainUsesAnyIndex(t *testing.T, db *gorm.DB, expectedKeys []string, query string) {
+	t.Helper()
+
+	var rows []struct {
+		Key        sql.NullString `gorm:"column:key"`
+		Rows       sql.NullInt64  `gorm:"column:rows"`
+		AccessType sql.NullString `gorm:"column:type"`
+	}
+	require.NoError(t, db.Raw(query).Scan(&rows).Error)
+	require.NotEmpty(t, rows, "expected EXPLAIN rows for %s", query)
+	allowed := make(map[string]struct{}, len(expectedKeys))
+	for _, key := range expectedKeys {
+		allowed[key] = struct{}{}
+	}
+	seenKeys := make([]string, 0, len(rows))
+	usedAllowedKey := false
+	for _, row := range rows {
+		require.True(t, row.Key.Valid, "expected query to use an index: %s", query)
+		seenKeys = append(seenKeys, row.Key.String)
+		require.True(t, row.Rows.Valid, "expected query to expose row estimate: %s", query)
+		require.LessOrEqual(t, row.Rows.Int64, int64(10), "unexpected row estimate for %s using %s", query, row.Key.String)
+		require.NotEqual(t, "ALL", row.AccessType.String, "unexpected full table scan for %s", query)
+		if _, ok := allowed[row.Key.String]; ok {
+			usedAllowedKey = true
+		}
+	}
+	require.True(t, usedAllowedKey, "expected query to use one of %v, saw %v: %s", expectedKeys, seenKeys, query)
 }

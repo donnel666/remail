@@ -34,13 +34,19 @@ type MailTransportModule struct {
 	OutboundSendUseCase *mailapp.OutboundSendUseCase
 	InboundUseCase      *mailapp.InboundService
 	MicrosoftAliases    *mailapp.MicrosoftAliasService
+	TokenRefresh        *mailapp.MicrosoftTokenRefreshService
+	AuxiliaryMail       mailapp.AuxiliaryMailQueryPort
+	AliasScheduleQuery  coreapp.AliasScheduleQueryPort
 	ValidationUseCase   coreapp.ResourceValidationPort
 	ValidationAdapter   *ResourceValidationAdapter
 	BindingRecorder     coreapp.MicrosoftBindingInputRecorder
+	BindingQuery        coreapp.BindingQueryPort
+	BindingAdmin        coreapp.BindingAdminPort
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
 	BackgroundDispatch  BackgroundDispatchSizer
 	AliasDispatch       MicrosoftAliasDispatchReleaser
+	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
 }
 
 func (m *MailTransportModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
@@ -63,6 +69,13 @@ func (m *MailTransportModule) SetHistoricalProjectMatcher(matcher mailapp.Histor
 	m.ValidationAdapter.SetHistoricalProjectMatcher(matcher)
 }
 
+func (m *MailTransportModule) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
+	if m == nil || m.tokenRefreshRepo == nil {
+		return
+	}
+	m.tokenRefreshRepo.SetMicrosoftCredentialPort(credentials)
+}
+
 func NewMailTransportModule(
 	db *gorm.DB,
 	files governanceapp.FilePort,
@@ -73,31 +86,43 @@ func NewMailTransportModule(
 	proxies *proxyapp.ProxyUseCase,
 ) (*MailTransportModule, error) {
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
+	operationLogs := governanceinfra.NewOperationLogRepo(db)
 	outboundStore := mailinfra.NewOutboundMailStore(db)
 	outboundQueue := mailinfra.NewOutboundMailQueue(asynqClient)
 	inboundRepo := mailinfra.NewInboundMailRepo(db)
 	inboundResolver := mailinfra.NewInboundResourceResolver(db)
 	inboundQueue := mailinfra.NewInboundMailQueue(asynqClient)
 	bindingRepo := mailinfra.NewMicrosoftBindingRepo(db)
+	auxiliaryMailRepo := mailinfra.NewAuxiliaryMailRepo(db)
 	aliasStore := mailinfra.NewMicrosoftAliasStore(db)
 	aliasQueue := mailinfra.NewMicrosoftAliasQueue(asynqClient)
+	tokenRefreshRepo := mailinfra.NewMicrosoftTokenRefreshRepo(db)
+	tokenRefreshQueue := mailinfra.NewMicrosoftTokenRefreshQueue(asynqClient)
 	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReader(db, files))
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
 	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundStore, outboundQueue, systemLogs, outboundFrom)
 	validationAdapter := NewResourceValidationAdapter(proxies, bindingRepo)
 	aliasAdapter := NewMicrosoftAliasCreationAdapter(proxies)
+	aliasService := mailapp.NewMicrosoftAliasService(aliasStore, aliasQueue, aliasAdapter)
+	tokenRefreshService := mailapp.NewMicrosoftTokenRefreshService(tokenRefreshRepo, tokenRefreshQueue, validationAdapter)
 	module := &MailTransportModule{
 		DeliveryUseCase:     outboundDelivery,
 		OutboundDelivery:    outboundDelivery,
 		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(outboundStore, sender, systemLogs),
 		InboundUseCase:      inboundUseCase,
-		MicrosoftAliases:    mailapp.NewMicrosoftAliasService(aliasStore, aliasQueue, aliasAdapter),
+		MicrosoftAliases:    aliasService,
+		TokenRefresh:        tokenRefreshService,
+		AuxiliaryMail:       mailapp.NewAuxiliaryMailQueryService(auxiliaryMailRepo, bindingRepo, files, operationLogs, systemLogs),
+		AliasScheduleQuery:  NewMicrosoftAliasScheduleQueryAdapter(aliasService),
 		ValidationUseCase:   validationAdapter,
 		ValidationAdapter:   validationAdapter,
 		BindingRecorder:     NewMicrosoftBindingInputAdapter(bindingRepo),
+		BindingQuery:        NewMicrosoftBindingQueryAdapter(bindingRepo),
+		BindingAdmin:        NewMicrosoftBindingAdminAdapter(bindingRepo),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 		AliasDispatch:       aliasStore,
+		tokenRefreshRepo:    tokenRefreshRepo,
 	}
 	if inboundCfg.Enabled {
 		module.InboundSMTP = mailinfra.NewInboundSMTPServer(inboundCfg, inboundUseCase)
@@ -142,17 +167,22 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 	var once sync.Once
 	scheduleMailDispatchers(ctx, m, 0)
 	scheduleMicrosoftAliasDispatcher(ctx, m, 0)
+	scheduleMicrosoftTokenRefreshDispatcher(ctx, m, 0)
 	go func() {
 		mailTicker := time.NewTicker(mailDispatcherInterval)
 		aliasTicker := time.NewTicker(microsoftAliasDispatcherInterval)
+		tokenRefreshTicker := time.NewTicker(microsoftTokenRefreshDispatcherInterval)
 		defer mailTicker.Stop()
 		defer aliasTicker.Stop()
+		defer tokenRefreshTicker.Stop()
 		for {
 			select {
 			case <-mailTicker.C:
 				scheduleMailDispatchers(ctx, m, 0)
 			case <-aliasTicker.C:
 				scheduleMicrosoftAliasDispatcher(ctx, m, 0)
+			case <-tokenRefreshTicker.C:
+				scheduleMicrosoftTokenRefreshDispatcher(ctx, m, 0)
 			case <-ctx.Done():
 				return
 			}

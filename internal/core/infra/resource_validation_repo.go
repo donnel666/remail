@@ -19,23 +19,24 @@ import (
 )
 
 type ResourceValidationModel struct {
-	ID            uint       `gorm:"primaryKey;autoIncrement"`
-	ResourceID    uint       `gorm:"not null;column:resource_id"`
-	ResourceType  string     `gorm:"type:varchar(32);not null;column:resource_type"`
-	OwnerUserID   uint       `gorm:"not null;column:owner_user_id"`
-	Status        string     `gorm:"type:varchar(32);not null;default:'queued'"`
-	Attempts      int        `gorm:"not null;default:0"`
-	MaxAttempts   int        `gorm:"not null;default:3;column:max_attempts"`
-	ClaimToken    string     `gorm:"type:char(36);not null;default:'';column:claim_token"`
-	DispatchToken string     `gorm:"type:char(36);not null;default:'';column:dispatch_token"`
-	DispatchedAt  *time.Time `gorm:"column:dispatched_at"`
-	LastSafeError string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	RequestID     string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
-	Path          string     `gorm:"type:varchar(255);not null;default:''"`
-	StartedAt     *time.Time `gorm:"column:started_at"`
-	FinishedAt    *time.Time `gorm:"column:finished_at"`
-	CreatedAt     time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime"`
+	ID                         uint       `gorm:"primaryKey;autoIncrement"`
+	ResourceID                 uint       `gorm:"not null;column:resource_id"`
+	ResourceType               string     `gorm:"type:varchar(32);not null;column:resource_type"`
+	OwnerUserID                uint       `gorm:"not null;column:owner_user_id"`
+	ExpectedCredentialRevision uint64     `gorm:"not null;default:0;column:expected_credential_revision"`
+	Status                     string     `gorm:"type:varchar(32);not null;default:'queued'"`
+	Attempts                   int        `gorm:"not null;default:0"`
+	MaxAttempts                int        `gorm:"not null;default:3;column:max_attempts"`
+	ClaimToken                 string     `gorm:"type:char(36);not null;default:'';column:claim_token"`
+	DispatchToken              string     `gorm:"type:char(36);not null;default:'';column:dispatch_token"`
+	DispatchedAt               *time.Time `gorm:"column:dispatched_at"`
+	LastSafeError              string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	RequestID                  string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
+	Path                       string     `gorm:"type:varchar(255);not null;default:''"`
+	StartedAt                  *time.Time `gorm:"column:started_at"`
+	FinishedAt                 *time.Time `gorm:"column:finished_at"`
+	CreatedAt                  time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt                  time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 type ResourceValidationBatchModel struct {
@@ -66,45 +67,47 @@ func (ResourceValidationModel) TableName() string {
 
 func validationModel(job *domain.ResourceValidation) *ResourceValidationModel {
 	return &ResourceValidationModel{
-		ID:            job.ID,
-		ResourceID:    job.ResourceID,
-		ResourceType:  string(job.ResourceType),
-		OwnerUserID:   job.OwnerUserID,
-		Status:        string(job.Status),
-		Attempts:      job.Attempts,
-		MaxAttempts:   normalizeValidationMaxAttempts(job.MaxAttempts),
-		ClaimToken:    job.ClaimToken,
-		DispatchToken: job.DispatchToken,
-		DispatchedAt:  job.DispatchedAt,
-		LastSafeError: job.LastSafeError,
-		RequestID:     job.RequestID,
-		Path:          job.Path,
-		StartedAt:     job.StartedAt,
-		FinishedAt:    job.FinishedAt,
-		CreatedAt:     job.CreatedAt,
-		UpdatedAt:     job.UpdatedAt,
+		ID:                         job.ID,
+		ResourceID:                 job.ResourceID,
+		ResourceType:               string(job.ResourceType),
+		OwnerUserID:                job.OwnerUserID,
+		ExpectedCredentialRevision: job.ExpectedCredentialRevision,
+		Status:                     string(job.Status),
+		Attempts:                   job.Attempts,
+		MaxAttempts:                normalizeValidationMaxAttempts(job.MaxAttempts),
+		ClaimToken:                 job.ClaimToken,
+		DispatchToken:              job.DispatchToken,
+		DispatchedAt:               job.DispatchedAt,
+		LastSafeError:              job.LastSafeError,
+		RequestID:                  job.RequestID,
+		Path:                       job.Path,
+		StartedAt:                  job.StartedAt,
+		FinishedAt:                 job.FinishedAt,
+		CreatedAt:                  job.CreatedAt,
+		UpdatedAt:                  job.UpdatedAt,
 	}
 }
 
 func (m *ResourceValidationModel) toDomain() *domain.ResourceValidation {
 	return &domain.ResourceValidation{
-		ID:            m.ID,
-		ResourceID:    m.ResourceID,
-		ResourceType:  domain.ResourceType(m.ResourceType),
-		OwnerUserID:   m.OwnerUserID,
-		Status:        domain.ResourceValidationStatus(m.Status),
-		Attempts:      m.Attempts,
-		MaxAttempts:   normalizeValidationMaxAttempts(m.MaxAttempts),
-		ClaimToken:    m.ClaimToken,
-		DispatchToken: m.DispatchToken,
-		DispatchedAt:  m.DispatchedAt,
-		LastSafeError: m.LastSafeError,
-		RequestID:     m.RequestID,
-		Path:          m.Path,
-		StartedAt:     m.StartedAt,
-		FinishedAt:    m.FinishedAt,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
+		ID:                         m.ID,
+		ResourceID:                 m.ResourceID,
+		ResourceType:               domain.ResourceType(m.ResourceType),
+		OwnerUserID:                m.OwnerUserID,
+		ExpectedCredentialRevision: m.ExpectedCredentialRevision,
+		Status:                     domain.ResourceValidationStatus(m.Status),
+		Attempts:                   m.Attempts,
+		MaxAttempts:                normalizeValidationMaxAttempts(m.MaxAttempts),
+		ClaimToken:                 m.ClaimToken,
+		DispatchToken:              m.DispatchToken,
+		DispatchedAt:               m.DispatchedAt,
+		LastSafeError:              m.LastSafeError,
+		RequestID:                  m.RequestID,
+		Path:                       m.Path,
+		StartedAt:                  m.StartedAt,
+		FinishedAt:                 m.FinishedAt,
+		CreatedAt:                  m.CreatedAt,
+		UpdatedAt:                  m.UpdatedAt,
 	}
 }
 
@@ -127,17 +130,23 @@ func NewResourceValidationRepo(db *gorm.DB) *ResourceValidationRepo {
 
 func (r *ResourceValidationRepo) CreateWithLog(ctx context.Context, job *domain.ResourceValidation, log *governancedomain.OperationLog) (bool, error) {
 	created := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	create := func(tx *gorm.DB) error {
+		if err := prepareResourceForValidationTx(tx, job); err != nil {
+			return err
+		}
 		existing, err := findActiveValidationJobTx(tx, job.ResourceID)
 		if err != nil {
 			return err
 		}
 		if existing != nil {
-			*job = *existing
-			return nil
-		}
-		if err := prepareResourceForValidationTx(tx, job); err != nil {
-			return err
+			if job.ResourceType != domain.ResourceTypeMicrosoft ||
+				existing.ExpectedCredentialRevision == job.ExpectedCredentialRevision {
+				*job = *existing
+				return nil
+			}
+			if err := supersedeValidationJobTx(tx, existing.ID, "Resource credentials changed; validation was superseded."); err != nil {
+				return err
+			}
 		}
 		model := validationModel(job)
 		if err := tx.Create(model).Error; err != nil {
@@ -163,7 +172,13 @@ func (r *ResourceValidationRepo) CreateWithLog(ctx context.Context, job *domain.
 			}
 		}
 		return nil
-	})
+	}
+	var err error
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		err = create(tx.WithContext(ctx))
+	} else {
+		err = r.db.WithContext(ctx).Transaction(create)
+	}
 	return created, err
 }
 
@@ -258,15 +273,16 @@ func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidate
 	models := make([]ResourceValidationModel, len(candidates))
 	for i, candidate := range candidates {
 		models[i] = ResourceValidationModel{
-			ResourceID:   candidate.ID,
-			ResourceType: candidate.ResourceType,
-			OwnerUserID:  candidate.OwnerUserID,
-			Status:       string(domain.ResourceValidationQueued),
-			MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
-			RequestID:    strings.TrimSpace(requestID),
-			Path:         strings.TrimSpace(path),
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ResourceID:                 candidate.ID,
+			ResourceType:               candidate.ResourceType,
+			OwnerUserID:                candidate.OwnerUserID,
+			ExpectedCredentialRevision: candidate.CredentialRevision,
+			Status:                     string(domain.ResourceValidationQueued),
+			MaxAttempts:                domain.ResourceValidationDefaultMaxAttempts,
+			RequestID:                  strings.TrimSpace(requestID),
+			Path:                       strings.TrimSpace(path),
+			CreatedAt:                  now,
+			UpdatedAt:                  now,
 		}
 	}
 	for start := 0; start < len(models); start += resourceValidationBatchInsertSize {
@@ -729,52 +745,94 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 }
 
 func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
-	updates := map[string]any{"updated_at": time.Now().UTC()}
-	if clientID = strings.TrimSpace(clientID); clientID != "" {
-		updates["client_id"] = clientID
-	}
-	if refreshToken = strings.TrimSpace(refreshToken); refreshToken != "" {
-		updates["refresh_token"] = refreshToken
-	}
-	if len(updates) == 1 {
+	clientID = strings.TrimSpace(clientID)
+	refreshToken = strings.TrimSpace(refreshToken)
+	if clientID == "" && refreshToken == "" {
 		return nil
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
+	stale := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		root, ms, job, err := lockMicrosoftValidationStateTx(tx, jobID, resourceID, claimToken)
+		if err != nil {
 			return err
 		}
+		now := time.Now().UTC()
+		if !validationJobMatchesCredentialRevision(job, ms) ||
+			domain.MicrosoftResourceStatus(ms.Status) == domain.MicrosoftStatusDeleted ||
+			domain.MicrosoftResourceStatus(ms.Status) == domain.MicrosoftStatusDisabled {
+			stale = true
+			return finishStaleMicrosoftValidationTx(tx, job, now)
+		}
+
+		updates := map[string]any{}
+		if clientID != "" && clientID != ms.ClientID {
+			updates["client_id"] = clientID
+		}
+		if refreshToken != "" && refreshToken != ms.RefreshToken {
+			updates["refresh_token"] = refreshToken
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		nextRevision := ms.CredentialRevision + 1
+		updates["credential_revision"] = nextRevision
+		updates["credential_updated_at"] = now
+		updates["token_last_refreshed_at"] = now
+		updates["token_last_request_id"] = job.RequestID
+		updates["updated_at"] = now
 		result := tx.Model(&MicrosoftResourceModel{}).
-			Where("id = ? AND status <> ?", resourceID, string(domain.MicrosoftStatusDeleted)).
+			Where("id = ? AND credential_revision = ? AND status NOT IN ?", resourceID, ms.CredentialRevision, []string{
+				string(domain.MicrosoftStatusDeleted),
+				string(domain.MicrosoftStatusDisabled),
+			}).
 			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("save refreshed microsoft credentials: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return domain.ErrResourceNotFound
+			return domain.ErrResourceVersionConflict
+		}
+		if err := tx.Model(&ResourceValidationModel{}).
+			Where("id = ? AND status = ? AND claim_token = ?", job.ID, string(domain.ResourceValidationRunning), job.ClaimToken).
+			Update("expected_credential_revision", nextRevision).Error; err != nil {
+			return fmt.Errorf("advance validation credential revision: %w", err)
+		}
+		if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+			return err
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return coreapp.ErrValidationResultStale
+	}
+	return nil
 }
 
 func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	stale := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
+		root, ms, job, err := lockMicrosoftValidationStateTx(tx, jobID, resourceID, claimToken)
+		if err != nil {
 			return err
 		}
-		var ms MicrosoftResourceModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ms, resourceID).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
+		if !validationJobMatchesCredentialRevision(job, ms) {
+			stale = true
+			if err := finishStaleMicrosoftValidationTx(tx, job, now); err != nil {
+				return err
 			}
-			return fmt.Errorf("lock microsoft resource for validation: %w", err)
+			return createSystemLogInTx(ctx, tx, staleValidationSystemLog(systemLog))
 		}
 		switch domain.MicrosoftResourceStatus(ms.Status) {
 		case domain.MicrosoftStatusDeleted:
-			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
+			stale = true
+			return markValidationJobFailedTx(tx, job.ID, job.ClaimToken, "Resource not found.", now)
 		case domain.MicrosoftStatusDisabled:
-			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource status does not allow validation.", now)
+			stale = true
+			return markValidationJobFailedTx(tx, job.ID, job.ClaimToken, "Resource status does not allow validation.", now)
 		}
 
 		safeMessage := safeValidationMessage(result.SafeMessage)
@@ -794,27 +852,50 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 			"updated_at":      now,
 		}
 		if result.Valid {
-			if strings.TrimSpace(result.ClientID) != "" {
-				updates["client_id"] = strings.TrimSpace(result.ClientID)
+			credentialsChanged := false
+			if value := strings.TrimSpace(result.ClientID); value != "" && value != ms.ClientID {
+				updates["client_id"] = value
+				credentialsChanged = true
 			}
-			if strings.TrimSpace(result.RefreshToken) != "" {
-				updates["refresh_token"] = strings.TrimSpace(result.RefreshToken)
+			if value := strings.TrimSpace(result.RefreshToken); value != "" && value != ms.RefreshToken {
+				updates["refresh_token"] = value
+				credentialsChanged = true
 			}
 			if result.RTExpireAt != nil {
 				updates["rt_expire_at"] = result.RTExpireAt
 			}
 			updates["graph_available"] = result.GraphAvailable
+			if credentialsChanged {
+				updates["credential_revision"] = ms.CredentialRevision + 1
+				updates["credential_updated_at"] = now
+				updates["token_last_refreshed_at"] = now
+				updates["token_last_request_id"] = job.RequestID
+			}
 		}
-		if err := tx.Model(&MicrosoftResourceModel{}).
-			Where("id = ? AND status <> ?", resourceID, string(domain.MicrosoftStatusDeleted)).
-			Updates(updates).Error; err != nil {
-			return fmt.Errorf("apply microsoft validation result: %w", err)
+		updated := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND credential_revision = ? AND status <> ?", resourceID, ms.CredentialRevision, string(domain.MicrosoftStatusDeleted)).
+			Updates(updates)
+		if updated.Error != nil {
+			return fmt.Errorf("apply microsoft validation result: %w", updated.Error)
 		}
-		if err := finishValidationJobTx(tx, jobID, claimToken, jobStatus, safeMessage, now); err != nil {
+		if updated.RowsAffected == 0 {
+			return domain.ErrResourceVersionConflict
+		}
+		if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+			return err
+		}
+		if err := finishValidationJobTx(tx, job.ID, job.ClaimToken, jobStatus, safeMessage, now); err != nil {
 			return err
 		}
 		return createSystemLogInTx(ctx, tx, systemLog)
 	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return coreapp.ErrValidationResultStale
+	}
+	return nil
 }
 
 func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.DomainValidationResult, systemLog *governancedomain.SystemLog) error {
@@ -900,6 +981,98 @@ func lockRunningValidationJob(tx *gorm.DB, id uint, claimToken string) error {
 	return nil
 }
 
+// lockMicrosoftValidationStateTx follows the global mutation lock order used
+// by Core and Alloc: resource root, Microsoft subtype, then durable job. That
+// order prevents administrator commands and validation workers from forming a
+// root/job lock cycle while still fencing duplicate worker deliveries.
+func lockMicrosoftValidationStateTx(tx *gorm.DB, jobID uint, resourceID uint, claimToken string) (*EmailResourceModel, *MicrosoftResourceModel, *ResourceValidationModel, error) {
+	var root EmailResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND type = ?", resourceID, string(domain.ResourceTypeMicrosoft)).
+		First(&root).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrResourceNotFound
+		}
+		return nil, nil, nil, fmt.Errorf("lock microsoft resource root for validation: %w", err)
+	}
+
+	var ms MicrosoftResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", resourceID).
+		First(&ms).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrResourceNotFound
+		}
+		return nil, nil, nil, fmt.Errorf("lock microsoft resource for validation: %w", err)
+	}
+
+	var job ResourceValidationModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where(
+			"id = ? AND resource_id = ? AND resource_type = ? AND status = ? AND claim_token = ?",
+			jobID,
+			resourceID,
+			string(domain.ResourceTypeMicrosoft),
+			string(domain.ResourceValidationRunning),
+			claimToken,
+		).
+		First(&job).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrInvalidResourceStatus
+		}
+		return nil, nil, nil, fmt.Errorf("lock microsoft validation job: %w", err)
+	}
+	return &root, &ms, &job, nil
+}
+
+func validationJobMatchesCredentialRevision(job *ResourceValidationModel, ms *MicrosoftResourceModel) bool {
+	return job != nil && ms != nil &&
+		job.ExpectedCredentialRevision > 0 &&
+		job.ExpectedCredentialRevision == ms.CredentialRevision
+}
+
+func finishStaleMicrosoftValidationTx(tx *gorm.DB, job *ResourceValidationModel, now time.Time) error {
+	if job == nil {
+		return domain.ErrInvalidResourceStatus
+	}
+	return finishValidationJobTx(
+		tx,
+		job.ID,
+		job.ClaimToken,
+		string(domain.ResourceValidationFailed),
+		"Resource credentials changed; stale validation result was discarded.",
+		now,
+	)
+}
+
+func staleValidationSystemLog(log *governancedomain.SystemLog) *governancedomain.SystemLog {
+	if log == nil {
+		return nil
+	}
+	copyLog := *log
+	copyLog.Level = "info"
+	copyLog.EventType = "resource.validation_stale"
+	copyLog.Message = "Stale resource validation result was discarded."
+	copyLog.Detail = "Resource credentials changed before the worker committed its result."
+	return &copyLog
+}
+
+func bumpResourceVersionTx(tx *gorm.DB, resourceID uint, now time.Time) error {
+	result := tx.Model(&EmailResourceModel{}).
+		Where("id = ?", resourceID).
+		Updates(map[string]any{
+			"version":    gorm.Expr("version + 1"),
+			"updated_at": now,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("advance resource version: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrResourceNotFound
+	}
+	return nil
+}
+
 func markValidationJobFailedTx(tx *gorm.DB, jobID uint, claimToken string, safeError string, now time.Time) error {
 	return finishValidationJobTx(tx, jobID, claimToken, string(domain.ResourceValidationFailed), safeValidationMessage(safeError), now)
 }
@@ -923,12 +1096,38 @@ func finishValidationJobTx(tx *gorm.DB, jobID uint, claimToken string, status st
 	return nil
 }
 
+func supersedeValidationJobTx(tx *gorm.DB, jobID uint, safeError string) error {
+	now := time.Now().UTC()
+	result := tx.Model(&ResourceValidationModel{}).
+		Where("id = ? AND status IN ?", jobID, []string{
+			string(domain.ResourceValidationQueued),
+			string(domain.ResourceValidationRunning),
+		}).
+		Updates(map[string]any{
+			"status":          string(domain.ResourceValidationFailed),
+			"claim_token":     "",
+			"dispatch_token":  "",
+			"dispatched_at":   nil,
+			"last_safe_error": safeValidationMessage(safeError),
+			"finished_at":     now,
+			"updated_at":      now,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("supersede resource validation job: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrInvalidResourceStatus
+	}
+	return nil
+}
+
 type validationCandidateRow struct {
-	ID              uint
-	ResourceType    string `gorm:"column:resource_type"`
-	OwnerUserID     uint   `gorm:"column:owner_user_id"`
-	MicrosoftStatus string `gorm:"column:microsoft_status"`
-	DomainStatus    string `gorm:"column:domain_status"`
+	ID                 uint
+	ResourceType       string `gorm:"column:resource_type"`
+	OwnerUserID        uint   `gorm:"column:owner_user_id"`
+	CredentialRevision uint64 `gorm:"column:credential_revision"`
+	MicrosoftStatus    string `gorm:"column:microsoft_status"`
+	DomainStatus       string `gorm:"column:domain_status"`
 }
 
 func selectValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint) ([]validationCandidateRow, error) {
@@ -938,7 +1137,7 @@ func selectValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUser
 	var rows []validationCandidateRow
 	if err := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
 		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("er.id IN ? AND er.owner_user_id = ?", ids, ownerUserID).
@@ -962,7 +1161,7 @@ func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, 
 	var rows []validationCandidateRow
 	if err := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
 		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("er.id IN ? AND er.owner_user_id = ?", ids, ownerUserID).
@@ -1005,7 +1204,7 @@ func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerU
 func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.status AS microsoft_status, '' AS domain_status").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.status AS microsoft_status, '' AS domain_status").
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
 		Where("er.id <= ?", throughID).
@@ -1061,7 +1260,7 @@ func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.D
 func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, '' AS microsoft_status, dr.status AS domain_status").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, '' AS microsoft_status, dr.status AS domain_status").
 		Joins("JOIN domain_resources AS dr ON dr.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeDomain)).
 		Where("er.id <= ?", throughID).
@@ -1213,6 +1412,7 @@ func prepareResourceForValidationTx(tx *gorm.DB, job *domain.ResourceValidation)
 				return fmt.Errorf("mark microsoft resource pending for validation: %w", err)
 			}
 		}
+		job.ExpectedCredentialRevision = ms.CredentialRevision
 	case domain.ResourceTypeDomain:
 		var dr DomainResourceModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&dr, job.ResourceID).Error

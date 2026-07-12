@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/donnel666/remail/api/middleware"
 	"github.com/donnel666/remail/internal/iam/app"
@@ -377,12 +378,32 @@ func (h *IAMHandler) GetCurrentSupplierApplication(c *gin.Context) {
 
 // GET /v1/admin/users
 func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
-	offset, limit, ok := parsePagination(c)
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err == nil && parsedLimit > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message":   "Invalid query parameters.",
+				"requestId": middleware.GetRequestID(c),
+			})
+			return
+		}
+	}
+	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
 	if !ok {
 		return
 	}
 	ids, ok := parseUintQueryList(c, "ids")
 	if !ok {
+		return
+	}
+	if len(ids) > 1000 || utf8.RuneCountInString(strings.TrimSpace(c.Query("search"))) > 120 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
 		return
 	}
 

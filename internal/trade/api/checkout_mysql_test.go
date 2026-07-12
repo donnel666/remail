@@ -807,8 +807,8 @@ func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *te
 func TestCheckoutEmailSuffixFiltersAllocationSourceMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
-	seedTradeMicrosoftResource(t, db, 1, 1000, "first@blocked.test", "blocked.test", 999, true)
-	seedTradeMicrosoftResource(t, db, 1, 1001, "first@example.com", "example.com", 100, true)
+	seedTradeMicrosoftResource(t, db, 1, 1000, "first@blocked.test", "blocked.test", 100, true)
+	seedTradeMicrosoftResource(t, db, 1, 1001, "first@example.com", "example.com", 99, true)
 	creditBuyer(t, db, 2, "10.00")
 
 	uc := newTradeUseCase(db)

@@ -537,6 +537,7 @@ paths:
     get:
       operationId: getAdminUsers
       summary: List all users (admin only)
+      description: Requires `iam:user/read`. The Microsoft resource owner picker uses the existing paginated IAM query and must not infer owner eligibility client-side; mutation commands revalidate that the selected user exists and is enabled.
       tags:
         - Admin
       security:
@@ -546,11 +547,14 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 0
             default: 0
         - name: limit
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 100
             default: 20
         - name: ids
           in: query
@@ -567,6 +571,7 @@ paths:
           description: Unified fuzzy search across user email, nickname, and ID.
           schema:
             type: string
+            maxLength: 120
       responses:
         "200":
           description: Paginated user list
@@ -592,6 +597,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/users/{userId}:
     patch:
@@ -3132,7 +3141,9 @@ paths:
   /v1/admin/allocations:
     get:
       operationId: getAdminAllocations
-      summary: List allocation records for diagnostics
+      summary: List enriched allocation and order records for administrators
+      description: |
+        Requires `alloc:allocation/read`. The Microsoft resource Orders Tab calls this endpoint with `type=microsoft&resourceId=...`. Alloc owns the page and enriches its bounded result through batch read ports for order, project, buyer, and authorized verification-code facts. Amounts are decimal strings. Mail bodies, service tokens, wallet facts, and mock-only mail-count/usage aggregates are never returned.
       tags:
         - Allocation
       security:
@@ -3151,10 +3162,12 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 1
         - name: resourceId
           in: query
           schema:
             type: integer
+            minimum: 1
         - name: status
           in: query
           schema:
@@ -3169,11 +3182,14 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 0
             default: 0
         - name: limit
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 100
             default: 20
       responses:
         "200":
@@ -3181,7 +3197,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AllocationListResponse"
+                $ref: "#/components/schemas/AdminAllocationListResponse"
         "400":
           description: Invalid query parameters
           content:
@@ -3200,6 +3216,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/admin/allocations/{allocationId}:
     get:
@@ -5391,6 +5411,1253 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/admin/resources:
+    get:
+      operationId: getAdminMicrosoftResources
+      summary: List Microsoft resources for the administrator console
+      description: |
+        Requires `core:resource/read`. Directly queries the resource facts and returns administrator-safe Microsoft resource fields plus cross-filter facets. The default query excludes logically deleted resources; `status=deleted` selects deleted resources explicitly. Facets are calculated from the complete matched set and each facet ignores only its own filter. Credential values, tokens, object keys, task leases, and upstream payloads are never returned.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          description: This administrator query is limited to Microsoft resources.
+          schema:
+            type: string
+            enum: [microsoft]
+        - name: search
+          in: query
+          description: Case-insensitive search across resource ID, mailbox address, and owner display identity.
+          schema:
+            type: string
+            maxLength: 120
+        - name: suffix
+          in: query
+          description: Exact normalized mailbox domain. Values with or without a leading `@` are accepted.
+          schema:
+            type: string
+            maxLength: 255
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminMicrosoftResourceStatus"
+        - name: forSale
+          in: query
+          description: Public-supply flag. The UI's private=true filter maps to forSale=false.
+          schema:
+            type: boolean
+        - name: longLived
+          in: query
+          schema:
+            type: boolean
+        - name: graphAvailable
+          in: query
+          schema:
+            type: boolean
+        - name: tokenHealth
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminMicrosoftTokenHealth"
+        - name: createdFrom
+          in: query
+          description: Inclusive ISO 8601 creation-time lower bound.
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          description: Exclusive ISO 8601 creation-time upper bound; must be later than createdFrom.
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: afterId
+          in: query
+          description: Optional seek cursor for the same stable `id DESC` ordering. When present, offset is ignored.
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated Microsoft resource list and server-side facets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftResourceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/imports:
+    post:
+      operationId: postAdminMicrosoftResourceImport
+      summary: Import Microsoft resources for a selected owner
+      description: |
+        Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request only persists a private upload and a durable import fact before returning 202. Parsing, duplicate handling, resource creation/recovery, and validation run asynchronously. The original TXT, credentials, and private object key are never returned or written to ordinary logs.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - ownerId
+                - longLived
+                - errorStrategy
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: UTF-8 TXT using one of the four documented `----`-delimited credential line formats.
+                ownerId:
+                  type: integer
+                  minimum: 1
+                longLived:
+                  type: boolean
+                errorStrategy:
+                  type: string
+                  enum: [skip, abort]
+              additionalProperties: false
+      responses:
+        "202":
+          description: Durable import accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/imports/{importId}:
+    get:
+      operationId: getAdminMicrosoftResourceImport
+      summary: Get an administrator Microsoft-resource import
+      description: Requires `core:resource/read`. Returns only safe counters, status, diagnostic text, and the durable task reference; it never returns uploaded text, credentials, or an object key.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Import status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftImportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/validations:
+    post:
+      operationId: postAdminMicrosoftResourceValidations
+      summary: Validate selected or all matching Microsoft resources
+      description: |
+        Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selection modes persist a durable batch before returning 202. Filter mode captures the normalized filter and an ID high-water mark; the client must not enumerate all matching IDs.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+      responses:
+        "202":
+          description: Durable validation batch accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/disable:
+    post:
+      operationId: postAdminMicrosoftResourcesDisable
+      summary: Disable explicitly selected Microsoft resources
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Only `selection.mode=ids` is accepted in this release. The short transaction does not terminate or rewrite existing orders and allocations.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftIdsCommandRequest"
+      responses:
+        "200":
+          description: Synchronous ids-mode result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/publish:
+    post:
+      operationId: postAdminMicrosoftResourcesPublish
+      summary: Publish selected Microsoft resources for sale
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Owner eligibility is revalidated by the server.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous ids-mode result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
+        "202":
+          description: Durable filter-mode batch accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/unpublish:
+    post:
+      operationId: postAdminMicrosoftResourcesUnpublish
+      summary: Convert selected Microsoft resources to private supply
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Existing orders and allocations are not released or changed.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous ids-mode result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
+        "202":
+          description: Durable filter-mode batch accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/delete:
+    post:
+      operationId: postAdminMicrosoftResourcesDelete
+      summary: Logically delete selected Microsoft resources
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous ids-mode result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
+        "202":
+          description: Durable filter-mode batch accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}:
+    get:
+      operationId: getAdminMicrosoftResource
+      summary: Get a Microsoft resource administrator summary
+      description: |
+        Requires `core:resource/read`. Returns the basic-information Tab result: resource and owner identity, current auxiliary address, safe state and timestamps, alias counts, recent task summaries, configured credential flags, and token diagnostics. These fields are composed from bounded direct queries; no administrator projection table is maintained. Aliases, task history, allocations, message lists, and message bodies are loaded through their owning APIs and are not embedded here.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Administrator-safe Microsoft resource summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftResourceDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      operationId: patchAdminMicrosoftResource
+      summary: Atomically edit a Microsoft resource
+      description: |
+        Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`; supplying `bindingAddress` additionally requires `mailtransport:binding/write`. Session authentication, CSRF, and an idempotency key are required. Resource, owner, current binding input, optional complete credentials, validation fact, and OperationLog are committed atomically. `status`, derived health, task state, and binding verification state are not accepted. Email or owner changes conflict with an active Allocation.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftUpdateRequest"
+      responses:
+        "200":
+          description: Atomic edit committed; validationTask is null when no validation was required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      operationId: deleteAdminMicrosoftResource
+      summary: Logically delete one Microsoft resource
+      description: Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The command forces private supply and performs a logical delete while retaining historical facts. An active Allocation or stale version returns 409.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Resource logically deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/credentials:
+    put:
+      operationId: putAdminMicrosoftResourceCredentials
+      summary: Replace Microsoft credentials as one write-only set
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The complete credential set replaces the previous revision, clears derived token health, moves the resource to pending, and creates or reuses a durable validation fact in the same transaction. No credential value is returned.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftReplaceCredentialsRequest"
+      responses:
+        "200":
+          description: Credential revision replaced and validation durably accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/validate:
+    post:
+      operationId: postAdminMicrosoftResourceValidate
+      summary: Validate one Microsoft resource
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Creates or reuses the resource's active durable validation and returns only after that fact commits. Disabled and deleted resources return 409; Microsoft network work never runs in the HTTP transaction.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Durable validation accepted or an active validation reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/enable:
+    post:
+      operationId: postAdminMicrosoftResourceEnable
+      summary: Enable a disabled Microsoft resource
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Atomically changes `disabled` to `pending`, clears untrusted derived health, and creates or reuses a validation fact. The 200 response confirms the durable local state, not successful Microsoft validation.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Resource is pending and validation is durably accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/disable:
+    post:
+      operationId: postAdminMicrosoftResourceDisable
+      summary: Disable one Microsoft resource
+      description: Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Disabling blocks new supply and automatic maintenance but does not terminate or modify existing orders and allocations. Repeating the command against an already-disabled resource is idempotent.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Resource disabled or already disabled
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/publish:
+    post:
+      operationId: postAdminMicrosoftResourcePublish
+      summary: Publish one Microsoft resource for sale
+      description: Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The owner must be enabled and have supplier, admin, or super-admin eligibility. Publishing only changes future supply eligibility and is idempotent when already public.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Resource published or already public
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/unpublish:
+    post:
+      operationId: postAdminMicrosoftResourceUnpublish
+      summary: Convert one Microsoft resource to private supply
+      description: Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. The command only affects future supply eligibility; existing Allocations are retained and alias scheduling is not paused. Repeating it against a private resource is idempotent.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Resource made private or already private
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/recover:
+    post:
+      operationId: postAdminMicrosoftResourceRecover
+      summary: Recover a logically deleted Microsoft resource
+      description: Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Atomically changes a deleted resource to pending and private, clears derived health, and creates or reuses validation. A non-deleted resource, stale version, or reused email identity returns 409.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Resource recovered to pending and validation durably accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/token/refresh:
+    post:
+      operationId: postAdminMicrosoftResourceTokenRefresh
+      summary: Queue a Microsoft refresh-token diagnostic
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Creates or reuses a durable token task before returning 202. Disabled resources may be diagnosed, but the task never enables them automatically; deleted resources return 409. No token value is returned.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Durable token task accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/aliases:
+    get:
+      operationId: getAdminMicrosoftResourceAliases
+      summary: List a Microsoft resource's aliases
+      description: Requires `core:resource/read`. `kind=explicit` returns explicit inventory plus the safe weekly/yearly schedule summary; `kind=other` returns dot and plus aliases and a null schedule. Attempt history, candidate addresses, fencing data, allocation status, order data, and mock-only diagnostics are not returned.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [explicit, other]
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated alias inventory and optional explicit-alias schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMicrosoftAliasListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: postAdminMicrosoftResourceAlias
+      summary: Expedite the explicit-alias schedule
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. This command advances the existing durable schedule or reuses an active attempt; it never inserts an alias directly and never bypasses quota, admission, reservation, fencing, or reconciliation rules.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Alias schedule task accepted or active attempt reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/messages/fetch:
+    post:
+      operationId: postAdminMicrosoftResourceMessagesFetch
+      summary: Queue a resource-level Microsoft mail fetch
+      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch persists or reuses a resource-level single-flight fetch job before returning 202. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Durable resource fetch accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/tasks:
+    get:
+      operationId: getAdminTasks
+      summary: List normalized administrator tasks for a Microsoft resource
+      description: |
+        Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: bizType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [microsoft_resource]
+        - name: bizId
+          in: query
+          required: true
+          description: Microsoft resource ID.
+          schema:
+            type: integer
+            minimum: 1
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminTaskKind"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminTaskStatus"
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated normalized task view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/tasks/{taskId}:
+    get:
+      operationId: getAdminTask
+      summary: Get one normalized administrator task
+      description: Requires `governance:task/read`. The ID must be a source-qualified or equivalently globally unique safe reference. Polling reads the owning task fact only and does not grant cross-context write authority. A required source failure returns 503 rather than a stale or fabricated status.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 160
+            pattern: '^[a-z][a-z0-9_]*:[A-Za-z0-9._~-]+$'
+      responses:
+        "200":
+          description: Current normalized task state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/messages:
+    get:
+      operationId: getAdminMessages
+      summary: List primary-mailbox message summaries for a resource
+      description: Requires `mailmatch:message/read`. Search is evaluated server-side across the authorized sender, recipient, subject, preview/body, and verification-code semantics, but list items never contain a body, full match diagnostic, private object key, or raw upstream message. Verification codes and order numbers are returned only as authorized safe display fields.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated message summaries without bodies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMessageListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/messages/{messageId}:
+    get:
+      operationId: getAdminMessage
+      summary: Get one primary-mailbox message body and diagnostic
+      description: Requires `mailmatch:message/read`. `resourceId` participates in the authorization and association lookup; an unknown message and a message belonging to another resource both return the same safe 404. This controlled read may return the body, verification code, order number, and sanitized match diagnostic, but never an object key, raw envelope, token, or upstream error body.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: resourceId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Authorized message body and safe diagnostic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMessageDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/bindings:
+    get:
+      operationId: getAdminBindings
+      summary: Get a resource's current auxiliary binding and message summaries
+      description: Requires `mailtransport:binding/read`. Directly queries the current binding fact and returns its safe summary plus a server-paginated auxiliary-message summary list. A resource with no configured auxiliary mailbox is a successful empty state with `binding=null`; it is not represented as 404. Message bodies, raw envelopes, and private object keys are not returned.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Current binding and paginated auxiliary-message summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBindingMessageListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/bindings/messages/{messageId}:
+    get:
+      operationId: getAdminBindingMessage
+      summary: Get one auxiliary-mailbox message body and diagnostic
+      description: Requires `mailtransport:binding/read`. The server verifies the resource, current/historical binding scope, and message association together; unknown and cross-resource IDs return the same safe 404. The response may contain the authorized body, code, order number, and sanitized diagnostic, but never a raw RFC822 object key, original envelope, secret, or upstream error body.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: resourceId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Authorized auxiliary message body and safe diagnostic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuxiliaryMessageDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
 components:
   parameters:
     CsrfToken:
@@ -5419,6 +6686,24 @@ components:
         maxLength: 128
       description: Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 
+    AdminCommandIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+    ExpectedAdminResourceVersion:
+      name: version
+      in: query
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+
   securitySchemes:
     cookieAuth:
       type: apiKey
@@ -5430,6 +6715,56 @@ components:
       type: http
       scheme: bearer
       description: User API key in the Authorization header, for example `Bearer rk-...`; SDK clients may also use `X-API-Key`.
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, path, query, pagination, enum, or multipart input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: The requested fact does not exist in the authorized scope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: State, uniqueness, idempotency, active-allocation, or optimistic-concurrency conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: The request is syntactically valid but violates field or domain constraints
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadGateway:
+      description: An authorized upstream content read failed safely
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: A required internal or upstream dependency is temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   schemas:
     HealthResponse:
@@ -8749,4 +10084,1226 @@ components:
         createdAt:
           type: string
           format: date-time
+      additionalProperties: false
+
+    AdminMicrosoftResourceStatus:
+      type: string
+      enum: [pending, normal, abnormal, disabled, deleted]
+    AdminMicrosoftTokenHealth:
+      type: string
+      description: "`expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot."
+      enum: [valid, expiring, expired, missing]
+    AdminMicrosoftOwnerSummary:
+      type: object
+      required:
+        - id
+        - email
+        - nickname
+        - groupName
+        - role
+        - enabled
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        email:
+          type: string
+          format: email
+        nickname:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        enabled:
+          type: boolean
+      additionalProperties: false
+    AdminMicrosoftResourceItem:
+      type: object
+      required:
+        - id
+        - type
+        - version
+        - emailAddress
+        - suffix
+        - bindingAddress
+        - owner
+        - status
+        - forSale
+        - longLived
+        - graphAvailable
+        - mailProtocol
+        - qualityScore
+        - tokenHealth
+        - rtExpireAt
+        - lastAllocatedAt
+        - lastSafeError
+        - activeTask
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          enum: [microsoft]
+        version:
+          type: integer
+          minimum: 1
+          description: Monotonic resource version used by administrator mutation preconditions.
+        emailAddress:
+          type: string
+          format: email
+        suffix:
+          type: string
+          description: Backend-normalized display suffix including the leading `@`.
+          example: "@outlook.com"
+        bindingAddress:
+          type: string
+          format: email
+          nullable: true
+          description: Current auxiliary mailbox address from MailTransport, or null when not configured.
+        owner:
+          $ref: "#/components/schemas/AdminMicrosoftOwnerSummary"
+        status:
+          $ref: "#/components/schemas/AdminMicrosoftResourceStatus"
+        forSale:
+          type: boolean
+        longLived:
+          type: boolean
+        graphAvailable:
+          type: boolean
+        mailProtocol:
+          type: string
+          enum: [graph, imap, unavailable]
+          description: Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
+        qualityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        tokenHealth:
+          $ref: "#/components/schemas/AdminMicrosoftTokenHealth"
+        rtExpireAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSafeError:
+          type: string
+          nullable: true
+          description: Sanitized resource diagnostic without secrets, upstream bodies, or stack traces.
+        activeTask:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminTaskSummary"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminMicrosoftStatusFacet:
+      type: object
+      required: [all, pending, normal, abnormal, disabled, deleted]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+          description: All matching non-deleted resources when the status dimension is ignored.
+        pending:
+          type: integer
+          format: int64
+          minimum: 0
+        normal:
+          type: integer
+          format: int64
+          minimum: 0
+        abnormal:
+          type: integer
+          format: int64
+          minimum: 0
+        disabled:
+          type: integer
+          format: int64
+          minimum: 0
+        deleted:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftBooleanFacet:
+      type: object
+      required: [all, yes, no]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+        yes:
+          type: integer
+          format: int64
+          minimum: 0
+        no:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftTokenHealthFacet:
+      type: object
+      required: [all, valid, expiring, expired, missing]
+      properties:
+        all:
+          type: integer
+          format: int64
+          minimum: 0
+        valid:
+          type: integer
+          format: int64
+          minimum: 0
+        expiring:
+          type: integer
+          format: int64
+          minimum: 0
+        expired:
+          type: integer
+          format: int64
+          minimum: 0
+        missing:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftSuffixFacet:
+      type: object
+      required: [key, count]
+      properties:
+        key:
+          type: string
+          description: Normalized suffix including the leading `@`.
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftFacets:
+      type: object
+      required:
+        - status
+        - forSale
+        - longLived
+        - graphAvailable
+        - tokenHealth
+        - suffixes
+      properties:
+        status:
+          $ref: "#/components/schemas/AdminMicrosoftStatusFacet"
+        forSale:
+          $ref: "#/components/schemas/AdminMicrosoftBooleanFacet"
+        longLived:
+          $ref: "#/components/schemas/AdminMicrosoftBooleanFacet"
+        graphAvailable:
+          $ref: "#/components/schemas/AdminMicrosoftBooleanFacet"
+        tokenHealth:
+          $ref: "#/components/schemas/AdminMicrosoftTokenHealthFacet"
+        suffixes:
+          type: array
+          description: Suffix-self-excluded counts sorted by count descending and key ascending.
+          items:
+            $ref: "#/components/schemas/AdminMicrosoftSuffixFacet"
+      additionalProperties: false
+    AdminMicrosoftResourceListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - nextAfterId
+        - facets
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMicrosoftResourceItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        nextAfterId:
+          type: integer
+          minimum: 1
+          nullable: true
+        facets:
+          $ref: "#/components/schemas/AdminMicrosoftFacets"
+      additionalProperties: false
+    AdminMicrosoftAliasCounts:
+      type: object
+      required: [explicit, dot, plus]
+      properties:
+        explicit:
+          type: integer
+          format: int64
+          minimum: 0
+        dot:
+          type: integer
+          format: int64
+          minimum: 0
+        plus:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftCredentialConfiguration:
+      type: object
+      description: Safe configured flags only. Password, client ID, refresh token, access token, and authorization codes are never returned.
+      required:
+        - passwordConfigured
+        - clientIdConfigured
+        - refreshTokenConfigured
+        - revision
+        - updatedAt
+      properties:
+        passwordConfigured:
+          type: boolean
+        clientIdConfigured:
+          type: boolean
+        refreshTokenConfigured:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    AdminMicrosoftTokenDiagnostic:
+      type: object
+      required:
+        - health
+        - rtExpireAt
+        - remainingSeconds
+        - lastRefreshedAt
+        - scopes
+        - lastRefreshRequestId
+        - lastSafeError
+      properties:
+        health:
+          $ref: "#/components/schemas/AdminMicrosoftTokenHealth"
+        rtExpireAt:
+          type: string
+          format: date-time
+          nullable: true
+        remainingSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: Server-derived non-negative remaining lifetime, or null when expiry is unknown.
+        lastRefreshedAt:
+          type: string
+          format: date-time
+          nullable: true
+        scopes:
+          type: array
+          uniqueItems: true
+          description: Microsoft ACL requested/configured scope allowlist. It is returned only when both Client ID and refresh token are configured; otherwise it is empty. It is not a provider-reported granted-scope result.
+          items:
+            type: string
+        lastRefreshRequestId:
+          type: string
+          nullable: true
+          description: Safe correlation ID only; never an OAuth authorization code or token.
+        lastSafeError:
+          type: string
+          nullable: true
+      additionalProperties: false
+    AdminMicrosoftResourceDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminMicrosoftResourceItem"
+        - type: object
+          required:
+            - aliasCounts
+            - recentTasks
+            - credentials
+            - token
+          properties:
+            aliasCounts:
+              $ref: "#/components/schemas/AdminMicrosoftAliasCounts"
+            recentTasks:
+              type: array
+              maxItems: 5
+              description: Bounded safe summaries for the basic-information Tab; complete history is queried from `/v1/admin/tasks`.
+              items:
+                $ref: "#/components/schemas/AdminTaskSummary"
+            credentials:
+              $ref: "#/components/schemas/AdminMicrosoftCredentialConfiguration"
+            token:
+              $ref: "#/components/schemas/AdminMicrosoftTokenDiagnostic"
+    AdminMicrosoftCredentialsInput:
+      type: object
+      description: Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision.
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        clientId:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        refreshToken:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 8192
+          writeOnly: true
+      additionalProperties: false
+    AdminMicrosoftUpdateRequest:
+      type: object
+      required:
+        - version
+      minProperties: 2
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: Last observed resource version; stale writes return 409.
+        emailAddress:
+          type: string
+          format: email
+        bindingAddress:
+          type: string
+          format: email
+          nullable: true
+          description: Set or replace the auxiliary address; null clears the current input. Clients must not submit a binding status.
+        ownerId:
+          type: integer
+          minimum: 1
+        qualityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        forSale:
+          type: boolean
+        longLived:
+          type: boolean
+        credentials:
+          $ref: "#/components/schemas/AdminMicrosoftCredentialsInput"
+      additionalProperties: false
+    AdminMicrosoftReplaceCredentialsRequest:
+      type: object
+      description: Complete replacement. `clientId` and `refreshToken` must be supplied together or both omitted.
+      required:
+        - version
+        - password
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: Last observed resource version; stale writes return 409.
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        clientId:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        refreshToken:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 8192
+          writeOnly: true
+      additionalProperties: false
+    AdminMicrosoftMutationResponse:
+      type: object
+      required:
+        - resource
+        - validationTask
+      properties:
+        resource:
+          $ref: "#/components/schemas/AdminMicrosoftResourceDetail"
+        validationTask:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminTaskView"
+          description: Durable validation task created or reused by this mutation; null when the edit did not require validation.
+      additionalProperties: false
+    AdminMicrosoftBulkFilter:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [microsoft]
+        search:
+          type: string
+          maxLength: 120
+        suffix:
+          type: string
+          maxLength: 255
+        status:
+          $ref: "#/components/schemas/AdminMicrosoftResourceStatus"
+        forSale:
+          type: boolean
+        longLived:
+          type: boolean
+        graphAvailable:
+          type: boolean
+        tokenHealth:
+          $ref: "#/components/schemas/AdminMicrosoftTokenHealth"
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminMicrosoftIdsSelection:
+      type: object
+      required:
+        - mode
+        - resourceIds
+      properties:
+        mode:
+          type: string
+          enum: [ids]
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+      additionalProperties: false
+    AdminMicrosoftFilterSelection:
+      type: object
+      required:
+        - mode
+        - filter
+      properties:
+        mode:
+          type: string
+          enum: [filter]
+        filter:
+          $ref: "#/components/schemas/AdminMicrosoftBulkFilter"
+      additionalProperties: false
+    AdminMicrosoftBulkSelection:
+      oneOf:
+        - $ref: "#/components/schemas/AdminMicrosoftIdsSelection"
+        - $ref: "#/components/schemas/AdminMicrosoftFilterSelection"
+    AdminMicrosoftIdsCommandRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminMicrosoftIdsSelection"
+      additionalProperties: false
+    AdminMicrosoftBulkCommandRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminMicrosoftBulkSelection"
+      additionalProperties: false
+    AdminReasonCount:
+      type: object
+      required:
+        - reason
+        - count
+      properties:
+        reason:
+          type: string
+          description: Stable safe reason bucket; never a raw database or upstream error.
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    AdminMicrosoftBulkResult:
+      type: object
+      required:
+        - requested
+        - affected
+        - skipped
+        - reasonCounts
+      properties:
+        requested:
+          type: integer
+          minimum: 0
+        affected:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        affectedResourceIds:
+          type: array
+          description: Present only for bounded ids mode.
+          items:
+            type: integer
+            minimum: 1
+        skippedResourceIds:
+          type: array
+          description: Present only for bounded ids mode.
+          items:
+            type: integer
+            minimum: 1
+        reasonCounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminReasonCount"
+      additionalProperties: false
+    AdminTaskKind:
+      type: string
+      enum:
+        - validation
+        - import
+        - alias
+        - token
+        - fetch
+        - bulk_validation
+        - bulk_publish
+        - bulk_unpublish
+        - bulk_delete
+    AdminTaskStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, uncertain, canceled]
+    AdminTaskBizType:
+      type: string
+      enum: [microsoft_resource, microsoft_resource_import, microsoft_resource_bulk]
+    AdminTaskProgress:
+      type: object
+      required:
+        - total
+        - processed
+        - succeeded
+        - skipped
+        - failed
+        - reasonCounts
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        processed:
+          type: integer
+          format: int64
+          minimum: 0
+        succeeded:
+          type: integer
+          format: int64
+          minimum: 0
+        skipped:
+          type: integer
+          format: int64
+          minimum: 0
+        failed:
+          type: integer
+          format: int64
+          minimum: 0
+        reasonCounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminReasonCount"
+      additionalProperties: false
+    AdminTaskSummary:
+      type: object
+      required:
+        - taskId
+        - kind
+        - status
+        - credentialRevision
+        - updatedAt
+      properties:
+        taskId:
+          type: string
+          minLength: 3
+          maxLength: 160
+          pattern: '^[a-z][a-z0-9_]*:[A-Za-z0-9._~-]+$'
+        kind:
+          $ref: "#/components/schemas/AdminTaskKind"
+        status:
+          $ref: "#/components/schemas/AdminTaskStatus"
+        credentialRevision:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Credential revision fixed when a validation, token, or fetch task was submitted; null for tasks that do not read credentials.
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminTaskView:
+      type: object
+      required:
+        - taskId
+        - bizType
+        - bizId
+        - kind
+        - status
+        - attempts
+        - maxAttempts
+        - remainingAttempts
+        - credentialRevision
+        - queuedAt
+        - startedAt
+        - finishedAt
+        - updatedAt
+        - progress
+      properties:
+        taskId:
+          type: string
+          minLength: 3
+          maxLength: 160
+          pattern: '^[a-z][a-z0-9_]*:[A-Za-z0-9._~-]+$'
+        bizType:
+          $ref: "#/components/schemas/AdminTaskBizType"
+        bizId:
+          type: integer
+          minimum: 1
+        kind:
+          $ref: "#/components/schemas/AdminTaskKind"
+        status:
+          $ref: "#/components/schemas/AdminTaskStatus"
+        attempts:
+          type: integer
+          minimum: 0
+        maxAttempts:
+          type: integer
+          minimum: 1
+        remainingAttempts:
+          type: integer
+          minimum: 0
+        credentialRevision:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Immutable credential revision captured at submission for validation, token, and fetch work; workers must not apply results to a different revision.
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        progress:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminTaskProgress"
+      additionalProperties: false
+    AdminTaskListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - succeeded
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminTaskView"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        succeeded:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Succeeded count across the complete filtered result, not just the current page.
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    AdminTaskAcceptedResponse:
+      type: object
+      required:
+        - taskId
+        - requestId
+        - status
+        - accepted
+        - task
+        - reused
+      properties:
+        taskId:
+          type: string
+          minLength: 1
+          description: Stable source-qualified identifier of the accepted durable task.
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Safe request identifier persisted with the accepted durable fact.
+        status:
+          $ref: "#/components/schemas/AdminTaskStatus"
+        accepted:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Safely displayable accepted count. A filter batch may report zero until expansion.
+        task:
+          $ref: "#/components/schemas/AdminTaskView"
+        reused:
+          type: boolean
+          description: True when the command returned an already-active durable fact.
+      additionalProperties: false
+    AdminMicrosoftImportResponse:
+      type: object
+      required:
+        - importId
+        - taskId
+        - requestId
+        - status
+        - accepted
+        - imported
+        - skipped
+        - lastSafeError
+        - task
+        - reused
+        - createdAt
+        - updatedAt
+      properties:
+        importId:
+          type: integer
+          minimum: 1
+        taskId:
+          type: string
+          minLength: 1
+          description: Stable source-qualified identifier of the durable import task.
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Safe request identifier persisted on the durable import record.
+        status:
+          type: string
+          enum: [processing, imported, failed]
+        accepted:
+          type: integer
+          format: int64
+          minimum: 0
+        imported:
+          type: integer
+          format: int64
+          minimum: 0
+        skipped:
+          type: integer
+          format: int64
+          minimum: 0
+        lastSafeError:
+          type: string
+          nullable: true
+        task:
+          $ref: "#/components/schemas/AdminTaskView"
+        reused:
+          type: boolean
+          description: True only when the POST replayed an existing import; status GET responses return false.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminMicrosoftAliasItem:
+      type: object
+      required:
+        - id
+        - kind
+        - emailAddress
+        - createdAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [explicit, dot, plus]
+        emailAddress:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminMicrosoftAliasSchedule:
+      type: object
+      required:
+        - weekCreated
+        - weekLimit
+        - yearCreated
+        - yearLimit
+        - nextRunAt
+      properties:
+        weekCreated:
+          type: integer
+          minimum: 0
+        weekLimit:
+          type: integer
+          minimum: 0
+        yearCreated:
+          type: integer
+          minimum: 0
+        yearLimit:
+          type: integer
+          minimum: 0
+        nextRunAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    AdminMicrosoftAliasListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - schedule
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMicrosoftAliasItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        schedule:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminMicrosoftAliasSchedule"
+          description: Present for kind=explicit and null for kind=other.
+      additionalProperties: false
+    AdminMessageSummary:
+      type: object
+      required:
+        - id
+        - mailbox
+        - recipient
+        - sender
+        - subject
+        - preview
+        - status
+        - verificationCode
+        - orderNo
+        - receivedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        mailbox:
+          type: string
+          enum: [main, alias, dot, plus]
+        recipient:
+          type: string
+        sender:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+          description: Bounded plain-text preview; never the complete body.
+        status:
+          type: string
+          enum: [received, matched, ignored]
+        verificationCode:
+          type: string
+          nullable: true
+        orderNo:
+          type: string
+          nullable: true
+        receivedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminMessageDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminMessageSummary"
+        - type: object
+          required:
+            - body
+            - matchDiagnostic
+          properties:
+            body:
+              type: string
+              description: Authorized, safely rendered message body. Raw object keys and envelopes are never returned.
+            matchDiagnostic:
+              type: string
+              nullable: true
+              description: Sanitized matching explanation without raw rules, secrets, stack traces, or upstream payloads.
+    AdminMessageListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMessageSummary"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    AdminBindingSummary:
+      type: object
+      required:
+        - id
+        - emailAddress
+        - status
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        emailAddress:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [pending, code_sent, verified, timeout, failed, expired]
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminAuxiliaryMessageSummary:
+      type: object
+      required:
+        - id
+        - recipient
+        - sender
+        - subject
+        - preview
+        - status
+        - verificationCode
+        - orderNo
+        - receivedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        recipient:
+          type: string
+        sender:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+        status:
+          type: string
+          enum: [received, matched, ignored]
+        verificationCode:
+          type: string
+          nullable: true
+        orderNo:
+          type: string
+          nullable: true
+        receivedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AdminAuxiliaryMessageDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminAuxiliaryMessageSummary"
+        - type: object
+          required:
+            - body
+            - matchDiagnostic
+          properties:
+            body:
+              type: string
+            matchDiagnostic:
+              type: string
+              nullable: true
+    AdminBindingMessageListResponse:
+      type: object
+      required:
+        - binding
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        binding:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminBindingSummary"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAuxiliaryMessageSummary"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    AdminAllocationItem:
+      type: object
+      required:
+        - type
+        - id
+        - orderNo
+        - projectId
+        - projectName
+        - projectLogoUrl
+        - resourceId
+        - mailbox
+        - supplyScope
+        - deliveryEmail
+        - serviceMode
+        - orderStatus
+        - status
+        - payAmount
+        - buyerEmail
+        - verificationCode
+        - createdAt
+        - receiveUntil
+      properties:
+        type:
+          type: string
+          enum: [microsoft, domain]
+        id:
+          type: integer
+          minimum: 1
+          description: Allocation ID.
+        orderNo:
+          type: string
+        projectId:
+          type: integer
+          minimum: 1
+        projectName:
+          type: string
+        projectLogoUrl:
+          type: string
+          nullable: true
+        resourceId:
+          type: integer
+          minimum: 1
+        mailbox:
+          type: string
+          enum: [main, alias, dot, plus, domain]
+        supplyScope:
+          type: string
+          enum: [owned, public]
+        deliveryEmail:
+          type: string
+          format: email
+        serviceMode:
+          type: string
+          enum: [code, purchase]
+        orderStatus:
+          type: string
+          enum: [pending_payment, paid, active, completed, refunded, failed, closed]
+        status:
+          type: string
+          enum: [allocated, released]
+        payAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        buyerEmail:
+          type: string
+          format: email
+        verificationCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        receiveUntil:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    AdminAllocationListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAllocationItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
       additionalProperties: false

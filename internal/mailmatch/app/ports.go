@@ -99,9 +99,10 @@ type FetchedMessage struct {
 }
 
 type FetchMessagesRequest struct {
-	Scope   OrderScope
-	SinceAt time.Time
-	UntilAt time.Time
+	Scope     OrderScope
+	SinceAt   time.Time
+	UntilAt   time.Time
+	RequestID string
 }
 
 type FetchMessagesResult struct {
@@ -580,6 +581,14 @@ func (e *mailIngestError) Error() string { return e.err.Error() }
 func (e *mailIngestError) Unwrap() error { return e.err }
 
 func (uc *UseCase) ingestFetchedMessages(ctx context.Context, fetched []FetchedMessage) (int, int, *time.Time, error) {
+	return uc.ingestFetchedMessagesWithFence(ctx, fetched, nil)
+}
+
+func (uc *UseCase) ingestFetchedMessagesWithFence(
+	ctx context.Context,
+	fetched []FetchedMessage,
+	fence func(context.Context) error,
+) (int, int, *time.Time, error) {
 	messages := make([]domain.Message, 0, len(fetched))
 	matchDeliveries := make([]matchedDelivery, 0)
 	for _, item := range fetched {
@@ -597,6 +606,11 @@ func (uc *UseCase) ingestFetchedMessages(ctx context.Context, fetched []FetchedM
 	storedDeliveries := make([]matchedDelivery, 0, len(matchDeliveries))
 	stored := 0
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if fence != nil {
+			if err := fence(txCtx); err != nil {
+				return err
+			}
+		}
 		storedMessages, err := uc.repo.UpsertMessages(txCtx, messages)
 		if err != nil {
 			return &mailIngestError{safe: "Mail message storage failed.", err: err}
