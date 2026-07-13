@@ -54,6 +54,10 @@ type queueInfoReader interface {
 	GetQueueInfo(queue string) (*asynq.QueueInfo, error)
 }
 
+type queueNamesReader interface {
+	Queues() ([]string, error)
+}
+
 // BackgroundLoadController keeps low-priority queues full while the service is
 // idle and stops adding work when foreground queues or MySQL are busy.
 type BackgroundLoadController struct {
@@ -340,11 +344,8 @@ func (c *BackgroundLoadController) foregroundLoad() (active, pending int, reliab
 		return 0, 0, true
 	}
 	for _, queue := range c.foregroundQueues {
-		info, err := c.queues.GetQueueInfo(queue)
-		if errors.Is(err, asynq.ErrQueueNotFound) {
-			continue
-		}
-		if err != nil {
+		info, reliable := c.queueInfo(queue)
+		if !reliable {
 			return 0, 0, false
 		}
 		if info == nil {
@@ -360,15 +361,41 @@ func (c *BackgroundLoadController) queueOutstanding(queue string) (int, bool) {
 	if c == nil || c.queues == nil || queue == "" {
 		return 0, true
 	}
-	info, err := c.queues.GetQueueInfo(queue)
-	if errors.Is(err, asynq.ErrQueueNotFound) {
-		return 0, true
-	}
-	if err != nil {
+	info, reliable := c.queueInfo(queue)
+	if !reliable {
 		return 0, false
 	}
 	if info == nil {
 		return 0, true
 	}
 	return info.Active + info.Pending + info.Retry, true
+}
+
+func (c *BackgroundLoadController) queueInfo(queue string) (*asynq.QueueInfo, bool) {
+	info, err := c.queues.GetQueueInfo(queue)
+	if err == nil {
+		return info, true
+	}
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return nil, true
+	}
+
+	// Inspector.GetQueueInfo returns an internal queue-not-found error that
+	// does not match the public asynq.ErrQueueNotFound sentinel. Confirm
+	// absence through the public queue list so an empty Redis can bootstrap
+	// its first background task without masking errors for existing queues.
+	names, ok := c.queues.(queueNamesReader)
+	if !ok {
+		return nil, false
+	}
+	queues, listErr := names.Queues()
+	if listErr != nil {
+		return nil, false
+	}
+	for _, existing := range queues {
+		if existing == queue {
+			return nil, false
+		}
+	}
+	return nil, true
 }

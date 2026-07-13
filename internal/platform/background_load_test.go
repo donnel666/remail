@@ -162,6 +162,20 @@ func TestBackgroundLoadControllerMissingQueuesAreTreatedAsEmpty(t *testing.T) {
 	}
 }
 
+func TestBackgroundLoadControllerBootstrapsMissingInspectorQueues(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	inspector := asynq.NewInspectorFromRedisClient(redisClient)
+	queues, err := inspector.Queues()
+	require.NoError(t, err)
+	require.Empty(t, queues)
+
+	controller := NewBackgroundLoadController(nil, inspector, nil, 128)
+
+	require.Equal(t, backgroundIdleDispatchCap, controller.DispatchLimit("background_alias", 4, 100))
+}
+
 func TestBackgroundLoadControllerInspectorFailureIsConservative(t *testing.T) {
 	controller := NewBackgroundLoadController(nil, queueInfoReaderErrorStub{}, nil, 128)
 
