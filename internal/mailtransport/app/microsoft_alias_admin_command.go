@@ -39,10 +39,10 @@ type MicrosoftAliasAdminCommandStore interface {
 	) (*MicrosoftAliasExpediteResult, bool, error)
 }
 
-// AcceptAdminExpedite accelerates an already-existing canonical schedule. It
-// deliberately cannot create a schedule, alias candidate or attempt, so quota,
-// admission, reservation, fencing and reconciliation remain owned by the
-// normal alias worker.
+// AcceptAdminExpedite ensures an eligible resource has a canonical schedule,
+// then accelerates it. It never creates an alias candidate or attempt, so
+// quota, admission, reservation, fencing and reconciliation remain owned by
+// the normal alias worker.
 func (s *MicrosoftAliasService) AcceptAdminExpedite(
 	ctx context.Context,
 	command MicrosoftAliasExpediteCommand,
@@ -60,6 +60,9 @@ func (s *MicrosoftAliasService) AcceptAdminExpedite(
 	if command.ResourceID == 0 || command.OperatorUserID == 0 ||
 		command.IdempotencyKey == "" || len(command.IdempotencyKey) > 128 {
 		return nil, ErrInvalidMicrosoftAliasExpedite
+	}
+	if _, err := s.EnsureScheduleForResource(ctx, command.ResourceID); err != nil {
+		return nil, ErrMicrosoftAliasAdminUnavailable
 	}
 
 	now := s.now().UTC()

@@ -80,6 +80,25 @@ type BindingAdminPort interface {
 	ReplaceAdminInput(ctx context.Context, command AdminBindingCommand) error
 }
 
+// AdminProxyBindingSummary is Proxy-owned, credential-free binding data shown
+// only in an administrator resource detail. Raw proxy URLs are intentionally
+// never part of this cross-context view.
+type AdminProxyBindingSummary struct {
+	ProxyID    uint
+	Host       string
+	OutboundIP string
+	Country    string
+	IPVersion  string
+	Status     string
+	ExpireAt   time.Time
+}
+
+// AdminProxyBindingQueryPort is implemented by BC-PROXY. Email addresses are
+// used because proxy bindings are keyed by the Microsoft account address.
+type AdminProxyBindingQueryPort interface {
+	GetByEmailAddresses(ctx context.Context, addresses []string) (map[string][]AdminProxyBindingSummary, error)
+}
+
 // ResourceAllocationGuardPort is implemented by Alloc. Core locks the resource
 // root first; the adapter then checks active allocations in the same tx.
 type ResourceAllocationGuardPort interface {
@@ -245,10 +264,11 @@ type AdminTokenDiagnostic struct {
 
 type AdminMicrosoftResourceDetail struct {
 	AdminMicrosoftResourceItem
-	AliasCounts AdminMicrosoftAliasCounts
-	RecentTasks []AdminTaskSummary
-	Credentials AdminCredentialConfiguration
-	Token       AdminTokenDiagnostic
+	AliasCounts   AdminMicrosoftAliasCounts
+	RecentTasks   []AdminTaskSummary
+	Credentials   AdminCredentialConfiguration
+	Token         AdminTokenDiagnostic
+	ProxyBindings []AdminProxyBindingSummary
 }
 
 type AdminMicrosoftAliasCounts struct {
@@ -287,6 +307,7 @@ type AdminResourceQuery struct {
 	bindings BindingQueryPort
 	tasks    TaskQueryPort
 	aliases  AliasScheduleQueryPort
+	proxies  AdminProxyBindingQueryPort
 	now      func() time.Time
 }
 
@@ -302,6 +323,12 @@ func (q *AdminResourceQuery) SetPorts(owners OwnerQueryPort, bindings BindingQue
 	q.bindings = bindings
 	q.tasks = tasks
 	q.aliases = aliases
+}
+
+func (q *AdminResourceQuery) SetProxyBindings(port AdminProxyBindingQueryPort) {
+	if q != nil {
+		q.proxies = port
+	}
 }
 
 func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftListFilter, offset, limit int, afterID uint) (*AdminMicrosoftListResult, error) {
@@ -393,6 +420,14 @@ func (q *AdminResourceQuery) Get(ctx context.Context, resourceID uint) (*AdminMi
 	if err != nil {
 		return nil, fmt.Errorf("load admin resource binding: %w", err)
 	}
+	proxyBindings := []AdminProxyBindingSummary{}
+	if q.proxies != nil {
+		items, proxyErr := q.proxies.GetByEmailAddresses(ctx, []string{record.EmailAddress})
+		if proxyErr != nil {
+			return nil, fmt.Errorf("load admin resource proxy bindings: %w", proxyErr)
+		}
+		proxyBindings = append(proxyBindings, items[strings.ToLower(strings.TrimSpace(record.EmailAddress))]...)
+	}
 	if q.tasks != nil {
 		recent, taskErr := q.tasks.GetRecentByResourceID(ctx, resourceID, 5)
 		if taskErr != nil {
@@ -439,6 +474,7 @@ func (q *AdminResourceQuery) Get(ctx context.Context, resourceID uint) (*AdminMi
 			LastRefreshRequestID: refreshRequestID,
 			LastSafeError:        safeOptionalString(record.LastSafeError),
 		},
+		ProxyBindings: proxyBindings,
 	}, nil
 }
 

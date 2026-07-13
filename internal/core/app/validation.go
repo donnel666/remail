@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -40,6 +41,14 @@ type ResourceValidationQueue interface {
 type ResourceValidationPort interface {
 	ValidateMicrosoft(ctx context.Context, req MicrosoftValidationRequest) (MicrosoftValidationResult, error)
 	ValidateDomain(ctx context.Context, req DomainValidationRequest) (DomainValidationResult, error)
+}
+
+// MicrosoftAliasScheduleTriggerPort is implemented by MailTransport. It is
+// called only after Core has committed a successful Microsoft validation; it
+// owns the separate durable alias schedule and never participates in Core's
+// validation transaction.
+type MicrosoftAliasScheduleTriggerPort interface {
+	EnsureForValidatedMicrosoftResource(ctx context.Context, resourceID uint) error
 }
 
 type MicrosoftValidationRequest struct {
@@ -115,11 +124,18 @@ type ValidationResultView struct {
 }
 
 type ResourceValidationUseCase struct {
-	resources   EmailResourceRepository
-	validations ResourceValidationRepository
-	queue       ResourceValidationQueue
-	validator   ResourceValidationPort
-	now         func() time.Time
+	resources    EmailResourceRepository
+	validations  ResourceValidationRepository
+	queue        ResourceValidationQueue
+	validator    ResourceValidationPort
+	aliasTrigger MicrosoftAliasScheduleTriggerPort
+	now          func() time.Time
+}
+
+func (uc *ResourceValidationUseCase) SetMicrosoftAliasScheduleTrigger(trigger MicrosoftAliasScheduleTriggerPort) {
+	if uc != nil {
+		uc.aliasTrigger = trigger
+	}
 }
 
 const ResourceValidationMaxExplicitIDs = 10_000
@@ -502,7 +518,21 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 	if errors.Is(err, ErrValidationResultStale) {
 		return nil
 	}
-	return err
+	if err != nil || !result.Valid || uc.aliasTrigger == nil {
+		return err
+	}
+	// Alias scheduling is its own durable concern. A transient failure here
+	// must not turn an already-committed validation success back into a retry;
+	// the daily alias scan remains the recovery path.
+	if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, job.ResourceID); triggerErr != nil {
+		slog.Warn(
+			"microsoft alias schedule trigger deferred after validation",
+			"resource_id", job.ResourceID,
+			"validation_id", job.ID,
+			"request_id", job.RequestID,
+		)
+	}
+	return nil
 }
 
 func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *domain.ResourceValidation) error {

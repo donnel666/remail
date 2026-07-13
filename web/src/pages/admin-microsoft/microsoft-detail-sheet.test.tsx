@@ -228,6 +228,17 @@ function detail(id: number): AdminMicrosoftResourceDetail {
       role: "supplier",
     },
     qualityScore: 80,
+	proxyBindings: [
+	  {
+	    country: "US",
+	    expireAt: now,
+	    host: "proxy.example.net",
+	    ipVersion: "ipv4",
+	    outboundIp: "203.0.113.10",
+	    proxyId: 12,
+	    status: "normal",
+	  },
+	],
     recentTasks: [],
     rtExpireAt: null,
     status: "normal",
@@ -347,6 +358,27 @@ describe("admin Microsoft detail sheet runtime", () => {
         expect.any(AbortSignal)
       )
     );
+  });
+
+  it("shows safe proxy binding details and the binding expiry in basic info", () => {
+    renderSheet(detail(41));
+
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "DIV" &&
+          element.querySelector("div") === null &&
+          element.textContent === "#12 proxy.example.net · ipv4 · normal · 203.0.113.10"
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "DIV" &&
+          element.querySelector("div") === null &&
+          element.textContent === "ipv4: 2026-07-12T00:00:00Z"
+      )
+    ).toBeInTheDocument();
   });
 
   it("keeps all four manual task actions connected and refreshes after acceptance", async () => {

@@ -117,6 +117,40 @@ function ResourceOverview({
             }
           />
           <InfoItem
+            label={t("Resource proxy")}
+            value={
+              detail.proxyBindings.length > 0 ? (
+                <div className="space-y-1 text-xs">
+                  {detail.proxyBindings.map((binding) => (
+                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
+                      <span className="font-mono">#{binding.proxyId}</span>{" "}
+                      {binding.host || "-"} · {binding.ipVersion} · {binding.status}
+                      {binding.outboundIp ? ` · ${binding.outboundIp}` : ""}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[var(--semi-color-text-2)]">{t("Not configured")}</span>
+              )
+            }
+          />
+          <InfoItem
+            label={t("Expires at")}
+            value={
+              detail.proxyBindings.length > 0 ? (
+                <div className="space-y-1 text-xs">
+                  {detail.proxyBindings.map((binding) => (
+                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
+                      {binding.ipVersion}: {formatTime(binding.expireAt)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[var(--semi-color-text-2)]">-</span>
+              )
+            }
+          />
+          <InfoItem
             label={t("Owner")}
             value={<OwnerIdentity owner={detail.owner} t={t} />}
           />

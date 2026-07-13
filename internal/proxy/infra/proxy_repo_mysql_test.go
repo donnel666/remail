@@ -349,6 +349,36 @@ func TestProxyRepoAcquireResourceBindingMySQL(t *testing.T) {
 	require.Len(t, bindings, 1)
 }
 
+func TestProxyRepoListsSafeAdminResourceBindingMetadataMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	proxy := &domain.Proxy{
+		Pool:       domain.ProxyPoolResource,
+		URL:        "socks5://proxy-user:proxy-password@proxy.example.net:1080",
+		ExpireAt:   now.Add(24 * time.Hour),
+		IPVersion:  domain.ProxyIPv4,
+		OutboundIP: "198.51.100.20",
+		Country:    "US",
+		Status:     domain.ProxyStatusNormal,
+	}
+	require.NoError(t, repo.Create(context.Background(), proxy))
+	_, err := repo.AcquireResourceProxy(context.Background(), "safe-binding@example.com", domain.ProxyIPv4, now, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	items, err := repo.ListAdminResourceProxyBindings(context.Background(), []string{"SAFE-BINDING@example.com"})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "safe-binding@example.com", items[0].BindKey)
+	require.Equal(t, proxy.ID, items[0].ProxyID)
+	require.Equal(t, "proxy.example.net", items[0].Host)
+	require.Equal(t, "198.51.100.20", items[0].OutboundIP)
+	require.Equal(t, "ipv4", items[0].IPVersion)
+	require.Equal(t, "normal", items[0].Status)
+	require.NotContains(t, items[0].Host, "proxy-user")
+	require.NotContains(t, items[0].Host, "proxy-password")
+}
+
 func TestProxyRepoAcquireResourceCoversExpiredBindingMySQL(t *testing.T) {
 	db := newProxyMySQLTestDB(t)
 	repo := NewProxyRepo(db)

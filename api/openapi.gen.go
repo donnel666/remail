@@ -2982,6 +2982,25 @@ type AdminMicrosoftOwnerSummary struct {
 // AdminMicrosoftOwnerSummaryRole defines model for AdminMicrosoftOwnerSummary.Role.
 type AdminMicrosoftOwnerSummaryRole string
 
+// AdminMicrosoftProxyBinding Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned.
+type AdminMicrosoftProxyBinding struct {
+	Country  string    `json:"country"`
+	ExpireAt time.Time `json:"expireAt"`
+
+	// Host Parsed proxy host only; it contains no scheme, port, username, or password.
+	Host string `json:"host"`
+
+	// IpVersion Stored resource-proxy address family, normally `ipv4` or `ipv6`.
+	IpVersion string `json:"ipVersion"`
+
+	// OutboundIp Last verified outbound IP, when known.
+	OutboundIp string `json:"outboundIp"`
+	ProxyId    int    `json:"proxyId"`
+
+	// Status Current proxy health status, such as `normal`, `abnormal`, `disabled`, or `expired`.
+	Status string `json:"status"`
+}
+
 // AdminMicrosoftReplaceCredentialsRequest Complete replacement. `clientId` and `refreshToken` must be supplied together or both omitted.
 type AdminMicrosoftReplaceCredentialsRequest struct {
 	ClientId     *string `json:"clientId,omitempty"`
@@ -3016,7 +3035,10 @@ type AdminMicrosoftResourceDetail struct {
 	// MailProtocol Safe effective receive-protocol conclusion for display; it contains no endpoint or credential detail.
 	MailProtocol AdminMicrosoftResourceDetailMailProtocol `json:"mailProtocol"`
 	Owner        AdminMicrosoftOwnerSummary               `json:"owner"`
-	QualityScore int                                      `json:"qualityScore"`
+
+	// ProxyBindings Current and most recently stored proxy bindings for this Microsoft account. Binding expiry is returned even when a binding is no longer usable.
+	ProxyBindings []AdminMicrosoftProxyBinding `json:"proxyBindings"`
+	QualityScore  int                          `json:"qualityScore"`
 
 	// RecentTasks Bounded safe summaries for the basic-information Tab; complete history is queried from `/v1/admin/tasks`.
 	RecentTasks []AdminTaskSummary           `json:"recentTasks"`

@@ -82,6 +82,14 @@ func (adminHandlerBindingAdminPort) ReplaceAdminInput(context.Context, coreapp.A
 	return nil
 }
 
+type adminHandlerProxyBindingPort struct {
+	items map[string][]coreapp.AdminProxyBindingSummary
+}
+
+func (p adminHandlerProxyBindingPort) GetByEmailAddresses(_ context.Context, _ []string) (map[string][]coreapp.AdminProxyBindingSummary, error) {
+	return p.items, nil
+}
+
 type adminHandlerAllocationGuard struct {
 	err error
 }
@@ -293,6 +301,12 @@ func TestAdminMicrosoftReadHandlersMatchSafeFlatContract(t *testing.T) {
 		nil,
 		nil,
 	)
+	query.SetProxyBindings(adminHandlerProxyBindingPort{items: map[string][]coreapp.AdminProxyBindingSummary{
+		"safe-mailbox@outlook.com": {{
+			ProxyID: 9, Host: "proxy.example.net", OutboundIP: "203.0.113.9", Country: "US",
+			IPVersion: "ipv4", Status: "normal", ExpireAt: expireAt,
+		}},
+	}})
 	handler := NewCoreHandler(&CoreModule{AdminResourceQuery: query})
 	router := gin.New()
 	router.Use(middleware.RequestID())
@@ -329,6 +343,12 @@ func TestAdminMicrosoftReadHandlersMatchSafeFlatContract(t *testing.T) {
 	require.Equal(t, "valid", detailPayload["token"].(map[string]any)["health"])
 	require.EqualValues(t, 2, detailPayload["aliasCounts"].(map[string]any)["explicit"])
 	require.NotNil(t, detailPayload["recentTasks"])
+	proxyBindings := detailPayload["proxyBindings"].([]any)
+	require.Len(t, proxyBindings, 1)
+	proxyBinding := proxyBindings[0].(map[string]any)
+	require.Equal(t, "proxy.example.net", proxyBinding["host"])
+	require.Equal(t, "203.0.113.9", proxyBinding["outboundIp"])
+	require.NotContains(t, body, "proxy-user")
 }
 
 func TestAdminMicrosoftListRejectsWrongTypeAndOversizedLimit(t *testing.T) {

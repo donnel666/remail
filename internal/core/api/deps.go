@@ -59,6 +59,18 @@ func (m *CoreModule) SetAdminResourcePorts(
 	}
 }
 
+func (m *CoreModule) SetAdminProxyBindingQueryPort(port coreapp.AdminProxyBindingQueryPort) {
+	if m != nil && m.AdminResourceQuery != nil {
+		m.AdminResourceQuery.SetProxyBindings(port)
+	}
+}
+
+func (m *CoreModule) SetMicrosoftAliasScheduleTrigger(trigger coreapp.MicrosoftAliasScheduleTriggerPort) {
+	if m != nil && m.ValidationUseCase != nil {
+		m.ValidationUseCase.SetMicrosoftAliasScheduleTrigger(trigger)
+	}
+}
+
 // NewCoreModule wires up all Core module dependencies.
 func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client, validator coreapp.ResourceValidationPort, bindingRecorder coreapp.MicrosoftBindingInputRecorder) (*CoreModule, error) {
 	txtParser := coreinfra.NewTXTParser()

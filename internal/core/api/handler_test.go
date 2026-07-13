@@ -1753,6 +1753,16 @@ type mockResourceValidator struct {
 	domainErr    error
 }
 
+type validationAliasTrigger struct {
+	resourceIDs []uint
+	err         error
+}
+
+func (t *validationAliasTrigger) EnsureForValidatedMicrosoftResource(_ context.Context, resourceID uint) error {
+	t.resourceIDs = append(t.resourceIDs, resourceID)
+	return t.err
+}
+
 func (v mockResourceValidator) ValidateMicrosoft(_ context.Context, _ coreapp.MicrosoftValidationRequest) (coreapp.MicrosoftValidationResult, error) {
 	if v.msErr != nil {
 		return coreapp.MicrosoftValidationResult{}, v.msErr
@@ -2499,6 +2509,8 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 			GraphAvailable: true,
 		},
 	})
+	aliasTrigger := &validationAliasTrigger{}
+	uc.SetMicrosoftAliasScheduleTrigger(aliasTrigger)
 
 	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
 	ms := &coredomain.MicrosoftResource{EmailAddress: "test@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
@@ -2517,6 +2529,29 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	require.Equal(t, "rotated-client", resourceRepo.microsoft[root.ID].ClientID)
 	require.Equal(t, "rotated-refresh-token", resourceRepo.microsoft[root.ID].RefreshToken)
 	require.True(t, resourceRepo.microsoft[root.ID].GraphAvailable)
+	require.Equal(t, []uint{root.ID}, aliasTrigger.resourceIDs)
+}
+
+func TestResourceValidationUseCase_AliasScheduleFailureDoesNotUndoValidation(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationQueue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{Valid: true},
+	})
+	trigger := &validationAliasTrigger{err: errors.New("alias schedule database unavailable")}
+	uc.SetMicrosoftAliasScheduleTrigger(trigger)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "trigger-error@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-trigger-error", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.Equal(t, coredomain.ResourceValidationSucceeded, validationRepo.jobs[job.ValidationID].Status)
+	require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
+	require.Equal(t, []uint{root.ID}, trigger.resourceIDs)
 }
 
 func TestResourceValidationUseCase_ProcessMicrosoftTemporaryFailureKeepsResourcePending(t *testing.T) {

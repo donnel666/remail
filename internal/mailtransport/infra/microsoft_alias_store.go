@@ -232,6 +232,102 @@ LIMIT ?`, now, now, now, microsoftAliasScheduleEnsureBatch)
 	return paused.RowsAffected + wokenRows + inserted.RowsAffected, nil
 }
 
+// EnsureScheduleForResource is the narrow counterpart to the daily broad
+// scanner. It creates a missing schedule for a normal resource, or wakes a
+// paused schedule only when the same eligibility facts used by administrator
+// expedite show that its prior block is no longer current.
+func (s *MicrosoftAliasStore) EnsureScheduleForResource(ctx context.Context, resourceID uint, now time.Time) (bool, error) {
+	if resourceID == 0 {
+		return false, nil
+	}
+	ensured := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inserted := tx.Exec(`
+INSERT IGNORE INTO microsoft_alias_schedules (
+    resource_id, status, next_run_at, attempts, last_safe_error, created_at, updated_at
+)
+SELECT id, 'pending', ?, 0, '', ?, ?
+FROM microsoft_resources
+WHERE id = ? AND status = 'normal'`, now, now, now, resourceID)
+		if inserted.Error != nil {
+			return fmt.Errorf("ensure validated microsoft alias schedule: %w", inserted.Error)
+		}
+		if inserted.RowsAffected > 0 {
+			ensured = true
+			return nil
+		}
+
+		var state struct {
+			ResourceID               uint   `gorm:"column:resource_id"`
+			ResourceStatus           string `gorm:"column:resource_status"`
+			ScheduleStatus           string `gorm:"column:schedule_status"`
+			BlockedResourceSignature string `gorm:"column:blocked_resource_signature"`
+			LastSafeError            string `gorm:"column:last_safe_error"`
+			ResourceSignature        string `gorm:"column:resource_signature"`
+		}
+		if err := tx.Raw(`
+SELECT
+    schedule.resource_id AS resource_id,
+    resource.status AS resource_status,
+    schedule.status AS schedule_status,
+    schedule.blocked_resource_signature AS blocked_resource_signature,
+    schedule.last_safe_error AS last_safe_error,
+    SHA2(CONCAT_WS(
+        CHAR(0),
+        resource.status,
+        resource.email_address,
+        resource.password,
+        resource.client_id,
+        resource.refresh_token,
+        COALESCE(binding.binding_address, '')
+    ), 256) AS resource_signature
+FROM microsoft_alias_schedules AS schedule
+JOIN microsoft_resources AS resource ON resource.id = schedule.resource_id
+LEFT JOIN microsoft_binding_mailboxes AS binding
+  ON binding.resource_id = resource.id
+ AND binding.status <> 'expired'
+WHERE schedule.resource_id = ?
+LIMIT 1
+FOR UPDATE`, resourceID).Scan(&state).Error; err != nil {
+			return fmt.Errorf("load validated microsoft alias schedule: %w", err)
+		}
+		if state.ResourceID == 0 || state.ResourceStatus != "normal" || state.ScheduleStatus != "paused" ||
+			!canWakeMicrosoftAliasSchedule(state.BlockedResourceSignature, state.ResourceSignature, state.LastSafeError) {
+			return nil
+		}
+		woken := tx.Model(&MicrosoftAliasScheduleModel{}).
+			Where("resource_id = ? AND status = ?", resourceID, "paused").
+			Updates(microsoftAliasScheduleWakeUpdates(now))
+		if woken.Error != nil {
+			return fmt.Errorf("wake validated microsoft alias schedule: %w", woken.Error)
+		}
+		ensured = woken.RowsAffected > 0
+		return nil
+	})
+	return ensured, err
+}
+
+func canWakeMicrosoftAliasSchedule(blockedSignature, resourceSignature, lastSafeError string) bool {
+	return strings.TrimSpace(blockedSignature) == "" ||
+		blockedSignature != resourceSignature ||
+		lastSafeError == legacyMicrosoftAliasPublicOnlyMessage ||
+		lastSafeError == mailapp.MicrosoftAliasResourceNotNormalMessage
+}
+
+func microsoftAliasScheduleWakeUpdates(now time.Time) map[string]any {
+	return map[string]any{
+		"status":                      "pending",
+		"claim_token":                 "",
+		"next_run_at":                 now,
+		"failure_streak":              0,
+		"blocked_resource_signature":  "",
+		"blocked_resource_updated_at": nil,
+		"blocked_last_allocated_at":   nil,
+		"last_safe_error":             "",
+		"updated_at":                  now,
+	}
+}
+
 func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, now, queuedStaleBefore, runningStaleBefore time.Time) ([]mailapp.MicrosoftAliasTask, error) {
 	if limit <= 0 {
 		limit = 10

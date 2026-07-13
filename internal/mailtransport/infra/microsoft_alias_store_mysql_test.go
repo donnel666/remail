@@ -62,6 +62,55 @@ func createMicrosoftAliasTestResource(t *testing.T, db *gorm.DB, resourceID uint
 	).Error)
 }
 
+func TestMicrosoftAliasStoreEnsuresValidatedResourceScheduleMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1008, "pending")
+	store := NewMicrosoftAliasStore(db)
+	now := time.Date(2026, time.July, 13, 1, 2, 3, 0, time.UTC)
+
+	ensured, err := store.EnsureScheduleForResource(context.Background(), 1008, now)
+	require.NoError(t, err)
+	assert.False(t, ensured, "a validation callback must not schedule a resource that is not normal")
+
+	require.NoError(t, db.Exec("UPDATE microsoft_resources SET status = 'normal' WHERE id = ?", 1008).Error)
+	ensured, err = store.EnsureScheduleForResource(context.Background(), 1008, now)
+	require.NoError(t, err)
+	assert.True(t, ensured)
+	assert.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1008).Status)
+
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_alias_schedules AS schedule
+JOIN microsoft_resources AS resource ON resource.id = schedule.resource_id
+SET schedule.status = 'paused',
+    schedule.claim_token = 'old-claim',
+    schedule.last_safe_error = 'Microsoft account is locked.',
+    schedule.blocked_resource_signature = SHA2(CONCAT_WS(
+        CHAR(0),
+        resource.status,
+        resource.email_address,
+        resource.password,
+        resource.client_id,
+        resource.refresh_token,
+        ''
+    ), 256)
+WHERE schedule.resource_id = ?`, 1008).Error)
+	ensured, err = store.EnsureScheduleForResource(context.Background(), 1008, now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, ensured, "a permanent alias failure remains paused when validation changed no relevant facts")
+	paused := loadAliasAdminSchedule(t, db, 1008)
+	assert.Equal(t, "paused", paused.Status)
+	assert.Equal(t, "Microsoft account is locked.", paused.LastSafeError)
+
+	require.NoError(t, db.Exec("UPDATE microsoft_resources SET password = 'new-secret' WHERE id = ?", 1008).Error)
+	ensured, err = store.EnsureScheduleForResource(context.Background(), 1008, now.Add(2*time.Minute))
+	require.NoError(t, err)
+	assert.True(t, ensured, "a successful validation after relevant account facts changed may retry")
+	woken := loadAliasAdminSchedule(t, db, 1008)
+	assert.Equal(t, "pending", woken.Status)
+	assert.Empty(t, woken.ClaimToken)
+	assert.True(t, woken.NextRunAt.Equal(now.Add(2*time.Minute)))
+}
+
 func TestMicrosoftAliasStoreAssignsDeterministicSuperAdminOwnerMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1010, "normal")

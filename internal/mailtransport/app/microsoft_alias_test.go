@@ -31,6 +31,9 @@ type fakeMicrosoftAliasStore struct {
 	eligibilityChecks int
 	ensureCalls       int
 	ensureResult      int64
+	ensuredResourceID uint
+	ensureResourceOK  bool
+	ensureResourceErr error
 	dispatchTasks     []MicrosoftAliasTask
 	markDispatchErr   error
 	adminSchedule     *MicrosoftAliasAdminSchedule
@@ -45,6 +48,11 @@ type fakeMicrosoftAliasStore struct {
 func (f *fakeMicrosoftAliasStore) EnsureSchedules(context.Context, time.Time) (int64, error) {
 	f.ensureCalls++
 	return f.ensureResult, nil
+}
+
+func (f *fakeMicrosoftAliasStore) EnsureScheduleForResource(_ context.Context, resourceID uint, _ time.Time) (bool, error) {
+	f.ensuredResourceID = resourceID
+	return f.ensureResourceOK, f.ensureResourceErr
 }
 
 func (f *fakeMicrosoftAliasStore) FindDispatchable(context.Context, int, time.Time, time.Time, time.Time) ([]MicrosoftAliasTask, error) {
@@ -221,11 +229,39 @@ func TestMicrosoftAliasAdminCommandReturnsCanonicalTaskAndSafeAudit(t *testing.T
 	assert.Equal(t, governanceapp.AdminTaskStatusQueued, accepted.Task.Status)
 	assert.Equal(t, 1, accepted.Task.MaxAttempts)
 	assert.Equal(t, "alias-expedite-key", store.adminCommand.IdempotencyKey)
+	assert.Equal(t, uint(42), store.ensuredResourceID)
 	require.NotNil(t, store.adminCommandLog)
 	assert.Equal(t, uint(7), store.adminCommandLog.OperatorUserID)
 	assert.Equal(t, "42", store.adminCommandLog.ResourceID)
 	assert.NotContains(t, store.adminCommandLog.SafeSummary, "secret")
 	assert.Equal(t, 1, queue.dispatches)
+}
+
+func TestMicrosoftAliasAdminCommandEnsuresMissingScheduleBeforeExpedite(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		ensureResourceOK: true,
+		expediteResult: &MicrosoftAliasExpediteResult{
+			ResourceID:     42,
+			Status:         "queued",
+			QueuedAt:       now,
+			UpdatedAt:      now,
+			WakeDispatcher: true,
+		},
+	}
+	queue := &fakeMicrosoftAliasAdminQueue{}
+	service := NewMicrosoftAliasService(store, queue, nil)
+	service.now = func() time.Time { return now }
+
+	accepted, err := service.AcceptAdminExpedite(context.Background(), MicrosoftAliasExpediteCommand{
+		ResourceID:     42,
+		OperatorUserID: 7,
+		IdempotencyKey: "ensure-before-expedite",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, accepted)
+	assert.Equal(t, uint(42), store.ensuredResourceID)
+	assert.Equal(t, 1, queue.dispatches, "the accepted expedite wakes the dispatcher once")
 }
 
 func TestMicrosoftAliasAdminCommandReplaysReceiptAndValidatesIdempotency(t *testing.T) {
@@ -278,18 +314,15 @@ func TestMicrosoftAliasDispatchThrottlesCompletedScheduleSweeps(t *testing.T) {
 	require.Equal(t, 2, store.ensureCalls)
 }
 
-func TestMicrosoftAliasDispatchContinuesScheduleBackfillImmediately(t *testing.T) {
-	store := &fakeMicrosoftAliasStore{ensureResult: microsoftAliasEnsureBatchHint}
-	service := NewMicrosoftAliasService(store, nil, nil)
-	service.now = func() time.Time {
-		return time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
-	}
+func TestMicrosoftAliasValidationEnsuresOnlyTheValidatedSchedule(t *testing.T) {
+	store := &fakeMicrosoftAliasStore{ensureResourceOK: true}
+	queue := &fakeMicrosoftAliasAdminQueue{}
+	service := NewMicrosoftAliasService(store, queue, nil)
 
-	_, err := service.DispatchPending(context.Background(), 10)
-	require.NoError(t, err)
-	_, err = service.DispatchPending(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, 2, store.ensureCalls)
+	require.NoError(t, service.EnsureForValidatedMicrosoftResource(context.Background(), 42))
+	assert.Equal(t, uint(42), store.ensuredResourceID)
+	assert.Equal(t, 1, queue.dispatches)
+	assert.Zero(t, store.ensureCalls, "validation must not start the broad daily scan")
 }
 
 func TestMicrosoftAliasDispatchReportsFailureToRestoreUnqueuedSchedule(t *testing.T) {

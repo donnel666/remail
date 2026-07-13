@@ -63,6 +63,7 @@ func TestAdminAliasExpediteRouteReturnsOpenAPITaskShapeWithoutInternalFacts(t *t
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.Equal(t, "core:resource", checker.resource)
 	assert.Equal(t, "operate", checker.action)
+	assert.Equal(t, uint(100), store.ensuredID)
 	assert.Equal(t, uint(100), store.command.ResourceID)
 	assert.Equal(t, uint(7), store.command.OperatorUserID)
 	assert.Equal(t, "alias-expedite-idempotency", store.command.IdempotencyKey)
@@ -135,9 +136,16 @@ type adminAliasExpediteStoreStub struct {
 	mailapp.MicrosoftAliasScheduleStore
 	result       *mailapp.MicrosoftAliasExpediteResult
 	err          error
+	ensureErr    error
+	ensuredID    uint
 	receiptReuse bool
 	command      mailapp.MicrosoftAliasExpediteCommand
 	operationLog *governancedomain.OperationLog
+}
+
+func (s *adminAliasExpediteStoreStub) EnsureScheduleForResource(_ context.Context, resourceID uint, _ time.Time) (bool, error) {
+	s.ensuredID = resourceID
+	return false, s.ensureErr
 }
 
 func (s *adminAliasExpediteStoreStub) AcceptAdminAliasExpedite(

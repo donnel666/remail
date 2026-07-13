@@ -161,12 +161,23 @@ type adminMicrosoftTokenResponse struct {
 	LastSafeError        *string    `json:"lastSafeError"`
 }
 
+type adminMicrosoftProxyBindingResponse struct {
+	ProxyID    uint      `json:"proxyId"`
+	Host       string    `json:"host"`
+	OutboundIP string    `json:"outboundIp"`
+	Country    string    `json:"country"`
+	IPVersion  string    `json:"ipVersion"`
+	Status     string    `json:"status"`
+	ExpireAt   time.Time `json:"expireAt"`
+}
+
 type adminMicrosoftDetailResponse struct {
 	adminMicrosoftResourceItemResponse
-	AliasCounts adminMicrosoftAliasCountsResponse `json:"aliasCounts"`
-	RecentTasks []adminTaskSummaryResponse        `json:"recentTasks"`
-	Credentials adminMicrosoftCredentialResponse  `json:"credentials"`
-	Token       adminMicrosoftTokenResponse       `json:"token"`
+	AliasCounts   adminMicrosoftAliasCountsResponse    `json:"aliasCounts"`
+	RecentTasks   []adminTaskSummaryResponse           `json:"recentTasks"`
+	Credentials   adminMicrosoftCredentialResponse     `json:"credentials"`
+	Token         adminMicrosoftTokenResponse          `json:"token"`
+	ProxyBindings []adminMicrosoftProxyBindingResponse `json:"proxyBindings"`
 }
 
 type adminMicrosoftCredentialsRequest struct {
@@ -819,6 +830,15 @@ func toAdminMicrosoftDetailResponse(detail *coreapp.AdminMicrosoftResourceDetail
 	for i := range detail.RecentTasks {
 		recent[i] = *toAdminTaskSummary(&detail.RecentTasks[i])
 	}
+	proxyBindings := make([]adminMicrosoftProxyBindingResponse, len(detail.ProxyBindings))
+	for i := range detail.ProxyBindings {
+		proxyBindings[i] = adminMicrosoftProxyBindingResponse{
+			ProxyID: detail.ProxyBindings[i].ProxyID, Host: detail.ProxyBindings[i].Host,
+			OutboundIP: detail.ProxyBindings[i].OutboundIP, Country: detail.ProxyBindings[i].Country,
+			IPVersion: detail.ProxyBindings[i].IPVersion, Status: detail.ProxyBindings[i].Status,
+			ExpireAt: detail.ProxyBindings[i].ExpireAt,
+		}
+	}
 	return adminMicrosoftDetailResponse{
 		adminMicrosoftResourceItemResponse: toAdminMicrosoftItemResponse(detail.AdminMicrosoftResourceItem),
 		AliasCounts:                        adminMicrosoftAliasCountsResponse{Explicit: detail.AliasCounts.Explicit, Dot: detail.AliasCounts.Dot, Plus: detail.AliasCounts.Plus},
@@ -832,6 +852,7 @@ func toAdminMicrosoftDetailResponse(detail *coreapp.AdminMicrosoftResourceDetail
 			LastRefreshedAt: detail.Token.LastRefreshedAt, Scopes: detail.Token.Scopes,
 			LastRefreshRequestID: detail.Token.LastRefreshRequestID, LastSafeError: detail.Token.LastSafeError,
 		},
+		ProxyBindings: proxyBindings,
 	}
 }
 

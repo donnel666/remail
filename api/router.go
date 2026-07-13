@@ -130,6 +130,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		}
 		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		coreMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
+		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
+		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		governanceMod := governanceapi.NewModule(p.DB)

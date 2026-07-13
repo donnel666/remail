@@ -9,7 +9,8 @@ import (
 )
 
 type ProxyModule struct {
-	ProxyUseCase *proxyapp.ProxyUseCase
+	ProxyUseCase          *proxyapp.ProxyUseCase
+	AdminResourceBindings *proxyapp.AdminResourceProxyBindingQuery
 }
 
 func NewProxyModule(db *gorm.DB, asynqClient *asynq.Client) (*ProxyModule, error) {
@@ -20,6 +21,7 @@ func NewProxyModule(db *gorm.DB, asynqClient *asynq.Client) (*ProxyModule, error
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 
 	return &ProxyModule{
-		ProxyUseCase: proxyapp.NewProxyUseCase(repo, checker, checkQueue, operationLogs, systemLogs),
+		ProxyUseCase:          proxyapp.NewProxyUseCase(repo, checker, checkQueue, operationLogs, systemLogs),
+		AdminResourceBindings: proxyapp.NewAdminResourceProxyBindingQuery(repo),
 	}, nil
 }

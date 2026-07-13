@@ -359,6 +359,51 @@ func (r *ProxyRepo) CountBindings(ctx context.Context, filter proxyapp.ProxyBind
 	return total, nil
 }
 
+// ListAdminResourceProxyBindings returns the current stored proxy-binding
+// facts for resource email addresses. It intentionally selects the parsed host
+// instead of the raw proxy URL so a cross-context administrator read cannot
+// expose proxy credentials.
+func (r *ProxyRepo) ListAdminResourceProxyBindings(ctx context.Context, keys []string) ([]proxyapp.AdminResourceProxyBinding, error) {
+	keys = normalizeProxyBindingKeys(keys)
+	if len(keys) == 0 {
+		return []proxyapp.AdminResourceProxyBinding{}, nil
+	}
+	var rows []struct {
+		BindKey    string    `gorm:"column:bind_key"`
+		ProxyID    uint      `gorm:"column:proxy_id"`
+		Host       string    `gorm:"column:host"`
+		OutboundIP string    `gorm:"column:outbound_ip"`
+		Country    string    `gorm:"column:country"`
+		IPVersion  string    `gorm:"column:ip_version"`
+		Status     string    `gorm:"column:status"`
+		ExpireAt   time.Time `gorm:"column:expire_at"`
+	}
+	if err := r.db.WithContext(ctx).Table("proxy_bindings AS binding").
+		Select(`binding.bind_key, binding.proxy_id, proxy.url_host AS host,
+			proxy.outbound_ip, proxy.country, binding.ip_version, proxy.status,
+			binding.expire_at`).
+		Joins("JOIN proxies AS proxy ON proxy.id = binding.proxy_id").
+		Where("binding.bind_key IN ?", keys).
+		Order("binding.bind_key ASC, binding.expire_at DESC, binding.id DESC").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list admin resource proxy bindings: %w", err)
+	}
+	items := make([]proxyapp.AdminResourceProxyBinding, len(rows))
+	for i := range rows {
+		items[i] = proxyapp.AdminResourceProxyBinding{
+			BindKey:    rows[i].BindKey,
+			ProxyID:    rows[i].ProxyID,
+			Host:       rows[i].Host,
+			OutboundIP: rows[i].OutboundIP,
+			Country:    rows[i].Country,
+			IPVersion:  rows[i].IPVersion,
+			Status:     rows[i].Status,
+			ExpireAt:   rows[i].ExpireAt,
+		}
+	}
+	return items, nil
+}
+
 func (r *ProxyRepo) Update(ctx context.Context, proxy *domain.Proxy) error {
 	return r.updateInTx(ctx, r.db.WithContext(ctx), proxy)
 }
@@ -1447,6 +1492,23 @@ func proxySearchTerm(value string) string {
 		return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 	}
 	return strings.ToLower(trimmed)
+}
+
+func normalizeProxyBindingKeys(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		keys = append(keys, value)
+	}
+	return keys
 }
 
 func escapeLikePrefix(value string) string {

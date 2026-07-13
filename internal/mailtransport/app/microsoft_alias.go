@@ -15,10 +15,12 @@ const (
 	MicrosoftAliasWeeklyLimit = 2
 	MicrosoftAliasYearlyLimit = 10
 
-	microsoftAliasRunningTimeout  = 30 * time.Minute
-	microsoftAliasQueuedTimeout   = 4 * time.Hour
-	microsoftAliasEnsureInterval  = 5 * time.Minute
-	microsoftAliasEnsureBatchHint = int64(10000)
+	microsoftAliasRunningTimeout = 30 * time.Minute
+	microsoftAliasQueuedTimeout  = 4 * time.Hour
+	// The broad eligibility scan is deliberately daily. Immediate validation
+	// success and an administrator expedite use the targeted path below, so the
+	// periodic scanner is a recovery/backfill mechanism rather than a hot loop.
+	microsoftAliasEnsureInterval = 24 * time.Hour
 
 	microsoftAliasReconciliationGrace            = 24 * time.Hour
 	microsoftAliasNegativeConfirmationInterval   = time.Hour
@@ -100,6 +102,7 @@ type MicrosoftAliasCreationResult struct {
 
 type MicrosoftAliasScheduleStore interface {
 	EnsureSchedules(ctx context.Context, now time.Time) (int64, error)
+	EnsureScheduleForResource(ctx context.Context, resourceID uint, now time.Time) (bool, error)
 	FindDispatchable(ctx context.Context, limit int, now, queuedStaleBefore, runningStaleBefore time.Time) ([]MicrosoftAliasTask, error)
 	Claim(ctx context.Context, task MicrosoftAliasTask, now time.Time) (*MicrosoftAliasAccount, bool, error)
 	CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, error)
@@ -109,6 +112,34 @@ type MicrosoftAliasScheduleStore interface {
 	Defer(ctx context.Context, resourceID uint, claimToken string, nextRunAt time.Time, safeError string, failed bool) error
 	Pause(ctx context.Context, resourceID uint, claimToken string, safeError string) error
 	MarkDispatchFailed(ctx context.Context, task MicrosoftAliasTask, nextRunAt time.Time, safeError string) error
+}
+
+// EnsureScheduleForResource records or wakes an eligible resource's durable
+// alias schedule. It never calls Microsoft directly; the normal dispatcher
+// claims and executes the work later.
+func (s *MicrosoftAliasService) EnsureScheduleForResource(ctx context.Context, resourceID uint) (bool, error) {
+	if s == nil || s.store == nil || resourceID == 0 {
+		return false, nil
+	}
+	ensured, err := s.store.EnsureScheduleForResource(ctx, resourceID, s.now().UTC())
+	if err != nil {
+		return false, err
+	}
+	return ensured, nil
+}
+
+// EnsureForValidatedMicrosoftResource records or wakes the durable alias
+// schedule after a successful Microsoft validation. A schedule change wakes
+// the existing dispatcher; no external request runs in this call.
+func (s *MicrosoftAliasService) EnsureForValidatedMicrosoftResource(ctx context.Context, resourceID uint) error {
+	ensured, err := s.EnsureScheduleForResource(ctx, resourceID)
+	if err != nil {
+		return err
+	}
+	if ensured {
+		s.ScheduleDispatcher(ctx, 0)
+	}
+	return nil
 }
 
 type MicrosoftAliasQueue interface {
@@ -193,9 +224,6 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 			s.resetScheduleEnsure()
 			return nil, fmt.Errorf("ensure microsoft alias schedules: %w", err)
 		}
-		if ensured >= microsoftAliasEnsureBatchHint {
-			s.resetScheduleEnsure()
-		}
 	}
 	tasks, err := s.store.FindDispatchable(
 		ctx,
@@ -240,6 +268,8 @@ func (s *MicrosoftAliasService) beginEnsureSchedules(now time.Time) bool {
 	return true
 }
 
+// resetScheduleEnsure permits an earlier retry only after the daily scan
+// itself failed before it could persist any scheduling decision.
 func (s *MicrosoftAliasService) resetScheduleEnsure() {
 	s.ensureMu.Lock()
 	s.lastEnsureAt = time.Time{}

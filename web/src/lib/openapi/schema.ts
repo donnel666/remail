@@ -3642,12 +3642,29 @@ export interface components {
             lastRefreshRequestId: string | null;
             lastSafeError: string | null;
         };
+        /** @description Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned. */
+        AdminMicrosoftProxyBinding: {
+            proxyId: number;
+            /** @description Parsed proxy host only; it contains no scheme, port, username, or password. */
+            host: string;
+            /** @description Last verified outbound IP, when known. */
+            outboundIp: string;
+            country: string;
+            /** @description Stored resource-proxy address family, normally `ipv4` or `ipv6`. */
+            ipVersion: string;
+            /** @description Current proxy health status, such as `normal`, `abnormal`, `disabled`, or `expired`. */
+            status: string;
+            /** Format: date-time */
+            expireAt: string;
+        };
         AdminMicrosoftResourceDetail: components["schemas"]["AdminMicrosoftResourceItem"] & {
             aliasCounts: components["schemas"]["AdminMicrosoftAliasCounts"];
             /** @description Bounded safe summaries for the basic-information Tab; complete history is queried from `/v1/admin/tasks`. */
             recentTasks: components["schemas"]["AdminTaskSummary"][];
             credentials: components["schemas"]["AdminMicrosoftCredentialConfiguration"];
             token: components["schemas"]["AdminMicrosoftTokenDiagnostic"];
+            /** @description Current and most recently stored proxy bindings for this Microsoft account. Binding expiry is returned even when a binding is no longer usable. */
+            proxyBindings: components["schemas"]["AdminMicrosoftProxyBinding"][];
         };
         /** @description Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision. */
         AdminMicrosoftCredentialsInput: {

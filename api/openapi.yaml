@@ -10432,6 +10432,31 @@ components:
           type: string
           nullable: true
       additionalProperties: false
+    AdminMicrosoftProxyBinding:
+      type: object
+      description: Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned.
+      required: [proxyId, host, outboundIp, country, ipVersion, status, expireAt]
+      properties:
+        proxyId:
+          type: integer
+          minimum: 1
+        host:
+          type: string
+          description: Parsed proxy host only; it contains no scheme, port, username, or password.
+        outboundIp:
+          type: string
+          description: Last verified outbound IP, when known.
+        country:
+          type: string
+        ipVersion:
+          type: string
+          description: Stored resource-proxy address family, normally `ipv4` or `ipv6`.
+        status:
+          type: string
+          description: Current proxy health status, such as `normal`, `abnormal`, `disabled`, or `expired`.
+        expireAt:
+          type: string
+          format: date-time
     AdminMicrosoftResourceDetail:
       allOf:
         - $ref: "#/components/schemas/AdminMicrosoftResourceItem"
@@ -10441,6 +10466,7 @@ components:
             - recentTasks
             - credentials
             - token
+            - proxyBindings
           properties:
             aliasCounts:
               $ref: "#/components/schemas/AdminMicrosoftAliasCounts"
@@ -10454,6 +10480,11 @@ components:
               $ref: "#/components/schemas/AdminMicrosoftCredentialConfiguration"
             token:
               $ref: "#/components/schemas/AdminMicrosoftTokenDiagnostic"
+            proxyBindings:
+              type: array
+              description: Current and most recently stored proxy bindings for this Microsoft account. Binding expiry is returned even when a binding is no longer usable.
+              items:
+                $ref: "#/components/schemas/AdminMicrosoftProxyBinding"
     AdminMicrosoftCredentialsInput:
       type: object
       description: Complete write-only credential set. `clientId` and `refreshToken` must be supplied together or both omitted; invalid pairs return 422. Omission of this object from PATCH preserves the current credential revision.

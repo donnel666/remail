@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -145,26 +144,17 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 			WakeDispatcher: true,
 		}, nil
 	case "paused":
-		canWake := strings.TrimSpace(schedule.BlockedResourceSignature) == "" ||
-			schedule.BlockedResourceSignature != resource.Signature ||
-			schedule.LastSafeError == legacyMicrosoftAliasPublicOnlyMessage ||
-			schedule.LastSafeError == mailapp.MicrosoftAliasResourceNotNormalMessage
+		canWake := canWakeMicrosoftAliasSchedule(
+			schedule.BlockedResourceSignature,
+			resource.Signature,
+			schedule.LastSafeError,
+		)
 		if !canWake {
 			return nil, mailapp.ErrMicrosoftAliasSchedulePaused
 		}
 		update := tx.Model(&MicrosoftAliasScheduleModel{}).
 			Where("resource_id = ? AND status = ?", resourceID, "paused").
-			Updates(map[string]any{
-				"status":                      "pending",
-				"claim_token":                 "",
-				"next_run_at":                 now,
-				"failure_streak":              0,
-				"blocked_resource_signature":  "",
-				"blocked_resource_updated_at": nil,
-				"blocked_last_allocated_at":   nil,
-				"last_safe_error":             "",
-				"updated_at":                  now,
-			})
+			Updates(microsoftAliasScheduleWakeUpdates(now))
 		if update.Error != nil {
 			return nil, aliasAdminUnavailable("wake changed schedule", update.Error)
 		}
