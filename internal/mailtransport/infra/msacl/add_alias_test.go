@@ -197,12 +197,30 @@ func TestClassifyAddAssocIDResponse(t *testing.T) {
 
 func TestMapExplicitAliasErrorDoesNotBlameProxyForPageTimeout(t *testing.T) {
 	result := mapExplicitAliasError(
-		newAuthError("page flow incomplete", AuthStatusAuthTimeout),
+		&AuthError{
+			Message: "page flow incomplete",
+			Status:  AuthStatusAuthTimeout,
+			Stage:   explicitAliasStageLoginMissingPostURL,
+		},
 	)
 
 	assert.Equal(t, "auth_timeout", result.Category)
-	assert.Equal(t, "Microsoft alias authorization timed out.", result.SafeMessage)
+	assert.Equal(t, explicitAliasStageLoginMissingPostURL, result.Stage)
+	assert.Equal(t, "Microsoft alias authorization timed out. [stage=login_missing_post_url]", result.SafeMessage)
 	assert.False(t, result.ProxyFailure)
+}
+
+func TestAnnotateExplicitAliasAuthTimeoutStagePreservesSpecificStage(t *testing.T) {
+	err := &AuthError{
+		Message: "specific page failure",
+		Status:  AuthStatusAuthTimeout,
+		Stage:   explicitAliasStageManageRedirected,
+	}
+
+	result := annotateExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
+
+	require.Same(t, err, result)
+	assert.Equal(t, explicitAliasStageManageRedirected, err.Stage)
 }
 
 func TestMapExplicitAliasErrorMarksProxiedTransportFailure(t *testing.T) {

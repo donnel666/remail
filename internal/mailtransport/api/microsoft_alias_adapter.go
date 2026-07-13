@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -82,6 +83,16 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 				Category:    "request",
 				SafeMessage: "Microsoft alias service is temporarily unavailable.",
 			}
+		}
+		if raw.Stage != "" {
+			slog.Warn(
+				"microsoft alias remote attempt failed",
+				"resource_id", req.ResourceID,
+				"category", raw.Category,
+				"stage", raw.Stage,
+				"attempted", len(raw.Attempted),
+				"proxy_failure", raw.ProxyFailure,
+			)
 		}
 		last = mailapp.MicrosoftAliasCreationResult{
 			Category:     raw.Category,

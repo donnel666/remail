@@ -57,6 +57,7 @@ type ExplicitAliasResult struct {
 	Attempted    []string
 	Absent       []string
 	Category     string
+	Stage        string
 	SafeMessage  string
 	ProxyFailure bool
 }
@@ -330,11 +331,17 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 	}
 	if ppft == "" || postURL == "" {
 		if ppft == "" {
-			logExplicitAliasStage(explicitAliasStageLoginMissingPPFT)
-		} else {
-			logExplicitAliasStage(explicitAliasStageLoginMissingPostURL)
+			return "", "", newExplicitAliasStageError(
+				"OAuth 登录页缺少 PPFT 或提交地址",
+				AuthStatusAuthTimeout,
+				explicitAliasStageLoginMissingPPFT,
+			)
 		}
-		return "", "", newAuthError("OAuth 登录页缺少 PPFT 或提交地址", AuthStatusAuthTimeout)
+		return "", "", newExplicitAliasStageError(
+			"OAuth 登录页缺少 PPFT 或提交地址",
+			AuthStatusAuthTimeout,
+			explicitAliasStageLoginMissingPostURL,
+		)
 	}
 	uaid := firstNonEmpty(getQueryParam(postURL, "uaid"), getQueryParam(currentURL, "uaid"))
 
@@ -368,8 +375,11 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 	ppft = extractPPFT(page)
 	postURL = extractPostURL(page)
 	if postURL == "" {
-		logExplicitAliasStage(explicitAliasStageLoginMissingPostURL)
-		return "", "", newAuthError("提交凭据时缺少 post_url", AuthStatusAuthTimeout)
+		return "", "", newExplicitAliasStageError(
+			"提交凭据时缺少 post_url",
+			AuthStatusAuthTimeout,
+			explicitAliasStageLoginMissingPostURL,
+		)
 	}
 
 	opid := getQueryParam(currentURL, "opid")
@@ -402,8 +412,7 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 		preferredBindingAddress,
 	)
 	if err != nil {
-		logExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
-		return "", "", err
+		return "", "", annotateExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
 	}
 	page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
 	if err != nil {
@@ -430,8 +439,11 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 		page, currentURL = resp.Body, resp.URL
 	}
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-		logExplicitAliasStage(explicitAliasStageAccountPageIncomplete)
-		return "", "", newAuthError("未能进入 Microsoft 别名管理页", AuthStatusAuthTimeout)
+		return "", "", newExplicitAliasStageError(
+			"未能进入 Microsoft 别名管理页",
+			AuthStatusAuthTimeout,
+			explicitAliasStageAccountPageIncomplete,
+		)
 	}
 	return page, currentURL, nil
 }
@@ -843,8 +855,7 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		)
 	}
 	if err != nil {
-		logExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
-		return "", "", attempted, err
+		return "", "", attempted, annotateExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
 	}
 	page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
 	if err != nil {
@@ -977,8 +988,11 @@ func confirmExplicitAliasPresent(session *Session, alias, referer string) (bool,
 		return false, newAuthError(fmt.Sprintf("查询 Microsoft 别名列表失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 	}
 	if !isExplicitAliasManageURL(resp.URL) {
-		logExplicitAliasStage(explicitAliasStageManageRedirected)
-		return false, newAuthError("Microsoft alias session is no longer authenticated.", AuthStatusAuthTimeout)
+		return false, newExplicitAliasStageError(
+			"Microsoft alias session is no longer authenticated.",
+			AuthStatusAuthTimeout,
+			explicitAliasStageManageRedirected,
+		)
 	}
 	return explicitAliasPresentOnManagePage(resp.Body, resp.URL, alias), nil
 }
@@ -1007,38 +1021,48 @@ func isExplicitAliasManageURL(rawURL string) bool {
 func mapExplicitAliasError(err error) ExplicitAliasResult {
 	authErr, _ := err.(*AuthError)
 	status := AuthStatusUnknownError
+	stage := ""
 	if authErr != nil && strings.TrimSpace(authErr.Status) != "" {
 		status = authErr.Status
+		stage = strings.TrimSpace(authErr.Stage)
+	}
+	failure := func(category, message string, proxyFailure bool) ExplicitAliasResult {
+		result := explicitAliasFailure(category, message, proxyFailure)
+		if stage != "" {
+			result.Stage = stage
+			result.SafeMessage += " [stage=" + stage + "]"
+		}
+		return result
 	}
 	switch status {
 	case AuthStatusPasswordError:
-		return explicitAliasFailure("password", "Microsoft account password is incorrect.", false)
+		return failure("password", "Microsoft account password is incorrect.", false)
 	case AuthStatusUnknownMailbox:
-		return explicitAliasFailure("unknown_mailbox", "Microsoft account is unavailable for alias creation.", false)
+		return failure("unknown_mailbox", "Microsoft account is unavailable for alias creation.", false)
 	case AuthStatusMFARequired:
-		return explicitAliasFailure("mfa", "Microsoft account requires authenticator verification.", false)
+		return failure("mfa", "Microsoft account requires authenticator verification.", false)
 	case AuthStatusPasskeyRequired:
-		return explicitAliasFailure("passkey", "Microsoft account requires passkey verification.", false)
+		return failure("passkey", "Microsoft account requires passkey verification.", false)
 	case AuthStatusPhoneVerification:
-		return explicitAliasFailure("phone", "Microsoft account requires phone verification.", false)
+		return failure("phone", "Microsoft account requires phone verification.", false)
 	case AuthStatusAccountLocked:
-		return explicitAliasFailure("locked", "Microsoft account is locked.", false)
+		return failure("locked", "Microsoft account is locked.", false)
 	case AuthStatusAccountAbnormal:
-		return explicitAliasFailure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
+		return failure("account_abnormal", "Microsoft account is restricted or requires recovery.", false)
 	case AuthStatusRateLimited:
-		return explicitAliasFailure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", false)
+		return failure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", false)
 	case AuthStatusAlreadyBound:
-		return explicitAliasFailure("already_bound", "Microsoft account recovery mailbox cannot be used.", false)
+		return failure("already_bound", "Microsoft account recovery mailbox cannot be used.", false)
 	case AuthStatusCodeTimeout:
-		return explicitAliasFailure("code_timeout", "Microsoft recovery mailbox verification timed out.", false)
+		return failure("code_timeout", "Microsoft recovery mailbox verification timed out.", false)
 	case AuthStatusVerifyCodeError:
-		return explicitAliasFailure("code_error", "Microsoft recovery mailbox verification failed.", false)
+		return failure("code_error", "Microsoft recovery mailbox verification failed.", false)
 	case AuthStatusAuthTimeout:
-		return explicitAliasFailure("auth_timeout", "Microsoft alias authorization timed out.", false)
+		return failure("auth_timeout", "Microsoft alias authorization timed out.", false)
 	case AuthStatusRequestError:
-		return explicitAliasFailure("request", "Microsoft alias service is temporarily unavailable.", sessionTransportUsedProxy(err))
+		return failure("request", "Microsoft alias service is temporarily unavailable.", sessionTransportUsedProxy(err))
 	default:
-		return explicitAliasFailure("alias_failed", "Microsoft alias creation failed.", false)
+		return failure("alias_failed", "Microsoft alias creation failed.", false)
 	}
 }
 
@@ -1050,11 +1074,22 @@ func explicitAliasFailure(category, message string, proxyFailure bool) ExplicitA
 	}
 }
 
-func logExplicitAliasAuthTimeoutStage(err error, stage string) {
+func annotateExplicitAliasAuthTimeoutStage(err error, stage string) error {
 	authErr, ok := err.(*AuthError)
 	if ok && authErr.Status == AuthStatusAuthTimeout {
-		logExplicitAliasStage(stage)
+		if authErr.Stage == "" {
+			authErr.Stage = stage
+		}
+		logExplicitAliasStage(authErr.Stage)
 	}
+	return err
+}
+
+func newExplicitAliasStageError(message, status, stage string) *AuthError {
+	err := newAuthError(message, status)
+	err.Stage = stage
+	logExplicitAliasStage(stage)
+	return err
 }
 
 func logExplicitAliasStage(stage string) {

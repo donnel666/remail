@@ -21,6 +21,7 @@ const (
 type AuthError struct {
 	Message      string
 	Status       string
+	Stage        string
 	BoundMailbox string
 	BoundDisplay string
 	Cause        error
