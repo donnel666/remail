@@ -36,10 +36,7 @@ const (
 	backgroundLoadCritical
 )
 
-const (
-	backgroundDispatchLockKey = "remail:background-dispatch-lock"
-	backgroundExecutionKey    = "remail:background-execution-slots"
-)
+const backgroundExecutionKey = "remail:background-execution-slots"
 
 var acquireBackgroundExecutionScript = redis.NewScript(`
 redis.call("zremrangebyscore", KEYS[1], "-inf", ARGV[1])
@@ -90,37 +87,13 @@ func (c *BackgroundLoadController) AcquireDispatchBudget(ctx context.Context, qu
 	if c == nil {
 		return minimum, func() {}
 	}
-	if c.redis == nil {
-		c.dispatchMu.Lock()
-		return c.dispatchLimit(queue, minimum, maximum, true), c.dispatchMu.Unlock
-	}
 
-	token := NewUUIDV4String()
-	acquired, err := c.redis.SetNX(ctx, backgroundDispatchLockKey, token, 2*time.Minute).Result()
-	if err != nil {
-		// Redis is also the Asynq backend, so an outage will make enqueueing fail
-		// naturally. Retain process-local serialization while the distributed
-		// dispatcher lock is temporarily unavailable.
-		c.dispatchMu.Lock()
-		return c.dispatchLimit(queue, minimum, maximum, true), c.dispatchMu.Unlock
-	}
-	if !acquired {
-		return 0, func() {}
-	}
-	var once sync.Once
-	release := func() {
-		once.Do(func() {
-			releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			_ = c.redis.Eval(
-				releaseCtx,
-				`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
-				[]string{backgroundDispatchLockKey},
-				token,
-			).Err()
-		})
-	}
-	return c.dispatchLimit(queue, minimum, maximum, true), release
+	// Dispatchers are short database/queue operations. Serializing them in this
+	// process prevents competing scans from overfilling the background queues
+	// without turning a normal lock race into a silently dropped dispatch.
+	// Cross-process correctness remains with each durable store's claim.
+	c.dispatchMu.Lock()
+	return c.dispatchLimit(queue, minimum, maximum, true), c.dispatchMu.Unlock
 }
 
 // TryAcquireExecution admits a low-priority task immediately before it claims
@@ -317,7 +290,7 @@ func (c *BackgroundLoadController) loadLevel(ignoreCurrentDispatcher bool) backg
 	// Dispatchers run on the default foreground queue. While one is asking for
 	// a budget, its own active task must not turn an otherwise idle system into
 	// moderate load. Execution admission does not use this adjustment, and the
-	// global dispatcher lock guarantees at most one admitted dispatcher.
+	// process-local dispatcher mutex serializes these budget calculations.
 	if ignoreCurrentDispatcher && foregroundActive > 0 {
 		foregroundActive--
 	}

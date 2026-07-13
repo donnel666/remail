@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -172,8 +174,11 @@ func TestBackgroundLoadControllerInspectorFailureIsConservative(t *testing.T) {
 	require.False(t, admitted)
 }
 
-func TestBackgroundLoadControllerSerializesDispatchBudgets(t *testing.T) {
-	controller := NewBackgroundLoadController(nil, queueInfoReaderStub{}, nil, 128)
+func TestBackgroundLoadControllerWaitsForDispatchBudgetWhenRedisIsConfigured(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	controller := NewBackgroundLoadController(nil, queueInfoReaderStub{}, redisClient, 128)
 	_, releaseFirst := controller.AcquireDispatchBudget(context.Background(), "background_validation", 8, 100)
 	acquiredSecond := make(chan func(), 1)
 	go func() {
