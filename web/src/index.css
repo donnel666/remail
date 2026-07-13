@@ -381,6 +381,20 @@ body[theme-mode="dark"] .semi-always-light,
   scrollbar-gutter: stable;
 }
 
+/* Force a REAL vertical scrollbar on the body, not just a reserved gutter.
+   The fixed:'right' action column is a position:sticky cell; it only sticks to
+   the content edge (matching the header, which Semi already pulls in by the
+   scrollbar width) when a real scrollbar is present. With only an empty
+   scrollbar-gutter — i.e. when the rows fit vertically and no natural scrollbar
+   appears — the sticky cell sticks 6px further out to the border edge, so the
+   action column's divider ends up 6px right of the header's. This is why it only
+   showed on short tables like proxy management. A real (but empty) scrollbar
+   keeps the sticky cell on the content edge on every page; tables that already
+   overflow are unaffected. */
+.remail-stable-table .semi-table-body {
+  overflow-y: scroll !important;
+}
+
 .remail-table-cell-ellipsis {
   display: block;
   max-width: 100%;
