@@ -1,5 +1,26 @@
 import type { WorkbenchOrder } from "./types";
 
+const purchaseAutoFetchWindowMs = 60 * 60 * 1000;
+
+export function shouldAutoFetchOrderMail(
+  order: Pick<WorkbenchOrder, "createdAt" | "serviceMode" | "serviceState">,
+  now = Date.now(),
+) {
+  if (order.serviceMode !== "purchase") return true;
+  if (
+    order.serviceState !== "pending_activation" &&
+    order.serviceState !== "in_warranty"
+  ) {
+    return false;
+  }
+  const createdAt = Date.parse(order.createdAt);
+  return (
+    Number.isFinite(createdAt) &&
+    createdAt <= now &&
+    now - createdAt < purchaseAutoFetchWindowMs
+  );
+}
+
 export function shouldShowQuickFetchControl(
   order: Pick<
     WorkbenchOrder,

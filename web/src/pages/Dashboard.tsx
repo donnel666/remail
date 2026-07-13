@@ -24,7 +24,10 @@ import {
 } from "@/lib/projects-api";
 
 import { MailboxClientModal } from "./workbench/mailbox-client";
-import { mergeOrderRuntimeState } from "./workbench/order-runtime";
+import {
+  mergeOrderRuntimeState,
+  shouldAutoFetchOrderMail,
+} from "./workbench/order-runtime";
 import { OrderPanel } from "./workbench/order-panel";
 import { ProductPickerPanel } from "./workbench/product-picker-panel";
 import { ProjectListPanel } from "./workbench/project-list-panel";
@@ -810,6 +813,7 @@ export default function Dashboard() {
     order: WorkbenchOrder,
     source: FetchSource,
   ) {
+    if (source === "auto" && !shouldAutoFetchOrderMail(order)) return;
     const existing = fetchInFlightRef.current.get(order.orderNo);
     if (existing) return existing;
 
@@ -901,7 +905,7 @@ export default function Dashboard() {
       if (order && !order.token) {
         void loadOrderDetail(orderNo)
           .then((detail) => {
-            if (!detail.hasDelivery) {
+            if (!detail.hasDelivery && shouldAutoFetchOrderMail(detail)) {
               void handleFetchOrderMail(detail, "auto");
             }
           })
@@ -910,7 +914,11 @@ export default function Dashboard() {
               apiErrorMessage(err, t("An unexpected error occurred.")),
             ),
           );
-      } else if (order && !order.hasDelivery) {
+      } else if (
+        order &&
+        !order.hasDelivery &&
+        shouldAutoFetchOrderMail(order)
+      ) {
         void handleFetchOrderMail(order, "auto");
       }
       return orderNo;
@@ -925,7 +933,7 @@ export default function Dashboard() {
     if (params.token) {
       setMailClientParams(params);
       const order = orders.find((item) => item.orderNo === params.orderNo);
-      if (order) {
+      if (order && shouldAutoFetchOrderMail(order)) {
         void handleFetchOrderMail(order, "auto");
       }
       return;
@@ -937,7 +945,9 @@ export default function Dashboard() {
           orderNo: order.orderNo,
           token: order.token,
         });
-        void handleFetchOrderMail(order, "auto");
+        if (shouldAutoFetchOrderMail(order)) {
+          void handleFetchOrderMail(order, "auto");
+        }
       })
       .catch((err) =>
         Toast.error(apiErrorMessage(err, t("An unexpected error occurred."))),
@@ -1001,7 +1011,10 @@ export default function Dashboard() {
       </div>
 
       <MailboxClientModal
-        autoFetchEnabled={!mailClientOrder?.verificationCode}
+        autoFetchEnabled={
+          !mailClientOrder?.verificationCode &&
+          Boolean(mailClientOrder && shouldAutoFetchOrderMail(mailClientOrder))
+        }
         email={mailClientParams?.email}
         fetchEnabled={mailClientOrder?.productType !== "domain"}
         fetchKey={mailClientParams?.orderNo}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   mergeOrderRuntimeState,
+  shouldAutoFetchOrderMail,
   shouldShowQuickFetchControl,
 } from "./order-runtime";
 import type { WorkbenchOrder } from "./types";
@@ -86,5 +87,87 @@ describe("shouldShowQuickFetchControl", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("shouldAutoFetchOrderMail", () => {
+  const now = Date.parse("2026-07-10T11:00:00Z");
+
+  it.each([
+    ["pending activation", "pending_activation"],
+    ["in warranty", "in_warranty"],
+  ] as const)(
+    "allows automatic fetch for a recent purchase order that is %s",
+    (_, serviceState) => {
+      expect(
+        shouldAutoFetchOrderMail(
+          order({
+            createdAt: "2026-07-10T10:30:00Z",
+            serviceMode: "purchase",
+            serviceState,
+          }),
+          now,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("allows automatic fetch until the one-hour window expires", () => {
+    expect(
+      shouldAutoFetchOrderMail(
+        order({
+          createdAt: "2026-07-10T10:01:00Z",
+          serviceMode: "purchase",
+          serviceState: "in_warranty",
+        }),
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("stops automatic fetch after one hour", () => {
+    expect(
+      shouldAutoFetchOrderMail(
+        order({
+          createdAt: "2026-07-10T10:00:00Z",
+          serviceMode: "purchase",
+          serviceState: "in_warranty",
+        }),
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it.each(["warranty_ended", "activation_timeout"] as const)(
+    "stops automatic fetch for purchase orders that are %s",
+    (serviceState) => {
+      expect(
+        shouldAutoFetchOrderMail(
+          order({
+            createdAt: "2026-07-10T10:30:00Z",
+            serviceMode: "purchase",
+            serviceState,
+          }),
+          now,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("stops automatic fetch when the creation time is invalid", () => {
+    expect(
+      shouldAutoFetchOrderMail(
+        order({
+          createdAt: "invalid",
+          serviceMode: "purchase",
+          serviceState: "pending_activation",
+        }),
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps automatic fetch enabled for code orders", () => {
+    expect(shouldAutoFetchOrderMail(order(), now)).toBe(true);
   });
 });

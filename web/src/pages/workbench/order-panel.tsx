@@ -16,7 +16,10 @@ import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { cn } from "@/lib/utils";
 
 import { FetchControl } from "./fetch-control";
-import { shouldShowQuickFetchControl } from "./order-runtime";
+import {
+  shouldAutoFetchOrderMail,
+  shouldShowQuickFetchControl,
+} from "./order-runtime";
 import { ProjectIcon } from "./project-icon";
 import type {
   FetchResult,
@@ -222,6 +225,7 @@ function OrderAccordionItem({
                 {shouldShowQuickFetchControl(order) ? (
                   <FetchControl
                     actionLabelKey="Refresh"
+                    autoEnabled={shouldAutoFetchOrderMail(order)}
                     compact
                     fetchKey={order.orderNo}
                     onFetch={(source) => onFetchMail(order, source)}
