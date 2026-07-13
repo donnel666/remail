@@ -9,21 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMicrosoftAliasAdapterRotatesAfterPartialProxyFailure(t *testing.T) {
+func TestMicrosoftAliasAdapterStopsAfterPostSideEffectBecomesUncertain(t *testing.T) {
 	calls := 0
 	adapter := NewMicrosoftAliasCreationAdapter(nil)
 	adapter.createAliases = func(context.Context, string, string, string, string, []string) (msacl.ExplicitAliasResult, error) {
 		calls++
-		if calls == 1 {
-			return msacl.ExplicitAliasResult{
-				Aliases:      []string{"first123456@outlook.com"},
-				Attempted:    []string{"first123456@outlook.com", "second123456@outlook.com"},
-				Category:     "request",
-				ProxyFailure: true,
-			}, nil
-		}
 		return msacl.ExplicitAliasResult{
-			Aliases: []string{"first123456@outlook.com", "second123456@outlook.com"},
+			Aliases:      []string{"first123456@outlook.com"},
+			Attempted:    []string{"first123456@outlook.com", "second123456@outlook.com"},
+			Category:     "request",
+			ProxyFailure: true,
 		}, nil
 	}
 
@@ -37,33 +32,30 @@ func TestMicrosoftAliasAdapterRotatesAfterPartialProxyFailure(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 2, calls)
-	require.Equal(t, []string{
-		"first123456@outlook.com",
-		"second123456@outlook.com",
-	}, result.Aliases)
+	require.Equal(t, 1, calls)
+	require.Equal(t, []string{"first123456@outlook.com"}, result.Aliases)
 	require.Equal(t, []string{
 		"first123456@outlook.com",
 		"second123456@outlook.com",
 	}, result.Attempted)
-	require.False(t, result.ProxyFailure)
+	require.Equal(t, []string{"second123456@outlook.com"}, result.Uncertain)
+	require.True(t, result.ProxyFailure)
 }
 
-func TestMicrosoftAliasAdapterPreservesEarlierUncertainCandidateAcrossLaterLoginFailure(t *testing.T) {
+func TestMicrosoftAliasAdapterRotatesProxyBeforeAnyPostSideEffect(t *testing.T) {
 	calls := 0
 	adapter := NewMicrosoftAliasCreationAdapter(nil)
 	adapter.createAliases = func(context.Context, string, string, string, string, []string) (msacl.ExplicitAliasResult, error) {
 		calls++
 		if calls == 1 {
 			return msacl.ExplicitAliasResult{
-				Attempted:    []string{"first123456@outlook.com"},
 				Category:     "request",
 				ProxyFailure: true,
 			}, nil
 		}
 		return msacl.ExplicitAliasResult{
-			Category:    "mfa",
-			SafeMessage: "Microsoft account requires additional verification.",
+			Aliases:   []string{"first123456@outlook.com"},
+			Attempted: []string{"first123456@outlook.com"},
 		}, nil
 	}
 
@@ -75,8 +67,10 @@ func TestMicrosoftAliasAdapterPreservesEarlierUncertainCandidateAcrossLaterLogin
 
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
-	require.Equal(t, []string{"first123456@outlook.com"}, result.Uncertain)
-	require.Equal(t, "mfa", result.Category)
+	require.Equal(t, []string{"first123456@outlook.com"}, result.Aliases)
+	require.Equal(t, []string{"first123456@outlook.com"}, result.Attempted)
+	require.Empty(t, result.Uncertain)
+	require.False(t, result.ProxyFailure)
 }
 
 func TestMicrosoftAliasAdapterUsesReadOnlyReconciliationForUncertainCandidates(t *testing.T) {
@@ -107,4 +101,31 @@ func TestMicrosoftAliasAdapterUsesReadOnlyReconciliationForUncertainCandidates(t
 	require.Equal(t, 1, reconcileCalls)
 	require.Equal(t, []string{"first123456@outlook.com"}, result.Absent)
 	require.Empty(t, result.Attempted)
+}
+
+func TestMicrosoftAliasAdapterDoesNotRotateProxyForPageTimeout(t *testing.T) {
+	adapter := NewMicrosoftAliasCreationAdapter(nil)
+	calls := 0
+	adapter.createAliases = func(context.Context, string, string, string, string, []string) (msacl.ExplicitAliasResult, error) {
+		calls++
+		return msacl.ExplicitAliasResult{
+			Attempted:    []string{"first123456@outlook.com"},
+			Category:     "auth_timeout",
+			SafeMessage:  "Microsoft alias authorization timed out.",
+			ProxyFailure: false,
+		}, nil
+	}
+
+	result, err := adapter.CreateMicrosoftAliases(context.Background(), mailapp.MicrosoftAliasCreationRequest{
+		EmailAddress: "owner@example.com",
+		Password:     "secret",
+		Candidates:   []string{"first123456@outlook.com"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, []string{"first123456@outlook.com"}, result.Attempted)
+	require.Equal(t, []string{"first123456@outlook.com"}, result.Uncertain)
+	require.Equal(t, "auth_timeout", result.Category)
+	require.False(t, result.ProxyFailure)
 }

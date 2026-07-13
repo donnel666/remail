@@ -82,17 +82,28 @@ func requireRequest(t *testing.T, req *http.Request, method, rawURL string) {
 	require.Equal(t, rawURL, req.URL.String())
 }
 
-func TestAddSingleExplicitAliasUsesFreshCanaryAndConfirmsManagePage(t *testing.T) {
+func TestSessionTransportFailureTracksWhetherRequestUsedProxy(t *testing.T) {
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
+			return nil, io.ErrUnexpectedEOF
+		},
+	)
+	session.usesProxy = true
+
+	_, err := session.Get(addAssocIDURL, requestOptions{})
+
+	require.Error(t, err)
+	require.True(t, sessionTransportUsedProxy(err))
+	client.requireDone()
+}
+
+func TestAddSingleExplicitAliasStartsAtAddAssocIDAndUsesFreshCanary(t *testing.T) {
 	const (
 		prefix = "david123456"
 		alias  = prefix + "@outlook.com"
 	)
 	session, client := newScriptedSession(t,
-		func(req *http.Request, follow bool) (*http.Response, error) {
-			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
-			require.True(t, follow)
-			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>other123456@outlook.com</div>`, nil), nil
-		},
 		func(req *http.Request, follow bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, addAssocIDURL)
 			require.True(t, follow)
@@ -108,18 +119,16 @@ func TestAddSingleExplicitAliasUsesFreshCanaryAndConfirmsManagePage(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, "fresh-canary", fields.Get("canary"))
 			require.Equal(t, prefix, fields.Get("AssociatedIdLive"))
+			require.Equal(t, "outlook.com", fields.Get("SingleDomain"))
+			require.Equal(t, "NONE", fields.Get("PostOption"))
+			require.Equal(t, "LIVE", fields.Get("AddAssocIdOptions"))
 			return scriptedResponse(req, 302, addAssocIDURL, "", map[string]string{
 				"Location": "/names/manage?noteid=NOTE_AssociatedIdAddedWL",
 			}), nil
 		},
-		func(req *http.Request, follow bool) (*http.Response, error) {
-			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage?noteid=NOTE_AssociatedIdAddedWL")
-			require.True(t, follow)
-			return scriptedResponse(req, 200, "https://account.live.com/names/manage?noteid=NOTE_AssociatedIdAddedWL", `<div>`+alias+`</div>`, nil), nil
-		},
 	)
 
-	gotAlias, category, attempted, _, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
 
 	require.NoError(t, err)
 	require.Equal(t, alias, gotAlias)
@@ -128,16 +137,37 @@ func TestAddSingleExplicitAliasUsesFreshCanaryAndConfirmsManagePage(t *testing.T
 	client.requireDone()
 }
 
-func TestAddSingleExplicitAliasReconcilesSameCandidateAfterLostResponse(t *testing.T) {
+func TestAddSingleExplicitAliasMissingCanaryIsNotAttempted(t *testing.T) {
+	const prefix = "david123456"
+	session, client := newScriptedSession(t,
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
+			require.True(t, follow)
+			return scriptedResponse(req, 200, addAssocIDURL, `<html>missing canary</html>`, nil), nil
+		},
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
+			require.True(t, follow)
+			return scriptedResponse(req, 200, addAssocIDURL, `<html>still missing canary</html>`, nil), nil
+		},
+	)
+
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
+
+	require.NoError(t, err)
+	require.Equal(t, prefix+"@outlook.com", gotAlias)
+	require.Equal(t, aliasCategoryFailed, category)
+	require.False(t, attempted)
+	client.requireDone()
+}
+
+func TestAddSingleExplicitAliasMarksLostPostResponseAsAttempted(t *testing.T) {
 	const (
 		prefix = "david123456"
-		alias  = prefix + "@outlook.com"
 	)
-	firstSession, firstClient := newScriptedSession(t,
+	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {
-			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>other123456@outlook.com</div>`, nil), nil
-		},
-		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
 			page := `<input type="hidden" name="canary" value="fresh-canary"><input name="AddAssocIdOptions" value="LIVE">`
 			return scriptedResponse(req, 200, addAssocIDURL, page, nil), nil
 		},
@@ -147,24 +177,10 @@ func TestAddSingleExplicitAliasReconcilesSameCandidateAfterLostResponse(t *testi
 		},
 	)
 
-	_, _, attempted, _, err := addSingleExplicitAlias(firstSession, prefix, "owner@example.com", "", "")
+	_, _, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
 	require.Error(t, err)
 	require.True(t, attempted)
-	firstClient.requireDone()
-
-	retrySession, retryClient := newScriptedSession(t,
-		func(req *http.Request, _ bool) (*http.Response, error) {
-			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
-			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>`+alias+`</div>`, nil), nil
-		},
-	)
-	gotAlias, category, attempted, _, err := addSingleExplicitAlias(retrySession, prefix, "owner@example.com", "", "")
-
-	require.NoError(t, err)
-	require.Equal(t, alias, gotAlias)
-	require.Equal(t, aliasCategoryAdded, category)
-	require.False(t, attempted)
-	retryClient.requireDone()
+	client.requireDone()
 }
 
 func TestReconcileExplicitAliasesDoesNotSubmitAddAssocIDAgain(t *testing.T) {

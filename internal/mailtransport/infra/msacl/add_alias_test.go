@@ -1,6 +1,8 @@
 package msacl
 
 import (
+	"context"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -191,4 +193,50 @@ func TestClassifyAddAssocIDResponse(t *testing.T) {
 			)
 		})
 	}
+}
+
+func TestMapExplicitAliasErrorDoesNotBlameProxyForPageTimeout(t *testing.T) {
+	result := mapExplicitAliasError(
+		newAuthError("page flow incomplete", AuthStatusAuthTimeout),
+	)
+
+	assert.Equal(t, "auth_timeout", result.Category)
+	assert.Equal(t, "Microsoft alias authorization timed out.", result.SafeMessage)
+	assert.False(t, result.ProxyFailure)
+}
+
+func TestMapExplicitAliasErrorMarksProxiedTransportFailure(t *testing.T) {
+	result := mapExplicitAliasError(
+		wrapAuthError(
+			"proxy request failed",
+			AuthStatusRequestError,
+			newSessionTransportError(io.ErrUnexpectedEOF, true),
+		),
+	)
+
+	assert.Equal(t, "request", result.Category)
+	assert.Equal(t, "Microsoft alias service is temporarily unavailable.", result.SafeMessage)
+	assert.True(t, result.ProxyFailure)
+}
+
+func TestMapExplicitAliasErrorDoesNotBlameProxyForHTTPFailure(t *testing.T) {
+	result := mapExplicitAliasError(
+		newAuthError("AddAssocId request failed (HTTP 503)", AuthStatusRequestError),
+	)
+
+	assert.Equal(t, "request", result.Category)
+	assert.False(t, result.ProxyFailure)
+}
+
+func TestMapExplicitAliasErrorDoesNotBlameProxyForCancellation(t *testing.T) {
+	result := mapExplicitAliasError(
+		wrapAuthError(
+			"request canceled",
+			AuthStatusRequestError,
+			newSessionTransportError(context.Canceled, true),
+		),
+	)
+
+	assert.Equal(t, "request", result.Category)
+	assert.False(t, result.ProxyFailure)
 }

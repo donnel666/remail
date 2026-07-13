@@ -21,6 +21,12 @@ const (
 	aliasCategoryExists            = "alias_exists"
 	aliasCategoryFailed            = "alias_failed"
 	aliasCategoryNeedsVerification = "needs_verification"
+
+	explicitAliasStageLoginMissingPPFT        = "login_missing_ppft"
+	explicitAliasStageLoginMissingPostURL     = "login_missing_post_url"
+	explicitAliasStageAccountPageIncomplete   = "account_page_incomplete"
+	explicitAliasStageManageRedirected        = "manage_redirected"
+	explicitAliasStageAddAssocIDMissingCanary = "addassocid_missing_canary"
 )
 
 var (
@@ -100,9 +106,8 @@ func GenerateExplicitAliasCandidates(count int) ([]string, error) {
 func AddExplicitAliasCandidates(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string) (ExplicitAliasResult, error) {
 	if err := contextOrBackground(ctx).Err(); err != nil {
 		return ExplicitAliasResult{
-			Category:     "request",
-			SafeMessage:  "Microsoft alias service is temporarily unavailable.",
-			ProxyFailure: strings.TrimSpace(proxy) != "",
+			Category:    "request",
+			SafeMessage: "Microsoft alias service is temporarily unavailable.",
 		}, err
 	}
 	candidates = normalizeExplicitAliasCandidates(candidates)
@@ -117,7 +122,7 @@ func AddExplicitAliasCandidates(ctx context.Context, email, password, proxy, pre
 	if err == nil {
 		return result, nil
 	}
-	failure := mapExplicitAliasError(err, strings.TrimSpace(proxy) != "")
+	failure := mapExplicitAliasError(err)
 	failure.Aliases = result.Aliases
 	failure.Attempted = result.Attempted
 	failure.Absent = result.Absent
@@ -130,9 +135,8 @@ func AddExplicitAliasCandidates(ctx context.Context, email, password, proxy, pre
 func ReconcileExplicitAliasCandidates(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string) (ExplicitAliasResult, error) {
 	if err := contextOrBackground(ctx).Err(); err != nil {
 		return ExplicitAliasResult{
-			Category:     "request",
-			SafeMessage:  "Microsoft alias service is temporarily unavailable.",
-			ProxyFailure: strings.TrimSpace(proxy) != "",
+			Category:    "request",
+			SafeMessage: "Microsoft alias service is temporarily unavailable.",
 		}, err
 	}
 	candidates = normalizeExplicitAliasCandidates(candidates)
@@ -147,7 +151,7 @@ func ReconcileExplicitAliasCandidates(ctx context.Context, email, password, prox
 	if err == nil {
 		return result, nil
 	}
-	failure := mapExplicitAliasError(err, strings.TrimSpace(proxy) != "")
+	failure := mapExplicitAliasError(err)
 	failure.Aliases = result.Aliases
 	failure.Absent = result.Absent
 	return failure, nil
@@ -207,24 +211,20 @@ func addExplicitAliases(ctx context.Context, email, password, proxy, preferredBi
 
 	aliases := make([]string, 0, len(candidates))
 	attemptedAliases := make([]string, 0, len(candidates))
-	absentAliases := make([]string, 0, len(candidates))
 	lastCategory := ""
 	for attempt, candidate := range candidates {
 		if attempt > 0 {
 			if err := session.sleep(2 * time.Second); err != nil {
-				return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases, Absent: absentAliases}, wrapAuthError(fmt.Sprintf("创建别名取消: %s", err), AuthStatusRequestError, err)
+				return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases}, wrapAuthError(fmt.Sprintf("创建别名取消: %s", err), AuthStatusRequestError, err)
 			}
 		}
 		prefix := strings.TrimSuffix(candidate, "@outlook.com")
-		alias, category, attempted, reconciledAbsent, err := addSingleExplicitAlias(session, prefix, email, proxy, preferredBindingAddress)
+		alias, category, attempted, err := addSingleExplicitAlias(session, prefix, email, proxy, preferredBindingAddress)
 		if attempted {
 			attemptedAliases = append(attemptedAliases, candidate)
 		}
-		if reconciledAbsent && !attempted {
-			absentAliases = append(absentAliases, candidate)
-		}
 		if err != nil {
-			return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases, Absent: absentAliases}, err
+			return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases}, err
 		}
 		lastCategory = category
 		switch category {
@@ -236,25 +236,23 @@ func addExplicitAliases(ctx context.Context, email, password, proxy, preferredBi
 			return ExplicitAliasResult{
 				Aliases:     aliases,
 				Attempted:   attemptedAliases,
-				Absent:      absentAliases,
 				Category:    aliasCategoryRateLimited,
 				SafeMessage: "Microsoft alias creation is rate limited.",
 			}, nil
 		case aliasCategoryFailed:
 			continue
 		default:
-			return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases, Absent: absentAliases}, newAuthError("Microsoft alias response category is invalid.", AuthStatusRequestError)
+			return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases}, newAuthError("Microsoft alias response category is invalid.", AuthStatusRequestError)
 		}
 	}
 
 	if len(aliases) == len(candidates) {
-		return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases, Absent: absentAliases}, nil
+		return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases}, nil
 	}
 	if lastCategory == aliasCategoryExists {
 		return ExplicitAliasResult{
 			Aliases:     aliases,
 			Attempted:   attemptedAliases,
-			Absent:      absentAliases,
 			Category:    aliasCategoryExists,
 			SafeMessage: "Generated Microsoft aliases are unavailable.",
 		}, nil
@@ -262,7 +260,6 @@ func addExplicitAliases(ctx context.Context, email, password, proxy, preferredBi
 	return ExplicitAliasResult{
 		Aliases:     aliases,
 		Attempted:   attemptedAliases,
-		Absent:      absentAliases,
 		Category:    aliasCategoryFailed,
 		SafeMessage: "Microsoft alias creation did not reach the requested count.",
 	}, nil
@@ -332,6 +329,11 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 		postURL = extractPostURL(page)
 	}
 	if ppft == "" || postURL == "" {
+		if ppft == "" {
+			logExplicitAliasStage(explicitAliasStageLoginMissingPPFT)
+		} else {
+			logExplicitAliasStage(explicitAliasStageLoginMissingPostURL)
+		}
 		return "", "", newAuthError("OAuth 登录页缺少 PPFT 或提交地址", AuthStatusAuthTimeout)
 	}
 	uaid := firstNonEmpty(getQueryParam(postURL, "uaid"), getQueryParam(currentURL, "uaid"))
@@ -366,6 +368,7 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 	ppft = extractPPFT(page)
 	postURL = extractPostURL(page)
 	if postURL == "" {
+		logExplicitAliasStage(explicitAliasStageLoginMissingPostURL)
 		return "", "", newAuthError("提交凭据时缺少 post_url", AuthStatusAuthTimeout)
 	}
 
@@ -399,6 +402,7 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 		preferredBindingAddress,
 	)
 	if err != nil {
+		logExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
 		return "", "", err
 	}
 	page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
@@ -426,6 +430,7 @@ func loginForExplicitAlias(session *Session, email, password, proxy, preferredBi
 		page, currentURL = resp.Body, resp.URL
 	}
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
+		logExplicitAliasStage(explicitAliasStageAccountPageIncomplete)
 		return "", "", newAuthError("未能进入 Microsoft 别名管理页", AuthStatusAuthTimeout)
 	}
 	return page, currentURL, nil
@@ -729,16 +734,8 @@ func followExplicitAliasTarget(session *Session, page, currentURL string, maxRou
 	return page, currentURL, nil
 }
 
-func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBindingAddress string) (string, string, bool, bool, error) {
+func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBindingAddress string) (string, string, bool, error) {
 	fullAlias := strings.ToLower(prefix + "@outlook.com")
-	present, err := confirmExplicitAliasPresent(session, fullAlias, addAssocIDURL)
-	if err != nil {
-		return "", "", false, false, err
-	}
-	if present {
-		return fullAlias, aliasCategoryAdded, false, false, nil
-	}
-	reconciledAbsent := true
 
 	var page string
 	var canary string
@@ -750,7 +747,7 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 			HasAllowRedirects: true,
 		})
 		if err != nil {
-			return "", "", false, reconciledAbsent, wrapAuthError(fmt.Sprintf("加载 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
+			return "", "", false, wrapAuthError(fmt.Sprintf("加载 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
 		}
 		page = resp.Body
 		canary = extractExplicitAliasCanary(page)
@@ -760,7 +757,8 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		}
 	}
 	if canary == "" {
-		return fullAlias, aliasCategoryFailed, false, reconciledAbsent, nil
+		logExplicitAliasStage(explicitAliasStageAddAssocIDMissingCanary)
+		return fullAlias, aliasCategoryFailed, false, nil
 	}
 
 	attempted := true
@@ -782,24 +780,26 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", attempted, false, wrapAuthError(fmt.Sprintf("提交 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
+		return "", "", attempted, wrapAuthError(fmt.Sprintf("提交 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
 	}
 	redirectURL := resp.Header.Get("Location")
 	category := classifyAddAssocIDResponse(resp.StatusCode, redirectURL, resp.Body)
 	switch category {
+	case aliasCategoryAdded:
+		return fullAlias, aliasCategoryAdded, attempted, nil
 	case aliasCategoryRateLimited, aliasCategoryFailed:
-		return fullAlias, category, attempted, false, nil
+		return fullAlias, category, attempted, nil
 	case aliasCategoryExists:
 		present, err := confirmExplicitAliasPresent(session, fullAlias, addAssocIDURL)
 		if err != nil {
-			return "", "", attempted, false, err
+			return "", "", attempted, err
 		}
 		if present {
-			return fullAlias, aliasCategoryAdded, attempted, false, nil
+			return fullAlias, aliasCategoryAdded, attempted, nil
 		}
-		return fullAlias, aliasCategoryExists, attempted, false, nil
+		return fullAlias, aliasCategoryExists, attempted, nil
 	case "request":
-		return "", "", attempted, false, newAuthError(fmt.Sprintf("AddAssocId 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
+		return "", "", attempted, newAuthError(fmt.Sprintf("AddAssocId 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 	}
 
 	page, currentURL := resp.Body, resp.URL
@@ -811,12 +811,12 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 			HasAllowRedirects: true,
 		})
 		if err != nil {
-			return "", "", attempted, false, wrapAuthError(fmt.Sprintf("跟随 AddAssocId 跳转异常: %s", err), AuthStatusRequestError, err)
+			return "", "", attempted, wrapAuthError(fmt.Sprintf("跟随 AddAssocId 跳转异常: %s", err), AuthStatusRequestError, err)
 		}
 		page, currentURL = redirectResp.Body, redirectResp.URL
 	}
 	if explicitAliasPresentOnManagePage(page, currentURL, fullAlias) {
-		return fullAlias, aliasCategoryAdded, attempted, false, nil
+		return fullAlias, aliasCategoryAdded, attempted, nil
 	}
 
 	if strings.Contains(page, "apiCanary") && strings.Contains(page, "rawProofList") {
@@ -843,30 +843,28 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		)
 	}
 	if err != nil {
-		return "", "", attempted, false, err
+		logExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
+		return "", "", attempted, err
 	}
 	page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
 	if err != nil {
-		return "", "", attempted, false, err
+		return "", "", attempted, err
 	}
 	page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
 	if err != nil {
-		return "", "", attempted, false, err
+		return "", "", attempted, err
 	}
 	if explicitAliasPresentOnManagePage(page, currentURL, fullAlias) {
-		return fullAlias, aliasCategoryAdded, attempted, false, nil
+		return fullAlias, aliasCategoryAdded, attempted, nil
 	}
-	present, err = confirmExplicitAliasPresent(session, fullAlias, currentURL)
+	present, err := confirmExplicitAliasPresent(session, fullAlias, currentURL)
 	if err != nil {
-		return "", "", attempted, false, err
+		return "", "", attempted, err
 	}
 	if present {
-		return fullAlias, aliasCategoryAdded, attempted, false, nil
+		return fullAlias, aliasCategoryAdded, attempted, nil
 	}
-	if category == aliasCategoryAdded {
-		return "", "", attempted, false, newAuthError("Microsoft alias response could not be reconciled.", AuthStatusRequestError)
-	}
-	return fullAlias, aliasCategoryFailed, attempted, false, nil
+	return fullAlias, aliasCategoryFailed, attempted, nil
 }
 
 func extractExplicitAliasCanary(page string) string {
@@ -979,6 +977,7 @@ func confirmExplicitAliasPresent(session *Session, alias, referer string) (bool,
 		return false, newAuthError(fmt.Sprintf("查询 Microsoft 别名列表失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 	}
 	if !isExplicitAliasManageURL(resp.URL) {
+		logExplicitAliasStage(explicitAliasStageManageRedirected)
 		return false, newAuthError("Microsoft alias session is no longer authenticated.", AuthStatusAuthTimeout)
 	}
 	return explicitAliasPresentOnManagePage(resp.Body, resp.URL, alias), nil
@@ -1005,7 +1004,7 @@ func isExplicitAliasManageURL(rawURL string) bool {
 	return strings.EqualFold(strings.TrimRight(parsed.Path, "/"), "/names/manage")
 }
 
-func mapExplicitAliasError(err error, proxyFailure bool) ExplicitAliasResult {
+func mapExplicitAliasError(err error) ExplicitAliasResult {
 	authErr, _ := err.(*AuthError)
 	status := AuthStatusUnknownError
 	if authErr != nil && strings.TrimSpace(authErr.Status) != "" {
@@ -1035,11 +1034,11 @@ func mapExplicitAliasError(err error, proxyFailure bool) ExplicitAliasResult {
 	case AuthStatusVerifyCodeError:
 		return explicitAliasFailure("code_error", "Microsoft recovery mailbox verification failed.", false)
 	case AuthStatusAuthTimeout:
-		return explicitAliasFailure("auth_timeout", "Microsoft alias authorization timed out.", proxyFailure)
+		return explicitAliasFailure("auth_timeout", "Microsoft alias authorization timed out.", false)
 	case AuthStatusRequestError:
-		return explicitAliasFailure("request", "Microsoft alias service is temporarily unavailable.", proxyFailure)
+		return explicitAliasFailure("request", "Microsoft alias service is temporarily unavailable.", sessionTransportUsedProxy(err))
 	default:
-		return explicitAliasFailure("alias_failed", "Microsoft alias creation failed.", proxyFailure)
+		return explicitAliasFailure("alias_failed", "Microsoft alias creation failed.", false)
 	}
 }
 
@@ -1049,6 +1048,17 @@ func explicitAliasFailure(category, message string, proxyFailure bool) ExplicitA
 		SafeMessage:  message,
 		ProxyFailure: proxyFailure,
 	}
+}
+
+func logExplicitAliasAuthTimeoutStage(err error, stage string) {
+	authErr, ok := err.(*AuthError)
+	if ok && authErr.Status == AuthStatusAuthTimeout {
+		logExplicitAliasStage(stage)
+	}
+}
+
+func logExplicitAliasStage(stage string) {
+	logWarning("Microsoft explicit alias flow incomplete: stage=%s", stage)
 }
 
 func queryValue(rawURL, key string) string {

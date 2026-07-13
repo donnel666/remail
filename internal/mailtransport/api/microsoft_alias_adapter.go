@@ -79,9 +79,8 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 		)
 		if err != nil {
 			raw = msacl.ExplicitAliasResult{
-				Category:     "request",
-				SafeMessage:  "Microsoft alias service is temporarily unavailable.",
-				ProxyFailure: proxyID != 0,
+				Category:    "request",
+				SafeMessage: "Microsoft alias service is temporarily unavailable.",
 			}
 		}
 		last = mailapp.MicrosoftAliasCreationResult{
@@ -137,6 +136,9 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 		if raw.ProxyFailure {
 			if proxyID != 0 {
 				a.reportAliasProxyFailure(ctx, proxyID, raw.SafeMessage)
+			}
+			if len(raw.Attempted) > 0 {
+				return last, nil
 			}
 			if attempt < maxMicrosoftProxyAttempts {
 				continue

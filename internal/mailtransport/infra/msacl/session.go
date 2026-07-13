@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -33,6 +34,31 @@ type Session struct {
 	userAgent   string
 	dcInterval  int
 	dcExpiresIn int
+	usesProxy   bool
+}
+
+type sessionTransportError struct {
+	error
+	usesProxy bool
+}
+
+func (e *sessionTransportError) Unwrap() error {
+	return e.error
+}
+
+func newSessionTransportError(err error, usesProxy bool) error {
+	if err == nil {
+		return nil
+	}
+	return &sessionTransportError{error: err, usesProxy: usesProxy}
+}
+
+func sessionTransportUsedProxy(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var transportErr *sessionTransportError
+	return errors.As(err, &transportErr) && transportErr.usesProxy
 }
 
 type sessionHTTPClient interface {
@@ -119,7 +145,7 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 	}
 	client, err := newTLSHTTPClient(fp.Profile, proxy, 30)
 	if err != nil {
-		return nil, err
+		return nil, newSessionTransportError(err, proxy != "")
 	}
 	return &Session{
 		client:      client,
@@ -127,15 +153,22 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 		navHeaders:  cloneStringMap(fp.HeadersNavigate),
 		corsHeaders: cloneStringMap(fp.HeadersCORS),
 		userAgent:   fp.UserAgent,
+		usesProxy:   proxy != "",
 	}, nil
 }
 
 func newPlainSession(ctx context.Context, proxy string, timeoutSeconds int) (*Session, error) {
+	proxy = normalizeProxy(proxy)
 	client, err := newTLSHTTPClient(profiles.Chrome_124, proxy, timeoutSeconds)
 	if err != nil {
-		return nil, err
+		return nil, newSessionTransportError(err, proxy != "")
 	}
-	return &Session{client: client, ctx: contextOrBackground(ctx), userAgent: "Mozilla/5.0"}, nil
+	return &Session{
+		client:    client,
+		ctx:       contextOrBackground(ctx),
+		userAgent: "Mozilla/5.0",
+		usesProxy: proxy != "",
+	}, nil
 }
 
 func (s *Session) Get(rawURL string, opts requestOptions) (*HTTPResponse, error) {
@@ -195,12 +228,12 @@ func (s *Session) do(method, rawURL string, opts requestOptions) (*HTTPResponse,
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, newSessionTransportError(err, s.usesProxy)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, newSessionTransportError(err, s.usesProxy)
 	}
 	respURL := rawURL
 	if resp.Request != nil && resp.Request.URL != nil {
