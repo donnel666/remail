@@ -239,18 +239,22 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 
 	// ---- reused lines 403–448: declineKMSI → relay → follow → AddAssocId ----
 	logInfo("OTC 步骤7: declineKMSI + relay + follow")
+	logInfo("OTC 验码后落点=%s pageID=%s", currentURL, extractPageID(page))
 	page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
 	if err != nil {
 		return "", "", err
 	}
+	logInfo("OTC declineKMSI 后=%s", currentURL)
 	page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
 	if err != nil {
 		return "", "", err
 	}
+	logInfo("OTC relay 后=%s", currentURL)
 	page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
 	if err != nil {
 		return "", "", err
 	}
+	logInfo("OTC follow 后=%s", currentURL)
 
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
 		resp, err = session.Get(addAssocIDURL, requestOptions{
@@ -262,6 +266,7 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 			return "", "", wrapAuthError(fmt.Sprintf("进入 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
 		}
 		page, currentURL = resp.Body, resp.URL
+		logInfo("OTC 兜底 GET AddAssocId 后=%s", currentURL)
 	}
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
 		return "", "", newExplicitAliasStageError(

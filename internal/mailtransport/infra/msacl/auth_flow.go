@@ -338,15 +338,23 @@ func declineKMSI(session *Session, page, rawURL, referer string) (string, string
 }
 
 func isKMSIPage(page string) bool {
-	pageID := strings.ToLower(strings.TrimSpace(extractPageID(page)))
-	isKMSI := pageID == "i5245"
-	if pageID == "" {
-		lowerPage := strings.ToLower(page)
-		isKMSI = strings.Contains(page, "保持登录状态") ||
-			strings.Contains(page, "保持登录") ||
-			strings.Contains(lowerPage, "stay signed in")
+	// 对齐 Python reference 的 _decline_kmsi 检测 (OR 组合), 不再仅当 pageID 为空
+	// 时才看文本。微软"保持登录?"页的 sPageId 并不总是 i5245, 之前只认 i5245
+	// 导致部分账号验码后 KMSI 未被拒绝, relay/follow 到不了 AddAssocId。
+	if strings.EqualFold(strings.TrimSpace(extractPageID(page)), "i5245") {
+		return true
 	}
-	return isKMSI
+	lowerPage := strings.ToLower(page)
+	if strings.Contains(page, "保持登录状态") ||
+		strings.Contains(page, "保持登录") ||
+		strings.Contains(lowerPage, "stay signed in") {
+		return true
+	}
+	// Python 兜底: 含 LoginOptions + type + PPFT 的登录续页也按 KMSI 处理 (提交 type=28)。
+	if strings.Contains(page, "LoginOptions") && strings.Contains(page, "type") && extractPPFT(page) != "" {
+		return true
+	}
+	return false
 }
 
 func handleJSPollingPage(session *Session, page, rawURL string) (string, string, error) {
