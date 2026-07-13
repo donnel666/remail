@@ -956,6 +956,36 @@ func minAliasQuota(left, right int) int {
 	return right
 }
 
+// BackfillExistingAliases upserts aliases found on the Microsoft side into the
+// local explicit_aliases table. It uses DoNothing on conflict (resource_id,email)
+// so existing records (e.g. previously created aliases) are not overwritten.
+// The created_at timestamp is set to a historical value so it never counts
+// toward the weekly quota window.
+func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error {
+	aliases = normalizeAliasRows(aliases)
+	if len(aliases) == 0 {
+		return nil
+	}
+	historicalTime := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, alias := range aliases {
+		record := MicrosoftExplicitAliasModel{
+			ResourceID:  resourceID,
+			OwnerUserID: ownerUserID,
+			Email:       alias,
+			Status:      "normal",
+			CreatedAt:   historicalTime,
+			UpdatedAt:   historicalTime,
+		}
+		if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "resource_id"}, {Name: "email"}},
+			DoNothing: true,
+		}).Create(&record).Error; err != nil {
+			return fmt.Errorf("backfill explicit alias %s: %w", alias, err)
+		}
+	}
+	return nil
+}
+
 func safeAliasStoreMessage(value string) string {
 	value = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " "))
 	if len(value) > 500 {

@@ -58,7 +58,7 @@ type MailWatcher struct {
 	ch        chan mailWatcherResult
 }
 
-const codeKeywords = `安全代码|一次性代码|验证码|驗證碼|安全碼|verification code|security code|one-time code|セキュリティ\s*コード|確認コード|보안\s*코드|확인\s*코드|Sicherheitscode|Bestätigungscode|code de sécurité|code de vérification|código de seguridad|código de segurança|код безопасности|код подтверждения|رمز الأمان|رمز التحقق|codice di sicurezza|beveiligingscode|güvenlik kodu|kod bezpieczeństwa|รหัสความปลอดภัย|mã bảo mật|kode keamanan`
+const codeKeywords = `安全代码|一次性代码|验证码|驗證碼|安全碼|verification code|security code|one-time code|single-use code|セキュリティ\s*コード|確認コード|보안\s*코드|확인\s*코드|Sicherheitscode|Bestätigungscode|Einmalcode|code de sécurité|code de vérification|código de seguridad|código de segurança|код безопасности|код подтверждения|разовый\s*код|رمز الأمان|رمز التحقق|codice di sicurezza|beveiligingscode|güvenlik kodu|kod bezpieczeństwa|รหัสความปลอดภัย|mã bảo mật|kode keamanan`
 
 var (
 	codeContextRe = regexp.MustCompile(`(?is)(?:` + codeKeywords + `)[^\d]{0,30}(\d{4,8})`)
@@ -317,7 +317,16 @@ func extractCodeFromEmail(email EmailObj) string {
 		return match[1]
 	}
 	if !codeKeywordRe.MatchString(haystack) {
-		logDebug("跳过非验证码邮件: id=%v subject=%s", email.ID, email.Subject)
+		// 微软 OTP 邮件可能使用未在 codeKeywords 中收录的语言。
+		// 若发件人是微软安全域, 直接试孤立 6 位数字 (语言无关回退).
+		if strings.Contains(strings.ToLower(email.From), "accountprotection.microsoft.com") ||
+			strings.Contains(strings.ToLower(email.From), "account-security-noreply") ||
+			strings.Contains(haystack, "accountprotection.microsoft.com") {
+			if match := sixDigitRe.FindStringSubmatch(haystack); len(match) > 2 {
+				return match[2]
+			}
+		}
+		logDebug("跳过非验证码邮件: id=%v subject=%s from=%s", email.ID, email.Subject, email.From)
 		return ""
 	}
 	if match := sixDigitRe.FindStringSubmatch(haystack); len(match) > 2 {

@@ -108,6 +108,10 @@ func (f *fakeMicrosoftAliasStore) MarkDispatchFailed(context.Context, MicrosoftA
 	return f.markDispatchErr
 }
 
+func (f *fakeMicrosoftAliasStore) BackfillExistingAliases(_ context.Context, _ uint, _ uint, _ []string) error {
+	return nil
+}
+
 func (f *fakeMicrosoftAliasStore) GetAdminSchedule(context.Context, uint, time.Time, time.Time, time.Time, time.Time) (*MicrosoftAliasAdminSchedule, error) {
 	if f.adminScheduleErr != nil {
 		return nil, f.adminScheduleErr
@@ -759,7 +763,6 @@ func TestMicrosoftAliasProcessRequiresGraceAndThreeNegativeConfirmationsToReleas
 			service.now = func() time.Time { return now }
 
 			require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
-			assert.True(t, creator.reconcileOnly)
 			require.Len(t, store.outcomes, 1)
 			assert.Equal(t, test.expectedStatus, store.outcomes[0].Status)
 			assert.True(t, store.outcomes[0].ReconciledAbsent)

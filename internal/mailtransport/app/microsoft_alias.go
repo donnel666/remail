@@ -91,13 +91,14 @@ type MicrosoftAliasCreationRequest struct {
 }
 
 type MicrosoftAliasCreationResult struct {
-	Aliases      []string
-	Attempted    []string
-	Uncertain    []string
-	Absent       []string
-	Category     string
-	SafeMessage  string
-	ProxyFailure bool
+	Aliases         []string
+	Attempted       []string
+	Uncertain       []string
+	Absent          []string
+	ExistingAliases []string // all aliases found on the account at login time (for backfill reconciliation)
+	Category        string
+	SafeMessage     string
+	ProxyFailure    bool
 }
 
 type MicrosoftAliasScheduleStore interface {
@@ -112,6 +113,7 @@ type MicrosoftAliasScheduleStore interface {
 	Defer(ctx context.Context, resourceID uint, claimToken string, nextRunAt time.Time, safeError string, failed bool) error
 	Pause(ctx context.Context, resourceID uint, claimToken string, safeError string) error
 	MarkDispatchFailed(ctx context.Context, task MicrosoftAliasTask, nextRunAt time.Time, safeError string) error
+	BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error
 }
 
 // EnsureScheduleForResource records or wakes an eligible resource's durable
@@ -341,12 +343,8 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 
 	reservedAliases := make([]string, 0, len(attempts))
-	reconcileOnly := true
 	for _, attempt := range attempts {
 		reservedAliases = append(reservedAliases, attempt.Alias)
-		if !attempt.WasUncertain {
-			reconcileOnly = false
-		}
 	}
 	eligible, err := s.store.CheckEligibility(ctx, task.ResourceID, account.ClaimToken)
 	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
@@ -387,7 +385,6 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		Password:       account.Password,
 		BindingAddress: account.BindingAddress,
 		Candidates:     reservedAliases,
-		ReconcileOnly:  reconcileOnly,
 	})
 	releaseRemote()
 	if createErr != nil {
@@ -465,6 +462,14 @@ func (s *MicrosoftAliasService) completeAliasResult(
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("complete microsoft alias attempts: %w", err)
+	}
+
+	// Backfill externally-listed aliases into the local DB. This brings in
+	// any existing Microsoft-side aliases that are not yet recorded in
+	// explicit_aliases. Since it uses DoNothing on conflict, it never
+	// overwrites locally created records.
+	if len(result.ExistingAliases) > 0 {
+		_ = s.store.BackfillExistingAliases(ctx, task.ResourceID, account.ResourceID, result.ExistingAliases)
 	}
 
 	yearStart, yearEnd, weekStart, weekEnd := microsoftAliasQuotaWindows(completedAt)

@@ -11,10 +11,10 @@ import (
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 )
 
+const maxAliasProxyAttempts = 1
+
 type MicrosoftAliasCreationAdapter struct {
-	proxies          *proxyapp.ProxyUseCase
-	createAliases    func(context.Context, string, string, string, string, []string) (msacl.ExplicitAliasResult, error)
-	reconcileAliases func(context.Context, string, string, string, string, []string) (msacl.ExplicitAliasResult, error)
+	proxies *proxyapp.ProxyUseCase
 }
 
 func NewMicrosoftAliasCreationAdapter(proxies *proxyapp.ProxyUseCase) *MicrosoftAliasCreationAdapter {
@@ -27,29 +27,14 @@ func (a *MicrosoftAliasCreationAdapter) GenerateMicrosoftAliasCandidates(count i
 	return msacl.GenerateExplicitAliasCandidates(count)
 }
 
+// CreateMicrosoftAliases performs a single OTC-login session: lists all existing
+// aliases (for reconciliation backfill) and creates the requested candidates.
+// This replaces the old dual-path (Add vs Reconcile) which used separate logins.
 func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest) (mailapp.MicrosoftAliasCreationResult, error) {
-	var last mailapp.MicrosoftAliasCreationResult
-	confirmed := make([]string, 0, len(req.Candidates))
-	seenConfirmed := make(map[string]struct{}, len(req.Candidates))
-	attempted := make([]string, 0, len(req.Candidates))
-	seenAttempted := make(map[string]struct{}, len(req.Candidates))
-	uncertain := make(map[string]struct{}, len(req.Candidates))
-	absent := make(map[string]struct{}, len(req.Candidates))
-	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt)
 		if err != nil {
-			for _, alias := range attempted {
-				_, confirmedAlias := seenConfirmed[alias]
-				_, reconciledAbsent := absent[alias]
-				if !confirmedAlias && !reconciledAbsent {
-					uncertain[alias] = struct{}{}
-				}
-			}
 			return mailapp.MicrosoftAliasCreationResult{
-				Aliases:     append([]string(nil), confirmed...),
-				Attempted:   append([]string(nil), attempted...),
-				Uncertain:   aliasesFromSet(req.Candidates, uncertain),
-				Absent:      aliasesFromSet(req.Candidates, absent),
 				Category:    "request",
 				SafeMessage: "Microsoft alias service is temporarily unavailable.",
 			}, nil
@@ -61,125 +46,74 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 			proxyID = proxyConfig.ID
 		}
 
-		createAliases := msacl.AddExplicitAliasCandidates
-		if req.ReconcileOnly {
-			createAliases = msacl.ReconcileExplicitAliasCandidates
-			if a != nil && a.reconcileAliases != nil {
-				createAliases = a.reconcileAliases
+		// SyncAndAddExplicitAliases does a single OTC-login then lists +
+		// creates aliases, all in one session.
+		result := msacl.SyncAndAddExplicitAliases(ctx, req.EmailAddress, proxyURL, req.BindingAddress, req.Candidates)
+
+		if result.OverallFailure != nil {
+			raw := *result.OverallFailure
+			if raw.Stage != "" {
+				slog.Warn("microsoft alias OTC login failed",
+					"resource_id", req.ResourceID,
+					"category", raw.Category,
+					"stage", raw.Stage,
+				)
 			}
-		} else if a != nil && a.createAliases != nil {
-			createAliases = a.createAliases
-		}
-		raw, err := createAliases(
-			ctx,
-			req.EmailAddress,
-			req.Password,
-			proxyURL,
-			req.BindingAddress,
-			req.Candidates,
-		)
-		if err != nil {
-			raw = msacl.ExplicitAliasResult{
-				Category:    "request",
-				SafeMessage: "Microsoft alias service is temporarily unavailable.",
-			}
-		}
-		if raw.Stage != "" {
-			slog.Warn(
-				"microsoft alias remote attempt failed",
-				"resource_id", req.ResourceID,
-				"category", raw.Category,
-				"stage", raw.Stage,
-				"attempted", len(raw.Attempted),
-				"proxy_failure", raw.ProxyFailure,
-			)
-		}
-		last = mailapp.MicrosoftAliasCreationResult{
-			Category:     raw.Category,
-			SafeMessage:  raw.SafeMessage,
-			ProxyFailure: raw.ProxyFailure,
-		}
-		for _, alias := range raw.Aliases {
-			key := strings.ToLower(strings.TrimSpace(alias))
-			if key == "" {
-				continue
-			}
-			if _, ok := seenConfirmed[key]; ok {
-				continue
-			}
-			seenConfirmed[key] = struct{}{}
-			confirmed = append(confirmed, key)
-			delete(uncertain, key)
-			delete(absent, key)
-		}
-		for _, alias := range raw.Attempted {
-			key := strings.ToLower(strings.TrimSpace(alias))
-			if key == "" {
-				continue
-			}
-			if _, ok := seenAttempted[key]; !ok {
-				seenAttempted[key] = struct{}{}
-				attempted = append(attempted, key)
-			}
-			if _, ok := seenConfirmed[key]; ok {
-				delete(uncertain, key)
-			} else if raw.ProxyFailure || isAmbiguousAliasCategory(raw.Category) {
-				uncertain[key] = struct{}{}
-			} else {
-				delete(uncertain, key)
-			}
-		}
-		for _, alias := range raw.Absent {
-			key := strings.ToLower(strings.TrimSpace(alias))
-			if key == "" {
-				continue
-			}
-			if _, ok := seenConfirmed[key]; ok {
-				continue
-			}
-			absent[key] = struct{}{}
-			delete(uncertain, key)
-		}
-		last.Aliases = append([]string(nil), confirmed...)
-		last.Attempted = append([]string(nil), attempted...)
-		last.Uncertain = aliasesFromSet(req.Candidates, uncertain)
-		last.Absent = aliasesFromSet(req.Candidates, absent)
-		if raw.ProxyFailure {
-			if proxyID != 0 {
+			if raw.ProxyFailure && proxyID != 0 {
 				a.reportAliasProxyFailure(ctx, proxyID, raw.SafeMessage)
+				if attempt < maxAliasProxyAttempts {
+					continue
+				}
 			}
-			if len(raw.Attempted) > 0 {
-				return last, nil
-			}
-			if attempt < maxMicrosoftProxyAttempts {
-				continue
-			}
-			return last, nil
+			return mailapp.MicrosoftAliasCreationResult{
+				Aliases:     []string{},
+				Attempted:   []string{},
+				Category:    raw.Category,
+				SafeMessage: raw.SafeMessage,
+			}, nil
 		}
-		a.reportAliasProxySuccess(ctx, proxyID)
-		return last, nil
-	}
-	return last, nil
-}
-
-func isAmbiguousAliasCategory(category string) bool {
-	switch strings.TrimSpace(category) {
-	case "request", "auth_timeout", "code_timeout", "code_error":
-		return true
-	default:
-		return false
-	}
-}
-
-func aliasesFromSet(candidates []string, values map[string]struct{}) []string {
-	result := make([]string, 0, len(values))
-	for _, candidate := range candidates {
-		candidate = strings.ToLower(strings.TrimSpace(candidate))
-		if _, ok := values[candidate]; ok {
-			result = append(result, candidate)
+		if proxyID != 0 {
+			a.reportAliasProxySuccess(ctx, proxyID)
 		}
+
+		// Collect add results
+		confirmed := make([]string, 0, len(result.AddResults))
+		attempted := make([]string, 0, len(result.AddResults))
+		var lastCategory string
+		var lastSafeMsg string
+		for _, r := range result.AddResults {
+			for _, alias := range r.Aliases {
+				confirmed = append(confirmed, strings.ToLower(strings.TrimSpace(alias)))
+			}
+			for _, alias := range r.Attempted {
+				attempted = append(attempted, strings.ToLower(strings.TrimSpace(alias)))
+			}
+			if r.Category != "" {
+				lastCategory = r.Category
+			}
+			if r.SafeMessage != "" {
+				lastSafeMsg = r.SafeMessage
+			}
+		}
+
+		// Map existing aliases from the account for backfill reconciliation
+		existing := make([]string, 0, len(result.ExistingAliases))
+		for _, a := range result.ExistingAliases {
+			existing = append(existing, strings.ToLower(strings.TrimSpace(a)))
+		}
+
+		return mailapp.MicrosoftAliasCreationResult{
+			Aliases:         confirmed,
+			Attempted:       attempted,
+			ExistingAliases: existing,
+			Category:        lastCategory,
+			SafeMessage:     lastSafeMsg,
+		}, nil
 	}
-	return result
+	return mailapp.MicrosoftAliasCreationResult{
+		Category:    "request",
+		SafeMessage: "Microsoft alias service is temporarily unavailable.",
+	}, nil
 }
 
 func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, attempt int) (*proxyapp.ProxyConfig, error) {
