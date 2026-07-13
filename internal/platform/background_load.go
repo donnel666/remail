@@ -83,7 +83,7 @@ func NewBackgroundLoadController(db *sql.DB, queues queueInfoReader, redisClient
 	}
 }
 
-func (c *BackgroundLoadController) AcquireDispatchBudget(ctx context.Context, queue string, minimum, maximum int) (int, func()) {
+func (c *BackgroundLoadController) AcquireDispatchBudget(_ context.Context, queue string, minimum, maximum int) (int, func()) {
 	if c == nil {
 		return minimum, func() {}
 	}
