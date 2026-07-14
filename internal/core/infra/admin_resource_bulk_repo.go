@@ -104,6 +104,18 @@ func (r *AdminResourceBulkRepo) CreateWithLog(ctx context.Context, command *core
 				Row().Scan(&maxResourceID); err != nil {
 				return fmt.Errorf("capture admin bulk high-water mark: %w", err)
 			}
+			// Filter batches expand durably in the dispatcher, but the operator
+			// needs an immediate matched-count in the acceptance response instead of
+			// a bare 0. Count how many resources match the filter up to the captured
+			// high-water mark now; the dispatcher's per-page CompletePage still
+			// accumulates the authoritative matched total as it processes.
+			var matched64 int64
+			if err := r.read.adminMicrosoftFilterQuery(ctx, command.Selection.Filter.ListFilter(), time.Now().UTC(), "").
+				Where("er.id <= ?", maxResourceID).
+				Count(&matched64).Error; err != nil {
+				return fmt.Errorf("count admin bulk matches: %w", err)
+			}
+			matched = int(matched64)
 		}
 		model := &AdminResourceBulkCommandModel{
 			OperatorUserID: command.OperatorUserID, Action: string(command.Action), SelectionMode: string(command.Selection.Mode),

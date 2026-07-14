@@ -122,7 +122,10 @@ func (a *MicrosoftAliasCreationAdapter) acquireAliasProxy(ctx context.Context, r
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
 	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-		Key:                 strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		Key: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		// Proxy IP-version contract: the alias-creation task MUST use IPv4. Only
+		// mail receiving (接码/收件) may use IPv6 — the explicit-alias login and
+		// AddAlias calls require IPv4. Do not change this to IPv6.
 		IPVersion:           proxydomain.ProxyIPv4,
 		Purpose:             proxydomain.ProxyPurposeBinding,
 		AllowSystemFallback: true,

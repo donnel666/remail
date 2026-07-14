@@ -203,6 +203,7 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 		RequestID:     strings.TrimSpace(requestID),
 		Path:          strings.TrimSpace(path),
 	}
+	filterCandidateCount := 0
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if selection.Mode == coreapp.ResourceBulkSelectionFilter {
 			if err := tx.Table("email_resources").
@@ -211,6 +212,11 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 				Row().Scan(&batch.ThroughID); err != nil {
 				return fmt.Errorf("capture resource validation batch high-water mark: %w", err)
 			}
+			count, err := countValidationCandidatesByFilter(ctx, tx, ownerUserID, selection.Filter, batch.ThroughID)
+			if err != nil {
+				return err
+			}
+			filterCandidateCount = count
 		}
 		if err := tx.Create(batch).Error; err != nil {
 			return fmt.Errorf("create resource validation batch: %w", err)
@@ -226,11 +232,18 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 		return nil, err
 	}
 	result := &coreapp.ResourceBatchValidationResult{}
-	if selection.Mode == coreapp.ResourceBulkSelectionIDs {
+	switch selection.Mode {
+	case coreapp.ResourceBulkSelectionIDs:
 		// The IDs are durably accepted here but are intentionally resolved by the
 		// dispatcher so the HTTP request performs no resource expansion work.
 		result.Requested = len(selection.ResourceIDs)
 		result.Queued = len(selection.ResourceIDs)
+	case coreapp.ResourceBulkSelectionFilter:
+		// Filter batches expand durably in the dispatcher, but the operator needs
+		// an immediate submitted-count. Report how many resources match right now;
+		// the exact per-resource jobs are created during expansion.
+		result.Requested = filterCandidateCount
+		result.Queued = filterCandidateCount
 	}
 	return result, nil
 }
@@ -728,6 +741,36 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 			return domain.ErrInvalidResourceStatus
 		}
 		if exhausted {
+			// Retryable validation attempts are exhausted. Previously only the job
+			// was marked failed, leaving the resource stuck in `pending` forever
+			// (never abnormal, endlessly re-validated). Mark the resource abnormal
+			// in the same transaction so it reaches a terminal state. Branch by
+			// resource type so both Microsoft and domain resources are covered.
+			switch job.ResourceType {
+			case string(domain.ResourceTypeMicrosoft):
+				if err := tx.Model(&MicrosoftResourceModel{}).
+					Where("id = ? AND status NOT IN ?", job.ResourceID,
+						[]string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)}).
+					Updates(map[string]interface{}{
+						"status":          string(domain.MicrosoftStatusAbnormal),
+						"quality_score":   validationQualityScore(false),
+						"last_safe_error": safeValidationMessage(safeError),
+						"updated_at":      now,
+					}).Error; err != nil {
+					return fmt.Errorf("mark microsoft resource abnormal on validation exhaustion: %w", err)
+				}
+			case string(domain.ResourceTypeDomain):
+				if err := tx.Model(&DomainResourceModel{}).
+					Where("id = ? AND status NOT IN ?", job.ResourceID,
+						[]string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)}).
+					Updates(map[string]interface{}{
+						"status":          string(domain.DomainStatusAbnormal),
+						"last_safe_error": safeValidationMessage(safeError),
+						"updated_at":      now,
+					}).Error; err != nil {
+					return fmt.Errorf("mark domain resource abnormal on validation exhaustion: %w", err)
+				}
+			}
 			return createSystemLogInTx(ctx, tx, &governancedomain.SystemLog{
 				Level:     "warning",
 				Module:    "core",
@@ -1202,9 +1245,26 @@ func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerU
 }
 
 func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
+	q := microsoftValidationCandidateQuery(ctx, tx, ownerUserID, filter, afterID, throughID).
+		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.status AS microsoft_status, '' AS domain_status")
+
+	var rows []validationCandidateRow
+	q = q.Order("er.id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("select microsoft validation resources: %w", err)
+	}
+	return validateValidationCandidateRows(rows)
+}
+
+// microsoftValidationCandidateQuery builds the shared Microsoft candidate
+// predicate (join + all filter clauses) without SELECT/ORDER/LIMIT so both the
+// paged expansion SELECT and the submit-time COUNT stay in lock-step.
+func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint) *gorm.DB {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.status AS microsoft_status, '' AS domain_status").
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
 		Where("er.id <= ?", throughID).
@@ -1245,6 +1305,12 @@ func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.D
 			prefix,
 		)
 	}
+	return q
+}
+
+func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
+	q := domainValidationCandidateQuery(ctx, tx, ownerUserID, filter, afterID, throughID).
+		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, '' AS microsoft_status, dr.status AS domain_status")
 
 	var rows []validationCandidateRow
 	q = q.Order("er.id ASC")
@@ -1252,15 +1318,16 @@ func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.D
 		q = q.Limit(limit)
 	}
 	if err := q.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("select microsoft validation resources: %w", err)
+		return nil, fmt.Errorf("select domain validation resources: %w", err)
 	}
 	return validateValidationCandidateRows(rows)
 }
 
-func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
+// domainValidationCandidateQuery mirrors microsoftValidationCandidateQuery for
+// domain resources: the shared predicate used by both expansion and COUNT.
+func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint) *gorm.DB {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, '' AS microsoft_status, dr.status AS domain_status").
 		Joins("JOIN domain_resources AS dr ON dr.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeDomain)).
 		Where("er.id <= ?", throughID).
@@ -1288,17 +1355,30 @@ func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, 
 	if filter.Search != "" {
 		q = q.Where("dr.domain LIKE ?", strings.ToLower(strings.TrimSpace(filter.Search))+"%")
 	}
-
-	var rows []validationCandidateRow
-	q = q.Order("er.id ASC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("select domain validation resources: %w", err)
-	}
-	return validateValidationCandidateRows(rows)
+	return q
 }
+
+// countValidationCandidatesByFilter returns how many resources currently match a
+// filter selection up to throughID. It is an estimate used to show the operator
+// an immediate submitted-count for deferred batches; the durable dispatcher does
+// the authoritative per-resource expansion later.
+func countValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, throughID uint) (int, error) {
+	var count int64
+	var q *gorm.DB
+	switch filter.ResourceType {
+	case domain.ResourceTypeMicrosoft:
+		q = microsoftValidationCandidateQuery(ctx, tx, ownerUserID, filter, 0, throughID)
+	case domain.ResourceTypeDomain:
+		q = domainValidationCandidateQuery(ctx, tx, ownerUserID, filter, 0, throughID)
+	default:
+		return 0, domain.ErrInvalidResourceType
+	}
+	if err := q.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count validation candidates: %w", err)
+	}
+	return int(count), nil
+}
+
 
 func validateValidationCandidateRows(rows []validationCandidateRow) ([]validationCandidateRow, error) {
 	for _, row := range rows {

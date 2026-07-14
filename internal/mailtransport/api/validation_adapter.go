@@ -336,13 +336,38 @@ func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreap
 		purpose = proxydomain.ProxyPurposeBinding
 	}
 	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-		Key:                 strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		Key: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		// Proxy IP-version contract: the validation task MUST use IPv4. Only mail
+		// receiving (接码/收件) may use IPv6 — every other Microsoft interaction
+		// (login, RT refresh, binding) requires IPv4. Do not change this to IPv6.
 		IPVersion:           proxydomain.ProxyIPv4,
 		Purpose:             purpose,
 		AllowSystemFallback: true,
 		Attempt:             attempt,
 		RequestID:           req.RequestID,
 	})
+}
+
+// acquireBindingProxy obtains a binding-purpose proxy for a supplementary
+// recovery-mailbox resolution login. It is best-effort: on any failure it
+// returns an empty URL so the caller can fall back to its existing proxy.
+func (a *ResourceValidationAdapter) acquireBindingProxy(ctx context.Context, req coreapp.MicrosoftValidationRequest) string {
+	if a == nil || a.proxies == nil {
+		return ""
+	}
+	cfg, err := a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
+		Key: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
+		// Binding-resolution login MUST use IPv4 (see acquireProxy contract): only
+		// mail receiving may use IPv6.
+		IPVersion:           proxydomain.ProxyIPv4,
+		Purpose:             proxydomain.ProxyPurposeBinding,
+		AllowSystemFallback: true,
+		RequestID:           req.RequestID,
+	})
+	if err != nil || cfg == nil || cfg.Direct {
+		return ""
+	}
+	return cfg.URL
 }
 
 func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, req coreapp.MicrosoftValidationRequest, proxyURL string, bindingAddress string) (mailinfra.MicrosoftOAuthResult, error) {
@@ -356,13 +381,23 @@ func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, 
 	}
 	var result mailinfra.MicrosoftOAuthResult
 	var err error
-	if strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != "" {
+	isRefreshTokenAccount := strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != ""
+	if isRefreshTokenAccount {
 		result, err = a.microsoft.RefreshToken(ctx, oauthReq)
 	} else {
 		result, err = a.microsoft.AcquireToken(ctx, oauthReq)
 	}
 	if err != nil || !result.Valid {
 		return result, err
+	}
+	// A valid refresh token proves the account works but never resolves the
+	// recovery-mailbox binding — the token exchange does not touch it. Alias/OTP
+	// tasks require a real, receivable binding_address, so complete the binding
+	// relationship with a password login when it has not yet been resolved to a
+	// verified project mailbox or a known external one. This augments only the
+	// binding facts; the refresh-token validation result stays authoritative.
+	if isRefreshTokenAccount {
+		a.resolveBindingForRefreshedAccount(ctx, req, proxyURL, bindingAddress, &result)
 	}
 	if a.fetcher == nil {
 		result.Valid = false
@@ -400,6 +435,71 @@ func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, 
 	result.SafeMessage = ""
 	result.ProxyFailure = false
 	return result, nil
+}
+
+// resolveBindingForRefreshedAccount completes the recovery-mailbox binding for a
+// refresh-token account whose token exchange succeeded. The token path never
+// touches the binding relationship, so a password login is required to discover
+// (or bind) the real recovery mailbox. It is best-effort: any failure is logged
+// and leaves the refresh-token validation result intact — the account is still
+// valid, only its binding stays unresolved for a later retry. Only the binding
+// facts (BindingAddress / BindingStatus / BoundDisplay) are merged in; the
+// caller's recordBindingResult then persists them.
+func (a *ResourceValidationAdapter) resolveBindingForRefreshedAccount(ctx context.Context, req coreapp.MicrosoftValidationRequest, proxyURL, bindingAddress string, result *mailinfra.MicrosoftOAuthResult) {
+	if a == nil || a.bindings == nil || a.microsoft == nil || result == nil {
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		// Without a password we cannot reach the identity page to resolve the
+		// binding; leave it for manual handling rather than fabricate one.
+		return
+	}
+	resolved, err := a.bindings.BindingResolved(ctx, req.ResourceID)
+	if err != nil {
+		slog.Warn(
+			"microsoft binding resolution state lookup failed",
+			"resource_id", req.ResourceID,
+			"request_id", req.RequestID,
+			"error", err,
+		)
+		return
+	}
+	if resolved {
+		return
+	}
+	// A password login that reaches the identity/binding page needs a
+	// binding-purpose (residential) proxy to avoid risk control, exactly like the
+	// non-refresh-token AcquireToken path. The refresh-token validation above used
+	// an auth-purpose proxy, so acquire a dedicated one here and fall back to the
+	// already-acquired proxy only if none is available.
+	resolutionProxyURL := proxyURL
+	if bindingProxyURL := a.acquireBindingProxy(ctx, req); bindingProxyURL != "" {
+		resolutionProxyURL = bindingProxyURL
+	}
+	bindingResult, err := a.microsoft.AcquireToken(ctx, mailinfra.MicrosoftOAuthRequest{
+		EmailAddress:   req.EmailAddress,
+		Password:       req.Password,
+		BindingAddress: bindingAddress,
+		ProxyURL:       resolutionProxyURL,
+	})
+	if err != nil {
+		slog.Warn(
+			"microsoft binding resolution login failed",
+			"resource_id", req.ResourceID,
+			"request_id", req.RequestID,
+			"error", err,
+		)
+		return
+	}
+	if display := strings.TrimSpace(bindingResult.BoundDisplay); display != "" {
+		result.BoundDisplay = display
+	}
+	if addr := strings.TrimSpace(bindingResult.BindingAddress); addr != "" {
+		result.BindingAddress = addr
+	}
+	if status := strings.TrimSpace(bindingResult.BindingStatus); status != "" {
+		result.BindingStatus = status
+	}
 }
 
 func (a *ResourceValidationAdapter) reportProxySuccess(ctx context.Context, proxyID uint) error {

@@ -2178,7 +2178,11 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 		},
 	}, nil, "req-domain-validation-filter", "/v1/resources/validations")
 	require.NoError(t, err)
-	require.Zero(t, result.Requested)
+	// Deferred filter batches now report the matched estimate at acceptance (the
+	// operator must not see "0 submitted"); only private-validation matches the
+	// NotSale/.com/normal/recent filter. Jobs are still created during expansion.
+	require.Equal(t, 1, result.Requested)
+	require.Equal(t, 1, result.Queued)
 	require.Zero(t, result.Created)
 	createdAfterAcceptance := &domain.MailDomainResource{
 		Domain:       "future-private-validation.example.com",

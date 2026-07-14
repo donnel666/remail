@@ -247,6 +247,33 @@ func (r *MicrosoftBindingRepo) PreferredAddress(ctx context.Context, resourceID 
 	return model.BindingAddress, nil
 }
 
+// BindingResolved reports whether the resource's recovery-mailbox binding is
+// already a usable fact: either verified against a receivable project-domain
+// address, or resolved to a known external mailbox (bound_display recorded).
+// A pending/timeout/failed-without-display binding is NOT resolved — the
+// relationship still needs to be completed before alias/OTP tasks can run.
+func (r *MicrosoftBindingRepo) BindingResolved(ctx context.Context, resourceID uint) (bool, error) {
+	if resourceID == 0 {
+		return false, nil
+	}
+	var model MicrosoftBindingMailboxModel
+	err := r.db.WithContext(ctx).
+		Select("status, bound_display").
+		Where("resource_id = ? AND status <> ?", resourceID, string(domain.MicrosoftBindingExpired)).
+		Order("updated_at DESC").
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("resolve microsoft binding state: %w", err)
+	}
+	if strings.TrimSpace(model.BoundDisplay) != "" {
+		return true, nil
+	}
+	return model.Status == string(domain.MicrosoftBindingVerified), nil
+}
+
 func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, bindingAddress string, status domain.MicrosoftBindingStatus, safeError string) error {
 	if resourceID == 0 {
 		return nil

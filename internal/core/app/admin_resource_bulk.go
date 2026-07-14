@@ -246,12 +246,10 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 	affected, skipped := 0, 0
 	checkpoint := ids[len(ids)-1]
 	done := len(ids) < adminResourceBulkPageSize
-	matched := len(ids)
-	if command.Selection.Mode == AdminResourceBulkIDs {
-		// Explicit selections are counted at acceptance time so missing IDs are
-		// still represented in the command's requested/matched total.
-		matched = 0
-	}
+	// Both explicit-ID and filter selections capture their matched total at
+	// acceptance time (repo CreateWithLog), so per-page processing must never
+	// re-add matches or the command would report roughly double the real count.
+	matched := 0
 	err = s.commands.repo.WithTx(ctx, func(txCtx context.Context) error {
 		for _, resourceID := range ids {
 			var changed bool
