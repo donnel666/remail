@@ -608,6 +608,40 @@ func accountEmailMask(accountEmail string) string {
 }
 
 func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy string, preferredBindingAddress string) string {
+	// Preferred (import-supplied) binding address wins if it matches the mask —
+	// domain-agnostic; may even be an operator-recorded external address.
+	if preferred := strings.ToLower(strings.TrimSpace(preferredBindingAddress)); preferred != "" && mailboxMatchesMasked(maskedEmail, preferred) {
+		logInfo("通过导入输入找到当前账号真实辅助邮箱")
+		logDebug("导入输入匹配: account=%s, real_mailbox=%s", accountEmail, preferred)
+		return preferred
+	}
+	// Decide which binding domains to resolve against. If the masked proof
+	// already carries a domain, only that domain is relevant AND it must be one
+	// of ours (∈ binding list) — an external domain returns "" so the caller
+	// records the masked display instead. Otherwise MATCH against ALL binding
+	// domains (the account's recovery could live on any of them).
+	var domains []string
+	if strings.Contains(maskedEmail, "@") {
+		d := strings.ToLower(strings.SplitN(maskedEmail, "@", 2)[1])
+		if !domainInProject(d) {
+			return ""
+		}
+		domains = []string{d}
+	} else {
+		domains = activeAuxiliaryDomains()
+	}
+	for _, domain := range domains {
+		if addr := resolveRealMailboxForDomain(ctx, maskedEmail, accountEmail, proxy, domain); addr != "" {
+			return addr
+		}
+	}
+	return ""
+}
+
+// resolveRealMailboxForDomain resolves the account's real recovery mailbox on a
+// SINGLE binding domain: deterministic rule → recorded output → content search
+// by account mask → API search by masked prefix. Returns "" if none match.
+func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail, proxy, domain string) string {
 	prefix := ""
 	if m := regexp.MustCompile(`(?i)^([a-z0-9]{1,5})\*+`).FindStringSubmatch(maskedEmail); len(m) > 1 {
 		prefix = m[1]
@@ -615,17 +649,7 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 		prefix = strings.Split(maskedEmail, "*")[0]
 	}
 	prefix = regexp.MustCompile(`[^a-z0-9]`).ReplaceAllString(strings.ToLower(prefix), "")
-	domain := "aishop6.com"
-	if strings.Contains(maskedEmail, "@") {
-		domain = strings.ToLower(strings.SplitN(maskedEmail, "@", 2)[1])
-	}
 	accountKey := strings.ToLower(strings.TrimSpace(accountEmail))
-
-	if preferred := strings.ToLower(strings.TrimSpace(preferredBindingAddress)); preferred != "" && mailboxMatchesMasked(maskedEmail, preferred) {
-		logInfo("通过导入输入找到当前账号真实辅助邮箱")
-		logDebug("导入输入匹配: account=%s, real_mailbox=%s", accountEmail, preferred)
-		return preferred
-	}
 
 	if generated, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedEmail, generated) {
 		logInfo("通过辅助邮箱生成规则匹配真实地址")
@@ -640,6 +664,7 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 	}
 
 	if mask := accountEmailMask(accountEmail); mask != "" {
+		var found string
 		func() {
 			defer func() {
 				if recover() != nil {
@@ -660,11 +685,11 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 				}
 				logInfo("通过邮件正文账号掩码找到真实辅助邮箱")
 				logDebug("正文掩码匹配: account=%s, mask=%s, real_mailbox=%s", accountEmail, mask, candidates[0])
-				prefix = "\x00" + candidates[0]
+				found = candidates[0]
 			}
 		}()
-		if strings.HasPrefix(prefix, "\x00") {
-			return strings.TrimPrefix(prefix, "\x00")
+		if found != "" {
+			return found
 		}
 	}
 

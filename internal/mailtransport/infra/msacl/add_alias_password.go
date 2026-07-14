@@ -71,6 +71,9 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	if strings.TrimSpace(bindingAddress) == "" {
 		return "", "", fmt.Errorf("password login requires a binding mailbox address")
 	}
+	if strings.Contains(bindingAddress, "*") {
+		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundDisplay: bindingAddress}
+	}
 	if strings.TrimSpace(password) == "" {
 		return "", "", newAuthError("password login requires the account password", AuthStatusPasswordError)
 	}

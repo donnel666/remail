@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -47,6 +49,97 @@ type MailTransportModule struct {
 	BackgroundDispatch  BackgroundDispatchSizer
 	AliasDispatch       MicrosoftAliasDispatchReleaser
 	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
+	bindingDomains      bindingDomainLister
+	autoRefresh         microsoftAutoRefreshLister
+}
+
+// bindingDomainLister sources the auxiliary/recovery-mailbox domains
+// (domain_resources.purpose='binding') injected into msacl.
+type bindingDomainLister interface {
+	ListBindingDomains(ctx context.Context) ([]string, error)
+}
+
+// microsoftAutoRefreshLister sources Microsoft resources whose refresh token is
+// nearing expiry, for the proactive daily refresh scan.
+type microsoftAutoRefreshLister interface {
+	ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int) ([]coreinfra.MicrosoftAutoRefreshCandidate, error)
+}
+
+const (
+	// auxiliaryDomainRefreshInterval controls how often the binding-domain list
+	// is reloaded from the DB into msacl (eventually consistent; a newly-added
+	// binding domain becomes usable within one interval).
+	auxiliaryDomainRefreshInterval = 60 * time.Second
+
+	// Proactive refresh-token expiry scan: once a day at ~dawn, enqueue a
+	// refresh for every account whose refresh token expires within the lookahead
+	// window (RT lifetime is ~3 months; start renewing a month ahead).
+	microsoftRTRefreshLookahead = 30 * 24 * time.Hour
+	microsoftRTRefreshHour      = 3
+	microsoftRTRefreshScanLimit = 2000
+)
+
+// refreshAuxiliaryDomains loads the binding-purpose domains from the DB into the
+// msacl auxiliary-domain list. On error it leaves the previous list in place.
+func refreshAuxiliaryDomains(ctx context.Context, lister bindingDomainLister) {
+	if lister == nil {
+		return
+	}
+	domains, err := lister.ListBindingDomains(ctx)
+	if err != nil {
+		slog.Warn("load auxiliary binding domains failed", "error", err)
+		return
+	}
+	msacl.SetAuxiliaryDomains(domains)
+	slog.Info("auxiliary binding domains loaded", "count", len(domains))
+}
+
+// scanExpiringTokenRefresh enqueues a proactive refresh task for every Microsoft
+// account whose refresh token expires within the lookahead window. Idempotent
+// per-day (CreateOrReuse dedupes by IdempotencyKey), so re-runs are safe.
+func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context) {
+	if m == nil || m.autoRefresh == nil || m.TokenRefresh == nil {
+		return
+	}
+	before := time.Now().UTC().Add(microsoftRTRefreshLookahead)
+	candidates, err := m.autoRefresh.ListMicrosoftAutoRefreshCandidates(ctx, before, microsoftRTRefreshScanLimit)
+	if err != nil {
+		slog.Warn("microsoft rt auto-refresh scan failed", "error", err)
+		return
+	}
+	day := time.Now().UTC().Format("20060102")
+	enqueued := 0
+	for _, c := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		if c.ResourceID == 0 || c.OwnerUserID == 0 {
+			continue
+		}
+		if _, err := m.TokenRefresh.Accept(ctx, mailapp.MicrosoftTokenRefreshCommand{
+			ResourceID:     c.ResourceID,
+			OperatorUserID: c.OwnerUserID,
+			IdempotencyKey: fmt.Sprintf("auto-rt-refresh-%d-%s", c.ResourceID, day),
+			RequestID:      fmt.Sprintf("auto-rt-%s-%d", day, c.ResourceID),
+			Path:           "system/auto-rt-refresh",
+		}); err != nil {
+			slog.Warn("microsoft rt auto-refresh enqueue failed", "resource_id", c.ResourceID, "error", err)
+			continue
+		}
+		enqueued++
+	}
+	slog.Info("microsoft rt auto-refresh scan done", "candidates", len(candidates), "enqueued", enqueued)
+}
+
+// durationUntilHour returns the time until the next occurrence of the given hour
+// (0-23) in the server's local time.
+func durationUntilHour(hour int) time.Duration {
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.Sub(now)
 }
 
 func (m *MailTransportModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
@@ -99,6 +192,12 @@ func NewMailTransportModule(
 	tokenRefreshRepo := mailinfra.NewMicrosoftTokenRefreshRepo(db)
 	tokenRefreshQueue := mailinfra.NewMicrosoftTokenRefreshQueue(asynqClient)
 	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReader(db, files))
+	// Source the auxiliary (recovery) mailbox domains from domain_resources
+	// (purpose='binding') instead of a hardcoded default; load once now and
+	// refresh periodically in StartDispatchers. The same repo also feeds the
+	// proactive refresh-token expiry scan.
+	resourceRepo := coreinfra.NewResourceRepo(db)
+	refreshAuxiliaryDomains(context.Background(), resourceRepo)
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
 	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundStore, outboundQueue, systemLogs, outboundFrom)
@@ -123,6 +222,8 @@ func NewMailTransportModule(
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 		AliasDispatch:       aliasStore,
 		tokenRefreshRepo:    tokenRefreshRepo,
+		bindingDomains:      resourceRepo,
+		autoRefresh:         resourceRepo,
 	}
 	if inboundCfg.Enabled {
 		module.InboundSMTP = mailinfra.NewInboundSMTPServer(inboundCfg, inboundUseCase)
@@ -172,9 +273,11 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 		mailTicker := time.NewTicker(mailDispatcherInterval)
 		aliasTicker := time.NewTicker(microsoftAliasDispatcherInterval)
 		tokenRefreshTicker := time.NewTicker(microsoftTokenRefreshDispatcherInterval)
+		bindingDomainTicker := time.NewTicker(auxiliaryDomainRefreshInterval)
 		defer mailTicker.Stop()
 		defer aliasTicker.Stop()
 		defer tokenRefreshTicker.Stop()
+		defer bindingDomainTicker.Stop()
 		for {
 			select {
 			case <-mailTicker.C:
@@ -183,6 +286,19 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 				scheduleMicrosoftAliasDispatcher(ctx, m, 0)
 			case <-tokenRefreshTicker.C:
 				scheduleMicrosoftTokenRefreshDispatcher(ctx, m, 0)
+			case <-bindingDomainTicker.C:
+				refreshAuxiliaryDomains(ctx, m.bindingDomains)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	// Proactive refresh-token expiry scan: once a day at ~dawn.
+	go func() {
+		for {
+			select {
+			case <-time.After(durationUntilHour(microsoftRTRefreshHour)):
+				m.scanExpiringTokenRefresh(ctx)
 			case <-ctx.Done():
 				return
 			}

@@ -1081,7 +1081,15 @@ func mapExplicitAliasError(err error) ExplicitAliasResult {
 	case AuthStatusRateLimited:
 		return failure(aliasCategoryRateLimited, "Microsoft alias creation is rate limited.", false)
 	case AuthStatusAlreadyBound:
-		return failure("already_bound", "Microsoft account recovery mailbox cannot be used.", false)
+		display := ""
+		if authErr != nil {
+			display = strings.TrimSpace(firstNonEmpty(authErr.BoundDisplay, authErr.BoundMailbox))
+		}
+		message := "Microsoft account recovery mailbox cannot be used."
+		if display != "" {
+			message = fmt.Sprintf("Microsoft account already bound to recovery mailbox (%s).", display)
+		}
+		return failure("already_bound", message, false)
 	case AuthStatusCodeTimeout:
 		return failure("code_timeout", "Microsoft recovery mailbox verification timed out.", false)
 	case AuthStatusVerifyCodeError:

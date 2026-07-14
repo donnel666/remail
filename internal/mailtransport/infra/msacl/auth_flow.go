@@ -656,7 +656,7 @@ func authorizeAccount(ctx context.Context, email, password, proxy string, prefer
 
 func domainInProject(domain string) bool {
 	domain = strings.ToLower(strings.TrimSpace(domain))
-	for _, projectDomain := range mailDomains {
+	for _, projectDomain := range activeAuxiliaryDomains() {
 		if domain == strings.ToLower(projectDomain) {
 			return true
 		}

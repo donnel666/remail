@@ -37,6 +37,10 @@ const (
 	MicrosoftAliasAttemptUncertain = "uncertain"
 
 	MicrosoftAliasResourceNotNormalMessage = "Microsoft resource is not in normal state for alias creation."
+	// MicrosoftAliasExternalRecoveryMessage marks accounts whose recovery mailbox
+	// is on an external (non-binding) domain: we cannot receive OTP codes there,
+	// so explicit-alias creation can never succeed and the schedule is skipped.
+	MicrosoftAliasExternalRecoveryMessage = "Recovery mailbox is external; explicit-alias creation is skipped."
 )
 
 var microsoftAliasQuotaLocation = time.FixedZone("Asia/Shanghai", 8*60*60)

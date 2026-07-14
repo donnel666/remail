@@ -32,6 +32,12 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	if strings.TrimSpace(bindingAddress) == "" {
 		return "", "", fmt.Errorf("OTC login requires a binding mailbox address")
 	}
+	if strings.Contains(bindingAddress, "*") {
+		// A masked binding address (e.g. a****b@qq.com) is a recorded external
+		// recovery mailbox we cannot receive codes at — fail fast instead of
+		// sending an OTP to an unroutable address.
+		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundDisplay: bindingAddress}
+	}
 
 	// ---- reused lines 302–386: GET AddAssocId → submit email → GetCredentialType ----
 	logInfo("OTC 步骤1: 访问 AddAssocId")

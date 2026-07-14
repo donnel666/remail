@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,6 +41,65 @@ func activeMailboxReader() MailboxReader {
 	mailboxReaderState.RLock()
 	defer mailboxReaderState.RUnlock()
 	return mailboxReaderState.reader
+}
+
+// Auxiliary (recovery) mailbox domains come from domain_resources rows whose
+// purpose is 'binding', injected at startup via SetAuxiliaryDomains (mirrors
+// the SetMailboxReader seam). When none are injected it falls back to the
+// env-configured mailDomains — used only by the aliastest harness and unit
+// tests; in production the fallback is empty, so an unconfigured list hard-fails
+// instead of fabricating an address on a default domain.
+var auxiliaryDomainsState = struct {
+	sync.RWMutex
+	domains []string
+}{}
+
+// auxiliaryDomainCursor drives round-robin selection for the GENERATE path.
+var auxiliaryDomainCursor atomic.Uint64
+
+// SetAuxiliaryDomains replaces the active binding-purpose domain list.
+func SetAuxiliaryDomains(domains []string) {
+	normalized := make([]string, 0, len(domains))
+	seen := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		d = strings.Trim(strings.ToLower(strings.TrimSpace(d)), ".")
+		if d == "" {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		normalized = append(normalized, d)
+	}
+	auxiliaryDomainsState.Lock()
+	auxiliaryDomainsState.domains = normalized
+	auxiliaryDomainsState.Unlock()
+}
+
+// activeAuxiliaryDomains returns the injected binding domains, or the env
+// fallback (mailDomains) when none have been injected. Used by the MATCH path
+// (iterate all) and as the source for round-robin generation.
+func activeAuxiliaryDomains() []string {
+	auxiliaryDomainsState.RLock()
+	domains := auxiliaryDomainsState.domains
+	auxiliaryDomainsState.RUnlock()
+	if len(domains) > 0 {
+		return domains
+	}
+	return mailDomains
+}
+
+// nextAuxiliaryDomain picks one binding domain by round-robin — the GENERATE
+// path (creating a new auxiliary mailbox for an unbound account). Errors when
+// no binding domain is configured (never fabricates a default).
+func nextAuxiliaryDomain() (string, error) {
+	domains := activeAuxiliaryDomains()
+	if len(domains) == 0 {
+		return "", newAuthError("未配置辅助邮箱绑定域名 (domain_resources purpose=binding)", AuthStatusRequestError)
+	}
+	idx := int((auxiliaryDomainCursor.Add(1) - 1) % uint64(len(domains)))
+	return domains[idx], nil
 }
 
 type mailWatcherResult struct {
@@ -128,20 +188,6 @@ func postJSON(ctx context.Context, path string, payload map[string]any, proxy st
 		}
 	}
 	return data, nil
-}
-
-func mailDomain() (string, error) {
-	if len(mailDomains) == 0 {
-		return "", newAuthError("未配置 Cloud Mail 域名", AuthStatusRequestError)
-	}
-	index := mailDomainIndex
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(mailDomains) {
-		index = len(mailDomains) - 1
-	}
-	return mailDomains[index], nil
 }
 
 func createTempMailbox(ctx context.Context, accountEmail string, preferredBindingAddress string) (string, error) {

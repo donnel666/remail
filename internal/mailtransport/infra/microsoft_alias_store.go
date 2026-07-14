@@ -429,6 +429,7 @@ func (s *MicrosoftAliasStore) Claim(ctx context.Context, task mailapp.MicrosoftA
 			EmailAddress      string     `gorm:"column:email_address"`
 			Password          string     `gorm:"column:password"`
 			BindingAddress    string     `gorm:"column:binding_address"`
+			BoundDisplay      string     `gorm:"column:bound_display"`
 			ResourceStatus    string     `gorm:"column:resource_status"`
 			ResourceSignature string     `gorm:"column:resource_signature"`
 			ResourceUpdatedAt time.Time  `gorm:"column:resource_updated_at"`
@@ -440,6 +441,7 @@ SELECT
     mr.email_address AS email_address,
     mr.password AS password,
     COALESCE(binding.binding_address, '') AS binding_address,
+    COALESCE(binding.bound_display, '') AS bound_display,
     mr.status AS resource_status,
     mr.updated_at AS resource_updated_at,
     mr.last_allocated_at AS last_allocated_at,
@@ -477,6 +479,28 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 				})
 			if result.Error != nil {
 				return fmt.Errorf("pause ineligible microsoft alias schedule: %w", result.Error)
+			}
+			return nil
+		}
+		// External recovery mailbox: a recorded external bound_display means OTP
+		// codes cannot be received, so alias creation can never succeed — pause
+		// (skip) the schedule. bound_display is cleared on a successful project-
+		// domain bind (MarkStatus), and a rebind changes the signature, so the
+		// account is reconsidered automatically.
+		if strings.TrimSpace(row.BoundDisplay) != "" {
+			result := tx.Model(&MicrosoftAliasScheduleModel{}).
+				Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+				Updates(map[string]any{
+					"status":                      "paused",
+					"claim_token":                 "",
+					"last_safe_error":             mailapp.MicrosoftAliasExternalRecoveryMessage,
+					"blocked_resource_signature":  row.ResourceSignature,
+					"blocked_resource_updated_at": row.ResourceUpdatedAt,
+					"blocked_last_allocated_at":   row.LastAllocatedAt,
+					"updated_at":                  now,
+				})
+			if result.Error != nil {
+				return fmt.Errorf("pause external-recovery microsoft alias schedule: %w", result.Error)
 			}
 			return nil
 		}

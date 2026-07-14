@@ -22,7 +22,7 @@ func isProjectMailboxAddress(mailbox string) bool {
 }
 
 func deterministicAuxiliaryAddress(accountEmail string) (string, error) {
-	domain, err := mailDomain()
+	domain, err := nextAuxiliaryDomain()
 	if err != nil {
 		return "", err
 	}

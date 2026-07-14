@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	stdmail "net/mail"
 	"strings"
@@ -457,6 +458,13 @@ func (a *ResourceValidationAdapter) prepareBindingAddress(ctx context.Context, r
 func (a *ResourceValidationAdapter) recordBindingResult(ctx context.Context, req coreapp.MicrosoftValidationRequest, result mailinfra.MicrosoftOAuthResult) error {
 	if a == nil || a.bindings == nil {
 		return nil
+	}
+	// Bound to an external recovery mailbox (masked): record the fact and stop —
+	// there is no real, receivable binding_address for us to upsert. The masked
+	// address goes to both bound_display and the (admin-facing) last_safe_error.
+	if display := strings.TrimSpace(result.BoundDisplay); display != "" {
+		return a.bindings.RecordBoundDisplay(ctx, req.ResourceID, display,
+			fmt.Sprintf("Microsoft account is already bound to recovery mailbox (%s).", display))
 	}
 	bindingAddress := strings.TrimSpace(result.BindingAddress)
 	if bindingAddress == "" {

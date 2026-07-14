@@ -107,4 +107,7 @@ func TestMapAuthErrorAlreadyBoundPreservesBindingStateWithoutLeakingDisplay(t *t
 	assert.Equal(t, "binding@example.com", result.BindingAddress)
 	assert.Equal(t, string(maildomain.MicrosoftBindingFailed), result.BindingStatus)
 	assert.NotContains(t, result.SafeMessage, "masked@example.com")
+	// The masked recovery mailbox is exposed via the structured field, not the
+	// public SafeMessage.
+	assert.Equal(t, "masked@example.com", result.BoundDisplay)
 }

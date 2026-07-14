@@ -261,8 +261,10 @@ func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, 
 	switch status {
 	case domain.MicrosoftBindingCodeSent:
 		updates["code_sent_at"] = now
+		updates["bound_display"] = "" // receivable project-domain recovery; clear any prior external mark
 	case domain.MicrosoftBindingVerified:
 		updates["verified_at"] = now
+		updates["bound_display"] = ""
 	}
 	db := r.db.WithContext(ctx)
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
@@ -275,6 +277,33 @@ func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, 
 	result := query.Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("mark microsoft binding status: %w", result.Error)
+	}
+	return nil
+}
+
+// RecordBoundDisplay records the (masked) external recovery mailbox that a
+// Microsoft account is actually bound to (e.g. a****b@qq.com) on the resource's
+// binding row(s), and marks the binding failed — we cannot receive verification
+// codes at an external address, but the fact is preserved for operators.
+func (r *MicrosoftBindingRepo) RecordBoundDisplay(ctx context.Context, resourceID uint, boundDisplay string, safeError string) error {
+	boundDisplay = strings.TrimSpace(boundDisplay)
+	if resourceID == 0 || boundDisplay == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	updates := map[string]any{
+		"bound_display":   boundDisplay,
+		"status":          string(domain.MicrosoftBindingFailed),
+		"category":        bindingStatusCategory(domain.MicrosoftBindingFailed),
+		"last_safe_error": strings.TrimSpace(safeError),
+		"updated_at":      now,
+	}
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
+	if err := db.Model(&MicrosoftBindingMailboxModel{}).Where("resource_id = ?", resourceID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("record microsoft binding bound_display: %w", err)
 	}
 	return nil
 }

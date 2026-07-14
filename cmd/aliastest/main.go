@@ -195,6 +195,7 @@ func main() {
 	minioKey := flag.String("minio-key", "remail", "minio access key")
 	minioSecret := flag.String("minio-secret", "", "minio secret key")
 	bucket := flag.String("bucket", "remail", "minio bucket")
+	bindingDomains := flag.String("binding-domains", "", "comma-separated auxiliary binding domains (SetAuxiliaryDomains); defaults to the -binding address domain")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -218,6 +219,21 @@ func main() {
 		os.Exit(1)
 	}
 	msacl.SetMailboxReader(&dbReader{db: db, mc: mc, bucket: *bucket})
+
+	// Inject the auxiliary binding domains (production loads these from
+	// domain_resources purpose=binding). Default to the -binding address domain.
+	var auxDomains []string
+	for _, d := range strings.Split(*bindingDomains, ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			auxDomains = append(auxDomains, strings.ToLower(d))
+		}
+	}
+	if len(auxDomains) == 0 {
+		if at := strings.LastIndex(*binding, "@"); at >= 0 && at+1 < len(*binding) {
+			auxDomains = []string{strings.ToLower((*binding)[at+1:])}
+		}
+	}
+	msacl.SetAuxiliaryDomains(auxDomains)
 
 	var cands []string
 	if strings.TrimSpace(*candidates) != "" {

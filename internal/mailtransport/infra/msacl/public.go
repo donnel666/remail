@@ -17,6 +17,7 @@ type Result struct {
 	BindingStatus  string
 	Category       string
 	SafeMessage    string
+	BoundDisplay   string
 	ProxyFailure   bool
 }
 
@@ -49,8 +50,10 @@ func mapAuthError(err error, proxyFailure bool) Result {
 		status = authErr.Status
 	}
 	boundMailbox := ""
+	boundDisplay := ""
 	if authErr != nil {
 		boundMailbox = strings.TrimSpace(authErr.BoundMailbox)
+		boundDisplay = strings.TrimSpace(authErr.BoundDisplay)
 	}
 	switch status {
 	case AuthStatusPasswordError:
@@ -70,8 +73,13 @@ func mapAuthError(err error, proxyFailure bool) Result {
 	case AuthStatusRateLimited:
 		return aclFailure("request", "Microsoft authorization is temporarily rate limited.", false)
 	case AuthStatusAlreadyBound:
+		// Keep the public SafeMessage generic (no masked-address leak); the
+		// masked recovery mailbox is carried in the structured BoundDisplay field
+		// (only ever the masked display, never a real address) for admin-visible
+		// persistence (bound_display).
 		result := aclFailure("already_bound", "Microsoft account is already bound to another recovery mailbox.", false)
 		result.BindingAddress = boundMailbox
+		result.BoundDisplay = boundDisplay
 		if boundMailbox != "" {
 			result.BindingStatus = string(maildomain.MicrosoftBindingFailed)
 		}

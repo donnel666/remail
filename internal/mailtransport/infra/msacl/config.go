@@ -24,7 +24,6 @@ var (
 	mailAPIBase          = strings.TrimRight(envString("CLOUD_MAIL_BASE", "https://remail.aishop6.com"), "/")
 	mailAPIKey           = strings.TrimSpace(envString("CLOUD_MAIL_JWT", envString("CLOUD_MAIL_API_KEY", "")))
 	mailDomains          = configuredMailDomains()
-	mailDomainIndex      = envInt("CLOUD_MAIL_DOMAIN_INDEX", 0)
 	mailPollTimeout      = envInt("CLOUD_MAIL_POLL_TIMEOUT", 60)
 	mailPollInterval     = envInt("CLOUD_MAIL_POLL_INTERVAL", 2)
 	mailLateArrivalGrace = envInt("CLOUD_MAIL_LATE_ARRIVAL_GRACE", 12)
@@ -132,13 +131,17 @@ func envBool(key string, fallback bool) bool {
 	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
+// configuredMailDomains reads the env auxiliary-domain override (used only by
+// the aliastest harness and unit tests). Production injects the list from
+// domain_resources (purpose=binding) via SetAuxiliaryDomains; there is NO
+// hardcoded default — an unconfigured list is empty and hard-fails generation.
 func configuredMailDomains() []string {
 	raw := strings.TrimSpace(os.Getenv("CLOUD_MAIL_DOMAINS"))
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("REMAIL_MAIL_DOMAINS"))
 	}
 	if raw == "" {
-		return []string{"aishop6.com"}
+		return nil
 	}
 	parts := strings.FieldsFunc(raw, func(r rune) bool {
 		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
@@ -155,9 +158,6 @@ func configuredMailDomains() []string {
 		}
 		seen[domain] = struct{}{}
 		domains = append(domains, domain)
-	}
-	if len(domains) == 0 {
-		return []string{"aishop6.com"}
 	}
 	return domains
 }

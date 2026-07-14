@@ -648,6 +648,53 @@ func (r *ResourceRepo) FindMicrosoftByID(ctx context.Context, resourceID uint) (
 	return model.toDomain(), nil
 }
 
+// ListBindingDomains returns the domain names configured as auxiliary/recovery
+// mailbox domains (domain_resources.purpose = 'binding') that have passed
+// validation (status = 'normal'). It sources the msacl auxiliary-mailbox domain
+// list (SetAuxiliaryDomains) instead of a hardcoded default.
+func (r *ResourceRepo) ListBindingDomains(ctx context.Context) ([]string, error) {
+	var domains []string
+	err := r.db.WithContext(ctx).
+		Model(&DomainResourceModel{}).
+		Where("purpose = ? AND status = ?", string(domain.PurposeBinding), string(domain.DomainStatusNormal)).
+		Order("id").
+		Pluck("domain", &domains).Error
+	if err != nil {
+		return nil, fmt.Errorf("list binding domains: %w", err)
+	}
+	return domains, nil
+}
+
+// MicrosoftAutoRefreshCandidate identifies a Microsoft resource whose refresh
+// token is nearing expiry and should be proactively refreshed.
+type MicrosoftAutoRefreshCandidate struct {
+	ResourceID  uint `gorm:"column:resource_id"`
+	OwnerUserID uint `gorm:"column:owner_user_id"`
+}
+
+// ListMicrosoftAutoRefreshCandidates returns Microsoft resources that hold a
+// refresh token whose expiry (rt_expire_at) falls on or before `before` (e.g.
+// now + 30 days), so a proactive refresh can renew the token before it lapses.
+func (r *ResourceRepo) ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int) ([]MicrosoftAutoRefreshCandidate, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	var rows []MicrosoftAutoRefreshCandidate
+	err := r.db.WithContext(ctx).
+		Table("microsoft_resources AS mr").
+		Select("mr.id AS resource_id, er.owner_user_id AS owner_user_id").
+		Joins("JOIN email_resources er ON er.id = mr.id").
+		Where("mr.refresh_token <> '' AND mr.client_id <> '' AND mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ? AND mr.status <> ?",
+			before, "deleted").
+		Order("mr.rt_expire_at ASC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list microsoft auto-refresh candidates: %w", err)
+	}
+	return rows, nil
+}
+
 func (r *ResourceRepo) FindDomainByID(ctx context.Context, resourceID uint) (*domain.MailDomainResource, error) {
 	var model DomainResourceModel
 	err := r.db.WithContext(ctx).First(&model, resourceID).Error
