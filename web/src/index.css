@@ -1864,6 +1864,16 @@ body[theme-mode="dark"] .semi-always-light,
   letter-spacing: 0;
 }
 
+.workbench-project-row-id {
+  flex: 0 0 auto;
+  color: var(--semi-color-text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
 .workbench-project-row-main,
 .workbench-product-main {
   display: flex;

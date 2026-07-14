@@ -53,6 +53,10 @@ export function ProjectListPanel({
           projects.map((project) => {
             const selected = selectedProjectId === project.id;
             const inventory = project.products.reduce((sum, product) => {
+              // Suffix rows split the parent product inventory by domain. Counting
+              // them here would report the same stock more than once.
+              if (product.id !== product.productId) return sum;
+
               return (
                 sum +
                 (serviceMode === "code"
@@ -69,6 +73,7 @@ export function ProjectListPanel({
                 type="button"
               >
                 <ProjectIcon name={project.name} logoUrl={project.logoUrl} />
+                <span className="workbench-project-row-id">#{project.id}</span>
                 <span className="workbench-project-row-main">
                   <OverflowTooltip
                     className="workbench-project-row-name"
