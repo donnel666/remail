@@ -44,6 +44,7 @@ type MailTransportModule struct {
 	BindingRecorder     coreapp.MicrosoftBindingInputRecorder
 	BindingQuery        coreapp.BindingQueryPort
 	BindingAdmin        coreapp.BindingAdminPort
+	ValidationBinding   coreapp.MicrosoftValidationBindingCommitPort
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
 	BackgroundDispatch  BackgroundDispatchSizer
@@ -66,6 +67,11 @@ type microsoftAutoRefreshLister interface {
 }
 
 const (
+	// microsoftBindingRecoveryHistoryWindow lets the validation safeguard use
+	// older inbound Microsoft security-mail evidence when reconstructing a
+	// recovery mailbox. Exact OTP List queries are unaffected by this window.
+	microsoftBindingRecoveryHistoryWindow = 90 * 24 * time.Hour
+
 	// auxiliaryDomainRefreshInterval controls how often the binding-domain list
 	// is reloaded from the DB into msacl (eventually consistent; a newly-added
 	// binding domain becomes usable within one interval).
@@ -191,7 +197,11 @@ func NewMailTransportModule(
 	aliasQueue := mailinfra.NewMicrosoftAliasQueue(asynqClient)
 	tokenRefreshRepo := mailinfra.NewMicrosoftTokenRefreshRepo(db)
 	tokenRefreshQueue := mailinfra.NewMicrosoftTokenRefreshQueue(asynqClient)
-	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReader(db, files))
+	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReaderWithContentWindow(
+		db,
+		files,
+		microsoftBindingRecoveryHistoryWindow,
+	))
 	// Source the auxiliary (recovery) mailbox domains from domain_resources
 	// (purpose='binding') instead of a hardcoded default; load once now and
 	// refresh periodically in StartDispatchers. The same repo also feeds the
@@ -219,6 +229,7 @@ func NewMailTransportModule(
 		BindingRecorder:     NewMicrosoftBindingInputAdapter(bindingRepo),
 		BindingQuery:        NewMicrosoftBindingQueryAdapter(bindingRepo),
 		BindingAdmin:        NewMicrosoftBindingAdminAdapter(bindingRepo),
+		ValidationBinding:   NewMicrosoftValidationBindingCommitAdapter(bindingRepo),
 		InboundSMTPEnabled:  inboundCfg.Enabled,
 		AliasDispatch:       aliasStore,
 		tokenRefreshRepo:    tokenRefreshRepo,

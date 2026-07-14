@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
@@ -26,10 +27,13 @@ import (
 )
 
 const (
-	microsoftGraphAPIBase        = "https://graph.microsoft.com/v1.0"
-	microsoftGraphMessagePageTop = 100
-	microsoftIMAPTokenURL        = "https://login.live.com/oauth20_token.srf"
-	outlookIMAPAddress           = "outlook.office365.com:993"
+	microsoftGraphAPIBase          = "https://graph.microsoft.com/v1.0"
+	microsoftGraphMessagePageTop   = 100
+	microsoftIMAPTokenURL          = "https://login.live.com/oauth20_token.srf"
+	outlookIMAPAddress             = "outlook.office365.com:993"
+	microsoftIdentityMismatch      = "identity_mismatch"
+	microsoftIMAPOperationTimeout  = 60 * time.Second
+	microsoftProxyHandshakeTimeout = 30 * time.Second
 )
 
 var defaultMicrosoftMailFolders = []MicrosoftMailFolder{
@@ -40,6 +44,9 @@ var defaultMicrosoftMailFolders = []MicrosoftMailFolder{
 type MicrosoftMailFetchClient struct {
 	timeout           time.Duration
 	graphFetch        func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error)
+	newGraphSession   func(context.Context, string, int) (*msacl.Session, error)
+	graphIdentity     func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error)
+	graphFolderFetch  func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error)
 	exchangeIMAPToken func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error)
 }
 
@@ -100,6 +107,20 @@ type graphMessagesPage struct {
 	Error    *graphErrorEnvelope `json:"error"`
 }
 
+type graphIdentityProfile struct {
+	Mail              string              `json:"mail"`
+	UserPrincipalName string              `json:"userPrincipalName"`
+	Error             *graphErrorEnvelope `json:"error"`
+}
+
+type microsoftGraphIdentityStatus uint8
+
+const (
+	microsoftGraphIdentityUnavailable microsoftGraphIdentityStatus = iota
+	microsoftGraphIdentityMatched
+	microsoftGraphIdentityMismatched
+)
+
 type graphMessage struct {
 	ID                string              `json:"id"`
 	InternetMessageID string              `json:"internetMessageId"`
@@ -156,6 +177,10 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 	if graphErr == nil && graphResult.Valid {
 		return graphResult, nil
 	}
+	graphIdentityMismatched := strings.EqualFold(strings.TrimSpace(graphResult.Category), microsoftIdentityMismatch)
+	if strings.TrimSpace(graphResult.RefreshToken) != "" {
+		req.RefreshToken = strings.TrimSpace(graphResult.RefreshToken)
+	}
 	graphSafeError := graphResult.SafeMessage
 	if graphSafeError == "" {
 		graphSafeError = "Microsoft mail service is temporarily unavailable."
@@ -175,12 +200,33 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 				return imapResult, nil
 			}
 			if imapErr != nil {
-				tokenResult = microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", false)
+				if strings.TrimSpace(imapResult.Category) != "" &&
+					!isTemporaryMicrosoftMailFetchCategory(imapResult.Category) {
+					tokenResult = imapResult
+				} else {
+					tokenResult = microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", imapResult.ProxyFailure)
+				}
 			} else {
 				tokenResult = imapResult
 			}
 		}
+		if strings.TrimSpace(imapRefreshToken) != "" {
+			// The IMAP-scope exchange is authoritative even when the subsequent
+			// mailbox proof fails. Keep its rotated RT so a one-time rotation does
+			// not leave the database pointing at the superseded credential.
+			rotated := strings.TrimSpace(imapRefreshToken)
+			graphResult.RefreshToken = rotated
+			tokenResult.RefreshToken = rotated
+		}
+		if strings.TrimSpace(tokenResult.RefreshToken) == "" && strings.TrimSpace(req.RefreshToken) != "" {
+			// Graph may already have rotated the RT before the IMAP-scope exchange
+			// fails. The fallback failure must still carry that latest credential.
+			tokenResult.RefreshToken = strings.TrimSpace(req.RefreshToken)
+		}
 		if tokenResult.SafeMessage != "" {
+			if graphIdentityMismatched && !isTemporaryMicrosoftMailFetchCategory(tokenResult.Category) {
+				return graphResult, nil
+			}
 			tokenResult.GraphSafeError = graphSafeError
 			tokenResult.FallbackFrom = "graph"
 			if graphResult.ProxyFailure {
@@ -188,6 +234,9 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 			}
 			return tokenResult, nil
 		}
+	}
+	if graphIdentityMismatched {
+		return graphResult, nil
 	}
 
 	if graphResult.SafeMessage == "" {
@@ -215,9 +264,41 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		accessToken = tokenResult.AccessToken
 		refreshToken = tokenResult.RefreshToken
 	}
-	session, err := msacl.NewAPISession(ctx, req.ProxyURL, timeoutSeconds(c.timeout))
+	newGraphSession := msacl.NewAPISession
+	if c != nil && c.newGraphSession != nil {
+		newGraphSession = c.newGraphSession
+	}
+	session, err := newGraphSession(ctx, req.ProxyURL, timeoutSeconds(c.timeout))
 	if err != nil {
-		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
+		failure := microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != "")
+		// Session construction happens after a possible OAuth exchange. Keep the
+		// exchange's rotated RT even if the subsequent Graph client cannot start.
+		failure.RefreshToken = refreshToken
+		return failure, err
+	}
+	identityCheck := fetchMicrosoftGraphIdentity
+	if c != nil && c.graphIdentity != nil {
+		identityCheck = c.graphIdentity
+	}
+	identityStatus, identityErr := identityCheck(ctx, session, accessToken, req.EmailAddress)
+	if identityErr != nil {
+		category, message, proxyFailure := classifyMicrosoftGraphFailure(identityErr)
+		failure := microsoftMailFetchFailure(category, message, proxyFailure)
+		failure.RefreshToken = refreshToken
+		return failure, nil
+	}
+	switch identityStatus {
+	case microsoftGraphIdentityMatched:
+		// Continue to the mailbox folders only after the configured account has
+		// been matched to Graph's own identity response.
+	case microsoftGraphIdentityMismatched:
+		failure := microsoftMailFetchFailure(microsoftIdentityMismatch, "Microsoft OAuth credentials do not match the configured account.", false)
+		failure.RefreshToken = refreshToken
+		return failure, nil
+	default:
+		failure := microsoftMailFetchFailure("request", "Microsoft account identity could not be verified.", false)
+		failure.RefreshToken = refreshToken
+		return failure, nil
 	}
 	result := MicrosoftMailFetchResult{
 		Valid:        true,
@@ -225,11 +306,20 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		RefreshToken: refreshToken,
 		FolderCounts: map[string]int{},
 	}
+	fetchFolder := fetchGraphFolderMessages
+	if c != nil && c.graphFolderFetch != nil {
+		fetchFolder = c.graphFolderFetch
+	}
 	for _, folder := range defaultMicrosoftMailFolders {
-		messages, err := fetchGraphFolderMessages(ctx, session, accessToken, folder, req)
+		messages, err := fetchFolder(ctx, session, accessToken, folder, req)
 		if err != nil {
 			category, message, proxyFailure := classifyMicrosoftGraphFailure(err)
-			return microsoftMailFetchFailure(category, message, proxyFailure), nil
+			failure := microsoftMailFetchFailure(category, message, proxyFailure)
+			// A successful OAuth exchange may rotate the refresh token before a
+			// later Graph request fails. Preserve that authoritative credential so
+			// IMAP fallback and the validation commit do not reuse the superseded RT.
+			failure.RefreshToken = refreshToken
+			return failure, nil
 		}
 		result.FolderCounts[folder.Label] = len(messages)
 		result.MessageCount += len(messages)
@@ -241,6 +331,82 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
 	result.MessageCount = len(result.Messages)
 	return result, nil
+}
+
+func fetchMicrosoftGraphIdentity(
+	_ context.Context,
+	session *msacl.Session,
+	accessToken string,
+	expectedEmail string,
+) (microsoftGraphIdentityStatus, error) {
+	if session == nil || strings.TrimSpace(accessToken) == "" {
+		return microsoftGraphIdentityUnavailable, nil
+	}
+	values := url.Values{}
+	values.Set("$select", "mail,userPrincipalName")
+	var profile graphIdentityProfile
+	resp, err := session.GetJSON(microsoftGraphAPIBase+"/me?"+values.Encode(), map[string]string{
+		"Authorization": "Bearer " + strings.TrimSpace(accessToken),
+		"Accept":        "application/json",
+	}, &profile)
+	if err != nil {
+		return microsoftGraphIdentityUnavailable, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := ""
+		if profile.Error != nil {
+			message = strings.TrimSpace(profile.Error.Message)
+		}
+		return microsoftGraphIdentityUnavailable, &microsoftGraphHTTPError{
+			statusCode: resp.StatusCode,
+			message:    message,
+		}
+	}
+	return microsoftGraphIdentityStatusFor(expectedEmail, profile), nil
+}
+
+func microsoftGraphIdentityStatusFor(expectedEmail string, profile graphIdentityProfile) microsoftGraphIdentityStatus {
+	expectedEmail = normalizeMicrosoftGraphIdentityEmail(expectedEmail)
+	if expectedEmail == "" {
+		return microsoftGraphIdentityUnavailable
+	}
+	candidates := []string{profile.Mail, profile.UserPrincipalName}
+	foundIdentity := false
+	for _, candidate := range candidates {
+		candidate = normalizeMicrosoftGraphIdentityEmail(candidate)
+		if candidate == "" {
+			continue
+		}
+		foundIdentity = true
+		if candidate == expectedEmail {
+			return microsoftGraphIdentityMatched
+		}
+	}
+	if foundIdentity {
+		return microsoftGraphIdentityMismatched
+	}
+	return microsoftGraphIdentityUnavailable
+}
+
+func normalizeMicrosoftGraphIdentityEmail(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || strings.ContainsAny(value, "\r\n\t") {
+		return ""
+	}
+	parsed, err := stdmail.ParseAddress(value)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(parsed.Address), value) {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Address))
+}
+
+func isTemporaryMicrosoftMailFetchCategory(category string) bool {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "request", "auth_timeout", "rate_limited":
+		return true
+	default:
+		return false
+	}
 }
 
 func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
@@ -319,15 +485,31 @@ func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, 
 }
 
 func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchRequest, accessToken string) (MicrosoftMailFetchResult, error) {
-	client, err := dialOutlookIMAPClient(ctx, req.ProxyURL)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, microsoftIMAPOperationTimeout)
+	defer cancel()
+	client, err := dialOutlookIMAPClient(operationCtx, req.ProxyURL)
 	if err != nil {
 		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
 	}
-	defer client.Close()
+	var closeOnce sync.Once
+	closeClient := func() {
+		closeOnce.Do(func() { _ = client.Close() })
+	}
+	stopCancellationClose := context.AfterFunc(operationCtx, closeClient)
+	defer func() {
+		stopCancellationClose()
+		closeClient()
+	}()
 
 	if err := client.Authenticate(newXOAuth2Client(req.EmailAddress, accessToken)); err != nil {
 		_ = client.Logout().Wait()
-		return microsoftMailFetchFailure("imap_auth_failed", "Microsoft IMAP authentication failed.", false), err
+		if isDefinitiveMicrosoftIMAPAuthenticationFailure(err) {
+			return microsoftMailFetchFailure("imap_auth_failed", "Microsoft IMAP authentication failed.", false), err
+		}
+		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
 	}
 
 	result := MicrosoftMailFetchResult{
@@ -338,7 +520,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	}
 	selectedFolders := 0
 	for _, folder := range imapCandidateFolders(client) {
-		if err := ctx.Err(); err != nil {
+		if err := operationCtx.Err(); err != nil {
 			_ = client.Logout().Wait()
 			return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", false), err
 		}
@@ -353,7 +535,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		if count == 0 {
 			continue
 		}
-		seqSet, err := recentIMAPSeqSet(ctx, client, selectData.NumMessages, req.SinceAt, req.MaxMessages)
+		seqSet, err := recentIMAPSeqSet(operationCtx, client, selectData.NumMessages, req.SinceAt, req.MaxMessages)
 		if err != nil || len(seqSet) == 0 {
 			continue
 		}
@@ -386,13 +568,39 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	return result, nil
 }
 
+func isDefinitiveMicrosoftIMAPAuthenticationFailure(err error) bool {
+	var imapErr *imap.Error
+	if !errors.As(err, &imapErr) || imapErr == nil {
+		return false
+	}
+	switch imapErr.Code {
+	case imap.ResponseCodeAuthenticationFailed, imap.ResponseCodeAuthorizationFailed:
+		return true
+	}
+	if imapErr.Type != imap.StatusResponseTypeNo {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(imapErr.Text))
+	return strings.Contains(text, "authenticate failed") ||
+		strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "login failed") ||
+		strings.Contains(text, "invalid credentials")
+}
+
 func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Client, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "outlook.office365.com", NextProtos: []string{"imap"}}
 	conn, err := dialOutlookIMAPConn(ctx, proxyURL)
 	if err != nil {
 		return nil, err
 	}
 	tlsConn := tls.Client(conn, tlsConfig)
+	if err := setConnectionDeadline(ctx, tlsConn, microsoftIMAPOperationTimeout); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -401,6 +609,9 @@ func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Cl
 }
 
 func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	proxyURL = normalizeMailProxyURL(proxyURL)
 	dialer := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
 	if proxyURL == "" {
@@ -421,7 +632,19 @@ func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error)
 		if err != nil {
 			return nil, err
 		}
-		return socksDialer.Dial("tcp", outlookIMAPAddress)
+		contextDialer, ok := socksDialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("socks5 proxy does not support context cancellation")
+		}
+		conn, err := contextDialer.DialContext(ctx, "tcp", outlookIMAPAddress)
+		if err != nil {
+			return nil, err
+		}
+		if err := setConnectionDeadline(ctx, conn, microsoftIMAPOperationTimeout); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return conn, nil
 	case "http", "https":
 		return dialHTTPConnect(ctx, dialer, parsed, outlookIMAPAddress)
 	default:
@@ -441,15 +664,24 @@ func normalizeMailProxyURL(value string) string {
 }
 
 func dialHTTPConnect(ctx context.Context, dialer *net.Dialer, parsed *url.URL, target string) (net.Conn, error) {
-	var conn net.Conn
-	var err error
-	if strings.EqualFold(parsed.Scheme, "https") {
-		conn, err = tls.DialWithDialer(dialer, "tcp", parsed.Host, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: parsed.Hostname()})
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", parsed.Host)
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	conn, err := dialer.DialContext(ctx, "tcp", parsed.Host)
 	if err != nil {
 		return nil, err
+	}
+	if err := setConnectionDeadline(ctx, conn, microsoftProxyHandshakeTimeout); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if strings.EqualFold(parsed.Scheme, "https") {
+		tlsConn := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: parsed.Hostname()})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		conn = tlsConn
 	}
 	request := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", target, target)
 	if parsed.User != nil {
@@ -483,6 +715,22 @@ func dialHTTPConnect(ctx context.Context, dialer *net.Dialer, parsed *url.URL, t
 		}
 	}
 	return conn, nil
+}
+
+func setConnectionDeadline(ctx context.Context, conn net.Conn, fallback time.Duration) error {
+	if conn == nil {
+		return errors.New("network connection is nil")
+	}
+	if fallback <= 0 {
+		fallback = microsoftProxyHandshakeTimeout
+	}
+	deadline := time.Now().Add(fallback)
+	if ctx != nil {
+		if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+			deadline = contextDeadline
+		}
+	}
+	return conn.SetDeadline(deadline)
 }
 
 func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint32, sinceAt time.Time, maxMessages int) (imap.SeqSet, error) {

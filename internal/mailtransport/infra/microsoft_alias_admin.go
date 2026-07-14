@@ -59,14 +59,32 @@ func (s *MicrosoftAliasStore) expediteAdminScheduleInTx(
 	now time.Time,
 ) (*mailapp.MicrosoftAliasExpediteResult, error) {
 	var resource struct {
-		ID        uint   `gorm:"column:id"`
-		Status    string `gorm:"column:status"`
-		Signature string `gorm:"column:resource_signature"`
+		ID                 uint   `gorm:"column:id"`
+		Status             string `gorm:"column:status"`
+		Signature          string `gorm:"column:resource_signature"`
+		BindingAddress     string `gorm:"column:binding_address"`
+		BindingStatus      string `gorm:"column:binding_status"`
+		BoundDisplay       string `gorm:"column:bound_display"`
+		BindingAccount     string `gorm:"column:binding_account_email"`
+		ResourceEmail      string `gorm:"column:resource_email"`
+		BindingDomainReady bool   `gorm:"column:binding_domain_ready"`
 	}
 	if err := tx.Raw(`
 SELECT
     mr.id AS id,
     mr.status AS status,
+    mr.email_address AS resource_email,
+    COALESCE(binding.binding_address, '') AS binding_address,
+    COALESCE(binding.status, '') AS binding_status,
+    COALESCE(binding.bound_display, '') AS bound_display,
+    COALESCE(binding.account_email, '') AS binding_account_email,
+    EXISTS (
+        SELECT 1
+        FROM domain_resources AS binding_domain
+        WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+          AND binding_domain.purpose = 'binding'
+          AND binding_domain.status = 'normal'
+    ) AS binding_domain_ready,
     SHA2(CONCAT_WS(
         CHAR(0),
         mr.status,
@@ -74,7 +92,10 @@ SELECT
         mr.password,
         mr.client_id,
         mr.refresh_token,
-        COALESCE(binding.binding_address, '')
+        COALESCE(binding.account_email, ''),
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
     ), 256) AS resource_signature
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_binding_mailboxes AS binding
@@ -148,6 +169,14 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 			schedule.BlockedResourceSignature,
 			resource.Signature,
 			schedule.LastSafeError,
+			microsoftAliasBindingReady(
+				resource.BindingStatus,
+				resource.BindingAddress,
+				resource.BoundDisplay,
+				resource.BindingAccount,
+				resource.ResourceEmail,
+				resource.BindingDomainReady,
+			),
 		)
 		if !canWake {
 			return nil, mailapp.ErrMicrosoftAliasSchedulePaused

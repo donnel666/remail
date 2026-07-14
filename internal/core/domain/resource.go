@@ -255,6 +255,41 @@ func (r *MicrosoftResource) InvalidateMicrosoftIdentity(now time.Time) error {
 	return nil
 }
 
+// InvalidateMicrosoftAccountIdentity advances the validation generation after
+// the Microsoft account email changes and removes every credential that belongs
+// to the previous account. A later explicit credential replacement may install
+// a complete new set, but an email-only PATCH must never try the old account's
+// password or refresh token against the new identity.
+func (r *MicrosoftResource) InvalidateMicrosoftAccountIdentity(now time.Time) error {
+	if err := r.InvalidateMicrosoftIdentity(now); err != nil {
+		return err
+	}
+	r.Password = ""
+	r.ClientID = ""
+	r.RefreshToken = ""
+	return nil
+}
+
+// InvalidateMicrosoftBinding advances the validation generation when the
+// recovery-mailbox input changes. OAuth credentials remain intact, but an
+// in-flight worker must no longer be allowed to commit facts collected against
+// the previous binding relationship.
+func (r *MicrosoftResource) InvalidateMicrosoftBinding(now time.Time) error {
+	if r.Status == MicrosoftStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.CredentialRevision == 0 {
+		r.CredentialRevision = 1
+	}
+	r.CredentialRevision++
+	r.CredentialUpdatedAt = now.UTC()
+	r.Status = MicrosoftStatusPending
+	r.GraphAvailable = false
+	r.QualityScore = 0
+	r.LastSafeError = ""
+	return nil
+}
+
 // ReplaceCredentialsAdmin replaces the write-only credential set as one
 // logical value. A Microsoft client ID and refresh token are either both
 // configured or both omitted.

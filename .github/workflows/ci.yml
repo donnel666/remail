@@ -75,7 +75,7 @@ jobs:
           - shard: core
             packages: ./internal/core/... ./internal/iam/... ./internal/mailtransport/...
           - shard: services
-            packages: ./api/... ./cmd/benchseed/... ./internal/alloc/... ./internal/billing/... ./internal/governance/... ./internal/mailmatch/... ./internal/openapi/... ./internal/platform/... ./internal/proxy/... ./internal/trade/...
+            packages: ./api/... ./cmd/benchseed/... ./cmd/msrecovery/... ./internal/alloc/... ./internal/billing/... ./internal/governance/... ./internal/mailmatch/... ./internal/openapi/... ./internal/platform/... ./internal/proxy/... ./internal/trade/...
 
     steps:
       - uses: actions/checkout@v4
@@ -386,6 +386,7 @@ jobs:
         run: |
           mkdir -p dist/remail
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-msrecovery ./cmd/msrecovery
           cp -r migrations dist/remail/migrations
           cp deploy/compose.yml deploy/nginx.conf dist/remail/
           tar -czf "dist/remail-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C dist remail

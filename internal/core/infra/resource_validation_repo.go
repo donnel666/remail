@@ -112,8 +112,9 @@ func (m *ResourceValidationModel) toDomain() *domain.ResourceValidation {
 }
 
 type ResourceValidationRepo struct {
-	db            *gorm.DB
-	operationLogs *governanceinfra.OperationLogRepo
+	db                     *gorm.DB
+	operationLogs          *governanceinfra.OperationLogRepo
+	microsoftBindingCommit coreapp.MicrosoftValidationBindingCommitPort
 }
 
 const (
@@ -125,6 +126,15 @@ func NewResourceValidationRepo(db *gorm.DB) *ResourceValidationRepo {
 	return &ResourceValidationRepo{
 		db:            db,
 		operationLogs: governanceinfra.NewOperationLogRepo(db),
+	}
+}
+
+// SetMicrosoftValidationBindingCommitPort installs the MailTransport-owned
+// writer used to commit recovery-mailbox facts. The writer is called only from
+// caller-owned, fenced validation progress/result transactions.
+func (r *ResourceValidationRepo) SetMicrosoftValidationBindingCommitPort(port coreapp.MicrosoftValidationBindingCommitPort) {
+	if r != nil {
+		r.microsoftBindingCommit = port
 	}
 }
 
@@ -706,9 +716,54 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 	now := time.Now().UTC()
 	exhausted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var hint ResourceValidationModel
+		if err := tx.Select("id, resource_id, resource_type").Where("id = ?", id).Take(&hint).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrInvalidResourceStatus
+			}
+			return fmt.Errorf("load resource validation retry lock hint: %w", err)
+		}
+
+		var root EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ?", hint.ResourceID, hint.ResourceType).
+			First(&root).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock resource root for validation retry: %w", err)
+		}
+		switch hint.ResourceType {
+		case string(domain.ResourceTypeMicrosoft):
+			var resource MicrosoftResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, hint.ResourceID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return domain.ErrResourceNotFound
+				}
+				return fmt.Errorf("lock microsoft resource for validation retry: %w", err)
+			}
+		case string(domain.ResourceTypeDomain):
+			var resource DomainResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, hint.ResourceID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return domain.ErrResourceNotFound
+				}
+				return fmt.Errorf("lock domain resource for validation retry: %w", err)
+			}
+		default:
+			return domain.ErrInvalidResourceType
+		}
+
 		var job ResourceValidationModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ? AND claim_token = ?", id, string(domain.ResourceValidationRunning), claimToken).
+			Where(
+				"id = ? AND resource_id = ? AND resource_type = ? AND status = ? AND claim_token = ?",
+				id,
+				hint.ResourceID,
+				hint.ResourceType,
+				string(domain.ResourceValidationRunning),
+				claimToken,
+			).
 			First(&job).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -746,9 +801,10 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 			// (never abnormal, endlessly re-validated). Mark the resource abnormal
 			// in the same transaction so it reaches a terminal state. Branch by
 			// resource type so both Microsoft and domain resources are covered.
+			resourceChanged := false
 			switch job.ResourceType {
 			case string(domain.ResourceTypeMicrosoft):
-				if err := tx.Model(&MicrosoftResourceModel{}).
+				updated := tx.Model(&MicrosoftResourceModel{}).
 					Where("id = ? AND status NOT IN ?", job.ResourceID,
 						[]string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)}).
 					Updates(map[string]interface{}{
@@ -756,19 +812,28 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 						"quality_score":   validationQualityScore(false),
 						"last_safe_error": safeValidationMessage(safeError),
 						"updated_at":      now,
-					}).Error; err != nil {
-					return fmt.Errorf("mark microsoft resource abnormal on validation exhaustion: %w", err)
+					})
+				if updated.Error != nil {
+					return fmt.Errorf("mark microsoft resource abnormal on validation exhaustion: %w", updated.Error)
 				}
+				resourceChanged = updated.RowsAffected > 0
 			case string(domain.ResourceTypeDomain):
-				if err := tx.Model(&DomainResourceModel{}).
+				updated := tx.Model(&DomainResourceModel{}).
 					Where("id = ? AND status NOT IN ?", job.ResourceID,
 						[]string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)}).
 					Updates(map[string]interface{}{
 						"status":          string(domain.DomainStatusAbnormal),
 						"last_safe_error": safeValidationMessage(safeError),
 						"updated_at":      now,
-					}).Error; err != nil {
-					return fmt.Errorf("mark domain resource abnormal on validation exhaustion: %w", err)
+					})
+				if updated.Error != nil {
+					return fmt.Errorf("mark domain resource abnormal on validation exhaustion: %w", updated.Error)
+				}
+				resourceChanged = updated.RowsAffected > 0
+			}
+			if resourceChanged {
+				if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+					return err
 				}
 			}
 			return createSystemLogInTx(ctx, tx, &governancedomain.SystemLog{
@@ -787,12 +852,7 @@ func (r *ResourceValidationRepo) MarkRetryableFailure(ctx context.Context, id ui
 	return exhausted, err
 }
 
-func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
-	clientID = strings.TrimSpace(clientID)
-	refreshToken = strings.TrimSpace(refreshToken)
-	if clientID == "" && refreshToken == "" {
-		return nil
-	}
+func (r *ResourceValidationRepo) SaveMicrosoftProgress(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult) error {
 	stale := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		root, ms, job, err := lockMicrosoftValidationStateTx(tx, jobID, resourceID, claimToken)
@@ -807,41 +867,62 @@ func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, j
 			return finishStaleMicrosoftValidationTx(tx, job, now)
 		}
 
+		bindingChanged, err := r.commitMicrosoftValidationBindingTx(ctx, tx, root, ms, result)
+		if errors.Is(err, coreapp.ErrValidationResultStale) {
+			stale = true
+			return finishStaleMicrosoftValidationTx(tx, job, now)
+		}
+		if err != nil {
+			return err
+		}
+
 		updates := map[string]any{}
+		clientID := ""
+		refreshToken := ""
+		if result.CredentialsAuthoritative {
+			clientID = strings.TrimSpace(result.ClientID)
+			refreshToken = strings.TrimSpace(result.RefreshToken)
+		}
 		if clientID != "" && clientID != ms.ClientID {
 			updates["client_id"] = clientID
 		}
 		if refreshToken != "" && refreshToken != ms.RefreshToken {
 			updates["refresh_token"] = refreshToken
 		}
-		if len(updates) == 0 {
-			return nil
+		credentialsChanged := len(updates) > 0
+		if credentialsChanged {
+			nextRevision := ms.CredentialRevision + 1
+			updates["credential_revision"] = nextRevision
+			updates["credential_updated_at"] = now
+			updates["token_last_refreshed_at"] = now
+			updates["token_last_request_id"] = job.RequestID
+			updates["updated_at"] = now
+			updated := tx.Model(&MicrosoftResourceModel{}).
+				Where("id = ? AND credential_revision = ? AND status NOT IN ?", resourceID, ms.CredentialRevision, []string{
+					string(domain.MicrosoftStatusDeleted),
+					string(domain.MicrosoftStatusDisabled),
+				}).
+				Updates(updates)
+			if updated.Error != nil {
+				return fmt.Errorf("save microsoft validation progress credentials: %w", updated.Error)
+			}
+			if updated.RowsAffected == 0 {
+				return domain.ErrResourceVersionConflict
+			}
+			jobUpdate := tx.Model(&ResourceValidationModel{}).
+				Where("id = ? AND status = ? AND claim_token = ?", job.ID, string(domain.ResourceValidationRunning), job.ClaimToken).
+				Update("expected_credential_revision", nextRevision)
+			if jobUpdate.Error != nil {
+				return fmt.Errorf("advance validation credential revision: %w", jobUpdate.Error)
+			}
+			if jobUpdate.RowsAffected == 0 {
+				return domain.ErrInvalidResourceStatus
+			}
 		}
-		nextRevision := ms.CredentialRevision + 1
-		updates["credential_revision"] = nextRevision
-		updates["credential_updated_at"] = now
-		updates["token_last_refreshed_at"] = now
-		updates["token_last_request_id"] = job.RequestID
-		updates["updated_at"] = now
-		result := tx.Model(&MicrosoftResourceModel{}).
-			Where("id = ? AND credential_revision = ? AND status NOT IN ?", resourceID, ms.CredentialRevision, []string{
-				string(domain.MicrosoftStatusDeleted),
-				string(domain.MicrosoftStatusDisabled),
-			}).
-			Updates(updates)
-		if result.Error != nil {
-			return fmt.Errorf("save refreshed microsoft credentials: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return domain.ErrResourceVersionConflict
-		}
-		if err := tx.Model(&ResourceValidationModel{}).
-			Where("id = ? AND status = ? AND claim_token = ?", job.ID, string(domain.ResourceValidationRunning), job.ClaimToken).
-			Update("expected_credential_revision", nextRevision).Error; err != nil {
-			return fmt.Errorf("advance validation credential revision: %w", err)
-		}
-		if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
-			return err
+		if bindingChanged || credentialsChanged {
+			if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -854,8 +935,53 @@ func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, j
 	return nil
 }
 
+// SaveMicrosoftCredentials is kept as a narrow compatibility wrapper for
+// callers that only persist token rotation. New validation code must use
+// SaveMicrosoftProgress so binding facts and credentials share one fence and
+// one root-version advance.
+func (r *ResourceValidationRepo) SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
+	if strings.TrimSpace(clientID) == "" && strings.TrimSpace(refreshToken) == "" {
+		return nil
+	}
+	return r.SaveMicrosoftProgress(ctx, jobID, resourceID, claimToken, coreapp.MicrosoftValidationResult{
+		ClientID:                 clientID,
+		RefreshToken:             refreshToken,
+		CredentialsAuthoritative: true,
+	})
+}
+
+func (r *ResourceValidationRepo) commitMicrosoftValidationBindingTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	root *EmailResourceModel,
+	ms *MicrosoftResourceModel,
+	result coreapp.MicrosoftValidationResult,
+) (bool, error) {
+	if result.RecoveredBinding == nil && result.BindingObservation == nil {
+		return false, nil
+	}
+	if r.microsoftBindingCommit == nil || root == nil || ms == nil {
+		return false, domain.ErrResourceDependency
+	}
+	changed, err := r.microsoftBindingCommit.CommitValidationBinding(
+		platform.WithGormTx(ctx, tx.WithContext(ctx)),
+		coreapp.MicrosoftValidationBindingCommand{
+			ResourceID:         root.ID,
+			OwnerUserID:        root.OwnerUserID,
+			AccountEmail:       ms.EmailAddress,
+			RecoveredBinding:   result.RecoveredBinding,
+			BindingObservation: result.BindingObservation,
+		},
+	)
+	if err != nil {
+		return false, fmt.Errorf("commit microsoft validation binding: %w", err)
+	}
+	return changed, nil
+}
+
 func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {
 	stale := false
+	bindingRejected := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		root, ms, job, err := lockMicrosoftValidationStateTx(tx, jobID, resourceID, claimToken)
@@ -878,6 +1004,24 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 			return markValidationJobFailedTx(tx, job.ID, job.ClaimToken, "Resource status does not allow validation.", now)
 		}
 
+		_, commitErr := r.commitMicrosoftValidationBindingTx(ctx, tx, root, ms, result)
+		if errors.Is(commitErr, coreapp.ErrValidationBindingRejected) {
+			bindingRejected = true
+			result.Valid = false
+			result.Category = "binding"
+			result.SafeMessage = coreapp.MicrosoftValidationBindingRejectedMessage
+			systemLog = rejectedMicrosoftBindingValidationSystemLog(job)
+		} else if errors.Is(commitErr, coreapp.ErrValidationResultStale) {
+			stale = true
+			if err := finishStaleMicrosoftValidationTx(tx, job, now); err != nil {
+				return err
+			}
+			return createSystemLogInTx(ctx, tx, staleValidationSystemLog(systemLog))
+		}
+		if commitErr != nil && !bindingRejected {
+			return commitErr
+		}
+
 		safeMessage := safeValidationMessage(result.SafeMessage)
 		nextStatus := string(domain.MicrosoftStatusAbnormal)
 		jobStatus := string(domain.ResourceValidationFailed)
@@ -894,8 +1038,8 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 			"last_safe_error": safeMessage,
 			"updated_at":      now,
 		}
-		if result.Valid {
-			credentialsChanged := false
+		credentialsChanged := false
+		if result.Valid || result.CredentialsAuthoritative {
 			if value := strings.TrimSpace(result.ClientID); value != "" && value != ms.ClientID {
 				updates["client_id"] = value
 				credentialsChanged = true
@@ -904,16 +1048,18 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 				updates["refresh_token"] = value
 				credentialsChanged = true
 			}
+		}
+		if result.Valid {
 			if result.RTExpireAt != nil {
 				updates["rt_expire_at"] = result.RTExpireAt
 			}
 			updates["graph_available"] = result.GraphAvailable
-			if credentialsChanged {
-				updates["credential_revision"] = ms.CredentialRevision + 1
-				updates["credential_updated_at"] = now
-				updates["token_last_refreshed_at"] = now
-				updates["token_last_request_id"] = job.RequestID
-			}
+		}
+		if credentialsChanged {
+			updates["credential_revision"] = ms.CredentialRevision + 1
+			updates["credential_updated_at"] = now
+			updates["token_last_refreshed_at"] = now
+			updates["token_last_request_id"] = job.RequestID
 		}
 		updated := tx.Model(&MicrosoftResourceModel{}).
 			Where("id = ? AND credential_revision = ? AND status <> ?", resourceID, ms.CredentialRevision, string(domain.MicrosoftStatusDeleted)).
@@ -938,28 +1084,24 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, jobID
 	if stale {
 		return coreapp.ErrValidationResultStale
 	}
+	if bindingRejected {
+		return coreapp.ErrValidationBindingRejected
+	}
 	return nil
 }
 
 func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.DomainValidationResult, systemLog *governancedomain.SystemLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		if err := lockRunningValidationJob(tx, jobID, claimToken); err != nil {
-			return err
-		}
-		var dr DomainResourceModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&dr, resourceID).Error
+		_, dr, job, err := lockDomainValidationStateTx(tx, jobID, resourceID, claimToken)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
-			}
-			return fmt.Errorf("lock domain resource for validation: %w", err)
+			return err
 		}
 		switch domain.MailDomainStatus(dr.Status) {
 		case domain.DomainStatusDeleted:
-			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource not found.", now)
+			return markValidationJobFailedTx(tx, job.ID, job.ClaimToken, "Resource not found.", now)
 		case domain.DomainStatusDisabled:
-			return markValidationJobFailedTx(tx, jobID, claimToken, "Resource status does not allow validation.", now)
+			return markValidationJobFailedTx(tx, job.ID, job.ClaimToken, "Resource status does not allow validation.", now)
 		}
 
 		safeMessage := safeValidationMessage(result.SafeMessage)
@@ -979,7 +1121,7 @@ func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, jobID ui
 			}).Error; err != nil {
 			return fmt.Errorf("apply domain validation result: %w", err)
 		}
-		if err := finishValidationJobTx(tx, jobID, claimToken, jobStatus, safeMessage, now); err != nil {
+		if err := finishValidationJobTx(tx, job.ID, job.ClaimToken, jobStatus, safeMessage, now); err != nil {
 			return err
 		}
 		return createSystemLogInTx(ctx, tx, systemLog)
@@ -1006,20 +1148,6 @@ func (r *ResourceValidationRepo) MarkDispatchFailed(ctx context.Context, id uint
 		})
 	if result.Error != nil {
 		return fmt.Errorf("mark resource validation dispatch failed: %w", result.Error)
-	}
-	return nil
-}
-
-func lockRunningValidationJob(tx *gorm.DB, id uint, claimToken string) error {
-	var job ResourceValidationModel
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND status = ? AND claim_token = ?", id, string(domain.ResourceValidationRunning), claimToken).
-		First(&job).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.ErrInvalidResourceStatus
-		}
-		return fmt.Errorf("lock resource validation job: %w", err)
 	}
 	return nil
 }
@@ -1068,6 +1196,50 @@ func lockMicrosoftValidationStateTx(tx *gorm.DB, jobID uint, resourceID uint, cl
 	return &root, &ms, &job, nil
 }
 
+// lockDomainValidationStateTx follows the same global mutation order as
+// validation creation and Microsoft result commits: root, subtype, then job.
+// Besides avoiding a subtype/job deadlock, binding the job to the supplied
+// resource prevents one worker claim from applying a result to another domain.
+func lockDomainValidationStateTx(tx *gorm.DB, jobID uint, resourceID uint, claimToken string) (*EmailResourceModel, *DomainResourceModel, *ResourceValidationModel, error) {
+	var root EmailResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND type = ?", resourceID, string(domain.ResourceTypeDomain)).
+		First(&root).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrResourceNotFound
+		}
+		return nil, nil, nil, fmt.Errorf("lock domain resource root for validation: %w", err)
+	}
+
+	var dr DomainResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", resourceID).
+		First(&dr).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrResourceNotFound
+		}
+		return nil, nil, nil, fmt.Errorf("lock domain resource for validation: %w", err)
+	}
+
+	var job ResourceValidationModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where(
+			"id = ? AND resource_id = ? AND resource_type = ? AND status = ? AND claim_token = ?",
+			jobID,
+			resourceID,
+			string(domain.ResourceTypeDomain),
+			string(domain.ResourceValidationRunning),
+			claimToken,
+		).
+		First(&job).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, domain.ErrInvalidResourceStatus
+		}
+		return nil, nil, nil, fmt.Errorf("lock domain validation job: %w", err)
+	}
+	return &root, &dr, &job, nil
+}
+
 func validationJobMatchesCredentialRevision(job *ResourceValidationModel, ms *MicrosoftResourceModel) bool {
 	return job != nil && ms != nil &&
 		job.ExpectedCredentialRevision > 0 &&
@@ -1098,6 +1270,22 @@ func staleValidationSystemLog(log *governancedomain.SystemLog) *governancedomain
 	copyLog.Message = "Stale resource validation result was discarded."
 	copyLog.Detail = "Resource credentials changed before the worker committed its result."
 	return &copyLog
+}
+
+func rejectedMicrosoftBindingValidationSystemLog(job *ResourceValidationModel) *governancedomain.SystemLog {
+	if job == nil {
+		return nil
+	}
+	return &governancedomain.SystemLog{
+		Level:     "warning",
+		Module:    "core",
+		EventType: "resource.validation_failed",
+		RequestID: job.RequestID,
+		BizType:   "resource",
+		BizID:     fmt.Sprintf("%d", job.ResourceID),
+		Message:   "Resource validation failed.",
+		Detail:    "binding: " + coreapp.MicrosoftValidationBindingRejectedMessage,
+	}
 }
 
 func bumpResourceVersionTx(tx *gorm.DB, resourceID uint, now time.Time) error {

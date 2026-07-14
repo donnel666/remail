@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,8 +59,10 @@ func (p adminCommandOwnerPort) ValidateTargetOwner(_ context.Context, id uint) (
 }
 
 type adminCommandBindingPort struct {
-	commands []coreapp.AdminBindingCommand
-	err      error
+	commands                     []coreapp.AdminBindingCommand
+	err                          error
+	requireValidationBeforeWrite bool
+	observedValidationID         uint
 }
 
 type adminCommandBindingQueryPort map[uint]coreapp.AdminBindingSummary
@@ -78,8 +81,20 @@ func (p adminCommandBindingQueryPort) GetByResourceIDs(ctx context.Context, ids 
 }
 
 func (p *adminCommandBindingPort) ReplaceAdminInput(ctx context.Context, command coreapp.AdminBindingCommand) error {
-	if _, ok := platform.GormTxFromContext(ctx); !ok {
+	tx, ok := platform.GormTxFromContext(ctx)
+	if !ok {
 		return errors.New("binding command is not in the core transaction")
+	}
+	if p.requireValidationBeforeWrite {
+		var job ResourceValidationModel
+		if err := tx.Where(
+			"resource_id = ? AND status IN ?",
+			command.ResourceID,
+			[]string{string(domain.ResourceValidationQueued), string(domain.ResourceValidationRunning)},
+		).Order("id DESC").Take(&job).Error; err != nil {
+			return fmt.Errorf("validation job must be created before binding write: %w", err)
+		}
+		p.observedValidationID = job.ID
 	}
 	p.commands = append(p.commands, command)
 	return p.err
@@ -133,7 +148,7 @@ func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testi
 	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
 	service := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
 	owners := adminCommandOwners()
-	binding := &adminCommandBindingPort{}
+	binding := &adminCommandBindingPort{requireValidationBeforeWrite: true}
 	guard := &adminCommandAllocationGuard{}
 	service.SetPorts(owners, adminCommandBindingQueryPort{}, binding, guard)
 	insertAdminCommandUsers(t, db)
@@ -179,6 +194,8 @@ func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testi
 	require.NotNil(t, result.ValidationTask)
 	require.Equal(t, root.ID, result.ValidationTask.ResourceID)
 	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
+	require.Equal(t, result.ValidationTask.ValidationID, binding.observedValidationID,
+		"administrator edits must acquire/supersede the validation job before writing the binding")
 	require.True(t, guard.called)
 	require.Len(t, binding.commands, 1)
 	require.True(t, binding.commands[0].BindingAddressSet)
@@ -583,6 +600,73 @@ func TestAdminResourceCredentialEditSupersedesOlderActiveValidationMySQL(t *test
 	var oldStored, newStored ResourceValidationModel
 	require.NoError(t, db.First(&oldStored, oldJob.ID).Error)
 	require.Equal(t, string(domain.ResourceValidationFailed), oldStored.Status)
+	require.Contains(t, oldStored.LastSafeError, "superseded")
+	require.NoError(t, db.First(&newStored, result.ValidationTask.ValidationID).Error)
+	require.Equal(t, string(domain.ResourceValidationQueued), newStored.Status)
+	require.EqualValues(t, 2, newStored.ExpectedCredentialRevision)
+}
+
+func TestAdminResourceBindingEditSupersedesOlderRunningValidationMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	adminRepo := NewAdminResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
+	service := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
+	bindingWriter := &adminCommandBindingPort{}
+	insertAdminCommandUsers(t, db)
+
+	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	resource := &domain.MicrosoftResource{
+		EmailAddress: "binding-supersede@outlook.com", Password: "password", ClientID: "client", RefreshToken: "refresh", Status: domain.MicrosoftStatusNormal,
+		GraphAvailable: true, QualityScore: 100,
+	}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+	oldJob := &domain.ResourceValidation{
+		ResourceID: root.ID, ResourceType: domain.ResourceTypeMicrosoft, OwnerUserID: 1,
+		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
+	}
+	created, err := validationRepo.CreateWithLog(context.Background(), oldJob, nil)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("id = ?", oldJob.ID).Updates(map[string]any{
+		"status":      string(domain.ResourceValidationRunning),
+		"claim_token": "binding-supersede-old-claim",
+	}).Error)
+
+	service.SetPorts(
+		adminCommandOwners(),
+		adminCommandBindingQueryPort{root.ID: {
+			ResourceID: root.ID, EmailAddress: "old-binding@example.net", Status: "pending",
+		}},
+		bindingWriter,
+		&adminCommandAllocationGuard{},
+	)
+	newBinding := "new-binding@example.net"
+	result, err := service.Edit(context.Background(), coreapp.AdminMicrosoftEditCommand{
+		ResourceID: root.ID, Version: root.Version,
+		BindingAddressSet: true, BindingAddress: &newBinding,
+		OperatorUserID: 9, IdempotencyKey: "admin-binding-supersede", RequestID: "req-binding-supersede", Path: "/v1/admin/resources/:resourceId",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.ValidationTask)
+	require.NotEqual(t, oldJob.ID, result.ValidationTask.ValidationID)
+	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
+	require.Len(t, bindingWriter.commands, 1)
+
+	var stored MicrosoftResourceModel
+	require.NoError(t, db.First(&stored, root.ID).Error)
+	require.EqualValues(t, 2, stored.CredentialRevision)
+	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
+	require.False(t, stored.GraphAvailable)
+	require.Equal(t, 0, stored.QualityScore)
+	require.Equal(t, "client", stored.ClientID)
+	require.Equal(t, "refresh", stored.RefreshToken)
+
+	var oldStored, newStored ResourceValidationModel
+	require.NoError(t, db.First(&oldStored, oldJob.ID).Error)
+	require.Equal(t, string(domain.ResourceValidationFailed), oldStored.Status)
+	require.Empty(t, oldStored.ClaimToken)
 	require.Contains(t, oldStored.LastSafeError, "superseded")
 	require.NoError(t, db.First(&newStored, result.ValidationTask.ValidationID).Error)
 	require.Equal(t, string(domain.ResourceValidationQueued), newStored.Status)

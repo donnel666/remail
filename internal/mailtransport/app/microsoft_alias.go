@@ -41,6 +41,10 @@ const (
 	// is on an external (non-binding) domain: we cannot receive OTP codes there,
 	// so explicit-alias creation can never succeed and the schedule is skipped.
 	MicrosoftAliasExternalRecoveryMessage = "Recovery mailbox is external; explicit-alias creation is skipped."
+	// MicrosoftAliasBindingUnresolvedMessage marks accounts whose recovery
+	// mailbox is absent, unverified, empty, or masked. Alias creation must wait
+	// until validation has established a concrete verified binding.
+	MicrosoftAliasBindingUnresolvedMessage = "Recovery mailbox binding is not verified; explicit-alias creation is paused."
 )
 
 var microsoftAliasQuotaLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -110,7 +114,8 @@ type MicrosoftAliasScheduleStore interface {
 	EnsureScheduleForResource(ctx context.Context, resourceID uint, now time.Time) (bool, error)
 	FindDispatchable(ctx context.Context, limit int, now, queuedStaleBefore, runningStaleBefore time.Time) ([]MicrosoftAliasTask, error)
 	Claim(ctx context.Context, task MicrosoftAliasTask, now time.Time) (*MicrosoftAliasAccount, bool, error)
-	CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, error)
+	CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, string, error)
+	ReloadEligibleAccount(ctx context.Context, resourceID uint, claimToken string) (*MicrosoftAliasAccount, bool, string, error)
 	Reserve(ctx context.Context, resourceID uint, claimToken string, candidates []string, yearStart, yearEnd, weekStart, weekEnd, now time.Time) ([]MicrosoftAliasAttempt, MicrosoftAliasUsage, error)
 	Usage(ctx context.Context, resourceID uint, yearStart, yearEnd, weekStart, weekEnd time.Time) (MicrosoftAliasUsage, error)
 	Complete(ctx context.Context, resourceID uint, claimToken string, outcomes []MicrosoftAliasAttemptOutcome, completedAt time.Time) error
@@ -313,6 +318,17 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
 		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
 	}
+	currentAccount, eligible, ineligibleMessage, err := s.store.ReloadEligibleAccount(ctx, task.ResourceID, account.ClaimToken)
+	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("recheck microsoft alias eligibility before reservation: %w", err)
+	}
+	if !eligible || currentAccount == nil {
+		return s.pauseIneligibleAttempts(ctx, task.ResourceID, account.ClaimToken, nil, ineligibleMessage, s.now().UTC())
+	}
+	account = currentAccount
 
 	candidates, err := s.creator.GenerateMicrosoftAliasCandidates(MicrosoftAliasWeeklyLimit)
 	if err != nil {
@@ -350,16 +366,6 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	for _, attempt := range attempts {
 		reservedAliases = append(reservedAliases, attempt.Alias)
 	}
-	eligible, err := s.store.CheckEligibility(ctx, task.ResourceID, account.ClaimToken)
-	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("recheck microsoft alias eligibility: %w", err)
-	}
-	if !eligible {
-		return s.pauseIneligibleAttempts(ctx, task.ResourceID, account.ClaimToken, attempts, s.now().UTC())
-	}
 
 	releaseRemote, err := s.acquireRemoteExecution(ctx)
 	if err != nil {
@@ -369,7 +375,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		}
 		return s.completeAliasResult(ctx, task, account, attempts, result)
 	}
-	eligible, err = s.store.CheckEligibility(ctx, task.ResourceID, account.ClaimToken)
+	currentAccount, eligible, ineligibleMessage, err = s.store.ReloadEligibleAccount(ctx, task.ResourceID, account.ClaimToken)
 	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
 		releaseRemote()
 		return nil
@@ -378,10 +384,11 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		releaseRemote()
 		return fmt.Errorf("recheck microsoft alias eligibility before remote request: %w", err)
 	}
-	if !eligible {
+	if !eligible || currentAccount == nil {
 		releaseRemote()
-		return s.pauseIneligibleAttempts(ctx, task.ResourceID, account.ClaimToken, attempts, s.now().UTC())
+		return s.pauseIneligibleAttempts(ctx, task.ResourceID, account.ClaimToken, attempts, ineligibleMessage, s.now().UTC())
 	}
+	account = currentAccount
 
 	result, createErr := s.creator.CreateMicrosoftAliases(ctx, MicrosoftAliasCreationRequest{
 		ResourceID:     account.ResourceID,
@@ -512,8 +519,13 @@ func (s *MicrosoftAliasService) pauseIneligibleAttempts(
 	resourceID uint,
 	claimToken string,
 	attempts []MicrosoftAliasAttempt,
+	safeMessage string,
 	completedAt time.Time,
 ) error {
+	safeMessage = strings.TrimSpace(safeMessage)
+	if safeMessage == "" {
+		safeMessage = MicrosoftAliasResourceNotNormalMessage
+	}
 	outcomes := make([]MicrosoftAliasAttemptOutcome, 0, len(attempts))
 	for _, attempt := range attempts {
 		status := MicrosoftAliasAttemptFailed
@@ -524,7 +536,7 @@ func (s *MicrosoftAliasService) pauseIneligibleAttempts(
 			AttemptID:   attempt.ID,
 			Status:      status,
 			Category:    "not_eligible",
-			SafeMessage: MicrosoftAliasResourceNotNormalMessage,
+			SafeMessage: safeMessage,
 		})
 	}
 	if len(outcomes) > 0 {
@@ -534,7 +546,7 @@ func (s *MicrosoftAliasService) pauseIneligibleAttempts(
 			return fmt.Errorf("complete ineligible microsoft alias attempts: %w", err)
 		}
 	}
-	return ignoreStaleAliasClaim(s.store.Pause(ctx, resourceID, claimToken, MicrosoftAliasResourceNotNormalMessage))
+	return ignoreStaleAliasClaim(s.store.Pause(ctx, resourceID, claimToken, safeMessage))
 }
 
 func (s *MicrosoftAliasService) acquireRemoteExecution(ctx context.Context) (func(), error) {

@@ -954,9 +954,11 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 
 		changedFields := make([]string, 0, 7)
 		identityChanged := false
+		accountEmailChanged := false
 		if normalizedEmail != nil && resource.EmailAddress != *normalizedEmail {
 			resource.EmailAddress = *normalizedEmail
 			identityChanged = true
+			accountEmailChanged = true
 			changedFields = append(changedFields, "emailAddress")
 		}
 
@@ -1023,8 +1025,16 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 				return err
 			}
 			changedFields = append(changedFields, "credentials")
+		} else if accountEmailChanged {
+			if err := resource.InvalidateMicrosoftAccountIdentity(now); err != nil {
+				return err
+			}
 		} else if identityChanged {
 			if err := resource.InvalidateMicrosoftIdentity(now); err != nil {
+				return err
+			}
+		} else if bindingAddressChanged {
+			if err := resource.InvalidateMicrosoftBinding(now); err != nil {
 				return err
 			}
 		}
@@ -1048,6 +1058,18 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, command.Version); err != nil {
 			return err
 		}
+		// Keep the cross-context mutation order aligned with validation result
+		// commits: resource root -> Microsoft subtype -> validation job -> binding.
+		// Both writes still share this caller-owned transaction, so a later binding
+		// or audit failure rolls the saved resource and queued job back together.
+		if validationRequired {
+			task, created, err := s.createValidationTx(txCtx, root, resource, command.RequestID, command.Path)
+			if err != nil {
+				return err
+			}
+			result.ValidationTask = task
+			shouldSchedule = created
+		}
 		if identityChanged || bindingAddressChanged {
 			if s.bindings == nil {
 				return domain.ErrResourceDependency
@@ -1061,14 +1083,6 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 			}); err != nil {
 				return err
 			}
-		}
-		if validationRequired {
-			task, created, err := s.createValidationTx(txCtx, root, resource, command.RequestID, command.Path)
-			if err != nil {
-				return err
-			}
-			result.ValidationTask = task
-			shouldSchedule = created
 		}
 		if err := s.logs.Create(txCtx, adminResourceOperationLog(
 			command.OperatorUserID,

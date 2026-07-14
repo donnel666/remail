@@ -630,10 +630,24 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 	} else {
 		domains = activeAuxiliaryDomains()
 	}
+	var candidates []string
+	seen := make(map[string]struct{}, len(domains))
 	for _, domain := range domains {
-		if addr := resolveRealMailboxForDomain(ctx, maskedEmail, accountEmail, proxy, domain); addr != "" {
-			return addr
+		addr := strings.ToLower(strings.TrimSpace(resolveRealMailboxForDomain(ctx, maskedEmail, accountEmail, proxy, domain)))
+		if addr == "" {
+			continue
 		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		candidates = append(candidates, addr)
+	}
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	if len(candidates) > 1 {
+		logWarning("辅助邮箱掩码匹配到多个域候选, 保持未解析: account=%s, candidates=%v", accountEmail, firstN(candidates, 5))
 	}
 	return ""
 }
@@ -651,13 +665,7 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 	prefix = regexp.MustCompile(`[^a-z0-9]`).ReplaceAllString(strings.ToLower(prefix), "")
 	accountKey := strings.ToLower(strings.TrimSpace(accountEmail))
 
-	if generated, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedEmail, generated) {
-		logInfo("通过辅助邮箱生成规则匹配真实地址")
-		logDebug("生成规则匹配: account=%s, masked_email=%s, real_mailbox=%s", accountEmail, maskedEmail, generated)
-		return generated
-	}
-
-	if recorded := lookupRecordedMailboxForAccount(accountKey, domain); recorded != "" {
+	if recorded := lookupRecordedMailboxForAccount(accountKey, domain); recorded != "" && mailboxMatchesMasked(maskedEmail, recorded) {
 		logInfo("通过输出记录找到当前账号真实辅助邮箱")
 		logDebug("输出记录匹配: account=%s, real_mailbox=%s", accountEmail, recorded)
 		return recorded
@@ -665,6 +673,7 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 
 	if mask := accountEmailMask(accountEmail); mask != "" {
 		var found string
+		ambiguous := false
 		func() {
 			defer func() {
 				if recover() != nil {
@@ -674,26 +683,31 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 			results := searchMailboxesByContent(ctx, mask, proxy)
 			var candidates []string
 			for _, addr := range results {
-				addr = strings.ToLower(addr)
-				if addr != "" && strings.HasSuffix(addr, "@"+domain) && (prefix == "" || strings.HasPrefix(addr, prefix)) {
+				addr = strings.ToLower(strings.TrimSpace(addr))
+				matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
+				if addr != "" && strings.HasSuffix(addr, "@"+domain) &&
+					(prefix == "" || strings.HasPrefix(addr, prefix)) && matchesFullMask {
 					candidates = append(candidates, addr)
 				}
 			}
-			if len(candidates) > 0 {
-				if len(candidates) > 1 {
-					logWarning("正文掩码匹配到多个邮箱, 使用最新一条: account=%s, mask=%s, candidates=%v", accountEmail, mask, firstN(candidates, 5))
-				}
+			if len(candidates) == 1 {
 				logInfo("通过邮件正文账号掩码找到真实辅助邮箱")
 				logDebug("正文掩码匹配: account=%s, mask=%s, real_mailbox=%s", accountEmail, mask, candidates[0])
 				found = candidates[0]
+			} else if len(candidates) > 1 {
+				logWarning("正文掩码匹配到多个邮箱, 保持未解析: account=%s, mask=%s, candidates=%v", accountEmail, mask, firstN(candidates, 5))
+				ambiguous = true
 			}
 		}()
+		if ambiguous {
+			return ""
+		}
 		if found != "" {
 			return found
 		}
 	}
 
-	if recorded := lookupRecordedMailboxByPrefix(prefix, domain); recorded != "" {
+	if recorded := lookupRecordedMailboxByPrefix(prefix, domain); recorded != "" && mailboxMatchesMasked(maskedEmail, recorded) {
 		logInfo("通过输出记录找到掩码邮箱对应真实地址")
 		logDebug("输出记录前缀匹配: masked_email=%s, real_mailbox=%s", maskedEmail, recorded)
 		return recorded
@@ -702,18 +716,32 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 	results := searchMailboxes(ctx, prefix, proxy)
 	var candidates []string
 	for _, result := range results {
-		addr := strings.ToLower(result)
-		if strings.HasPrefix(addr, prefix) && strings.HasSuffix(addr, "@"+domain) {
+		addr := strings.ToLower(strings.TrimSpace(result))
+		matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
+		if strings.HasPrefix(addr, prefix) && strings.HasSuffix(addr, "@"+domain) && matchesFullMask {
 			candidates = append(candidates, addr)
 		}
 	}
-	if len(candidates) == 1 || (len(candidates) > 1 && len(prefix) >= 4) {
+	if len(candidates) == 1 {
 		logInfo("通过 API 找到掩码邮箱对应真实地址")
 		logDebug("掩码邮箱匹配: masked_email=%s, real_mailbox=%s", maskedEmail, candidates[0])
 		return candidates[0]
 	}
 	if len(candidates) > 1 {
-		logWarning("掩码前缀过短且匹配到多个邮箱: masked_email=%s, candidates=%v", maskedEmail, firstN(candidates, 5))
+		logWarning("掩码邮箱匹配到多个候选, 保持未解析: masked_email=%s, candidates=%v", maskedEmail, firstN(candidates, 5))
+		return ""
+	}
+
+	// Deterministic naming is a useful last-resort candidate, but it is not
+	// stronger than account-associated historical evidence. Returning it only
+	// after the evidence searches prevents a guessed mask match from hiding a
+	// different concrete mailbox already present in the receiving system. The
+	// caller must still prove this candidate through the normal OTP login before
+	// persisting it as verified.
+	if generated, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedEmail, generated) {
+		logInfo("通过辅助邮箱生成规则匹配候选地址")
+		logDebug("生成规则候选: account=%s, masked_email=%s, candidate=%s", accountEmail, maskedEmail, generated)
+		return generated
 	}
 	return ""
 }

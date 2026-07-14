@@ -23,12 +23,24 @@ import (
 const msaclContentSearchWindow = 10 * time.Minute
 
 type MSACLMailboxReader struct {
-	db    *gorm.DB
-	files governanceapp.FilePort
+	db                  *gorm.DB
+	files               governanceapp.FilePort
+	contentSearchWindow time.Duration
 }
 
 func NewMSACLMailboxReader(db *gorm.DB, files governanceapp.FilePort) *MSACLMailboxReader {
-	return &MSACLMailboxReader{db: db, files: files}
+	return NewMSACLMailboxReaderWithContentWindow(db, files, msaclContentSearchWindow)
+}
+
+// NewMSACLMailboxReaderWithContentWindow creates a mailbox reader whose
+// content lookup may inspect older inbound evidence. Callers choose the bounded
+// window explicitly; NewMSACLMailboxReader retains the historical ten-minute
+// default.
+func NewMSACLMailboxReaderWithContentWindow(db *gorm.DB, files governanceapp.FilePort, window time.Duration) *MSACLMailboxReader {
+	if window <= 0 {
+		window = msaclContentSearchWindow
+	}
+	return &MSACLMailboxReader{db: db, files: files, contentSearchWindow: window}
 }
 
 func (r *MSACLMailboxReader) List(ctx context.Context, mailbox string, limit int, fuzzy bool) ([]msacl.EmailObj, error) {
@@ -69,12 +81,26 @@ func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string
 		limit = 50
 	}
 
+	window := r.contentSearchWindow
+	if window <= 0 {
+		window = msaclContentSearchWindow
+	}
+	like := "%" + escapeMSACLLike(content) + "%"
 	var rows []InboundMailModel
-	since := time.Now().UTC().Add(-msaclContentSearchWindow)
+	since := time.Now().UTC().Add(-window)
 	if err := r.db.WithContext(ctx).
 		Model(&InboundMailModel{}).
 		Where("status IN ?", msaclReadableInboundStatuses()).
 		Where("created_at >= ?", since).
+		Where(`(
+			LOWER(body_preview) LIKE ? ESCAPE '!' OR
+			LOWER(subject) LIKE ? ESCAPE '!' OR
+			LOWER(recipient) LIKE ? ESCAPE '!' OR
+			(parsed_at IS NULL AND (
+				LOWER(header_from) LIKE '%microsoft%' OR
+				LOWER(envelope_from) LIKE '%microsoft%'
+			))
+		)`, like, like, like).
 		Order("created_at DESC, id DESC").
 		Limit(limit * 4).
 		Find(&rows).Error; err != nil {
@@ -96,6 +122,15 @@ func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string
 		}
 	}
 	return filtered, nil
+}
+
+func escapeMSACLLike(value string) string {
+	replacer := strings.NewReplacer(
+		`!`, `!!`,
+		`%`, `!%`,
+		`_`, `!_`,
+	)
+	return replacer.Replace(value)
 }
 
 func msaclReadableInboundStatuses() []string {

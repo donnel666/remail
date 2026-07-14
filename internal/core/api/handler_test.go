@@ -1285,9 +1285,13 @@ func (q *mockImportQueue) EnqueueMicrosoftImport(_ context.Context, task coreapp
 }
 
 type mockValidationRepo struct {
-	jobs      map[uint]*coredomain.ResourceValidation
-	resources *mockResourceRepo
-	seq       uint
+	jobs                    map[uint]*coredomain.ResourceValidation
+	resources               *mockResourceRepo
+	savedProgress           []coreapp.MicrosoftValidationResult
+	appliedMicrosoftResults []coreapp.MicrosoftValidationResult
+	saveProgressErr         error
+	applyMicrosoftErr       error
+	seq                     uint
 }
 
 func newMockValidationRepo(resources *mockResourceRepo) *mockValidationRepo {
@@ -1584,21 +1588,25 @@ func (r *mockValidationRepo) MarkRetryableFailure(_ context.Context, id uint, cl
 	return false, nil
 }
 
-func (r *mockValidationRepo) SaveMicrosoftCredentials(_ context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error {
+func (r *mockValidationRepo) SaveMicrosoftProgress(_ context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.MicrosoftValidationResult) error {
 	job := r.jobs[jobID]
 	if job == nil || job.ClaimToken != claimToken {
 		return coredomain.ErrInvalidResourceStatus
 	}
-	if r.resources != nil {
+	if r.saveProgressErr != nil {
+		return r.saveProgressErr
+	}
+	if result.CredentialsAuthoritative && r.resources != nil {
 		if ms := r.resources.microsoft[resourceID]; ms != nil {
-			if strings.TrimSpace(clientID) != "" {
-				ms.ClientID = strings.TrimSpace(clientID)
+			if strings.TrimSpace(result.ClientID) != "" {
+				ms.ClientID = strings.TrimSpace(result.ClientID)
 			}
-			if strings.TrimSpace(refreshToken) != "" {
-				ms.RefreshToken = strings.TrimSpace(refreshToken)
+			if strings.TrimSpace(result.RefreshToken) != "" {
+				ms.RefreshToken = strings.TrimSpace(result.RefreshToken)
 			}
 		}
 	}
+	r.savedProgress = append(r.savedProgress, result)
 	return nil
 }
 
@@ -1607,6 +1615,15 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint,
 	if job == nil || job.ClaimToken != claimToken {
 		return coredomain.ErrResourceNotFound
 	}
+	if r.applyMicrosoftErr != nil && !errors.Is(r.applyMicrosoftErr, coreapp.ErrValidationBindingRejected) {
+		return r.applyMicrosoftErr
+	}
+	if errors.Is(r.applyMicrosoftErr, coreapp.ErrValidationBindingRejected) {
+		result.Valid = false
+		result.Category = "binding"
+		result.SafeMessage = coreapp.MicrosoftValidationBindingRejectedMessage
+	}
+	r.appliedMicrosoftResults = append(r.appliedMicrosoftResults, result)
 	job.ClaimToken = ""
 	if r.resources != nil {
 		ms := r.resources.microsoft[resourceID]
@@ -1628,16 +1645,18 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint,
 			job.UpdatedAt = time.Now()
 			return nil
 		}
-		if result.Valid {
-			ms.Status = coredomain.MicrosoftStatusNormal
-			ms.LastSafeError = ""
-			ms.QualityScore = 100
+		if result.Valid || result.CredentialsAuthoritative {
 			if strings.TrimSpace(result.ClientID) != "" {
 				ms.ClientID = strings.TrimSpace(result.ClientID)
 			}
 			if strings.TrimSpace(result.RefreshToken) != "" {
 				ms.RefreshToken = strings.TrimSpace(result.RefreshToken)
 			}
+		}
+		if result.Valid {
+			ms.Status = coredomain.MicrosoftStatusNormal
+			ms.LastSafeError = ""
+			ms.QualityScore = 100
 			ms.GraphAvailable = result.GraphAvailable
 		} else {
 			ms.Status = coredomain.MicrosoftStatusAbnormal
@@ -1654,7 +1673,7 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, jobID uint,
 		job.LastSafeError = result.SafeMessage
 	}
 	job.UpdatedAt = time.Now()
-	return nil
+	return r.applyMicrosoftErr
 }
 
 func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, jobID uint, resourceID uint, claimToken string, result coreapp.DomainValidationResult, _ *governancedomain.SystemLog) error {
@@ -2532,6 +2551,43 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	require.Equal(t, []uint{root.ID}, aliasTrigger.resourceIDs)
 }
 
+func TestResourceValidationUseCase_RejectedRecoveredBindingIsTerminalAndSkipsAlias(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationRepo.applyMicrosoftErr = coreapp.ErrValidationBindingRejected
+	validationQueue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{
+			Valid:                    true,
+			ClientID:                 "rotated-client",
+			RefreshToken:             "rotated-refresh",
+			CredentialsAuthoritative: true,
+			RecoveredBinding: &coreapp.MicrosoftRecoveredBinding{
+				Address: "occupied@binding.test",
+			},
+		},
+	})
+	aliasTrigger := &validationAliasTrigger{}
+	uc.SetMicrosoftAliasScheduleTrigger(aliasTrigger)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "binding-rejected@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-binding-rejected", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
+	require.Equal(t, coreapp.MicrosoftValidationBindingRejectedMessage, validationRepo.jobs[job.ValidationID].LastSafeError)
+	require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
+	require.Equal(t, coreapp.MicrosoftValidationBindingRejectedMessage, resourceRepo.microsoft[root.ID].LastSafeError)
+	require.Equal(t, "rotated-client", resourceRepo.microsoft[root.ID].ClientID)
+	require.Equal(t, "rotated-refresh", resourceRepo.microsoft[root.ID].RefreshToken)
+	require.Empty(t, aliasTrigger.resourceIDs)
+	require.Len(t, validationRepo.appliedMicrosoftResults, 1)
+	require.False(t, validationRepo.appliedMicrosoftResults[0].Valid)
+}
+
 func TestResourceValidationUseCase_AliasScheduleFailureDoesNotUndoValidation(t *testing.T) {
 	resourceRepo := newMockResourceRepo()
 	validationRepo := newMockValidationRepo(resourceRepo)
@@ -2603,6 +2659,77 @@ func TestResourceValidationUseCase_ProcessMicrosoftAuthTimeoutRetriesWithoutChan
 	require.Equal(t, "Microsoft authorization timed out.", validationRepo.jobs[job.ValidationID].LastSafeError)
 	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
 	require.Empty(t, resourceRepo.microsoft[root.ID].LastSafeError)
+}
+
+func TestResourceValidationUseCase_RetryableMicrosoftResultSavesRecoveryProgressBeforeRetry(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationQueue := &mockValidationQueue{}
+	recovered := &coreapp.MicrosoftRecoveredBinding{Address: "recovered@binding.test"}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{
+			Valid:                    false,
+			Category:                 "auth_timeout",
+			SafeMessage:              "Microsoft authorization timed out.",
+			ClientID:                 "rotated-client",
+			RefreshToken:             "rotated-refresh",
+			CredentialsAuthoritative: true,
+			RecoveredBinding:         recovered,
+			BindingObservation:       &coreapp.MicrosoftBindingObservation{Address: "ordinary@binding.test", Status: "pending"},
+		},
+	})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "retry-progress@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-retry-progress", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.Len(t, validationRepo.savedProgress, 1)
+	require.Equal(t, recovered, validationRepo.savedProgress[0].RecoveredBinding)
+	require.Equal(t, "rotated-client", resourceRepo.microsoft[root.ID].ClientID)
+	require.Equal(t, "rotated-refresh", resourceRepo.microsoft[root.ID].RefreshToken)
+	require.Equal(t, coredomain.ResourceValidationQueued, validationRepo.jobs[job.ValidationID].Status)
+	require.Equal(t, "Microsoft authorization timed out.", validationRepo.jobs[job.ValidationID].LastSafeError)
+}
+
+func TestResourceValidationUseCase_RetryableRecoveredBindingRejectionBecomesTerminal(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationRepo.saveProgressErr = coreapp.ErrValidationBindingRejected
+	validationQueue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{
+			Valid:                    false,
+			Category:                 "request",
+			SafeMessage:              "Microsoft mail service is temporarily unavailable.",
+			ClientID:                 "rotated-client",
+			RefreshToken:             "rotated-refresh",
+			CredentialsAuthoritative: true,
+			RecoveredBinding: &coreapp.MicrosoftRecoveredBinding{
+				Address: "occupied@binding.test",
+			},
+		},
+	})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	ms := &coredomain.MicrosoftResource{EmailAddress: "retry-binding-rejected@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, ms))
+	job, err := uc.Create(context.Background(), root.ID, 1, false, "req-retry-binding-rejected", "/v1/resources/:resourceId/validate")
+	require.NoError(t, err)
+
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, job.ValidationID)))
+	require.Equal(t, coredomain.ResourceValidationFailed, validationRepo.jobs[job.ValidationID].Status)
+	require.Equal(t, coreapp.MicrosoftValidationBindingRejectedMessage, validationRepo.jobs[job.ValidationID].LastSafeError)
+	require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
+	require.Equal(t, coreapp.MicrosoftValidationBindingRejectedMessage, resourceRepo.microsoft[root.ID].LastSafeError)
+	require.Equal(t, "rotated-client", resourceRepo.microsoft[root.ID].ClientID)
+	require.Equal(t, "rotated-refresh", resourceRepo.microsoft[root.ID].RefreshToken)
+	require.Equal(t, 1, validationQueue.dispatchers, "a terminal binding rejection must not schedule a durable retry")
+	require.Len(t, validationRepo.appliedMicrosoftResults, 1)
+	require.Nil(t, validationRepo.appliedMicrosoftResults[0].RecoveredBinding)
+	require.Nil(t, validationRepo.appliedMicrosoftResults[0].BindingObservation)
 }
 
 func TestResourceValidationUseCase_ProcessMicrosoftTemporaryFailureExhaustsJobWithoutChangingResource(t *testing.T) {

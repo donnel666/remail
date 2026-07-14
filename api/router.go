@@ -129,6 +129,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			return nil, cleanup, err
 		}
 		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
+		coreMod.SetMicrosoftValidationBindingCommitPort(mailMod.ValidationBinding)
 		coreMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
 		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
 		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))

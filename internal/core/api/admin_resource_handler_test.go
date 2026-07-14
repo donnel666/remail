@@ -206,7 +206,7 @@ func (*adminHandlerValidationRepo) MarkFailed(context.Context, uint, string, str
 func (*adminHandlerValidationRepo) MarkRetryableFailure(context.Context, uint, string, string) (bool, error) {
 	return false, nil
 }
-func (*adminHandlerValidationRepo) SaveMicrosoftCredentials(context.Context, uint, uint, string, string, string) error {
+func (*adminHandlerValidationRepo) SaveMicrosoftProgress(context.Context, uint, uint, string, coreapp.MicrosoftValidationResult) error {
 	return nil
 }
 func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, uint, uint, string, coreapp.MicrosoftValidationResult, *governancedomain.SystemLog) error {

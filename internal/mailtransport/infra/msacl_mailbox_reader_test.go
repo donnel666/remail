@@ -54,3 +54,15 @@ func TestMSACLMailboxReaderPreservesRowIdentityWhenObjectIsUnreadable(t *testing
 	require.Equal(t, "proof@example.com", emails[0].To)
 	require.Empty(t, emails[0].Preview)
 }
+
+func TestNewMSACLMailboxReaderWithContentWindow(t *testing.T) {
+	reader := NewMSACLMailboxReaderWithContentWindow(nil, failingMSACLFileStore{}, 90*24*time.Hour)
+	require.Equal(t, 90*24*time.Hour, reader.contentSearchWindow)
+
+	defaulted := NewMSACLMailboxReaderWithContentWindow(nil, failingMSACLFileStore{}, 0)
+	require.Equal(t, msaclContentSearchWindow, defaulted.contentSearchWindow)
+}
+
+func TestEscapeMSACLLikeTreatsAccountMaskLiterally(t *testing.T) {
+	require.Equal(t, `qa!%!_**8\@example.test!!`, escapeMSACLLike(`qa%_**8\@example.test!`))
+}

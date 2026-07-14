@@ -71,20 +71,23 @@ func (MicrosoftAliasAttemptModel) TableName() string {
 }
 
 type MicrosoftAliasStore struct {
-	db            *gorm.DB
-	operationLogs operationLogTxWriter
+	db                           *gorm.DB
+	operationLogs                operationLogTxWriter
+	recoveredBindingScanPageSize int
 }
 
 const (
 	microsoftAliasScheduleEnsureBatch             = 10000
+	microsoftAliasRecoveredBindingScanPageSize    = 256
 	microsoftAliasNegativeConfirmationMinInterval = time.Hour
 	legacyMicrosoftAliasPublicOnlyMessage         = "Microsoft resource is not publicly available for alias creation."
 )
 
 func NewMicrosoftAliasStore(db *gorm.DB) *MicrosoftAliasStore {
 	return &MicrosoftAliasStore{
-		db:            db,
-		operationLogs: governanceinfra.NewOperationLogRepo(db),
+		db:                           db,
+		operationLogs:                governanceinfra.NewOperationLogRepo(db),
+		recoveredBindingScanPageSize: microsoftAliasRecoveredBindingScanPageSize,
 	}
 }
 
@@ -115,7 +118,28 @@ SET schedule.status = 'paused',
         current_resource.client_id,
         current_resource.refresh_token,
         COALESCE((
+            SELECT binding.account_email
+            FROM microsoft_binding_mailboxes AS binding
+            WHERE binding.resource_id = current_resource.id
+              AND binding.status <> 'expired'
+            LIMIT 1
+        ), ''),
+        COALESCE((
             SELECT binding.binding_address
+            FROM microsoft_binding_mailboxes AS binding
+            WHERE binding.resource_id = current_resource.id
+              AND binding.status <> 'expired'
+            LIMIT 1
+        ), ''),
+        COALESCE((
+            SELECT binding.status
+            FROM microsoft_binding_mailboxes AS binding
+            WHERE binding.resource_id = current_resource.id
+              AND binding.status <> 'expired'
+            LIMIT 1
+        ), ''),
+        COALESCE((
+            SELECT binding.bound_display
             FROM microsoft_binding_mailboxes AS binding
             WHERE binding.resource_id = current_resource.id
               AND binding.status <> 'expired'
@@ -133,8 +157,9 @@ WHERE schedule.status IN ('pending', 'queued')
 
 	var pausedResourceIDs []uint
 	// Old releases paused private resources with the public-only error below.
-	// Wake those rows once, and compare both legacy sale-bit signatures so a
-	// later for_sale toggle does not wake an otherwise permanently paused task.
+	// Compare both the current binding-state signature and the older address-only
+	// variants (with and without the legacy sale bit), so deploying the richer
+	// signature does not wake every permanently paused schedule at once.
 	if err := s.db.WithContext(ctx).
 		Table("microsoft_alias_schedules AS schedule").
 		Select("schedule.resource_id").
@@ -142,9 +167,56 @@ WHERE schedule.status IN ('pending', 'queued')
 		Joins("LEFT JOIN microsoft_binding_mailboxes AS binding ON binding.resource_id = mr.id AND binding.status <> ?", "expired").
 		Where(`schedule.status = ?
   AND mr.status = ?
-  AND (
-    schedule.last_safe_error IN (?, ?)
-    OR schedule.blocked_resource_signature NOT IN (
+	  AND (
+	    schedule.last_safe_error IN (?, ?)
+	    OR schedule.blocked_resource_signature NOT IN (
+      SHA2(CONCAT_WS(
+        CHAR(0),
+        mr.status,
+        mr.email_address,
+        mr.password,
+        mr.client_id,
+        mr.refresh_token,
+        COALESCE(binding.account_email, ''),
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
+      ), 256),
+      SHA2(CONCAT_WS(
+        CHAR(0),
+        mr.status,
+        mr.email_address,
+        mr.password,
+        mr.client_id,
+        mr.refresh_token,
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
+      ), 256),
+      SHA2(CONCAT_WS(
+        CHAR(0),
+        mr.status,
+        TRUE,
+        mr.email_address,
+        mr.password,
+        mr.client_id,
+        mr.refresh_token,
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
+      ), 256),
+      SHA2(CONCAT_WS(
+        CHAR(0),
+        mr.status,
+        FALSE,
+        mr.email_address,
+        mr.password,
+        mr.client_id,
+        mr.refresh_token,
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
+      ), 256),
       SHA2(CONCAT_WS(
         CHAR(0),
         mr.status,
@@ -175,11 +247,99 @@ WHERE schedule.status IN ('pending', 'queued')
         COALESCE(binding.binding_address, '')
       ), 256)
     )
-  )`, "paused", "normal", legacyMicrosoftAliasPublicOnlyMessage, mailapp.MicrosoftAliasResourceNotNormalMessage).
+	  )`, "paused", "normal", legacyMicrosoftAliasPublicOnlyMessage, mailapp.MicrosoftAliasResourceNotNormalMessage).
 		Order("schedule.resource_id ASC").
 		Limit(microsoftAliasScheduleEnsureBatch).
 		Pluck("schedule.resource_id", &pausedResourceIDs).Error; err != nil {
 		return 0, fmt.Errorf("find paused microsoft alias schedules: %w", err)
+	}
+	// A legacy address-only signature is unchanged when the same recovery
+	// address moves from unresolved/external to verified. Select those rows
+	// separately and apply the exact Go mailbox parser before waking them; a SQL
+	// approximation would repeatedly wake malformed legacy addresses.
+	remainingWakeCapacity := microsoftAliasScheduleEnsureBatch - len(pausedResourceIDs)
+	if remainingWakeCapacity > 0 {
+		type recoveredBindingCandidate struct {
+			ResourceID          uint   `gorm:"column:resource_id"`
+			BindingAddress      string `gorm:"column:binding_address"`
+			BindingStatus       string `gorm:"column:binding_status"`
+			BoundDisplay        string `gorm:"column:bound_display"`
+			BindingAccountEmail string `gorm:"column:binding_account_email"`
+			ResourceEmail       string `gorm:"column:resource_email"`
+			BindingDomainReady  bool   `gorm:"column:binding_domain_ready"`
+		}
+		pageSize := s.recoveredBindingScanPageSize
+		if pageSize <= 0 {
+			pageSize = microsoftAliasRecoveredBindingScanPageSize
+		}
+		seenResourceIDs := make(map[uint]struct{}, len(pausedResourceIDs))
+		for _, resourceID := range pausedResourceIDs {
+			seenResourceIDs[resourceID] = struct{}{}
+		}
+		var afterResourceID uint
+		for remainingWakeCapacity > 0 {
+			var recoveredCandidates []recoveredBindingCandidate
+			if err := s.db.WithContext(ctx).
+				Table("microsoft_alias_schedules AS schedule").
+				Select(`schedule.resource_id AS resource_id,
+binding.binding_address AS binding_address,
+binding.status AS binding_status,
+COALESCE(binding.bound_display, '') AS bound_display,
+binding.account_email AS binding_account_email,
+mr.email_address AS resource_email,
+EXISTS (
+    SELECT 1
+    FROM domain_resources AS binding_domain
+    WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+      AND binding_domain.purpose = 'binding'
+      AND binding_domain.status = 'normal'
+) AS binding_domain_ready`).
+				Joins("JOIN microsoft_resources AS mr ON mr.id = schedule.resource_id").
+				Joins("JOIN microsoft_binding_mailboxes AS binding ON binding.resource_id = mr.id AND binding.status <> ?", "expired").
+				Where(`schedule.status = ?
+  AND mr.status = ?
+  AND schedule.last_safe_error IN (?, ?)
+  AND binding.status = ?
+	  AND COALESCE(binding.bound_display, '') = ''
+	  AND schedule.resource_id > ?`,
+					"paused",
+					"normal",
+					mailapp.MicrosoftAliasExternalRecoveryMessage,
+					mailapp.MicrosoftAliasBindingUnresolvedMessage,
+					"verified",
+					afterResourceID,
+				).
+				Order("schedule.resource_id ASC").
+				Limit(pageSize).
+				Scan(&recoveredCandidates).Error; err != nil {
+				return 0, fmt.Errorf("find recovered microsoft alias bindings: %w", err)
+			}
+			if len(recoveredCandidates) == 0 {
+				break
+			}
+			afterResourceID = recoveredCandidates[len(recoveredCandidates)-1].ResourceID
+			for _, candidate := range recoveredCandidates {
+				if !microsoftAliasBindingReady(
+					candidate.BindingStatus,
+					candidate.BindingAddress,
+					candidate.BoundDisplay,
+					candidate.BindingAccountEmail,
+					candidate.ResourceEmail,
+					candidate.BindingDomainReady,
+				) {
+					continue
+				}
+				if _, exists := seenResourceIDs[candidate.ResourceID]; exists {
+					continue
+				}
+				seenResourceIDs[candidate.ResourceID] = struct{}{}
+				pausedResourceIDs = append(pausedResourceIDs, candidate.ResourceID)
+				remainingWakeCapacity--
+				if remainingWakeCapacity == 0 {
+					break
+				}
+			}
+		}
 	}
 	var wokenRows int64
 	if len(pausedResourceIDs) > 0 {
@@ -264,6 +424,12 @@ WHERE id = ? AND status = 'normal'`, now, now, now, resourceID)
 			BlockedResourceSignature string `gorm:"column:blocked_resource_signature"`
 			LastSafeError            string `gorm:"column:last_safe_error"`
 			ResourceSignature        string `gorm:"column:resource_signature"`
+			BindingAddress           string `gorm:"column:binding_address"`
+			BindingStatus            string `gorm:"column:binding_status"`
+			BoundDisplay             string `gorm:"column:bound_display"`
+			BindingAccountEmail      string `gorm:"column:binding_account_email"`
+			ResourceEmail            string `gorm:"column:resource_email"`
+			BindingDomainReady       bool   `gorm:"column:binding_domain_ready"`
 		}
 		if err := tx.Raw(`
 SELECT
@@ -272,6 +438,18 @@ SELECT
     schedule.status AS schedule_status,
     schedule.blocked_resource_signature AS blocked_resource_signature,
     schedule.last_safe_error AS last_safe_error,
+    COALESCE(binding.binding_address, '') AS binding_address,
+    COALESCE(binding.status, '') AS binding_status,
+    COALESCE(binding.bound_display, '') AS bound_display,
+    COALESCE(binding.account_email, '') AS binding_account_email,
+    resource.email_address AS resource_email,
+    EXISTS (
+        SELECT 1
+        FROM domain_resources AS binding_domain
+        WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+          AND binding_domain.purpose = 'binding'
+          AND binding_domain.status = 'normal'
+    ) AS binding_domain_ready,
     SHA2(CONCAT_WS(
         CHAR(0),
         resource.status,
@@ -279,7 +457,10 @@ SELECT
         resource.password,
         resource.client_id,
         resource.refresh_token,
-        COALESCE(binding.binding_address, '')
+        COALESCE(binding.account_email, ''),
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
     ), 256) AS resource_signature
 FROM microsoft_alias_schedules AS schedule
 JOIN microsoft_resources AS resource ON resource.id = schedule.resource_id
@@ -292,7 +473,19 @@ FOR UPDATE`, resourceID).Scan(&state).Error; err != nil {
 			return fmt.Errorf("load validated microsoft alias schedule: %w", err)
 		}
 		if state.ResourceID == 0 || state.ResourceStatus != "normal" || state.ScheduleStatus != "paused" ||
-			!canWakeMicrosoftAliasSchedule(state.BlockedResourceSignature, state.ResourceSignature, state.LastSafeError) {
+			!canWakeMicrosoftAliasSchedule(
+				state.BlockedResourceSignature,
+				state.ResourceSignature,
+				state.LastSafeError,
+				microsoftAliasBindingReady(
+					state.BindingStatus,
+					state.BindingAddress,
+					state.BoundDisplay,
+					state.BindingAccountEmail,
+					state.ResourceEmail,
+					state.BindingDomainReady,
+				),
+			) {
 			return nil
 		}
 		woken := tx.Model(&MicrosoftAliasScheduleModel{}).
@@ -307,11 +500,22 @@ FOR UPDATE`, resourceID).Scan(&state).Error; err != nil {
 	return ensured, err
 }
 
-func canWakeMicrosoftAliasSchedule(blockedSignature, resourceSignature, lastSafeError string) bool {
+func canWakeMicrosoftAliasSchedule(blockedSignature, resourceSignature, lastSafeError string, bindingReady bool) bool {
 	return strings.TrimSpace(blockedSignature) == "" ||
 		blockedSignature != resourceSignature ||
 		lastSafeError == legacyMicrosoftAliasPublicOnlyMessage ||
-		lastSafeError == mailapp.MicrosoftAliasResourceNotNormalMessage
+		lastSafeError == mailapp.MicrosoftAliasResourceNotNormalMessage ||
+		(bindingReady && (lastSafeError == mailapp.MicrosoftAliasExternalRecoveryMessage ||
+			lastSafeError == mailapp.MicrosoftAliasBindingUnresolvedMessage))
+}
+
+func microsoftAliasBindingReady(status, address, boundDisplay, bindingAccountEmail, resourceEmail string, bindingDomainReady bool) bool {
+	return status == "verified" &&
+		isConcreteMicrosoftBindingAddress(address) &&
+		strings.TrimSpace(boundDisplay) == "" &&
+		normalizeBindingEmail(bindingAccountEmail) != "" &&
+		normalizeBindingEmail(bindingAccountEmail) == normalizeBindingEmail(resourceEmail) &&
+		bindingDomainReady
 }
 
 func microsoftAliasScheduleWakeUpdates(now time.Time) map[string]any {
@@ -425,15 +629,18 @@ func (s *MicrosoftAliasStore) Claim(ctx context.Context, task mailapp.MicrosoftA
 		}
 
 		var row struct {
-			ResourceID        uint       `gorm:"column:resource_id"`
-			EmailAddress      string     `gorm:"column:email_address"`
-			Password          string     `gorm:"column:password"`
-			BindingAddress    string     `gorm:"column:binding_address"`
-			BoundDisplay      string     `gorm:"column:bound_display"`
-			ResourceStatus    string     `gorm:"column:resource_status"`
-			ResourceSignature string     `gorm:"column:resource_signature"`
-			ResourceUpdatedAt time.Time  `gorm:"column:resource_updated_at"`
-			LastAllocatedAt   *time.Time `gorm:"column:last_allocated_at"`
+			ResourceID         uint       `gorm:"column:resource_id"`
+			EmailAddress       string     `gorm:"column:email_address"`
+			Password           string     `gorm:"column:password"`
+			BindingAddress     string     `gorm:"column:binding_address"`
+			BindingStatus      string     `gorm:"column:binding_status"`
+			BoundDisplay       string     `gorm:"column:bound_display"`
+			BindingAccount     string     `gorm:"column:binding_account_email"`
+			BindingDomainReady bool       `gorm:"column:binding_domain_ready"`
+			ResourceStatus     string     `gorm:"column:resource_status"`
+			ResourceSignature  string     `gorm:"column:resource_signature"`
+			ResourceUpdatedAt  time.Time  `gorm:"column:resource_updated_at"`
+			LastAllocatedAt    *time.Time `gorm:"column:last_allocated_at"`
 		}
 		if err := tx.Raw(`
 SELECT
@@ -441,7 +648,16 @@ SELECT
     mr.email_address AS email_address,
     mr.password AS password,
     COALESCE(binding.binding_address, '') AS binding_address,
+    COALESCE(binding.status, '') AS binding_status,
     COALESCE(binding.bound_display, '') AS bound_display,
+    COALESCE(binding.account_email, '') AS binding_account_email,
+    EXISTS (
+        SELECT 1
+        FROM domain_resources AS binding_domain
+        WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+          AND binding_domain.purpose = 'binding'
+          AND binding_domain.status = 'normal'
+    ) AS binding_domain_ready,
     mr.status AS resource_status,
     mr.updated_at AS resource_updated_at,
     mr.last_allocated_at AS last_allocated_at,
@@ -452,7 +668,10 @@ SELECT
         mr.password,
         mr.client_id,
         mr.refresh_token,
-        COALESCE(binding.binding_address, '')
+        COALESCE(binding.account_email, ''),
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
     ), 256) AS resource_signature
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_binding_mailboxes AS binding
@@ -504,6 +723,30 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 			}
 			return nil
 		}
+		if !microsoftAliasBindingReady(
+			row.BindingStatus,
+			row.BindingAddress,
+			row.BoundDisplay,
+			row.BindingAccount,
+			row.EmailAddress,
+			row.BindingDomainReady,
+		) {
+			result := tx.Model(&MicrosoftAliasScheduleModel{}).
+				Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+				Updates(map[string]any{
+					"status":                      "paused",
+					"claim_token":                 "",
+					"last_safe_error":             mailapp.MicrosoftAliasBindingUnresolvedMessage,
+					"blocked_resource_signature":  row.ResourceSignature,
+					"blocked_resource_updated_at": row.ResourceUpdatedAt,
+					"blocked_last_allocated_at":   row.LastAllocatedAt,
+					"updated_at":                  now,
+				})
+			if result.Error != nil {
+				return fmt.Errorf("pause unresolved-binding microsoft alias schedule: %w", result.Error)
+			}
+			return nil
+		}
 
 		result := tx.Model(&MicrosoftAliasScheduleModel{}).
 			Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
@@ -538,27 +781,81 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 	return account, claimed, err
 }
 
-func (s *MicrosoftAliasStore) CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, error) {
+func (s *MicrosoftAliasStore) ReloadEligibleAccount(ctx context.Context, resourceID uint, claimToken string) (*mailapp.MicrosoftAliasAccount, bool, string, error) {
 	var row struct {
-		ResourceID uint   `gorm:"column:resource_id"`
-		Status     string `gorm:"column:resource_status"`
+		ResourceID         uint   `gorm:"column:resource_id"`
+		ResourceStatus     string `gorm:"column:resource_status"`
+		ResourceEmail      string `gorm:"column:resource_email"`
+		Password           string `gorm:"column:password"`
+		BindingAddress     string `gorm:"column:binding_address"`
+		BindingStatus      string `gorm:"column:binding_status"`
+		BoundDisplay       string `gorm:"column:bound_display"`
+		BindingAccount     string `gorm:"column:binding_account_email"`
+		BindingDomainReady bool   `gorm:"column:binding_domain_ready"`
+		FailureStreak      int    `gorm:"column:failure_streak"`
 	}
 	if err := s.db.WithContext(ctx).Raw(`
 SELECT
     schedule.resource_id AS resource_id,
-    mr.status AS resource_status
+    schedule.failure_streak AS failure_streak,
+    mr.status AS resource_status,
+    mr.email_address AS resource_email,
+    mr.password AS password,
+    COALESCE(binding.binding_address, '') AS binding_address,
+    COALESCE(binding.status, '') AS binding_status,
+    COALESCE(binding.bound_display, '') AS bound_display,
+    COALESCE(binding.account_email, '') AS binding_account_email,
+    EXISTS (
+        SELECT 1
+        FROM domain_resources AS binding_domain
+        WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+          AND binding_domain.purpose = 'binding'
+          AND binding_domain.status = 'normal'
+    ) AS binding_domain_ready
 FROM microsoft_alias_schedules AS schedule
 JOIN microsoft_resources AS mr ON mr.id = schedule.resource_id
+LEFT JOIN microsoft_binding_mailboxes AS binding
+  ON binding.resource_id = mr.id
+ AND binding.status <> 'expired'
 WHERE schedule.resource_id = ?
   AND schedule.status = 'running'
   AND schedule.claim_token = ?
 LIMIT 1`, resourceID, claimToken).Scan(&row).Error; err != nil {
-		return false, fmt.Errorf("load microsoft alias eligibility: %w", err)
+		return nil, false, "", fmt.Errorf("load microsoft alias eligibility: %w", err)
 	}
 	if row.ResourceID == 0 {
-		return false, mailapp.ErrMicrosoftAliasStaleClaim
+		return nil, false, "", mailapp.ErrMicrosoftAliasStaleClaim
 	}
-	return row.Status == "normal", nil
+	if row.ResourceStatus != "normal" {
+		return nil, false, mailapp.MicrosoftAliasResourceNotNormalMessage, nil
+	}
+	if strings.TrimSpace(row.BoundDisplay) != "" {
+		return nil, false, mailapp.MicrosoftAliasExternalRecoveryMessage, nil
+	}
+	if !microsoftAliasBindingReady(
+		row.BindingStatus,
+		row.BindingAddress,
+		row.BoundDisplay,
+		row.BindingAccount,
+		row.ResourceEmail,
+		row.BindingDomainReady,
+	) {
+		return nil, false, mailapp.MicrosoftAliasBindingUnresolvedMessage, nil
+	}
+	return &mailapp.MicrosoftAliasAccount{
+		ResourceID:     row.ResourceID,
+		EmailAddress:   row.ResourceEmail,
+		Password:       row.Password,
+		BindingAddress: row.BindingAddress,
+		ResourceStatus: row.ResourceStatus,
+		FailureStreak:  row.FailureStreak,
+		ClaimToken:     claimToken,
+	}, true, "", nil
+}
+
+func (s *MicrosoftAliasStore) CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, string, error) {
+	_, eligible, safeMessage, err := s.ReloadEligibleAccount(ctx, resourceID, claimToken)
+	return eligible, safeMessage, err
 }
 
 func (s *MicrosoftAliasStore) Usage(ctx context.Context, resourceID uint, yearStart, yearEnd, weekStart, weekEnd time.Time) (mailapp.MicrosoftAliasUsage, error) {
@@ -849,10 +1146,77 @@ func (s *MicrosoftAliasStore) Defer(ctx context.Context, resourceID uint, claimT
 }
 
 func (s *MicrosoftAliasStore) Pause(ctx context.Context, resourceID uint, claimToken string, safeError string) error {
+	safeError = safeAliasStoreMessage(safeError)
+	if safeError == mailapp.MicrosoftAliasBindingUnresolvedMessage || safeError == mailapp.MicrosoftAliasExternalRecoveryMessage {
+		if err := pauseMicrosoftAliasScheduleWithCurrentSignature(s.db.WithContext(ctx), resourceID, claimToken, safeError); err != nil {
+			return fmt.Errorf("pause microsoft alias schedule: %w", err)
+		}
+		return nil
+	}
 	if err := updateMicrosoftAliasScheduleTx(s.db.WithContext(ctx), resourceID, claimToken, "paused", time.Now().UTC(), safeError, nil); err != nil {
 		return fmt.Errorf("pause microsoft alias schedule: %w", err)
 	}
 	return nil
+}
+
+func pauseMicrosoftAliasScheduleWithCurrentSignature(db *gorm.DB, resourceID uint, claimToken, safeError string) error {
+	now := time.Now().UTC()
+	return db.Transaction(func(tx *gorm.DB) error {
+		var resource struct {
+			ID              uint       `gorm:"column:id"`
+			Signature       string     `gorm:"column:resource_signature"`
+			UpdatedAt       time.Time  `gorm:"column:updated_at"`
+			LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
+		}
+		if err := tx.Raw(`
+SELECT
+    resource.id AS id,
+    resource.updated_at AS updated_at,
+    resource.last_allocated_at AS last_allocated_at,
+    SHA2(CONCAT_WS(
+        CHAR(0),
+        resource.status,
+        resource.email_address,
+        resource.password,
+        resource.client_id,
+        resource.refresh_token,
+        COALESCE(binding.account_email, ''),
+        COALESCE(binding.binding_address, ''),
+        COALESCE(binding.status, ''),
+        COALESCE(binding.bound_display, '')
+    ), 256) AS resource_signature
+FROM microsoft_resources AS resource
+LEFT JOIN microsoft_binding_mailboxes AS binding
+  ON binding.resource_id = resource.id
+ AND binding.status <> 'expired'
+WHERE resource.id = ?
+LIMIT 1
+FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
+			return fmt.Errorf("lock microsoft alias resource signature: %w", err)
+		}
+		if resource.ID == 0 {
+			return mailapp.ErrMicrosoftAliasStaleClaim
+		}
+		result := tx.Model(&MicrosoftAliasScheduleModel{}).
+			Where("resource_id = ? AND status = ? AND claim_token = ?", resourceID, "running", claimToken).
+			Updates(map[string]any{
+				"status":                      "paused",
+				"claim_token":                 "",
+				"next_run_at":                 now,
+				"last_safe_error":             safeError,
+				"blocked_resource_signature":  resource.Signature,
+				"blocked_resource_updated_at": resource.UpdatedAt,
+				"blocked_last_allocated_at":   resource.LastAllocatedAt,
+				"updated_at":                  now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return mailapp.ErrMicrosoftAliasStaleClaim
+		}
+		return nil
+	})
 }
 
 func (s *MicrosoftAliasStore) MarkDispatchFailed(ctx context.Context, task mailapp.MicrosoftAliasTask, nextRunAt time.Time, safeError string) error {

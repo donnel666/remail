@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	stdmail "net/mail"
 	"strings"
@@ -19,18 +19,74 @@ import (
 
 const maxMicrosoftProxyAttempts = 3
 
+type microsoftBindingRecoveryAction uint8
+
+const (
+	microsoftBindingRecoveryNone microsoftBindingRecoveryAction = iota
+	// A valid refresh-token flow remains authoritative. The recovered candidate
+	// still requires password/OTP confirmation, but that confirmation must not
+	// replace the refreshed OAuth credentials.
+	microsoftBindingRecoveryObserve
+	// No usable RT exists. Once the read-only probe resolves a candidate, retry
+	// password login exactly once and use its credentials only after it confirms
+	// the same complete address as verified.
+	microsoftBindingRecoveryRetryPassword
+)
+
+func (action microsoftBindingRecoveryAction) needed() bool {
+	return action != microsoftBindingRecoveryNone
+}
+
+// microsoftBindingRecoveryCandidate is evidence discovered by the read-only
+// password-recovery proof picker. It is deliberately not a Core recovered fact:
+// the address must pass a normal password/identity OTP confirmation first.
+type microsoftBindingRecoveryCandidate struct {
+	Address                  string
+	ExpectedBindingID        uint
+	ExpectedBindingAddress   string
+	ExpectedBindingUpdatedAt time.Time
+}
+
+func (candidate *microsoftBindingRecoveryCandidate) confirmedFact() *coreapp.MicrosoftRecoveredBinding {
+	if candidate == nil {
+		return nil
+	}
+	return &coreapp.MicrosoftRecoveredBinding{
+		Address:                  candidate.Address,
+		ExpectedBindingID:        candidate.ExpectedBindingID,
+		ExpectedBindingAddress:   candidate.ExpectedBindingAddress,
+		ExpectedBindingUpdatedAt: candidate.ExpectedBindingUpdatedAt,
+	}
+}
+
 type microsoftOAuthProtocol interface {
 	RefreshToken(ctx context.Context, req mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error)
 	AcquireToken(ctx context.Context, req mailinfra.MicrosoftOAuthRequest) (mailinfra.MicrosoftOAuthResult, error)
 }
 
+type microsoftProxyProvider interface {
+	Acquire(ctx context.Context, req proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error)
+	ReportSuccess(ctx context.Context, proxyID uint) error
+	ReportFailure(ctx context.Context, proxyID uint, safeError string) error
+}
+
+type microsoftMailFetcher interface {
+	FetchAll(ctx context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
+}
+
+type microsoftValidationBindingStore interface {
+	FindByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]maildomain.MicrosoftBindingMailbox, error)
+}
+
 type ResourceValidationAdapter struct {
-	proxies   *proxyapp.ProxyUseCase
-	microsoft microsoftOAuthProtocol
-	fetcher   *mailinfra.MicrosoftMailFetchClient
-	dns       *mailinfra.DomainDNSValidator
-	bindings  *mailinfra.MicrosoftBindingRepo
-	history   mailapp.HistoricalProjectMatcher
+	proxies                    microsoftProxyProvider
+	microsoft                  microsoftOAuthProtocol
+	fetcher                    microsoftMailFetcher
+	dns                        *mailinfra.DomainDNSValidator
+	bindings                   microsoftValidationBindingStore
+	history                    mailapp.HistoricalProjectMatcher
+	probePasswordRecovery      func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error)
+	evaluateBindingEligibility func(context.Context, msacl.PasswordRecoveryProbeResult) msacl.BindingRecoveryEligibility
 }
 
 // RefreshMicrosoftToken is the MailTransport ACL used by the durable
@@ -168,11 +224,13 @@ func (a *ResourceValidationAdapter) SetHistoricalProjectMatcher(matcher mailapp.
 
 func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
 	return &ResourceValidationAdapter{
-		proxies:   proxies,
-		microsoft: mailinfra.NewMicrosoftOAuthClient(),
-		fetcher:   mailinfra.NewMicrosoftMailFetchClient(),
-		dns:       mailinfra.NewDomainDNSValidator(),
-		bindings:  bindings,
+		proxies:                    proxies,
+		microsoft:                  mailinfra.NewMicrosoftOAuthClient(),
+		fetcher:                    mailinfra.NewMicrosoftMailFetchClient(),
+		dns:                        mailinfra.NewDomainDNSValidator(),
+		bindings:                   bindings,
+		probePasswordRecovery:      msacl.ProbePasswordRecovery,
+		evaluateBindingEligibility: msacl.EvaluateActiveBindingRecoveryEligibility,
 	}
 }
 
@@ -185,16 +243,32 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		}, nil
 	}
 
-	preferredBindingAddress, err := a.preferredBindingAddress(ctx, req.ResourceID)
+	bindingSnapshot, err := a.microsoftBindingSnapshot(ctx, req.ResourceID)
 	if err != nil {
 		return coreapp.MicrosoftValidationResult{}, err
 	}
-	preferredBindingAddress, err = a.prepareBindingAddress(ctx, req, preferredBindingAddress)
+	preferredBindingAddress := bindingSnapshotPreferredAddress(bindingSnapshot, req.EmailAddress)
+	effectiveBindingAddress := preferredBindingAddress
+	bindingAlreadyVerified := bindingSnapshotHasCompleteVerifiedAddress(bindingSnapshot, req.EmailAddress)
+	if bindingSnapshot != nil && bindingSnapshot.Status != maildomain.MicrosoftBindingExpired && preferredBindingAddress == "" {
+		// Preserve a pending/failed operator or import input for the normal
+		// validation fallback. It is deliberately not trusted as a preferred
+		// proof-picker match unless it is already verified.
+		effectiveBindingAddress = strings.TrimSpace(bindingSnapshot.BindingAddress)
+	}
+	effectiveBindingAddress, err = a.prepareBindingAddress(req, effectiveBindingAddress)
 	if err != nil {
 		return coreapp.MicrosoftValidationResult{}, err
 	}
 
 	var last coreapp.MicrosoftValidationResult
+	var recoveredBinding *coreapp.MicrosoftRecoveredBinding
+	bindingConfirmedThisRun := bindingAlreadyVerified
+	var confirmedBindingObservation *mailinfra.MicrosoftOAuthResult
+	var authoritativeClientID string
+	var authoritativeRefreshToken string
+	credentialsKnownAuthoritative := false
+	recoveryAttempted := false
 	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireProxy(ctx, req, attempt)
 		if err != nil {
@@ -206,13 +280,108 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			proxyURL = proxyConfig.URL
 			proxyID = proxyConfig.ID
 		}
-
-		rawResult, err := a.runMicrosoftValidation(ctx, req, proxyURL, preferredBindingAddress)
+		rawResult, recoveryAction, credentialsAuthoritative, err := a.runMicrosoftValidation(ctx, req, proxyURL, effectiveBindingAddress, bindingConfirmedThisRun || recoveredBinding != nil)
 		if err != nil {
+			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+				return coreapp.MicrosoftValidationResult{}, cancelErr
+			}
 			rawResult.Valid = false
 			rawResult.Category = "request"
 			rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
 			rawResult.ProxyFailure = proxyID != 0
+		}
+		if recoveryAction == microsoftBindingRecoveryNone &&
+			recoveredBinding == nil &&
+			confirmedBindingObservation != nil &&
+			strings.TrimSpace(rawResult.BindingAddress) == "" {
+			mergeSupplementaryBindingResult(&rawResult, *confirmedBindingObservation)
+		}
+
+		// The proof probe uses a different binding proxy and may itself be
+		// cancelled. For observe-only RT flows the outer auth/fetch proxy has
+		// already completed all of its work, so settle its health before probing.
+		proxyReported := false
+		if recoveryAction == microsoftBindingRecoveryObserve && proxyID != 0 {
+			if rawResult.ProxyFailure {
+				_ = a.reportProxyFailure(ctx, proxyID, rawResult.SafeMessage)
+			} else {
+				_ = a.reportProxySuccess(ctx, proxyID)
+			}
+			proxyReported = true
+		}
+
+		recoveryNeeded := recoveryAction.needed()
+		var recoveryCandidate *microsoftBindingRecoveryCandidate
+		recoveryProbeUnavailable := false
+		if recoveryNeeded && !bindingAlreadyVerified && !recoveryAttempted {
+			recoveryAttempted = true
+			recoveryCandidate, recoveryProbeUnavailable, err = a.recoverBindingForValidation(ctx, req, bindingSnapshot)
+			if err != nil {
+				return coreapp.MicrosoftValidationResult{}, err
+			}
+			if recoveryCandidate != nil {
+				effectiveBindingAddress = recoveryCandidate.Address
+			}
+		}
+		if recoveryProbeUnavailable {
+			rawResult = unavailableMicrosoftBindingRecoveryResult(rawResult, effectiveBindingAddress)
+		}
+		if recoveryCandidate != nil {
+			var confirmed bool
+			rawResult, credentialsAuthoritative, confirmed, err = a.confirmMicrosoftBindingRecoveryCandidate(
+				ctx,
+				req,
+				proxyURL,
+				rawResult,
+				credentialsAuthoritative,
+				recoveryAction,
+				recoveryCandidate,
+			)
+			if err != nil {
+				if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+					return coreapp.MicrosoftValidationResult{}, cancelErr
+				}
+				rawResult.Valid = false
+				rawResult.Category = "request"
+				rawResult.SafeMessage = "Microsoft mail service is temporarily unavailable."
+				// The retry login owns an independent binding proxy. Only FetchAll
+				// still uses the outer proxy and may mark it failed.
+				rawResult.ProxyFailure = false
+			}
+			if confirmed {
+				recoveredBinding = recoveryCandidate.confirmedFact()
+			}
+		}
+		if rawResult.Valid && recoveryNeeded && recoveredBinding == nil && strings.TrimSpace(rawResult.BoundDisplay) == "" {
+			rawResult.Valid = false
+			rawResult.Category = "request"
+			rawResult.SafeMessage = "Microsoft recovery mailbox relationship could not be resolved."
+			rawResult.ProxyFailure = false
+		}
+		if credentialsAuthoritative {
+			credentialsKnownAuthoritative = true
+			if strings.TrimSpace(rawResult.ClientID) != "" {
+				authoritativeClientID = strings.TrimSpace(rawResult.ClientID)
+			}
+			if strings.TrimSpace(rawResult.RefreshToken) != "" {
+				authoritativeRefreshToken = strings.TrimSpace(rawResult.RefreshToken)
+			}
+		} else if credentialsKnownAuthoritative {
+			// A later attempt may fail before producing replacement credentials.
+			// Keep the last credentials that this validation run obtained from a
+			// successful RT/password OAuth exchange; the current failure category
+			// and Valid flag remain authoritative for the validation outcome.
+			rawResult.ClientID = authoritativeClientID
+			rawResult.RefreshToken = authoritativeRefreshToken
+			credentialsAuthoritative = true
+		}
+		if recoveredBinding == nil && credentialsAuthoritative && normalBindingHasCompleteVerifiedAddress(rawResult) {
+			bindingConfirmedThisRun = true
+			effectiveBindingAddress = strings.ToLower(strings.TrimSpace(rawResult.BindingAddress))
+			confirmedBindingObservation = &mailinfra.MicrosoftOAuthResult{
+				BindingAddress: effectiveBindingAddress,
+				BindingStatus:  string(maildomain.MicrosoftBindingVerified),
+			}
 		}
 		if strings.TrimSpace(rawResult.ClientID) != "" {
 			req.ClientID = strings.TrimSpace(rawResult.ClientID)
@@ -221,7 +390,13 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			req.RefreshToken = strings.TrimSpace(rawResult.RefreshToken)
 		}
 		last = toCoreMicrosoftResult(rawResult)
-		_ = a.recordBindingResult(ctx, req, rawResult)
+		last.CredentialsAuthoritative = credentialsAuthoritative
+		last.RecoveredBinding = recoveredBinding
+		if recoveredBinding != nil {
+			last.BindingObservation = nil
+		} else if last.BindingObservation != nil {
+			ensurePreparedBindingObservation(&last, rawResult, effectiveBindingAddress)
+		}
 		if rawResult.Valid {
 			if err := a.matchHistoricalProjects(ctx, req, rawResult); err != nil {
 				slog.Warn(
@@ -231,27 +406,33 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 					"error", err,
 				)
 			}
-			_ = a.reportProxySuccess(ctx, proxyID)
+			if !proxyReported {
+				_ = a.reportProxySuccess(ctx, proxyID)
+			}
 			return last, nil
 		}
 		if rawResult.ProxyFailure && proxyID != 0 {
-			_ = a.reportProxyFailure(ctx, proxyID, rawResult.SafeMessage)
+			if !proxyReported {
+				_ = a.reportProxyFailure(ctx, proxyID, rawResult.SafeMessage)
+			}
 			continue
 		}
 		if rawResult.ProxyFailure && proxyID == 0 && attempt < maxMicrosoftProxyAttempts {
 			continue
 		}
-		if proxyID != 0 {
+		if proxyID != 0 && !proxyReported {
 			_ = a.reportProxySuccess(ctx, proxyID)
 		}
 		return last, nil
 	}
 	if last.SafeMessage == "" {
-		last = coreapp.MicrosoftValidationResult{
-			Valid:       false,
-			Category:    "request",
-			SafeMessage: "Microsoft mail service is temporarily unavailable.",
-		}
+		last.Valid = false
+		last.Category = "request"
+		last.SafeMessage = "Microsoft mail service is temporarily unavailable."
+	}
+	last.RecoveredBinding = recoveredBinding
+	if recoveredBinding != nil {
+		last.BindingObservation = nil
 	}
 	return last, nil
 }
@@ -348,29 +529,34 @@ func (a *ResourceValidationAdapter) acquireProxy(ctx context.Context, req coreap
 	})
 }
 
-// acquireBindingProxy obtains a binding-purpose proxy for a supplementary
-// recovery-mailbox resolution login. It is best-effort: on any failure it
-// returns an empty URL so the caller can fall back to its existing proxy.
-func (a *ResourceValidationAdapter) acquireBindingProxy(ctx context.Context, req coreapp.MicrosoftValidationRequest) string {
+// acquireBindingRecoveryProxy gives proof discovery an independent
+// binding-purpose IPv4 acquisition and retry lifecycle. The proxy repository
+// may still choose the same healthy resource proxy for the same account key.
+func (a *ResourceValidationAdapter) acquireBindingRecoveryProxy(
+	ctx context.Context,
+	req coreapp.MicrosoftValidationRequest,
+	attempt int,
+) (*proxyapp.ProxyConfig, error) {
 	if a == nil || a.proxies == nil {
-		return ""
+		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
-	cfg, err := a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-		Key: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
-		// Binding-resolution login MUST use IPv4 (see acquireProxy contract): only
-		// mail receiving may use IPv6.
+	return a.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
+		Key:                 strings.ToLower(strings.TrimSpace(req.EmailAddress)),
 		IPVersion:           proxydomain.ProxyIPv4,
 		Purpose:             proxydomain.ProxyPurposeBinding,
 		AllowSystemFallback: true,
+		Attempt:             attempt,
 		RequestID:           req.RequestID,
 	})
-	if err != nil || cfg == nil || cfg.Direct {
-		return ""
-	}
-	return cfg.URL
 }
 
-func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, req coreapp.MicrosoftValidationRequest, proxyURL string, bindingAddress string) (mailinfra.MicrosoftOAuthResult, error) {
+func (a *ResourceValidationAdapter) runMicrosoftValidation(
+	ctx context.Context,
+	req coreapp.MicrosoftValidationRequest,
+	proxyURL string,
+	bindingAddress string,
+	bindingAlreadyVerified bool,
+) (mailinfra.MicrosoftOAuthResult, microsoftBindingRecoveryAction, bool, error) {
 	oauthReq := mailinfra.MicrosoftOAuthRequest{
 		EmailAddress:   req.EmailAddress,
 		Password:       req.Password,
@@ -379,26 +565,210 @@ func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, 
 		BindingAddress: bindingAddress,
 		ProxyURL:       proxyURL,
 	}
-	var result mailinfra.MicrosoftOAuthResult
-	var err error
-	isRefreshTokenAccount := strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != ""
-	if isRefreshTokenAccount {
-		result, err = a.microsoft.RefreshToken(ctx, oauthReq)
-	} else {
-		result, err = a.microsoft.AcquireToken(ctx, oauthReq)
+	if !microsoftRequestHasRefreshToken(req) {
+		result, err := a.microsoft.AcquireToken(ctx, oauthReq)
+		prepareMicrosoftPasswordBindingResult(&result, bindingAddress, bindingAlreadyVerified)
+		recoveryAction := microsoftBindingRecoveryNone
+		if normalBindingNeedsRecovery(result) {
+			recoveryAction = microsoftBindingRecoveryRetryPassword
+		}
+		if err != nil || !result.Valid {
+			return result, recoveryAction, false, err
+		}
+		if !normalBindingHasCompleteVerifiedAddress(result) {
+			if recoveryAction.needed() {
+				return result, recoveryAction, true, nil
+			}
+			return unresolvedMicrosoftBindingResult(result, bindingAddress), microsoftBindingRecoveryNone, true, nil
+		}
+		result, err = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, result)
+		return result, microsoftBindingRecoveryNone, true, err
 	}
-	if err != nil || !result.Valid {
-		return result, err
+
+	refreshed, err := a.microsoft.RefreshToken(ctx, oauthReq)
+	if err != nil {
+		// Some protocol adapters may return a structured OAuth rejection together
+		// with a diagnostic error. An explicit invalid-grant/expired category is
+		// still authoritative enough to take the password fallback; transport and
+		// cancellation errors without that category must not do so.
+		if refreshed.Valid || !shouldFallbackInvalidRefreshToken(refreshed) || strings.TrimSpace(req.Password) == "" {
+			return refreshed, microsoftBindingRecoveryNone, false, err
+		}
+		if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+			return refreshed, microsoftBindingRecoveryNone, false, cancelErr
+		}
 	}
-	// A valid refresh token proves the account works but never resolves the
-	// recovery-mailbox binding — the token exchange does not touch it. Alias/OTP
-	// tasks require a real, receivable binding_address, so complete the binding
-	// relationship with a password login when it has not yet been resolved to a
-	// verified project mailbox or a known external one. This augments only the
-	// binding facts; the refresh-token validation result stays authoritative.
-	if isRefreshTokenAccount {
-		a.resolveBindingForRefreshedAccount(ctx, req, proxyURL, bindingAddress, &result)
+	if !refreshed.Valid {
+		if !shouldFallbackInvalidRefreshToken(refreshed) || strings.TrimSpace(req.Password) == "" {
+			return refreshed, microsoftBindingRecoveryNone, false, nil
+		}
+		passwordResult, passwordErr := a.acquireTokenWithBindingProxy(ctx, req, bindingAddress)
+		prepareMicrosoftPasswordBindingResult(&passwordResult, bindingAddress, bindingAlreadyVerified)
+		recoveryAction := microsoftBindingRecoveryNone
+		if normalBindingNeedsRecovery(passwordResult) {
+			recoveryAction = microsoftBindingRecoveryRetryPassword
+		}
+		if passwordErr != nil || !passwordResult.Valid {
+			return passwordResult, recoveryAction, false, passwordErr
+		}
+		if !normalBindingHasCompleteVerifiedAddress(passwordResult) {
+			if recoveryAction.needed() {
+				return passwordResult, recoveryAction, true, nil
+			}
+			return unresolvedMicrosoftBindingResult(passwordResult, bindingAddress), microsoftBindingRecoveryNone, true, nil
+		}
+		passwordResult, passwordErr = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, passwordResult)
+		return passwordResult, microsoftBindingRecoveryNone, true, passwordErr
 	}
+
+	// Refresh proves the account and supplies the authoritative OAuth credentials,
+	// but it never confirms the recovery mailbox relationship. Every unresolved
+	// binding must therefore perform a fresh password binding flow in this run;
+	// historical failed/masked observations are not accepted as current proof.
+	if bindingAlreadyVerified {
+		refreshed, err = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, refreshed)
+		return refreshed, microsoftBindingRecoveryNone, true, err
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		return missingMicrosoftBindingPasswordResult(refreshed, bindingAddress), microsoftBindingRecoveryNone, true, nil
+	}
+
+	bindingResult, bindingErr := a.acquireTokenWithBindingProxy(ctx, req, bindingAddress)
+	prepareMicrosoftBindingResult(&bindingResult, bindingAddress)
+	if bindingErr != nil {
+		preserveRefreshedCredentials(&bindingResult, refreshed)
+		return bindingResult, microsoftBindingRecoveryNone, true, bindingErr
+	}
+	if normalBindingNeedsRecovery(bindingResult) {
+		mergeSupplementaryBindingResult(&refreshed, bindingResult)
+		refreshed, err = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, refreshed)
+		return refreshed, microsoftBindingRecoveryObserve, true, err
+	}
+	if !bindingResult.Valid {
+		preserveRefreshedCredentials(&bindingResult, refreshed)
+		return bindingResult, microsoftBindingRecoveryNone, true, nil
+	}
+	if !normalBindingHasCompleteVerifiedAddress(bindingResult) {
+		bindingResult = unresolvedMicrosoftBindingResult(bindingResult, bindingAddress)
+		preserveRefreshedCredentials(&bindingResult, refreshed)
+		return bindingResult, microsoftBindingRecoveryNone, true, nil
+	}
+	mergeSupplementaryBindingResult(&refreshed, bindingResult)
+	refreshed, err = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, refreshed)
+	return refreshed, microsoftBindingRecoveryNone, true, err
+}
+
+func (a *ResourceValidationAdapter) confirmMicrosoftBindingRecoveryCandidate(
+	ctx context.Context,
+	req coreapp.MicrosoftValidationRequest,
+	proxyURL string,
+	base mailinfra.MicrosoftOAuthResult,
+	baseCredentialsAuthoritative bool,
+	action microsoftBindingRecoveryAction,
+	candidate *microsoftBindingRecoveryCandidate,
+) (mailinfra.MicrosoftOAuthResult, bool, bool, error) {
+	if candidate == nil {
+		return base, baseCredentialsAuthoritative, false, nil
+	}
+	confirmation, err := a.acquireTokenWithBindingProxy(ctx, req, candidate.Address)
+	confirmationWasValid := confirmation.Valid
+	protocolConfirmationAddress := strings.ToLower(strings.TrimSpace(confirmation.BindingAddress))
+	protocolConfirmedAddress := isCompleteMicrosoftBindingAddress(protocolConfirmationAddress) &&
+		strings.EqualFold(strings.TrimSpace(confirmation.BindingStatus), string(maildomain.MicrosoftBindingVerified))
+	prepareMicrosoftBindingResult(&confirmation, candidate.Address)
+	if err != nil {
+		if action == microsoftBindingRecoveryObserve || (baseCredentialsAuthoritative && !confirmationWasValid) {
+			preserveRefreshedCredentials(&confirmation, base)
+			return confirmation, true, false, err
+		}
+		return confirmation, confirmationWasValid, false, err
+	}
+	confirmed := confirmation.Valid &&
+		protocolConfirmedAddress &&
+		strings.EqualFold(protocolConfirmationAddress, strings.TrimSpace(candidate.Address))
+	if !confirmed {
+		if confirmation.Valid || normalBindingNeedsRecovery(confirmation) {
+			confirmation = unresolvedMicrosoftBindingConfirmationResult(confirmation, candidate.Address)
+		} else {
+			prepareUnconfirmedMicrosoftBindingObservation(&confirmation, candidate.Address)
+		}
+		if action == microsoftBindingRecoveryObserve || (baseCredentialsAuthoritative && !confirmationWasValid) {
+			preserveRefreshedCredentials(&confirmation, base)
+			return confirmation, true, false, nil
+		}
+		return confirmation, confirmationWasValid, false, nil
+	}
+	if action == microsoftBindingRecoveryObserve {
+		return base, true, true, nil
+	}
+	confirmation, err = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, confirmation)
+	return confirmation, true, true, err
+}
+
+// acquireTokenWithBindingProxy owns the full proxy lifecycle for password
+// authentication started from an RT flow. A binding-proxy failure must never be
+// attributed to the outer auth proxy, so retryable failures are returned with
+// ProxyFailure cleared after the corresponding binding proxy is reported.
+func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
+	ctx context.Context,
+	req coreapp.MicrosoftValidationRequest,
+	bindingAddress string,
+) (mailinfra.MicrosoftOAuthResult, error) {
+	last := unavailableMicrosoftBindingResult()
+	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return mailinfra.MicrosoftOAuthResult{}, err
+		}
+		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt)
+		if err != nil {
+			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+				return mailinfra.MicrosoftOAuthResult{}, cancelErr
+			}
+			continue
+		}
+		proxyURL := ""
+		proxyID := uint(0)
+		if proxyConfig != nil && !proxyConfig.Direct {
+			proxyURL = proxyConfig.URL
+			proxyID = proxyConfig.ID
+		}
+		result, acquireErr := a.microsoft.AcquireToken(ctx, mailinfra.MicrosoftOAuthRequest{
+			EmailAddress:   req.EmailAddress,
+			Password:       req.Password,
+			BindingAddress: bindingAddress,
+			ProxyURL:       proxyURL,
+		})
+		if cancelErr := microsoftRecoveryContextError(ctx, acquireErr); cancelErr != nil {
+			return mailinfra.MicrosoftOAuthResult{}, cancelErr
+		}
+		if acquireErr != nil && strings.TrimSpace(result.Category) == "" {
+			result = unavailableMicrosoftBindingResult()
+			result.ProxyFailure = proxyID != 0
+		}
+		if result.ProxyFailure {
+			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
+			result.ProxyFailure = false
+			last = result
+			continue
+		}
+		if acquireErr != nil {
+			result.ProxyFailure = false
+			return result, nil
+		}
+		_ = a.reportProxySuccess(ctx, proxyID)
+		result.ProxyFailure = false
+		return result, nil
+	}
+	last.ProxyFailure = false
+	return last, nil
+}
+
+func (a *ResourceValidationAdapter) fetchMicrosoftValidation(
+	ctx context.Context,
+	emailAddress string,
+	proxyURL string,
+	result mailinfra.MicrosoftOAuthResult,
+) (mailinfra.MicrosoftOAuthResult, error) {
 	if a.fetcher == nil {
 		result.Valid = false
 		result.Category = "request"
@@ -406,22 +776,25 @@ func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, 
 		return result, nil
 	}
 	fetchResult, err := a.fetcher.FetchAll(ctx, mailinfra.MicrosoftMailFetchRequest{
-		EmailAddress: req.EmailAddress,
+		EmailAddress: emailAddress,
 		ClientID:     result.ClientID,
 		RefreshToken: result.RefreshToken,
 		AccessToken:  result.AccessToken,
 		ProxyURL:     proxyURL,
 	})
 	result.MailFetch = &fetchResult
+	if strings.TrimSpace(fetchResult.RefreshToken) != "" {
+		// Token exchange may have succeeded and rotated the RT before a later
+		// mailbox operation returned an error. Preserve that progress even though
+		// the validation outcome remains retryable.
+		result.RefreshToken = strings.TrimSpace(fetchResult.RefreshToken)
+	}
 	if err != nil {
 		result.Valid = false
 		result.Category = "request"
 		result.SafeMessage = "Microsoft mail service is temporarily unavailable."
 		result.ProxyFailure = strings.TrimSpace(proxyURL) != ""
 		return result, err
-	}
-	if strings.TrimSpace(fetchResult.RefreshToken) != "" {
-		result.RefreshToken = strings.TrimSpace(fetchResult.RefreshToken)
 	}
 	result.Valid = fetchResult.Valid
 	if !fetchResult.Valid {
@@ -432,74 +805,173 @@ func (a *ResourceValidationAdapter) runMicrosoftValidation(ctx context.Context, 
 	}
 	result.GraphAvailable = strings.EqualFold(fetchResult.Protocol, "graph")
 	result.Category = ""
-	result.SafeMessage = ""
+	if strings.TrimSpace(result.BindingAddress) == "" && strings.TrimSpace(result.BoundDisplay) == "" {
+		result.SafeMessage = ""
+	}
 	result.ProxyFailure = false
 	return result, nil
 }
 
-// resolveBindingForRefreshedAccount completes the recovery-mailbox binding for a
-// refresh-token account whose token exchange succeeded. The token path never
-// touches the binding relationship, so a password login is required to discover
-// (or bind) the real recovery mailbox. It is best-effort: any failure is logged
-// and leaves the refresh-token validation result intact — the account is still
-// valid, only its binding stays unresolved for a later retry. Only the binding
-// facts (BindingAddress / BindingStatus / BoundDisplay) are merged in; the
-// caller's recordBindingResult then persists them.
-func (a *ResourceValidationAdapter) resolveBindingForRefreshedAccount(ctx context.Context, req coreapp.MicrosoftValidationRequest, proxyURL, bindingAddress string, result *mailinfra.MicrosoftOAuthResult) {
-	if a == nil || a.bindings == nil || a.microsoft == nil || result == nil {
+func microsoftRequestHasRefreshToken(req coreapp.MicrosoftValidationRequest) bool {
+	return strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != ""
+}
+
+func shouldFallbackInvalidRefreshToken(result mailinfra.MicrosoftOAuthResult) bool {
+	switch strings.ToLower(strings.TrimSpace(result.Category)) {
+	case "oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalBindingNeedsRecovery(result mailinfra.MicrosoftOAuthResult) bool {
+	return strings.EqualFold(strings.TrimSpace(result.Category), "already_bound") ||
+		strings.TrimSpace(result.BoundDisplay) != "" ||
+		isMaskedMicrosoftBindingAddress(result.BindingAddress)
+}
+
+func normalBindingHasCompleteVerifiedAddress(result mailinfra.MicrosoftOAuthResult) bool {
+	if !isCompleteMicrosoftBindingAddress(result.BindingAddress) {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(result.BindingStatus))
+	return status == string(maildomain.MicrosoftBindingVerified) || (result.Valid && status == "")
+}
+
+func prepareMicrosoftBindingResult(result *mailinfra.MicrosoftOAuthResult, candidate string) {
+	if result == nil {
 		return
 	}
-	if strings.TrimSpace(req.Password) == "" {
-		// Without a password we cannot reach the identity page to resolve the
-		// binding; leave it for manual handling rather than fabricate one.
+	result.BindingAddress = strings.ToLower(strings.TrimSpace(result.BindingAddress))
+	result.BoundDisplay = strings.TrimSpace(result.BoundDisplay)
+	protocolReturnedCompleteAddress := isCompleteMicrosoftBindingAddress(result.BindingAddress)
+	if result.BindingAddress == "" && isCompleteMicrosoftBindingAddress(candidate) {
+		result.BindingAddress = strings.ToLower(strings.TrimSpace(candidate))
+	}
+	if strings.EqualFold(strings.TrimSpace(result.BindingStatus), string(maildomain.MicrosoftBindingVerified)) &&
+		(!result.Valid || !protocolReturnedCompleteAddress) {
+		// A local candidate may be retained for a later OTP attempt or pending
+		// observation, but a status-only protocol response does not prove that
+		// Microsoft confirmed this exact address.
+		result.BindingStatus = string(maildomain.MicrosoftBindingPending)
+	}
+	if strings.TrimSpace(result.BindingStatus) != "" || result.BindingAddress == "" {
 		return
 	}
-	resolved, err := a.bindings.BindingResolved(ctx, req.ResourceID)
-	if err != nil {
-		slog.Warn(
-			"microsoft binding resolution state lookup failed",
-			"resource_id", req.ResourceID,
-			"request_id", req.RequestID,
-			"error", err,
-		)
+	switch {
+	case normalBindingNeedsRecovery(*result):
+		result.BindingStatus = string(maildomain.MicrosoftBindingFailed)
+	case result.Valid && protocolReturnedCompleteAddress:
+		result.BindingStatus = string(maildomain.MicrosoftBindingVerified)
+	default:
+		result.BindingStatus = string(maildomain.MicrosoftBindingPending)
+	}
+}
+
+func prepareMicrosoftPasswordBindingResult(result *mailinfra.MicrosoftOAuthResult, candidate string, preserveTrustedBinding bool) {
+	if result == nil {
 		return
 	}
-	if resolved {
+	protocolReturnedBindingEvidence := strings.TrimSpace(result.BindingAddress) != "" ||
+		strings.TrimSpace(result.BindingStatus) != "" ||
+		strings.TrimSpace(result.BoundDisplay) != "" ||
+		strings.EqualFold(strings.TrimSpace(result.Category), "already_bound")
+	prepareMicrosoftBindingResult(result, candidate)
+	if preserveTrustedBinding && !protocolReturnedBindingEvidence {
+		// A password/transport failure that says nothing about the recovery
+		// mailbox must not turn a clean, previously verified relationship into a
+		// locally manufactured pending observation merely because candidate was
+		// supplied to the login flow.
+		result.BindingAddress = ""
+		result.BindingStatus = ""
+		result.BoundDisplay = ""
+	}
+}
+
+func mergeSupplementaryBindingResult(target *mailinfra.MicrosoftOAuthResult, binding mailinfra.MicrosoftOAuthResult) {
+	if target == nil {
 		return
 	}
-	// A password login that reaches the identity/binding page needs a
-	// binding-purpose (residential) proxy to avoid risk control, exactly like the
-	// non-refresh-token AcquireToken path. The refresh-token validation above used
-	// an auth-purpose proxy, so acquire a dedicated one here and fall back to the
-	// already-acquired proxy only if none is available.
-	resolutionProxyURL := proxyURL
-	if bindingProxyURL := a.acquireBindingProxy(ctx, req); bindingProxyURL != "" {
-		resolutionProxyURL = bindingProxyURL
+	target.BindingAddress = strings.TrimSpace(binding.BindingAddress)
+	target.BindingStatus = strings.TrimSpace(binding.BindingStatus)
+	target.BoundDisplay = strings.TrimSpace(binding.BoundDisplay)
+	if strings.TrimSpace(binding.SafeMessage) != "" {
+		target.SafeMessage = strings.TrimSpace(binding.SafeMessage)
 	}
-	bindingResult, err := a.microsoft.AcquireToken(ctx, mailinfra.MicrosoftOAuthRequest{
-		EmailAddress:   req.EmailAddress,
-		Password:       req.Password,
-		BindingAddress: bindingAddress,
-		ProxyURL:       resolutionProxyURL,
-	})
-	if err != nil {
-		slog.Warn(
-			"microsoft binding resolution login failed",
-			"resource_id", req.ResourceID,
-			"request_id", req.RequestID,
-			"error", err,
-		)
+}
+
+func preserveRefreshedCredentials(target *mailinfra.MicrosoftOAuthResult, refreshed mailinfra.MicrosoftOAuthResult) {
+	if target == nil {
 		return
 	}
-	if display := strings.TrimSpace(bindingResult.BoundDisplay); display != "" {
-		result.BoundDisplay = display
+	target.ClientID = strings.TrimSpace(refreshed.ClientID)
+	target.RefreshToken = strings.TrimSpace(refreshed.RefreshToken)
+	target.AccessToken = strings.TrimSpace(refreshed.AccessToken)
+}
+
+func missingMicrosoftBindingPasswordResult(refreshed mailinfra.MicrosoftOAuthResult, bindingAddress string) mailinfra.MicrosoftOAuthResult {
+	refreshed.Valid = false
+	refreshed.Category = "password"
+	refreshed.SafeMessage = "Microsoft account password is required to resolve the recovery mailbox relationship."
+	refreshed.ProxyFailure = false
+	prepareMicrosoftBindingResult(&refreshed, bindingAddress)
+	return refreshed
+}
+
+func unresolvedMicrosoftBindingResult(result mailinfra.MicrosoftOAuthResult, bindingAddress string) mailinfra.MicrosoftOAuthResult {
+	result.Valid = false
+	result.Category = "request"
+	result.SafeMessage = "Microsoft recovery mailbox relationship could not be resolved."
+	result.ProxyFailure = false
+	prepareMicrosoftBindingResult(&result, bindingAddress)
+	return result
+}
+
+func unresolvedMicrosoftBindingConfirmationResult(result mailinfra.MicrosoftOAuthResult, candidateAddress string) mailinfra.MicrosoftOAuthResult {
+	result.Valid = false
+	result.Category = "request"
+	result.SafeMessage = "Microsoft recovery mailbox confirmation did not match the resolved address."
+	result.ProxyFailure = false
+	result.BindingAddress = strings.ToLower(strings.TrimSpace(candidateAddress))
+	result.BindingStatus = string(maildomain.MicrosoftBindingPending)
+	result.BoundDisplay = ""
+	return result
+}
+
+func prepareUnconfirmedMicrosoftBindingObservation(result *mailinfra.MicrosoftOAuthResult, candidateAddress string) {
+	if result == nil {
+		return
 	}
-	if addr := strings.TrimSpace(bindingResult.BindingAddress); addr != "" {
-		result.BindingAddress = addr
+	result.BindingAddress = strings.ToLower(strings.TrimSpace(candidateAddress))
+	result.BoundDisplay = ""
+	if strings.TrimSpace(result.BindingStatus) == "" ||
+		strings.EqualFold(strings.TrimSpace(result.BindingStatus), string(maildomain.MicrosoftBindingVerified)) {
+		result.BindingStatus = string(maildomain.MicrosoftBindingPending)
 	}
-	if status := strings.TrimSpace(bindingResult.BindingStatus); status != "" {
-		result.BindingStatus = status
+}
+
+func unavailableMicrosoftBindingResult() mailinfra.MicrosoftOAuthResult {
+	return mailinfra.MicrosoftOAuthResult{
+		Category:    "request",
+		SafeMessage: "Microsoft authorization request failed temporarily.",
 	}
+}
+
+func unavailableMicrosoftBindingRecoveryResult(result mailinfra.MicrosoftOAuthResult, bindingAddress string) mailinfra.MicrosoftOAuthResult {
+	result.Valid = false
+	result.Category = "request"
+	result.SafeMessage = "Microsoft recovery mailbox lookup is temporarily unavailable."
+	result.ProxyFailure = false
+	result.BoundDisplay = ""
+	if isCompleteMicrosoftBindingAddress(bindingAddress) {
+		result.BindingAddress = strings.ToLower(strings.TrimSpace(bindingAddress))
+		result.BindingStatus = string(maildomain.MicrosoftBindingPending)
+	} else {
+		result.BindingAddress = ""
+		result.BindingStatus = ""
+	}
+	return result
 }
 
 func (a *ResourceValidationAdapter) reportProxySuccess(ctx context.Context, proxyID uint) error {
@@ -518,74 +990,267 @@ func (a *ResourceValidationAdapter) reportProxyFailure(ctx context.Context, prox
 
 func toCoreMicrosoftResult(result mailinfra.MicrosoftOAuthResult) coreapp.MicrosoftValidationResult {
 	return coreapp.MicrosoftValidationResult{
-		Valid:          result.Valid,
-		ClientID:       result.ClientID,
-		RefreshToken:   result.RefreshToken,
-		GraphAvailable: result.GraphAvailable,
-		Category:       result.Category,
-		SafeMessage:    result.SafeMessage,
+		Valid:              result.Valid,
+		ClientID:           result.ClientID,
+		RefreshToken:       result.RefreshToken,
+		GraphAvailable:     result.GraphAvailable,
+		Category:           result.Category,
+		SafeMessage:        result.SafeMessage,
+		BindingObservation: bindingObservationFromOAuthResult(result),
 	}
 }
 
-func (a *ResourceValidationAdapter) preferredBindingAddress(ctx context.Context, resourceID uint) (string, error) {
-	if a == nil || a.bindings == nil {
-		return "", nil
+func bindingObservationFromOAuthResult(result mailinfra.MicrosoftOAuthResult) *coreapp.MicrosoftBindingObservation {
+	address := strings.ToLower(strings.TrimSpace(result.BindingAddress))
+	boundDisplay := strings.TrimSpace(result.BoundDisplay)
+	if isMaskedMicrosoftBindingAddress(address) {
+		if boundDisplay == "" {
+			boundDisplay = address
+		}
+		address = ""
+	} else if address != "" && !isCompleteMicrosoftBindingAddress(address) {
+		address = ""
 	}
-	return a.bindings.PreferredAddress(ctx, resourceID)
+	if address == "" && boundDisplay == "" {
+		return nil
+	}
+	status := strings.TrimSpace(result.BindingStatus)
+	if result.Valid && address != "" && status == "" {
+		status = string(maildomain.MicrosoftBindingVerified)
+	}
+	return &coreapp.MicrosoftBindingObservation{
+		Address:      address,
+		Status:       status,
+		BoundDisplay: boundDisplay,
+		SafeMessage:  strings.TrimSpace(result.SafeMessage),
+	}
 }
 
-func (a *ResourceValidationAdapter) prepareBindingAddress(ctx context.Context, req coreapp.MicrosoftValidationRequest, preferredBindingAddress string) (string, error) {
-	if a == nil || a.bindings == nil {
-		return preferredBindingAddress, nil
+func ensurePreparedBindingObservation(result *coreapp.MicrosoftValidationResult, raw mailinfra.MicrosoftOAuthResult, bindingAddress string) {
+	if result == nil {
+		return
 	}
-	if strings.TrimSpace(req.ClientID) != "" && strings.TrimSpace(req.RefreshToken) != "" {
-		return preferredBindingAddress, nil
+	address := strings.ToLower(strings.TrimSpace(bindingAddress))
+	if !isCompleteMicrosoftBindingAddress(address) {
+		address = ""
 	}
+	if observation := result.BindingObservation; observation != nil {
+		if strings.TrimSpace(observation.BoundDisplay) != "" {
+			// An already-bound response may echo Microsoft's masked proof in
+			// BindingAddress. Never persist that mask as an active address: use
+			// only the complete candidate prepared before the login. For an RT
+			// account with no candidate this deliberately stays empty, so the
+			// commit can update an existing row but cannot create a masked one.
+			observation.Address = address
+		} else if strings.TrimSpace(observation.Address) == "" && address != "" {
+			observation.Address = address
+		}
+		return
+	}
+	if address == "" {
+		return
+	}
+	status := strings.TrimSpace(raw.BindingStatus)
+	if status == "" {
+		status = string(maildomain.MicrosoftBindingPending)
+	}
+	result.BindingObservation = &coreapp.MicrosoftBindingObservation{
+		Address:     address,
+		Status:      status,
+		SafeMessage: strings.TrimSpace(raw.SafeMessage),
+	}
+}
+
+func (a *ResourceValidationAdapter) microsoftBindingSnapshot(ctx context.Context, resourceID uint) (*maildomain.MicrosoftBindingMailbox, error) {
+	if a == nil || a.bindings == nil || resourceID == 0 {
+		return nil, nil
+	}
+	items, err := a.bindings.FindByResourceIDs(ctx, []uint{resourceID})
+	if err != nil {
+		return nil, err
+	}
+	binding, ok := items[resourceID]
+	if !ok {
+		return nil, nil
+	}
+	copyBinding := binding
+	return &copyBinding, nil
+}
+
+func bindingSnapshotPreferredAddress(binding *maildomain.MicrosoftBindingMailbox, accountEmail string) string {
+	if !bindingSnapshotHasCompleteVerifiedAddress(binding, accountEmail) {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(binding.BindingAddress))
+}
+
+func shouldProbeBindingRecovery(binding *maildomain.MicrosoftBindingMailbox, accountEmail string) bool {
+	return !bindingSnapshotHasCompleteVerifiedAddress(binding, accountEmail)
+}
+
+func bindingSnapshotHasCompleteVerifiedAddress(binding *maildomain.MicrosoftBindingMailbox, accountEmail string) bool {
+	accountEmail = strings.ToLower(strings.TrimSpace(accountEmail))
+	return binding != nil &&
+		binding.Status == maildomain.MicrosoftBindingVerified &&
+		isCompleteMicrosoftBindingAddress(binding.BindingAddress) &&
+		accountEmail != "" &&
+		strings.EqualFold(strings.TrimSpace(binding.AccountEmail), accountEmail) &&
+		strings.TrimSpace(binding.BoundDisplay) == "" &&
+		strings.TrimSpace(binding.CodeMessageID) == ""
+}
+
+func isCompleteMicrosoftBindingAddress(address string) bool {
+	address = strings.TrimSpace(address)
+	if address == "" || strings.Contains(address, "*") || strings.ContainsAny(address, "\r\n\t") {
+		return false
+	}
+	parsed, err := stdmail.ParseAddress(address)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(parsed.Address), address) {
+		return false
+	}
+	parts := strings.Split(parsed.Address, "@")
+	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
+}
+
+func isMaskedMicrosoftBindingAddress(address string) bool {
+	address = strings.TrimSpace(address)
+	return strings.Contains(address, "*") && strings.Contains(address, "@")
+}
+
+// recoverBindingForValidation performs only the side-effect-free Microsoft
+// proof-picker lookup. It never sends an OTP and never invokes password reset.
+// A candidate is returned only when the proof resolves uniquely to a configured
+// project binding domain and the local mailbox reader is currently usable. It
+// is never persisted directly: a normal password/OTP flow must confirm the same
+// complete address before the adapter emits a fenced RecoveredBinding fact.
+func (a *ResourceValidationAdapter) recoverBindingForValidation(
+	ctx context.Context,
+	req coreapp.MicrosoftValidationRequest,
+	snapshot *maildomain.MicrosoftBindingMailbox,
+) (*microsoftBindingRecoveryCandidate, bool, error) {
+	if a == nil || a.bindings == nil || !shouldProbeBindingRecovery(snapshot, req.EmailAddress) {
+		return nil, false, nil
+	}
+	probe := a.probePasswordRecovery
+	if probe == nil {
+		probe = msacl.ProbePasswordRecovery
+	}
+	evaluate := a.evaluateBindingEligibility
+	if evaluate == nil {
+		evaluate = msacl.EvaluateActiveBindingRecoveryEligibility
+	}
+
+	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		proxyConfig, err := a.acquireBindingRecoveryProxy(ctx, req, attempt)
+		if err != nil {
+			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+				return nil, false, cancelErr
+			}
+			if attempt < maxMicrosoftProxyAttempts {
+				continue
+			}
+			logMicrosoftBindingRecoverySkip(req, "proxy_unavailable")
+			return nil, true, nil
+		}
+
+		proxyURL := ""
+		proxyID := uint(0)
+		if proxyConfig != nil && !proxyConfig.Direct {
+			proxyURL = proxyConfig.URL
+			proxyID = proxyConfig.ID
+		}
+		// An unresolved row must never bias proof selection. In particular, a
+		// deterministic/generated or historically masked address is only a login
+		// candidate, not verified evidence that may short-circuit enumeration.
+		result, err := probe(ctx, req.EmailAddress, proxyURL, "")
+		if err != nil {
+			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
+				return nil, false, cancelErr
+			}
+			if !isTemporaryMicrosoftRecoveryProbeError(err) {
+				_ = a.reportProxySuccess(ctx, proxyID)
+				logMicrosoftBindingRecoverySkip(req, "probe_rejected")
+				return nil, false, nil
+			}
+			if attempt < maxMicrosoftProxyAttempts {
+				continue
+			}
+			logMicrosoftBindingRecoverySkip(req, "probe_unavailable")
+			return nil, true, nil
+		}
+
+		_ = a.reportProxySuccess(ctx, proxyID)
+		eligibility := evaluate(ctx, result)
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		if !eligibility.Allowed {
+			logMicrosoftBindingRecoverySkip(req, string(eligibility.Reason))
+			return nil, false, nil
+		}
+		recovered := &microsoftBindingRecoveryCandidate{
+			Address: strings.ToLower(strings.TrimSpace(result.BindingAddress)),
+		}
+		if !isCompleteMicrosoftBindingAddress(recovered.Address) {
+			logMicrosoftBindingRecoverySkip(req, "unresolved")
+			return nil, false, nil
+		}
+		if snapshot != nil {
+			recovered.ExpectedBindingID = snapshot.ID
+			recovered.ExpectedBindingAddress = strings.ToLower(strings.TrimSpace(snapshot.BindingAddress))
+			recovered.ExpectedBindingUpdatedAt = snapshot.UpdatedAt
+		}
+		return recovered, false, nil
+	}
+	return nil, true, nil
+}
+
+func microsoftRecoveryContextError(ctx context.Context, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if ctx != nil {
+		return ctx.Err()
+	}
+	return nil
+}
+
+func isTemporaryMicrosoftRecoveryProbeError(err error) bool {
+	var authErr *msacl.AuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	switch strings.TrimSpace(authErr.Status) {
+	case msacl.AuthStatusRequestError, msacl.AuthStatusAuthTimeout, msacl.AuthStatusRateLimited:
+		return true
+	default:
+		return false
+	}
+}
+
+func logMicrosoftBindingRecoverySkip(req coreapp.MicrosoftValidationRequest, reason string) {
+	slog.Info(
+		"microsoft binding recovery safeguard skipped",
+		"resource_id", req.ResourceID,
+		"request_id", req.RequestID,
+		"reason", strings.TrimSpace(reason),
+	)
+}
+
+// prepareBindingAddress is deliberately pure. A validation worker must not
+// create or rewrite binding rows before Core checks its job and credential
+// fences; the chosen address returns later as a BindingObservation instead.
+func (a *ResourceValidationAdapter) prepareBindingAddress(req coreapp.MicrosoftValidationRequest, preferredBindingAddress string) (string, error) {
 	bindingAddress := strings.TrimSpace(preferredBindingAddress)
-	if bindingAddress == "" {
+	if !isCompleteMicrosoftBindingAddress(bindingAddress) {
 		generated, err := msacl.DeterministicAuxiliaryAddress(req.EmailAddress)
 		if err != nil {
 			return "", err
 		}
 		bindingAddress = generated
 	}
-	if err := a.bindings.EnsureForValidation(ctx, req.ResourceID, req.OwnerUserID, req.EmailAddress, bindingAddress); err != nil {
-		return "", err
-	}
 	return bindingAddress, nil
-}
-
-func (a *ResourceValidationAdapter) recordBindingResult(ctx context.Context, req coreapp.MicrosoftValidationRequest, result mailinfra.MicrosoftOAuthResult) error {
-	if a == nil || a.bindings == nil {
-		return nil
-	}
-	// Bound to an external recovery mailbox (masked): record the fact and stop —
-	// there is no real, receivable binding_address for us to upsert. The masked
-	// address goes to both bound_display and the (admin-facing) last_safe_error.
-	if display := strings.TrimSpace(result.BoundDisplay); display != "" {
-		return a.bindings.RecordBoundDisplay(ctx, req.ResourceID, display,
-			fmt.Sprintf("Microsoft account is already bound to recovery mailbox (%s).", display))
-	}
-	bindingAddress := strings.TrimSpace(result.BindingAddress)
-	if bindingAddress == "" {
-		return nil
-	}
-	if err := a.bindings.UpsertForResource(ctx, req.ResourceID, req.OwnerUserID, req.EmailAddress, bindingAddress); err != nil {
-		return err
-	}
-	switch result.BindingStatus {
-	case string(maildomain.MicrosoftBindingCodeSent):
-		return a.bindings.MarkStatus(ctx, req.ResourceID, bindingAddress, maildomain.MicrosoftBindingCodeSent, "")
-	case string(maildomain.MicrosoftBindingVerified):
-		return a.bindings.MarkStatus(ctx, req.ResourceID, bindingAddress, maildomain.MicrosoftBindingVerified, "")
-	case string(maildomain.MicrosoftBindingTimeout):
-		return a.bindings.MarkStatus(ctx, req.ResourceID, bindingAddress, maildomain.MicrosoftBindingTimeout, result.SafeMessage)
-	case string(maildomain.MicrosoftBindingFailed):
-		return a.bindings.MarkStatus(ctx, req.ResourceID, bindingAddress, maildomain.MicrosoftBindingFailed, result.SafeMessage)
-	default:
-		if result.Valid {
-			return a.bindings.MarkStatus(ctx, req.ResourceID, bindingAddress, maildomain.MicrosoftBindingVerified, "")
-		}
-	}
-	return nil
 }

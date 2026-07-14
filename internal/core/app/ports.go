@@ -625,19 +625,22 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 				chunkLines = append(chunkLines, line)
 			}
 		}
-		if err := uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines); err != nil {
-			return err
-		}
 		if uc.validationCreator != nil {
-			return uc.validationCreator.CreateImportedValidationJobs(
+			if err := uc.validationCreator.CreateImportedValidationJobs(
 				txCtx,
 				task.OwnerUserID,
 				createdIDs,
 				task.RequestID,
 				"/v1/resources/imports",
-			)
+			); err != nil {
+				return err
+			}
 		}
-		return nil
+		// Use the same root/subtype -> validation job -> binding order as
+		// administrator edits and validation result commits. These imported
+		// resources are still uncommitted, and any binding failure rolls the
+		// jobs and resources back with the enclosing import transaction.
+		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines)
 	}
 	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(
 		ctx,

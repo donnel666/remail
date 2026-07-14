@@ -14,35 +14,41 @@ import (
 )
 
 type fakeMicrosoftAliasStore struct {
-	account           *MicrosoftAliasAccount
-	usage             MicrosoftAliasUsage
-	postCompleteUsage *MicrosoftAliasUsage
-	reserveAttempts   []MicrosoftAliasAttempt
-	reserveUsage      MicrosoftAliasUsage
-	claimed           bool
-	completed         bool
-	completedAt       time.Time
-	outcomes          []MicrosoftAliasAttemptOutcome
-	deferredAt        time.Time
-	deferredSafe      string
-	deferredFailed    bool
-	paused            bool
-	eligible          *bool
-	eligibilityChecks int
-	ensureCalls       int
-	ensureResult      int64
-	ensuredResourceID uint
-	ensureResourceOK  bool
-	ensureResourceErr error
-	dispatchTasks     []MicrosoftAliasTask
-	markDispatchErr   error
-	adminSchedule     *MicrosoftAliasAdminSchedule
-	adminScheduleErr  error
-	expediteResult    *MicrosoftAliasExpediteResult
-	expediteErr       error
-	adminCommand      MicrosoftAliasExpediteCommand
-	adminCommandLog   *governancedomain.OperationLog
-	adminCommandReuse bool
+	account             *MicrosoftAliasAccount
+	usage               MicrosoftAliasUsage
+	postCompleteUsage   *MicrosoftAliasUsage
+	reserveAttempts     []MicrosoftAliasAttempt
+	reserveUsage        MicrosoftAliasUsage
+	reserveCalls        int
+	claimed             bool
+	completed           bool
+	completedAt         time.Time
+	outcomes            []MicrosoftAliasAttemptOutcome
+	deferredAt          time.Time
+	deferredSafe        string
+	deferredFailed      bool
+	paused              bool
+	pausedSafe          string
+	eligible            *bool
+	eligibilitySafe     string
+	eligibilityValues   []bool
+	eligibilitySafes    []string
+	eligibilityAccounts []*MicrosoftAliasAccount
+	eligibilityChecks   int
+	ensureCalls         int
+	ensureResult        int64
+	ensuredResourceID   uint
+	ensureResourceOK    bool
+	ensureResourceErr   error
+	dispatchTasks       []MicrosoftAliasTask
+	markDispatchErr     error
+	adminSchedule       *MicrosoftAliasAdminSchedule
+	adminScheduleErr    error
+	expediteResult      *MicrosoftAliasExpediteResult
+	expediteErr         error
+	adminCommand        MicrosoftAliasExpediteCommand
+	adminCommandLog     *governancedomain.OperationLog
+	adminCommandReuse   bool
 }
 
 func (f *fakeMicrosoftAliasStore) EnsureSchedules(context.Context, time.Time) (int64, error) {
@@ -66,15 +72,46 @@ func (f *fakeMicrosoftAliasStore) Claim(_ context.Context, task MicrosoftAliasTa
 	return f.account, f.claimed, nil
 }
 
-func (f *fakeMicrosoftAliasStore) CheckEligibility(context.Context, uint, string) (bool, error) {
+func (f *fakeMicrosoftAliasStore) nextEligibility() (int, bool, string) {
+	index := f.eligibilityChecks
 	f.eligibilityChecks++
-	if f.eligible == nil {
-		return true, nil
+	if index < len(f.eligibilityValues) {
+		safeMessage := ""
+		if index < len(f.eligibilitySafes) {
+			safeMessage = f.eligibilitySafes[index]
+		}
+		return index, f.eligibilityValues[index], safeMessage
 	}
-	return *f.eligible, nil
+	if f.eligible == nil {
+		return index, true, ""
+	}
+	return index, *f.eligible, f.eligibilitySafe
+}
+
+func (f *fakeMicrosoftAliasStore) CheckEligibility(context.Context, uint, string) (bool, string, error) {
+	_, eligible, safeMessage := f.nextEligibility()
+	return eligible, safeMessage, nil
+}
+
+func (f *fakeMicrosoftAliasStore) ReloadEligibleAccount(_ context.Context, _ uint, claimToken string) (*MicrosoftAliasAccount, bool, string, error) {
+	index, eligible, safeMessage := f.nextEligibility()
+	if !eligible {
+		return nil, false, safeMessage, nil
+	}
+	account := f.account
+	if index < len(f.eligibilityAccounts) && f.eligibilityAccounts[index] != nil {
+		account = f.eligibilityAccounts[index]
+	}
+	if account == nil {
+		return nil, false, MicrosoftAliasResourceNotNormalMessage, nil
+	}
+	clone := *account
+	clone.ClaimToken = claimToken
+	return &clone, true, "", nil
 }
 
 func (f *fakeMicrosoftAliasStore) Reserve(context.Context, uint, string, []string, time.Time, time.Time, time.Time, time.Time, time.Time) ([]MicrosoftAliasAttempt, MicrosoftAliasUsage, error) {
+	f.reserveCalls++
 	return append([]MicrosoftAliasAttempt(nil), f.reserveAttempts...), f.reserveUsage, nil
 }
 
@@ -99,8 +136,9 @@ func (f *fakeMicrosoftAliasStore) Defer(_ context.Context, _ uint, _ string, nex
 	return nil
 }
 
-func (f *fakeMicrosoftAliasStore) Pause(context.Context, uint, string, string) error {
+func (f *fakeMicrosoftAliasStore) Pause(_ context.Context, _ uint, _ string, safeMessage string) error {
 	f.paused = true
+	f.pausedSafe = safeMessage
 	return nil
 }
 
@@ -160,12 +198,15 @@ func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAliasDispatcher(context.C
 
 type fakeMicrosoftAliasCreator struct {
 	count         int
+	generateCalls int
 	reconcileOnly bool
 	candidates    []string
 	result        MicrosoftAliasCreationResult
+	request       MicrosoftAliasCreationRequest
 }
 
 func (f *fakeMicrosoftAliasCreator) GenerateMicrosoftAliasCandidates(count int) ([]string, error) {
+	f.generateCalls++
 	values := f.candidates
 	if len(values) == 0 {
 		values = []string{"first123456@outlook.com", "second123456@outlook.com"}
@@ -179,6 +220,7 @@ func (f *fakeMicrosoftAliasCreator) GenerateMicrosoftAliasCandidates(count int) 
 func (f *fakeMicrosoftAliasCreator) CreateMicrosoftAliases(_ context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasCreationResult, error) {
 	f.count = len(req.Candidates)
 	f.reconcileOnly = req.ReconcileOnly
+	f.request = req
 	return f.result, nil
 }
 
@@ -690,8 +732,9 @@ func TestMicrosoftAliasProcessStopsWhenResourceBecomesAbnormalBeforeRemoteCall(t
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
 	eligible := false
 	store := &fakeMicrosoftAliasStore{
-		claimed:  true,
-		eligible: &eligible,
+		claimed:         true,
+		eligible:        &eligible,
+		eligibilitySafe: MicrosoftAliasResourceNotNormalMessage,
 		account: &MicrosoftAliasAccount{
 			ResourceID:     42,
 			EmailAddress:   "owner@example.com",
@@ -710,11 +753,119 @@ func TestMicrosoftAliasProcessStopsWhenResourceBecomesAbnormalBeforeRemoteCall(t
 
 	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
 	assert.Zero(t, creator.count)
+	assert.Zero(t, creator.generateCalls)
+	assert.Zero(t, store.reserveCalls)
 	assert.Equal(t, 1, store.eligibilityChecks)
 	assert.True(t, store.paused)
-	require.Len(t, store.outcomes, 2)
+	assert.Equal(t, MicrosoftAliasResourceNotNormalMessage, store.pausedSafe)
+	assert.Empty(t, store.outcomes)
+}
+
+func TestMicrosoftAliasProcessPreservesBindingReasonWhenEligibilityChanges(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 30, 0, 0, time.UTC)
+	eligible := false
+	store := &fakeMicrosoftAliasStore{
+		claimed:         true,
+		eligible:        &eligible,
+		eligibilitySafe: MicrosoftAliasBindingUnresolvedMessage,
+		account: &MicrosoftAliasAccount{
+			ResourceID:     42,
+			EmailAddress:   "owner@example.com",
+			Password:       "secret",
+			BindingAddress: "binding@example.com",
+			ResourceStatus: "normal",
+		},
+		reserveAttempts: []MicrosoftAliasAttempt{{
+			ID:     1,
+			Alias:  "david123456@outlook.com",
+			Status: MicrosoftAliasAttemptRunning,
+		}},
+		reserveUsage: MicrosoftAliasUsage{YearCount: 1, WeekCount: 1},
+	}
+	creator := &fakeMicrosoftAliasCreator{}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	assert.Zero(t, creator.count)
+	assert.Zero(t, creator.generateCalls)
+	assert.Zero(t, store.reserveCalls)
+	assert.Equal(t, MicrosoftAliasBindingUnresolvedMessage, store.pausedSafe)
+	assert.Empty(t, store.outcomes)
+}
+
+func TestMicrosoftAliasProcessRechecksEligibilityImmediatelyBeforeRemoteCall(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 45, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		claimed:           true,
+		eligibilityValues: []bool{true, false},
+		eligibilitySafes:  []string{"", MicrosoftAliasBindingUnresolvedMessage},
+		account: &MicrosoftAliasAccount{
+			ResourceID:     42,
+			EmailAddress:   "owner@example.com",
+			Password:       "secret",
+			BindingAddress: "binding@example.com",
+			ResourceStatus: "normal",
+		},
+		reserveAttempts: []MicrosoftAliasAttempt{{
+			ID:     1,
+			Alias:  "david123456@outlook.com",
+			Status: MicrosoftAliasAttemptRunning,
+		}},
+		reserveUsage: MicrosoftAliasUsage{YearCount: 1, WeekCount: 1},
+	}
+	creator := &fakeMicrosoftAliasCreator{}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	assert.Equal(t, 2, store.eligibilityChecks)
+	assert.Equal(t, 1, creator.generateCalls)
+	assert.Equal(t, 1, store.reserveCalls)
+	assert.Zero(t, creator.count, "the remote creator must not run after the second eligibility check fails")
+	assert.Equal(t, MicrosoftAliasBindingUnresolvedMessage, store.pausedSafe)
+	require.Len(t, store.outcomes, 1)
 	assert.Equal(t, MicrosoftAliasAttemptFailed, store.outcomes[0].Status)
-	assert.Equal(t, MicrosoftAliasAttemptFailed, store.outcomes[1].Status)
+	assert.Equal(t, MicrosoftAliasBindingUnresolvedMessage, store.outcomes[0].SafeMessage)
+}
+
+func TestMicrosoftAliasProcessUsesAccountReloadedImmediatelyBeforeRemoteCall(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 50, 0, 0, time.UTC)
+	claimed := &MicrosoftAliasAccount{
+		ResourceID:     42,
+		EmailAddress:   "owner@example.com",
+		Password:       "old-password",
+		BindingAddress: "old-binding@recovery.test",
+		ResourceStatus: "normal",
+	}
+	firstCheck := *claimed
+	secondCheck := *claimed
+	secondCheck.Password = "new-password"
+	secondCheck.BindingAddress = "new-binding@recovery.test"
+	store := &fakeMicrosoftAliasStore{
+		claimed:             true,
+		account:             claimed,
+		eligibilityValues:   []bool{true, true},
+		eligibilityAccounts: []*MicrosoftAliasAccount{&firstCheck, &secondCheck},
+		reserveAttempts: []MicrosoftAliasAttempt{{
+			ID:     1,
+			Alias:  "david123456@outlook.com",
+			Status: MicrosoftAliasAttemptRunning,
+		}},
+		reserveUsage: MicrosoftAliasUsage{YearCount: 1, WeekCount: 1},
+	}
+	creator := &fakeMicrosoftAliasCreator{result: MicrosoftAliasCreationResult{
+		Aliases:   []string{"david123456@outlook.com"},
+		Attempted: []string{"david123456@outlook.com"},
+	}}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.Equal(t, 2, store.eligibilityChecks)
+	require.Equal(t, "new-password", creator.request.Password)
+	require.Equal(t, "new-binding@recovery.test", creator.request.BindingAddress)
+	require.Equal(t, "owner@example.com", creator.request.EmailAddress)
 }
 
 func TestMicrosoftAliasProcessRequiresGraceAndThreeNegativeConfirmationsToReleaseUncertainAttempt(t *testing.T) {

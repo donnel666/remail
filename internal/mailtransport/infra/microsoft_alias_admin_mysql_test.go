@@ -125,6 +125,7 @@ func TestMicrosoftAliasAdminScheduleReadsUsageAndCommandAdvancesWithoutBypassing
 func TestMicrosoftAliasAdminUncertainWorkerResultStaysUncertainInTaskViewsMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 9234, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 9234)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
 		ResourceID: 9234,
@@ -570,7 +571,10 @@ SELECT SHA2(CONCAT_WS(
     mr.password,
     mr.client_id,
     mr.refresh_token,
-    COALESCE(binding.binding_address, '')
+    COALESCE(binding.account_email, ''),
+    COALESCE(binding.binding_address, ''),
+    COALESCE(binding.status, ''),
+    COALESCE(binding.bound_display, '')
 ), 256) AS resource_signature
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_binding_mailboxes AS binding

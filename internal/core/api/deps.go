@@ -32,6 +32,7 @@ type CoreModule struct {
 	AdminBulk            *coreapp.AdminResourceBulkService
 	MicrosoftCredentials coreapp.MicrosoftCredentialPort
 	BackgroundDispatch   BackgroundDispatchSizer
+	validationRepo       *coreinfra.ResourceValidationRepo
 }
 
 func (m *CoreModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
@@ -68,6 +69,12 @@ func (m *CoreModule) SetAdminProxyBindingQueryPort(port coreapp.AdminProxyBindin
 func (m *CoreModule) SetMicrosoftAliasScheduleTrigger(trigger coreapp.MicrosoftAliasScheduleTriggerPort) {
 	if m != nil && m.ValidationUseCase != nil {
 		m.ValidationUseCase.SetMicrosoftAliasScheduleTrigger(trigger)
+	}
+}
+
+func (m *CoreModule) SetMicrosoftValidationBindingCommitPort(port coreapp.MicrosoftValidationBindingCommitPort) {
+	if m != nil && m.validationRepo != nil {
+		m.validationRepo.SetMicrosoftValidationBindingCommitPort(port)
 	}
 }
 
@@ -111,5 +118,6 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 		AdminCommands:        adminCommands,
 		AdminBulk:            adminBulk,
 		MicrosoftCredentials: coreapp.NewMicrosoftCredentialService(adminRepo),
+		validationRepo:       validationRepo,
 	}, nil
 }

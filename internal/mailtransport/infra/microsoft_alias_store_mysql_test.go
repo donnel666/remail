@@ -3,9 +3,12 @@ package infra
 import (
 	"context"
 	"errors"
+	"fmt"
+	stdmail "net/mail"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +65,90 @@ func createMicrosoftAliasTestResource(t *testing.T, db *gorm.DB, resourceID uint
 	).Error)
 }
 
+func createMicrosoftAliasTestBinding(t *testing.T, db *gorm.DB, resourceID uint, address, status, boundDisplay string) {
+	t.Helper()
+	ensureMicrosoftAliasTestBindingDomain(t, db, resourceID, address)
+	result := db.Exec(`
+INSERT INTO microsoft_binding_mailboxes (
+    resource_id,
+    resource_type,
+    owner_user_id,
+    account_email,
+    binding_address,
+    purpose,
+    status,
+    bound_display
+)
+SELECT
+    root.id,
+    root.type,
+    root.owner_user_id,
+    resource.email_address,
+    ?,
+    'validation',
+    ?,
+    ?
+FROM email_resources AS root
+JOIN microsoft_resources AS resource ON resource.id = root.id
+WHERE root.id = ?`, address, status, boundDisplay, resourceID)
+	require.NoError(t, result.Error)
+	require.EqualValues(t, 1, result.RowsAffected)
+}
+
+func ensureMicrosoftAliasTestBindingDomain(t *testing.T, db *gorm.DB, resourceID uint, address string) {
+	t.Helper()
+	parsed, err := stdmail.ParseAddress(strings.ToLower(strings.TrimSpace(address)))
+	if err != nil || !strings.EqualFold(strings.TrimSpace(parsed.Address), strings.TrimSpace(address)) {
+		return
+	}
+	_, domainName, ok := strings.Cut(strings.ToLower(strings.TrimSpace(parsed.Address)), "@")
+	if !ok || domainName == "" || strings.Contains(domainName, "@") {
+		return
+	}
+	var exists int64
+	require.NoError(t, db.Table("domain_resources").Where("domain = ?", domainName).Count(&exists).Error)
+	if exists > 0 {
+		return
+	}
+	ownerID := uint(8_000_000 + resourceID*2)
+	domainResourceID := ownerID + 1
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, 'hash', 'supplier')",
+		ownerID,
+		fmt.Sprintf("alias-binding-domain-owner-%d@test.local", ownerID),
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, name, server_address, status) VALUES (?, ?, 'alias-binding-domain', ?, 'online')",
+		ownerID,
+		ownerID,
+		"mx."+domainName,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO email_resources(id, type, owner_user_id) VALUES (?, 'domain', ?)",
+		domainResourceID,
+		ownerID,
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, mail_server_id, purpose, status) VALUES (?, 'domain', ?, ?, ?, 'binding', 'normal')",
+		domainResourceID,
+		ownerID,
+		domainName,
+		ownerID,
+	).Error)
+}
+
+func createVerifiedMicrosoftAliasBinding(t *testing.T, db *gorm.DB, resourceID uint) {
+	t.Helper()
+	createMicrosoftAliasTestBinding(
+		t,
+		db,
+		resourceID,
+		fmt.Sprintf("binding-%d@recovery.test", resourceID),
+		"verified",
+		"",
+	)
+}
+
 func TestMicrosoftAliasStoreEnsuresValidatedResourceScheduleMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1008, "pending")
@@ -91,6 +178,9 @@ SET schedule.status = 'paused',
         resource.password,
         resource.client_id,
         resource.refresh_token,
+        '',
+        '',
+        '',
         ''
     ), 256)
 WHERE schedule.resource_id = ?`, 1008).Error)
@@ -109,6 +199,538 @@ WHERE schedule.resource_id = ?`, 1008).Error)
 	assert.Equal(t, "pending", woken.Status)
 	assert.Empty(t, woken.ClaimToken)
 	assert.True(t, woken.NextRunAt.Equal(now.Add(2*time.Minute)))
+}
+
+func TestMicrosoftAliasStoreWakesPausedScheduleAfterBindingRecoveryMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1018, "normal")
+	createMicrosoftAliasTestBinding(t, db, 1018, "same-address@recovery.test", "failed", "sa**********@recovery.test")
+
+	store := NewMicrosoftAliasStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, time.July, 14, 8, 0, 0, 0, time.UTC)
+	_, err := store.EnsureSchedules(ctx, now)
+	require.NoError(t, err)
+	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Nil(t, account)
+	paused := loadAliasAdminSchedule(t, db, 1018)
+	require.Equal(t, "paused", paused.Status)
+	require.Equal(t, mailapp.MicrosoftAliasExternalRecoveryMessage, paused.LastSafeError)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1018).
+		Updates(map[string]any{
+			"status":        "verified",
+			"bound_display": "",
+			"updated_at":    now.Add(time.Minute),
+		}).Error)
+
+	ensured, err := store.EnsureScheduleForResource(ctx, 1018, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ensured, "clearing the recovered binding mask must invalidate the paused signature")
+	woken := loadAliasAdminSchedule(t, db, 1018)
+	require.Equal(t, "pending", woken.Status)
+	require.Empty(t, woken.LastSafeError)
+}
+
+func TestMicrosoftAliasStoreBroadScanWakesLegacyExternalBindingAfterRecoveryMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1019, "normal")
+	createMicrosoftAliasTestBinding(t, db, 1019, "legacy-address@recovery.test", "failed", "le************@recovery.test")
+
+	store := NewMicrosoftAliasStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, time.July, 14, 9, 0, 0, 0, time.UTC)
+	_, err := store.EnsureSchedules(ctx, now)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_alias_schedules AS schedule
+JOIN microsoft_resources AS resource ON resource.id = schedule.resource_id
+JOIN microsoft_binding_mailboxes AS binding ON binding.resource_id = resource.id
+SET schedule.status = 'paused',
+    schedule.last_safe_error = ?,
+    schedule.blocked_resource_signature = SHA2(CONCAT_WS(
+        CHAR(0),
+        resource.status,
+        resource.email_address,
+        resource.password,
+        resource.client_id,
+        resource.refresh_token,
+        binding.binding_address
+    ), 256)
+WHERE schedule.resource_id = ?`, mailapp.MicrosoftAliasExternalRecoveryMessage, 1019).Error)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1019).
+		Updates(map[string]any{
+			"status":        "verified",
+			"bound_display": "",
+			"updated_at":    now.Add(time.Minute),
+		}).Error)
+
+	_, err = store.EnsureSchedules(ctx, now.Add(time.Minute))
+	require.NoError(t, err)
+	woken := loadAliasAdminSchedule(t, db, 1019)
+	require.Equal(t, "pending", woken.Status)
+	require.Empty(t, woken.LastSafeError)
+}
+
+func TestMicrosoftAliasStoreBroadScanWakesLegacyUnresolvedBindingAfterRecoveryMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1032, "normal")
+	createMicrosoftAliasTestBinding(t, db, 1032, "binding-1032@recovery.test", "pending", "")
+
+	store := NewMicrosoftAliasStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, time.July, 14, 9, 30, 0, 0, time.UTC)
+	_, err := store.EnsureSchedules(ctx, now)
+	require.NoError(t, err)
+	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Nil(t, account)
+	paused := loadAliasAdminSchedule(t, db, 1032)
+	require.Equal(t, "paused", paused.Status)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, paused.LastSafeError)
+
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_alias_schedules AS schedule
+JOIN microsoft_resources AS resource ON resource.id = schedule.resource_id
+JOIN microsoft_binding_mailboxes AS binding ON binding.resource_id = resource.id
+SET schedule.blocked_resource_signature = SHA2(CONCAT_WS(
+        CHAR(0),
+        resource.status,
+        resource.email_address,
+        resource.password,
+        resource.client_id,
+        resource.refresh_token,
+        binding.binding_address
+    ), 256)
+WHERE schedule.resource_id = ?`, 1032).Error)
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1032).
+		Updates(map[string]any{
+			"status":        "verified",
+			"bound_display": "",
+			"updated_at":    now.Add(time.Minute),
+		}).Error)
+
+	_, err = store.EnsureSchedules(ctx, now.Add(time.Minute))
+	require.NoError(t, err)
+	woken := loadAliasAdminSchedule(t, db, 1032)
+	require.Equal(t, "pending", woken.Status)
+	require.Empty(t, woken.LastSafeError)
+}
+
+func TestMicrosoftAliasStoreTargetedWakeAcceptsRecoveredBindingWithMatchingSignatureMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1033, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1033)
+	now := time.Date(2026, time.July, 14, 9, 45, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID:               1033,
+		Status:                   "paused",
+		NextRunAt:                now.Add(24 * time.Hour),
+		BlockedResourceSignature: currentAliasAdminResourceSignature(t, db, 1033),
+		LastSafeError:            mailapp.MicrosoftAliasBindingUnresolvedMessage,
+	}).Error)
+
+	ensured, err := NewMicrosoftAliasStore(db).EnsureScheduleForResource(context.Background(), 1033, now)
+	require.NoError(t, err)
+	require.True(t, ensured)
+	woken := loadAliasAdminSchedule(t, db, 1033)
+	require.Equal(t, "pending", woken.Status)
+	require.Empty(t, woken.LastSafeError)
+}
+
+func TestMicrosoftAliasStoreBroadScanKeepsMalformedVerifiedBindingPausedMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1035, "normal")
+	createMicrosoftAliasTestBinding(t, db, 1035, "bad@address@recovery.test", "verified", "")
+	now := time.Date(2026, time.July, 14, 9, 50, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID:               1035,
+		Status:                   "paused",
+		NextRunAt:                now.Add(24 * time.Hour),
+		BlockedResourceSignature: currentAliasAdminResourceSignature(t, db, 1035),
+		LastSafeError:            mailapp.MicrosoftAliasBindingUnresolvedMessage,
+	}).Error)
+
+	ensured, err := NewMicrosoftAliasStore(db).EnsureSchedules(context.Background(), now)
+	require.NoError(t, err)
+	require.Zero(t, ensured)
+	paused := loadAliasAdminSchedule(t, db, 1035)
+	require.Equal(t, "paused", paused.Status)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, paused.LastSafeError)
+}
+
+func TestMicrosoftAliasStoreWakesAfterBindingAccountMatchIsRestoredMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1037, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1037)
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1037).
+		Update("account_email", "different-account@outlook.test").Error)
+
+	store := NewMicrosoftAliasStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, time.July, 14, 9, 52, 0, 0, time.UTC)
+	_, err := store.EnsureSchedules(ctx, now)
+	require.NoError(t, err)
+	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Nil(t, account)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, loadAliasAdminSchedule(t, db, 1037).LastSafeError)
+
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_binding_mailboxes AS binding
+JOIN microsoft_resources AS resource ON resource.id = binding.resource_id
+SET binding.account_email = resource.email_address
+WHERE binding.resource_id = ?`, 1037).Error)
+	ensured, err := store.EnsureScheduleForResource(ctx, 1037, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ensured)
+	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1037).Status)
+}
+
+func TestMicrosoftAliasStoreBroadScanPaginatesPastMalformedRecoveredBindingsMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	now := time.Date(2026, time.July, 14, 9, 55, 0, 0, time.UTC)
+	for _, resourceID := range []uint{1040, 1041, 1042} {
+		createMicrosoftAliasTestResource(t, db, resourceID, "normal")
+		createMicrosoftAliasTestBinding(
+			t,
+			db,
+			resourceID,
+			fmt.Sprintf("bad@address@%d.test", resourceID),
+			"verified",
+			"",
+		)
+		require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+			ResourceID:               resourceID,
+			Status:                   "paused",
+			NextRunAt:                now.Add(24 * time.Hour),
+			BlockedResourceSignature: currentAliasAdminResourceSignature(t, db, resourceID),
+			LastSafeError:            mailapp.MicrosoftAliasBindingUnresolvedMessage,
+		}).Error)
+	}
+	createMicrosoftAliasTestResource(t, db, 1043, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1043)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID:               1043,
+		Status:                   "paused",
+		NextRunAt:                now.Add(24 * time.Hour),
+		BlockedResourceSignature: currentAliasAdminResourceSignature(t, db, 1043),
+		LastSafeError:            mailapp.MicrosoftAliasBindingUnresolvedMessage,
+	}).Error)
+
+	store := NewMicrosoftAliasStore(db)
+	store.recoveredBindingScanPageSize = 2
+	ensured, err := store.EnsureSchedules(context.Background(), now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, ensured)
+	for _, resourceID := range []uint{1040, 1041, 1042} {
+		require.Equal(t, "paused", loadAliasAdminSchedule(t, db, resourceID).Status)
+	}
+	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1043).Status)
+}
+
+func TestMicrosoftAliasStoreClaimRequiresVerifiedConcreteBindingMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	now := time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name            string
+		resourceID      uint
+		bindingAddress  string
+		bindingStatus   string
+		accountMismatch bool
+		wantClaimed     bool
+	}{
+		{name: "no binding row", resourceID: 1020},
+		{name: "verified empty address", resourceID: 1021, bindingStatus: "verified"},
+		{name: "pending binding", resourceID: 1022, bindingAddress: "binding-1022@recovery.test", bindingStatus: "pending"},
+		{name: "code sent binding", resourceID: 1023, bindingAddress: "binding-1023@recovery.test", bindingStatus: "code_sent"},
+		{name: "timeout binding", resourceID: 1024, bindingAddress: "binding-1024@recovery.test", bindingStatus: "timeout"},
+		{name: "failed binding", resourceID: 1025, bindingAddress: "binding-1025@recovery.test", bindingStatus: "failed"},
+		{name: "verified masked address", resourceID: 1026, bindingAddress: "b**********@recovery.test", bindingStatus: "verified"},
+		{name: "expired binding", resourceID: 1027, bindingAddress: "binding-1027@recovery.test", bindingStatus: "expired"},
+		{name: "verified malformed address", resourceID: 1028, bindingAddress: "bad@address@recovery.test", bindingStatus: "verified"},
+		{name: "verified whitespace address", resourceID: 1030, bindingAddress: "bad address@recovery.test", bindingStatus: "verified"},
+		{name: "verified binding for another account", resourceID: 1036, bindingAddress: "binding-1036@recovery.test", bindingStatus: "verified", accountMismatch: true},
+		{name: "verified concrete binding", resourceID: 1031, bindingAddress: "binding-1031@recovery.test", bindingStatus: "verified", wantClaimed: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			createMicrosoftAliasTestResource(t, db, test.resourceID, "normal")
+			if test.bindingStatus != "" {
+				createMicrosoftAliasTestBinding(t, db, test.resourceID, test.bindingAddress, test.bindingStatus, "")
+			}
+			if test.accountMismatch {
+				require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+					Where("resource_id = ?", test.resourceID).
+					Update("account_email", "different-account@outlook.test").Error)
+			}
+			claimToken := fmt.Sprintf("%032d", test.resourceID)
+			require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+				ResourceID: test.resourceID,
+				Status:     "queued",
+				NextRunAt:  now,
+				ClaimToken: claimToken,
+			}).Error)
+
+			store := NewMicrosoftAliasStore(db)
+			account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
+				ResourceID:    test.resourceID,
+				DispatchToken: claimToken,
+			}, now)
+			require.NoError(t, err)
+			require.Equal(t, test.wantClaimed, claimed)
+
+			schedule := loadAliasAdminSchedule(t, db, test.resourceID)
+			if test.wantClaimed {
+				require.NotNil(t, account)
+				require.Equal(t, test.bindingAddress, account.BindingAddress)
+				require.Equal(t, "running", schedule.Status)
+				require.Empty(t, schedule.LastSafeError)
+				return
+			}
+			require.Nil(t, account)
+			require.Equal(t, "paused", schedule.Status)
+			require.Empty(t, schedule.ClaimToken)
+			require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, schedule.LastSafeError)
+			require.NotEmpty(t, schedule.BlockedResourceSignature)
+		})
+	}
+}
+
+func TestMicrosoftAliasStoreCheckEligibilityRejectsBindingThatBecomesInvalidMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1029, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1029)
+	now := time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)
+	claimToken := fmt.Sprintf("%032d", 1029)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID: 1029,
+		Status:     "queued",
+		NextRunAt:  now,
+		ClaimToken: claimToken,
+	}).Error)
+
+	store := NewMicrosoftAliasStore(db)
+	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
+		ResourceID:    1029,
+		DispatchToken: claimToken,
+	}, now)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, account)
+
+	eligible, safeMessage, err := store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.True(t, eligible)
+	require.Empty(t, safeMessage)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1029).
+		Update("status", "failed").Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1029).
+		Updates(map[string]any{
+			"status":          "verified",
+			"binding_address": "b**********@recovery.test",
+		}).Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1029).
+		Updates(map[string]any{
+			"binding_address": "binding-1029@recovery.test",
+			"bound_display":   "bi**********@recovery.test",
+		}).Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasExternalRecoveryMessage, safeMessage)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1029).
+		Updates(map[string]any{
+			"bound_display": "",
+			"account_email": "different-account@outlook.test",
+		}).Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+
+	require.NoError(t, db.Where("resource_id = ?", 1029).Delete(&MicrosoftBindingMailboxModel{}).Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1029, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+}
+
+func TestMicrosoftAliasStoreBindingDomainMustRemainActiveMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1044, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1044)
+	now := time.Date(2026, time.July, 14, 11, 15, 0, 0, time.UTC)
+	claimToken := fmt.Sprintf("%032d", 1044)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID: 1044,
+		Status:     "queued",
+		NextRunAt:  now,
+		ClaimToken: claimToken,
+	}).Error)
+	require.NoError(t, db.Table("domain_resources").
+		Where("domain = ?", "recovery.test").
+		Update("status", "abnormal").Error)
+
+	store := NewMicrosoftAliasStore(db)
+	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
+		ResourceID:    1044,
+		DispatchToken: claimToken,
+	}, now)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Nil(t, account)
+	paused := loadAliasAdminSchedule(t, db, 1044)
+	require.Equal(t, "paused", paused.Status)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, paused.LastSafeError)
+
+	changed, err := store.EnsureSchedules(context.Background(), now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Zero(t, changed, "an inactive binding domain must not wake the alias schedule")
+	require.Equal(t, "paused", loadAliasAdminSchedule(t, db, 1044).Status)
+
+	require.NoError(t, db.Table("domain_resources").
+		Where("domain = ?", "recovery.test").
+		Update("status", "normal").Error)
+	changed, err = store.EnsureSchedules(context.Background(), now.Add(2*time.Minute))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, changed)
+	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1044).Status)
+}
+
+func TestMicrosoftAliasStoreRuntimeEligibilityRejectsInactiveBindingDomainMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1045, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1045)
+	now := time.Date(2026, time.July, 14, 11, 20, 0, 0, time.UTC)
+	claimToken := fmt.Sprintf("%032d", 1045)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID: 1045,
+		Status:     "queued",
+		NextRunAt:  now,
+		ClaimToken: claimToken,
+	}).Error)
+
+	store := NewMicrosoftAliasStore(db)
+	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
+		ResourceID:    1045,
+		DispatchToken: claimToken,
+	}, now)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, account)
+
+	require.NoError(t, db.Table("domain_resources").
+		Where("domain = ?", "recovery.test").
+		Update("status", "disabled").Error)
+	eligible, safeMessage, err := store.CheckEligibility(context.Background(), 1045, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+
+	require.NoError(t, db.Table("domain_resources").
+		Where("domain = ?", "recovery.test").
+		Update("status", "normal").Error)
+	eligible, safeMessage, err = store.CheckEligibility(context.Background(), 1045, claimToken)
+	require.NoError(t, err)
+	require.True(t, eligible)
+	require.Empty(t, safeMessage)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1045).
+		Update("binding_address", "reloaded-binding-1045@recovery.test").Error)
+	reloaded, eligible, safeMessage, err := store.ReloadEligibleAccount(context.Background(), 1045, claimToken)
+	require.NoError(t, err)
+	require.True(t, eligible)
+	require.Empty(t, safeMessage)
+	require.NotNil(t, reloaded)
+	require.Equal(t, "reloaded-binding-1045@recovery.test", reloaded.BindingAddress)
+	require.Equal(t, claimToken, reloaded.ClaimToken)
+}
+
+func TestMicrosoftAliasStoreRuntimeBindingPauseCapturesCurrentSignatureMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1034, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1034)
+	now := time.Date(2026, time.July, 14, 11, 30, 0, 0, time.UTC)
+	claimToken := fmt.Sprintf("%032d", 1034)
+	require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+		ResourceID: 1034,
+		Status:     "queued",
+		NextRunAt:  now,
+		ClaimToken: claimToken,
+	}).Error)
+
+	store := NewMicrosoftAliasStore(db)
+	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
+		ResourceID:    1034,
+		DispatchToken: claimToken,
+	}, now)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, account)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1034).
+		Update("status", "failed").Error)
+	eligible, safeMessage, err := store.CheckEligibility(context.Background(), 1034, claimToken)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, safeMessage)
+	require.NoError(t, store.Pause(context.Background(), 1034, claimToken, safeMessage))
+
+	paused := loadAliasAdminSchedule(t, db, 1034)
+	require.Equal(t, "paused", paused.Status)
+	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, paused.LastSafeError)
+	require.Equal(t, currentAliasAdminResourceSignature(t, db, 1034), paused.BlockedResourceSignature)
+	ensured, err := store.EnsureScheduleForResource(context.Background(), 1034, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.False(t, ensured, "unchanged invalid binding must remain stably paused")
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1034).
+		Update("status", "verified").Error)
+	ensured, err = store.EnsureScheduleForResource(context.Background(), 1034, now.Add(2*time.Minute))
+	require.NoError(t, err)
+	require.True(t, ensured)
+	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1034).Status)
 }
 
 func TestMicrosoftAliasStoreAssignsDeterministicSuperAdminOwnerMySQL(t *testing.T) {
@@ -196,6 +818,7 @@ func TestMicrosoftAliasStoreRefusesUnownedSuccessMySQL(t *testing.T) {
 func TestMicrosoftAliasStoreFencesStaleWorkerAndResumesCandidatesMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1001, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1001)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -295,6 +918,7 @@ func TestMicrosoftAliasStoreFencesStaleWorkerAndResumesCandidatesMySQL(t *testin
 func TestMicrosoftAliasStoreMovesSuccessAtBoundaryAndReleasesFailureMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1002, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1002)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	startedAt := time.Date(2026, time.July, 12, 15, 59, 0, 0, time.UTC)
@@ -358,6 +982,7 @@ func TestMicrosoftAliasStoreMovesSuccessAtBoundaryAndReleasesFailureMySQL(t *tes
 func TestMicrosoftAliasStoreWakesPausedNormalResourceMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1003, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1003)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -389,6 +1014,7 @@ func TestMicrosoftAliasStoreWakesPausedNormalResourceMySQL(t *testing.T) {
 func TestMicrosoftAliasStoreSchedulesNormalResourcesRegardlessOfSaleStateMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1006, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1006)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -408,20 +1034,20 @@ func TestMicrosoftAliasStoreSchedulesNormalResourcesRegardlessOfSaleStateMySQL(t
 	require.True(t, claimed)
 	require.NotNil(t, account)
 
-	eligible, err := store.CheckEligibility(ctx, 1006, account.ClaimToken)
+	eligible, _, err := store.CheckEligibility(ctx, 1006, account.ClaimToken)
 	require.NoError(t, err)
 	assert.True(t, eligible)
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET for_sale = TRUE, updated_at = ? WHERE id = 1006", now.Add(2*time.Minute)).Error)
-	eligible, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
+	eligible, _, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
 	require.NoError(t, err)
 	assert.True(t, eligible)
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET for_sale = FALSE, updated_at = ? WHERE id = 1006", now.Add(3*time.Minute)).Error)
-	eligible, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
+	eligible, _, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
 	require.NoError(t, err)
 	assert.True(t, eligible)
 
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET status = 'abnormal', updated_at = ? WHERE id = 1006", now.Add(4*time.Minute)).Error)
-	eligible, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
+	eligible, _, err = store.CheckEligibility(ctx, 1006, account.ClaimToken)
 	require.NoError(t, err)
 	assert.False(t, eligible)
 }
@@ -499,6 +1125,7 @@ WHERE mr.id = 1016`, now, now, now).Error)
 func TestMicrosoftAliasStorePermanentPauseWakesOnlyAfterResourceChangeMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1007, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1007)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
@@ -533,17 +1160,12 @@ func TestMicrosoftAliasStorePermanentPauseWakesOnlyAfterResourceChangeMySQL(t *t
 	assert.Zero(t, ensured)
 
 	resourceChangedAt := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
-	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_binding_mailboxes (
-    resource_id,
-    owner_user_id,
-    account_email,
-    binding_address,
-    status
-)
-SELECT id, id, email_address, 'binding-1007@test.local', 'verified'
-FROM microsoft_resources
-WHERE id = 1007`).Error)
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 1007).
+		Updates(map[string]any{
+			"binding_address": "changed-binding-1007@recovery.test",
+			"updated_at":      resourceChangedAt,
+		}).Error)
 	ensured, err = store.EnsureSchedules(ctx, resourceChangedAt)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, ensured)
@@ -554,6 +1176,7 @@ WHERE id = 1007`).Error)
 func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1008, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1008)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -595,6 +1218,7 @@ func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing
 func TestMicrosoftAliasStorePersistsConservativeUncertainReconciliationMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1009, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1009)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -655,6 +1279,7 @@ func TestMicrosoftAliasStorePersistsConservativeUncertainReconciliationMySQL(t *
 func TestMicrosoftAliasStorePermanentPauseDetectsCredentialChangeDuringRunMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1010, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1010)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -704,6 +1329,7 @@ func TestMicrosoftAliasStoreRotatesExpiredQueuedDispatchTokenMySQL(t *testing.T)
 func TestMicrosoftAliasStoreReconciledSuccessKeepsOriginalQuotaWindowMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1011, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1011)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	startedAt := time.Date(2026, time.December, 31, 15, 0, 0, 0, time.UTC)
@@ -753,6 +1379,7 @@ func TestMicrosoftAliasStoreReconciledSuccessKeepsOriginalQuotaWindowMySQL(t *te
 func TestMicrosoftAliasStoreSerializesConcurrentQuotaReservationsMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1005, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1005)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)

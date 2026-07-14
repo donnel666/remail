@@ -25,7 +25,7 @@ type ResourceValidationRepository interface {
 	ReleaseDispatch(ctx context.Context, id uint, dispatchToken string) error
 	MarkFailed(ctx context.Context, id uint, claimToken string, safeError string) error
 	MarkRetryableFailure(ctx context.Context, id uint, claimToken string, safeError string) (bool, error)
-	SaveMicrosoftCredentials(ctx context.Context, jobID uint, resourceID uint, claimToken string, clientID string, refreshToken string) error
+	SaveMicrosoftProgress(ctx context.Context, jobID uint, resourceID uint, claimToken string, result MicrosoftValidationResult) error
 	ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
 	ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
 	MarkDispatchFailed(ctx context.Context, id uint, dispatchToken string, safeError string) error
@@ -41,6 +41,15 @@ type ResourceValidationQueue interface {
 type ResourceValidationPort interface {
 	ValidateMicrosoft(ctx context.Context, req MicrosoftValidationRequest) (MicrosoftValidationResult, error)
 	ValidateDomain(ctx context.Context, req DomainValidationRequest) (DomainValidationResult, error)
+}
+
+// MicrosoftValidationBindingCommitPort is implemented by MailTransport. Core
+// invokes it only from fenced validation progress/result transactions, after
+// the resource root, Microsoft subtype, and running validation job have all
+// been locked and the expected credential revision has been checked.
+// Implementations must join the caller-owned transaction carried by ctx.
+type MicrosoftValidationBindingCommitPort interface {
+	CommitValidationBinding(ctx context.Context, command MicrosoftValidationBindingCommand) (changed bool, err error)
 }
 
 // MicrosoftAliasScheduleTriggerPort is implemented by MailTransport. It is
@@ -62,13 +71,56 @@ type MicrosoftValidationRequest struct {
 }
 
 type MicrosoftValidationResult struct {
-	Valid          bool
-	ClientID       string
-	RefreshToken   string
-	RTExpireAt     *time.Time
-	GraphAvailable bool
-	Category       string
-	SafeMessage    string
+	Valid        bool
+	ClientID     string
+	RefreshToken string
+	// CredentialsAuthoritative is set only after a refresh-token exchange or
+	// password OAuth flow actually succeeded. It lets Core preserve a rotated
+	// credential even when a later binding/fetch gate makes the overall
+	// validation result invalid, without trusting arbitrary non-empty fields
+	// returned by a failed protocol step.
+	CredentialsAuthoritative bool
+	RTExpireAt               *time.Time
+	GraphAvailable           bool
+	Category                 string
+	SafeMessage              string
+	// RecoveredBinding is a complete, uniquely resolved, locally receivable
+	// recovery-mailbox fact. It intentionally contains no proof mask, token,
+	// code, or other Microsoft protocol material.
+	RecoveredBinding   *MicrosoftRecoveredBinding
+	BindingObservation *MicrosoftBindingObservation
+}
+
+// MicrosoftRecoveredBinding carries the optimistic binding snapshot captured
+// before the remote proof lookup. ExpectedBindingID == 0 means no binding row
+// existed; otherwise ID, address, and updated_at must all still match when Core
+// commits the validation result.
+type MicrosoftRecoveredBinding struct {
+	Address                  string
+	ExpectedBindingID        uint
+	ExpectedBindingAddress   string
+	ExpectedBindingUpdatedAt time.Time
+}
+
+// MicrosoftBindingObservation is the ordinary binding outcome produced by a
+// validation login. Unlike RecoveredBinding it carries no recovery proof and
+// cannot replace a concurrently changed binding outside Core's job fence.
+type MicrosoftBindingObservation struct {
+	Address      string
+	Status       string
+	BoundDisplay string
+	SafeMessage  string
+}
+
+// MicrosoftValidationBindingCommand is assembled by Core from the fenced
+// validation result and the currently locked Microsoft resource. AccountEmail
+// therefore never comes from an unfenced external protocol response.
+type MicrosoftValidationBindingCommand struct {
+	ResourceID         uint
+	OwnerUserID        uint
+	AccountEmail       string
+	RecoveredBinding   *MicrosoftRecoveredBinding
+	BindingObservation *MicrosoftBindingObservation
 }
 
 type DomainValidationRequest struct {
@@ -152,6 +204,15 @@ var ErrValidationTemporaryUnavailable = errors.New("resource validation temporar
 // call was in flight. The repository has already made the job terminal; the
 // worker must not retry the stale payload or overwrite the newer state.
 var ErrValidationResultStale = errors.New("resource validation result is stale")
+
+// ErrValidationBindingRejected means the remote validation resolved a binding
+// fact that cannot be committed as this resource's active recovery mailbox
+// (for example, the address is already assigned or its local binding domain is
+// no longer active). This is a terminal validation result, not a stale worker
+// fence and not a transient infrastructure failure.
+var ErrValidationBindingRejected = errors.New("resource validation binding was rejected")
+
+const MicrosoftValidationBindingRejectedMessage = "Microsoft recovery mailbox is unavailable or already assigned."
 
 func NewResourceValidationUseCase(resources EmailResourceRepository, validations ResourceValidationRepository, queue ResourceValidationQueue, validator ResourceValidationPort) *ResourceValidationUseCase {
 	return &ResourceValidationUseCase{
@@ -495,27 +556,39 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 			result.SafeMessage = "Microsoft mail service is temporarily unavailable."
 		}
 	}
-	if !result.Valid && isRetryableValidationCategory(result.Category) &&
-		(strings.TrimSpace(result.ClientID) != "" || strings.TrimSpace(result.RefreshToken) != "") {
-		if err := uc.validations.SaveMicrosoftCredentials(
-			ctx,
-			job.ID,
-			job.ResourceID,
-			job.ClaimToken,
-			result.ClientID,
-			result.RefreshToken,
-		); err != nil {
+	if isRetryableValidationCategory(result.Category) && !result.Valid {
+		if err := uc.validations.SaveMicrosoftProgress(ctx, job.ID, job.ResourceID, job.ClaimToken, result); err != nil {
 			if errors.Is(err, ErrValidationResultStale) {
 				return nil
 			}
+			if errors.Is(err, ErrValidationBindingRejected) {
+				// The remote proof may have completed before a local uniqueness or
+				// active-domain constraint changed. Make that a terminal binding
+				// failure instead of leaving a pending resource with a failed job.
+				result.Valid = false
+				result.Category = "binding"
+				result.SafeMessage = MicrosoftValidationBindingRejectedMessage
+				result.RecoveredBinding = nil
+				result.BindingObservation = nil
+				applyErr := uc.validations.ApplyMicrosoftResult(
+					ctx,
+					job.ID,
+					job.ResourceID,
+					job.ClaimToken,
+					result,
+					validationSystemLog(job, false, result.Category, result.SafeMessage),
+				)
+				if errors.Is(applyErr, ErrValidationResultStale) || errors.Is(applyErr, ErrValidationBindingRejected) {
+					return nil
+				}
+				return applyErr
+			}
 			return err
 		}
-	}
-	if isRetryableValidationCategory(result.Category) && !result.Valid {
 		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
 	}
 	err = uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
-	if errors.Is(err, ErrValidationResultStale) {
+	if errors.Is(err, ErrValidationResultStale) || errors.Is(err, ErrValidationBindingRejected) {
 		return nil
 	}
 	if err != nil || !result.Valid || uc.aliasTrigger == nil {

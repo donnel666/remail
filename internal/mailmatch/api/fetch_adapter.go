@@ -15,8 +15,12 @@ import (
 
 const maxFetchProxyAttempts = 3
 
+type microsoftMessageFetchClient interface {
+	FetchAll(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
+}
+
 type MicrosoftFetchAdapter struct {
-	client  *mailinfra.MicrosoftMailFetchClient
+	client  microsoftMessageFetchClient
 	proxies *proxyapp.ProxyUseCase
 }
 
@@ -57,6 +61,12 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			UntilAt:      req.UntilAt,
 			MaxMessages:  30,
 		})
+		if rotated := strings.TrimSpace(result.RefreshToken); rotated != "" {
+			// A mailbox operation can fail after Microsoft has already rotated the
+			// RT. Reuse the newest credential for the next proxy attempt instead of
+			// retrying with a superseded one.
+			req.Scope.MicrosoftRT = rotated
+		}
 		if err != nil {
 			lastFailure = &mailmatchapp.MailFetchFailure{
 				Category:    "request",
@@ -75,7 +85,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			}, nil
 		}
 		lastFailure = microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
-		if result.ProxyFailure || proxyID != 0 {
+		if result.ProxyFailure {
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
 			continue
 		}

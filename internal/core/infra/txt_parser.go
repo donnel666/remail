@@ -1,9 +1,21 @@
 package infra
 
 import (
+	"net/mail"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/donnel666/remail/internal/core/domain"
+)
+
+const (
+	// Keep deterministic row validation aligned with the persistence schema so
+	// skip-mode imports reject a bad line before entering a 1000-row transaction.
+	microsoftImportEmailMaxLength          = 255
+	microsoftImportPasswordMaxLength       = 512
+	microsoftImportClientIDMaxLength       = 255
+	microsoftImportRefreshTokenMaxLength   = 1024
+	microsoftImportBindingAddressMaxLength = 320
 )
 
 // TXTParser parses resource import TXT files.
@@ -68,7 +80,9 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 
 	email := strings.TrimSpace(parts[0])
 	password := parts[1]
-	if email == "" || password == "" {
+	if !isValidMicrosoftImportEmail(email, microsoftImportEmailMaxLength) ||
+		password == "" ||
+		exceedsMicrosoftImportLength(password, microsoftImportPasswordMaxLength) {
 		return nil, importLineError(lineNumber, parts)
 	}
 
@@ -78,20 +92,27 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 	switch len(parts) {
 	case 3:
 		bindingAddress = strings.TrimSpace(parts[2])
-		if bindingAddress == "" {
+		if !isValidMicrosoftImportEmail(bindingAddress, microsoftImportBindingAddressMaxLength) {
 			return nil, importLineError(lineNumber, parts)
 		}
 	case 4:
 		clientID = strings.TrimSpace(parts[2])
 		refreshToken = strings.TrimSpace(parts[3])
-		if clientID == "" || refreshToken == "" {
+		if clientID == "" ||
+			refreshToken == "" ||
+			exceedsMicrosoftImportLength(clientID, microsoftImportClientIDMaxLength) ||
+			exceedsMicrosoftImportLength(refreshToken, microsoftImportRefreshTokenMaxLength) {
 			return nil, importLineError(lineNumber, parts)
 		}
 	case 5:
 		clientID = strings.TrimSpace(parts[2])
 		refreshToken = strings.TrimSpace(parts[3])
 		bindingAddress = strings.TrimSpace(parts[4])
-		if clientID == "" || refreshToken == "" || bindingAddress == "" {
+		if clientID == "" ||
+			refreshToken == "" ||
+			exceedsMicrosoftImportLength(clientID, microsoftImportClientIDMaxLength) ||
+			exceedsMicrosoftImportLength(refreshToken, microsoftImportRefreshTokenMaxLength) ||
+			!isValidMicrosoftImportEmail(bindingAddress, microsoftImportBindingAddressMaxLength) {
 			return nil, importLineError(lineNumber, parts)
 		}
 	}
@@ -104,6 +125,18 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 		RefreshToken:   refreshToken,
 		BindingAddress: bindingAddress,
 	}, nil
+}
+
+func isValidMicrosoftImportEmail(value string, maxLength int) bool {
+	if value == "" || exceedsMicrosoftImportLength(value, maxLength) || strings.Count(value, "@") != 1 {
+		return false
+	}
+	parsed, err := mail.ParseAddress(value)
+	return err == nil && parsed.Address == value
+}
+
+func exceedsMicrosoftImportLength(value string, maxLength int) bool {
+	return maxLength <= 0 || utf8.RuneCountInString(value) > maxLength
 }
 
 func importLineError(lineNumber int, parts []string) *domain.ImportLineError {
