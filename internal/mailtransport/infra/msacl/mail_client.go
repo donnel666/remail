@@ -64,6 +64,11 @@ var (
 	codeContextRe = regexp.MustCompile(`(?is)(?:` + codeKeywords + `)[^\d]{0,30}(\d{4,8})`)
 	codeKeywordRe = regexp.MustCompile(`(?is)` + codeKeywords)
 	sixDigitRe    = regexp.MustCompile(`(^|[^\d])(\d{6})([^\d]|$)`)
+	// emailAddrRe matches an email address. OTP mails greet the recipient by
+	// address ("Hi ocom_2472aca1a08c@aishop6.com,"), whose local part carries
+	// digit runs that would otherwise be mis-read as the code; strip addresses
+	// before extracting the code.
+	emailAddrRe = regexp.MustCompile(`[^\s<>"']+@[^\s<>"']+`)
 )
 
 func resolveMailProxy(proxy string) string {
@@ -305,9 +310,18 @@ func searchMailboxesByContent(ctx context.Context, content, proxy string) []stri
 }
 
 func extractCodeFromEmail(email EmailObj) string {
-	haystack := email.Subject + " " + email.Preview
+	// Strip email addresses first: the recipient address in the greeting
+	// ("Hi ocom_2472aca1a08c@…,") carries digit runs (here "2472") that would
+	// otherwise be mis-read as the OTP over the real body code (e.g. 654505).
+	haystack := emailAddrRe.ReplaceAllString(email.Subject+" "+email.Preview, " ")
 	code := strings.TrimSpace(email.VerificationCode)
-	if code != "" && codeKeywordRe.MatchString(haystack) {
+	// Trust the stored (inbound-pipeline) code only if it actually appears in
+	// the message. That pipeline can mis-extract digits from the RECIPIENT
+	// address (e.g. ocom_2472aca1a08c@… → "2472") instead of the real body
+	// code (e.g. 654505); submitting that wrong value fails Microsoft's OTP
+	// verify and dead-ends the login. When the stored code is absent from the
+	// body, fall through to body extraction and only use it as a last resort.
+	if code != "" && codeKeywordRe.MatchString(haystack) && strings.Contains(haystack, code) {
 		return code
 	}
 	if code != "" {
@@ -331,6 +345,12 @@ func extractCodeFromEmail(email EmailObj) string {
 	}
 	if match := sixDigitRe.FindStringSubmatch(haystack); len(match) > 2 {
 		return match[2]
+	}
+	// Keyword present but no isolated 6-digit code found in the body — the
+	// message body may be truncated/absent from the preview, so fall back to
+	// the stored code (correct in the common case).
+	if code != "" {
+		return code
 	}
 	return ""
 }
