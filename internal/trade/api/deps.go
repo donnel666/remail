@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
@@ -37,7 +38,7 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 		orderTokenAdapter{tokens: tokens},
 	)
 	uc.SetOrderDeliveryPort(orderDeliveryAdapter{db: db})
-	uc.SetProjectNamePort(projectNameAdapter{db: db})
+	uc.SetProjectDisplayPort(projectDisplayAdapter{db: db})
 	uc.SetSystemLogPort(systemLogs)
 	return &Module{
 		UseCase:       uc,
@@ -45,30 +46,34 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 	}
 }
 
-// projectNameAdapter is a read-model helper that resolves project display
-// names for order listings, mirroring orderDeliveryAdapter's approach.
-type projectNameAdapter struct {
+// projectDisplayAdapter resolves the current project presentation fields for
+// one order page in a single query, mirroring orderDeliveryAdapter's approach.
+type projectDisplayAdapter struct {
 	db *gorm.DB
 }
 
-func (a projectNameAdapter) ProjectNames(ctx context.Context, projectIDs []uint) (map[uint]string, error) {
-	result := make(map[uint]string, len(projectIDs))
+func (a projectDisplayAdapter) ProjectDisplays(ctx context.Context, projectIDs []uint) (map[uint]tradeapp.ProjectDisplay, error) {
+	result := make(map[uint]tradeapp.ProjectDisplay, len(projectIDs))
 	if len(projectIDs) == 0 {
 		return result, nil
 	}
 	var rows []struct {
-		ID   uint   `gorm:"column:id"`
-		Name string `gorm:"column:name"`
+		ID      uint   `gorm:"column:id"`
+		Name    string `gorm:"column:name"`
+		LogoURL string `gorm:"column:logo_url"`
 	}
 	if err := a.db.WithContext(ctx).
 		Table("projects").
-		Select("id, name").
+		Select("id, name, logo_url").
 		Where("id IN ?", projectIDs).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		result[row.ID] = row.Name
+		result[row.ID] = tradeapp.ProjectDisplay{
+			Name:    row.Name,
+			LogoURL: strings.TrimSpace(row.LogoURL),
+		}
 	}
 	return result, nil
 }

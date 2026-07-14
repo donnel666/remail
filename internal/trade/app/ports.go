@@ -106,9 +106,16 @@ type SystemLogPort interface {
 	Create(ctx context.Context, log *governancedomain.SystemLog) error
 }
 
-// ProjectNamePort resolves project display names for order read models.
-type ProjectNamePort interface {
-	ProjectNames(ctx context.Context, projectIDs []uint) (map[uint]string, error)
+// ProjectDisplay contains the mutable project presentation fields used by
+// order read models. Orders retain the project ID as their durable fact while
+// the current name and logo are resolved in one bounded batch query.
+type ProjectDisplay struct {
+	Name    string
+	LogoURL string
+}
+
+type ProjectDisplayPort interface {
+	ProjectDisplays(ctx context.Context, projectIDs []uint) (map[uint]ProjectDisplay, error)
 }
 
 type Repository interface {
@@ -253,6 +260,7 @@ type CheckoutRequest struct {
 type CheckoutResult struct {
 	Order              domain.Order
 	ProjectName        string
+	ProjectLogoURL     string
 	ServiceToken       string
 	Created            bool
 	HasDelivery        bool
@@ -291,7 +299,7 @@ type UseCase struct {
 	tokens                     OrderTokenPort
 	deliveries                 OrderDeliveryPort
 	systemLogs                 SystemLogPort
-	projectNames               ProjectNamePort
+	projectDisplays            ProjectDisplayPort
 	now                        func() time.Time
 	deliveryNotificationCursor atomic.Uint64
 }
@@ -311,8 +319,8 @@ func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
 	uc.deliveries = deliveries
 }
 
-func (uc *UseCase) SetProjectNamePort(projectNames ProjectNamePort) {
-	uc.projectNames = projectNames
+func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
+	uc.projectDisplays = projectDisplays
 }
 
 func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
@@ -413,11 +421,12 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 	if err := uc.attachOrderDelivery(ctx, result); err != nil {
 		return nil, err
 	}
-	named := []CheckoutResult{*result}
-	if err := uc.attachProjectNames(ctx, named); err != nil {
+	displayed := []CheckoutResult{*result}
+	if err := uc.attachProjectDisplays(ctx, displayed); err != nil {
 		return nil, err
 	}
-	result.ProjectName = named[0].ProjectName
+	result.ProjectName = displayed[0].ProjectName
+	result.ProjectLogoURL = displayed[0].ProjectLogoURL
 	return result, nil
 }
 
@@ -464,14 +473,14 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 			attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
 		}
 	}
-	if err := uc.attachProjectNames(ctx, results); err != nil {
+	if err := uc.attachProjectDisplays(ctx, results); err != nil {
 		return nil, err
 	}
 	return list, nil
 }
 
-func (uc *UseCase) attachProjectNames(ctx context.Context, results []CheckoutResult) error {
-	if uc.projectNames == nil || len(results) == 0 {
+func (uc *UseCase) attachProjectDisplays(ctx context.Context, results []CheckoutResult) error {
+	if uc.projectDisplays == nil || len(results) == 0 {
 		return nil
 	}
 	idSet := make(map[uint]struct{}, len(results))
@@ -490,12 +499,14 @@ func (uc *UseCase) attachProjectNames(ctx context.Context, results []CheckoutRes
 	if len(ids) == 0 {
 		return nil
 	}
-	names, err := uc.projectNames.ProjectNames(ctx, ids)
+	displays, err := uc.projectDisplays.ProjectDisplays(ctx, ids)
 	if err != nil {
 		return err
 	}
 	for i := range results {
-		results[i].ProjectName = names[results[i].Order.ProjectID]
+		display := displays[results[i].Order.ProjectID]
+		results[i].ProjectName = display.Name
+		results[i].ProjectLogoURL = display.LogoURL
 	}
 	return nil
 }

@@ -7067,6 +7067,9 @@ components:
         projectName:
           type: string
           description: Display name of the ordered project; omitted when the project no longer exists.
+        projectLogoUrl:
+          type: string
+          description: Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
         projectProductId:
           type: integer
         productType:

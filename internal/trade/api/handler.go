@@ -471,6 +471,10 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 	order := result.Order
 	allocationType := ""
 	allocationID := uint(0)
+	var projectLogoURL *string
+	if value := strings.TrimSpace(result.ProjectLogoURL); value != "" {
+		projectLogoURL = &value
+	}
 	if order.AllocationType != nil {
 		allocationType = string(*order.AllocationType)
 	}
@@ -486,6 +490,7 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		UserID:               order.UserID,
 		ProjectID:            order.ProjectID,
 		ProjectName:          result.ProjectName,
+		ProjectLogoURL:       projectLogoURL,
 		ProjectProductID:     order.ProjectProductID,
 		ProductType:          string(order.ProductType),
 		ServiceMode:          string(order.ServiceMode),

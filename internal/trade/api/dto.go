@@ -18,6 +18,7 @@ type OrderResponse struct {
 	UserID               uint       `json:"userId"`
 	ProjectID            uint       `json:"projectId"`
 	ProjectName          string     `json:"projectName,omitempty"`
+	ProjectLogoURL       *string    `json:"projectLogoUrl,omitempty"`
 	ProjectProductID     uint       `json:"projectProductId"`
 	ProductType          string     `json:"productType"`
 	ServiceMode          string     `json:"serviceMode"`

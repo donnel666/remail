@@ -129,6 +129,8 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	}))
 	activated, err := uc.GetOrder(context.Background(), first.Order.OrderNo, 2, false)
 	require.NoError(t, err)
+	require.Equal(t, "Trade Project", activated.ProjectName)
+	require.Equal(t, "/v1/projects/logos/trade-project", activated.ProjectLogoURL)
 	require.Equal(t, tradedomain.OrderStatusActive, activated.Order.Status)
 	require.NotNil(t, activated.Order.ActivatedAt)
 	require.InDelta(t, int64(0), int64(activated.Order.ActivatedAt.Sub(matchedAt).Seconds()), 1)
@@ -1217,8 +1219,8 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
     (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
     (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
-VALUES (10, 'Trade Project', 'trade', 'listed', 'public', TRUE)`).Error)
+INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
+VALUES (10, 'Trade Project', 'trade', '/v1/projects/logos/trade-project', 'listed', 'public', TRUE)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO project_products(
     id, project_id, type, status, code_enabled, purchase_enabled,

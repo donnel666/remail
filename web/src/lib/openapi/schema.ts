@@ -2295,6 +2295,8 @@ export interface components {
             projectId: number;
             /** @description Display name of the ordered project; omitted when the project no longer exists. */
             projectName?: string;
+            /** @description Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo. */
+            projectLogoUrl?: string;
             projectProductId: number;
             /** @enum {string} */
             productType: "microsoft" | "domain";

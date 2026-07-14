@@ -502,9 +502,13 @@ export default function Orders() {
           title: t("Project"),
           dataIndex: "projectName",
           width: 150,
-          render: (name: string | undefined) => (
+          render: (name: string | undefined, record: OrderResponse) => (
             <span className="flex min-w-0 items-center gap-2">
-              <ProjectIcon name={name || "-"} size={18} />
+              <ProjectIcon
+                logoUrl={record.projectLogoUrl}
+                name={name || "-"}
+                size={18}
+              />
               <OverflowTooltip className="truncate" content={name || "-"}>
                 {name || "-"}
               </OverflowTooltip>

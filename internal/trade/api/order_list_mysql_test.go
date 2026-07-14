@@ -106,6 +106,7 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.Nil(t, all.NextAfterID)
 	for _, item := range all.Items {
 		require.Equal(t, "Trade Project", item.ProjectName)
+		require.Equal(t, "/v1/projects/logos/trade-project", item.ProjectLogoURL)
 	}
 	require.NotNil(t, all.Facets)
 	require.EqualValues(t, 4, all.Facets.Status.All)
