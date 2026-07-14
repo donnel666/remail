@@ -3880,6 +3880,9 @@ type OrderResponse struct {
 	ProductType OrderResponseProductType `json:"productType"`
 	ProjectId   int                      `json:"projectId"`
 
+	// ProjectLogoUrl Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
+	ProjectLogoUrl *string `json:"projectLogoUrl,omitempty"`
+
 	// ProjectName Display name of the ordered project; omitted when the project no longer exists.
 	ProjectName      *string    `json:"projectName,omitempty"`
 	ProjectProductId int        `json:"projectProductId"`
