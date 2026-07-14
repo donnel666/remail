@@ -186,6 +186,7 @@ func stripHTML(s string) string {
 
 func main() {
 	email := flag.String("email", "", "account email")
+	password := flag.String("password", "", "account password (enables mechanism-2 password fallback)")
 	binding := flag.String("binding", "", "recovery mailbox (full)")
 	proxy := flag.String("proxy", "", "proxy url")
 	candidates := flag.String("candidates", "", "comma-separated alias prefixes; empty = login+list only")
@@ -235,7 +236,7 @@ func main() {
 	defer cancel()
 
 	fmt.Printf(">>> SyncAndAddExplicitAliases email=%s binding=%s candidates=%v\n", *email, *binding, cands)
-	res := msacl.SyncAndAddExplicitAliases(ctx, *email, *proxy, *binding, cands)
+	res := msacl.SyncAndAddExplicitAliases(ctx, *email, *password, *proxy, *binding, cands)
 	fmt.Println("========== RESULT ==========")
 	if res.OverallFailure != nil {
 		fmt.Printf("OVERALL FAILURE: category=%s stage=%s msg=%s\n",

@@ -46,9 +46,10 @@ func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Conte
 			proxyID = proxyConfig.ID
 		}
 
-		// SyncAndAddExplicitAliases does a single OTC-login then lists +
-		// creates aliases, all in one session.
-		result := msacl.SyncAndAddExplicitAliases(ctx, req.EmailAddress, proxyURL, req.BindingAddress, req.Candidates)
+		// SyncAndAddExplicitAliases does a single login (OTC, falling back to
+		// password on a code timeout) then lists + creates aliases, all in one
+		// session.
+		result := msacl.SyncAndAddExplicitAliases(ctx, req.EmailAddress, req.Password, proxyURL, req.BindingAddress, req.Candidates)
 
 		if result.OverallFailure != nil {
 			raw := *result.OverallFailure

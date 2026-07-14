@@ -238,56 +238,11 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	page, currentURL = resp.Body, resp.URL
 	logDebug("OTC type=27 验码后落 %s", currentURL)
 
-	// ---- declineKMSI → relay → follow, looped ----
-	// After the type=27 verify Microsoft may chain several interrupts (KMSI,
-	// passkey enrollment, another KMSI, ...). Loop declineKMSI+relay+follow and
-	// re-issue GET AddAssocId between rounds until we land on the alias page.
-	logInfo("OTC 步骤7: declineKMSI + relay + follow (循环)")
-	logInfo("OTC 验码后落点=%s pageID=%s", currentURL, extractPageID(page))
-	for round := 0; round < 4; round++ {
-		if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-			break
-		}
-		page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
-		if err != nil {
-			return "", "", err
-		}
-		page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
-		if err != nil {
-			return "", "", err
-		}
-		page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
-		if err != nil {
-			return "", "", err
-		}
-		logInfo("OTC 第%d轮后=%s pageID=%s", round+1, currentURL, extractPageID(page))
-		if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-			break
-		}
-		// Re-trigger the AddAssocId continuation (skipping an interrupt returns
-		// to the already-authenticated flow, often via a KMSI page the next
-		// round handles).
-		resp, gerr := session.Get(addAssocIDURL, requestOptions{
-			Headers:           navHeaders(session, map[string]string{"Referer": currentURL}),
-			AllowRedirects:    true,
-			HasAllowRedirects: true,
-		})
-		if gerr != nil {
-			return "", "", wrapAuthError(fmt.Sprintf("进入 AddAssocId 异常: %s", gerr), AuthStatusRequestError, gerr)
-		}
-		page, currentURL = resp.Body, resp.URL
-		logInfo("OTC 第%d轮兜底GET后=%s pageID=%s", round+1, currentURL, extractPageID(page))
-	}
-	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-		_ = os.WriteFile("/tmp/msacl_otc_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o644)
-		logWarning("OTC 卡住未到 addassocid: url=%s pageID=%s 已dump /tmp/msacl_otc_stuck.html", currentURL, extractPageID(page))
-		return "", "", newExplicitAliasStageError(
-			"未能进入 Microsoft 别名管理页",
-			AuthStatusAuthTimeout,
-			explicitAliasStageAccountPageIncomplete,
-		)
-	}
-	return page, currentURL, nil
+	// ---- 收敛到 AddAssocId (KMSI/passkey 等中断) ----
+	// type=27 验码后微软会串联若干中断 (KMSI, passkey 强制注册, 再 KMSI, ...);
+	// 交给共享的收敛循环 (add_alias_password.go) 处理到别名管理页。
+	logInfo("OTC 步骤7: 收敛到 AddAssocId (验码后落点=%s pageID=%s)", currentURL, extractPageID(page))
+	return convergeExplicitAliasToAddAssocID(session, page, currentURL)
 }
 
 // SyncAndAddExplicitAliasesResult contains the outcome of a single "login →
@@ -303,14 +258,18 @@ type SyncAndAddExplicitAliasesResult struct {
 	OverallFailure *ExplicitAliasResult
 }
 
-// SyncAndAddExplicitAliases performs a single OTC-login session that:
-//  1. Logs in via email OTC (GetOneTimeCode → read OTP → type=27 verify)
+// SyncAndAddExplicitAliases performs a single login session that:
+//  1. Logs in via email OTC (mechanism 1, eOTT_OtcLogin). If the code is not
+//     received (eOTT_OtcLogin daily limit reached), it falls back to a password
+//     login (mechanism 2, the INDEPENDENT eOTT_OneTimePassword channel).
 //  2. GET account.live.com/names/manage and lists all existing aliases
 //  3. Creates each candidate in candidates (addSingleExplicitAlias, reusing session)
 //
 // It is the "one login does list+add" primitive required by the architecture
-// constraint (max 3 OTP sends per account per day).
-func SyncAndAddExplicitAliases(ctx context.Context, email, proxy, bindingAddress string, candidates []string) *SyncAndAddExplicitAliasesResult {
+// constraint (max 3 OTP sends per channel per account per day). Only the
+// SUCCEEDING login proceeds to list+add — a fallback replaces the failed login,
+// it never doubles the work.
+func SyncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bindingAddress string, candidates []string) *SyncAndAddExplicitAliasesResult {
 	ctx = contextOrBackground(ctx)
 	session, err := newBrowserSession(ctx, proxy)
 	if err != nil {
@@ -323,12 +282,40 @@ func SyncAndAddExplicitAliases(ctx context.Context, email, proxy, bindingAddress
 		}
 	}
 
-	// Step 1: OTC login
-	_, currentURL, err := loginForExplicitAliasOTC(session, email, proxy, bindingAddress)
-	if err != nil {
+	// Step 1: OTC login (mechanism 1). On a code timeout — eOTT_OtcLogin's daily
+	// 3-send limit reached — fall back to the password login (mechanism 2), which
+	// uses the independent eOTT_OneTimePassword channel (another 3 codes/day). A
+	// fresh session is required; the OTC session is mid-challenge. The password
+	// login then does the SAME one-login list+add below (no redundant login).
+	//
+	// MSACL_FORCE_PASSWORD_LOGIN=1 skips OTC and uses the password login directly
+	// (debug/ops override, e.g. when eOTT_OtcLogin is known-exhausted).
+	var currentURL string
+	if os.Getenv("MSACL_FORCE_PASSWORD_LOGIN") == "1" && strings.TrimSpace(password) != "" {
+		logWarning("MSACL_FORCE_PASSWORD_LOGIN=1: 跳过 OTC, 直接密码登录 (第二套 eOTT_OneTimePassword)")
+		if _, currentURL, err = loginForExplicitAliasPassword(session, email, password, proxy, bindingAddress); err != nil {
+			mapped := mapExplicitAliasError(err)
+			return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
+		}
+	} else if _, currentURL, err = loginForExplicitAliasOTC(session, email, proxy, bindingAddress); err != nil {
 		mapped := mapExplicitAliasError(err)
-		return &SyncAndAddExplicitAliasesResult{
-			OverallFailure: &mapped,
+		if mapped.Category != "code_timeout" || strings.TrimSpace(password) == "" {
+			return &SyncAndAddExplicitAliasesResult{
+				OverallFailure: &mapped,
+			}
+		}
+		logWarning("OTC 登录收码失败(code_timeout), 切换密码登录(第二套 eOTT_OneTimePassword)")
+		session, err = newBrowserSession(ctx, proxy)
+		if err != nil {
+			f := ExplicitAliasResult{
+				Category:    "request",
+				SafeMessage: fmt.Sprintf("创建浏览器会话失败: %s", err),
+			}
+			return &SyncAndAddExplicitAliasesResult{OverallFailure: &f}
+		}
+		if _, currentURL, err = loginForExplicitAliasPassword(session, email, password, proxy, bindingAddress); err != nil {
+			mapped2 := mapExplicitAliasError(err)
+			return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped2}
 		}
 	}
 
