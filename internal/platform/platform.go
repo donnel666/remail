@@ -48,6 +48,10 @@ func backgroundQueueConfig() map[string]int {
 	return map[string]int{
 		"background_validation": 3,
 		"background_alias":      1,
+		// Admin resource bulk operations (validate/publish/unpublish/delete) are
+		// enqueued to the "resource" queue; without it here no server consumes
+		// them and every bulk command sits queued forever.
+		"resource": 2,
 	}
 }
 
