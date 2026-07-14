@@ -1379,7 +1379,6 @@ func countValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUs
 	return int(count), nil
 }
 
-
 func validateValidationCandidateRows(rows []validationCandidateRow) ([]validationCandidateRow, error) {
 	for _, row := range rows {
 		switch domain.ResourceType(row.ResourceType) {
