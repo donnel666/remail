@@ -102,7 +102,7 @@ func (r *dbReader) List(ctx context.Context, mailbox string, limit int, fuzzy bo
 	return out, rows.Err()
 }
 
-func (r *dbReader) SearchByContent(ctx context.Context, content string, limit int) ([]msacl.EmailObj, error) {
+func (r *dbReader) SearchByContent(_ context.Context, _ string, _ int) ([]msacl.EmailObj, error) {
 	return nil, nil // not needed for OTC login
 }
 
@@ -163,7 +163,7 @@ func readBody(contentType, cte string, r io.Reader) string {
 		}
 		return htmlFallback
 	}
-	var reader io.Reader = r
+	reader := r
 	switch strings.ToLower(strings.TrimSpace(cte)) {
 	case "base64":
 		reader = base64.NewDecoder(base64.StdEncoding, r)

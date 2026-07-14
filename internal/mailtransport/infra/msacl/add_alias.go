@@ -1174,9 +1174,9 @@ func extractPasskeySkipURL(page, currentURL string) string {
 func dumpInterruptCandidates(page string) string {
 	_ = os.WriteFile("/tmp/msacl_passkey.html", []byte(page), 0o644)
 	var parts []string
-	add := func(label, pattern string, max int) {
+	add := func(label, pattern string, limit int) {
 		re := regexp.MustCompile(pattern)
-		ms := re.FindAllString(page, max)
+		ms := re.FindAllString(page, limit)
 		if len(ms) > 0 {
 			parts = append(parts, label+"="+strings.Join(ms, "¦"))
 		}
