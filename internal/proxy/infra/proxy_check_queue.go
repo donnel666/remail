@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/donnel666/remail/internal/platform"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	"github.com/hibiken/asynq"
 )
@@ -16,7 +17,7 @@ const (
 	TypeProxyCheckBatch      = "proxy:check_batch"
 	TypeProxyCheckDispatcher = "proxy:check_dispatcher"
 
-	proxyQueueName                  = "default"
+	proxyQueueName                  = platform.QueueDefault
 	proxyCheckTaskTimeout           = 90 * time.Second
 	proxyCheckBatchTaskTimeout      = 10 * time.Minute
 	proxyCheckDispatcherTaskTimeout = 30 * time.Second

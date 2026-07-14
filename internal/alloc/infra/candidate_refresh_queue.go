@@ -8,6 +8,7 @@ import (
 	"time"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
@@ -15,7 +16,7 @@ const (
 	TypeCandidateRefresh           = "alloc:candidate_refresh"
 	TypeCandidateRefreshDispatcher = "alloc:candidate_refresh_dispatcher"
 
-	allocationQueueName                   = "default"
+	allocationQueueName                   = platform.QueueDefault
 	candidateRefreshTaskTimeout           = 5 * time.Minute
 	candidateRefreshDispatcherTaskTimeout = 30 * time.Second
 )

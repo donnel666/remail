@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
@@ -15,7 +16,7 @@ const (
 	TypeResourceValidation           = "core:resource_validation"
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
-	ResourceValidationQueueName     = "background_validation"
+	ResourceValidationQueueName     = platform.QueueBackgroundValidation
 	validationTaskMaxRetry          = 3
 	validationTaskTimeout           = 15 * time.Minute
 	validationDispatcherTaskTimeout = 30 * time.Second

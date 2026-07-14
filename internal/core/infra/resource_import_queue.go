@@ -7,13 +7,14 @@ import (
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
 	TypeMicrosoftImport = "core:microsoft_import"
 
-	importQueueName    = "default"
+	importQueueName    = platform.QueueDefault
 	importTaskMaxRetry = 3
 	importTaskTimeout  = 30 * time.Minute
 )

@@ -82,8 +82,11 @@ func NewBackgroundLoadController(db *sql.DB, queues queueInfoReader, redisClient
 		queues:            queues,
 		redis:             redisClient,
 		workerConcurrency: workerConcurrency,
-		foregroundQueues:  []string{"mailfetch", "default", "mailtransport"},
-		backgroundQueues:  []string{"background_validation", "background_alias"},
+		foregroundQueues:  []string{QueueMailfetch, QueueDefault, QueueMailtransport},
+		// Load-managed background queues. QueueResource is intentionally omitted:
+		// admin bulk tasks are best-effort and their handler does not consult the
+		// load controller, so they run unmanaged on the background worker pool.
+		backgroundQueues: []string{QueueBackgroundValidation, QueueBackgroundAlias},
 	}
 }
 

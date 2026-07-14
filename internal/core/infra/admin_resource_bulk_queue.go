@@ -6,13 +6,14 @@ import (
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
 	TypeAdminResourceBulk           = "core:admin_resource_bulk"
 	TypeAdminResourceBulkDispatcher = "core:admin_resource_bulk_dispatcher"
-	AdminResourceBulkQueueName      = "resource"
+	AdminResourceBulkQueueName      = platform.QueueResource
 )
 
 type AdminResourceBulkQueue struct {

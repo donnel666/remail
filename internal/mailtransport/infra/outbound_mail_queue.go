@@ -8,13 +8,14 @@ import (
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
 	TypeOutboundSend     = "mailtransport:outbound_send"
 	TypeOutboundDispatch = "mailtransport:outbound_dispatch"
-	mailQueueName        = "mailtransport"
+	mailQueueName        = platform.QueueMailtransport
 	outboundTaskMaxRetry = 3
 	outboundTaskTimeout  = 3 * time.Minute
 	dispatchTaskTimeout  = 30 * time.Second

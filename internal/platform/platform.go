@@ -29,7 +29,7 @@ const (
 // long-running lower-priority tasks in the shared pool can never starve them.
 func realtimeQueueConfig() map[string]int {
 	return map[string]int{
-		"mailfetch": 1,
+		QueueMailfetch: 1,
 	}
 }
 
@@ -37,8 +37,8 @@ func realtimeQueueConfig() map[string]int {
 // own pool, so the shared pool must never starve mailtransport/default work.
 func foregroundQueueConfig() map[string]int {
 	return map[string]int{
-		"mailtransport": 4,
-		"default":       3,
+		QueueMailtransport: 4,
+		QueueDefault:       3,
 	}
 }
 
@@ -46,12 +46,12 @@ func foregroundQueueConfig() map[string]int {
 // realtime and foreground tiers.
 func backgroundQueueConfig() map[string]int {
 	return map[string]int{
-		"background_validation": 3,
-		"background_alias":      1,
+		QueueBackgroundValidation: 3,
+		QueueBackgroundAlias:      1,
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
-		// enqueued to the "resource" queue; without it here no server consumes
-		// them and every bulk command sits queued forever.
-		"resource": 2,
+		// enqueued to the resource queue; without it here no server consumes them
+		// and every bulk command sits queued forever.
+		QueueResource: 2,
 	}
 }
 

@@ -8,13 +8,14 @@ import (
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
 	TypeMicrosoftAlias           = "mailtransport:microsoft_alias"
 	TypeMicrosoftAliasDispatcher = "mailtransport:microsoft_alias_dispatcher"
-	MicrosoftAliasQueueName      = "background_alias"
+	MicrosoftAliasQueueName      = platform.QueueBackgroundAlias
 
 	microsoftAliasTaskTimeout     = 20 * time.Minute
 	microsoftAliasDispatchTimeout = time.Minute

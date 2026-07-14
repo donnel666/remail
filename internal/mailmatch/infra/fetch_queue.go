@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
@@ -16,7 +17,7 @@ const (
 	TypeMailmatchResourceFetch   = "mailmatch:resource_fetch"
 	TypeMailmatchFetchDispatcher = "mailmatch:fetch_dispatcher"
 
-	mailmatchQueueName           = "mailfetch"
+	mailmatchQueueName           = platform.QueueMailfetch
 	mailmatchFetchTaskMaxRetry   = 0
 	mailmatchFetchTaskTimeout    = 60 * time.Second
 	mailmatchDispatchTaskTimeout = 30 * time.Second

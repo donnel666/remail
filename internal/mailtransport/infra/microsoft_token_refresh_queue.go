@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
@@ -15,7 +16,7 @@ const (
 	TypeMicrosoftTokenRefresh           = "mailtransport:microsoft_token_refresh"
 	TypeMicrosoftTokenRefreshDispatcher = "mailtransport:microsoft_token_refresh_dispatcher"
 
-	MicrosoftTokenRefreshQueueName = "background_validation"
+	MicrosoftTokenRefreshQueueName = platform.QueueBackgroundValidation
 
 	microsoftTokenRefreshTaskTimeout       = 2 * time.Minute
 	microsoftTokenRefreshDispatcherTimeout = time.Minute
