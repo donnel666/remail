@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useId } from "react";
 
+import { useAuth } from "@/context/auth-provider";
 import { listAPIKeys } from "@/lib/openapi-credentials-api";
 
 import {
@@ -32,28 +33,31 @@ const developmentFallbackApiKeys = [
 export default function ApiDocs() {
   const containerId = useId().replace(/:/g, "");
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     let disposed = false;
     let zhCnController: ReturnType<typeof installSwaggerZhCn> | undefined;
 
-    const apiKeysPromise = listAPIKeys({ limit: 100, offset: 0 })
-      .then((response) =>
-        response.items.map((item) => ({
-          enabled: item.enabled,
-          name: item.name || item.keyPrefix || "API Key",
-          token: item.keyPlain || item.keyPrefix || "",
-        }))
-      )
-      .catch((error: unknown) => {
-        console.warn("Failed to load API keys for Swagger UI", error);
-        return [];
-      })
-      .then((apiKeys) =>
-        apiKeys.length === 0 && import.meta.env.DEV
-          ? developmentFallbackApiKeys
-          : apiKeys
-      );
+    const apiKeysPromise = currentUser
+      ? listAPIKeys({ limit: 100, offset: 0 })
+          .then((response) =>
+            response.items.map((item) => ({
+              enabled: item.enabled,
+              name: item.name || item.keyPrefix || "API Key",
+              token: item.keyPlain || item.keyPrefix || "",
+            }))
+          )
+          .catch((error: unknown) => {
+            console.warn("Failed to load API keys for Swagger UI", error);
+            return [];
+          })
+          .then((apiKeys) =>
+            apiKeys.length === 0 && import.meta.env.DEV
+              ? developmentFallbackApiKeys
+              : apiKeys
+          )
+      : Promise.resolve([]);
 
     async function bootstrapSwagger() {
       const [spec] = await Promise.all([
@@ -115,7 +119,7 @@ export default function ApiDocs() {
       const container = document.getElementById(containerId);
       if (container) container.innerHTML = "";
     };
-  }, [containerId, navigate]);
+  }, [containerId, currentUser, navigate]);
 
   return (
     <div className="api-docs-page">
