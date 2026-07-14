@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -728,6 +729,9 @@ func followExplicitAliasTarget(session *Session, page, currentURL string, maxRou
 		}
 		if strings.Contains(lowURL, "/interrupt/") || strings.Contains(lowURL, "passkey") {
 			skipURL := extractSkipURL(page)
+			if skipURL == "" {
+				skipURL = extractPasskeySkipURL(page, currentURL)
+			}
 			if strings.HasPrefix(skipURL, "http") {
 				resp, err := session.Get(skipURL, requestOptions{
 					Headers:           navHeaders(session, map[string]string{"Referer": currentURL}),
@@ -740,6 +744,7 @@ func followExplicitAliasTarget(session *Session, page, currentURL string, maxRou
 				page, currentURL = resp.Body, resp.URL
 				continue
 			}
+			logWarning("interrupt/passkey 无法提取 skip 链接: url=%s 候选=[%s]", currentURL, dumpInterruptCandidates(page))
 		}
 		break
 	}
@@ -1142,4 +1147,48 @@ func isExplicitAliasTarget(lowerURL string) bool {
 			strings.Contains(lowerURL, "/names/manage") ||
 			strings.Contains(lowerURL, "/proofs/") ||
 			strings.Contains(lowerURL, "/identity/"))
+}
+
+// dumpInterruptCandidates extracts likely skip/continue targets from an
+// interrupt page (passkey/security-info nag pages on account.live.com whose
+// skip structure differs from the login.live.com ServerData "skip" block).
+// It also writes the full page to /tmp for offline analysis. Debug aid.
+// extractPasskeySkipURL handles the account.live.com/interrupt/passkey FIDO
+// enrollment nag page. That page is a JS auto-submit form to fido/create with
+// no ServerData "skip" block, so extractSkipURL can't handle it. To decline
+// enrollment we follow the postBackUrl (which carries ru= back to the OAuth
+// authorize continuation), falling back to the ru query param of the page URL.
+func extractPasskeySkipURL(page, currentURL string) string {
+	if m := regexp.MustCompile(`(?i)name=['"]postBackUrl['"]\s+value=['"]([^'"]+)['"]`).FindStringSubmatch(page); len(m) > 1 {
+		u := html.UnescapeString(m[1])
+		if strings.HasPrefix(strings.ToLower(u), "http") {
+			return u
+		}
+	}
+	if ru := getQueryParam(currentURL, "ru"); strings.HasPrefix(strings.ToLower(ru), "http") {
+		return ru
+	}
+	return ""
+}
+
+func dumpInterruptCandidates(page string) string {
+	_ = os.WriteFile("/tmp/msacl_passkey.html", []byte(page), 0o644)
+	var parts []string
+	add := func(label, pattern string, max int) {
+		re := regexp.MustCompile(pattern)
+		ms := re.FindAllString(page, max)
+		if len(ms) > 0 {
+			parts = append(parts, label+"="+strings.Join(ms, "¦"))
+		}
+	}
+	add("skipKeys", `(?i)"[a-z]*skip[a-z]*"\s*:\s*("?[^",}]{0,120}"?|\{[^}]{0,160}\})`, 6)
+	add("urlKeys", `(?i)"url[a-z]*"\s*:\s*"[^"]{0,120}"`, 8)
+	add("hrefs", `(?i)href="[^"]{0,120}"`, 12)
+	add("actions", `(?i)<form\b[^>]*action="[^"]{0,120}"`, 4)
+	add("btnText", `(?i)>[^<]{0,24}(skip|later|not now|以后|跳过|稍后|取消|cancel)[^<]{0,24}<`, 6)
+	s := strings.Join(parts, " ‖ ")
+	if len(s) > 1800 {
+		s = s[:1800]
+	}
+	return s
 }

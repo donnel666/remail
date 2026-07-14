@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -237,38 +238,49 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	page, currentURL = resp.Body, resp.URL
 	logDebug("OTC type=27 验码后落 %s", currentURL)
 
-	// ---- reused lines 403–448: declineKMSI → relay → follow → AddAssocId ----
-	logInfo("OTC 步骤7: declineKMSI + relay + follow")
+	// ---- declineKMSI → relay → follow, looped ----
+	// After the type=27 verify Microsoft may chain several interrupts (KMSI,
+	// passkey enrollment, another KMSI, ...). Loop declineKMSI+relay+follow and
+	// re-issue GET AddAssocId between rounds until we land on the alias page.
+	logInfo("OTC 步骤7: declineKMSI + relay + follow (循环)")
 	logInfo("OTC 验码后落点=%s pageID=%s", currentURL, extractPageID(page))
-	page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
-	if err != nil {
-		return "", "", err
-	}
-	logInfo("OTC declineKMSI 后=%s", currentURL)
-	page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
-	if err != nil {
-		return "", "", err
-	}
-	logInfo("OTC relay 后=%s", currentURL)
-	page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
-	if err != nil {
-		return "", "", err
-	}
-	logInfo("OTC follow 后=%s", currentURL)
-
-	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-		resp, err = session.Get(addAssocIDURL, requestOptions{
+	for round := 0; round < 4; round++ {
+		if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
+			break
+		}
+		page, currentURL, _, err = declineKMSI(session, page, currentURL, currentURL)
+		if err != nil {
+			return "", "", err
+		}
+		page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
+		if err != nil {
+			return "", "", err
+		}
+		page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
+		if err != nil {
+			return "", "", err
+		}
+		logInfo("OTC 第%d轮后=%s pageID=%s", round+1, currentURL, extractPageID(page))
+		if strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
+			break
+		}
+		// Re-trigger the AddAssocId continuation (skipping an interrupt returns
+		// to the already-authenticated flow, often via a KMSI page the next
+		// round handles).
+		resp, gerr := session.Get(addAssocIDURL, requestOptions{
 			Headers:           navHeaders(session, map[string]string{"Referer": currentURL}),
 			AllowRedirects:    true,
 			HasAllowRedirects: true,
 		})
-		if err != nil {
-			return "", "", wrapAuthError(fmt.Sprintf("进入 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
+		if gerr != nil {
+			return "", "", wrapAuthError(fmt.Sprintf("进入 AddAssocId 异常: %s", gerr), AuthStatusRequestError, gerr)
 		}
 		page, currentURL = resp.Body, resp.URL
-		logInfo("OTC 兜底 GET AddAssocId 后=%s", currentURL)
+		logInfo("OTC 第%d轮兜底GET后=%s pageID=%s", round+1, currentURL, extractPageID(page))
 	}
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
+		_ = os.WriteFile("/tmp/msacl_otc_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o644)
+		logWarning("OTC 卡住未到 addassocid: url=%s pageID=%s 已dump /tmp/msacl_otc_stuck.html", currentURL, extractPageID(page))
 		return "", "", newExplicitAliasStageError(
 			"未能进入 Microsoft 别名管理页",
 			AuthStatusAuthTimeout,
@@ -320,19 +332,43 @@ func SyncAndAddExplicitAliases(ctx context.Context, email, proxy, bindingAddress
 		}
 	}
 
-	// Step 2: List existing aliases from names/manage
+	// Step 2: List existing aliases from names/manage. That page is often
+	// bounced to login.srf?wa=wsignin1.0; follow the relay to reach it.
 	logInfo("列出已有别名 (names/manage)")
-	resp, err := session.Get("https://account.live.com/names/manage", requestOptions{
+	const namesManageURL = "https://account.live.com/names/manage"
+	var existingAliases []string
+	resp, err := session.Get(namesManageURL, requestOptions{
 		Headers:           navHeaders(session, map[string]string{"Referer": currentURL}),
 		AllowRedirects:    true,
 		HasAllowRedirects: true,
 	})
-	var existingAliases []string
-	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && isExplicitAliasManageURL(resp.URL) {
-		existingAliases = extractAllExplicitAliasesFromManagePage(resp.Body, resp.URL)
-		logInfo("发现 %d 个已有别名", len(existingAliases))
+	if err == nil {
+		p2, f2 := resp.Body, resp.URL
+		for i := 0; i < 3 && !isExplicitAliasManageURL(f2); i++ {
+			p2, f2, _ = continueExplicitAliasLoginRelay(session, p2, f2, 6)
+			if !isExplicitAliasManageURL(f2) {
+				p2, f2, _ = followExplicitAliasTarget(session, p2, f2, 10)
+			}
+			if !isExplicitAliasManageURL(f2) {
+				r2, e2 := session.Get(namesManageURL, requestOptions{
+					Headers:           navHeaders(session, map[string]string{"Referer": f2}),
+					AllowRedirects:    true,
+					HasAllowRedirects: true,
+				})
+				if e2 != nil {
+					break
+				}
+				p2, f2 = r2.Body, r2.URL
+			}
+		}
+		if isExplicitAliasManageURL(f2) {
+			existingAliases = extractAllExplicitAliasesFromManagePage(p2, f2)
+			logInfo("发现 %d 个已有别名", len(existingAliases))
+		} else {
+			logWarning("未能进入 names/manage 列出别名: url=%s", f2)
+		}
 	} else {
-		logWarning("无法获取别名列表 (err=%v status=%d url=%s), 继续创建", err, resp.StatusCode, resp.URL)
+		logWarning("获取 names/manage 异常: %v", err)
 	}
 
 	// Step 3: Create new aliases one by one, using the same session
