@@ -889,6 +889,58 @@ func TestProxyRepoCreateCheckBatchJobPersistsItemIDsMySQL(t *testing.T) {
 	require.Empty(t, dispatchable)
 }
 
+func TestProxyRepoPersistsBatchCheckStateBeforeCreatingSingleJobsMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	expireAt := time.Now().UTC().Add(time.Hour)
+
+	proxies := []*domain.Proxy{
+		{Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:24180", ExpireAt: expireAt, Status: domain.ProxyStatusNormal, Country: "US", Errors: 2, LastSafeError: "old failure"},
+		{Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:24181", ExpireAt: expireAt, Status: domain.ProxyStatusAbnormal, Country: "US", Errors: 3, LastSafeError: "old failure"},
+		{Pool: domain.ProxyPoolSystem, URL: "http://127.0.0.1:24182", ExpireAt: expireAt, Status: domain.ProxyStatusNormal, Country: "SG"},
+		{Pool: domain.ProxyPoolSystem, URL: "http://127.0.0.1:24183", ExpireAt: expireAt, Status: domain.ProxyStatusNormal, Country: "SG"},
+	}
+	for _, proxy := range proxies {
+		require.NoError(t, repo.Create(ctx, proxy))
+	}
+
+	matched, updated, err := repo.MarkCheckingBatchWithLog(ctx, []uint{proxies[0].ID, proxies[1].ID}, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, matched)
+	require.Equal(t, 2, updated)
+	filterMatched, filterUpdated, err := repo.MarkCheckingByFilterWithLog(ctx, proxyapp.ProxyListFilter{
+		Pool: domain.ProxyPoolSystem, Status: domain.ProxyStatusNormal, Country: "SG",
+	}, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, filterMatched)
+	require.EqualValues(t, 2, filterUpdated)
+
+	var stored []ProxyModel
+	require.NoError(t, db.Order("id ASC").Find(&stored).Error)
+	require.Len(t, stored, 4)
+	for i := range stored {
+		require.Equal(t, string(domain.ProxyStatusChecking), stored[i].Status)
+		require.Zero(t, stored[i].Errors)
+		require.Empty(t, stored[i].LastSafeError)
+	}
+	var jobs int64
+	require.NoError(t, db.Model(&ProxyCheckJobModel{}).Count(&jobs).Error)
+	require.Zero(t, jobs, "HTTP submission must persist checking state before the scheduler creates jobs")
+
+	created, err := repo.CreatePendingProxyCheckJobs(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, 4, created)
+	require.NoError(t, db.Model(&ProxyCheckJobModel{}).
+		Where("kind = ? AND status = ?", string(proxyapp.ProxyCheckJobSingle), string(proxyapp.ProxyCheckJobPending)).
+		Count(&jobs).Error)
+	require.EqualValues(t, 4, jobs)
+
+	created, err = repo.CreatePendingProxyCheckJobs(ctx, 10)
+	require.NoError(t, err)
+	require.Zero(t, created, "active single jobs must fence duplicate scheduler seeds")
+}
+
 func TestProxyRepoDeleteBatchWithLogWritesNoopAuditMySQL(t *testing.T) {
 	db := newProxyMySQLTestDB(t)
 	repo := NewProxyRepo(db)

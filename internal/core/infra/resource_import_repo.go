@@ -64,16 +64,29 @@ type ResourceImportItemModel struct {
 func (ResourceImportItemModel) TableName() string { return "resource_import_items" }
 
 func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel {
+	dispatchStatus := item.DispatchStatus
+	if dispatchStatus == "" {
+		dispatchStatus = "queued"
+	}
+	maxAttempts := item.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	errorStrategy, ok := domain.NormalizeImportErrorStrategy(string(item.ErrorStrategy))
+	if !ok {
+		errorStrategy = domain.ImportErrorStrategySkip
+	}
 	return &ResourceImportModel{
 		ID:               item.ID,
 		OwnerUserID:      item.OwnerUserID,
 		ResourceType:     string(item.ResourceType),
-		ErrorStrategy:    string(domain.ImportErrorStrategySkip),
+		LongLived:        item.LongLived,
+		ErrorStrategy:    string(errorStrategy),
 		SourceObjectKey:  item.SourceObjectKey,
 		FailureObjectKey: item.FailureObjectKey,
 		Status:           string(item.Status),
-		DispatchStatus:   "legacy",
-		MaxAttempts:      3,
+		DispatchStatus:   dispatchStatus,
+		MaxAttempts:      maxAttempts,
 		ImportedCount:    item.ImportedCount,
 		LastSafeError:    item.LastSafeError,
 		RequestID:        item.RequestID,
@@ -156,7 +169,7 @@ func (r *ResourceImportRepo) SetAdminImportCounts(ctx context.Context, importID 
 		return domain.ErrInvalidImportFormat
 	}
 	query := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
-		Where("id = ? AND operator_user_id IS NOT NULL AND status = ?", importID, string(domain.ResourceImportProcessing))
+		Where("id = ? AND status = ?", importID, string(domain.ResourceImportProcessing))
 	if claimToken != "" {
 		query = query.Where("dispatch_status = ? AND claim_token = ?", "running", claimToken)
 	}
@@ -209,7 +222,19 @@ func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, l
 	var claimed []coreapp.AdminResourceImportDispatchItem
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&ResourceImportModel{}).
-			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND started_at < ? AND attempts >= max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
+			Where("status = ? AND dispatch_status = ? AND updated_at < ?", string(domain.ResourceImportProcessing), "legacy", runningStaleBefore).
+			Updates(map[string]any{
+				"dispatch_status": "queued",
+				"claim_token":     "",
+				"dispatch_token":  "",
+				"dispatched_at":   nil,
+				"max_attempts":    gorm.Expr("GREATEST(max_attempts, 3)"),
+				"updated_at":      now,
+			}).Error; err != nil {
+			return fmt.Errorf("recover legacy resource imports: %w", err)
+		}
+		if err := tx.Model(&ResourceImportModel{}).
+			Where("status = ? AND dispatch_status = ? AND started_at < ? AND attempts >= max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
 			Updates(map[string]any{
 				"status":          string(domain.ResourceImportFailed),
 				"dispatch_status": "failed",
@@ -222,7 +247,7 @@ func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, l
 			return fmt.Errorf("expire stale administrator imports: %w", err)
 		}
 		if err := tx.Model(&ResourceImportModel{}).
-			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND started_at < ? AND attempts < max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
+			Where("status = ? AND dispatch_status = ? AND started_at < ? AND attempts < max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
 			Updates(map[string]any{
 				"dispatch_status": "queued",
 				"claim_token":     "",
@@ -235,7 +260,7 @@ func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, l
 
 		var models []ResourceImportModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("operator_user_id IS NOT NULL AND status = ? AND dispatch_status = ? AND attempts < max_attempts AND (dispatch_token = '' OR dispatched_at IS NULL OR dispatched_at < ?)", string(domain.ResourceImportProcessing), "queued", queuedDispatchStaleBefore).
+			Where("status = ? AND dispatch_status = ? AND attempts < max_attempts AND (dispatch_token = '' OR dispatched_at IS NULL OR dispatched_at < ?)", string(domain.ResourceImportProcessing), "queued", queuedDispatchStaleBefore).
 			Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
 			return fmt.Errorf("lock queued administrator resource imports: %w", err)
 		}

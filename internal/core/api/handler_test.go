@@ -1184,6 +1184,72 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
+func (r *mockImportRepo) ClaimAdminImportDispatchable(_ context.Context, limit int, _ time.Time, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+	items := make([]coreapp.AdminResourceImportDispatchItem, 0)
+	for id := uint(1); id <= r.seq && len(items) < limit; id++ {
+		item := r.imports[id]
+		if item == nil || item.Status != coredomain.ResourceImportProcessing || item.DispatchStatus != "queued" || item.DispatchToken != "" {
+			continue
+		}
+		item.DispatchToken = fmt.Sprintf("dispatch-%d", id)
+		items = append(items, coreapp.AdminResourceImportDispatchItem{
+			ImportID: item.ID, OwnerUserID: item.OwnerUserID, LongLived: item.LongLived,
+			ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID, DispatchToken: item.DispatchToken,
+		})
+	}
+	return items, nil
+}
+
+func (r *mockImportRepo) MarkAdminImportRunning(_ context.Context, id uint, dispatchToken string) (string, bool, error) {
+	item := r.imports[id]
+	if item == nil || item.DispatchStatus != "queued" || item.DispatchToken != dispatchToken {
+		return "", false, nil
+	}
+	item.DispatchStatus = "running"
+	item.DispatchToken = ""
+	item.ClaimToken = fmt.Sprintf("claim-%d", id)
+	item.Attempts++
+	return item.ClaimToken, true, nil
+}
+
+func (r *mockImportRepo) MarkAdminImportDispatchFailed(_ context.Context, id uint, dispatchToken, safeError string) error {
+	item := r.imports[id]
+	if item != nil && item.DispatchStatus == "queued" && item.DispatchToken == dispatchToken {
+		item.DispatchToken = ""
+		item.LastSafeError = safeError
+	}
+	return nil
+}
+
+func (r *mockImportRepo) MarkAdminImportRetryableFailure(_ context.Context, id uint, claimToken, safeError string) (bool, error) {
+	item := r.imports[id]
+	if item == nil || item.DispatchStatus != "running" || item.ClaimToken != claimToken {
+		return false, coredomain.ErrResourceImportInvalidClaim
+	}
+	item.ClaimToken = ""
+	item.LastSafeError = safeError
+	if item.Attempts >= item.MaxAttempts {
+		item.Status = coredomain.ResourceImportFailed
+		item.DispatchStatus = "failed"
+		return true, nil
+	}
+	item.DispatchStatus = "queued"
+	return false, nil
+}
+
+func (r *mockImportRepo) MarkAdminImportFailed(_ context.Context, id uint, claimToken, failureObjectKey, safeError string) error {
+	item := r.imports[id]
+	if item == nil || item.DispatchStatus != "running" || item.ClaimToken != claimToken {
+		return coredomain.ErrResourceImportInvalidClaim
+	}
+	item.Status = coredomain.ResourceImportFailed
+	item.DispatchStatus = "failed"
+	item.ClaimToken = ""
+	item.FailureObjectKey = failureObjectKey
+	item.LastSafeError = safeError
+	return nil
+}
+
 func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Context, id uint, _ string, _ []coredomain.MicrosoftImportLine, resources []coredomain.EmailResource, ms []coredomain.MicrosoftResource, _ []coreapp.AdminResourceImportSkippedItem, failureObjectKey string, safeSummary string, afterCreate func(context.Context, []coredomain.MicrosoftResource, []uint) error) ([]uint, error) {
 	item := r.imports[id]
 	if item == nil {

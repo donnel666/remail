@@ -14,6 +14,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResourceImportWithoutAdministratorIsDurablyDispatchableMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, role, enabled)
+VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
+
+	repo := NewResourceImportRepo(db)
+	item := &domain.ResourceImport{
+		OwnerUserID:     1,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		LongLived:       true,
+		ErrorStrategy:   domain.ImportErrorStrategyAbort,
+		SourceObjectKey: "imports/microsoft/source/user-durable.txt",
+		Status:          domain.ResourceImportProcessing,
+		DispatchStatus:  "queued",
+		MaxAttempts:     3,
+		RequestID:       "req-user-durable-import",
+	}
+	require.NoError(t, repo.Create(context.Background(), item))
+
+	var row ResourceImportModel
+	require.NoError(t, db.First(&row, item.ID).Error)
+	require.Nil(t, row.OperatorUserID)
+	require.Equal(t, "queued", row.DispatchStatus)
+	require.True(t, row.LongLived)
+	require.Equal(t, string(domain.ImportErrorStrategyAbort), row.ErrorStrategy)
+	require.Equal(t, item.RequestID, row.RequestID)
+
+	now := time.Now().UTC()
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, dispatchable, 1)
+	require.Equal(t, item.ID, dispatchable[0].ImportID)
+	require.True(t, dispatchable[0].LongLived)
+	require.Equal(t, domain.ImportErrorStrategyAbort, dispatchable[0].ErrorStrategy)
+	require.Equal(t, item.RequestID, dispatchable[0].RequestID)
+	require.NotEmpty(t, dispatchable[0].DispatchToken)
+
+	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), item.ID, dispatchable[0].DispatchToken)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, repo.SetAdminImportCounts(context.Background(), item.ID, claimToken, 2, 1))
+}
+
 func TestAdminResourceImportSerializedQueueTaskHydratesDurableObjectKeyMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`

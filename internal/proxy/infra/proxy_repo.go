@@ -538,6 +538,59 @@ func (r *ProxyRepo) DisableByFilterWithLog(ctx context.Context, filter proxyapp.
 	return disabled, nil
 }
 
+func (r *ProxyRepo) MarkCheckingBatchWithLog(ctx context.Context, ids []uint, log *governancedomain.OperationLog) (int, int, error) {
+	if len(ids) == 0 {
+		return 0, 0, domain.ErrInvalidProxyFilter
+	}
+	matched := int64(0)
+	updated := int64(0)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ProxyModel{}).Where("id IN ?", ids).Count(&matched).Error; err != nil {
+			return fmt.Errorf("count proxies for check: %w", err)
+		}
+		result := tx.Model(&ProxyModel{}).
+			Where("id IN ? AND status <> ?", ids, string(domain.ProxyStatusChecking)).
+			Updates(map[string]any{
+				"status":          string(domain.ProxyStatusChecking),
+				"errors":          0,
+				"last_safe_error": "",
+				"updated_at":      time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mark proxies checking: %w", result.Error)
+		}
+		updated = result.RowsAffected
+		return r.createOperationLogInTx(ctx, tx, log, "batch", fmt.Sprintf("Proxy batch check queued. Count: %d.", updated))
+	})
+	return int(matched), int(updated), err
+}
+
+func (r *ProxyRepo) MarkCheckingByFilterWithLog(ctx context.Context, filter proxyapp.ProxyListFilter, log *governancedomain.OperationLog) (int64, int64, error) {
+	var matched, updated int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := applyProxyListFilter(tx.Model(&ProxyModel{}), filter).Count(&matched).Error; err != nil {
+			return fmt.Errorf("count proxies for check: %w", err)
+		}
+		if matched == 0 {
+			return nil
+		}
+		result := applyProxyListFilter(tx.Model(&ProxyModel{}), filter).
+			Where("status <> ?", string(domain.ProxyStatusChecking)).
+			Updates(map[string]any{
+				"status":          string(domain.ProxyStatusChecking),
+				"errors":          0,
+				"last_safe_error": "",
+				"updated_at":      time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mark proxies checking by filter: %w", result.Error)
+		}
+		updated = result.RowsAffected
+		return r.createOperationLogInTx(ctx, tx, log, "filter", fmt.Sprintf("Proxy batch check queued. Count: %d.", updated))
+	})
+	return matched, updated, err
+}
+
 func (r *ProxyRepo) deleteByFilterWithTxLog(ctx context.Context, filter proxyapp.ProxyListFilter, log *governancedomain.OperationLog) (int64, error) {
 	var deleted int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -607,6 +660,36 @@ func (r *ProxyRepo) CreateCheckBatchJobWithLog(ctx context.Context, task proxyap
 		return nil, err
 	}
 	return job, nil
+}
+
+func (r *ProxyRepo) CreatePendingProxyCheckJobs(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var models []ProxyModel
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Select("id").
+			Where("status = ?", string(domain.ProxyStatusChecking)).
+			Where(`NOT EXISTS (
+				SELECT 1 FROM proxy_check_jobs AS job
+				WHERE job.proxy_id = proxies.id AND job.kind = ? AND job.status IN ?
+			)`, string(proxyapp.ProxyCheckJobSingle), []string{
+				string(proxyapp.ProxyCheckJobPending),
+				string(proxyapp.ProxyCheckJobQueued),
+				string(proxyapp.ProxyCheckJobRunning),
+			}).
+			Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
+			return fmt.Errorf("lock proxies pending check jobs: %w", err)
+		}
+		for i := range models {
+			if _, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, proxyapp.ProxyCheckTask{ProxyID: models[i].ID}, proxyapp.ProxyCheckBatchJobRequest{}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return len(models), err
 }
 
 func (r *ProxyRepo) ClaimDispatchableProxyCheckJobs(ctx context.Context, limit int, staleBefore time.Time) ([]proxyapp.ProxyCheckJob, error) {
@@ -1262,6 +1345,25 @@ func (r *ProxyRepo) createOperationLogInTx(ctx context.Context, tx *gorm.DB, log
 }
 
 func createProxyCheckJobInTx(ctx context.Context, tx *gorm.DB, kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) (*proxyapp.ProxyCheckJob, error) {
+	if kind == proxyapp.ProxyCheckJobSingle && task.ProxyID != 0 {
+		var existing ProxyCheckJobModel
+		err := tx.WithContext(ctx).
+			Where("kind = ? AND proxy_id = ? AND status IN ?", string(kind), task.ProxyID, []string{
+				string(proxyapp.ProxyCheckJobPending),
+				string(proxyapp.ProxyCheckJobQueued),
+				string(proxyapp.ProxyCheckJobRunning),
+			}).
+			Order("id DESC").First(&existing).Error
+		if err == nil {
+			if existing.Status != string(proxyapp.ProxyCheckJobPending) {
+				return nil, nil
+			}
+			return proxyCheckJobFromModel(existing)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("find active proxy check job: %w", err)
+		}
+	}
 	model, err := proxyCheckJobModel(kind, task, batchTask)
 	if err != nil {
 		return nil, err

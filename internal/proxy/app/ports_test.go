@@ -23,6 +23,7 @@ type fakeProxyRepository struct {
 	nextID        uint
 	nextJobID     uint
 	checkJobs     []ProxyCheckJob
+	pendingChecks []uint
 	failureProxy  *domain.Proxy
 
 	resourceAcquireCount int
@@ -62,6 +63,7 @@ func (r *fakeProxyRepository) CreateBatchWithLog(ctx context.Context, proxies []
 			return nil, 0, err
 		}
 		created = append(created, *proxy)
+		r.pendingChecks = append(r.pendingChecks, proxy.ID)
 	}
 	return created, 0, nil
 }
@@ -147,6 +149,19 @@ func (r *fakeProxyRepository) DeleteByFilterWithLog(context.Context, ProxyListFi
 func (r *fakeProxyRepository) DisableByFilterWithLog(context.Context, ProxyListFilter, *governancedomain.OperationLog) (int64, error) {
 	return 0, nil
 }
+func (r *fakeProxyRepository) MarkCheckingBatchWithLog(_ context.Context, ids []uint, _ *governancedomain.OperationLog) (int, int, error) {
+	r.pendingChecks = append(r.pendingChecks, ids...)
+	return len(ids), len(ids), nil
+}
+func (r *fakeProxyRepository) MarkCheckingByFilterWithLog(_ context.Context, filter ProxyListFilter, _ *governancedomain.OperationLog) (int64, int64, error) {
+	for id := uint(1); id <= uint(r.count); id++ {
+		r.pendingChecks = append(r.pendingChecks, id)
+	}
+	if filter.Status == domain.ProxyStatusChecking {
+		return r.count, 0, nil
+	}
+	return r.count, r.count, nil
+}
 func (r *fakeProxyRepository) MarkExpiredBefore(context.Context, time.Time) (int64, error) {
 	return r.expiredUpdated, nil
 }
@@ -174,6 +189,17 @@ func (r *fakeProxyRepository) UpdateCheckResultWithLog(ctx context.Context, id u
 func (r *fakeProxyRepository) CreateCheckBatchJobWithLog(_ context.Context, task ProxyCheckBatchJobRequest, _ *governancedomain.OperationLog) (*ProxyCheckJob, error) {
 	return r.createCheckJob(ProxyCheckJobBatch, ProxyCheckTask{}, task), nil
 }
+func (r *fakeProxyRepository) CreatePendingProxyCheckJobs(_ context.Context, limit int) (int, error) {
+	created := 0
+	for _, proxyID := range r.pendingChecks {
+		if created == limit || r.hasActiveSingleCheckJob(proxyID) {
+			continue
+		}
+		r.createCheckJob(ProxyCheckJobSingle, ProxyCheckTask{ProxyID: proxyID}, ProxyCheckBatchJobRequest{})
+		created++
+	}
+	return created, nil
+}
 func (r *fakeProxyRepository) ClaimDispatchableProxyCheckJobs(_ context.Context, limit int, staleBefore time.Time) ([]ProxyCheckJob, error) {
 	if limit <= 0 {
 		limit = len(r.checkJobs)
@@ -189,6 +215,7 @@ func (r *fakeProxyRepository) ClaimDispatchableProxyCheckJobs(_ context.Context,
 		}
 		r.checkJobs[i].Status = ProxyCheckJobQueued
 		r.checkJobs[i].LastSafeError = ""
+		r.checkJobs[i].UpdatedAt = time.Now().UTC()
 		jobs = append(jobs, r.checkJobs[i])
 		if len(jobs) == limit {
 			break
@@ -326,6 +353,16 @@ func (r *fakeProxyRepository) updateCheckJobStatus(jobID uint, status ProxyCheck
 	return false
 }
 
+func (r *fakeProxyRepository) hasActiveSingleCheckJob(proxyID uint) bool {
+	for i := range r.checkJobs {
+		if r.checkJobs[i].Kind == ProxyCheckJobSingle && r.checkJobs[i].ProxyID == proxyID &&
+			(r.checkJobs[i].Status == ProxyCheckJobPending || r.checkJobs[i].Status == ProxyCheckJobQueued || r.checkJobs[i].Status == ProxyCheckJobRunning) {
+			return true
+		}
+	}
+	return false
+}
+
 type fakeProxyCheckQueue struct {
 	tasks       []ProxyCheckTask
 	batchTasks  []ProxyCheckBatchTask
@@ -400,9 +437,10 @@ func TestProxyCreateQueuesCheckTask(t *testing.T) {
 	require.Empty(t, queue.batchTasks)
 }
 
-func TestProxyImportQueuesBatchCheckTask(t *testing.T) {
+func TestProxyImportPersistsCheckingBeforeDispatcherCreatesJobs(t *testing.T) {
+	repo := &fakeProxyRepository{}
 	queue := &fakeProxyCheckQueue{}
-	uc := NewProxyUseCase(&fakeProxyRepository{}, nil, queue, nil, nil)
+	uc := NewProxyUseCase(repo, nil, queue, nil, nil)
 
 	result, err := uc.Import(context.Background(), 1, "request-import", "/v1/admin/proxies/imports", ImportProxiesRequest{
 		Pool: domain.ProxyPoolSystem,
@@ -415,9 +453,17 @@ func TestProxyImportQueuesBatchCheckTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Created)
 	require.Empty(t, queue.tasks)
-	require.Len(t, queue.batchTasks, 1)
-	require.Equal(t, ProxyCheckBatchModeIDs, queue.batchTasks[0].Mode)
-	require.NotZero(t, queue.batchTasks[0].JobID)
+	require.Empty(t, queue.batchTasks)
+	require.Len(t, queue.dispatches, 1)
+	require.Len(t, repo.pendingChecks, 2)
+	require.Empty(t, repo.checkJobs)
+
+	dispatched, err := uc.DispatchProxyCheckJobs(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, dispatched.Attempted)
+	require.Equal(t, 2, dispatched.Queued)
+	require.Len(t, queue.tasks, 2)
+	require.Empty(t, queue.batchTasks)
 }
 
 func TestProxyCheckQueuesTaskAndMarksChecking(t *testing.T) {
@@ -555,7 +601,7 @@ func TestProxyUpdateExpiredExpireAtQueuesTask(t *testing.T) {
 	require.Equal(t, uint(10), queue.tasks[0].ProxyID)
 }
 
-func TestProxyCheckByFilterQueuesSingleBatchTask(t *testing.T) {
+func TestProxyCheckByFilterPersistsCheckingAndWakesDispatcher(t *testing.T) {
 	repo := &fakeProxyRepository{count: 2}
 	queue := &fakeProxyCheckQueue{}
 	uc := NewProxyUseCase(repo, nil, queue, nil, nil)
@@ -571,16 +617,16 @@ func TestProxyCheckByFilterQueuesSingleBatchTask(t *testing.T) {
 	require.Equal(t, 2, result.Queued)
 	require.Equal(t, 0, repo.listIDCalls)
 	require.Empty(t, queue.tasks)
-	require.Len(t, queue.batchTasks, 1)
-	require.Equal(t, ProxyCheckBatchModeFilter, queue.batchTasks[0].Mode)
-	require.Equal(t, domain.ProxyPoolResource, queue.batchTasks[0].Filter.Pool)
-	require.Equal(t, "US", queue.batchTasks[0].Filter.Country)
-	require.Equal(t, domain.ProxyStatusDisabled, queue.batchTasks[0].Filter.Status)
+	require.Empty(t, queue.batchTasks)
+	require.Len(t, queue.dispatches, 1)
+	require.Len(t, repo.pendingChecks, 2)
+	require.Empty(t, repo.checkJobs)
 }
 
-func TestProxyCheckBatchQueuesSingleBatchTask(t *testing.T) {
+func TestProxyCheckBatchPersistsCheckingAndWakesDispatcher(t *testing.T) {
+	repo := &fakeProxyRepository{}
 	queue := &fakeProxyCheckQueue{}
-	uc := NewProxyUseCase(&fakeProxyRepository{}, nil, queue, nil, nil)
+	uc := NewProxyUseCase(repo, nil, queue, nil, nil)
 
 	result, err := uc.CheckBatch(context.Background(), []uint{1, 2, 2, 3}, 1, "request-ids", "/v1/admin/proxies/check")
 
@@ -589,14 +635,15 @@ func TestProxyCheckBatchQueuesSingleBatchTask(t *testing.T) {
 	require.Equal(t, 3, result.Queued)
 	require.Empty(t, result.Items)
 	require.Empty(t, queue.tasks)
-	require.Len(t, queue.batchTasks, 1)
-	require.Equal(t, ProxyCheckBatchModeIDs, queue.batchTasks[0].Mode)
-	require.NotZero(t, queue.batchTasks[0].JobID)
+	require.Empty(t, queue.batchTasks)
+	require.Len(t, queue.dispatches, 1)
+	require.Equal(t, []uint{1, 2, 3}, repo.pendingChecks)
+	require.Empty(t, repo.checkJobs)
 }
 
-func TestProxyCheckBatchQueueFailureWritesSystemLog(t *testing.T) {
+func TestProxyCheckBatchDispatcherWakeFailureKeepsPersistedState(t *testing.T) {
 	queueErr := errors.New("redis is unavailable")
-	queue := &fakeProxyCheckQueue{batchErr: queueErr}
+	queue := &fakeProxyCheckQueue{dispatchErr: queueErr}
 	systems := &fakeSystemLogPort{}
 	repo := &fakeProxyRepository{}
 	uc := NewProxyUseCase(repo, nil, queue, nil, systems)
@@ -605,19 +652,18 @@ func TestProxyCheckBatchQueueFailureWritesSystemLog(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Queued)
-	require.Len(t, repo.checkJobs, 1)
-	require.Equal(t, ProxyCheckJobPending, repo.checkJobs[0].Status)
-	require.Contains(t, repo.checkJobs[0].LastSafeError, "redis is unavailable")
+	require.Equal(t, []uint{1, 2}, repo.pendingChecks)
+	require.Empty(t, repo.checkJobs)
 	require.Len(t, systems.logs, 1)
-	require.Equal(t, "proxy.check_batch_queue_failed", systems.logs[0].EventType)
-	require.Equal(t, "batch", systems.logs[0].BizID)
+	require.Equal(t, "proxy.check_dispatcher_enqueue_failed", systems.logs[0].EventType)
+	require.Equal(t, "dispatcher", systems.logs[0].BizID)
 	require.Contains(t, systems.logs[0].Detail, "redis is unavailable")
 }
 
-func TestProxyCheckByFilterQueueFailureWritesSystemLog(t *testing.T) {
+func TestProxyCheckByFilterDispatcherWakeFailureKeepsPersistedState(t *testing.T) {
 	queueErr := errors.New("redis is unavailable")
 	repo := &fakeProxyRepository{count: 2}
-	queue := &fakeProxyCheckQueue{batchErr: queueErr}
+	queue := &fakeProxyCheckQueue{dispatchErr: queueErr}
 	systems := &fakeSystemLogPort{}
 	uc := NewProxyUseCase(repo, nil, queue, nil, systems)
 
@@ -625,12 +671,11 @@ func TestProxyCheckByFilterQueueFailureWritesSystemLog(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Queued)
-	require.Len(t, repo.checkJobs, 1)
-	require.Equal(t, ProxyCheckJobPending, repo.checkJobs[0].Status)
-	require.Contains(t, repo.checkJobs[0].LastSafeError, "redis is unavailable")
+	require.Len(t, repo.pendingChecks, 2)
+	require.Empty(t, repo.checkJobs)
 	require.Len(t, systems.logs, 1)
-	require.Equal(t, "proxy.check_batch_queue_failed", systems.logs[0].EventType)
-	require.Equal(t, "filter", systems.logs[0].BizID)
+	require.Equal(t, "proxy.check_dispatcher_enqueue_failed", systems.logs[0].EventType)
+	require.Equal(t, "dispatcher", systems.logs[0].BizID)
 	require.Contains(t, systems.logs[0].Detail, "redis is unavailable")
 }
 

@@ -276,25 +276,21 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 	importRecord := &domain.ResourceImport{
 		OwnerUserID:     ownerUserID,
 		ResourceType:    domain.ResourceTypeMicrosoft,
+		LongLived:       longLived,
+		ErrorStrategy:   errorStrategy,
 		SourceObjectKey: storedSource.ObjectKey,
 		Status:          domain.ResourceImportProcessing,
+		DispatchStatus:  "queued",
+		MaxAttempts:     3,
+		RequestID:       importID,
 	}
 	if err := uc.imports.Create(ctx, importRecord); err != nil {
 		return nil, err
 	}
-
-	task := MicrosoftImportTask{
-		ImportID:        importRecord.ID,
-		OwnerUserID:     ownerUserID,
-		SourceObjectKey: storedSource.ObjectKey,
-		LongLived:       longLived,
-		ErrorStrategy:   errorStrategy,
-		RequestID:       importID,
-	}
-	if err := uc.queue.EnqueueMicrosoftImport(ctx, task); err != nil {
-		_ = uc.imports.MarkFailed(ctx, importRecord.ID, "", "Import task enqueue failed.")
-		return nil, domain.ErrImportQueueUnavailable
-	}
+	// The import row is the durable queue. A transient Redis failure must not
+	// turn an accepted import into a terminal failure; the periodic dispatcher
+	// will claim it again from MySQL.
+	_, _ = uc.DispatchAdminImports(ctx, 100)
 
 	return &ImportResult{ImportID: importRecord.ID, Imported: 0}, nil
 }

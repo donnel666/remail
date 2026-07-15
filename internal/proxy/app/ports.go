@@ -28,10 +28,13 @@ type ProxyRepository interface {
 	DeleteBatchWithLog(ctx context.Context, ids []uint, log *governancedomain.OperationLog) ([]uint, error)
 	DeleteByFilterWithLog(ctx context.Context, filter ProxyListFilter, log *governancedomain.OperationLog) (int64, error)
 	DisableByFilterWithLog(ctx context.Context, filter ProxyListFilter, log *governancedomain.OperationLog) (int64, error)
+	MarkCheckingBatchWithLog(ctx context.Context, ids []uint, log *governancedomain.OperationLog) (matched int, updated int, err error)
+	MarkCheckingByFilterWithLog(ctx context.Context, filter ProxyListFilter, log *governancedomain.OperationLog) (matched int64, updated int64, err error)
 	ListIDs(ctx context.Context, filter ProxyListFilter, afterID uint, limit int) ([]uint, error)
 	MarkExpiredBefore(ctx context.Context, now time.Time) (int64, error)
 	UpdateCheckResultWithLog(ctx context.Context, id uint, result domain.CheckResult, success bool, log *governancedomain.OperationLog) (*domain.Proxy, error)
 	CreateCheckBatchJobWithLog(ctx context.Context, task ProxyCheckBatchJobRequest, log *governancedomain.OperationLog) (*ProxyCheckJob, error)
+	CreatePendingProxyCheckJobs(ctx context.Context, limit int) (created int, err error)
 	ClaimDispatchableProxyCheckJobs(ctx context.Context, limit int, staleBefore time.Time) ([]ProxyCheckJob, error)
 	ListProxyCheckJobItemIDs(ctx context.Context, jobID uint, afterProxyID uint, limit int) ([]uint, error)
 	MarkProxyCheckJobQueued(ctx context.Context, jobID uint) (bool, error)
@@ -411,18 +414,13 @@ func (uc *ProxyUseCase) Import(ctx context.Context, operatorUserID uint, request
 		})
 	}
 	log := uc.operationLog(operatorUserID, requestID, path, "proxy.proxy.import", "batch", "success", "Proxy imported.")
-	created, existingDuplicates, job, err := uc.proxies.CreateBatchWithLogAndCheckJob(ctx, proxies, log, ProxyCheckBatchJobRequest{
-		Mode:           ProxyCheckBatchModeIDs,
-		OperatorUserID: operatorUserID,
-		RequestID:      requestID,
-		Path:           path,
-	})
+	created, existingDuplicates, err := uc.proxies.CreateBatchWithLog(ctx, proxies, log)
 	if err != nil {
 		_ = uc.writeOperationLog(ctx, operatorUserID, requestID, path, "proxy.proxy.import", "batch", "failure", "Proxy import failed.")
 		return nil, err
 	}
 	duplicates += existingDuplicates
-	uc.dispatchProxyCheckBatchJob(ctx, job)
+	uc.ScheduleProxyCheckDispatcher(ctx, 0)
 	return &ImportProxiesResult{
 		Requested:  len(req.URLs),
 		Created:    len(created),
@@ -696,21 +694,15 @@ func (uc *ProxyUseCase) CheckBatch(ctx context.Context, ids []uint, operatorUser
 		return nil, err
 	}
 	log := uc.operationLog(operatorUserID, requestID, path, "proxy.proxy.check_batch", "batch", "success", "Proxy batch check queued.")
-	job, err := uc.proxies.CreateCheckBatchJobWithLog(ctx, ProxyCheckBatchJobRequest{
-		Mode:           ProxyCheckBatchModeIDs,
-		ProxyIDs:       uniqueIDs,
-		OperatorUserID: operatorUserID,
-		RequestID:      requestID,
-		Path:           path,
-	}, log)
+	_, updated, err := uc.proxies.MarkCheckingBatchWithLog(ctx, uniqueIDs, log)
 	if err != nil {
 		_ = uc.writeOperationLog(ctx, operatorUserID, requestID, path, "proxy.proxy.check_batch", "batch", "failure", "Proxy batch check queue failed.")
 		return nil, err
 	}
-	uc.dispatchProxyCheckBatchJob(ctx, job)
+	uc.ScheduleProxyCheckDispatcher(ctx, 0)
 	return &CheckProxiesResult{
 		Requested: len(uniqueIDs),
-		Queued:    len(uniqueIDs),
+		Queued:    updated,
 		Items:     []domain.Proxy{},
 	}, nil
 }
@@ -719,29 +711,19 @@ func (uc *ProxyUseCase) CheckByFilter(ctx context.Context, filter ProxyListFilte
 	if err := validateProxyListFilter(filter); err != nil {
 		return nil, err
 	}
-	requested, err := uc.proxies.Count(ctx, filter)
+	log := uc.operationLog(operatorUserID, requestID, path, "proxy.proxy.check_batch", "filter", "success", "Proxy batch check queued.")
+	requested, updated, err := uc.proxies.MarkCheckingByFilterWithLog(ctx, filter, log)
 	if err != nil {
+		_ = uc.writeOperationLog(ctx, operatorUserID, requestID, path, "proxy.proxy.check_batch", "filter", "failure", "Proxy batch check queue failed.")
 		return nil, err
 	}
 	if requested == 0 {
 		return nil, domain.ErrInvalidProxyFilter
 	}
-	log := uc.operationLog(operatorUserID, requestID, path, "proxy.proxy.check_batch", "filter", "success", "Proxy batch check queued.")
-	job, err := uc.proxies.CreateCheckBatchJobWithLog(ctx, ProxyCheckBatchJobRequest{
-		Mode:           ProxyCheckBatchModeFilter,
-		Filter:         filter,
-		OperatorUserID: operatorUserID,
-		RequestID:      requestID,
-		Path:           path,
-	}, log)
-	if err != nil {
-		_ = uc.writeOperationLog(ctx, operatorUserID, requestID, path, "proxy.proxy.check_batch", "filter", "failure", "Proxy batch check queue failed.")
-		return nil, err
-	}
-	uc.dispatchProxyCheckBatchJob(ctx, job)
+	uc.ScheduleProxyCheckDispatcher(ctx, 0)
 	return &CheckProxiesResult{
 		Requested: int(requested),
-		Queued:    int(requested),
+		Queued:    int(updated),
 	}, nil
 }
 
@@ -969,6 +951,16 @@ func (uc *ProxyUseCase) DispatchProxyCheckJobs(ctx context.Context, limit int) (
 	jobs, err := uc.proxies.ClaimDispatchableProxyCheckJobs(ctx, limit, uc.now().Add(-staleProxyCheckJobAge))
 	if err != nil {
 		return nil, err
+	}
+	if remaining := limit - len(jobs); remaining > 0 {
+		if _, err := uc.proxies.CreatePendingProxyCheckJobs(ctx, remaining); err != nil {
+			return nil, err
+		}
+		created, err := uc.proxies.ClaimDispatchableProxyCheckJobs(ctx, remaining, uc.now().Add(-staleProxyCheckJobAge))
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, created...)
 	}
 	result := &DispatchProxyCheckJobsResult{Attempted: len(jobs)}
 	for i := range jobs {

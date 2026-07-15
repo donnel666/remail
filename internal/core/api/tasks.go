@@ -175,7 +175,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				"error", err,
 			)
 			if payload.DispatchToken != "" {
-				// Administrator imports persist retry/terminal state under a fenced
+				// Durable imports persist retry/terminal state under a fenced
 				// claim. Returning the error to Asynq would replay a consumed token;
 				// the periodic durable dispatcher issues a fresh token instead.
 				return nil
@@ -248,7 +248,7 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 	}
 	if module.ImportUseCase != nil {
 		if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
-			slog.Warn("administrator resource import dispatcher failed", "error", err)
+			slog.Warn("resource import dispatcher failed", "error", err)
 		}
 	}
 	return len(result.ImportedResourceIDs), nil
@@ -283,7 +283,7 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 				}
 				if module.ImportUseCase != nil {
 					if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
-						slog.Warn("administrator resource import dispatcher failed", "error", err)
+						slog.Warn("resource import dispatcher failed", "error", err)
 					}
 				}
 			case <-ctx.Done():
