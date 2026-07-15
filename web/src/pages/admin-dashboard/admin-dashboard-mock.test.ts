@@ -2,9 +2,29 @@ import { describe, expect, it } from "vitest";
 
 import { getAdminDashboardData } from "./admin-dashboard-mock";
 
+function localISOString(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millisecond = 0,
+) {
+  return new Date(
+    year,
+    monthIndex,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond,
+  ).toISOString();
+}
+
 const range = {
-  from: "2026-07-01T00:00:00+08:00",
-  to: "2026-07-07T23:59:59+08:00",
+  from: localISOString(2026, 6, 1),
+  to: localISOString(2026, 6, 7, 23, 59, 59),
 };
 
 function roundMoney(value: number) {
@@ -168,8 +188,8 @@ describe("getAdminDashboardData", () => {
 
   it("uses hourly points for a single-day platform view", async () => {
     const data = await getAdminDashboardData({
-      from: "2026-07-14T00:00:00+08:00",
-      to: "2026-07-14T23:59:59+08:00",
+      from: localISOString(2026, 6, 14),
+      to: localISOString(2026, 6, 14, 23, 59, 59),
     });
 
     expect(data.trend).toHaveLength(24);
@@ -179,8 +199,8 @@ describe("getAdminDashboardData", () => {
 
   it("respects a partial single-day range", async () => {
     const data = await getAdminDashboardData({
-      from: "2026-07-14T10:15:00+08:00",
-      to: "2026-07-14T11:20:00+08:00",
+      from: localISOString(2026, 6, 14, 10, 15),
+      to: localISOString(2026, 6, 14, 11, 20),
     });
 
     expect(data.trend.map((point) => point.label)).toEqual(["10:00", "11:00"]);
@@ -188,8 +208,8 @@ describe("getAdminDashboardData", () => {
 
   it("bounds long ranges and keeps cross-year labels unique", async () => {
     const data = await getAdminDashboardData({
-      from: "2000-01-01T00:00:00+08:00",
-      to: "2026-07-01T23:59:59+08:00",
+      from: localISOString(2000, 0, 1),
+      to: localISOString(2026, 6, 1, 23, 59, 59),
     });
 
     expect(data.trend.length).toBeLessThanOrEqual(366);

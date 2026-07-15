@@ -2,9 +2,29 @@ import { describe, expect, it } from "vitest";
 
 import { getDashboardData } from "./dashboard-mock";
 
+function localISOString(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millisecond = 0,
+) {
+  return new Date(
+    year,
+    monthIndex,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond,
+  ).toISOString();
+}
+
 const range = {
-  from: "2026-07-01T00:00:00.000Z",
-  to: "2026-07-07T23:59:59.999Z",
+  from: localISOString(2026, 6, 1),
+  to: localISOString(2026, 6, 7, 23, 59, 59, 999),
 };
 
 describe("getDashboardData", () => {
@@ -75,8 +95,8 @@ describe("getDashboardData", () => {
 
   it("respects the selected time inside a single day", async () => {
     const data = await getDashboardData({
-      from: "2026-07-14T10:15:00+08:00",
-      to: "2026-07-14T11:20:00+08:00",
+      from: localISOString(2026, 6, 14, 10, 15),
+      to: localISOString(2026, 6, 14, 11, 20),
     });
 
     expect(data.trend.map((point) => point.label)).toEqual(["10:00", "11:00"]);
@@ -85,13 +105,13 @@ describe("getDashboardData", () => {
   it("keeps today and all-time ranking semantics independent of the chart range", async () => {
     const [first, second] = await Promise.all([
       getDashboardData({
-        from: "2026-06-01T00:00:00+08:00",
-        to: "2026-06-07T23:59:59+08:00",
+        from: localISOString(2026, 5, 1),
+        to: localISOString(2026, 5, 7, 23, 59, 59),
         username: "donnel",
       }),
       getDashboardData({
-        from: "2026-07-01T00:00:00+08:00",
-        to: "2026-07-07T23:59:59+08:00",
+        from: localISOString(2026, 6, 1),
+        to: localISOString(2026, 6, 7, 23, 59, 59),
         username: "donnel",
       }),
     ]);
@@ -105,8 +125,8 @@ describe("getDashboardData", () => {
 
   it("bounds long ranges and gives cross-year points unique labels", async () => {
     const data = await getDashboardData({
-      from: "2000-01-01T00:00:00+08:00",
-      to: "2026-07-01T23:59:59+08:00",
+      from: localISOString(2000, 0, 1),
+      to: localISOString(2026, 6, 1, 23, 59, 59),
     });
 
     expect(data.trend.length).toBeLessThanOrEqual(366);

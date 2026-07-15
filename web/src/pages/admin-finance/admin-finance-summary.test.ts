@@ -7,6 +7,26 @@ import {
   reverseMockFinanceTransaction,
 } from "./admin-finance-mock";
 
+function localISOString(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millisecond = 0,
+) {
+  return new Date(
+    year,
+    monthIndex,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond,
+  ).toISOString();
+}
+
 function total(
   trend: Awaited<ReturnType<typeof getMockFinanceSummary>>["trend"],
   field: "accountRevenue" | "platformRevenue" | "recharge" | "refund" | "spend" | "withdraw",
@@ -17,8 +37,8 @@ function total(
 describe("getMockFinanceSummary", () => {
   it("uses only the selected hours for a single-day range", async () => {
     const summary = await getMockFinanceSummary({
-      createdFrom: "2026-07-14T10:15:00+08:00",
-      createdTo: "2026-07-14T11:20:00+08:00",
+      createdFrom: localISOString(2026, 6, 14, 10, 15),
+      createdTo: localISOString(2026, 6, 14, 11, 20),
     });
 
     expect(summary.trend.map((point) => point.label)).toEqual(["10:00", "11:00"]);
@@ -26,8 +46,8 @@ describe("getMockFinanceSummary", () => {
 
   it("derives every summary card from the returned trend", async () => {
     const summary = await getMockFinanceSummary({
-      createdFrom: "2026-07-01T00:00:00+08:00",
-      createdTo: "2026-07-07T23:59:59+08:00",
+      createdFrom: localISOString(2026, 6, 1),
+      createdTo: localISOString(2026, 6, 7, 23, 59, 59),
     });
 
     expect(Number(summary.rechargeAmount)).toBeCloseTo(total(summary.trend, "recharge"), 2);
@@ -46,8 +66,8 @@ describe("getMockFinanceSummary", () => {
 
   it("bounds long ranges and keeps cross-year labels unique", async () => {
     const summary = await getMockFinanceSummary({
-      createdFrom: "2000-01-01T00:00:00+08:00",
-      createdTo: "2026-07-01T23:59:59+08:00",
+      createdFrom: localISOString(2000, 0, 1),
+      createdTo: localISOString(2026, 6, 1, 23, 59, 59),
     });
 
     expect(summary.trend.length).toBeLessThanOrEqual(366);
