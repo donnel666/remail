@@ -905,13 +905,17 @@ func TestProxyRepoPersistsBatchCheckStateBeforeCreatingSingleJobsMySQL(t *testin
 		require.NoError(t, repo.Create(ctx, proxy))
 	}
 
-	matched, updated, err := repo.MarkCheckingBatchWithLog(ctx, []uint{proxies[0].ID, proxies[1].ID}, nil)
+	matched, updated, err := repo.MarkCheckingBatchWithLog(ctx, []uint{proxies[0].ID, proxies[1].ID}, &governancedomain.OperationLog{
+		OperatorUserID: 9, RequestID: "request-check-ids", Path: "/v1/admin/proxies/check",
+	})
 	require.NoError(t, err)
 	require.Equal(t, 2, matched)
 	require.Equal(t, 2, updated)
 	filterMatched, filterUpdated, err := repo.MarkCheckingByFilterWithLog(ctx, proxyapp.ProxyListFilter{
 		Pool: domain.ProxyPoolSystem, Status: domain.ProxyStatusNormal, Country: "SG",
-	}, nil)
+	}, &governancedomain.OperationLog{
+		OperatorUserID: 8, RequestID: "request-check-filter", Path: "/v1/admin/proxies/check",
+	})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, filterMatched)
 	require.EqualValues(t, 2, filterUpdated)
@@ -924,6 +928,12 @@ func TestProxyRepoPersistsBatchCheckStateBeforeCreatingSingleJobsMySQL(t *testin
 		require.Zero(t, stored[i].Errors)
 		require.Empty(t, stored[i].LastSafeError)
 	}
+	matched, updated, err = repo.MarkCheckingBatchWithLog(ctx, []uint{proxies[0].ID}, &governancedomain.OperationLog{
+		OperatorUserID: 7, RequestID: "request-check-again", Path: "/v1/admin/proxies/check",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, matched)
+	require.Zero(t, updated)
 	var jobs int64
 	require.NoError(t, db.Model(&ProxyCheckJobModel{}).Count(&jobs).Error)
 	require.Zero(t, jobs, "HTTP submission must persist checking state before the scheduler creates jobs")
@@ -935,6 +945,13 @@ func TestProxyRepoPersistsBatchCheckStateBeforeCreatingSingleJobsMySQL(t *testin
 		Where("kind = ? AND status = ?", string(proxyapp.ProxyCheckJobSingle), string(proxyapp.ProxyCheckJobPending)).
 		Count(&jobs).Error)
 	require.EqualValues(t, 4, jobs)
+	var persistedJobs []ProxyCheckJobModel
+	require.NoError(t, db.Where("kind = ?", string(proxyapp.ProxyCheckJobSingle)).Order("proxy_id ASC").Find(&persistedJobs).Error)
+	require.Len(t, persistedJobs, 4)
+	require.Equal(t, uint(7), persistedJobs[0].OperatorUserID)
+	require.Equal(t, "request-check-again", persistedJobs[0].RequestID)
+	require.Equal(t, uint(8), persistedJobs[2].OperatorUserID)
+	require.Equal(t, "request-check-filter", persistedJobs[2].RequestID)
 
 	created, err = repo.CreatePendingProxyCheckJobs(ctx, 10)
 	require.NoError(t, err)

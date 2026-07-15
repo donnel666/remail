@@ -21,23 +21,26 @@ import (
 )
 
 type ProxyModel struct {
-	ID            uint       `gorm:"primaryKey;autoIncrement"`
-	Pool          string     `gorm:"type:varchar(16);not null"`
-	URL           string     `gorm:"type:varchar(1024);not null;column:url"`
-	URLHash       string     `gorm:"type:char(64);not null;column:url_hash"`
-	URLHost       string     `gorm:"type:varchar(255);not null;column:url_host"`
-	ExpireAt      *time.Time `gorm:"column:expire_at"`
-	IPVersion     string     `gorm:"type:varchar(8);not null;column:ip_version"`
-	OutboundIP    string     `gorm:"type:varchar(64);not null;column:outbound_ip"`
-	Country       string     `gorm:"type:varchar(64);not null"`
-	LatencyMs     int        `gorm:"not null;column:latency_ms"`
-	Status        string     `gorm:"type:varchar(32);not null"`
-	Errors        int        `gorm:"not null"`
-	LastSafeError string     `gorm:"type:varchar(500);not null;column:last_safe_error"`
-	LastCheckedAt *time.Time `gorm:"column:last_checked_at"`
-	LastUsedAt    *time.Time `gorm:"column:last_used_at"`
-	CreatedAt     time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID                  uint       `gorm:"primaryKey;autoIncrement"`
+	Pool                string     `gorm:"type:varchar(16);not null"`
+	URL                 string     `gorm:"type:varchar(1024);not null;column:url"`
+	URLHash             string     `gorm:"type:char(64);not null;column:url_hash"`
+	URLHost             string     `gorm:"type:varchar(255);not null;column:url_host"`
+	ExpireAt            *time.Time `gorm:"column:expire_at"`
+	IPVersion           string     `gorm:"type:varchar(8);not null;column:ip_version"`
+	OutboundIP          string     `gorm:"type:varchar(64);not null;column:outbound_ip"`
+	Country             string     `gorm:"type:varchar(64);not null"`
+	LatencyMs           int        `gorm:"not null;column:latency_ms"`
+	Status              string     `gorm:"type:varchar(32);not null"`
+	Errors              int        `gorm:"not null"`
+	LastSafeError       string     `gorm:"type:varchar(500);not null;column:last_safe_error"`
+	CheckOperatorUserID uint       `gorm:"not null;default:0;column:check_operator_user_id"`
+	CheckRequestID      string     `gorm:"type:varchar(64);not null;default:'';column:check_request_id"`
+	CheckPath           string     `gorm:"type:varchar(255);not null;default:'';column:check_path"`
+	LastCheckedAt       *time.Time `gorm:"column:last_checked_at"`
+	LastUsedAt          *time.Time `gorm:"column:last_used_at"`
+	CreatedAt           time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt           time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (ProxyModel) TableName() string {
@@ -162,6 +165,9 @@ func (r *ProxyRepo) CreateBatchWithLog(ctx context.Context, proxies []*domain.Pr
 			created = append(created, *proxy)
 		}
 		summary := fmt.Sprintf("Proxy imported. Created: %d. Duplicated: %d.", len(created), duplicates)
+		if err := updateProxyCheckMetadataInTx(ctx, tx, proxyIDsFromDomain(created), proxyCheckTaskFromOperationLog(log)); err != nil {
+			return err
+		}
 		return r.createOperationLogInTx(ctx, tx, log, "batch", summary)
 	})
 	if err != nil {
@@ -544,9 +550,13 @@ func (r *ProxyRepo) MarkCheckingBatchWithLog(ctx context.Context, ids []uint, lo
 	}
 	matched := int64(0)
 	updated := int64(0)
+	task := proxyCheckTaskFromOperationLog(log)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&ProxyModel{}).Where("id IN ?", ids).Count(&matched).Error; err != nil {
 			return fmt.Errorf("count proxies for check: %w", err)
+		}
+		if err := updateProxyCheckMetadataInTx(ctx, tx, ids, task); err != nil {
+			return err
 		}
 		result := tx.Model(&ProxyModel{}).
 			Where("id IN ? AND status <> ?", ids, string(domain.ProxyStatusChecking)).
@@ -567,12 +577,18 @@ func (r *ProxyRepo) MarkCheckingBatchWithLog(ctx context.Context, ids []uint, lo
 
 func (r *ProxyRepo) MarkCheckingByFilterWithLog(ctx context.Context, filter proxyapp.ProxyListFilter, log *governancedomain.OperationLog) (int64, int64, error) {
 	var matched, updated int64
+	task := proxyCheckTaskFromOperationLog(log)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := applyProxyListFilter(tx.Model(&ProxyModel{}), filter).Count(&matched).Error; err != nil {
 			return fmt.Errorf("count proxies for check: %w", err)
 		}
 		if matched == 0 {
 			return nil
+		}
+		metadataUpdate := applyProxyListFilter(tx.Model(&ProxyModel{}), filter).
+			Updates(proxyCheckMetadataUpdates(task))
+		if metadataUpdate.Error != nil {
+			return fmt.Errorf("update proxy check metadata by filter: %w", metadataUpdate.Error)
 		}
 		result := applyProxyListFilter(tx.Model(&ProxyModel{}), filter).
 			Where("status <> ?", string(domain.ProxyStatusChecking)).
@@ -669,7 +685,7 @@ func (r *ProxyRepo) CreatePendingProxyCheckJobs(ctx context.Context, limit int) 
 	var models []ProxyModel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Select("id").
+			Select("id, check_operator_user_id, check_request_id, check_path").
 			Where("status = ?", string(domain.ProxyStatusChecking)).
 			Where(`NOT EXISTS (
 				SELECT 1 FROM proxy_check_jobs AS job
@@ -683,7 +699,12 @@ func (r *ProxyRepo) CreatePendingProxyCheckJobs(ctx context.Context, limit int) 
 			return fmt.Errorf("lock proxies pending check jobs: %w", err)
 		}
 		for i := range models {
-			if _, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, proxyapp.ProxyCheckTask{ProxyID: models[i].ID}, proxyapp.ProxyCheckBatchJobRequest{}); err != nil {
+			if _, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, proxyapp.ProxyCheckTask{
+				ProxyID:        models[i].ID,
+				OperatorUserID: models[i].CheckOperatorUserID,
+				RequestID:      models[i].CheckRequestID,
+				Path:           models[i].CheckPath,
+			}, proxyapp.ProxyCheckBatchJobRequest{}); err != nil {
 				return err
 			}
 		}
@@ -1340,6 +1361,35 @@ func (r *ProxyRepo) createOperationLogInTx(ctx context.Context, tx *gorm.DB, log
 	}
 	if err := r.operationLogs.CreateInTx(ctx, tx, &next); err != nil {
 		return fmt.Errorf("create operation log: %w", err)
+	}
+	return nil
+}
+
+func proxyCheckTaskFromOperationLog(log *governancedomain.OperationLog) proxyapp.ProxyCheckTask {
+	if log == nil {
+		return proxyapp.ProxyCheckTask{}
+	}
+	return proxyapp.ProxyCheckTask{
+		OperatorUserID: log.OperatorUserID,
+		RequestID:      log.RequestID,
+		Path:           log.Path,
+	}
+}
+
+func proxyCheckMetadataUpdates(task proxyapp.ProxyCheckTask) map[string]any {
+	return map[string]any{
+		"check_operator_user_id": task.OperatorUserID,
+		"check_request_id":       task.RequestID,
+		"check_path":             task.Path,
+	}
+}
+
+func updateProxyCheckMetadataInTx(ctx context.Context, tx *gorm.DB, ids []uint, task proxyapp.ProxyCheckTask) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := tx.WithContext(ctx).Model(&ProxyModel{}).Where("id IN ?", ids).Updates(proxyCheckMetadataUpdates(task)).Error; err != nil {
+		return fmt.Errorf("update proxy check metadata: %w", err)
 	}
 	return nil
 }

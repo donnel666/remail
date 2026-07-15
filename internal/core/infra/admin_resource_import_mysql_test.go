@@ -58,6 +58,38 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
 	require.NoError(t, repo.SetAdminImportCounts(context.Background(), item.ID, claimToken, 2, 1))
 }
 
+func TestLegacyResourceImportExpiresInsteadOfRunningWithIncompleteMetadataMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, role, enabled)
+VALUES (1, 'legacy-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
+
+	repo := NewResourceImportRepo(db)
+	item := &domain.ResourceImport{
+		OwnerUserID:     1,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		SourceObjectKey: "imports/microsoft/source/legacy-incomplete.txt",
+		Status:          domain.ResourceImportProcessing,
+		DispatchStatus:  "legacy",
+		MaxAttempts:     3,
+	}
+	require.NoError(t, repo.Create(context.Background(), item))
+	require.NoError(t, db.Model(&ResourceImportModel{}).Where("id = ?", item.ID).
+		UpdateColumn("updated_at", time.Now().UTC().Add(-2*time.Hour)).Error)
+
+	now := time.Now().UTC()
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Empty(t, dispatchable)
+
+	var row ResourceImportModel
+	require.NoError(t, db.First(&row, item.ID).Error)
+	require.Equal(t, string(domain.ResourceImportFailed), row.Status)
+	require.Equal(t, "failed", row.DispatchStatus)
+	require.Contains(t, row.LastSafeError, "submit the import again")
+	require.NotNil(t, row.FinishedAt)
+}
+
 func TestAdminResourceImportSerializedQueueTaskHydratesDurableObjectKeyMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`

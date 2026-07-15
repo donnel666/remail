@@ -24,6 +24,7 @@ type fakeProxyRepository struct {
 	nextJobID     uint
 	checkJobs     []ProxyCheckJob
 	pendingChecks []uint
+	pendingTasks  map[uint]ProxyCheckTask
 	failureProxy  *domain.Proxy
 
 	resourceAcquireCount int
@@ -53,7 +54,7 @@ func (r *fakeProxyRepository) CreateWithLogAndCheckJob(ctx context.Context, prox
 	task.ProxyID = proxy.ID
 	return r.createCheckJob(ProxyCheckJobSingle, task, ProxyCheckBatchJobRequest{}), nil
 }
-func (r *fakeProxyRepository) CreateBatchWithLog(ctx context.Context, proxies []*domain.Proxy, _ *governancedomain.OperationLog) ([]domain.Proxy, int, error) {
+func (r *fakeProxyRepository) CreateBatchWithLog(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog) ([]domain.Proxy, int, error) {
 	created := make([]domain.Proxy, 0, len(proxies))
 	for _, proxy := range proxies {
 		if proxy == nil {
@@ -64,6 +65,7 @@ func (r *fakeProxyRepository) CreateBatchWithLog(ctx context.Context, proxies []
 		}
 		created = append(created, *proxy)
 		r.pendingChecks = append(r.pendingChecks, proxy.ID)
+		r.rememberPendingTask(proxy.ID, log)
 	}
 	return created, 0, nil
 }
@@ -149,13 +151,17 @@ func (r *fakeProxyRepository) DeleteByFilterWithLog(context.Context, ProxyListFi
 func (r *fakeProxyRepository) DisableByFilterWithLog(context.Context, ProxyListFilter, *governancedomain.OperationLog) (int64, error) {
 	return 0, nil
 }
-func (r *fakeProxyRepository) MarkCheckingBatchWithLog(_ context.Context, ids []uint, _ *governancedomain.OperationLog) (int, int, error) {
+func (r *fakeProxyRepository) MarkCheckingBatchWithLog(_ context.Context, ids []uint, log *governancedomain.OperationLog) (int, int, error) {
 	r.pendingChecks = append(r.pendingChecks, ids...)
+	for _, id := range ids {
+		r.rememberPendingTask(id, log)
+	}
 	return len(ids), len(ids), nil
 }
-func (r *fakeProxyRepository) MarkCheckingByFilterWithLog(_ context.Context, filter ProxyListFilter, _ *governancedomain.OperationLog) (int64, int64, error) {
+func (r *fakeProxyRepository) MarkCheckingByFilterWithLog(_ context.Context, filter ProxyListFilter, log *governancedomain.OperationLog) (int64, int64, error) {
 	for id := uint(1); id <= uint(r.count); id++ {
 		r.pendingChecks = append(r.pendingChecks, id)
+		r.rememberPendingTask(id, log)
 	}
 	if filter.Status == domain.ProxyStatusChecking {
 		return r.count, 0, nil
@@ -195,10 +201,25 @@ func (r *fakeProxyRepository) CreatePendingProxyCheckJobs(_ context.Context, lim
 		if created == limit || r.hasActiveSingleCheckJob(proxyID) {
 			continue
 		}
-		r.createCheckJob(ProxyCheckJobSingle, ProxyCheckTask{ProxyID: proxyID}, ProxyCheckBatchJobRequest{})
+		task := r.pendingTasks[proxyID]
+		task.ProxyID = proxyID
+		r.createCheckJob(ProxyCheckJobSingle, task, ProxyCheckBatchJobRequest{})
 		created++
 	}
 	return created, nil
+}
+
+func (r *fakeProxyRepository) rememberPendingTask(proxyID uint, log *governancedomain.OperationLog) {
+	if r.pendingTasks == nil {
+		r.pendingTasks = make(map[uint]ProxyCheckTask)
+	}
+	task := ProxyCheckTask{}
+	if log != nil {
+		task.OperatorUserID = log.OperatorUserID
+		task.RequestID = log.RequestID
+		task.Path = log.Path
+	}
+	r.pendingTasks[proxyID] = task
 }
 func (r *fakeProxyRepository) ClaimDispatchableProxyCheckJobs(_ context.Context, limit int, staleBefore time.Time) ([]ProxyCheckJob, error) {
 	if limit <= 0 {
@@ -401,6 +422,10 @@ type fakeSystemLogPort struct {
 	err  error
 }
 
+type fakeOperationLogPort struct{}
+
+func (fakeOperationLogPort) Create(context.Context, *governancedomain.OperationLog) error { return nil }
+
 func (p *fakeSystemLogPort) Create(_ context.Context, log *governancedomain.SystemLog) error {
 	if log != nil {
 		copied := *log
@@ -440,7 +465,7 @@ func TestProxyCreateQueuesCheckTask(t *testing.T) {
 func TestProxyImportPersistsCheckingBeforeDispatcherCreatesJobs(t *testing.T) {
 	repo := &fakeProxyRepository{}
 	queue := &fakeProxyCheckQueue{}
-	uc := NewProxyUseCase(repo, nil, queue, nil, nil)
+	uc := NewProxyUseCase(repo, nil, queue, fakeOperationLogPort{}, nil)
 
 	result, err := uc.Import(context.Background(), 1, "request-import", "/v1/admin/proxies/imports", ImportProxiesRequest{
 		Pool: domain.ProxyPoolSystem,
@@ -464,6 +489,9 @@ func TestProxyImportPersistsCheckingBeforeDispatcherCreatesJobs(t *testing.T) {
 	require.Equal(t, 2, dispatched.Queued)
 	require.Len(t, queue.tasks, 2)
 	require.Empty(t, queue.batchTasks)
+	require.Equal(t, uint(1), queue.tasks[0].OperatorUserID)
+	require.Equal(t, "request-import", queue.tasks[0].RequestID)
+	require.Equal(t, "/v1/admin/proxies/imports", queue.tasks[0].Path)
 }
 
 func TestProxyCheckQueuesTaskAndMarksChecking(t *testing.T) {

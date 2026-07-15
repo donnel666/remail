@@ -224,14 +224,16 @@ func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, l
 		if err := tx.Model(&ResourceImportModel{}).
 			Where("status = ? AND dispatch_status = ? AND updated_at < ?", string(domain.ResourceImportProcessing), "legacy", runningStaleBefore).
 			Updates(map[string]any{
-				"dispatch_status": "queued",
+				"status":          string(domain.ResourceImportFailed),
+				"dispatch_status": "failed",
 				"claim_token":     "",
 				"dispatch_token":  "",
 				"dispatched_at":   nil,
-				"max_attempts":    gorm.Expr("GREATEST(max_attempts, 3)"),
+				"last_safe_error": "Legacy import metadata is incomplete. Please submit the import again.",
+				"finished_at":     now,
 				"updated_at":      now,
 			}).Error; err != nil {
-			return fmt.Errorf("recover legacy resource imports: %w", err)
+			return fmt.Errorf("expire legacy resource imports: %w", err)
 		}
 		if err := tx.Model(&ResourceImportModel{}).
 			Where("status = ? AND dispatch_status = ? AND started_at < ? AND attempts >= max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
