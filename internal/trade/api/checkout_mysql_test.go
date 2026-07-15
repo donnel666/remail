@@ -139,6 +139,35 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.InDelta(t, int64((1440 * time.Minute).Seconds()), int64(activated.Order.AfterSaleUntil.Sub(*first.Order.ReceiveStartedAt).Seconds()), 1)
 }
 
+func TestCheckoutZeroPricedPublicPurchaseMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("purchase_price", "0.000000").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+
+	result, err := newTradeUseCase(db).Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "purchase",
+		SupplyPolicy:   "public_only",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-zero-priced-public-purchase",
+		RequestID:      "req-zero-priced-public-purchase",
+	})
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, "0.00", result.Order.PayAmount)
+	require.NotNil(t, result.Order.DebitTxID)
+
+	var debitAmount string
+	require.NoError(t, db.Table("wallet_transactions").
+		Select("amount").
+		Where("id = ?", *result.Order.DebitTxID).
+		Scan(&debitAmount).Error)
+	require.Equal(t, "0.000000", debitAmount)
+}
+
 func TestCheckoutPurchaseOrderContinuesAfterProductDelistedMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")

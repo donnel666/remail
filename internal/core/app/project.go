@@ -264,11 +264,11 @@ func (uc *ProjectUseCase) GetOrderingQuote(ctx context.Context, projectID uint, 
 		if !product.CodeEnabled || product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
-		payAmount, err := normalizeOrderingAmount(product.CodePrice, true)
+		payAmount, err := normalizeOrderingAmount(product.CodePrice)
 		if err != nil {
 			return nil, err
 		}
-		supplierAmount, err := normalizeOrderingAmount(product.CodeSupplierPrice, false)
+		supplierAmount, err := normalizeOrderingAmount(product.CodeSupplierPrice)
 		if err != nil {
 			return nil, err
 		}
@@ -278,11 +278,11 @@ func (uc *ProjectUseCase) GetOrderingQuote(ctx context.Context, projectID uint, 
 		if !product.PurchaseEnabled || product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
-		payAmount, err := normalizeOrderingAmount(product.PurchasePrice, true)
+		payAmount, err := normalizeOrderingAmount(product.PurchasePrice)
 		if err != nil {
 			return nil, err
 		}
-		supplierAmount, err := normalizeOrderingAmount(product.PurchaseSupplierPrice, false)
+		supplierAmount, err := normalizeOrderingAmount(product.PurchaseSupplierPrice)
 		if err != nil {
 			return nil, err
 		}
@@ -834,12 +834,9 @@ func requiredMailRuleTypes(looseMatch bool) []domain.MailRuleType {
 	return []domain.MailRuleType{domain.MailRuleSender, domain.MailRuleRecipient, domain.MailRuleSubject, domain.MailRuleBody}
 }
 
-func normalizeOrderingAmount(value string, requirePositive bool) (string, error) {
+func normalizeOrderingAmount(value string) (string, error) {
 	amount, err := moneyfmt.Parse(value)
 	if err != nil || amount.IsNegative() {
-		return "", domain.ErrInvalidProduct
-	}
-	if requirePositive && !amount.IsPositive() {
 		return "", domain.ErrInvalidProduct
 	}
 	return moneyfmt.Format(amount), nil

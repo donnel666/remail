@@ -143,24 +143,24 @@ func TestNormalizeOrderingAmountPreservesLedgerPrecision(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		input           string
-		requirePositive bool
-		want            string
+		input string
+		want  string
 	}{
-		{input: "10", requirePositive: true, want: "10.00"},
-		{input: "0.008000", requirePositive: true, want: "0.008"},
-		{input: "0.005000", requirePositive: false, want: "0.005"},
-		{input: "0.007000", requirePositive: false, want: "0.007"},
+		{input: "10", want: "10.00"},
+		{input: "0", want: "0.00"},
+		{input: "0.008000", want: "0.008"},
+		{input: "0.005000", want: "0.005"},
+		{input: "0.007000", want: "0.007"},
 	} {
 		t.Run(test.input, func(t *testing.T) {
 			t.Parallel()
-			got, err := normalizeOrderingAmount(test.input, test.requirePositive)
+			got, err := normalizeOrderingAmount(test.input)
 			require.NoError(t, err)
 			require.Equal(t, test.want, got)
 		})
 	}
 
-	_, err := normalizeOrderingAmount("0.0000001", true)
+	_, err := normalizeOrderingAmount("0.0000001")
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
 }
 
