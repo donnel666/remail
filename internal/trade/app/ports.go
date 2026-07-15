@@ -59,6 +59,10 @@ type AllocationCommand struct {
 	ProjectProductID uint
 	SupplyScope      SupplyScope
 	EmailSuffix      string
+	// FulfillExistingOrder permits allocation after the product has been
+	// delisted. Trade sets it only after an order has been durably created;
+	// standalone/new allocation callers keep the current-sale guard.
+	FulfillExistingOrder bool
 }
 
 type AllocationResult struct {
@@ -122,6 +126,7 @@ type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error)
 	LoadOrCreatePendingOrder(ctx context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error)
+	FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey, requestFingerprint string) (*domain.Order, error)
 	FindOrder(ctx context.Context, orderNo string) (*domain.Order, error)
 	MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error)
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
@@ -146,19 +151,22 @@ type Repository interface {
 }
 
 type CreatePendingOrderCommand struct {
-	OrderNo            string
-	UserID             uint
-	ProjectID          uint
-	ProjectProductID   uint
-	ProductType        domain.ProductType
-	ServiceMode        domain.ServiceMode
-	SupplyPolicy       domain.SupplyPolicy
-	PayAmount          string
-	ClientChannel      domain.ClientChannel
-	APIKeyID           *uint
-	IdempotencyKey     string
-	RequestFingerprint string
-	Now                time.Time
+	OrderNo                 string
+	UserID                  uint
+	ProjectID               uint
+	ProjectProductID        uint
+	ProductType             domain.ProductType
+	ServiceMode             domain.ServiceMode
+	SupplyPolicy            domain.SupplyPolicy
+	PayAmount               string
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	ClientChannel           domain.ClientChannel
+	APIKeyID                *uint
+	IdempotencyKey          string
+	RequestFingerprint      string
+	Now                     time.Time
 }
 
 type MarkActiveCommand struct {
@@ -353,34 +361,56 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 		req.APIKeyID = nil
 	}
 
+	emailSuffix := normalizeEmailSuffix(req.EmailSuffix)
+	fingerprint := checkoutFingerprint(req.UserID, req.ProjectID, req.ProductID, mode, policy, emailSuffix, req.ClientChannel, apiKeyFingerprint(req.APIKeyID))
+	existing, err := uc.repo.FindOrderByIdempotency(ctx, req.ClientChannel, req.UserID, req.APIKeyID, idempotencyKey, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return uc.resumeExistingCheckout(ctx, existing.OrderNo, emailSuffix, strings.TrimSpace(req.RequestID))
+	}
+
+	// This is the only path that evaluates current product sale status. Once an
+	// order has been persisted, subsequent fulfilment must use that order's
+	// immutable service-window snapshot instead.
 	quote, err := uc.ordering.GetOrderingQuote(ctx, req.ProjectID, req.ProductID, req.UserID, mode)
 	if err != nil {
 		return nil, err
 	}
-	emailSuffix := normalizeEmailSuffix(req.EmailSuffix)
-	fingerprint := checkoutFingerprint(req.UserID, req.ProjectID, req.ProductID, mode, policy, emailSuffix, req.ClientChannel, apiKeyFingerprint(req.APIKeyID))
 	var result *CheckoutResult
 	var checkoutErr error
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		order, created, err := uc.repo.LoadOrCreatePendingOrder(txCtx, CreatePendingOrderCommand{
-			OrderNo:            nextOrderNo(),
-			UserID:             req.UserID,
-			ProjectID:          quote.ProjectID,
-			ProjectProductID:   quote.ProductID,
-			ProductType:        quote.ProductType,
-			ServiceMode:        mode,
-			SupplyPolicy:       policy,
-			PayAmount:          quote.PayAmount,
-			ClientChannel:      req.ClientChannel,
-			APIKeyID:           req.APIKeyID,
-			IdempotencyKey:     idempotencyKey,
-			RequestFingerprint: fingerprint,
-			Now:                uc.now(),
+			OrderNo:                 nextOrderNo(),
+			UserID:                  req.UserID,
+			ProjectID:               quote.ProjectID,
+			ProjectProductID:        quote.ProductID,
+			ProductType:             quote.ProductType,
+			ServiceMode:             mode,
+			SupplyPolicy:            policy,
+			PayAmount:               quote.PayAmount,
+			CodeWindowMinutes:       quote.CodeWindowMinutes,
+			ActivationWindowMinutes: quote.ActivationWindowMinutes,
+			WarrantyMinutes:         quote.WarrantyMinutes,
+			ClientChannel:           req.ClientChannel,
+			APIKeyID:                req.APIKeyID,
+			IdempotencyKey:          idempotencyKey,
+			RequestFingerprint:      fingerprint,
+			Now:                     uc.now(),
 		})
 		if err != nil {
 			return err
 		}
-		result, err = uc.resumeCheckout(txCtx, *order, *quote, emailSuffix, strings.TrimSpace(req.RequestID))
+		orderQuote := *quote
+		if !created {
+			storedQuote, quoteErr := orderingQuoteFromOrder(*order)
+			if quoteErr != nil {
+				return quoteErr
+			}
+			orderQuote = *storedQuote
+		}
+		result, err = uc.resumeCheckout(txCtx, *order, orderQuote, emailSuffix, strings.TrimSpace(req.RequestID))
 		if err != nil {
 			if shouldCommitCheckoutError(err) {
 				checkoutErr = err
@@ -389,6 +419,41 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 			return err
 		}
 		result.Created = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if checkoutErr != nil {
+		return nil, checkoutErr
+	}
+	return result, nil
+}
+
+// resumeExistingCheckout retries a persisted order without consulting current
+// project-product sale state. This keeps idempotent checkout retries usable
+// after a product is delisted while preserving the original order terms.
+func (uc *UseCase) resumeExistingCheckout(ctx context.Context, orderNo, emailSuffix, requestID string) (*CheckoutResult, error) {
+	var result *CheckoutResult
+	var checkoutErr error
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		order, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
+		if err != nil {
+			return err
+		}
+		quote, err := orderingQuoteFromOrder(*order)
+		if err != nil {
+			return err
+		}
+		result, err = uc.resumeCheckout(txCtx, *order, *quote, emailSuffix, requestID)
+		if err != nil {
+			if shouldCommitCheckoutError(err) {
+				checkoutErr = err
+				return nil
+			}
+			return err
+		}
+		result.Created = false
 		return nil
 	})
 	if err != nil {
@@ -777,11 +842,11 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		if order.ReceiveUntil != nil && matchedAt.After(order.ReceiveUntil.UTC()) {
 			return nil
 		}
-		quote, err := uc.ordering.GetOrderingQuote(ctx, order.ProjectID, order.ProjectProductID, order.UserID, domain.ServiceModePurchase)
+		quote, err := orderingQuoteFromOrder(*order)
 		if err != nil {
 			return err
 		}
-		afterSaleUntil := purchaseWarrantyUntil(*order, *quote, matchedAt)
+		afterSaleUntil := purchaseWarrantyUntil(*order, quote.WarrantyMinutes, matchedAt)
 		return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			_, _, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil)
 			return err
@@ -1111,11 +1176,12 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 	var lastErr error
 	for _, scope := range scopes {
 		result, err := uc.allocation.Allocate(ctx, AllocationCommand{
-			OrderNo:          order.OrderNo,
-			BuyerUserID:      order.UserID,
-			ProjectProductID: order.ProjectProductID,
-			SupplyScope:      scope,
-			EmailSuffix:      emailSuffix,
+			OrderNo:              order.OrderNo,
+			BuyerUserID:          order.UserID,
+			ProjectProductID:     order.ProjectProductID,
+			SupplyScope:          scope,
+			EmailSuffix:          emailSuffix,
+			FulfillExistingOrder: true,
 		})
 		if err == nil {
 			return result, nil
@@ -1174,16 +1240,44 @@ func initialAfterSaleUntil(receiveUntil time.Time, mode domain.ServiceMode) *tim
 	return &receiveUntil
 }
 
-func purchaseWarrantyUntil(order domain.Order, quote OrderingQuote, matchedAt time.Time) time.Time {
+func purchaseWarrantyUntil(order domain.Order, warrantyMinutes int, matchedAt time.Time) time.Time {
 	start := matchedAt.UTC()
 	if order.ReceiveStartedAt != nil && !order.ReceiveStartedAt.IsZero() {
 		start = order.ReceiveStartedAt.UTC()
 	}
-	until := start.Add(time.Duration(quote.WarrantyMinutes) * time.Minute)
+	until := start.Add(time.Duration(warrantyMinutes) * time.Minute)
 	if until.Before(matchedAt.UTC()) {
 		return matchedAt.UTC()
 	}
 	return until
+}
+
+func orderingQuoteFromOrder(order domain.Order) (*OrderingQuote, error) {
+	quote := &OrderingQuote{
+		ProjectID:               order.ProjectID,
+		ProductID:               order.ProjectProductID,
+		ProductType:             order.ProductType,
+		PayAmount:               order.PayAmount,
+		CodeWindowMinutes:       order.CodeWindowMinutes,
+		ActivationWindowMinutes: order.ActivationWindowMinutes,
+		WarrantyMinutes:         order.WarrantyMinutes,
+	}
+	if quote.ProjectID == 0 || quote.ProductID == 0 || quote.ProductType == "" {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	switch order.ServiceMode {
+	case domain.ServiceModeCode:
+		if quote.CodeWindowMinutes <= 0 {
+			return nil, domain.ErrInvalidOrderRequest
+		}
+	case domain.ServiceModePurchase:
+		if quote.ActivationWindowMinutes <= 0 || quote.WarrantyMinutes <= 0 {
+			return nil, domain.ErrInvalidOrderRequest
+		}
+	default:
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	return quote, nil
 }
 
 func tokenExpireAt(mode domain.ServiceMode, receiveUntil time.Time) *time.Time {

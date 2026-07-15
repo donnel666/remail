@@ -19,37 +19,40 @@ import (
 )
 
 type OrderModel struct {
-	ID                   uint       `gorm:"primaryKey;autoIncrement"`
-	OrderNo              string     `gorm:"type:varchar(64);not null;column:order_no"`
-	UserID               uint       `gorm:"not null;column:user_id"`
-	ProjectID            uint       `gorm:"not null;column:project_id"`
-	ProjectProductID     uint       `gorm:"not null;column:project_product_id"`
-	ProductType          string     `gorm:"type:varchar(32);not null;column:product_type"`
-	ServiceMode          string     `gorm:"type:varchar(32);not null;column:service_mode"`
-	SupplyPolicy         string     `gorm:"type:varchar(32);not null;column:supply_policy"`
-	Status               string     `gorm:"type:varchar(32);not null"`
-	FailureCode          string     `gorm:"type:varchar(32);not null;default:'';column:failure_code"`
-	PayAmount            string     `gorm:"type:decimal(18,6);not null;column:pay_amount"`
-	RefundAmount         string     `gorm:"type:decimal(18,6);not null;column:refund_amount"`
-	DebitTxID            *uint      `gorm:"column:debit_tx_id"`
-	RefundTxID           *uint      `gorm:"column:refund_tx_id"`
-	AllocationType       *string    `gorm:"type:varchar(32);column:allocation_type"`
-	MicrosoftAllocID     *uint      `gorm:"column:microsoft_alloc_id"`
-	DomainAllocID        *uint      `gorm:"column:domain_alloc_id"`
-	DeliveryEmail        string     `gorm:"type:varchar(255);not null;column:delivery_email"`
-	ReceiveStartedAt     *time.Time `gorm:"column:receive_started_at"`
-	ReceiveUntil         *time.Time `gorm:"column:receive_until"`
-	ActivatedAt          *time.Time `gorm:"column:activated_at"`
-	AfterSaleUntil       *time.Time `gorm:"column:after_sale_until"`
-	ClientChannel        string     `gorm:"type:varchar(32);not null;column:client_channel"`
-	APIKeyID             *uint      `gorm:"column:api_key_id"`
-	IdempotencyKey       string     `gorm:"type:varchar(128);not null;column:idempotency_key"`
-	RequestFingerprint   string     `gorm:"type:char(64);not null;column:request_fingerprint"`
-	ServiceCleanupStatus string     `gorm:"type:varchar(32);not null;column:service_cleanup_status"`
-	ArchivedAt           *time.Time `gorm:"column:archived_at"`
-	CreatedAt            time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt            time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
-	Version              int        `gorm:"not null;default:1"`
+	ID                      uint       `gorm:"primaryKey;autoIncrement"`
+	OrderNo                 string     `gorm:"type:varchar(64);not null;column:order_no"`
+	UserID                  uint       `gorm:"not null;column:user_id"`
+	ProjectID               uint       `gorm:"not null;column:project_id"`
+	ProjectProductID        uint       `gorm:"not null;column:project_product_id"`
+	ProductType             string     `gorm:"type:varchar(32);not null;column:product_type"`
+	ServiceMode             string     `gorm:"type:varchar(32);not null;column:service_mode"`
+	SupplyPolicy            string     `gorm:"type:varchar(32);not null;column:supply_policy"`
+	Status                  string     `gorm:"type:varchar(32);not null"`
+	FailureCode             string     `gorm:"type:varchar(32);not null;default:'';column:failure_code"`
+	PayAmount               string     `gorm:"type:decimal(18,6);not null;column:pay_amount"`
+	RefundAmount            string     `gorm:"type:decimal(18,6);not null;column:refund_amount"`
+	CodeWindowMinutes       int        `gorm:"not null;column:code_window_minutes"`
+	ActivationWindowMinutes int        `gorm:"not null;column:activation_window_minutes"`
+	WarrantyMinutes         int        `gorm:"not null;column:warranty_minutes"`
+	DebitTxID               *uint      `gorm:"column:debit_tx_id"`
+	RefundTxID              *uint      `gorm:"column:refund_tx_id"`
+	AllocationType          *string    `gorm:"type:varchar(32);column:allocation_type"`
+	MicrosoftAllocID        *uint      `gorm:"column:microsoft_alloc_id"`
+	DomainAllocID           *uint      `gorm:"column:domain_alloc_id"`
+	DeliveryEmail           string     `gorm:"type:varchar(255);not null;column:delivery_email"`
+	ReceiveStartedAt        *time.Time `gorm:"column:receive_started_at"`
+	ReceiveUntil            *time.Time `gorm:"column:receive_until"`
+	ActivatedAt             *time.Time `gorm:"column:activated_at"`
+	AfterSaleUntil          *time.Time `gorm:"column:after_sale_until"`
+	ClientChannel           string     `gorm:"type:varchar(32);not null;column:client_channel"`
+	APIKeyID                *uint      `gorm:"column:api_key_id"`
+	IdempotencyKey          string     `gorm:"type:varchar(128);not null;column:idempotency_key"`
+	RequestFingerprint      string     `gorm:"type:char(64);not null;column:request_fingerprint"`
+	ServiceCleanupStatus    string     `gorm:"type:varchar(32);not null;column:service_cleanup_status"`
+	ArchivedAt              *time.Time `gorm:"column:archived_at"`
+	CreatedAt               time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt               time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	Version                 int        `gorm:"not null;default:1"`
 }
 
 func (OrderModel) TableName() string { return "orders" }
@@ -107,22 +110,25 @@ func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.Create
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
 		tx := r.dbFor(txCtx)
 		candidate := OrderModel{
-			OrderNo:              cmd.OrderNo,
-			UserID:               cmd.UserID,
-			ProjectID:            cmd.ProjectID,
-			ProjectProductID:     cmd.ProjectProductID,
-			ProductType:          string(cmd.ProductType),
-			ServiceMode:          string(cmd.ServiceMode),
-			SupplyPolicy:         string(cmd.SupplyPolicy),
-			Status:               string(domain.OrderStatusPendingPayment),
-			FailureCode:          "",
-			PayAmount:            cmd.PayAmount,
-			RefundAmount:         "0.00",
-			ClientChannel:        string(cmd.ClientChannel),
-			APIKeyID:             cmd.APIKeyID,
-			IdempotencyKey:       strings.TrimSpace(cmd.IdempotencyKey),
-			RequestFingerprint:   cmd.RequestFingerprint,
-			ServiceCleanupStatus: "none",
+			OrderNo:                 cmd.OrderNo,
+			UserID:                  cmd.UserID,
+			ProjectID:               cmd.ProjectID,
+			ProjectProductID:        cmd.ProjectProductID,
+			ProductType:             string(cmd.ProductType),
+			ServiceMode:             string(cmd.ServiceMode),
+			SupplyPolicy:            string(cmd.SupplyPolicy),
+			Status:                  string(domain.OrderStatusPendingPayment),
+			FailureCode:             "",
+			PayAmount:               cmd.PayAmount,
+			RefundAmount:            "0.00",
+			CodeWindowMinutes:       cmd.CodeWindowMinutes,
+			ActivationWindowMinutes: cmd.ActivationWindowMinutes,
+			WarrantyMinutes:         cmd.WarrantyMinutes,
+			ClientChannel:           string(cmd.ClientChannel),
+			APIKeyID:                cmd.APIKeyID,
+			IdempotencyKey:          strings.TrimSpace(cmd.IdempotencyKey),
+			RequestFingerprint:      cmd.RequestFingerprint,
+			ServiceCleanupStatus:    "none",
 		}
 		if err := tx.Create(&candidate).Error; err != nil {
 			if !isDuplicateKeyError(err) {
@@ -139,6 +145,24 @@ func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.Create
 	}
 	order := orderModelToDomain(model)
 	return &order, created, nil
+}
+
+func (r *Repo) FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey, requestFingerprint string) (*domain.Order, error) {
+	var model OrderModel
+	err := r.dbFor(ctx).
+		Where("idempotency_subject = ? AND idempotency_key = ?", idempotencySubject(channel, userID, apiKeyID), strings.TrimSpace(idempotencyKey)).
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find idempotent order: %w", err)
+	}
+	if model.RequestFingerprint != requestFingerprint {
+		return nil, domain.ErrIdempotencyConflict
+	}
+	order := orderModelToDomain(model)
+	return &order, nil
 }
 
 func (r *Repo) FindOrder(ctx context.Context, orderNo string) (*domain.Order, error) {
@@ -947,37 +971,40 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		allocationType = &value
 	}
 	return domain.Order{
-		ID:                   model.ID,
-		OrderNo:              model.OrderNo,
-		UserID:               model.UserID,
-		ProjectID:            model.ProjectID,
-		ProjectProductID:     model.ProjectProductID,
-		ProductType:          domain.ProductType(model.ProductType),
-		ServiceMode:          domain.ServiceMode(model.ServiceMode),
-		SupplyPolicy:         domain.SupplyPolicy(model.SupplyPolicy),
-		Status:               domain.OrderStatus(model.Status),
-		FailureCode:          domain.OrderFailureCode(model.FailureCode),
-		PayAmount:            normalizeStoredMoney(model.PayAmount),
-		RefundAmount:         normalizeStoredMoney(model.RefundAmount),
-		DebitTxID:            model.DebitTxID,
-		RefundTxID:           model.RefundTxID,
-		AllocationType:       allocationType,
-		MicrosoftAllocID:     model.MicrosoftAllocID,
-		DomainAllocID:        model.DomainAllocID,
-		DeliveryEmail:        model.DeliveryEmail,
-		ReceiveStartedAt:     model.ReceiveStartedAt,
-		ReceiveUntil:         model.ReceiveUntil,
-		ActivatedAt:          model.ActivatedAt,
-		AfterSaleUntil:       model.AfterSaleUntil,
-		ClientChannel:        domain.ClientChannel(model.ClientChannel),
-		APIKeyID:             model.APIKeyID,
-		IdempotencyKey:       model.IdempotencyKey,
-		RequestFingerprint:   model.RequestFingerprint,
-		ServiceCleanupStatus: model.ServiceCleanupStatus,
-		ArchivedAt:           model.ArchivedAt,
-		CreatedAt:            model.CreatedAt,
-		UpdatedAt:            model.UpdatedAt,
-		Version:              model.Version,
+		ID:                      model.ID,
+		OrderNo:                 model.OrderNo,
+		UserID:                  model.UserID,
+		ProjectID:               model.ProjectID,
+		ProjectProductID:        model.ProjectProductID,
+		ProductType:             domain.ProductType(model.ProductType),
+		ServiceMode:             domain.ServiceMode(model.ServiceMode),
+		SupplyPolicy:            domain.SupplyPolicy(model.SupplyPolicy),
+		Status:                  domain.OrderStatus(model.Status),
+		FailureCode:             domain.OrderFailureCode(model.FailureCode),
+		PayAmount:               normalizeStoredMoney(model.PayAmount),
+		RefundAmount:            normalizeStoredMoney(model.RefundAmount),
+		CodeWindowMinutes:       model.CodeWindowMinutes,
+		ActivationWindowMinutes: model.ActivationWindowMinutes,
+		WarrantyMinutes:         model.WarrantyMinutes,
+		DebitTxID:               model.DebitTxID,
+		RefundTxID:              model.RefundTxID,
+		AllocationType:          allocationType,
+		MicrosoftAllocID:        model.MicrosoftAllocID,
+		DomainAllocID:           model.DomainAllocID,
+		DeliveryEmail:           model.DeliveryEmail,
+		ReceiveStartedAt:        model.ReceiveStartedAt,
+		ReceiveUntil:            model.ReceiveUntil,
+		ActivatedAt:             model.ActivatedAt,
+		AfterSaleUntil:          model.AfterSaleUntil,
+		ClientChannel:           domain.ClientChannel(model.ClientChannel),
+		APIKeyID:                model.APIKeyID,
+		IdempotencyKey:          model.IdempotencyKey,
+		RequestFingerprint:      model.RequestFingerprint,
+		ServiceCleanupStatus:    model.ServiceCleanupStatus,
+		ArchivedAt:              model.ArchivedAt,
+		CreatedAt:               model.CreatedAt,
+		UpdatedAt:               model.UpdatedAt,
+		Version:                 model.Version,
 	}
 }
 

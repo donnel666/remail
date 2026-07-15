@@ -228,11 +228,12 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		scope = allocdomain.SupplyScopeOwned
 	}
 	result, err := a.alloc.Allocate(ctx, allocapp.AllocateCommand{
-		OrderNo:          cmd.OrderNo,
-		BuyerUserID:      cmd.BuyerUserID,
-		ProjectProductID: cmd.ProjectProductID,
-		SupplyScope:      scope,
-		EmailSuffix:      cmd.EmailSuffix,
+		OrderNo:              cmd.OrderNo,
+		BuyerUserID:          cmd.BuyerUserID,
+		ProjectProductID:     cmd.ProjectProductID,
+		SupplyScope:          scope,
+		EmailSuffix:          cmd.EmailSuffix,
+		FulfillExistingOrder: cmd.FulfillExistingOrder,
 	})
 	if err != nil {
 		return nil, mapAllocationError(err)

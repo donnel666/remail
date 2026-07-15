@@ -22,6 +22,10 @@ type AllocateCommand struct {
 	ProjectProductID uint
 	SupplyScope      domain.SupplyScope
 	EmailSuffix      string
+	// FulfillExistingOrder is set only by Trade after an order is persisted.
+	// A delisted product cannot receive new orders, but it must remain
+	// allocatable for an already accepted order.
+	FulfillExistingOrder bool
 }
 
 type UseCase struct {
@@ -73,7 +77,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 				return nil
 			}
 
-			config, err := uc.repo.LoadProductConfig(txCtx, cmd.ProjectProductID, cmd.BuyerUserID)
+			config, err := uc.repo.LoadProductConfig(txCtx, cmd.ProjectProductID, cmd.BuyerUserID, cmd.FulfillExistingOrder)
 			if err != nil {
 				return err
 			}

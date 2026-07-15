@@ -86,6 +86,32 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	require.Equal(t, int64(workers), active)
 }
 
+func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("status", "disabled").Error)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-delisted-product-new",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrProjectNotAllocatable)
+
+	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:              "ord-delisted-product-existing",
+		BuyerUserID:          2,
+		ProjectProductID:     20,
+		SupplyScope:          domain.SupplyScopePublic,
+		FulfillExistingOrder: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(1000), allocation.ResourceID)
+}
+
 func TestAllocationWaitsForMicrosoftResourceRootLockedByAdminMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

@@ -32,6 +32,7 @@ import (
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	tradeinfra "github.com/donnel666/remail/internal/trade/infra"
 	"github.com/gin-gonic/gin"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -136,6 +137,105 @@ func TestCheckoutSuccessAndIdempotentReplayMySQL(t *testing.T) {
 	require.InDelta(t, int64(0), int64(activated.Order.ActivatedAt.Sub(matchedAt).Seconds()), 1)
 	require.NotNil(t, activated.Order.AfterSaleUntil)
 	require.InDelta(t, int64((1440 * time.Minute).Seconds()), int64(activated.Order.AfterSaleUntil.Sub(*first.Order.ReceiveStartedAt).Seconds()), 1)
+}
+
+func TestCheckoutPurchaseOrderContinuesAfterProductDelistedMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 2, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	uc := newTradeUseCase(db)
+	request := tradeapp.CheckoutRequest{
+		UserID:         2,
+		ProjectID:      10,
+		ProductID:      20,
+		ServiceMode:    "purchase",
+		SupplyPolicy:   "private_first",
+		ClientChannel:  tradedomain.ClientChannelConsole,
+		IdempotencyKey: "order-delisted-product-existing",
+		RequestID:      "req-delisted-product-existing",
+	}
+	first, err := uc.Checkout(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, tradedomain.OrderStatusActive, first.Order.Status)
+	require.Equal(t, 60, first.Order.ActivationWindowMinutes)
+	require.Equal(t, 1440, first.Order.WarrantyMinutes)
+
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Updates(map[string]any{
+		"status":                    "disabled",
+		"activation_window_minutes": 5,
+		"warranty_minutes":          5,
+	}).Error)
+
+	newRequest := request
+	newRequest.IdempotencyKey = "order-delisted-product-new"
+	_, err = uc.Checkout(context.Background(), newRequest)
+	require.ErrorIs(t, err, tradedomain.ErrProjectUnavailable)
+
+	replay, err := uc.Checkout(context.Background(), request)
+	require.NoError(t, err)
+	require.False(t, replay.Created)
+	require.Equal(t, first.Order.OrderNo, replay.Order.OrderNo)
+
+	matchedAt := first.Order.ReceiveStartedAt.Add(10 * time.Minute)
+	require.NoError(t, uc.NotifyMatchedCode(context.Background(), tradeapp.MatchCodeResultRequest{
+		OrderNo:   first.Order.OrderNo,
+		MatchedAt: matchedAt,
+	}))
+	activated, err := uc.GetOrder(context.Background(), first.Order.OrderNo, 2, false)
+	require.NoError(t, err)
+	require.NotNil(t, activated.Order.ActivatedAt)
+	require.NotNil(t, activated.Order.AfterSaleUntil)
+	require.InDelta(t, int64((1440 * time.Minute).Seconds()), int64(activated.Order.AfterSaleUntil.Sub(*first.Order.ReceiveStartedAt).Seconds()), 1)
+}
+
+func TestOrderServiceSnapshotMigrationBackfillsDelistedProductMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, tradeMigrationsDir(t), 12))
+
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Exec(`
+INSERT INTO orders(
+    order_no, user_id, project_id, project_product_id, product_type,
+    service_mode, supply_policy, status, failure_code, pay_amount,
+    refund_amount, client_channel, idempotency_key, request_fingerprint,
+    service_cleanup_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy-delisted-product-order",
+		2,
+		10,
+		20,
+		"microsoft",
+		"purchase",
+		"public_only",
+		"active",
+		"",
+		"2.000000",
+		"0.000000",
+		"console",
+		"legacy-delisted-product-key",
+		strings.Repeat("a", 64),
+		"none",
+	).Error)
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("status", "disabled").Error)
+
+	require.NoError(t, goose.UpTo(sqlDB, tradeMigrationsDir(t), 13))
+	var snapshot struct {
+		CodeWindowMinutes       int
+		ActivationWindowMinutes int
+		WarrantyMinutes         int
+	}
+	require.NoError(t, db.Table("orders").
+		Select("code_window_minutes, activation_window_minutes, warranty_minutes").
+		Where("order_no = ?", "legacy-delisted-product-order").
+		Take(&snapshot).Error)
+	require.Equal(t, 10, snapshot.CodeWindowMinutes)
+	require.Equal(t, 60, snapshot.ActivationWindowMinutes)
+	require.Equal(t, 1440, snapshot.WarrantyMinutes)
 }
 
 func TestCheckoutOwnedMicrosoftStockCreatesZeroDebitMySQL(t *testing.T) {

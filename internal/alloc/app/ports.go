@@ -243,7 +243,7 @@ type Repository interface {
 
 	FindExistingAllocation(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error)
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
-	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint) (*ProductAllocationConfig, error)
+	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)

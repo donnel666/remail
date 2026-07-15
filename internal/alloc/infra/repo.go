@@ -387,7 +387,7 @@ func (r *Repo) CreateOrderGuard(ctx context.Context, orderNo string, allocationT
 	return nil
 }
 
-func (r *Repo) LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint) (*allocapp.ProductAllocationConfig, error) {
+func (r *Repo) LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*allocapp.ProductAllocationConfig, error) {
 	type row struct {
 		ProjectID  uint
 		ProductID  uint
@@ -408,7 +408,7 @@ SELECT
 FROM project_products pp
 JOIN projects p ON p.id = pp.project_id
 WHERE pp.id = ?
-  AND pp.status = 'enabled'
+  AND (? = TRUE OR pp.status = 'enabled')
   AND p.status = 'listed'
   AND (
       p.access_type = 'public'
@@ -417,7 +417,7 @@ WHERE pp.id = ?
           WHERE pa.project_id = p.id AND pa.user_id = ?
       )
   )
-LIMIT 1`, productID, buyerUserID).Scan(&item).Error
+LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 	if err != nil {
 		return nil, fmt.Errorf("load product config: %w", err)
 	}
