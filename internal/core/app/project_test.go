@@ -201,6 +201,40 @@ func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.
 	require.Equal(t, uint(9), repo.log.OperatorUserID)
 }
 
+func TestProjectUseCaseAdminUpdatePreservesDisabledHistoricalProduct(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+
+	req := validProjectCreateRequest()
+	req.Products[0].Status = "disabled"
+	req.Products = append(req.Products, ProjectProductRequest{
+		Type:                    "domain",
+		Status:                  "enabled",
+		CodeEnabled:             true,
+		PurchaseEnabled:         false,
+		CodePrice:               "0.200000",
+		CodeSupplierPrice:       "0.100000",
+		PurchasePrice:           "0",
+		PurchaseSupplierPrice:   "0",
+		CodeWindowMinutes:       10,
+		ActivationWindowMinutes: 60,
+		WarrantyMinutes:         60,
+	})
+
+	detail, err := uc.AdminUpdate(
+		context.Background(),
+		9,
+		55,
+		req,
+		"req-update-preserve-disabled-product",
+		"/v1/admin/projects/:projectId",
+	)
+	require.NoError(t, err)
+	require.Len(t, detail.Products, 2)
+	require.Equal(t, domain.ProductStatusDisabled, detail.Products[0].Status)
+	require.Equal(t, domain.ProductStatusEnabled, detail.Products[1].Status)
+}
+
 func TestProjectUseCaseAdminCreateListedNormalizesPrivateAccesses(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

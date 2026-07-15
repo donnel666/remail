@@ -471,6 +471,97 @@ func TestProjectRepoFacetsMySQL(t *testing.T) {
 	require.Equal(t, int64(1), facets.ProductType.Domain)
 }
 
+func TestProjectRepoListsOnlyCurrentSaleableProductsMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewProjectRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"admin@test.local",
+		"hash",
+		"admin",
+	).Error)
+
+	microsoft := validListedProjectDetail("Current Microsoft Product")
+	require.NoError(t, repo.CreateWithLog(context.Background(), microsoft, projectTestLog("req-project-current-microsoft")))
+
+	withHistoricalMicrosoft := validListedProjectDetail("Domain With Historical Microsoft Product")
+	historicalMicrosoft := withHistoricalMicrosoft.Products[0]
+	historicalMicrosoft.Status = domain.ProductStatusDisabled
+	withHistoricalMicrosoft.Products = []domain.Product{
+		historicalMicrosoft,
+		{
+			Type:                    domain.ProductTypeDomain,
+			Status:                  domain.ProductStatusEnabled,
+			CodeEnabled:             true,
+			CodePrice:               "0.200000",
+			CodeSupplierPrice:       "0.100000",
+			PurchaseEnabled:         false,
+			PurchasePrice:           "0.000000",
+			PurchaseSupplierPrice:   "0.000000",
+			CodeWindowMinutes:       10,
+			ActivationWindowMinutes: 60,
+			WarrantyMinutes:         60,
+		},
+	}
+	require.NoError(t, repo.CreateWithLog(context.Background(), withHistoricalMicrosoft, projectTestLog("req-project-historical-microsoft")))
+
+	allFilter := coreapp.ProjectListFilter{
+		Scope:   coreapp.ProjectListScopeAll,
+		IsAdmin: true,
+	}
+	items, err := repo.List(context.Background(), allFilter, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	var historicalSummary *coreapp.ProjectSummary
+	for i := range items {
+		if items[i].Project.ID == withHistoricalMicrosoft.Project.ID {
+			historicalSummary = &items[i]
+			break
+		}
+	}
+	require.NotNil(t, historicalSummary)
+	require.Equal(t, 1, historicalSummary.ProductCount)
+	require.Len(t, historicalSummary.Products, 1)
+	require.Equal(t, domain.ProductTypeDomain, historicalSummary.Products[0].Type)
+	require.Equal(t, domain.ProductStatusEnabled, historicalSummary.Products[0].Status)
+
+	microsoftFilter := allFilter
+	microsoftFilter.ProductType = domain.ProductTypeMicrosoft
+	microsoftItems, err := repo.List(context.Background(), microsoftFilter, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, microsoftItems, 1)
+	require.Equal(t, microsoft.Project.ID, microsoftItems[0].Project.ID)
+	microsoftCount, err := repo.Count(context.Background(), microsoftFilter)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), microsoftCount)
+
+	domainFilter := allFilter
+	domainFilter.ProductType = domain.ProductTypeDomain
+	domainItems, err := repo.List(context.Background(), domainFilter, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, domainItems, 1)
+	require.Equal(t, withHistoricalMicrosoft.Project.ID, domainItems[0].Project.ID)
+
+	facets, err := repo.Facets(context.Background(), allFilter)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), facets.ProductType.Microsoft)
+	require.Equal(t, int64(1), facets.ProductType.Domain)
+
+	adminDetail, err := repo.FindDetail(context.Background(), withHistoricalMicrosoft.Project.ID, 0, true)
+	require.NoError(t, err)
+	require.Len(t, adminDetail.Products, 2)
+	var foundHistoricalMicrosoft bool
+	for _, product := range adminDetail.Products {
+		if product.Type == domain.ProductTypeMicrosoft {
+			foundHistoricalMicrosoft = true
+			require.Equal(t, domain.ProductStatusDisabled, product.Status)
+		}
+	}
+	require.True(t, foundHistoricalMicrosoft)
+}
+
 func TestProjectSchemaRejectsInvalidProductRulesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 

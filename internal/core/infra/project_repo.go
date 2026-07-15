@@ -710,6 +710,7 @@ func (r *ProjectRepo) projectProductTypeFacet(ctx context.Context, filter coreap
 	var rows []projectStringFacetRow
 	err := r.projectListQuery(ctx, filter).
 		Joins("JOIN project_products ON project_products.project_id = projects.id").
+		Where("project_products.status = ?", string(domain.ProductStatusEnabled)).
 		Select("project_products.type AS value, COUNT(DISTINCT projects.id) AS count").
 		Group("project_products.type").
 		Scan(&rows).Error
@@ -902,7 +903,8 @@ func (r *ProjectRepo) projectListQueryWithDB(ctx context.Context, db *gorm.DB, f
 			SELECT 1 FROM project_products
 			WHERE project_products.project_id = projects.id
 			AND project_products.type = ?
-		)`, string(filter.ProductType))
+			AND project_products.status = ?
+		)`, string(filter.ProductType), string(domain.ProductStatusEnabled))
 	}
 	if filter.TargetPlatform != "" {
 		q = q.Where("projects.target_platform = ?", filter.TargetPlatform)
@@ -1173,6 +1175,7 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 	var models []ProjectProductModel
 	if err := r.db.WithContext(ctx).
 		Where("project_id IN ?", projectIDs).
+		Where("status = ?", string(domain.ProductStatusEnabled)).
 		Order("project_id ASC, id ASC").
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list project summary products: %w", err)

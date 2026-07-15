@@ -81,6 +81,7 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
 type ProjectProductType = "microsoft" | "domain";
+type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
 type ProjectMailRuleType = "sender" | "recipient" | "subject" | "body";
 type RecipientPattern = "exact" | "dot" | "plus";
@@ -109,6 +110,7 @@ interface ProductDraft {
   purchaseEnabled: boolean;
   purchasePrice: string;
   purchaseSupplierPrice: string;
+  status: ProjectProductStatus;
   type: ProjectProductType;
   warrantyMinutes: string;
 }
@@ -158,6 +160,7 @@ function createDefaultProduct(type: ProjectProductType): ProductDraft {
     purchaseEnabled: isMicrosoft,
     purchasePrice: isMicrosoft ? "0.01" : "0",
     purchaseSupplierPrice: isMicrosoft ? "0.007" : "0",
+    status: "enabled",
     type,
     warrantyMinutes: isMicrosoft ? "1440" : "60",
   };
@@ -267,7 +270,7 @@ function detailToDraft(detail: ProjectDetailResponse | null): ProjectDraft {
   if (!detail) return initialDraft();
   const products =
     detail.products.length > 0
-      ? detail.products.map((product) => ({
+      ? detail.products.map((product): ProductDraft => ({
           activationWindowMinutes: String(product.activationWindowMinutes ?? 0),
           codeEnabled: product.codeEnabled,
           codePrice: moneyToDraft(product.codePrice),
@@ -279,6 +282,7 @@ function detailToDraft(detail: ProjectDetailResponse | null): ProjectDraft {
           purchaseEnabled: product.purchaseEnabled,
           purchasePrice: moneyToDraft(product.purchasePrice),
           purchaseSupplierPrice: moneyToDraft(product.purchaseSupplierPrice),
+          status: product.status === "disabled" ? "disabled" : "enabled",
           type: product.type as ProjectProductType,
           warrantyMinutes: String(product.warrantyMinutes ?? 0),
         }))
@@ -436,7 +440,7 @@ function buildProjectPayload(
       purchaseEnabled: product.purchaseEnabled,
       purchasePrice: normalizedMoney(product.purchasePrice),
       purchaseSupplierPrice: normalizedMoney(product.purchaseSupplierPrice),
-      status: "enabled" as const,
+      status: product.status,
       type: product.type,
       warrantyMinutes: toNonNegativeInt(product.warrantyMinutes),
     };
@@ -495,9 +499,14 @@ function ProductDraftCard({
   return (
     <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Tag color={isMicrosoft ? "blue" : "green"} shape="circle">
-          {productTypeLabel(draft.type, t)}
-        </Tag>
+        <Space wrap>
+          <Tag color={isMicrosoft ? "blue" : "green"} shape="circle">
+            {productTypeLabel(draft.type, t)}
+          </Tag>
+          <Tag color={draft.status === "enabled" ? "green" : "grey"} shape="circle">
+            {draft.status === "enabled" ? t("Enabled") : t("Disabled")}
+          </Tag>
+        </Space>
         <Space wrap>
           <Checkbox
             checked={draft.codeEnabled}
@@ -956,12 +965,15 @@ function ProjectEditorSheet({
 
   const toggleProductType = (type: ProjectProductType) => {
     setDraft((previous) => {
-      const exists = previous.products.some((product) => product.type === type);
+      const existing = previous.products.find((product) => product.type === type);
       return {
         ...previous,
-        products: exists
-          ? previous.products.filter((product) => product.type !== type)
-          : [...previous.products, createDefaultProduct(type)],
+        products:
+          !existing
+            ? [...previous.products, createDefaultProduct(type)]
+            : existing.status === "disabled"
+              ? updateProduct(previous.products, type, { status: "enabled" })
+              : previous.products.filter((product) => product.type !== type),
       };
     });
   };
@@ -1223,7 +1235,8 @@ function ProjectEditorSheet({
               </div>
               <Space wrap>
                 {(["microsoft", "domain"] as ProjectProductType[]).map((type) => {
-                  const active = draft.products.some((product) => product.type === type);
+                  const product = draft.products.find((item) => item.type === type);
+                  const active = product?.status === "enabled";
                   return (
                     <Button
                       key={type}
@@ -1233,6 +1246,7 @@ function ProjectEditorSheet({
                       type={active ? "primary" : "tertiary"}
                     >
                       {productTypeLabel(type, t)}
+                      {product?.status === "disabled" ? ` · ${t("Disabled")}` : ""}
                     </Button>
                   );
                 })}
