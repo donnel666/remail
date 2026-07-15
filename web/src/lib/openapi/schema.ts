@@ -3115,9 +3115,9 @@ export interface components {
             accesses?: components["schemas"]["ProjectAccess"][];
         };
         ResourceValidationsResponse: {
-            /** @description Number of explicit resource IDs durably accepted for deferred expansion. Zero for filter mode because the match count is resolved asynchronously. */
+            /** @description Number of eligible resources matched by the submitted selection. */
             requested: number;
-            /** @description Number of explicit resource IDs accepted into the durable validation batch. Child jobs may not exist yet; zero for filter mode until expansion. */
+            /** @description Number of resources actually moved into pending validation, plus any immediately persisted revalidation jobs. */
             queued: number;
         };
         PublishResourcesRequest: {

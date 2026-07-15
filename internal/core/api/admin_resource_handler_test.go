@@ -184,17 +184,14 @@ func (r *adminHandlerValidationRepo) CreateWithLog(_ context.Context, job *domai
 func (*adminHandlerValidationRepo) CreateBatchWithLog(context.Context, uint, coreapp.ResourceBulkSelection, *governancedomain.OperationLog, string, string) (*coreapp.ResourceBatchValidationResult, error) {
 	return nil, nil
 }
-func (*adminHandlerValidationRepo) CreateDeferredBatchWithLog(context.Context, uint, coreapp.ResourceBulkSelection, *governancedomain.OperationLog, string, string) (*coreapp.ResourceBatchValidationResult, error) {
-	return nil, nil
-}
 func (*adminHandlerValidationRepo) FindByID(context.Context, uint) (*domain.ResourceValidation, error) {
 	return nil, nil
 }
+func (*adminHandlerValidationRepo) CreatePendingValidationJobs(context.Context, int) (int, error) {
+	return 0, nil
+}
 func (*adminHandlerValidationRepo) ClaimDispatchable(context.Context, int, time.Time, time.Time) ([]domain.ResourceValidation, error) {
 	return nil, nil
-}
-func (*adminHandlerValidationRepo) ResumeValidationBatches(context.Context, int) (int, error) {
-	return 0, nil
 }
 func (*adminHandlerValidationRepo) MarkRunning(context.Context, uint, string) (string, bool, error) {
 	return "", false, nil

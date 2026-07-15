@@ -17,10 +17,9 @@ import (
 type ResourceValidationRepository interface {
 	CreateWithLog(ctx context.Context, job *domain.ResourceValidation, log *governancedomain.OperationLog) (bool, error)
 	CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
-	CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
 	FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error)
+	CreatePendingValidationJobs(ctx context.Context, limit int) (int, error)
 	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]domain.ResourceValidation, error)
-	ResumeValidationBatches(ctx context.Context, candidateLimit int) (int, error)
 	MarkRunning(ctx context.Context, id uint, dispatchToken string) (claimToken string, claimed bool, err error)
 	ReleaseDispatch(ctx context.Context, id uint, dispatchToken string) error
 	MarkFailed(ctx context.Context, id uint, claimToken string, safeError string) error
@@ -149,10 +148,8 @@ type DispatchResourceValidationJobsResult struct {
 }
 
 // ResourceBatchValidationResult reports a bulk validation submission.
-// For an explicit-ID selection, Requested and Queued count IDs durably
-// accepted into the deferred batch; they do not imply that child jobs were
-// expanded before the HTTP response. Filter counts remain unknown (zero) until
-// the dispatcher expands the batch. Created is an internal expansion count.
+// Queued is the number of resources or durable jobs actually moved into the
+// validation flow before the request returns. Created is internal-only.
 type ResourceBatchValidationResult struct {
 	Requested int
 	Queued    int
@@ -343,44 +340,6 @@ func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection 
 	return result, nil
 }
 
-func (uc *ResourceValidationUseCase) CreateDeferredBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchValidationResult, error) {
-	switch selection.Mode {
-	case ResourceBulkSelectionIDs:
-		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDs {
-			return nil, domain.ErrResourceSelectionTooLarge
-		}
-		ids := uniqueResourceIDs(selection.ResourceIDs)
-		if len(ids) == 0 {
-			return nil, domain.ErrResourceNotFound
-		}
-		selection.ResourceIDs = ids
-	case ResourceBulkSelectionFilter:
-		filter, err := normalizeResourceBulkFilter(selection.Filter)
-		if err != nil {
-			return nil, err
-		}
-		selection.Filter = filter
-	default:
-		return nil, domain.ErrInvalidResourceType
-	}
-	log := &governancedomain.OperationLog{
-		OperatorUserID: userID,
-		OperationType:  "core.resource.validate_batch",
-		ResourceType:   "resource",
-		ResourceID:     "batch",
-		Path:           path,
-		Result:         "success",
-		SafeSummary:    "Resource validation batch accepted.",
-		RequestID:      requestID,
-	}
-	result, err := uc.validations.CreateDeferredBatchWithLog(ctx, userID, selection, log, requestID, path)
-	if err != nil {
-		return nil, err
-	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return result, nil
-}
-
 func (uc *ResourceValidationUseCase) Get(ctx context.Context, validationID uint, userID uint, isAdmin bool) (*ValidationResultView, error) {
 	job, err := uc.validations.FindByID(ctx, validationID)
 	if err != nil {
@@ -488,20 +447,19 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 	}
 	var dispatchErrors []error
 	if remaining := limit - len(jobs); remaining > 0 {
-		if _, err := uc.validations.ResumeValidationBatches(ctx, remaining); err != nil {
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("expand resource validation batches: %w", err))
+		if _, err := uc.validations.CreatePendingValidationJobs(ctx, remaining); err != nil {
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("create pending resource validation jobs: %w", err))
+		}
+		expandedJobs, err := uc.validations.ClaimDispatchable(
+			ctx,
+			remaining,
+			now.Add(-resourceValidationRunningStaleAfter),
+			now.Add(-resourceValidationQueuedLease),
+		)
+		if err != nil {
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("claim pending resource validations: %w", err))
 		} else {
-			expandedJobs, err := uc.validations.ClaimDispatchable(
-				ctx,
-				remaining,
-				now.Add(-resourceValidationRunningStaleAfter),
-				now.Add(-resourceValidationQueuedLease),
-			)
-			if err != nil {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf("claim expanded resource validations: %w", err))
-			} else {
-				jobs = append(jobs, expandedJobs...)
-			}
+			jobs = append(jobs, expandedJobs...)
 		}
 	}
 	result := &DispatchResourceValidationJobsResult{Attempted: len(jobs)}

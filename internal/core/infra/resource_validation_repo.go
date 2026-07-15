@@ -2,10 +2,8 @@ package infra
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -37,28 +35,6 @@ type ResourceValidationModel struct {
 	FinishedAt                 *time.Time `gorm:"column:finished_at"`
 	CreatedAt                  time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt                  time.Time  `gorm:"not null;autoUpdateTime"`
-}
-
-type ResourceValidationBatchModel struct {
-	ID            uint       `gorm:"primaryKey;autoIncrement"`
-	OwnerUserID   uint       `gorm:"not null;column:owner_user_id"`
-	SelectionJSON []byte     `gorm:"type:json;not null;column:selection_json"`
-	AfterID       uint       `gorm:"not null;default:0;column:after_id"`
-	ThroughID     uint       `gorm:"not null;default:0;column:through_id"`
-	Status        string     `gorm:"type:varchar(32);not null;default:'pending'"`
-	Requested     int        `gorm:"not null;default:0"`
-	Queued        int        `gorm:"not null;default:0"`
-	Created       int        `gorm:"not null;default:0"`
-	RequestID     string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
-	Path          string     `gorm:"type:varchar(255);not null;default:''"`
-	LastSafeError string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	FinishedAt    *time.Time `gorm:"column:finished_at"`
-	CreatedAt     time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime"`
-}
-
-func (ResourceValidationBatchModel) TableName() string {
-	return "resource_validation_batches"
 }
 
 func (ResourceValidationModel) TableName() string {
@@ -118,8 +94,7 @@ type ResourceValidationRepo struct {
 }
 
 const (
-	resourceValidationBatchInsertSize = 1000
-	resourceValidationMaxPageSize     = 1000
+	resourceValidationInsertSize = 1000
 )
 
 func NewResourceValidationRepo(db *gorm.DB) *ResourceValidationRepo {
@@ -193,58 +168,66 @@ func (r *ResourceValidationRepo) CreateWithLog(ctx context.Context, job *domain.
 }
 
 func (r *ResourceValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
-	switch selection.Mode {
-	case coreapp.ResourceBulkSelectionIDs, coreapp.ResourceBulkSelectionFilter:
-		return r.CreateDeferredBatchWithLog(ctx, ownerUserID, selection, log, requestID, path)
-	default:
-		return nil, domain.ErrInvalidResourceType
-	}
-}
-
-func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
 	if !selection.AllowBinding {
-		// This is durably serialized and re-applied during expansion so a
-		// deferred user batch cannot turn auxiliary-domain access into a later
-		// information leak.
 		selection.Filter.ExcludeBinding = true
 	}
-	selectionJSON, err := json.Marshal(selection)
-	if err != nil {
-		return nil, fmt.Errorf("marshal resource validation selection: %w", err)
-	}
-	batch := &ResourceValidationBatchModel{
-		OwnerUserID:   ownerUserID,
-		SelectionJSON: selectionJSON,
-		Status:        "pending",
-		RequestID:     strings.TrimSpace(requestID),
-		Path:          strings.TrimSpace(path),
-	}
-	filterCandidateCount := 0
+	result := &coreapp.ResourceBatchValidationResult{}
 	persist := func(tx *gorm.DB) error {
-		if selection.Mode == coreapp.ResourceBulkSelectionFilter {
-			if err := tx.Table("email_resources").
-				Select("COALESCE(MAX(id), 0)").
-				Where("owner_user_id = ? AND type = ?", ownerUserID, string(selection.Filter.ResourceType)).
-				Row().Scan(&batch.ThroughID); err != nil {
-				return fmt.Errorf("capture resource validation batch high-water mark: %w", err)
+		var candidates []validationCandidateRow
+		var err error
+		switch selection.Mode {
+		case coreapp.ResourceBulkSelectionIDs:
+			candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, ownerUserID, selection.ResourceIDs, selection.AllowBinding)
+		case coreapp.ResourceBulkSelectionFilter:
+			candidates, err = selectValidationCandidatesByFilter(ctx, tx, ownerUserID, selection.Filter)
+		default:
+			return domain.ErrInvalidResourceType
+		}
+		if err != nil {
+			return err
+		}
+
+		result.Requested = len(candidates)
+		pendingCandidates := make([]validationCandidateRow, 0, len(candidates))
+		immediateJobs := make([]validationCandidateRow, 0, len(candidates))
+		for _, candidate := range candidates {
+			if domain.ResourceType(candidate.ResourceType) != domain.ResourceTypeMicrosoft {
+				immediateJobs = append(immediateJobs, candidate)
+				continue
 			}
-			count, err := countValidationCandidatesByFilter(ctx, tx, ownerUserID, selection.Filter, batch.ThroughID)
-			if err != nil {
+			switch domain.MicrosoftResourceStatus(candidate.MicrosoftStatus) {
+			case domain.MicrosoftStatusAbnormal:
+				pendingCandidates = append(pendingCandidates, candidate)
+			case domain.MicrosoftStatusPending:
+				// Pending is already the durable validation request. The dispatcher
+				// will create a job if no active one exists.
+			default:
+				// Normal resources can still be explicitly revalidated without
+				// changing their externally visible status first.
+				immediateJobs = append(immediateJobs, candidate)
+			}
+		}
+		updated, err := markAbnormalMicrosoftCandidatesPendingTx(ctx, tx, pendingCandidates)
+		if err != nil {
+			return err
+		}
+		result.Queued = updated
+		if len(immediateJobs) > 0 {
+			jobResult := &coreapp.ResourceBatchValidationResult{}
+			if err := createValidationCandidateJobsTx(ctx, tx, immediateJobs, requestID, path, jobResult); err != nil {
 				return err
 			}
-			filterCandidateCount = count
-		}
-		if err := tx.Create(batch).Error; err != nil {
-			return fmt.Errorf("create resource validation batch: %w", err)
+			result.Queued += jobResult.Queued
+			result.Created += jobResult.Created
 		}
 		if log != nil {
-			log.SafeSummary = "Resource validation batch accepted for durable expansion."
 			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
 				return fmt.Errorf("create operation log: %w", err)
 			}
 		}
 		return nil
 	}
+	var err error
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
 		err = persist(tx.WithContext(ctx))
 	} else {
@@ -253,20 +236,6 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	result := &coreapp.ResourceBatchValidationResult{}
-	switch selection.Mode {
-	case coreapp.ResourceBulkSelectionIDs:
-		// The IDs are durably accepted here but are intentionally resolved by the
-		// dispatcher so the HTTP request performs no resource expansion work.
-		result.Requested = len(selection.ResourceIDs)
-		result.Queued = len(selection.ResourceIDs)
-	case coreapp.ResourceBulkSelectionFilter:
-		// Filter batches expand durably in the dispatcher, but the operator needs
-		// an immediate submitted-count. Report how many resources match right now;
-		// the exact per-resource jobs are created during expansion.
-		result.Requested = filterCandidateCount
-		result.Queued = filterCandidateCount
-	}
 	return result, nil
 }
 
@@ -274,7 +243,7 @@ func (r *ResourceValidationRepo) CreateImportedValidationBatch(ctx context.Conte
 	if len(resourceIDs) == 0 {
 		return nil
 	}
-	_, err := r.CreateDeferredBatchWithLog(ctx, ownerUserID, coreapp.ResourceBulkSelection{
+	_, err := r.CreateBatchWithLog(ctx, ownerUserID, coreapp.ResourceBulkSelection{
 		Mode:        coreapp.ResourceBulkSelectionIDs,
 		ResourceIDs: append([]uint(nil), resourceIDs...),
 	}, nil, requestID, path)
@@ -287,9 +256,6 @@ func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidate
 	}
 	result.Requested += len(candidates)
 	result.Queued += len(candidates)
-	if err := resetAbnormalMicrosoftCandidatesTx(ctx, tx, candidates); err != nil {
-		return err
-	}
 
 	now := time.Now().UTC()
 	models := make([]ResourceValidationModel, len(candidates))
@@ -307,206 +273,50 @@ func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidate
 			UpdatedAt:                  now,
 		}
 	}
-	for start := 0; start < len(models); start += resourceValidationBatchInsertSize {
-		end := start + resourceValidationBatchInsertSize
+	for start := 0; start < len(models); start += resourceValidationInsertSize {
+		end := start + resourceValidationInsertSize
 		if end > len(models) {
 			end = len(models)
 		}
-		inserted := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(models[start:end], resourceValidationBatchInsertSize)
+		inserted := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(models[start:end], resourceValidationInsertSize)
 		if inserted.Error != nil {
-			return fmt.Errorf("create resource validation batch: %w", inserted.Error)
+			return fmt.Errorf("create resource validation jobs: %w", inserted.Error)
 		}
 		result.Created += int(inserted.RowsAffected)
 	}
 	return nil
 }
 
-func (r *ResourceValidationRepo) ResumeValidationBatches(ctx context.Context, candidateLimit int) (int, error) {
-	if candidateLimit <= 0 {
+func (r *ResourceValidationRepo) CreatePendingValidationJobs(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
 		return 0, nil
 	}
-	processed := 0
-	// Empty or already-complete batches do not consume candidate budget. Bound
-	// the number inspected so corrupted/stale rows cannot monopolize a dispatch.
-	maxBatchScans := candidateLimit + 16
-	for scans := 0; processed < candidateLimit && scans < maxBatchScans; scans++ {
-		var batch ResourceValidationBatchModel
-		err := r.db.WithContext(ctx).
-			Where("status = ?", "pending").
-			Order("updated_at ASC, id ASC").
-			First(&batch).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return processed, nil
-		}
-		if err != nil {
-			return processed, fmt.Errorf("find pending resource validation batch: %w", err)
-		}
-		pageLimit := candidateLimit - processed
-		if pageLimit > resourceValidationMaxPageSize {
-			pageLimit = resourceValidationMaxPageSize
-		}
-		_, pageProcessed, err := r.expandValidationBatchPage(ctx, batch.ID, pageLimit)
-		if err != nil {
-			return processed, err
-		}
-		processed += pageProcessed
-	}
-	return processed, nil
-}
-
-func (r *ResourceValidationRepo) expandValidationBatchPage(ctx context.Context, batchID uint, limit int) (bool, int, error) {
-	if limit <= 0 {
-		return false, 0, nil
-	}
-	done := false
-	processed := 0
+	created := 0
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var batch ResourceValidationBatchModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ?", batchID, "pending").
-			First(&batch).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			done = true
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("lock resource validation batch: %w", err)
-		}
-		var selection coreapp.ResourceBulkSelection
-		if err := json.Unmarshal(batch.SelectionJSON, &selection); err != nil {
-			now := time.Now().UTC()
-			done = true
-			return tx.Model(&ResourceValidationBatchModel{}).
-				Where("id = ? AND status = ?", batch.ID, "pending").
-				Updates(map[string]any{
-					"status":          "failed",
-					"selection_json":  gorm.Expr("JSON_OBJECT()"),
-					"last_safe_error": "Resource validation batch filter is invalid.",
-					"finished_at":     now,
-					"updated_at":      now,
-				}).Error
-		}
-		if !selection.AllowBinding {
-			// Selection rows written before this guard did not contain the field;
-			// false remains the deliberately safe default for those batches.
-			selection.Filter.ExcludeBinding = true
-		}
 		var candidates []validationCandidateRow
-		nextAfterID := batch.AfterID
-		pageDone := false
-		switch selection.Mode {
-		case coreapp.ResourceBulkSelectionFilter:
-			candidates, err = selectValidationCandidatesByFilter(
-				ctx,
-				tx,
-				batch.OwnerUserID,
-				selection.Filter,
-				batch.AfterID,
-				batch.ThroughID,
-				limit+1,
-			)
-			pageDone = len(candidates) <= limit
-			if len(candidates) > limit {
-				candidates = candidates[:limit]
-			}
-			processed = len(candidates)
-			if len(candidates) == 0 {
-				pageDone = true
-			} else {
-				nextAfterID = candidates[len(candidates)-1].ID
-			}
-		case coreapp.ResourceBulkSelectionIDs:
-			pageIDs := validationBatchIDPage(selection.ResourceIDs, batch.AfterID, limit+1)
-			pageDone = len(pageIDs) <= limit
-			if len(pageIDs) > limit {
-				pageIDs = pageIDs[:limit]
-			}
-			processed = len(pageIDs)
-			if len(pageIDs) > 0 {
-				candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, batch.OwnerUserID, pageIDs, selection.AllowBinding)
-				nextAfterID = pageIDs[len(pageIDs)-1]
-			}
-		default:
-			now := time.Now().UTC()
-			done = true
-			return tx.Model(&ResourceValidationBatchModel{}).
-				Where("id = ? AND status = ?", batch.ID, "pending").
-				Updates(map[string]any{
-					"status":          "failed",
-					"selection_json":  gorm.Expr("JSON_OBJECT()"),
-					"last_safe_error": "Resource validation batch selection is invalid.",
-					"finished_at":     now,
-					"updated_at":      now,
-				}).Error
+		if err := tx.WithContext(ctx).
+			Table("email_resources AS er").
+			Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision, ms.status AS microsoft_status, '' AS domain_status").
+			Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
+			Where("er.type = ? AND ms.status = ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusPending)).
+			Where("NOT EXISTS (SELECT 1 FROM resource_validation_jobs AS rvj WHERE rvj.resource_id = er.id AND rvj.status IN ?)", []string{
+				string(domain.ResourceValidationQueued),
+				string(domain.ResourceValidationRunning),
+			}).
+			Order("er.id ASC").
+			Limit(limit).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Find(&candidates).Error; err != nil {
+			return fmt.Errorf("select pending resource validations: %w", err)
 		}
-		if err != nil {
+		result := &coreapp.ResourceBatchValidationResult{}
+		if err := createValidationCandidateJobsTx(ctx, tx, candidates, "", "", result); err != nil {
 			return err
 		}
-		if len(candidates) == 0 && pageDone {
-			now := time.Now().UTC()
-			done = true
-			return tx.Model(&ResourceValidationBatchModel{}).
-				Where("id = ? AND status = ?", batch.ID, "pending").
-				Updates(map[string]any{
-					"status":         "succeeded",
-					"selection_json": gorm.Expr("JSON_OBJECT()"),
-					"finished_at":    now,
-					"updated_at":     now,
-				}).Error
-		}
-
-		pageResult := &coreapp.ResourceBatchValidationResult{}
-		if len(candidates) > 0 {
-			if err := createValidationCandidateJobsTx(ctx, tx, candidates, batch.RequestID, batch.Path, pageResult); err != nil {
-				return err
-			}
-		}
-		if nextAfterID == batch.AfterID {
-			return fmt.Errorf("resource validation batch made no progress")
-		}
-		done = pageDone
-		updates := map[string]any{
-			"after_id":        nextAfterID,
-			"requested":       gorm.Expr("requested + ?", pageResult.Requested),
-			"queued":          gorm.Expr("queued + ?", pageResult.Queued),
-			"created":         gorm.Expr("created + ?", pageResult.Created),
-			"last_safe_error": "",
-			"updated_at":      time.Now().UTC(),
-		}
-		if done {
-			now := time.Now().UTC()
-			updates["status"] = "succeeded"
-			updates["selection_json"] = gorm.Expr("JSON_OBJECT()")
-			updates["finished_at"] = now
-			updates["updated_at"] = now
-		}
-		return tx.Model(&ResourceValidationBatchModel{}).
-			Where("id = ? AND status = ?", batch.ID, "pending").
-			Updates(updates).Error
+		created = result.Created
+		return nil
 	})
-	return done, processed, err
-}
-
-func validationBatchIDPage(values []uint, afterID uint, limit int) []uint {
-	ids := append([]uint(nil), values...)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	capacity := len(ids)
-	if limit > 0 && capacity > limit {
-		capacity = limit
-	}
-	result := make([]uint, 0, capacity)
-	var previous uint
-	for _, id := range ids {
-		if id == 0 || id == previous || id <= afterID {
-			continue
-		}
-		previous = id
-		result = append(result, id)
-		if limit > 0 && len(result) >= limit {
-			break
-		}
-	}
-	return result
+	return created, err
 }
 
 func (r *ResourceValidationRepo) FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error) {
@@ -1365,9 +1175,8 @@ type validationCandidateRow struct {
 	DomainStatus       string `gorm:"column:domain_status"`
 }
 
-// Deferred batches are accepted against a point-in-time selection. Resources
-// may be deleted, disabled, or transferred before a later page expands; those
-// rows are skipped so one stale ID cannot poison the global dispatcher.
+// Explicit selections skip resources that are unavailable or outside the
+// caller's ownership instead of letting one stale ID poison the whole batch.
 func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint, allowBinding bool) ([]validationCandidateRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -1384,7 +1193,7 @@ func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, 
 		query = query.Where("er.type <> ? OR dr.purpose <> ?", string(domain.ResourceTypeDomain), string(domain.PurposeBinding))
 	}
 	if err := query.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("select deferred validation resources: %w", err)
+		return nil, fmt.Errorf("select validation resources: %w", err)
 	}
 	result := make([]validationCandidateRow, 0, len(rows))
 	for _, row := range rows {
@@ -1407,46 +1216,36 @@ func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, 
 	return result, nil
 }
 
-func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
+func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) ([]validationCandidateRow, error) {
 	switch filter.ResourceType {
 	case domain.ResourceTypeMicrosoft:
-		return selectMicrosoftValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, throughID, limit)
+		return selectMicrosoftValidationCandidatesByFilter(ctx, tx, ownerUserID, filter)
 	case domain.ResourceTypeDomain:
-		return selectDomainValidationCandidatesByFilter(ctx, tx, ownerUserID, filter, afterID, throughID, limit)
+		return selectDomainValidationCandidatesByFilter(ctx, tx, ownerUserID, filter)
 	default:
 		return nil, domain.ErrInvalidResourceType
 	}
 }
 
-func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
-	q := microsoftValidationCandidateQuery(ctx, tx, ownerUserID, filter, afterID, throughID).
+func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) ([]validationCandidateRow, error) {
+	q := microsoftValidationCandidateQuery(ctx, tx, ownerUserID, filter).
 		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.status AS microsoft_status, '' AS domain_status")
 
 	var rows []validationCandidateRow
 	q = q.Order("er.id ASC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("select microsoft validation resources: %w", err)
 	}
 	return validateValidationCandidateRows(rows)
 }
 
-// microsoftValidationCandidateQuery builds the shared Microsoft candidate
-// predicate (join + all filter clauses) without SELECT/ORDER/LIMIT so both the
-// paged expansion SELECT and the submit-time COUNT stay in lock-step.
-func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint) *gorm.DB {
+func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) *gorm.DB {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
-		Where("er.id <= ?", throughID).
 		Where("ms.status NOT IN ?", []string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)})
 
-	if afterID > 0 {
-		q = q.Where("er.id > ?", afterID)
-	}
 	if filter.Status != "" {
 		q = q.Where("ms.status = ?", filter.Status)
 	}
@@ -1482,38 +1281,29 @@ func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUs
 	return q
 }
 
-func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
-	q := domainValidationCandidateQuery(ctx, tx, ownerUserID, filter, afterID, throughID).
+func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) ([]validationCandidateRow, error) {
+	q := domainValidationCandidateQuery(ctx, tx, ownerUserID, filter).
 		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, '' AS microsoft_status, dr.status AS domain_status")
 
 	var rows []validationCandidateRow
 	q = q.Order("er.id ASC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("select domain validation resources: %w", err)
 	}
 	return validateValidationCandidateRows(rows)
 }
 
-// domainValidationCandidateQuery mirrors microsoftValidationCandidateQuery for
-// domain resources: the shared predicate used by both expansion and COUNT.
-func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, afterID uint, throughID uint) *gorm.DB {
+func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) *gorm.DB {
 	q := tx.WithContext(ctx).
 		Table("email_resources AS er").
 		Joins("JOIN domain_resources AS dr ON dr.id = er.id").
 		Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeDomain)).
-		Where("er.id <= ?", throughID).
 		Where("dr.owner_user_id = ?", ownerUserID).
 		Where("dr.status NOT IN ?", []string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)})
 	if filter.ExcludeBinding {
 		q = q.Where("dr.purpose <> ?", string(domain.PurposeBinding))
 	}
 
-	if afterID > 0 {
-		q = q.Where("er.id > ?", afterID)
-	}
 	if filter.Status != "" {
 		q = q.Where("dr.status = ?", filter.Status)
 	}
@@ -1533,27 +1323,6 @@ func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserI
 		q = q.Where("dr.domain LIKE ?", strings.ToLower(strings.TrimSpace(filter.Search))+"%")
 	}
 	return q
-}
-
-// countValidationCandidatesByFilter returns how many resources currently match a
-// filter selection up to throughID. It is an estimate used to show the operator
-// an immediate submitted-count for deferred batches; the durable dispatcher does
-// the authoritative per-resource expansion later.
-func countValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter, throughID uint) (int, error) {
-	var count int64
-	var q *gorm.DB
-	switch filter.ResourceType {
-	case domain.ResourceTypeMicrosoft:
-		q = microsoftValidationCandidateQuery(ctx, tx, ownerUserID, filter, 0, throughID)
-	case domain.ResourceTypeDomain:
-		q = domainValidationCandidateQuery(ctx, tx, ownerUserID, filter, 0, throughID)
-	default:
-		return 0, domain.ErrInvalidResourceType
-	}
-	if err := q.Count(&count).Error; err != nil {
-		return 0, fmt.Errorf("count validation candidates: %w", err)
-	}
-	return int(count), nil
 }
 
 func validateValidationCandidateRows(rows []validationCandidateRow) ([]validationCandidateRow, error) {
@@ -1584,31 +1353,35 @@ func validateValidationCandidateRows(rows []validationCandidateRow) ([]validatio
 	return rows, nil
 }
 
-func resetAbnormalMicrosoftCandidatesTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow) error {
+func markAbnormalMicrosoftCandidatesPendingTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow) (int, error) {
 	ids := make([]uint, 0)
 	for _, candidate := range candidates {
-		if domain.ResourceType(candidate.ResourceType) == domain.ResourceTypeMicrosoft {
+		if domain.ResourceType(candidate.ResourceType) == domain.ResourceTypeMicrosoft &&
+			domain.MicrosoftResourceStatus(candidate.MicrosoftStatus) == domain.MicrosoftStatusAbnormal {
 			ids = append(ids, candidate.ID)
 		}
 	}
+	updated := 0
 	now := time.Now().UTC()
-	for start := 0; start < len(ids); start += resourceValidationBatchInsertSize {
-		end := start + resourceValidationBatchInsertSize
+	for start := 0; start < len(ids); start += resourceValidationInsertSize {
+		end := start + resourceValidationInsertSize
 		if end > len(ids) {
 			end = len(ids)
 		}
-		if err := tx.WithContext(ctx).
+		result := tx.WithContext(ctx).
 			Model(&MicrosoftResourceModel{}).
 			Where("id IN ? AND status = ?", ids[start:end], string(domain.MicrosoftStatusAbnormal)).
 			Updates(map[string]interface{}{
 				"status":          string(domain.MicrosoftStatusPending),
 				"last_safe_error": "",
 				"updated_at":      now,
-			}).Error; err != nil {
-			return fmt.Errorf("mark microsoft resources pending for validation: %w", err)
+			})
+		if result.Error != nil {
+			return updated, fmt.Errorf("mark microsoft resources pending for validation: %w", result.Error)
 		}
+		updated += int(result.RowsAffected)
 	}
-	return nil
+	return updated, nil
 }
 
 func findActiveValidationJobTx(tx *gorm.DB, resourceID uint) (*domain.ResourceValidation, error) {

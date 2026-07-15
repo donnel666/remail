@@ -189,7 +189,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			}
 			return err
 		}
-		queuedValidations, err := queueMicrosoftImportValidations(ctx, module, result)
+		pendingValidations, err := queueMicrosoftImportValidations(ctx, module, result)
 		if err != nil {
 			slog.Warn(
 				"microsoft import validation queue failed",
@@ -204,7 +204,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			"import_id", payload.ImportID,
 			"owner_user_id", payload.OwnerUserID,
 			"request_id", payload.RequestID,
-			"validation_jobs_queued", queuedValidations,
+			"validations_pending", pendingValidations,
 		)
 		return nil
 	})

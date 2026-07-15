@@ -1379,14 +1379,6 @@ func (r *mockValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUserID
 	return result, nil
 }
 
-func (r *mockValidationRepo) ResumeValidationBatches(context.Context, int) (int, error) {
-	return 0, nil
-}
-
-func (r *mockValidationRepo) CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
-	return r.CreateBatchWithLog(ctx, ownerUserID, selection, log, requestID, path)
-}
-
 func (r *mockValidationRepo) validationCandidateIDs(ownerUserID uint, selection coreapp.ResourceBulkSelection) ([]uint, error) {
 	switch selection.Mode {
 	case coreapp.ResourceBulkSelectionIDs:
@@ -1509,6 +1501,10 @@ func (r *mockValidationRepo) FindByID(_ context.Context, id uint) (*coredomain.R
 		return job, nil
 	}
 	return nil, nil
+}
+
+func (*mockValidationRepo) CreatePendingValidationJobs(context.Context, int) (int, error) {
+	return 0, nil
 }
 
 func (r *mockValidationRepo) ClaimDispatchable(_ context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]coredomain.ResourceValidation, error) {

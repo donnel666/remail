@@ -1110,9 +1110,8 @@ type ResourceBulkSelection struct {
 	Mode        ResourceBulkSelectionMode
 	ResourceIDs []uint
 	Filter      ResourceBulkFilter
-	// AllowBinding is persisted with deferred validation selections. It defaults
-	// to false so ordinary self-service batches (including old persisted batches)
-	// cannot select auxiliary-mailbox domains during later expansion.
+	// AllowBinding defaults to false so ordinary self-service batches cannot
+	// select auxiliary-mailbox domains.
 	AllowBinding bool `json:"allowBinding,omitempty"`
 }
 

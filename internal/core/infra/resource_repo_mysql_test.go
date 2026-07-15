@@ -3,7 +3,6 @@ package infra
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +21,19 @@ import (
 )
 
 var coreMySQLTestServer = testmysql.New("remail_core_test")
+
+type resourceValidationDispatchQueue struct {
+	tasks []coreapp.ResourceValidationTask
+}
+
+func (q *resourceValidationDispatchQueue) EnqueueResourceValidation(_ context.Context, task coreapp.ResourceValidationTask) error {
+	q.tasks = append(q.tasks, task)
+	return nil
+}
+
+func (*resourceValidationDispatchQueue) EnqueueResourceValidationDispatcher(context.Context, time.Duration) error {
+	return nil
+}
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -1738,7 +1750,7 @@ func TestResourceRepoBulkFilterMutationsMySQL(t *testing.T) {
 	require.Contains(t, filterDeleteLog.SafeSummary, "Count: 1")
 }
 
-func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMySQL(t *testing.T) {
+func TestResourceValidationRepoCreateBatchPersistsPendingBeforeDispatchMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	validationRepo := NewResourceValidationRepo(db)
@@ -1752,12 +1764,6 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 		"supplier",
 	).Error)
 
-	normal := &domain.MicrosoftResource{
-		EmailAddress: "validation-normal@outlook.com",
-		Password:     "secret",
-		Status:       domain.MicrosoftStatusPending,
-	}
-	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, normal))
 	abnormal := &domain.MicrosoftResource{
 		EmailAddress:  "validation-abnormal@outlook.com",
 		Password:      "secret",
@@ -1766,41 +1772,17 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	}
 	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, abnormal))
 
-	created, err := validationRepo.CreateWithLog(ctx, &domain.ResourceValidation{
-		ResourceID:   normal.ID,
-		ResourceType: domain.ResourceTypeMicrosoft,
-		OwnerUserID:  1,
-		Status:       domain.ResourceValidationQueued,
-		MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
-		RequestID:    "req-existing-validation",
-		Path:         "/v1/resources/:resourceId/validate",
-	}, nil)
-	require.NoError(t, err)
-	require.True(t, created)
-
 	result, err := validationRepo.CreateBatchWithLog(ctx, 1, coreapp.ResourceBulkSelection{
-		Mode:        coreapp.ResourceBulkSelectionIDs,
-		ResourceIDs: []uint{normal.ID, abnormal.ID},
+		Mode: coreapp.ResourceBulkSelectionFilter,
+		Filter: coreapp.ResourceBulkFilter{
+			ResourceType: domain.ResourceTypeMicrosoft,
+			Status:       string(domain.MicrosoftStatusAbnormal),
+		},
 	}, nil, "req-batch-validation", "/v1/resources/validations")
 	require.NoError(t, err)
-	require.Equal(t, 2, result.Requested)
-	require.Equal(t, 2, result.Queued)
+	require.Equal(t, 1, result.Requested)
+	require.Equal(t, 1, result.Queued)
 	require.Zero(t, result.Created)
-	var jobsBeforeExpansion int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobsBeforeExpansion).Error)
-	require.EqualValues(t, 1, jobsBeforeExpansion, "the request must not synchronously expand the deferred batch")
-	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
-	require.NoError(t, err)
-	require.Equal(t, 2, processed)
-
-	var normalActiveJobs int64
-	require.NoError(t, db.Raw(
-		"SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ? AND status IN (?, ?)",
-		normal.ID,
-		string(domain.ResourceValidationQueued),
-		string(domain.ResourceValidationRunning),
-	).Scan(&normalActiveJobs).Error)
-	require.EqualValues(t, 1, normalActiveJobs)
 
 	var abnormalStatus, abnormalSafeError string
 	require.NoError(t, db.Raw(
@@ -1809,6 +1791,22 @@ func TestResourceValidationRepoCreateBatchWithLogIsIdempotentAndResetsAbnormalMy
 	).Row().Scan(&abnormalStatus, &abnormalSafeError))
 	require.Equal(t, string(domain.MicrosoftStatusPending), abnormalStatus)
 	require.Empty(t, abnormalSafeError)
+	var jobsBeforeDispatch int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", abnormal.ID).Count(&jobsBeforeDispatch).Error)
+	require.Zero(t, jobsBeforeDispatch)
+
+	queue := &resourceValidationDispatchQueue{}
+	useCase := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, queue, nil)
+	dispatched, err := useCase.DispatchPending(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, dispatched.Queued)
+	require.Len(t, queue.tasks, 1)
+	var jobsAfterDispatch int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", abnormal.ID).Count(&jobsAfterDispatch).Error)
+	require.EqualValues(t, 1, jobsAfterDispatch)
+	createdJobs, err := validationRepo.CreatePendingValidationJobs(ctx, 1)
+	require.NoError(t, err)
+	require.Zero(t, createdJobs, "an active job fences duplicate pending-job creation")
 }
 
 func TestResourceValidationRepoMarkRunningIncrementsStaleRunningAttemptMySQL(t *testing.T) {
@@ -2028,7 +2026,7 @@ func TestResourceValidationRepoClaimDispatchableIsAtomicMySQL(t *testing.T) {
 	require.Equal(t, 1, total)
 }
 
-func TestResourceValidationRepoResumesDurableFilterBatchMySQL(t *testing.T) {
+func TestResourceValidationRepoCreatesJobsFromDurablePendingStateMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	validationRepo := NewResourceValidationRepo(db)
@@ -2051,30 +2049,10 @@ func TestResourceValidationRepoResumesDurableFilterBatchMySQL(t *testing.T) {
 		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
 		resource,
 	))
-	selectionJSON, err := json.Marshal(coreapp.ResourceBulkSelection{
-		Mode:   coreapp.ResourceBulkSelectionFilter,
-		Filter: coreapp.ResourceBulkFilter{ResourceType: domain.ResourceTypeMicrosoft},
-	})
-	require.NoError(t, err)
-	batch := &ResourceValidationBatchModel{
-		OwnerUserID:   1,
-		SelectionJSON: selectionJSON,
-		ThroughID:     resource.ID,
-		Status:        "pending",
-		RequestID:     "req-durable-filter",
-		Path:          "/v1/resources/validations",
-	}
-	require.NoError(t, db.Create(batch).Error)
-
-	processed, err := validationRepo.ResumeValidationBatches(ctx, 1)
+	processed, err := validationRepo.CreatePendingValidationJobs(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, processed)
 
-	require.NoError(t, db.First(batch, batch.ID).Error)
-	require.Equal(t, "succeeded", batch.Status)
-	require.JSONEq(t, `{}`, string(batch.SelectionJSON))
-	require.Equal(t, 1, batch.Requested)
-	require.Equal(t, 1, batch.Created)
 	var jobs int64
 	require.NoError(t, db.Model(&ResourceValidationModel{}).
 		Where("resource_id = ?", resource.ID).
@@ -2091,26 +2069,11 @@ func TestResourceValidationRepoResumesDurableFilterBatchMySQL(t *testing.T) {
 		&domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1},
 		second,
 	))
-	idSelectionJSON, err := json.Marshal(coreapp.ResourceBulkSelection{
-		Mode:        coreapp.ResourceBulkSelectionIDs,
-		ResourceIDs: []uint{second.ID},
-	})
-	require.NoError(t, err)
-	idBatch := &ResourceValidationBatchModel{
-		OwnerUserID:   1,
-		SelectionJSON: idSelectionJSON,
-		Status:        "pending",
-		RequestID:     "req-durable-ids",
-		Path:          "/v1/resources/imports",
-	}
-	require.NoError(t, db.Create(idBatch).Error)
-	processed, err = validationRepo.ResumeValidationBatches(ctx, 1)
+	processed, err = validationRepo.CreatePendingValidationJobs(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, processed)
-	require.NoError(t, db.First(idBatch, idBatch.ID).Error)
-	require.Equal(t, "succeeded", idBatch.Status)
-	require.JSONEq(t, `{}`, string(idBatch.SelectionJSON))
-	require.Equal(t, 1, idBatch.Created)
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
+	require.EqualValues(t, 2, jobs)
 }
 
 func TestResourceValidationRepoDefersImportedJobsUntilDispatchCapacityMySQL(t *testing.T) {
@@ -2152,32 +2115,24 @@ func TestResourceValidationRepoDefersImportedJobsUntilDispatchCapacityMySQL(t *t
 		)
 	}))
 
-	var batch ResourceValidationBatchModel
-	require.NoError(t, db.Where("request_id = ?", "req-import-deferred").First(&batch).Error)
-	require.Equal(t, "pending", batch.Status)
-	require.Equal(t, 0, batch.Created)
 	var jobs int64
 	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
 	require.Zero(t, jobs, "import acceptance must not materialize an unbounded job backlog")
 
-	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
+	processed, err := validationRepo.CreatePendingValidationJobs(ctx, 2)
 	require.NoError(t, err)
 	require.Equal(t, 2, processed)
 	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
 	require.EqualValues(t, 2, jobs, "dispatcher capacity is the materialization budget")
-	require.NoError(t, db.First(&batch, batch.ID).Error)
-	require.Equal(t, "pending", batch.Status)
 
-	processed, err = validationRepo.ResumeValidationBatches(ctx, 1)
+	processed, err = validationRepo.CreatePendingValidationJobs(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, processed)
 	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
 	require.EqualValues(t, 3, jobs)
-	require.NoError(t, db.First(&batch, batch.ID).Error)
-	require.Equal(t, "succeeded", batch.Status)
 }
 
-func TestResourceValidationRepoDeferredBatchSkipsNonOwnerMySQL(t *testing.T) {
+func TestResourceValidationRepoBatchSubmissionSkipsNonOwnerMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	validationRepo := NewResourceValidationRepo(db)
@@ -2198,13 +2153,13 @@ func TestResourceValidationRepoDeferredBatchSkipsNonOwnerMySQL(t *testing.T) {
 	owned := &domain.MicrosoftResource{
 		EmailAddress: "owned-validation@outlook.com",
 		Password:     "secret",
-		Status:       domain.MicrosoftStatusPending,
+		Status:       domain.MicrosoftStatusAbnormal,
 	}
 	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}, owned))
 	other := &domain.MicrosoftResource{
 		EmailAddress: "other-validation@outlook.com",
 		Password:     "secret",
-		Status:       domain.MicrosoftStatusPending,
+		Status:       domain.MicrosoftStatusAbnormal,
 	}
 	require.NoError(t, resourceRepo.CreateMicrosoft(ctx, &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 2}, other))
 
@@ -2213,10 +2168,11 @@ func TestResourceValidationRepoDeferredBatchSkipsNonOwnerMySQL(t *testing.T) {
 		ResourceIDs: []uint{owned.ID, other.ID},
 	}, nil, "req-batch-forbidden", "/v1/resources/validations")
 	require.NoError(t, err)
-	require.Equal(t, 2, result.Queued)
-	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
+	require.Equal(t, 1, result.Requested)
+	require.Equal(t, 1, result.Queued)
+	processed, err := validationRepo.CreatePendingValidationJobs(ctx, 2)
 	require.NoError(t, err)
-	require.Equal(t, 2, processed)
+	require.Equal(t, 1, processed)
 
 	var activeJobs int64
 	require.NoError(t, db.Raw(
@@ -2300,12 +2256,9 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 		},
 	}, nil, "req-domain-validation-filter", "/v1/resources/validations")
 	require.NoError(t, err)
-	// Deferred filter batches now report the matched estimate at acceptance (the
-	// operator must not see "0 submitted"); only private-validation matches the
-	// NotSale/.com/normal/recent filter. Jobs are still created during expansion.
 	require.Equal(t, 1, result.Requested)
 	require.Equal(t, 1, result.Queued)
-	require.Zero(t, result.Created)
+	require.Equal(t, 1, result.Created)
 	createdAfterAcceptance := &domain.MailDomainResource{
 		Domain:       "future-private-validation.example.com",
 		MailServerID: 200,
@@ -2317,10 +2270,6 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 		&domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1},
 		createdAfterAcceptance,
 	))
-	processed, err := validationRepo.ResumeValidationBatches(ctx, 64)
-	require.NoError(t, err)
-	require.Equal(t, 1, processed)
-
 	var privateJobs, saleJobs, bindingJobs, oldJobs, futureJobs int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", privateDomain.ID).Scan(&privateJobs).Error)
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM resource_validation_jobs WHERE resource_id = ?", saleDomain.ID).Scan(&saleJobs).Error)
@@ -2331,7 +2280,7 @@ func TestResourceValidationRepoCreateBatchWithLogFilterMatchesDomainPurposeMySQL
 	require.Zero(t, saleJobs)
 	require.Zero(t, bindingJobs)
 	require.Zero(t, oldJobs)
-	require.Zero(t, futureJobs, "resources created after filter acceptance must not enter the existing batch")
+	require.Zero(t, futureJobs, "resources created after submission must not enter completed work")
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {
