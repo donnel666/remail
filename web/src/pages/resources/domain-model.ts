@@ -48,7 +48,6 @@ export function toDomainResource(item: ResourceItem): DomainResource | null {
   if (item.type !== "domain") return null;
   if (!item.domain) return null;
   if (!item.domainTld) return null;
-  if (item.purpose === "binding") return null;
 
   return {
     id: item.id,
