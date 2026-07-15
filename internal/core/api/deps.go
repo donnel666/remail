@@ -1,8 +1,6 @@
 package api
 
 import (
-	"context"
-
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
@@ -12,9 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-type BackgroundDispatchSizer interface {
-	AcquireDispatchBudget(ctx context.Context, queue string, minimum, maximum int) (int, func())
-	TryAcquireExecution(ctx context.Context, queue string) (bool, func())
+type BackgroundExecutionGate interface {
+	TryAcquire() (release func(), admitted bool)
 }
 
 // CoreModule holds all wired dependencies for the Core (resource) module.
@@ -31,13 +28,13 @@ type CoreModule struct {
 	AdminCommands        *coreapp.AdminResourceCommandService
 	AdminBulk            *coreapp.AdminResourceBulkService
 	MicrosoftCredentials coreapp.MicrosoftCredentialPort
-	BackgroundDispatch   BackgroundDispatchSizer
+	BackgroundExecution  BackgroundExecutionGate
 	validationRepo       *coreinfra.ResourceValidationRepo
 }
 
-func (m *CoreModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
+func (m *CoreModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
-		m.BackgroundDispatch = sizer
+		m.BackgroundExecution = gate
 	}
 }
 

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -22,19 +20,15 @@ const (
 	// periodic scanner is a recovery/backfill mechanism rather than a hot loop.
 	microsoftAliasEnsureInterval = 24 * time.Hour
 
-	microsoftAliasReconciliationGrace            = 24 * time.Hour
-	microsoftAliasNegativeConfirmationInterval   = time.Hour
-	microsoftAliasRequiredNegativeConfirmations  = 3
-	microsoftAliasTransientBackoffBase           = 15 * time.Minute
-	microsoftAliasTransientBackoffMax            = 12 * time.Hour
-	defaultMicrosoftAliasRemoteRequestsPerSecond = 2
-	defaultMicrosoftAliasRemoteBurst             = 4
-	defaultMicrosoftAliasRemoteConcurrency       = 8
-
-	MicrosoftAliasAttemptRunning   = "running"
-	MicrosoftAliasAttemptSucceeded = "succeeded"
-	MicrosoftAliasAttemptFailed    = "failed"
-	MicrosoftAliasAttemptUncertain = "uncertain"
+	microsoftAliasReconciliationGrace           = 24 * time.Hour
+	microsoftAliasNegativeConfirmationInterval  = time.Hour
+	microsoftAliasRequiredNegativeConfirmations = 3
+	microsoftAliasTransientBackoffBase          = 15 * time.Minute
+	microsoftAliasTransientBackoffMax           = 12 * time.Hour
+	MicrosoftAliasAttemptRunning                = "running"
+	MicrosoftAliasAttemptSucceeded              = "succeeded"
+	MicrosoftAliasAttemptFailed                 = "failed"
+	MicrosoftAliasAttemptUncertain              = "uncertain"
 
 	MicrosoftAliasResourceNotNormalMessage = "Microsoft resource is not in normal state for alias creation."
 	// MicrosoftAliasExternalRecoveryMessage marks accounts whose recovery mailbox
@@ -182,41 +176,15 @@ type MicrosoftAliasService struct {
 	now          func() time.Time
 	ensureMu     sync.Mutex
 	lastEnsureAt time.Time
-	remoteMu     sync.RWMutex
-	remoteRate   *rate.Limiter
-	remoteSlots  chan struct{}
 }
 
 func NewMicrosoftAliasService(store MicrosoftAliasScheduleStore, queue MicrosoftAliasQueue, creator MicrosoftAliasCreator) *MicrosoftAliasService {
 	return &MicrosoftAliasService{
-		store:       store,
-		queue:       queue,
-		creator:     creator,
-		now:         func() time.Time { return time.Now().UTC() },
-		remoteRate:  rate.NewLimiter(rate.Limit(defaultMicrosoftAliasRemoteRequestsPerSecond), defaultMicrosoftAliasRemoteBurst),
-		remoteSlots: make(chan struct{}, defaultMicrosoftAliasRemoteConcurrency),
+		store:   store,
+		queue:   queue,
+		creator: creator,
+		now:     func() time.Time { return time.Now().UTC() },
 	}
-}
-
-// ConfigureRemoteLimits changes the per-process Microsoft alias start rate and
-// concurrency cap. It is intended to be called during application startup.
-func (s *MicrosoftAliasService) ConfigureRemoteLimits(requestsPerSecond float64, burst, maxConcurrent int) {
-	if s == nil {
-		return
-	}
-	if requestsPerSecond <= 0 {
-		requestsPerSecond = defaultMicrosoftAliasRemoteRequestsPerSecond
-	}
-	if burst <= 0 {
-		burst = defaultMicrosoftAliasRemoteBurst
-	}
-	if maxConcurrent <= 0 {
-		maxConcurrent = defaultMicrosoftAliasRemoteConcurrency
-	}
-	s.remoteMu.Lock()
-	s.remoteRate = rate.NewLimiter(rate.Limit(requestsPerSecond), burst)
-	s.remoteSlots = make(chan struct{}, maxConcurrent)
-	s.remoteMu.Unlock()
 }
 
 func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) (*MicrosoftAliasDispatchResult, error) {
@@ -367,25 +335,14 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		reservedAliases = append(reservedAliases, attempt.Alias)
 	}
 
-	releaseRemote, err := s.acquireRemoteExecution(ctx)
-	if err != nil {
-		result := MicrosoftAliasCreationResult{
-			Category:    "request",
-			SafeMessage: "Microsoft alias service is temporarily unavailable.",
-		}
-		return s.completeAliasResult(ctx, task, account, attempts, result)
-	}
 	currentAccount, eligible, ineligibleMessage, err = s.store.ReloadEligibleAccount(ctx, task.ResourceID, account.ClaimToken)
 	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
-		releaseRemote()
 		return nil
 	}
 	if err != nil {
-		releaseRemote()
 		return fmt.Errorf("recheck microsoft alias eligibility before remote request: %w", err)
 	}
 	if !eligible || currentAccount == nil {
-		releaseRemote()
 		return s.pauseIneligibleAttempts(ctx, task.ResourceID, account.ClaimToken, attempts, ineligibleMessage, s.now().UTC())
 	}
 	account = currentAccount
@@ -397,7 +354,6 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		BindingAddress: account.BindingAddress,
 		Candidates:     reservedAliases,
 	})
-	releaseRemote()
 	if createErr != nil {
 		result = MicrosoftAliasCreationResult{
 			Category:    "request",
@@ -547,32 +503,6 @@ func (s *MicrosoftAliasService) pauseIneligibleAttempts(
 		}
 	}
 	return ignoreStaleAliasClaim(s.store.Pause(ctx, resourceID, claimToken, safeMessage))
-}
-
-func (s *MicrosoftAliasService) acquireRemoteExecution(ctx context.Context) (func(), error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	s.remoteMu.RLock()
-	limiter := s.remoteRate
-	slots := s.remoteSlots
-	s.remoteMu.RUnlock()
-	release := func() {}
-	if slots != nil {
-		select {
-		case slots <- struct{}{}:
-			release = func() { <-slots }
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	if limiter != nil {
-		if err := limiter.Wait(ctx); err != nil {
-			release()
-			return nil, err
-		}
-	}
-	return release, nil
 }
 
 func microsoftAliasReconciliationCanRelease(attempt MicrosoftAliasAttempt, now time.Time) bool {

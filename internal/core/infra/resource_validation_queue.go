@@ -17,7 +17,7 @@ const (
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
 	ResourceValidationQueueName     = platform.QueueBackgroundValidation
-	validationTaskMaxRetry          = 3
+	validationTaskMaxRetry          = platform.BackgroundTaskMaxRetry
 	validationTaskTimeout           = 15 * time.Minute
 	validationDispatcherTaskTimeout = 30 * time.Second
 )
@@ -66,7 +66,10 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationDispatcher(ctx contex
 	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, nil)
 	options := []asynq.Option{
 		asynq.Queue("default"),
-		asynq.Unique(15 * time.Second),
+		// Asynq releases the uniqueness key as soon as the dispatcher finishes.
+		// Keeping the lease for the full task timeout prevents a slow scan from
+		// spawning overlapping dispatcher tasks every two seconds.
+		asynq.Unique(validationDispatcherTaskTimeout),
 		asynq.MaxRetry(0),
 		asynq.Timeout(validationDispatcherTaskTimeout),
 	}

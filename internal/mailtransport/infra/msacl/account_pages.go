@@ -607,6 +607,25 @@ func accountEmailMask(accountEmail string) string {
 	return local + "**@" + domain
 }
 
+func accountEmailMaskPattern(accountEmail string) *regexp.Regexp {
+	local, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(accountEmail)), "@")
+	if !ok || local == "" || domain == "" {
+		return nil
+	}
+	prefix := local
+	suffix := ""
+	if len(local) >= 3 {
+		prefix = local[:2]
+		suffix = local[len(local)-1:]
+	} else if len(local) == 2 {
+		prefix = local[:1]
+		suffix = local[1:]
+	}
+	return regexp.MustCompile(
+		`(?i)` + regexp.QuoteMeta(prefix) + `\*+` + regexp.QuoteMeta(suffix+"@"+domain),
+	)
+}
+
 func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy string, preferredBindingAddress string) string {
 	// Preferred (import-supplied) binding address wins if it matches the mask —
 	// domain-agnostic; may even be an operator-recorded external address.
@@ -671,6 +690,22 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 		return recorded
 	}
 
+	// Recent imports use the Microsoft local part verbatim on the selected
+	// binding domain. A broad account-mask search is often ambiguous because
+	// many accounts share the same first/last characters (for example
+	// br*****1@...). Prefer the exact account-local mailbox only when the local
+	// receiving store already contains a message addressed to that mailbox whose
+	// body names this exact account mask. This is evidence, not a guessed binding:
+	// callers must still complete the normal password/OTP confirmation before
+	// persisting the relationship as verified.
+	if direct := accountLocalAuxiliaryAddressForDomain(accountEmail, domain); direct != "" &&
+		mailboxMatchesMasked(maskedEmail, direct) &&
+		mailboxHasAccountMaskEvidence(ctx, direct, accountEmail, proxy) {
+		logInfo("通过账号同名辅助邮箱的精确收件证据找到真实辅助邮箱")
+		logDebug("账号同名收件证据匹配: account=%s, real_mailbox=%s", accountEmail, direct)
+		return direct
+	}
+
 	if mask := accountEmailMask(accountEmail); mask != "" {
 		var found string
 		ambiguous := false
@@ -682,11 +717,16 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 			}()
 			results := searchMailboxesByContent(ctx, mask, proxy)
 			var candidates []string
+			seenCandidates := make(map[string]struct{}, len(results))
 			for _, addr := range results {
 				addr = strings.ToLower(strings.TrimSpace(addr))
 				matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
 				if addr != "" && strings.HasSuffix(addr, "@"+domain) &&
 					(prefix == "" || strings.HasPrefix(addr, prefix)) && matchesFullMask {
+					if _, exists := seenCandidates[addr]; exists {
+						continue
+					}
+					seenCandidates[addr] = struct{}{}
 					candidates = append(candidates, addr)
 				}
 			}
@@ -715,10 +755,15 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 
 	results := searchMailboxes(ctx, prefix, proxy)
 	var candidates []string
+	seenCandidates := make(map[string]struct{}, len(results))
 	for _, result := range results {
 		addr := strings.ToLower(strings.TrimSpace(result))
 		matchesFullMask := !strings.Contains(maskedEmail, "@") || mailboxMatchesMasked(maskedEmail, addr)
 		if strings.HasPrefix(addr, prefix) && strings.HasSuffix(addr, "@"+domain) && matchesFullMask {
+			if _, exists := seenCandidates[addr]; exists {
+				continue
+			}
+			seenCandidates[addr] = struct{}{}
 			candidates = append(candidates, addr)
 		}
 	}
@@ -744,6 +789,37 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 		return generated
 	}
 	return ""
+}
+
+func accountLocalAuxiliaryAddressForDomain(accountEmail, domain string) string {
+	accountEmail = strings.ToLower(strings.TrimSpace(accountEmail))
+	domain = strings.Trim(strings.ToLower(strings.TrimSpace(domain)), ".")
+	local, sourceDomain, ok := strings.Cut(accountEmail, "@")
+	if !ok || local == "" || sourceDomain == "" || domain == "" {
+		return ""
+	}
+	return normalizeRecoveryMailbox(local + "@" + domain)
+}
+
+func mailboxHasAccountMaskEvidence(ctx context.Context, mailbox, accountEmail, proxy string) bool {
+	mailbox = normalizeRecoveryMailbox(mailbox)
+	maskPattern := accountEmailMaskPattern(accountEmail)
+	if mailbox == "" || maskPattern == nil {
+		return false
+	}
+	emails, err := mailList(ctx, mailbox, proxy, 10, false)
+	if err != nil {
+		return false
+	}
+	for _, email := range emails {
+		if !recoveryMailboxEvidenceMatches(mailbox, email.To) {
+			continue
+		}
+		if maskPattern.MatchString(email.Subject + " " + email.Preview) {
+			return true
+		}
+	}
+	return false
 }
 
 func resultRecordFiles() []string {

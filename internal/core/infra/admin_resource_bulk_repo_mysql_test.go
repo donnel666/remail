@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -141,6 +142,131 @@ func TestAdminResourceBulkFilterRunsDurablyAndIsIdempotentMySQL(t *testing.T) {
 		Where("operation_type = ? AND resource_id = ?", "core.admin_resource.unpublish_bulk", "bulk:"+uintString(command.ID)).
 		Count(&logs).Error)
 	require.EqualValues(t, 1, logs)
+}
+
+func TestAdminResourceBulkFilterFreezesCandidateIDsMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	insertAdminCommandUsers(t, db)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
+	commands := coreapp.NewAdminResourceCommandService(NewAdminResourceRepo(db), validation, governanceinfra.NewOperationLogRepo(db))
+	commands.SetPorts(adminCommandOwners(), nil, &adminCommandBindingPort{}, &adminCommandAllocationGuard{})
+	queue := &adminBulkQueueStub{}
+	service := coreapp.NewAdminResourceBulkService(NewAdminResourceBulkRepo(db), queue, commands)
+
+	// Create non-matches first so their IDs are below the acceptance high-water
+	// mark. A high-water mark alone would therefore admit them if they entered
+	// the filter while later pages were running.
+	lateEntrants := make([]*domain.EmailResource, 2)
+	for i := range lateEntrants {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("bulk-late-entrant-%d@outlook.com", i), Password: "secret",
+			Status: domain.MicrosoftStatusAbnormal, ForSale: true,
+		}
+		require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+		lateEntrants[i] = root
+	}
+
+	const snapshotSize = 101
+	snapshotRoots := make([]*domain.EmailResource, snapshotSize)
+	for i := range snapshotRoots {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("bulk-snapshot-%03d@outlook.com", i), Password: "secret",
+			Status: domain.MicrosoftStatusNormal, ForSale: true,
+		}
+		require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+		snapshotRoots[i] = root
+	}
+
+	command, reused, err := service.Submit(
+		context.Background(),
+		coreapp.AdminResourceBulkUnpublish,
+		coreapp.AdminResourceBulkSelection{
+			Mode: coreapp.AdminResourceBulkFilter,
+			Filter: coreapp.AdminResourceBulkFilterValue{
+				Status:  domain.MicrosoftStatusNormal,
+				ForSale: boolPointer(true),
+			},
+		},
+		9,
+		"bulk-filter-snapshot-key",
+		"req-bulk-filter-snapshot",
+		"/v1/admin/resources/unpublish",
+	)
+	require.NoError(t, err)
+	require.False(t, reused)
+	require.Equal(t, snapshotSize, command.MatchedCount)
+	require.Len(t, command.Selection.ResourceIDs, snapshotSize)
+	for _, entrant := range lateEntrants {
+		require.NotContains(t, command.Selection.ResourceIDs, entrant.ID)
+	}
+
+	// Two old resources now enter the filter, while one accepted candidate
+	// leaves it. Execution must still visit exactly the accepted 101 IDs: the
+	// departed candidate is observed once and skipped; the entrants are ignored.
+	lateEntrantIDs := []uint{lateEntrants[0].ID, lateEntrants[1].ID}
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).
+		Where("id IN ?", lateEntrantIDs).
+		Update("status", string(domain.MicrosoftStatusNormal)).Error)
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).
+		Where("id = ?", snapshotRoots[0].ID).
+		Update("for_sale", false).Error)
+
+	for page := 0; page < 3; page++ {
+		require.NoError(t, service.DispatchPending(context.Background(), 10))
+		require.Greater(t, len(queue.tasks), page)
+		require.NoError(t, service.Process(context.Background(), queue.tasks[page]))
+		stored, getErr := service.Get(context.Background(), command.ID)
+		require.NoError(t, getErr)
+		if stored.Status == "succeeded" {
+			break
+		}
+	}
+
+	stored, err := service.Get(context.Background(), command.ID)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", stored.Status)
+	require.Equal(t, stored.MatchedCount, stored.ProcessedCount)
+	require.Equal(t, snapshotSize, stored.ProcessedCount)
+	require.Equal(t, snapshotSize-1, stored.AffectedCount)
+	require.Equal(t, 1, stored.SkippedCount)
+	require.EqualValues(t, 1, stored.ReasonCounts["already_target"])
+	require.Equal(t, snapshotRoots[snapshotSize-1].ID, stored.CheckpointResourceID)
+
+	var entrantsStillForSale int64
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).
+		Where("id IN ? AND for_sale = ?", lateEntrantIDs, true).
+		Count(&entrantsStillForSale).Error)
+	require.EqualValues(t, len(lateEntrants), entrantsStillForSale)
+}
+
+func TestAdminResourceBulkFilterSnapshotJSONIsCompact(t *testing.T) {
+	resourceIDs := make([]uint, 30_000)
+	for i := range resourceIDs {
+		resourceIDs[i] = uint(i + 1)
+	}
+	payload, err := json.Marshal(coreapp.AdminResourceBulkSelection{
+		Mode:        coreapp.AdminResourceBulkFilter,
+		ResourceIDs: resourceIDs,
+		Filter:      coreapp.AdminResourceBulkFilterValue{Status: domain.MicrosoftStatusAbnormal},
+	})
+	require.NoError(t, err)
+	require.Less(t, len(payload), 256*1024)
+}
+
+func TestAdminResourceBulkLegacyFilterDoesNotRequeryMutableCandidates(t *testing.T) {
+	repo := &AdminResourceBulkRepo{}
+	command := &coreapp.AdminResourceBulkCommand{
+		Selection:      coreapp.AdminResourceBulkSelection{Mode: coreapp.AdminResourceBulkFilter},
+		MatchedCount:   3,
+		ProcessedCount: 2,
+	}
+	ids, err := repo.ListCandidateIDs(context.Background(), command, 100, time.Now())
+	require.ErrorIs(t, err, domain.ErrResourceDependency)
+	require.Nil(t, ids)
 }
 
 func TestAdminResourceBulkFilterSnapshotsOwnerSearchMySQL(t *testing.T) {

@@ -12,13 +12,14 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
-	resourceValidationDispatcherInterval = 15 * time.Second
-	resourceValidationDispatchMinimum    = 8
-	resourceValidationDispatchMaximum    = 64
+	resourceValidationDispatcherInterval = 2 * time.Second
+	resourceValidationDispatchMaximum    = 128
+	backgroundLegacyReleaseTimeout       = 5 * time.Second
 )
 
 // StartCoreWorkers registers Core task handlers and starts the Asynq server.
@@ -33,7 +34,11 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.AdminBulk == nil {
 			return nil
 		}
-		if err := module.AdminBulk.DispatchPending(ctx, 32); err != nil {
+		// This dispatcher has no periodic seeder and performs only a bounded
+		// DB-to-Redis handoff. Always let it seed at least one durable command;
+		// the command handler itself remains governed by the global window.
+		limit := max(1, backgroundDispatchLimit(module.BackgroundExecution, 32))
+		if err := module.AdminBulk.DispatchPending(ctx, limit); err != nil {
 			slog.Warn("admin resource bulk dispatcher failed", "error", err)
 		}
 		return nil
@@ -46,6 +51,25 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode admin resource bulk task: %w: %w", err, asynq.SkipRetry)
 		}
+		if payload.CommandID == 0 || payload.DispatchToken == "" {
+			return fmt.Errorf("decode admin resource bulk task: identity is missing: %w", asynq.SkipRetry)
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+				defer cancel()
+				if err := module.AdminBulk.ReleaseDispatch(recoveryCtx, payload); err != nil {
+					return fmt.Errorf("release legacy admin resource bulk dispatch: %w", err)
+				}
+				return nil
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
 		if err := module.AdminBulk.Process(ctx, payload); err != nil {
 			slog.Warn("admin resource bulk task failed", "command_id", payload.CommandID, "error", err)
 			return err
@@ -56,17 +80,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
-		limit := resourceValidationDispatchMaximum
-		releaseBudget := func() {}
-		if module.BackgroundDispatch != nil {
-			limit, releaseBudget = module.BackgroundDispatch.AcquireDispatchBudget(
-				ctx,
-				coreinfra.ResourceValidationQueueName,
-				resourceValidationDispatchMinimum,
-				resourceValidationDispatchMaximum,
-			)
-		}
-		defer releaseBudget()
+		limit := backgroundDispatchLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
@@ -93,19 +107,25 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode resource validation task: %w: %w", err, asynq.SkipRetry)
 		}
-		if payload.JobID != 0 && payload.DispatchToken != "" && module.BackgroundDispatch != nil {
-			admitted, release := module.BackgroundDispatch.TryAcquireExecution(ctx, coreinfra.ResourceValidationQueueName)
-			if !admitted {
-				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if payload.JobID == 0 || payload.DispatchToken == "" {
+			return fmt.Errorf("decode resource validation task: identity is missing: %w", asynq.SkipRetry)
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 				defer cancel()
-				if err := module.ValidationUseCase.ReleaseDispatch(releaseCtx, payload); err != nil {
-					return fmt.Errorf("release resource validation after admission denial: %w", err)
+				if err := module.ValidationUseCase.ReleaseDispatch(recoveryCtx, payload); err != nil {
+					return fmt.Errorf("release legacy resource validation dispatch: %w", err)
 				}
 				return nil
 			}
-			defer release()
+			return platform.ErrBackgroundExecutionDeferred
 		}
-
+		defer release()
 		slog.Info(
 			"processing resource validation task",
 			"job_id", payload.JobID,
@@ -188,6 +208,34 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		)
 		return nil
 	})
+}
+
+func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecutionGate) (func(), bool, error) {
+	if err := ctx.Err(); err != nil {
+		return func() {}, false, err
+	}
+	if gate == nil {
+		return func() {}, true, nil
+	}
+	release, admitted := gate.TryAcquire()
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted, nil
+}
+
+func backgroundDispatchLimit(gate BackgroundExecutionGate, maximum int) int {
+	if maximum <= 0 {
+		return 0
+	}
+	if gate == nil {
+		return maximum
+	}
+	capacity, ok := gate.(interface{ Available() int })
+	if !ok {
+		return maximum
+	}
+	return min(maximum, max(0, capacity.Available()))
 }
 
 func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, result *coreapp.MicrosoftImportProcessResult) (int, error) {

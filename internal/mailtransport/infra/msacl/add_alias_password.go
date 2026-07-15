@@ -177,7 +177,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	logInfo("PWD 身份页 proof=%s 辅助=%s", proofDisplay, bindingAddress)
 
 	// 记录发码前基线 (发码前, 避免秒到的码被吞入 seen)
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(session.context(), 120*time.Second)
 	defer cancel()
 	seen, err := snapshotMailboxKeys(ctx, bindingAddress, proxy)
 	if err != nil {

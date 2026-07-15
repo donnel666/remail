@@ -3,7 +3,9 @@ package platform
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -19,9 +21,12 @@ import (
 )
 
 const (
-	asynqWorkerConcurrency           = 64
-	asynqRealtimeWorkerConcurrency   = 32
-	asynqBackgroundWorkerConcurrency = 32
+	asynqWorkerConcurrency           = 768
+	asynqRealtimeWorkerConcurrency   = 256
+	asynqBackgroundWorkerConcurrency = 512
+	asynqShutdownTimeout             = 30 * time.Second
+	backgroundRetryDelayMinimum      = 5 * time.Second
+	backgroundRetryDelayJitter       = 5 * time.Second
 )
 
 // realtimeQueueConfig holds the latency-critical queues that back
@@ -46,8 +51,9 @@ func foregroundQueueConfig() map[string]int {
 // realtime and foreground tiers.
 func backgroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueBackgroundValidation: 3,
-		QueueBackgroundAlias:      1,
+		QueueBackgroundValidation:   3,
+		QueueBackgroundAlias:        1,
+		QueueBackgroundTokenRefresh: 1,
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
 		// and every bulk command sits queued forever.
@@ -108,12 +114,8 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.RealtimeAsynqServer = initRealtimeAsynqServer(cfg.Redis)
 	p.AsynqServer = initAsynqServer(cfg.Redis)
 	p.BackgroundAsynqServer = initBackgroundAsynqServer(cfg.Redis)
-	p.BackgroundLoad = NewBackgroundLoadController(
-		sqlDB,
-		asynq.NewInspectorFromRedisClient(rdb),
-		rdb,
-		asynqWorkerConcurrency+asynqRealtimeWorkerConcurrency,
-	)
+	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrency)
+	SetMetricsBackgroundLoad(p.BackgroundLoad)
 	p.SMTP = cfg.SMTP
 
 	cleanup := func() {
@@ -169,6 +171,9 @@ func (p *Platform) Close() {
 	}
 	p.clientClose.Do(func() {
 		slog.Info("shutting down platform clients")
+		if p.BackgroundLoad != nil {
+			p.BackgroundLoad.Stop(context.Background())
+		}
 		p.ShutdownWorkers()
 		if p.Asynq != nil {
 			_ = p.Asynq.Close()
@@ -254,8 +259,10 @@ func initAsynqServer(cfg RedisConfig) *asynq.Server {
 		DB:       cfg.DB,
 	}
 	return asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: asynqWorkerConcurrency,
-		Queues:      foregroundQueueConfig(),
+		Concurrency:     asynqWorkerConcurrency,
+		Queues:          foregroundQueueConfig(),
+		StrictPriority:  false, // weighted polling prevents a large queue from starving another queue
+		ShutdownTimeout: asynqShutdownTimeout,
 	})
 }
 
@@ -270,8 +277,10 @@ func initRealtimeAsynqServer(cfg RedisConfig) *asynq.Server {
 		DB:       cfg.DB,
 	}
 	return asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: asynqRealtimeWorkerConcurrency,
-		Queues:      realtimeQueueConfig(),
+		Concurrency:     asynqRealtimeWorkerConcurrency,
+		Queues:          realtimeQueueConfig(),
+		StrictPriority:  false,
+		ShutdownTimeout: asynqShutdownTimeout,
 	})
 }
 
@@ -282,7 +291,28 @@ func initBackgroundAsynqServer(cfg RedisConfig) *asynq.Server {
 		DB:       cfg.DB,
 	}
 	return asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: asynqBackgroundWorkerConcurrency,
-		Queues:      backgroundQueueConfig(),
+		Concurrency:     asynqBackgroundWorkerConcurrency,
+		Queues:          backgroundQueueConfig(),
+		StrictPriority:  false, // every non-empty background queue keeps a weighted share
+		RetryDelayFunc:  backgroundRetryDelay,
+		IsFailure:       backgroundIsFailure,
+		ShutdownTimeout: asynqShutdownTimeout,
 	})
+}
+
+func backgroundRetryDelay(retried int, err error, task *asynq.Task) time.Duration {
+	if errors.Is(err, ErrBackgroundExecutionDeferred) {
+		hash := fnv.New32a()
+		if task != nil {
+			_, _ = hash.Write([]byte(task.Type()))
+			_, _ = hash.Write(task.Payload())
+		}
+		jitterSteps := uint32(backgroundRetryDelayJitter/time.Second) + 1
+		return backgroundRetryDelayMinimum + time.Duration(hash.Sum32()%jitterSteps)*time.Second
+	}
+	return asynq.DefaultRetryDelayFunc(retried, err, task)
+}
+
+func backgroundIsFailure(err error) bool {
+	return !errors.Is(err, ErrBackgroundExecutionDeferred)
 }

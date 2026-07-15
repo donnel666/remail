@@ -16,7 +16,7 @@ const (
 	TypeMicrosoftTokenRefresh           = "mailtransport:microsoft_token_refresh"
 	TypeMicrosoftTokenRefreshDispatcher = "mailtransport:microsoft_token_refresh_dispatcher"
 
-	MicrosoftTokenRefreshQueueName = platform.QueueBackgroundValidation
+	MicrosoftTokenRefreshQueueName = platform.QueueBackgroundTokenRefresh
 
 	microsoftTokenRefreshTaskTimeout       = 2 * time.Minute
 	microsoftTokenRefreshDispatcherTimeout = time.Minute
@@ -46,7 +46,7 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Co
 		asynq.NewTask(TypeMicrosoftTokenRefresh, payload),
 		asynq.Queue(MicrosoftTokenRefreshQueueName),
 		asynq.TaskID(fmt.Sprintf("%s:%d:%s", TypeMicrosoftTokenRefresh, task.JobID, task.DispatchToken)),
-		asynq.MaxRetry(0),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.Timeout(microsoftTokenRefreshTaskTimeout),
 	)
 	if err != nil {
@@ -64,7 +64,7 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefreshDispatcher(ctx 
 	}
 	options := []asynq.Option{
 		asynq.Queue("default"),
-		asynq.Unique(15 * time.Second),
+		asynq.Unique(microsoftTokenRefreshDispatcherTimeout),
 		asynq.MaxRetry(0),
 		asynq.Timeout(microsoftTokenRefreshDispatcherTimeout),
 	}

@@ -75,6 +75,7 @@ type recoveryStore struct {
 	admin       *coreinfra.AdminResourceRepo
 	validations *coreinfra.ResourceValidationRepo
 	bindings    *mailinfra.MicrosoftBindingRepo
+	aliases     *mailinfra.MicrosoftAliasStore
 	users       *iaminfra.UserRepo
 	logs        *governanceinfra.OperationLogRepo
 }
@@ -86,6 +87,7 @@ func newRecoveryStore(db *gorm.DB) *recoveryStore {
 		admin:       coreinfra.NewAdminResourceRepo(db),
 		validations: coreinfra.NewResourceValidationRepo(db),
 		bindings:    mailinfra.NewMicrosoftBindingRepo(db),
+		aliases:     mailinfra.NewMicrosoftAliasStore(db),
 		users:       iaminfra.NewUserRepo(db),
 		logs:        governanceinfra.NewOperationLogRepo(db),
 	}
@@ -190,6 +192,13 @@ func (s *recoveryStore) applyRecoveredBinding(
 		}
 		applied, err = s.bindings.ApplyRecoveredBinding(txCtx, snapshot.recoveredBindingInput(bindingAddress))
 		if err != nil {
+			return err
+		}
+		// A dispatch prefilter may already have paused this resource while its
+		// binding was unresolved. Wake (or create) the durable alias schedule in
+		// the same transaction as the recovered binding so the server's periodic
+		// dispatcher can pick it up immediately after commit.
+		if _, err := s.aliases.EnsureScheduleForResource(txCtx, snapshot.ResourceID, time.Now().UTC()); err != nil {
 			return err
 		}
 		summary := "Microsoft recovery-mailbox binding was already verified."

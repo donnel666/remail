@@ -20,7 +20,7 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 		t.Fatal("realtime config must reserve capacity for the 接码 mailfetch queue")
 	}
 	for name := range rt {
-		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueResource {
+		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueResource {
 			t.Fatalf("realtime tier must not serve background queue %s", name)
 		}
 	}
@@ -34,18 +34,20 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}
 	}
-	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundAlias] != 1 {
-		t.Fatalf("background queues must retain 3:1 weighted fairness, got %#v", bg)
+	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueResource] != 2 {
+		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
 	}
 }
 
-func TestBackgroundAdmissionMatchesDedicatedWorkerCapacity(t *testing.T) {
-	if asynqBackgroundWorkerConcurrency != backgroundIdleExecutionCap {
-		t.Fatalf(
-			"idle background admission cap must match worker capacity: workers=%d cap=%d",
-			asynqBackgroundWorkerConcurrency,
-			backgroundIdleExecutionCap,
-		)
+func TestWorkerTierConcurrencyBudget(t *testing.T) {
+	if asynqRealtimeWorkerConcurrency != 256 || asynqWorkerConcurrency != 768 {
+		t.Fatalf("foreground ceilings must be realtime=256 and general=768, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
+	}
+	if asynqRealtimeWorkerConcurrency+asynqWorkerConcurrency != 1024 {
+		t.Fatalf("foreground worker capacity must total 1024, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
+	}
+	if asynqBackgroundWorkerConcurrency != 512 {
+		t.Fatalf("background worker ceiling must be 512, got %d", asynqBackgroundWorkerConcurrency)
 	}
 }
 
@@ -82,18 +84,13 @@ func TestEveryEnqueuedQueueIsServedByExactlyOneTier(t *testing.T) {
 	}
 }
 
-// TestLoadControllerQueuesAreKnown guards the second queue-name list (the load
-// controller's foreground/background classification) against drifting from the
-// single source of truth — every name it references must be in AllQueueNames.
-func TestLoadControllerQueuesAreKnown(t *testing.T) {
-	c := NewBackgroundLoadController(nil, nil, nil, 1)
-	known := map[string]struct{}{}
-	for _, q := range AllQueueNames {
-		known[q] = struct{}{}
+func TestLoadControllerCeilingMatchesBackgroundServer(t *testing.T) {
+	controller := NewBackgroundLoadController(asynqBackgroundWorkerConcurrency)
+	snapshot := controller.Snapshot()
+	if snapshot.Maximum != asynqBackgroundWorkerConcurrency {
+		t.Fatalf("adaptive ceiling must match the background Asynq ceiling, got adaptive=%d asynq=%d", snapshot.Maximum, asynqBackgroundWorkerConcurrency)
 	}
-	for _, q := range append(append([]string{}, c.foregroundQueues...), c.backgroundQueues...) {
-		if _, ok := known[q]; !ok {
-			t.Fatalf("load-controller queue %q is not in AllQueueNames (drifted)", q)
-		}
+	if snapshot.Limit < 1 || snapshot.Limit > snapshot.Maximum {
+		t.Fatalf("adaptive initial limit must be within its ceiling, got %#v", snapshot)
 	}
 }

@@ -1,5 +1,34 @@
 package platform
 
+import (
+	"context"
+
+	"github.com/hibiken/asynq"
+)
+
+// BackgroundTaskMaxRetry leaves ample Asynq retry headroom for rare
+// infrastructure errors. Capacity deferrals do not increment this counter.
+const BackgroundTaskMaxRetry = 100
+
+// BackgroundTaskHasRetryHeadroom reports whether a handler error can still be
+// moved to Asynq's retry set. Messages queued by older releases used
+// MaxRetry(0); callers must release their fenced database dispatch instead of
+// returning ErrBackgroundExecutionDeferred for those legacy messages.
+// Contexts outside an Asynq processor do not contain retry metadata and are
+// treated as retry-capable, which keeps direct handler tests deterministic.
+func BackgroundTaskHasRetryHeadroom(ctx context.Context) bool {
+	retried, retriedOK := asynq.GetRetryCount(ctx)
+	maximum, maximumOK := asynq.GetMaxRetry(ctx)
+	if !retriedOK || !maximumOK {
+		return true
+	}
+	return backgroundTaskHasRetryHeadroom(retried, maximum)
+}
+
+func backgroundTaskHasRetryHeadroom(retried, maximum int) bool {
+	return retried < maximum
+}
+
 // Single source of truth for Asynq queue names.
 //
 // Every queue a module enqueues to MUST be served by exactly one worker tier
@@ -20,10 +49,12 @@ const (
 	QueueMailtransport = "mailtransport"
 	// QueueDefault carries assorted foreground work (imports, allocation, proxy checks).
 	QueueDefault = "default"
-	// QueueBackgroundValidation carries resource validation + token refresh.
+	// QueueBackgroundValidation carries resource validation jobs.
 	QueueBackgroundValidation = "background_validation"
 	// QueueBackgroundAlias carries Microsoft explicit-alias creation.
 	QueueBackgroundAlias = "background_alias"
+	// QueueBackgroundTokenRefresh carries Microsoft refresh-token maintenance.
+	QueueBackgroundTokenRefresh = "background_token_refresh"
 	// QueueResource carries admin resource bulk operations (validate/publish/unpublish/delete).
 	QueueResource = "resource"
 )
@@ -36,5 +67,6 @@ var AllQueueNames = []string{
 	QueueDefault,
 	QueueBackgroundValidation,
 	QueueBackgroundAlias,
+	QueueBackgroundTokenRefresh,
 	QueueResource,
 }

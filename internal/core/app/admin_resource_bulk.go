@@ -287,6 +287,16 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 	return nil
 }
 
+// ReleaseDispatch returns a fenced, not-yet-started command to its durable
+// dispatcher. It is only needed while draining Asynq messages created by older
+// releases with MaxRetry(0).
+func (s *AdminResourceBulkService) ReleaseDispatch(ctx context.Context, task AdminResourceBulkTask) error {
+	if s == nil || s.repo == nil || task.CommandID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+		return nil
+	}
+	return s.repo.MarkDispatchFailed(ctx, task.CommandID, task.DispatchToken, "")
+}
+
 func (s *AdminResourceBulkService) retry(ctx context.Context, command *AdminResourceBulkCommand, cause error) error {
 	exhausted, err := s.repo.MarkRetryableFailure(ctx, command.ID, command.ClaimToken, "Batch processing failed temporarily.")
 	if err != nil {

@@ -34,7 +34,7 @@ func (q *AdminResourceBulkQueue) EnqueueAdminResourceBulk(ctx context.Context, t
 	}
 	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeAdminResourceBulk, payload),
 		asynq.Queue(AdminResourceBulkQueueName),
-		asynq.MaxRetry(0),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.TaskID(adminResourceBulkTaskID(task)),
 	)
 	if err == asynq.ErrTaskIDConflict {

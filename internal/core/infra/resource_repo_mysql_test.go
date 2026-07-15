@@ -15,6 +15,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -2053,6 +2054,70 @@ func TestResourceValidationRepoResumesDurableFilterBatchMySQL(t *testing.T) {
 	require.Equal(t, "succeeded", idBatch.Status)
 	require.JSONEq(t, `{}`, string(idBatch.SelectionJSON))
 	require.Equal(t, 1, idBatch.Created)
+}
+
+func TestResourceValidationRepoDefersImportedJobsUntilDispatchCapacityMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"import-batch-owner@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	resources := make([]uint, 0, 3)
+	for index := 0; index < 3; index++ {
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("import-deferred-%d@outlook.com", index),
+			Password:     "secret",
+			Status:       domain.MicrosoftStatusPending,
+		}
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, resourceRepo.CreateMicrosoft(
+			ctx,
+			root,
+			resource,
+		))
+		resources = append(resources, root.ID)
+	}
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return validationRepo.CreateImportedValidationBatch(
+			platform.WithGormTx(ctx, tx),
+			1,
+			resources,
+			"req-import-deferred",
+			"/v1/resources/imports",
+		)
+	}))
+
+	var batch ResourceValidationBatchModel
+	require.NoError(t, db.Where("request_id = ?", "req-import-deferred").First(&batch).Error)
+	require.Equal(t, "pending", batch.Status)
+	require.Equal(t, 0, batch.Created)
+	var jobs int64
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
+	require.Zero(t, jobs, "import acceptance must not materialize an unbounded job backlog")
+
+	processed, err := validationRepo.ResumeValidationBatches(ctx, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, processed)
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
+	require.EqualValues(t, 2, jobs, "dispatcher capacity is the materialization budget")
+	require.NoError(t, db.First(&batch, batch.ID).Error)
+	require.Equal(t, "pending", batch.Status)
+
+	processed, err = validationRepo.ResumeValidationBatches(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	require.NoError(t, db.Model(&ResourceValidationModel{}).Count(&jobs).Error)
+	require.EqualValues(t, 3, jobs)
+	require.NoError(t, db.First(&batch, batch.ID).Error)
+	require.Equal(t, "succeeded", batch.Status)
 }
 
 func TestResourceValidationRepoDeferredBatchSkipsNonOwnerMySQL(t *testing.T) {

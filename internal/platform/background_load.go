@@ -2,403 +2,424 @@ package platform
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"log/slog"
+	"math"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/hibiken/asynq"
-	"github.com/redis/go-redis/v9"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 const (
-	backgroundModerateDBUtilization = 0.40
-	backgroundBusyDBUtilization     = 0.70
-	backgroundCriticalDBUtilization = 0.90
+	backgroundOverloadPercent    = 70.0
+	backgroundRecoveryPercent    = 60.0
+	backgroundLoadSampleInterval = 2 * time.Second
 
-	backgroundIdleExecutionCap     = 32
-	backgroundModerateExecutionCap = 8
-	backgroundBusyExecutionCap     = 2
-	backgroundCriticalExecutionCap = 0
-	backgroundIdleDispatchCap      = 2 * backgroundIdleExecutionCap
-	backgroundModerateDispatchCap  = 2 * backgroundModerateExecutionCap
-	backgroundBusyDispatchCap      = backgroundBusyExecutionCap
-	backgroundCriticalDispatchCap  = 0
-
-	backgroundExecutionLeaseTTL = 25 * time.Minute
+	// The Asynq server owns the hard ceiling. The adaptive window starts
+	// conservatively, slow-starts and then probes upward additively while the
+	// host has headroom, and never closes completely so every weighted
+	// background queue can progress.
+	backgroundWorkerMinimum             = 8
+	backgroundWorkerInitial             = 16
+	backgroundWorkerMinimumIncreaseStep = 8
+	backgroundRecoverySamples           = 2
+	backgroundMetricFailureLimit        = 3
 )
 
-const (
-	backgroundLoadIdle backgroundLoadLevel = iota
-	backgroundLoadModerate
-	backgroundLoadBusy
-	backgroundLoadCritical
-)
+// ErrBackgroundExecutionDeferred tells the background Asynq server to retry a
+// task later without counting a business failure. The task remains fenced by
+// its existing durable dispatch token; no database cleanup is needed.
+var ErrBackgroundExecutionDeferred = errors.New("background execution capacity is temporarily unavailable")
 
-const backgroundExecutionKey = "remail:background-execution-slots"
-
-var acquireBackgroundExecutionScript = redis.NewScript(`
-redis.call("zremrangebyscore", KEYS[1], "-inf", ARGV[1])
-if redis.call("zcard", KEYS[1]) >= tonumber(ARGV[2]) then
-    return 0
-end
-redis.call("zadd", KEYS[1], ARGV[3], ARGV[4])
-redis.call("pexpire", KEYS[1], ARGV[5])
-return 1
-`)
-
-type backgroundLoadLevel uint8
-
-type queueInfoReader interface {
-	GetQueueInfo(queue string) (*asynq.QueueInfo, error)
+type systemLoadReader interface {
+	CPUPercent(ctx context.Context) (float64, error)
+	MemoryPercent(ctx context.Context) (float64, error)
 }
 
-type queueNamesReader interface {
-	Queues() ([]string, error)
-}
+type gopsutilSystemLoadReader struct{}
 
-// BackgroundLoadController keeps low-priority queues full while the service is
-// idle and stops adding work when foreground queues or MySQL are busy.
-type BackgroundLoadController struct {
-	db                 *sql.DB
-	queues             queueInfoReader
-	redis              redis.UniversalClient
-	workerConcurrency  int
-	foregroundQueues   []string
-	backgroundQueues   []string
-	foregroundRequests atomic.Int64
-	dispatchMu         sync.Mutex
-	executionMu        sync.Mutex
-	localExecutions    int
-}
-
-func NewBackgroundLoadController(db *sql.DB, queues queueInfoReader, redisClient redis.UniversalClient, workerConcurrency int) *BackgroundLoadController {
-	if workerConcurrency <= 0 {
-		workerConcurrency = 1
-	}
-	return &BackgroundLoadController{
-		db:                db,
-		queues:            queues,
-		redis:             redisClient,
-		workerConcurrency: workerConcurrency,
-		foregroundQueues:  []string{QueueMailfetch, QueueDefault, QueueMailtransport},
-		// Load-managed background queues. QueueResource is intentionally omitted:
-		// admin bulk tasks are best-effort and their handler does not consult the
-		// load controller, so they run unmanaged on the background worker pool.
-		backgroundQueues: []string{QueueBackgroundValidation, QueueBackgroundAlias},
-	}
-}
-
-func (c *BackgroundLoadController) AcquireDispatchBudget(_ context.Context, queue string, minimum, maximum int) (int, func()) {
-	if c == nil {
-		return minimum, func() {}
-	}
-
-	// Dispatchers are short database/queue operations. Serializing them in this
-	// process prevents competing scans from overfilling the background queues
-	// without turning a normal lock race into a silently dropped dispatch.
-	// Cross-process correctness remains with each durable store's claim.
-	c.dispatchMu.Lock()
-	return c.dispatchLimit(queue, minimum, maximum, true), c.dispatchMu.Unlock
-}
-
-// TryAcquireExecution admits a low-priority task immediately before it claims
-// durable work or starts an external request. Dispatch limiting keeps Redis
-// reasonably sized; this gate is what makes already-pending tasks yield when
-// foreground load rises.
-func (c *BackgroundLoadController) TryAcquireExecution(ctx context.Context, _ string) (bool, func()) {
-	if c == nil {
-		return true, func() {}
-	}
-	limit := c.executionLimit()
-	if limit <= 0 {
-		return false, func() {}
-	}
-	if c.redis == nil {
-		return c.tryAcquireLocalExecution(limit)
-	}
-
-	now := time.Now().UTC()
-	token := NewUUIDV4String()
-	result, err := acquireBackgroundExecutionScript.Run(
-		ctx,
-		c.redis,
-		[]string{backgroundExecutionKey},
-		now.UnixMilli(),
-		limit,
-		now.Add(backgroundExecutionLeaseTTL).UnixMilli(),
-		token,
-		backgroundExecutionLeaseTTL.Milliseconds(),
-	).Int()
+func (gopsutilSystemLoadReader) CPUPercent(ctx context.Context) (float64, error) {
+	values, err := cpu.PercentWithContext(ctx, 0, false)
 	if err != nil {
-		if ctx.Err() != nil {
-			return false, func() {}
-		}
-		// Keep a bounded process-local fallback if distributed admission is
-		// temporarily unavailable. This avoids both stranding durable work and
-		// admitting every pending task without a limit.
-		return c.tryAcquireLocalExecution(limit)
+		return 0, err
 	}
-	if result == 0 {
-		return false, func() {}
+	if len(values) == 0 {
+		return 0, errors.New("cpu usage sample is empty")
 	}
-
-	var once sync.Once
-	release := func() {
-		once.Do(func() {
-			releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			_ = c.redis.ZRem(releaseCtx, backgroundExecutionKey, token).Err()
-		})
-	}
-	return true, release
+	return values[0], nil
 }
 
-func (c *BackgroundLoadController) tryAcquireLocalExecution(limit int) (bool, func()) {
-	c.executionMu.Lock()
-	if c.localExecutions >= limit {
-		c.executionMu.Unlock()
-		return false, func() {}
+func (gopsutilSystemLoadReader) MemoryPercent(ctx context.Context) (float64, error) {
+	stats, err := mem.VirtualMemoryWithContext(ctx)
+	if err != nil {
+		return 0, err
 	}
-	c.localExecutions++
-	c.executionMu.Unlock()
-
-	var once sync.Once
-	return true, func() {
-		once.Do(func() {
-			c.executionMu.Lock()
-			c.localExecutions--
-			c.executionMu.Unlock()
-		})
+	if stats == nil {
+		return 0, errors.New("memory usage sample is empty")
 	}
+	return stats.UsedPercent, nil
 }
 
-func (c *BackgroundLoadController) BeginForegroundRequest() func() {
-	if c == nil {
-		return func() {}
-	}
-	c.foregroundRequests.Add(1)
-	return func() {
-		c.foregroundRequests.Add(-1)
-	}
+type systemLoadSample struct {
+	cpuPercent    float64
+	memoryPercent float64
+	cpuValid      bool
+	memoryValid   bool
+	sampledAt     time.Time
 }
 
-// DispatchLimit returns how many additional tasks may be queued now.
-func (c *BackgroundLoadController) DispatchLimit(queue string, minimum, maximum int) int {
-	return c.dispatchLimit(queue, minimum, maximum, false)
+// adaptiveConcurrencyGate is one process-wide, non-blocking execution window
+// shared by every background task type. A denied task is deferred by Asynq
+// instead of waiting in the handler, so admission control never consumes the
+// task's execution timeout.
+type adaptiveConcurrencyGate struct {
+	mu      sync.Mutex
+	maximum int
+	limit   int
+	active  int
 }
 
-func (c *BackgroundLoadController) dispatchLimit(queue string, minimum, maximum int, ignoreCurrentDispatcher bool) int {
+func newAdaptiveConcurrencyGate(initial, maximum int) *adaptiveConcurrencyGate {
 	if maximum <= 0 {
-		return 0
+		maximum = 1
 	}
-	if minimum <= 0 {
-		minimum = 1
+	initial = clamp(initial, 1, maximum)
+	return &adaptiveConcurrencyGate{
+		maximum: maximum,
+		limit:   initial,
 	}
-	if minimum > maximum {
-		minimum = maximum
+}
+
+func (g *adaptiveConcurrencyGate) TryAcquire() (func(), bool) {
+	g.mu.Lock()
+	if g.active >= g.limit {
+		g.mu.Unlock()
+		return func() {}, false
 	}
+	g.active++
+	g.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(g.Release) }, true
+}
+
+func (g *adaptiveConcurrencyGate) Release() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.active <= 0 {
+		panic("platform: background concurrency permit released without acquire")
+	}
+	g.active--
+}
+
+func (g *adaptiveConcurrencyGate) Resize(limit int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.limit = clamp(limit, 1, g.maximum)
+}
+
+func (g *adaptiveConcurrencyGate) Stats() (limit, active, maximum int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.limit, g.active, g.maximum
+}
+
+// BackgroundLoadSnapshot is the observable state of the adaptive background
+// worker window. Limit is the number of handlers currently allowed to execute;
+// Active is the live gate count. Denied tasks are returned without blocking.
+type BackgroundLoadSnapshot struct {
+	Limit         int
+	Active        int
+	Maximum       int
+	CPUPercent    float64
+	MemoryPercent float64
+	CPUValid      bool
+	MemoryValid   bool
+	SampledAt     time.Time
+}
+
+// BackgroundLoadController applies an AIMD-style feedback loop to one global
+// background execution window. CPU and memory are the only pressure signals:
+//
+//   - below 60% for both signals while the current window is saturated: after
+//     two confirming samples, double up to the remembered slow-start threshold,
+//     then grow additively without increasing by more than half the window;
+//   - from 60% up to 70%: hold the current window;
+//   - at or above 70% for either signal: halve the window.
+//
+// The 10-point hysteresis band prevents boundary chatter. Multiplicative
+// decrease gives foreground work capacity quickly. Startup doubles only to
+// half of the hard ceiling; after the first overload, that measured safe point
+// replaces the startup threshold and recovery becomes additive. Requiring real
+// saturation prevents an idle process from silently ramping to the 512 hard
+// ceiling before its first burst. The window never makes queue-specific
+// decisions; Asynq's non-strict weighted polling and durable dispatchers
+// preserve progress across background task types.
+type BackgroundLoadController struct {
+	systemLoad         systemLoadReader
+	gate               *adaptiveConcurrencyGate
+	minimum            int
+	maximum            int
+	increaseStep       int
+	slowStartThreshold int
+	sampleInterval     time.Duration
+
+	tuneMu            sync.Mutex
+	sampleMu          sync.RWMutex
+	lastSample        systemLoadSample
+	metricsStateKnown bool
+	metricsHealthy    bool
+	headroomSamples   int
+	metricFailures    int
+
+	lifecycleMu sync.Mutex
+	started     bool
+	cancel      context.CancelFunc
+	done        chan struct{}
+}
+
+func NewBackgroundLoadController(maximum int) *BackgroundLoadController {
+	return newBackgroundLoadController(gopsutilSystemLoadReader{}, maximum)
+}
+
+func newBackgroundLoadController(load systemLoadReader, maximum int) *BackgroundLoadController {
+	if maximum <= 0 {
+		maximum = 1
+	}
+	minimum := min(backgroundWorkerMinimum, maximum)
+	initial := min(max(backgroundWorkerInitial, minimum), maximum)
+	increaseStep := min(max(backgroundWorkerMinimumIncreaseStep, maximum/16, 1), maximum)
+	slowStartThreshold := min(maximum, max(initial, maximum/2))
+	return &BackgroundLoadController{
+		systemLoad:         load,
+		gate:               newAdaptiveConcurrencyGate(initial, maximum),
+		minimum:            minimum,
+		maximum:            maximum,
+		increaseStep:       increaseStep,
+		slowStartThreshold: slowStartThreshold,
+		sampleInterval:     backgroundLoadSampleInterval,
+	}
+}
+
+// Start performs one load sample synchronously and then starts the feedback
+// loop. The returned cleanup function is idempotent and matches router cleanup
+// functions. A controller has one lifecycle and is not restarted after Stop.
+func (c *BackgroundLoadController) Start(parent context.Context) func(context.Context) {
 	if c == nil {
-		return minimum
+		return func(context.Context) {}
+	}
+	if parent == nil {
+		parent = context.Background()
 	}
 
-	target := min(maximum, backgroundIdleDispatchCap)
-	switch c.loadLevel(ignoreCurrentDispatcher) {
-	case backgroundLoadCritical:
-		target = min(maximum, backgroundCriticalDispatchCap)
-	case backgroundLoadBusy:
-		target = min(maximum, backgroundBusyDispatchCap)
-	case backgroundLoadModerate:
-		target = min(maximum, backgroundModerateDispatchCap)
+	c.lifecycleMu.Lock()
+	if c.started {
+		c.lifecycleMu.Unlock()
+		return c.Stop
 	}
+	runCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	c.started = true
+	c.cancel = cancel
+	c.done = done
+	c.lifecycleMu.Unlock()
 
-	if target <= 0 {
-		return 0
-	}
-	globalOutstanding := 0
-	queueOutstanding := 0
-	otherQueueHasWork := false
-	for _, backgroundQueue := range c.backgroundQueues {
-		outstanding, reliable := c.queueOutstanding(backgroundQueue)
-		if !reliable {
-			return 0
-		}
-		globalOutstanding += outstanding
-		if backgroundQueue == queue {
-			queueOutstanding = outstanding
-		} else if outstanding > 0 {
-			otherQueueHasWork = true
-		}
-	}
-	globalAvailable := target - globalOutstanding
-	if globalAvailable <= 0 {
-		// A single queue is allowed to borrow the whole idle budget, but that
-		// must not prevent the other periodically-run dispatcher from ever
-		// seeding its first task. Admit one bounded probe batch; once that work
-		// is visible in Asynq, the normal 3:1 targets make the borrowing queue
-		// drain back to its share. The execution gate remains the hard resource
-		// cap, so this small dispatch overshoot cannot increase running work.
-		if queueOutstanding == 0 {
-			return min(minimum, target, maximum)
-		}
-		return 0
-	}
-	queueTarget := target
-	if otherQueueHasWork {
-		queueTarget = c.backgroundQueueTarget(queue, target)
-	}
-	queueAvailable := queueTarget - queueOutstanding
-	if queueAvailable <= 0 {
-		return 0
-	}
-	if queueAvailable < globalAvailable {
-		return queueAvailable
-	}
-	return globalAvailable
+	// Establish the first P-state before the background Asynq server starts.
+	c.sampleAndTune(runCtx)
+	go c.run(runCtx, done)
+	return c.Stop
 }
 
-func (c *BackgroundLoadController) backgroundQueueTarget(queue string, total int) int {
-	switch queue {
-	case "background_validation":
-		if total >= 2 {
-			return total - max(1, total/4)
-		}
-		return total
-	case "background_alias":
-		if total >= 2 {
-			return max(1, total/4)
-		}
-		return total
-	default:
-		return total
-	}
-}
-
-func (c *BackgroundLoadController) executionLimit() int {
-	switch c.loadLevel(false) {
-	case backgroundLoadCritical:
-		return backgroundCriticalExecutionCap
-	case backgroundLoadBusy:
-		return backgroundBusyExecutionCap
-	case backgroundLoadModerate:
-		return backgroundModerateExecutionCap
-	default:
-		return backgroundIdleExecutionCap
-	}
-}
-
-func (c *BackgroundLoadController) loadLevel(ignoreCurrentDispatcher bool) backgroundLoadLevel {
+func (c *BackgroundLoadController) Stop(ctx context.Context) {
 	if c == nil {
-		return backgroundLoadIdle
+		return
 	}
-	dbUtilization := c.databaseUtilization()
-	foregroundActive, foregroundPending, telemetryReliable := c.foregroundLoad()
-	// Dispatchers run on the default foreground queue. While one is asking for
-	// a budget, its own active task must not turn an otherwise idle system into
-	// moderate load. Execution admission does not use this adjustment, and the
-	// process-local dispatcher mutex serializes these budget calculations.
-	if ignoreCurrentDispatcher && foregroundActive > 0 {
-		foregroundActive--
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	foregroundRequests := int(c.foregroundRequests.Load())
-	criticalRequests := max(1, c.workerConcurrency/4)
-	criticalActive := max(1, c.workerConcurrency/2)
-	criticalPending := max(1, c.workerConcurrency)
-	busyRequests := max(1, c.workerConcurrency/8)
-	busyActive := max(1, c.workerConcurrency/4)
-	busyPending := max(1, c.workerConcurrency/2)
+	c.lifecycleMu.Lock()
+	cancel := c.cancel
+	done := c.done
+	c.lifecycleMu.Unlock()
+	if cancel == nil || done == nil {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
 
+func (c *BackgroundLoadController) run(ctx context.Context, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(c.sampleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.sampleAndTune(ctx)
+		}
+	}
+}
+
+func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
+	if c == nil || c.gate == nil {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
+
+	sample := systemLoadSample{sampledAt: time.Now()}
+	if c.systemLoad != nil {
+		if value, err := c.systemLoad.CPUPercent(ctx); err == nil && validSystemPercent(value) {
+			sample.cpuPercent = value
+			sample.cpuValid = true
+		}
+		if value, err := c.systemLoad.MemoryPercent(ctx); err == nil && validSystemPercent(value) {
+			sample.memoryPercent = value
+			sample.memoryValid = true
+		}
+	}
+
+	current, active, _ := c.gate.Stats()
+	next := current
+	reason := "hysteresis"
+	high := (sample.cpuValid && sample.cpuPercent >= backgroundOverloadPercent) ||
+		(sample.memoryValid && sample.memoryPercent >= backgroundOverloadPercent)
+	low := sample.cpuValid && sample.memoryValid &&
+		sample.cpuPercent < backgroundRecoveryPercent &&
+		sample.memoryPercent < backgroundRecoveryPercent
+	healthy := sample.cpuValid && sample.memoryValid
+	if healthy {
+		c.metricFailures = 0
+	} else {
+		c.metricFailures = min(c.metricFailures+1, backgroundMetricFailureLimit)
+	}
 	switch {
-	case dbUtilization >= backgroundCriticalDBUtilization ||
-		foregroundRequests >= criticalRequests ||
-		foregroundActive >= criticalActive ||
-		foregroundPending >= criticalPending:
-		return backgroundLoadCritical
-	case dbUtilization >= backgroundBusyDBUtilization ||
-		!telemetryReliable ||
-		foregroundRequests >= busyRequests ||
-		foregroundActive >= busyActive ||
-		foregroundPending >= busyPending:
-		return backgroundLoadBusy
-	case dbUtilization >= backgroundModerateDBUtilization ||
-		foregroundRequests > 0 ||
-		foregroundActive > 0 ||
-		foregroundPending > 0:
-		return backgroundLoadModerate
+	case high:
+		c.headroomSamples = 0
+		next = max(c.minimum, (current+1)/2)
+		c.slowStartThreshold = next
+		reason = "overload"
+	case low:
+		if active != current {
+			c.headroomSamples = 0
+			reason = "underutilized"
+		} else {
+			c.headroomSamples = min(c.headroomSamples+1, backgroundRecoverySamples)
+		}
+		if active == current && c.headroomSamples >= backgroundRecoverySamples {
+			if current < c.slowStartThreshold {
+				next = min(c.slowStartThreshold, current*2)
+				reason = "slow_start"
+			} else {
+				increase := min(c.increaseStep, max(1, current/2))
+				next = min(c.maximum, current+increase)
+				reason = "congestion_avoidance"
+			}
+		} else if active == current {
+			reason = "headroom_confirming"
+		}
+	case !sample.cpuValid || !sample.memoryValid:
+		c.headroomSamples = 0
+		if c.metricFailures >= backgroundMetricFailureLimit {
+			next = max(c.minimum, (current+1)/2)
+			c.slowStartThreshold = next
+			reason = "metrics_stale"
+		} else {
+			reason = "metrics_unavailable"
+		}
 	default:
-		return backgroundLoadIdle
+		c.headroomSamples = 0
 	}
+	if next != current {
+		c.gate.Resize(next)
+		slog.Info(
+			"background worker window adjusted",
+			"previous", current,
+			"limit", next,
+			"maximum", c.maximum,
+			"active", active,
+			"reason", reason,
+			"cpu_percent", sample.cpuPercent,
+			"cpu_valid", sample.cpuValid,
+			"memory_percent", sample.memoryPercent,
+			"memory_valid", sample.memoryValid,
+		)
+	}
+
+	if !healthy && (!c.metricsStateKnown || c.metricsHealthy) {
+		slog.Warn(
+			"background load metrics unavailable; holding worker window",
+			"cpu_valid", sample.cpuValid,
+			"memory_valid", sample.memoryValid,
+			"limit", next,
+		)
+	} else if healthy && c.metricsStateKnown && !c.metricsHealthy {
+		slog.Info("background load metrics recovered", "limit", next)
+	}
+	c.metricsStateKnown = true
+	c.metricsHealthy = healthy
+
+	c.sampleMu.Lock()
+	c.lastSample = sample
+	c.sampleMu.Unlock()
 }
 
-func (c *BackgroundLoadController) databaseUtilization() float64 {
-	if c == nil || c.db == nil {
+// TryAcquire attempts one permit without blocking. On denial, background
+// handlers return ErrBackgroundExecutionDeferred so Asynq preserves the task
+// and its durable dispatch token while scheduling a short retry. Waiting here
+// would consume the task's execution timeout before business work starts.
+func (c *BackgroundLoadController) TryAcquire() (func(), bool) {
+	if c == nil || c.gate == nil {
+		return func() {}, true
+	}
+	return c.gate.TryAcquire()
+}
+
+// Available returns the currently unused portion of the adaptive execution
+// window. Durable dispatchers use this as a bounded prefetch hint so a large
+// database backlog does not become an unbounded Asynq retry backlog. It is not
+// an overload signal; CPU and memory remain the only inputs that resize Limit.
+func (c *BackgroundLoadController) Available() int {
+	if c == nil || c.gate == nil {
 		return 0
 	}
-	stats := c.db.Stats()
-	if stats.MaxOpenConnections <= 0 {
-		return 0
-	}
-	return float64(stats.InUse) / float64(stats.MaxOpenConnections)
+	limit, active, _ := c.gate.Stats()
+	return max(0, limit-active)
 }
 
-func (c *BackgroundLoadController) foregroundLoad() (active, pending int, reliable bool) {
-	if c == nil || c.queues == nil {
-		return 0, 0, true
+func (c *BackgroundLoadController) Snapshot() BackgroundLoadSnapshot {
+	if c == nil || c.gate == nil {
+		return BackgroundLoadSnapshot{}
 	}
-	for _, queue := range c.foregroundQueues {
-		info, reliable := c.queueInfo(queue)
-		if !reliable {
-			return 0, 0, false
-		}
-		if info == nil {
-			continue
-		}
-		active += info.Active
-		pending += info.Pending + info.Retry
+	limit, active, maximum := c.gate.Stats()
+	c.sampleMu.RLock()
+	sample := c.lastSample
+	c.sampleMu.RUnlock()
+	return BackgroundLoadSnapshot{
+		Limit:         limit,
+		Active:        active,
+		Maximum:       maximum,
+		CPUPercent:    sample.cpuPercent,
+		MemoryPercent: sample.memoryPercent,
+		CPUValid:      sample.cpuValid,
+		MemoryValid:   sample.memoryValid,
+		SampledAt:     sample.sampledAt,
 	}
-	return active, pending, true
 }
 
-func (c *BackgroundLoadController) queueOutstanding(queue string) (int, bool) {
-	if c == nil || c.queues == nil || queue == "" {
-		return 0, true
-	}
-	info, reliable := c.queueInfo(queue)
-	if !reliable {
-		return 0, false
-	}
-	if info == nil {
-		return 0, true
-	}
-	return info.Active + info.Pending + info.Retry, true
+func validSystemPercent(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 100
 }
 
-func (c *BackgroundLoadController) queueInfo(queue string) (*asynq.QueueInfo, bool) {
-	info, err := c.queues.GetQueueInfo(queue)
-	if err == nil {
-		return info, true
-	}
-	if errors.Is(err, asynq.ErrQueueNotFound) {
-		return nil, true
-	}
-
-	// Inspector.GetQueueInfo returns an internal queue-not-found error that
-	// does not match the public asynq.ErrQueueNotFound sentinel. Confirm
-	// absence through the public queue list so an empty Redis can bootstrap
-	// its first background task without masking errors for existing queues.
-	names, ok := c.queues.(queueNamesReader)
-	if !ok {
-		return nil, false
-	}
-	queues, listErr := names.Queues()
-	if listErr != nil {
-		return nil, false
-	}
-	for _, existing := range queues {
-		if existing == queue {
-			return nil, false
-		}
-	}
-	return nil, true
+func clamp(value, minimum, maximum int) int {
+	return min(max(value, minimum), maximum)
 }

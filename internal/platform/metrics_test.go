@@ -17,4 +17,6 @@ func TestMetricsHandlerExposesReMailMetrics(t *testing.T) {
 	body := recorder.Body.String()
 	require.True(t, strings.Contains(body, "remail_business_events_total"))
 	require.True(t, strings.Contains(body, "remail_db_open_connections"))
+	require.True(t, strings.Contains(body, "remail_background_worker_limit"))
+	require.True(t, strings.Contains(body, "remail_background_load_metrics_healthy"))
 }

@@ -10,26 +10,21 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
-type coreBackgroundDispatchStub struct {
+type coreBackgroundExecutionGateStub struct {
 	admitted bool
-	queue    string
-	released bool
+	released atomic.Bool
 }
 
-func (s *coreBackgroundDispatchStub) AcquireDispatchBudget(context.Context, string, int, int) (int, func()) {
-	return 0, func() {}
+func (s *coreBackgroundExecutionGateStub) TryAcquire() (func(), bool) {
+	return func() { s.released.Store(true) }, s.admitted
 }
 
-func (s *coreBackgroundDispatchStub) TryAcquireExecution(_ context.Context, queue string) (bool, func()) {
-	s.queue = queue
-	return s.admitted, func() { s.released = true }
-}
-
-func TestResourceValidationTaskAdmissionDenialReleasesDurableDispatch(t *testing.T) {
+func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t *testing.T) {
 	repo := newMockValidationRepo(nil)
 	now := time.Now().UTC()
 	repo.jobs[1] = &coredomain.ResourceValidation{
@@ -39,10 +34,10 @@ func TestResourceValidationTaskAdmissionDenialReleasesDurableDispatch(t *testing
 		DispatchedAt:  &now,
 		MaxAttempts:   coredomain.ResourceValidationDefaultMaxAttempts,
 	}
-	gate := &coreBackgroundDispatchStub{}
+	gate := &coreBackgroundExecutionGateStub{}
 	module := &CoreModule{
-		ValidationUseCase:  coreapp.NewResourceValidationUseCase(nil, repo, &mockValidationQueue{}, nil),
-		BackgroundDispatch: gate,
+		ValidationUseCase:   coreapp.NewResourceValidationUseCase(nil, repo, &mockValidationQueue{}, nil),
+		BackgroundExecution: gate,
 	}
 	mux := asynq.NewServeMux()
 	RegisterCoreTaskHandlers(mux, module)
@@ -54,12 +49,11 @@ func TestResourceValidationTaskAdmissionDenialReleasesDurableDispatch(t *testing
 
 	err = mux.ProcessTask(context.Background(), asynq.NewTask(coreinfra.TypeResourceValidation, encoded))
 
-	require.NoError(t, err)
-	require.Equal(t, coreinfra.ResourceValidationQueueName, gate.queue)
-	require.Empty(t, repo.jobs[1].DispatchToken)
-	require.Nil(t, repo.jobs[1].DispatchedAt)
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.Equal(t, "dispatch-token", repo.jobs[1].DispatchToken)
+	require.NotNil(t, repo.jobs[1].DispatchedAt)
 	require.Equal(t, coredomain.ResourceValidationQueued, repo.jobs[1].Status)
-	require.False(t, gate.released)
+	require.False(t, gate.released.Load(), "a denied task never owns a permit")
 }
 
 type dispatcherCountingQueue struct {

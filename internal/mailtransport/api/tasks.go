@@ -9,19 +9,18 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const (
-	mailDispatcherInterval                   = 15 * time.Second
-	microsoftAliasDispatcherInterval         = 15 * time.Second
-	microsoftTokenRefreshDispatcherInterval  = 15 * time.Second
-	microsoftAliasDispatchMinimum            = 4
-	microsoftAliasDispatchMaximum            = 64
-	microsoftAliasAdmissionRetryDelay        = 30 * time.Second
-	microsoftTokenRefreshDispatchMinimum     = 2
-	microsoftTokenRefreshDispatchMaximum     = 32
-	microsoftTokenRefreshAdmissionRetryDelay = 30 * time.Second
+	mailDispatcherInterval                  = 15 * time.Second
+	microsoftAliasDispatcherInterval        = 2 * time.Second
+	microsoftTokenRefreshDispatcherInterval = 2 * time.Second
+	microsoftAliasDispatchMaximum           = 128
+	microsoftTokenRefreshDispatchMaximum    = 32
+	backgroundLegacyReleaseTimeout          = 5 * time.Second
+	backgroundLegacyAliasRetryDelay         = 30 * time.Second
 )
 
 func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTransportModule) {
@@ -29,17 +28,7 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if module == nil || module.TokenRefresh == nil {
 			return nil
 		}
-		limit := microsoftTokenRefreshDispatchMaximum
-		releaseBudget := func() {}
-		if module.BackgroundDispatch != nil {
-			limit, releaseBudget = module.BackgroundDispatch.AcquireDispatchBudget(
-				ctx,
-				mailinfra.MicrosoftTokenRefreshQueueName,
-				microsoftTokenRefreshDispatchMinimum,
-				microsoftTokenRefreshDispatchMaximum,
-			)
-		}
-		defer releaseBudget()
+		limit := backgroundDispatchLimit(module.BackgroundExecution, microsoftTokenRefreshDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
@@ -70,25 +59,22 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if payload.JobID == 0 || payload.ResourceID == 0 || payload.DispatchToken == "" {
 			return fmt.Errorf("decode microsoft token refresh task: identity is missing: %w", asynq.SkipRetry)
 		}
-		if module.BackgroundDispatch != nil {
-			admitted, release := module.BackgroundDispatch.TryAcquireExecution(ctx, mailinfra.MicrosoftTokenRefreshQueueName)
-			if !admitted {
-				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 				defer cancel()
-				if err := module.TokenRefresh.ReleaseDispatch(releaseCtx, payload); err != nil {
-					slog.Warn(
-						"microsoft token refresh admission release deferred",
-						"job_id", payload.JobID,
-						"resource_id", payload.ResourceID,
-						"request_id", payload.RequestID,
-					)
-					return nil
+				if err := module.TokenRefresh.ReleaseDispatch(recoveryCtx, payload); err != nil {
+					return fmt.Errorf("release legacy microsoft token refresh dispatch: %w", err)
 				}
-				module.TokenRefresh.ScheduleDispatcher(releaseCtx, microsoftTokenRefreshAdmissionRetryDelay)
 				return nil
 			}
-			defer release()
+			return platform.ErrBackgroundExecutionDeferred
 		}
+		defer release()
 		if err := module.TokenRefresh.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"microsoft token refresh task deferred",
@@ -96,7 +82,7 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 				"resource_id", payload.ResourceID,
 				"request_id", payload.RequestID,
 			)
-			return nil
+			return err
 		}
 		slog.Info(
 			"microsoft token refresh task finished",
@@ -111,17 +97,7 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if module == nil || module.MicrosoftAliases == nil {
 			return nil
 		}
-		limit := microsoftAliasDispatchMaximum
-		releaseBudget := func() {}
-		if module.BackgroundDispatch != nil {
-			limit, releaseBudget = module.BackgroundDispatch.AcquireDispatchBudget(
-				ctx,
-				mailinfra.MicrosoftAliasQueueName,
-				microsoftAliasDispatchMinimum,
-				microsoftAliasDispatchMaximum,
-			)
-		}
-		defer releaseBudget()
+		limit := backgroundDispatchLimit(module.BackgroundExecution, microsoftAliasDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
@@ -155,27 +131,30 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if payload.ResourceID == 0 || payload.DispatchToken == "" {
 			return fmt.Errorf("decode microsoft alias task: identity is missing: %w", asynq.SkipRetry)
 		}
-		if module.BackgroundDispatch != nil {
-			admitted, release := module.BackgroundDispatch.TryAcquireExecution(ctx, mailinfra.MicrosoftAliasQueueName)
-			if !admitted {
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				if module.AliasDispatch == nil {
-					slog.Warn("microsoft alias task admission deferred without schedule releaser", "resource_id", payload.ResourceID)
-					return nil
+					return fmt.Errorf("release legacy microsoft alias dispatch: schedule store is unavailable")
 				}
-				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 				defer cancel()
 				if err := module.AliasDispatch.MarkDispatchFailed(
-					releaseCtx,
+					recoveryCtx,
 					payload,
-					time.Now().UTC().Add(microsoftAliasAdmissionRetryDelay),
+					time.Now().UTC().Add(backgroundLegacyAliasRetryDelay),
 					"",
 				); err != nil {
-					return fmt.Errorf("defer microsoft alias task after admission denial: %w", err)
+					return fmt.Errorf("release legacy microsoft alias dispatch: %w", err)
 				}
 				return nil
 			}
-			defer release()
+			return platform.ErrBackgroundExecutionDeferred
 		}
+		defer release()
 		if err := module.MicrosoftAliases.Process(ctx, payload); err != nil {
 			slog.Warn("microsoft alias task failed", "resource_id", payload.ResourceID, "error", err)
 			return err
@@ -260,6 +239,34 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		slog.Info("inbound mail task finished", "inbound_mail_id", payload.InboundMailID)
 		return nil
 	})
+}
+
+func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecutionGate) (func(), bool, error) {
+	if err := ctx.Err(); err != nil {
+		return func() {}, false, err
+	}
+	if gate == nil {
+		return func() {}, true, nil
+	}
+	release, admitted := gate.TryAcquire()
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted, nil
+}
+
+func backgroundDispatchLimit(gate BackgroundExecutionGate, maximum int) int {
+	if maximum <= 0 {
+		return 0
+	}
+	if gate == nil {
+		return maximum
+	}
+	capacity, ok := gate.(interface{ Available() int })
+	if !ok {
+		return maximum
+	}
+	return min(maximum, max(0, capacity.Available()))
 }
 
 func isFinalAttempt(ctx context.Context) bool {

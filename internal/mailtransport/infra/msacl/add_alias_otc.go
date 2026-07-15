@@ -133,7 +133,7 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// OTP is not swallowed into the "seen" snapshot. This matches the Python
 	// reference (records base_id before GetOneTimeCode) and the existing
 	// bindAuxiliaryEmail pattern (starts the watcher before SendOtt).
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	ctx, cancel := context.WithTimeout(session.context(), 100*time.Second)
 	defer cancel()
 	seen, err := snapshotMailboxKeys(ctx, bindingAddress, proxy)
 	if err != nil {

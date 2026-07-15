@@ -51,7 +51,7 @@ func (q *MicrosoftAliasQueue) EnqueueMicrosoftAlias(ctx context.Context, task ma
 			task.ResourceID,
 			task.DispatchToken,
 		)),
-		asynq.MaxRetry(0),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.Timeout(microsoftAliasTaskTimeout),
 	)
 	if err != nil {
@@ -69,7 +69,7 @@ func (q *MicrosoftAliasQueue) EnqueueMicrosoftAliasDispatcher(ctx context.Contex
 	}
 	options := []asynq.Option{
 		asynq.Queue("default"),
-		asynq.Unique(15 * time.Second),
+		asynq.Unique(microsoftAliasDispatchTimeout),
 		asynq.MaxRetry(0),
 		asynq.Timeout(microsoftAliasDispatchTimeout),
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -201,6 +202,29 @@ WHERE schedule.resource_id = ?`, 1008).Error)
 	assert.True(t, woken.NextRunAt.Equal(now.Add(2*time.Minute)))
 }
 
+func TestMicrosoftAliasStoreEnsureScheduleJoinsCallerTransactionMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1040, "normal")
+	store := NewMicrosoftAliasStore(db)
+	wantRollback := errors.New("roll back alias schedule")
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		ensured, ensureErr := store.EnsureScheduleForResource(
+			platform.WithGormTx(context.Background(), tx),
+			1040,
+			time.Date(2026, time.July, 13, 1, 2, 3, 0, time.UTC),
+		)
+		require.NoError(t, ensureErr)
+		require.True(t, ensured)
+		return wantRollback
+	})
+	require.ErrorIs(t, err, wantRollback)
+
+	var schedules int64
+	require.NoError(t, db.Model(&MicrosoftAliasScheduleModel{}).Where("resource_id = ?", 1040).Count(&schedules).Error)
+	require.Zero(t, schedules, "the alias schedule must roll back with the recovered binding transaction")
+}
+
 func TestMicrosoftAliasStoreWakesPausedScheduleAfterBindingRecoveryMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1018, "normal")
@@ -213,12 +237,7 @@ func TestMicrosoftAliasStoreWakesPausedScheduleAfterBindingRecoveryMySQL(t *test
 	require.NoError(t, err)
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
-	require.NoError(t, err)
-	require.False(t, claimed)
-	require.Nil(t, account)
+	require.Empty(t, tasks, "dispatch prefilter must pause an external binding before enqueue")
 	paused := loadAliasAdminSchedule(t, db, 1018)
 	require.Equal(t, "paused", paused.Status)
 	require.Equal(t, mailapp.MicrosoftAliasExternalRecoveryMessage, paused.LastSafeError)
@@ -293,12 +312,7 @@ func TestMicrosoftAliasStoreBroadScanWakesLegacyUnresolvedBindingAfterRecoveryMy
 	require.NoError(t, err)
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
-	require.NoError(t, err)
-	require.False(t, claimed)
-	require.Nil(t, account)
+	require.Empty(t, tasks, "dispatch prefilter must pause an unresolved binding before enqueue")
 	paused := loadAliasAdminSchedule(t, db, 1032)
 	require.Equal(t, "paused", paused.Status)
 	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, paused.LastSafeError)
@@ -389,11 +403,7 @@ func TestMicrosoftAliasStoreWakesAfterBindingAccountMatchIsRestoredMySQL(t *test
 	require.NoError(t, err)
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-time.Hour), now.Add(-time.Hour))
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
-	require.NoError(t, err)
-	require.False(t, claimed)
-	require.Nil(t, account)
+	require.Empty(t, tasks, "dispatch prefilter must pause an account-mismatched binding before enqueue")
 	require.Equal(t, mailapp.MicrosoftAliasBindingUnresolvedMessage, loadAliasAdminSchedule(t, db, 1037).LastSafeError)
 
 	require.NoError(t, db.Exec(`
@@ -1055,6 +1065,7 @@ func TestMicrosoftAliasStoreSchedulesNormalResourcesRegardlessOfSaleStateMySQL(t
 func TestMicrosoftAliasStoreClaimPausesResourceThatBecomesAbnormalMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1017, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1017)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
@@ -1306,6 +1317,7 @@ func TestMicrosoftAliasStorePermanentPauseDetectsCredentialChangeDuringRunMySQL(
 func TestMicrosoftAliasStoreRotatesExpiredQueuedDispatchTokenMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1012, "normal")
+	createVerifiedMicrosoftAliasBinding(t, db, 1012)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)

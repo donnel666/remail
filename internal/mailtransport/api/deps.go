@@ -21,9 +21,8 @@ import (
 	"gorm.io/gorm"
 )
 
-type BackgroundDispatchSizer interface {
-	AcquireDispatchBudget(ctx context.Context, queue string, minimum, maximum int) (int, func())
-	TryAcquireExecution(ctx context.Context, queue string) (bool, func())
+type BackgroundExecutionGate interface {
+	TryAcquire() (release func(), admitted bool)
 }
 
 type MicrosoftAliasDispatchReleaser interface {
@@ -47,11 +46,17 @@ type MailTransportModule struct {
 	ValidationBinding   coreapp.MicrosoftValidationBindingCommitPort
 	InboundSMTP         *mailinfra.InboundSMTPServer
 	InboundSMTPEnabled  bool
-	BackgroundDispatch  BackgroundDispatchSizer
+	BackgroundExecution BackgroundExecutionGate
 	AliasDispatch       MicrosoftAliasDispatchReleaser
 	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
 	bindingDomains      bindingDomainLister
 	autoRefresh         microsoftAutoRefreshLister
+}
+
+func (m *MailTransportModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
+	if m != nil {
+		m.BackgroundExecution = gate
+	}
 }
 
 // bindingDomainLister sources the auxiliary/recovery-mailbox domains
@@ -146,12 +151,6 @@ func durationUntilHour(hour int) time.Duration {
 		next = next.Add(24 * time.Hour)
 	}
 	return next.Sub(now)
-}
-
-func (m *MailTransportModule) SetBackgroundDispatchSizer(sizer BackgroundDispatchSizer) {
-	if m != nil {
-		m.BackgroundDispatch = sizer
-	}
 }
 
 func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsumerPort) {

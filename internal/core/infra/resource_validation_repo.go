@@ -214,7 +214,7 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 		Path:          strings.TrimSpace(path),
 	}
 	filterCandidateCount := 0
-	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	persist := func(tx *gorm.DB) error {
 		if selection.Mode == coreapp.ResourceBulkSelectionFilter {
 			if err := tx.Table("email_resources").
 				Select("COALESCE(MAX(id), 0)").
@@ -238,7 +238,13 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 			}
 		}
 		return nil
-	}); err != nil {
+	}
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		err = persist(tx.WithContext(ctx))
+	} else {
+		err = r.db.WithContext(ctx).Transaction(persist)
+	}
+	if err != nil {
 		return nil, err
 	}
 	result := &coreapp.ResourceBatchValidationResult{}
@@ -258,28 +264,15 @@ func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context,
 	return result, nil
 }
 
-func (r *ResourceValidationRepo) CreateImportedValidationJobs(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error {
+func (r *ResourceValidationRepo) CreateImportedValidationBatch(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error {
 	if len(resourceIDs) == 0 {
 		return nil
 	}
-	create := func(tx *gorm.DB) error {
-		candidates, err := selectValidationCandidatesByIDs(ctx, tx, ownerUserID, resourceIDs)
-		if err != nil {
-			return err
-		}
-		return createValidationCandidateJobsTx(
-			ctx,
-			tx,
-			candidates,
-			requestID,
-			path,
-			&coreapp.ResourceBatchValidationResult{},
-		)
-	}
-	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		return create(tx)
-	}
-	return r.db.WithContext(ctx).Transaction(create)
+	_, err := r.CreateDeferredBatchWithLog(ctx, ownerUserID, coreapp.ResourceBulkSelection{
+		Mode:        coreapp.ResourceBulkSelectionIDs,
+		ResourceIDs: append([]uint(nil), resourceIDs...),
+	}, nil, requestID, path)
+	return err
 }
 
 func createValidationCandidateJobsTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow, requestID, path string, result *coreapp.ResourceBatchValidationResult) error {
@@ -1359,27 +1352,6 @@ type validationCandidateRow struct {
 	CredentialRevision uint64 `gorm:"column:credential_revision"`
 	MicrosoftStatus    string `gorm:"column:microsoft_status"`
 	DomainStatus       string `gorm:"column:domain_status"`
-}
-
-func selectValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint) ([]validationCandidateRow, error) {
-	if len(ids) == 0 {
-		return nil, domain.ErrResourceNotFound
-	}
-	var rows []validationCandidateRow
-	if err := tx.WithContext(ctx).
-		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
-		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
-		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
-		Where("er.id IN ? AND er.owner_user_id = ?", ids, ownerUserID).
-		Order("er.id ASC").
-		Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("select validation resources: %w", err)
-	}
-	if len(rows) != len(ids) {
-		return nil, domain.ErrForbiddenResource
-	}
-	return validateValidationCandidateRows(rows)
 }
 
 // Deferred batches are accepted against a point-in-time selection. Resources

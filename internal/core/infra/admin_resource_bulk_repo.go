@@ -70,12 +70,9 @@ func (r *AdminResourceBulkRepo) CreateWithLog(ctx context.Context, command *core
 	if command == nil {
 		return false, domain.ErrInvalidResourceCommand
 	}
-	selectionJSON, err := json.Marshal(command.Selection)
-	if err != nil {
-		return false, fmt.Errorf("marshal admin resource bulk selection: %w", err)
-	}
+	requestedSelection := command.Selection
 	created := false
-	err = withRetryableMySQLTransaction(ctx, r.db, func(tx *gorm.DB) error {
+	err := withRetryableMySQLTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		created = false
 		if command.IdempotencyKey != "" {
 			existing, err := findAdminBulkByIdempotencyTx(tx, command.OperatorUserID, command.IdempotencyKey)
@@ -90,35 +87,39 @@ func (r *AdminResourceBulkRepo) CreateWithLog(ctx context.Context, command *core
 				return err
 			}
 		}
+		selection := requestedSelection
+		selection.ResourceIDs = append([]uint(nil), requestedSelection.ResourceIDs...)
 		maxResourceID := uint(0)
-		matched := 0
-		if command.Selection.Mode == coreapp.AdminResourceBulkIDs {
-			matched = len(command.Selection.ResourceIDs)
-			if matched > 0 {
-				maxResourceID = command.Selection.ResourceIDs[matched-1]
+		if selection.Mode == coreapp.AdminResourceBulkIDs {
+			if matched := len(selection.ResourceIDs); matched > 0 {
+				maxResourceID = selection.ResourceIDs[matched-1]
 			}
 		} else {
-			if err := tx.Table("email_resources").
-				Select("COALESCE(MAX(id), 0)").
-				Where("type = ?", string(domain.ResourceTypeMicrosoft)).
-				Row().Scan(&maxResourceID); err != nil {
-				return fmt.Errorf("capture admin bulk high-water mark: %w", err)
+			// A filter is request metadata, not a durable work queue. Freeze its
+			// matching IDs in the same transaction that accepts the command so
+			// later state transitions cannot add or remove work from this batch.
+			// Keeping the compact uint array in the existing JSON column is small
+			// enough for the current resource scale and avoids one row per item.
+			selection.ResourceIDs = nil
+			if err := r.read.adminMicrosoftFilterQuery(
+				platform.WithGormTx(ctx, tx), selection.Filter.ListFilter(), time.Now().UTC(), "",
+			).
+				Select("er.id").
+				Order("er.id ASC").
+				Scan(&selection.ResourceIDs).Error; err != nil {
+				return fmt.Errorf("snapshot admin bulk matches: %w", err)
 			}
-			// Filter batches expand durably in the dispatcher, but the operator
-			// needs an immediate matched-count in the acceptance response instead of
-			// a bare 0. Count how many resources match the filter up to the captured
-			// high-water mark now; the dispatcher's per-page CompletePage still
-			// accumulates the authoritative matched total as it processes.
-			var matched64 int64
-			if err := r.read.adminMicrosoftFilterQuery(ctx, command.Selection.Filter.ListFilter(), time.Now().UTC(), "").
-				Where("er.id <= ?", maxResourceID).
-				Count(&matched64).Error; err != nil {
-				return fmt.Errorf("count admin bulk matches: %w", err)
+			if matched := len(selection.ResourceIDs); matched > 0 {
+				maxResourceID = selection.ResourceIDs[matched-1]
 			}
-			matched = int(matched64)
+		}
+		matched := len(selection.ResourceIDs)
+		selectionJSON, err := json.Marshal(selection)
+		if err != nil {
+			return fmt.Errorf("marshal admin resource bulk selection: %w", err)
 		}
 		model := &AdminResourceBulkCommandModel{
-			OperatorUserID: command.OperatorUserID, Action: string(command.Action), SelectionMode: string(command.Selection.Mode),
+			OperatorUserID: command.OperatorUserID, Action: string(command.Action), SelectionMode: string(selection.Mode),
 			SelectionJSON: selectionJSON, SelectionFingerprint: command.SelectionFingerprint, IdempotencyKey: command.IdempotencyKey,
 			MaxResourceID: maxResourceID, Status: "queued", MatchedCount: matched,
 			ReasonBuckets: []byte(`{}`), MaxAttempts: command.MaxAttempts,
@@ -268,32 +269,28 @@ func (r *AdminResourceBulkRepo) MarkRunning(ctx context.Context, id uint64, disp
 	return result, claimed, err
 }
 
-func (r *AdminResourceBulkRepo) ListCandidateIDs(ctx context.Context, command *coreapp.AdminResourceBulkCommand, limit int, now time.Time) ([]uint, error) {
+func (r *AdminResourceBulkRepo) ListCandidateIDs(_ context.Context, command *coreapp.AdminResourceBulkCommand, limit int, _ time.Time) ([]uint, error) {
 	if command == nil || limit <= 0 {
 		return nil, nil
 	}
-	if command.Selection.Mode == coreapp.AdminResourceBulkIDs {
-		result := make([]uint, 0, limit)
-		for _, id := range command.Selection.ResourceIDs {
-			if id <= command.CheckpointResourceID {
-				continue
-			}
-			result = append(result, id)
-			if len(result) == limit {
-				break
-			}
+	if command.Selection.Mode == coreapp.AdminResourceBulkFilter &&
+		len(command.Selection.ResourceIDs) == 0 && command.ProcessedCount < command.MatchedCount {
+		// Commands accepted before filter snapshots were introduced cannot be
+		// reconstructed faithfully from mutable resource state. Keep them from
+		// being reported as successfully complete with unprocessed accepted work.
+		return nil, fmt.Errorf("admin resource bulk filter snapshot is missing: %w", domain.ErrResourceDependency)
+	}
+	result := make([]uint, 0, limit)
+	for _, id := range command.Selection.ResourceIDs {
+		if id <= command.CheckpointResourceID {
+			continue
 		}
-		return result, nil
+		result = append(result, id)
+		if len(result) == limit {
+			break
+		}
 	}
-	filter := command.Selection.Filter.ListFilter()
-	query := r.read.adminMicrosoftFilterQuery(ctx, filter, now, "").
-		Where("er.id > ? AND er.id <= ?", command.CheckpointResourceID, command.MaxResourceID).
-		Select("er.id").Order("er.id ASC").Limit(limit)
-	var ids []uint
-	if err := query.Scan(&ids).Error; err != nil {
-		return nil, fmt.Errorf("list admin resource bulk candidates: %w", err)
-	}
-	return ids, nil
+	return result, nil
 }
 
 func (r *AdminResourceBulkRepo) CompletePage(ctx context.Context, id uint64, claimToken string, checkpoint uint, matched, processed, affected, skipped int, reasons map[string]int64, done bool) error {

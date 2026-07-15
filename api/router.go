@@ -43,13 +43,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 	// Global middleware
 	r.Use(gin.Recovery())
-	if p.BackgroundLoad != nil {
-		r.Use(func(c *gin.Context) {
-			done := p.BackgroundLoad.BeginForegroundRequest()
-			defer done()
-			c.Next()
-		})
-	}
 	r.Use(middleware.RequestID())
 	r.Use(platform.HTTPMetricsMiddleware())
 	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
@@ -114,7 +107,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		if err != nil {
 			return nil, cleanup, err
 		}
-		mailMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
+		mailMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		mailapi.RegisterMailTransportTaskHandlers(taskMux, mailMod)
 
 		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailMod.DeliveryUseCase)
@@ -130,7 +123,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		}
 		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		coreMod.SetMicrosoftValidationBindingCommitPort(mailMod.ValidationBinding)
-		coreMod.SetBackgroundDispatchSizer(p.BackgroundLoad)
+		coreMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
 		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
@@ -194,6 +187,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		p.ShutdownWorkers()
 		cleanup(context.Background())
 		return nil, cleanup, err
+	}
+	if p.BackgroundLoad != nil {
+		cleanupFuncs = append(cleanupFuncs, p.BackgroundLoad.Start(context.Background()))
 	}
 	if err := p.BackgroundAsynqServer.Start(taskMux); err != nil {
 		p.ShutdownWorkers()

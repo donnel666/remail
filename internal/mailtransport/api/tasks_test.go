@@ -3,97 +3,31 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
-type backgroundDispatchStub struct {
+type mailBackgroundExecutionGateStub struct {
 	admitted bool
-	queue    string
-	released bool
+	released atomic.Bool
 }
 
-func (s *backgroundDispatchStub) AcquireDispatchBudget(context.Context, string, int, int) (int, func()) {
-	return 0, func() {}
+func (s *mailBackgroundExecutionGateStub) TryAcquire() (func(), bool) {
+	return func() { s.released.Store(true) }, s.admitted
 }
 
-func (s *backgroundDispatchStub) TryAcquireExecution(_ context.Context, queue string) (bool, func()) {
-	s.queue = queue
-	return s.admitted, func() { s.released = true }
-}
-
-type aliasDispatchReleaserStub struct {
-	called    bool
-	task      mailapp.MicrosoftAliasTask
-	nextRunAt time.Time
-}
-
-func (s *aliasDispatchReleaserStub) MarkDispatchFailed(_ context.Context, task mailapp.MicrosoftAliasTask, nextRunAt time.Time, _ string) error {
-	s.called = true
-	s.task = task
-	s.nextRunAt = nextRunAt
-	return nil
-}
-
-func TestMicrosoftAliasTaskAdmissionDenialReturnsScheduleToPending(t *testing.T) {
-	gate := &backgroundDispatchStub{}
-	releaser := &aliasDispatchReleaserStub{}
-	module := &MailTransportModule{
-		MicrosoftAliases:   mailapp.NewMicrosoftAliasService(nil, nil, nil),
-		BackgroundDispatch: gate,
-		AliasDispatch:      releaser,
-	}
-	mux := asynq.NewServeMux()
-	RegisterMailTransportTaskHandlers(mux, module)
-	payload := mailapp.MicrosoftAliasTask{
-		ResourceID:    42,
-		DispatchToken: "0123456789abcdef0123456789abcdef",
-	}
-	encoded, err := json.Marshal(payload)
-	require.NoError(t, err)
-	startedAt := time.Now().UTC()
-
-	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeMicrosoftAlias, encoded))
-
-	require.NoError(t, err)
-	require.Equal(t, mailinfra.MicrosoftAliasQueueName, gate.queue)
-	require.True(t, releaser.called)
-	require.Equal(t, payload, releaser.task)
-	require.WithinDuration(t, startedAt.Add(microsoftAliasAdmissionRetryDelay), releaser.nextRunAt, time.Second)
-	require.False(t, gate.released)
-}
-
-func TestMicrosoftAliasTaskReleasesAdmissionSlotAfterProcessingFailure(t *testing.T) {
-	gate := &backgroundDispatchStub{admitted: true}
-	module := &MailTransportModule{
-		MicrosoftAliases:   mailapp.NewMicrosoftAliasService(nil, nil, nil),
-		BackgroundDispatch: gate,
-	}
-	mux := asynq.NewServeMux()
-	RegisterMailTransportTaskHandlers(mux, module)
-	encoded, err := json.Marshal(mailapp.MicrosoftAliasTask{
-		ResourceID:    42,
-		DispatchToken: "0123456789abcdef0123456789abcdef",
-	})
-	require.NoError(t, err)
-
-	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeMicrosoftAlias, encoded))
-
-	require.Error(t, err)
-	require.True(t, gate.released)
-}
-
-func TestMicrosoftTokenRefreshTaskAdmissionDenialReleasesDurableDispatch(t *testing.T) {
-	gate := &backgroundDispatchStub{}
+func TestMicrosoftTokenRefreshAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t *testing.T) {
+	gate := &mailBackgroundExecutionGateStub{}
 	repo := &adminTokenRefreshRepoStub{}
 	module := &MailTransportModule{
-		TokenRefresh:       mailapp.NewMicrosoftTokenRefreshService(repo, adminTokenRefreshQueueStub{}, nil),
-		BackgroundDispatch: gate,
+		TokenRefresh:        mailapp.NewMicrosoftTokenRefreshService(repo, adminTokenRefreshQueueStub{}, nil),
+		BackgroundExecution: gate,
 	}
 	mux := asynq.NewServeMux()
 	RegisterMailTransportTaskHandlers(mux, module)
@@ -108,20 +42,17 @@ func TestMicrosoftTokenRefreshTaskAdmissionDenialReleasesDurableDispatch(t *test
 
 	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeMicrosoftTokenRefresh, encoded))
 
-	require.NoError(t, err)
-	require.Equal(t, mailinfra.MicrosoftTokenRefreshQueueName, gate.queue)
-	require.Equal(t, 1, repo.releaseCalls)
-	require.Equal(t, uint64(91), repo.releasedID)
-	require.Equal(t, "dispatch-token", repo.releasedToken)
-	require.False(t, gate.released)
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.Zero(t, repo.releaseCalls)
+	require.False(t, gate.released.Load(), "a denied task never owns a permit")
 }
 
-func TestMicrosoftTokenRefreshTaskReleasesAdmissionSlotAfterProcessing(t *testing.T) {
-	gate := &backgroundDispatchStub{admitted: true}
+func TestMicrosoftTokenRefreshAdmissionPermitIsReleasedAfterNoopClaim(t *testing.T) {
+	gate := &mailBackgroundExecutionGateStub{admitted: true}
 	repo := &adminTokenRefreshRepoStub{}
 	module := &MailTransportModule{
-		TokenRefresh:       mailapp.NewMicrosoftTokenRefreshService(repo, adminTokenRefreshQueueStub{}, nil),
-		BackgroundDispatch: gate,
+		TokenRefresh:        mailapp.NewMicrosoftTokenRefreshService(repo, adminTokenRefreshQueueStub{}, nil),
+		BackgroundExecution: gate,
 	}
 	mux := asynq.NewServeMux()
 	RegisterMailTransportTaskHandlers(mux, module)
@@ -136,5 +67,5 @@ func TestMicrosoftTokenRefreshTaskReleasesAdmissionSlotAfterProcessing(t *testin
 	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeMicrosoftTokenRefresh, encoded))
 
 	require.NoError(t, err)
-	require.True(t, gate.released)
+	require.True(t, gate.released.Load())
 }

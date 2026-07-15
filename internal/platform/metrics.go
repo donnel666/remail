@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	metricsDB atomic.Pointer[sql.DB]
+	metricsDB             atomic.Pointer[sql.DB]
+	metricsBackgroundLoad atomic.Pointer[BackgroundLoadController]
 
 	httpRequests = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "remail_http_requests_total", Help: "HTTP requests by route and status."},
@@ -83,11 +84,69 @@ func init() {
 				return 0
 			},
 		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{Name: "remail_background_worker_limit", Help: "Adaptive limit for concurrently executing background task handlers."},
+			func() float64 {
+				if controller := metricsBackgroundLoad.Load(); controller != nil {
+					return float64(controller.Snapshot().Limit)
+				}
+				return 0
+			},
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{Name: "remail_background_workers_active", Help: "Background task handlers currently executing inside the adaptive window."},
+			func() float64 {
+				if controller := metricsBackgroundLoad.Load(); controller != nil {
+					return float64(controller.Snapshot().Active)
+				}
+				return 0
+			},
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{Name: "remail_background_cpu_percent", Help: "Latest host CPU utilization sample used by the background worker governor."},
+			func() float64 {
+				if controller := metricsBackgroundLoad.Load(); controller != nil {
+					snapshot := controller.Snapshot()
+					if snapshot.CPUValid {
+						return snapshot.CPUPercent
+					}
+				}
+				return 0
+			},
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{Name: "remail_background_memory_percent", Help: "Latest host memory utilization sample used by the background worker governor."},
+			func() float64 {
+				if controller := metricsBackgroundLoad.Load(); controller != nil {
+					snapshot := controller.Snapshot()
+					if snapshot.MemoryValid {
+						return snapshot.MemoryPercent
+					}
+				}
+				return 0
+			},
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{Name: "remail_background_load_metrics_healthy", Help: "Whether both CPU and memory samples are currently valid (1 for valid, 0 otherwise)."},
+			func() float64 {
+				if controller := metricsBackgroundLoad.Load(); controller != nil {
+					snapshot := controller.Snapshot()
+					if snapshot.CPUValid && snapshot.MemoryValid {
+						return 1
+					}
+				}
+				return 0
+			},
+		),
 	)
 }
 
 func SetMetricsDB(db *sql.DB) {
 	metricsDB.Store(db)
+}
+
+func SetMetricsBackgroundLoad(controller *BackgroundLoadController) {
+	metricsBackgroundLoad.Store(controller)
 }
 
 func MetricsHandler() http.Handler {

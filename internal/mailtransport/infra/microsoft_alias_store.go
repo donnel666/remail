@@ -11,6 +11,7 @@ import (
 
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -79,6 +80,7 @@ type MicrosoftAliasStore struct {
 const (
 	microsoftAliasScheduleEnsureBatch             = 10000
 	microsoftAliasRecoveredBindingScanPageSize    = 256
+	microsoftAliasDispatchEligibilityScanMax      = 512
 	microsoftAliasNegativeConfirmationMinInterval = time.Hour
 	legacyMicrosoftAliasPublicOnlyMessage         = "Microsoft resource is not publicly available for alias creation."
 )
@@ -401,7 +403,7 @@ func (s *MicrosoftAliasStore) EnsureScheduleForResource(ctx context.Context, res
 		return false, nil
 	}
 	ensured := false
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	persist := func(tx *gorm.DB) error {
 		inserted := tx.Exec(`
 INSERT IGNORE INTO microsoft_alias_schedules (
     resource_id, status, next_run_at, attempts, last_safe_error, created_at, updated_at
@@ -496,7 +498,13 @@ FOR UPDATE`, resourceID).Scan(&state).Error; err != nil {
 		}
 		ensured = woken.RowsAffected > 0
 		return nil
-	})
+	}
+	var err error
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		err = persist(tx.WithContext(ctx))
+	} else {
+		err = s.db.WithContext(ctx).Transaction(persist)
+	}
 	return ensured, err
 }
 
@@ -539,33 +547,52 @@ func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, n
 	tasks := make([]mailapp.MicrosoftAliasTask, 0, limit)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		schedules := make([]MicrosoftAliasScheduleModel, 0, limit)
-		load := func(status string, before time.Time, order string) error {
+		loadStale := func(status string, before time.Time, order string) error {
 			remaining := limit - len(schedules)
 			if remaining <= 0 {
 				return nil
 			}
 			var batch []MicrosoftAliasScheduleModel
-			query := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-				Where("status = ?", status)
-			if status == "pending" {
-				query = query.Where("next_run_at <= ?", before)
-			} else {
-				query = query.Where("updated_at < ?", before)
-			}
-			if err := query.Order(order).Limit(remaining).Find(&batch).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Where("status = ? AND updated_at < ?", status, before).
+				Order(order).
+				Limit(remaining).
+				Find(&batch).Error; err != nil {
 				return err
 			}
 			schedules = append(schedules, batch...)
 			return nil
 		}
-		if err := load("running", runningStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
+		if err := loadStale("running", runningStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
 			return err
 		}
-		if err := load("queued", queuedStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
+		if err := loadStale("queued", queuedStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
 			return err
 		}
-		if err := load("pending", now, "next_run_at ASC, resource_id ASC"); err != nil {
-			return err
+		if remaining := limit - len(schedules); remaining > 0 {
+			pending, err := lockDueMicrosoftAliasSchedules(tx, now, microsoftAliasDispatchScanLimit(remaining))
+			if err != nil {
+				return err
+			}
+			states, err := loadMicrosoftAliasDispatchEligibility(tx, pending)
+			if err != nil {
+				return err
+			}
+			for _, schedule := range pending {
+				state, ok := states[schedule.ResourceID]
+				if !ok {
+					return fmt.Errorf("load microsoft alias dispatch eligibility: resource %d is missing", schedule.ResourceID)
+				}
+				if safeMessage := microsoftAliasDispatchIneligibleMessage(state); safeMessage != "" {
+					if err := pausePendingMicrosoftAliasSchedule(tx, schedule, state, now, safeMessage); err != nil {
+						return err
+					}
+					continue
+				}
+				if len(schedules) < limit {
+					schedules = append(schedules, schedule)
+				}
+			}
 		}
 		for _, schedule := range schedules {
 			token, err := newMicrosoftAliasClaimToken()
@@ -611,6 +638,137 @@ func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, n
 		return nil, fmt.Errorf("find microsoft alias schedules: %w", err)
 	}
 	return tasks, nil
+}
+
+type microsoftAliasDispatchEligibility struct {
+	ResourceID          uint       `gorm:"column:resource_id"`
+	ResourceStatus      string     `gorm:"column:resource_status"`
+	ResourceEmail       string     `gorm:"column:resource_email"`
+	ResourceSignature   string     `gorm:"column:resource_signature"`
+	ResourceUpdatedAt   time.Time  `gorm:"column:resource_updated_at"`
+	LastAllocatedAt     *time.Time `gorm:"column:last_allocated_at"`
+	BindingAddress      string     `gorm:"column:binding_address"`
+	BindingStatus       string     `gorm:"column:binding_status"`
+	BoundDisplay        string     `gorm:"column:bound_display"`
+	BindingAccountEmail string     `gorm:"column:binding_account_email"`
+	BindingDomainReady  bool       `gorm:"column:binding_domain_ready"`
+}
+
+func microsoftAliasDispatchScanLimit(remaining int) int {
+	limit := remaining * 4
+	if limit < 64 {
+		limit = 64
+	}
+	return min(limit, microsoftAliasDispatchEligibilityScanMax)
+}
+
+func lockDueMicrosoftAliasSchedules(tx *gorm.DB, now time.Time, limit int) ([]MicrosoftAliasScheduleModel, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var schedules []MicrosoftAliasScheduleModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+		Where("status = ? AND next_run_at <= ?", "pending", now).
+		Order("next_run_at ASC, resource_id ASC").
+		Limit(limit).
+		Find(&schedules).Error; err != nil {
+		return nil, fmt.Errorf("lock pending microsoft alias schedules: %w", err)
+	}
+	return schedules, nil
+}
+
+func loadMicrosoftAliasDispatchEligibility(tx *gorm.DB, schedules []MicrosoftAliasScheduleModel) (map[uint]microsoftAliasDispatchEligibility, error) {
+	result := make(map[uint]microsoftAliasDispatchEligibility, len(schedules))
+	if len(schedules) == 0 {
+		return result, nil
+	}
+	resourceIDs := make([]uint, 0, len(schedules))
+	for _, schedule := range schedules {
+		resourceIDs = append(resourceIDs, schedule.ResourceID)
+	}
+	var rows []microsoftAliasDispatchEligibility
+	if err := tx.Table("microsoft_resources AS resource").
+		Select(`resource.id AS resource_id,
+resource.status AS resource_status,
+resource.email_address AS resource_email,
+resource.updated_at AS resource_updated_at,
+resource.last_allocated_at AS last_allocated_at,
+COALESCE(binding.binding_address, '') AS binding_address,
+COALESCE(binding.status, '') AS binding_status,
+COALESCE(binding.bound_display, '') AS bound_display,
+COALESCE(binding.account_email, '') AS binding_account_email,
+EXISTS (
+    SELECT 1
+    FROM domain_resources AS binding_domain
+    WHERE binding_domain.domain = LOWER(SUBSTRING_INDEX(binding.binding_address, '@', -1))
+      AND binding_domain.purpose = 'binding'
+      AND binding_domain.status = 'normal'
+) AS binding_domain_ready,
+SHA2(CONCAT_WS(
+    CHAR(0),
+    resource.status,
+    resource.email_address,
+    resource.password,
+    resource.client_id,
+    resource.refresh_token,
+    COALESCE(binding.account_email, ''),
+    COALESCE(binding.binding_address, ''),
+    COALESCE(binding.status, ''),
+    COALESCE(binding.bound_display, '')
+), 256) AS resource_signature`).
+		Joins("LEFT JOIN microsoft_binding_mailboxes AS binding ON binding.resource_id = resource.id AND binding.status <> ?", "expired").
+		Where("resource.id IN ?", resourceIDs).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load microsoft alias dispatch eligibility: %w", err)
+	}
+	for _, row := range rows {
+		result[row.ResourceID] = row
+	}
+	return result, nil
+}
+
+func microsoftAliasDispatchIneligibleMessage(state microsoftAliasDispatchEligibility) string {
+	if state.ResourceStatus != "normal" {
+		return mailapp.MicrosoftAliasResourceNotNormalMessage
+	}
+	if strings.TrimSpace(state.BoundDisplay) != "" {
+		return mailapp.MicrosoftAliasExternalRecoveryMessage
+	}
+	if !microsoftAliasBindingReady(
+		state.BindingStatus,
+		state.BindingAddress,
+		state.BoundDisplay,
+		state.BindingAccountEmail,
+		state.ResourceEmail,
+		state.BindingDomainReady,
+	) {
+		return mailapp.MicrosoftAliasBindingUnresolvedMessage
+	}
+	return ""
+}
+
+func pausePendingMicrosoftAliasSchedule(
+	tx *gorm.DB,
+	schedule MicrosoftAliasScheduleModel,
+	state microsoftAliasDispatchEligibility,
+	now time.Time,
+	safeMessage string,
+) error {
+	updated := tx.Model(&MicrosoftAliasScheduleModel{}).
+		Where("resource_id = ? AND status = ? AND claim_token = ?", schedule.ResourceID, "pending", schedule.ClaimToken).
+		Updates(map[string]any{
+			"status":                      "paused",
+			"claim_token":                 "",
+			"last_safe_error":             safeAliasStoreMessage(safeMessage),
+			"blocked_resource_signature":  state.ResourceSignature,
+			"blocked_resource_updated_at": state.ResourceUpdatedAt,
+			"blocked_last_allocated_at":   state.LastAllocatedAt,
+			"updated_at":                  now,
+		})
+	if updated.Error != nil {
+		return fmt.Errorf("pause ineligible microsoft alias dispatch candidate: %w", updated.Error)
+	}
+	return nil
 }
 
 func (s *MicrosoftAliasStore) Claim(ctx context.Context, task mailapp.MicrosoftAliasTask, now time.Time) (*mailapp.MicrosoftAliasAccount, bool, error) {

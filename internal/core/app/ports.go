@@ -156,7 +156,7 @@ type MicrosoftBindingInputRecorder interface {
 }
 
 type ImportedValidationCreator interface {
-	CreateImportedValidationJobs(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error
+	CreateImportedValidationBatch(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error
 }
 
 type MicrosoftBindingInput struct {
@@ -626,7 +626,7 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 			}
 		}
 		if uc.validationCreator != nil {
-			if err := uc.validationCreator.CreateImportedValidationJobs(
+			if err := uc.validationCreator.CreateImportedValidationBatch(
 				txCtx,
 				task.OwnerUserID,
 				createdIDs,
