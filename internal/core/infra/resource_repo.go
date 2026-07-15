@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -742,6 +743,9 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 			Joins("LEFT JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id").
 			Where("email_resources.type <> ? OR ms_filter.status <> ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusDeleted)).
 			Where("email_resources.type <> ? OR dr_filter.status <> ?", string(domain.ResourceTypeDomain), string(domain.DomainStatusDeleted))
+		if filter.ExcludeBinding {
+			q = q.Where("email_resources.type <> ? OR dr_filter.purpose <> ?", string(domain.ResourceTypeDomain), string(domain.PurposeBinding))
+		}
 		if filter.Status != "" {
 			q = q.Where(
 				"(email_resources.type = ? AND ms_filter.status = ?) OR (email_resources.type = ? AND dr_filter.status = ?)",
@@ -790,6 +794,9 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 	case domain.ResourceTypeDomain:
 		q = q.Joins("JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id AND dr_filter.status <> ?", string(domain.DomainStatusDeleted)).
 			Where("email_resources.type = ?", string(domain.ResourceTypeDomain))
+		if filter.ExcludeBinding {
+			q = q.Where("dr_filter.purpose <> ?", string(domain.PurposeBinding))
+		}
 		if filter.Status != "" {
 			q = q.Where("dr_filter.status = ?", filter.Status)
 		}
@@ -1028,6 +1035,8 @@ func resourceFacetsCacheKey(ownerUserID uint, filter coreapp.ResourceListFilter)
 	b.WriteString(strings.TrimSpace(filter.Status))
 	b.WriteString("|purpose=")
 	b.WriteString(strings.TrimSpace(filter.Purpose))
+	b.WriteString("|excludeBinding=")
+	b.WriteString(strconv.FormatBool(filter.ExcludeBinding))
 	b.WriteString("|forSale=")
 	b.WriteString(resourceBoolPtrKey(filter.ForSale))
 	b.WriteString("|longLived=")

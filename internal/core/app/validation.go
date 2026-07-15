@@ -259,6 +259,9 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 		if dr.Status == domain.DomainStatusDisabled {
 			return nil, domain.ErrInvalidResourceStatus
 		}
+		if !isAdmin && dr.Purpose == domain.PurposeBinding {
+			return nil, domain.ErrForbiddenResource
+		}
 	default:
 		return nil, domain.ErrInvalidResourceType
 	}
@@ -295,7 +298,11 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 	return validationView(job), nil
 }
 
-func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, requestID, path string) (*ResourceBatchValidationResult, error) {
+func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, isAdmin bool, requestID, path string) (*ResourceBatchValidationResult, error) {
+	selection.AllowBinding = isAdmin
+	if !selection.AllowBinding {
+		selection.Filter.ExcludeBinding = true
+	}
 	switch selection.Mode {
 	case ResourceBulkSelectionIDs:
 		if len(selection.ResourceIDs) > ResourceValidationMaxExplicitIDs {
@@ -384,6 +391,18 @@ func (uc *ResourceValidationUseCase) Get(ctx context.Context, validationID uint,
 	}
 	if !isAdmin && job.OwnerUserID != userID {
 		return nil, domain.ErrForbiddenResource
+	}
+	if !isAdmin && job.ResourceType == domain.ResourceTypeDomain {
+		if uc.resources == nil {
+			return nil, domain.ErrForbiddenResource
+		}
+		resource, err := uc.resources.FindDomainByID(ctx, job.ResourceID)
+		if err != nil {
+			return nil, err
+		}
+		if resource == nil || resource.Purpose == domain.PurposeBinding {
+			return nil, domain.ErrForbiddenResource
+		}
 	}
 	return validationView(job), nil
 }

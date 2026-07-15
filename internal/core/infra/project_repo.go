@@ -946,25 +946,73 @@ func projectBulkSummary(summary string, affected int64) string {
 }
 
 func (r *ProjectRepo) replaceProductsAndRules(ctx context.Context, tx *gorm.DB, projectID uint, detail *domain.ProjectDetail) error {
-	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectProductModel{}).Error; err != nil {
-		return fmt.Errorf("replace project products: %w", err)
+	// Products are referenced by orders and allocations. Rebuilding this table on
+	// every edit invalidates those foreign keys as soon as a project has live or
+	// historical orders. Keep an existing (project_id, type) row and its ID,
+	// update it in place, and only insert product types that are newly enabled.
+	var existingModels []ProjectProductModel
+	if err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("project_id = ?", projectID).
+		Order("id ASC").
+		Find(&existingModels).Error; err != nil {
+		return fmt.Errorf("list project products for replacement: %w", err)
 	}
-	if len(detail.Products) > 0 {
-		productModels := make([]ProjectProductModel, 0, len(detail.Products))
-		for i := range detail.Products {
-			detail.Products[i].ID = 0
-			detail.Products[i].ProjectID = projectID
-			productModels = append(productModels, productModelFromDomain(detail.Products[i]))
+	existingByType := make(map[string]ProjectProductModel, len(existingModels))
+	for _, existing := range existingModels {
+		existingByType[existing.Type] = existing
+	}
+
+	requestedTypes := make(map[string]struct{}, len(detail.Products))
+	for i := range detail.Products {
+		product := detail.Products[i]
+		product.ProjectID = projectID
+		productType := string(product.Type)
+		if _, exists := requestedTypes[productType]; exists {
+			return domain.ErrInvalidProduct
 		}
-		if err := tx.WithContext(ctx).Create(&productModels).Error; err != nil {
+		requestedTypes[productType] = struct{}{}
+
+		if existing, ok := existingByType[productType]; ok {
+			model := productModelFromDomain(product)
+			model.ID = existing.ID
+			model.ProjectID = projectID
+			// Preserve audit history for the logical product row. Existing orders
+			// retain this same product ID and their independently snapshotted price.
+			model.CreatedAt = existing.CreatedAt
+			if err := tx.WithContext(ctx).Save(&model).Error; err != nil {
+				return fmt.Errorf("update project product: %w", err)
+			}
+			detail.Products[i] = model.toDomain()
+			continue
+		}
+
+		model := productModelFromDomain(product)
+		model.ProjectID = projectID
+		if err := tx.WithContext(ctx).Create(&model).Error; err != nil {
 			if isDuplicateKeyError(err) {
 				return domain.ErrInvalidProduct
 			}
-			return fmt.Errorf("create replacement project products: %w", err)
+			return fmt.Errorf("create project product: %w", err)
 		}
-		for i := range productModels {
-			detail.Products[i] = productModels[i].toDomain()
+		detail.Products[i] = model.toDomain()
+	}
+
+	// Toggling a product off is a logical disable rather than a destructive
+	// delete. This preserves immutable order/allocation references while keeping
+	// the product unavailable to new orders. A later edit can re-enable the same
+	// type and will update this row in place.
+	for _, existing := range existingModels {
+		if _, requested := requestedTypes[existing.Type]; requested {
+			continue
 		}
+		if domain.ProductStatus(existing.Status) != domain.ProductStatusDisabled {
+			existing.Status = string(domain.ProductStatusDisabled)
+			if err := tx.WithContext(ctx).Save(&existing).Error; err != nil {
+				return fmt.Errorf("disable removed project product: %w", err)
+			}
+		}
+		detail.Products = append(detail.Products, existing.toDomain())
 	}
 
 	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectMailRuleModel{}).Error; err != nil {

@@ -1110,17 +1110,25 @@ type ResourceBulkSelection struct {
 	Mode        ResourceBulkSelectionMode
 	ResourceIDs []uint
 	Filter      ResourceBulkFilter
+	// AllowBinding is persisted with deferred validation selections. It defaults
+	// to false so ordinary self-service batches (including old persisted batches)
+	// cannot select auxiliary-mailbox domains during later expansion.
+	AllowBinding bool `json:"allowBinding,omitempty"`
 }
 
 // ResourceListFilter is the server-side filter shared by resource lists and
 // "all matching" bulk commands.
 type ResourceListFilter struct {
-	ResourceType   domain.ResourceType
-	Search         string
-	Suffix         string
-	TLD            string
-	Status         string
-	Purpose        string
+	ResourceType domain.ResourceType
+	Search       string
+	Suffix       string
+	TLD          string
+	Status       string
+	Purpose      string
+	// ExcludeBinding is an internal visibility guard for supplier/self-service
+	// resource queries. Auxiliary-mailbox domains are operational platform
+	// resources and must not contribute list items, totals, or facets there.
+	ExcludeBinding bool
 	ForSale        *bool
 	LongLived      *bool
 	GraphAvailable *bool
@@ -1176,6 +1184,12 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 	filter, err := normalizeResourceListFilter(filter)
 	if err != nil {
 		return nil, err
+	}
+	// Auxiliary-mailbox domains are only visible in an administrative all-scope
+	// query. In particular, do not rely on the web client to hide them after
+	// receiving the response: doing that leaks their counts and TLD facets.
+	if scope != "all" {
+		filter.ExcludeBinding = true
 	}
 
 	var resources []domain.EmailResource
@@ -1345,6 +1359,11 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 		}
 		if dr.Status == domain.DomainStatusDeleted {
 			return nil, domain.ErrResourceNotFound
+		}
+		// This is the supplier/self-service detail API. Binding domains are
+		// auxiliary-mailbox infrastructure and are deliberately not exposed here.
+		if dr.Purpose == domain.PurposeBinding {
+			return nil, domain.ErrForbiddenResource
 		}
 		return &DomainResourceDetail{
 			ID:              dr.ID,
@@ -2031,6 +2050,9 @@ func (uc *DomainMailboxUseCase) List(ctx context.Context, domainResourceID, user
 	}
 	if resource.Status == domain.DomainStatusDeleted {
 		return nil, domain.ErrResourceNotFound
+	}
+	if !isAdmin && resource.Purpose == domain.PurposeBinding {
+		return nil, domain.ErrForbiddenResource
 	}
 
 	root, err := uc.resources.FindByID(ctx, domainResourceID)

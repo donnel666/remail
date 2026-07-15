@@ -721,6 +721,9 @@ func (r *mockResourceRepo) resourceMatchesFilter(res *coredomain.EmailResource, 
 		if dr == nil || dr.Status == coredomain.DomainStatusDeleted {
 			return false
 		}
+		if filter.ExcludeBinding && dr.Purpose == coredomain.PurposeBinding {
+			return false
+		}
 		if filter.ResourceType == "" || filter.ResourceType == coredomain.ResourceType("all") || filter.ResourceType == coredomain.ResourceTypeDomain {
 			if filter.Status != "" && string(dr.Status) != filter.Status {
 				return false
@@ -1389,16 +1392,24 @@ func (r *mockValidationRepo) validationCandidateIDs(ownerUserID uint, selection 
 	case coreapp.ResourceBulkSelectionIDs:
 		ids := append([]uint(nil), selection.ResourceIDs...)
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		result := make([]uint, 0, len(ids))
 		for _, resourceID := range ids {
 			resource := r.resources.resources[resourceID]
 			if resource == nil || resource.OwnerUserID != ownerUserID {
 				return nil, coredomain.ErrForbiddenResource
 			}
+			if !selection.AllowBinding && resource.Type == coredomain.ResourceTypeDomain {
+				domain := r.resources.domains[resourceID]
+				if domain != nil && domain.Purpose == coredomain.PurposeBinding {
+					continue
+				}
+			}
 			if err := r.ensureValidationCandidateStatus(resource); err != nil {
 				return nil, err
 			}
+			result = append(result, resourceID)
 		}
-		return ids, nil
+		return result, nil
 	case coreapp.ResourceBulkSelectionFilter:
 		ids := make([]uint, 0)
 		for resourceID, resource := range r.resources.resources {
@@ -1473,6 +1484,9 @@ func (r *mockValidationRepo) matchesValidationFilter(resourceID uint, filter cor
 	case coredomain.ResourceTypeDomain:
 		dr := r.resources.domains[resourceID]
 		if dr == nil || dr.Status == coredomain.DomainStatusDeleted || dr.Status == coredomain.DomainStatusDisabled {
+			return false
+		}
+		if filter.ExcludeBinding && dr.Purpose == coredomain.PurposeBinding {
 			return false
 		}
 		if filter.Status != "" && string(dr.Status) != filter.Status {
@@ -2383,9 +2397,50 @@ func TestResourceValidationUseCase_CreateBatchRejectsTooManyExplicitIDs(t *testi
 	_, err := uc.CreateBatch(context.Background(), coreapp.ResourceBulkSelection{
 		Mode:        coreapp.ResourceBulkSelectionIDs,
 		ResourceIDs: make([]uint, coreapp.ResourceValidationMaxExplicitIDs+1),
-	}, 1, "req-too-large", "/v1/resources/validations")
+	}, 1, false, "req-too-large", "/v1/resources/validations")
 
 	require.ErrorIs(t, err, coredomain.ErrResourceSelectionTooLarge)
+}
+
+func TestResourceValidationUseCase_NonAdminCannotUseBindingDomains(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{})
+
+	visibleRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	visible := &coredomain.MailDomainResource{
+		Domain:       "visible-validation.example.com",
+		MailServerID: 1,
+		Purpose:      coredomain.PurposeNotSale,
+		Status:       coredomain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), visibleRoot, visible))
+
+	bindingRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	binding := &coredomain.MailDomainResource{
+		Domain:       "binding-validation.example.com",
+		MailServerID: 1,
+		Purpose:      coredomain.PurposeBinding,
+		Status:       coredomain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), bindingRoot, binding))
+
+	_, err := uc.Create(context.Background(), bindingRoot.ID, 1, false, "req-binding-validation", "/v1/resources/:resourceId/validate")
+	require.ErrorIs(t, err, coredomain.ErrForbiddenResource)
+
+	result, err := uc.CreateBatch(context.Background(), coreapp.ResourceBulkSelection{
+		Mode: coreapp.ResourceBulkSelectionFilter,
+		Filter: coreapp.ResourceBulkFilter{
+			ResourceType: coredomain.ResourceTypeDomain,
+		},
+	}, 1, false, "req-binding-validation-batch", "/v1/resources/validations")
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Requested)
+	require.Equal(t, 1, result.Queued)
+	require.Len(t, validationRepo.jobs, 1)
+	for _, job := range validationRepo.jobs {
+		require.Equal(t, visibleRoot.ID, job.ResourceID)
+	}
 }
 
 func TestQueueMicrosoftImportValidationsQueuesBatch(t *testing.T) {
@@ -2982,6 +3037,60 @@ func TestCoreHandler_ResourceListScopeAllFallsBackToOwnedForNonAdmin(t *testing.
 	require.Equal(t, 1, len(resp.Items))
 	require.Equal(t, int64(1), resp.Total)
 	require.Equal(t, "owner@example.com", resp.Items[0].Email)
+}
+
+func TestCoreHandler_SelfServiceDomainResourcesHideBindingDomainsAndFacets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, _, _ := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	visibleRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	visibleDomain := &coredomain.MailDomainResource{
+		Domain:       "visible.example.com",
+		MailServerID: 1,
+		Purpose:      coredomain.PurposeNotSale,
+		Status:       coredomain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), visibleRoot, visibleDomain))
+
+	bindingRoot := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	bindingDomain := &coredomain.MailDomainResource{
+		Domain:       "auxiliary.example.kg",
+		MailServerID: 1,
+		Purpose:      coredomain.PurposeBinding,
+		Status:       coredomain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), bindingRoot, bindingDomain))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/resources?type=domain", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.GetResources(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response ResourceListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.EqualValues(t, 1, response.Total)
+	require.Len(t, response.Items, 1)
+	require.Equal(t, visibleDomain.Domain, response.Items[0].Domain)
+	require.NotContains(t, w.Body.String(), bindingDomain.Domain)
+	require.NotNil(t, response.Facets)
+	require.EqualValues(t, 1, response.Facets.Status.All)
+	require.Equal(t, []ResourceKeyFacetResponse{{Key: ".com", Count: 1}}, response.Facets.TLDs)
+
+	detailW := httptest.NewRecorder()
+	detailContext, _ := gin.CreateTestContext(detailW)
+	detailContext.Request = httptest.NewRequest("GET", "/v1/resources/2", nil)
+	detailContext.Params = gin.Params{{Key: "resourceId", Value: "2"}}
+	setAuthContext(detailContext, 1, iamdomain.RoleUser)
+
+	h.GetResourceDetail(detailContext)
+
+	require.Equal(t, http.StatusNotFound, detailW.Code, detailW.Body.String())
+	require.NotContains(t, detailW.Body.String(), bindingDomain.Domain)
 }
 
 func TestCoreHandler_PublishMicrosoftResource(t *testing.T) {
@@ -3674,6 +3783,43 @@ func TestCoreHandler_DomainMailboxesDeletedDomainHidden(t *testing.T) {
 	h.GetDomainMailboxes(c)
 
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_DomainMailboxesHideBindingDomainFromNonAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mod, resourceRepo, mailServerRepo, mailboxRepo := setupCoreTestModule()
+	h := NewCoreHandler(mod)
+
+	server := &coredomain.MailServer{OwnerUserID: 1, ServerAddress: "mail.example.com", Status: coredomain.MailServerOnline}
+	require.NoError(t, mailServerRepo.Create(context.Background(), server))
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	domain := &coredomain.MailDomainResource{
+		Domain:       "binding.example.com",
+		MailServerID: server.ID,
+		Purpose:      coredomain.PurposeBinding,
+		Status:       coredomain.DomainStatusNormal,
+	}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, domain))
+	mailboxRepo.mailboxes[1] = &coredomain.GeneratedMailbox{
+		ID:          1,
+		ResourceID:  domain.ID,
+		OwnerUserID: 1,
+		Email:       "hidden@binding.example.com",
+		Status:      coredomain.GeneratedMailboxNormal,
+		CreatedAt:   time.Now(),
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/domains/1/mailboxes", nil)
+	c.Params = gin.Params{{Key: "domainId", Value: "1"}}
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.GetDomainMailboxes(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "hidden@binding.example.com")
 }
 
 func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *testing.T) {

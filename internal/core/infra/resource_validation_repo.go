@@ -202,6 +202,12 @@ func (r *ResourceValidationRepo) CreateBatchWithLog(ctx context.Context, ownerUs
 }
 
 func (r *ResourceValidationRepo) CreateDeferredBatchWithLog(ctx context.Context, ownerUserID uint, selection coreapp.ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*coreapp.ResourceBatchValidationResult, error) {
+	if !selection.AllowBinding {
+		// This is durably serialized and re-applied during expansion so a
+		// deferred user batch cannot turn auxiliary-domain access into a later
+		// information leak.
+		selection.Filter.ExcludeBinding = true
+	}
 	selectionJSON, err := json.Marshal(selection)
 	if err != nil {
 		return nil, fmt.Errorf("marshal resource validation selection: %w", err)
@@ -380,6 +386,11 @@ func (r *ResourceValidationRepo) expandValidationBatchPage(ctx context.Context, 
 					"updated_at":      now,
 				}).Error
 		}
+		if !selection.AllowBinding {
+			// Selection rows written before this guard did not contain the field;
+			// false remains the deliberately safe default for those batches.
+			selection.Filter.ExcludeBinding = true
+		}
 		var candidates []validationCandidateRow
 		nextAfterID := batch.AfterID
 		pageDone := false
@@ -412,7 +423,7 @@ func (r *ResourceValidationRepo) expandValidationBatchPage(ctx context.Context, 
 			}
 			processed = len(pageIDs)
 			if len(pageIDs) > 0 {
-				candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, batch.OwnerUserID, pageIDs)
+				candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, batch.OwnerUserID, pageIDs, selection.AllowBinding)
 				nextAfterID = pageIDs[len(pageIDs)-1]
 			}
 		default:
@@ -1357,19 +1368,22 @@ type validationCandidateRow struct {
 // Deferred batches are accepted against a point-in-time selection. Resources
 // may be deleted, disabled, or transferred before a later page expands; those
 // rows are skipped so one stale ID cannot poison the global dispatcher.
-func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint) ([]validationCandidateRow, error) {
+func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, ids []uint, allowBinding bool) ([]validationCandidateRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	var rows []validationCandidateRow
-	if err := tx.WithContext(ctx).
+	query := tx.WithContext(ctx).
 		Table("email_resources AS er").
 		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
 		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("er.id IN ? AND er.owner_user_id = ?", ids, ownerUserID).
-		Order("er.id ASC").
-		Find(&rows).Error; err != nil {
+		Order("er.id ASC")
+	if !allowBinding {
+		query = query.Where("er.type <> ? OR dr.purpose <> ?", string(domain.ResourceTypeDomain), string(domain.PurposeBinding))
+	}
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("select deferred validation resources: %w", err)
 	}
 	result := make([]validationCandidateRow, 0, len(rows))
@@ -1493,6 +1507,9 @@ func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserI
 		Where("er.id <= ?", throughID).
 		Where("dr.owner_user_id = ?", ownerUserID).
 		Where("dr.status NOT IN ?", []string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)})
+	if filter.ExcludeBinding {
+		q = q.Where("dr.purpose <> ?", string(domain.PurposeBinding))
+	}
 
 	if afterID > 0 {
 		q = q.Where("er.id > ?", afterID)

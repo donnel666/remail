@@ -319,6 +319,103 @@ func TestProjectRepoUpdateWithLogRejectsReviewingProjectMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidProjectStatus)
 }
 
+func TestProjectRepoUpdateWithLogPreservesReferencedProductWhenEnablingDomainMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewProjectRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"admin@test.local",
+		"hash",
+		"admin",
+	).Error)
+
+	detail := validListedProjectDetail("Referenced Product Update Project")
+	require.NoError(t, repo.CreateWithLog(context.Background(), detail, projectTestLog("req-project-referenced-create")))
+	require.Len(t, detail.Products, 1)
+	microsoftProductID := detail.Products[0].ID
+
+	// This mirrors a real paid/history-bearing project: orders reference the
+	// compound product key and prohibit destructive replacement of that row.
+	require.NoError(t, db.Exec(
+		`INSERT INTO orders(
+			order_no, user_id, project_id, project_product_id, product_type,
+			service_mode, pay_amount, idempotency_key, request_fingerprint, client_channel
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"project-product-reference-order",
+		1,
+		detail.Project.ID,
+		microsoftProductID,
+		string(domain.ProductTypeMicrosoft),
+		"code",
+		"0.100000",
+		"project-product-reference-key",
+		"0123456789012345678901234567890123456789012345678901234567890123",
+		"console",
+	).Error)
+
+	update := validListedProjectDetail("Referenced Product Update Project")
+	update.Project.ID = detail.Project.ID
+	update.Products = append(update.Products, domain.Product{
+		Type:                    domain.ProductTypeDomain,
+		Status:                  domain.ProductStatusEnabled,
+		CodeEnabled:             true,
+		CodePrice:               "0.200000",
+		CodeSupplierPrice:       "0.100000",
+		PurchaseEnabled:         false,
+		PurchasePrice:           "0.000000",
+		PurchaseSupplierPrice:   "0.000000",
+		CodeWindowMinutes:       10,
+		ActivationWindowMinutes: 60,
+		WarrantyMinutes:         60,
+	})
+
+	require.NoError(t, repo.UpdateWithLog(context.Background(), update, projectTestLog("req-project-referenced-enable-domain")))
+
+	stored, err := repo.FindDetail(context.Background(), detail.Project.ID, 0, true)
+	require.NoError(t, err)
+	require.Len(t, stored.Products, 2)
+	var sawMicrosoft, sawDomain bool
+	for _, product := range stored.Products {
+		switch product.Type {
+		case domain.ProductTypeMicrosoft:
+			sawMicrosoft = true
+			require.Equal(t, microsoftProductID, product.ID)
+			require.Equal(t, domain.ProductStatusEnabled, product.Status)
+		case domain.ProductTypeDomain:
+			sawDomain = true
+			require.Equal(t, domain.ProductStatusEnabled, product.Status)
+		}
+	}
+	require.True(t, sawMicrosoft)
+	require.True(t, sawDomain)
+
+	var orderProductID uint
+	require.NoError(t, db.Raw("SELECT project_product_id FROM orders WHERE order_no = ?", "project-product-reference-order").Scan(&orderProductID).Error)
+	require.Equal(t, microsoftProductID, orderProductID)
+
+	// Removing the Microsoft type from a later full configuration update must
+	// not resurrect the destructive delete path. Its historical row remains
+	// referenced by the order but becomes unavailable for new orders.
+	domainOnly := validListedProjectDetail("Referenced Product Update Project")
+	domainOnly.Project.ID = detail.Project.ID
+	domainOnly.Products = []domain.Product{update.Products[1]}
+	require.NoError(t, repo.UpdateWithLog(context.Background(), domainOnly, projectTestLog("req-project-referenced-disable-microsoft")))
+
+	stored, err = repo.FindDetail(context.Background(), detail.Project.ID, 0, true)
+	require.NoError(t, err)
+	require.Len(t, stored.Products, 2)
+	for _, product := range stored.Products {
+		if product.Type == domain.ProductTypeMicrosoft {
+			require.Equal(t, microsoftProductID, product.ID)
+			require.Equal(t, domain.ProductStatusDisabled, product.Status)
+		}
+	}
+	require.NoError(t, db.Raw("SELECT project_product_id FROM orders WHERE order_no = ?", "project-product-reference-order").Scan(&orderProductID).Error)
+	require.Equal(t, microsoftProductID, orderProductID)
+}
+
 func TestProjectRepoFacetsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewProjectRepo(db)

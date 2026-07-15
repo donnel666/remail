@@ -1098,6 +1098,63 @@ func TestResourceRepoPublishResourcesBatchWithLogPublishesMixedResourcesAndRolls
 	require.Zero(t, rollbackLogCount)
 }
 
+func TestResourceRepoListExcludesBindingDomainsWhenRequestedMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (?, ?, ?, ?)",
+		1,
+		"owner@test.local",
+		"hash",
+		"supplier",
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO mail_servers(id, owner_user_id, server_address, mx_record, status) VALUES (?, ?, ?, ?, ?)",
+		200,
+		1,
+		"mx.example.test",
+		"mx.example.test",
+		"online",
+	).Error)
+
+	visibleRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+	visible := &domain.MailDomainResource{
+		Domain:       "visible.example.com",
+		MailServerID: 200,
+		Purpose:      domain.PurposeNotSale,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, repo.CreateDomain(context.Background(), visibleRoot, visible))
+
+	bindingRoot := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
+	binding := &domain.MailDomainResource{
+		Domain:       "binding.example.kg",
+		MailServerID: 200,
+		Purpose:      domain.PurposeBinding,
+		Status:       domain.DomainStatusNormal,
+	}
+	require.NoError(t, repo.CreateDomain(context.Background(), bindingRoot, binding))
+
+	filter := coreapp.ResourceListFilter{
+		ResourceType:   domain.ResourceTypeDomain,
+		ExcludeBinding: true,
+	}
+	items, err := repo.List(context.Background(), 1, filter, 0, 20, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, visibleRoot.ID, items[0].ID)
+
+	total, err := repo.Count(context.Background(), 1, filter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+
+	facets, err := repo.Facets(context.Background(), 1, filter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, facets.Status.All)
+	require.Equal(t, []coreapp.ResourceKeyFacet{{Key: ".com", Count: 1}}, facets.TLDs)
+}
+
 func TestResourceRepoDeletePrivateMicrosoftWithLogMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)

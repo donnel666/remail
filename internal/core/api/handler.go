@@ -482,10 +482,12 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 		return
 	}
 
+	role, _ := middleware.GetCurrentRole(c)
 	result, err := h.module.ValidationUseCase.CreateBatch(
 		c.Request.Context(),
 		toAppBulkSelection(req.Selection),
 		userID,
+		role.HasAdminAccess(),
 		middleware.GetRequestID(c),
 		c.FullPath(),
 	)
