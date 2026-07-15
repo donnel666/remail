@@ -1,8 +1,9 @@
 export const TICKET_CREATE_ORDER_STORAGE_KEY = "remail:ticket-create-order";
 
-interface TicketOrderSource {
+export interface TicketOrderSource {
   orderNo: string;
   projectName?: string;
+  projectLogoUrl?: string | null;
   deliveryEmail: string;
   payAmount: string | number;
   serviceMode: "code" | "purchase";
@@ -11,9 +12,10 @@ interface TicketOrderSource {
   receiveUntil?: string | null;
 }
 
-interface TicketOrderRef {
+export interface TicketOrderRef {
   orderNo: string;
   projectName: string;
+  projectLogoUrl?: string;
   deliveryEmail: string;
   payAmount: number;
   serviceMode: "code" | "purchase";
@@ -41,6 +43,7 @@ export function buildOrderRefFromOrder(order: TicketOrderSource): TicketOrderRef
   return {
     orderNo: order.orderNo,
     projectName: order.projectName || "-",
+    projectLogoUrl: order.projectLogoUrl ?? undefined,
     deliveryEmail: order.deliveryEmail,
     payAmount: Number.isFinite(payAmount) ? payAmount : 0,
     serviceMode: order.serviceMode,

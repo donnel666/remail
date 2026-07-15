@@ -929,7 +929,7 @@ export default function AdminMicrosoftEmails() {
           fixed: "right",
           key: "operate",
           title: t("Action"),
-          width: 400,
+          width: 360,
           render: (_: unknown, record: AdminMicrosoftResourceItem) => renderRowActions(record),
         },
       ] as any[],

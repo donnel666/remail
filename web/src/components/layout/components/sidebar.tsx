@@ -24,7 +24,7 @@ export function Sidebar() {
         collapsed ? "w-16" : "w-[180px]"
       )}
     >
-      <nav className={cn("flex-1 overflow-y-auto bg-background px-2", collapsed ? "pt-3" : "pt-6")}>
+      <nav className={cn("scrollbar-none flex-1 overflow-y-auto bg-background px-2", collapsed ? "pt-3" : "pt-6")}>
         {visibleGroups.map((group, groupIndex) => (
           <section key={group.id}>
             {groupIndex > 0 ? (

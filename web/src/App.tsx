@@ -21,17 +21,23 @@ import zhCN from "@douyinfe/semi-ui/lib/es/locale/source/zh_CN";
 import enGB from "@douyinfe/semi-ui/lib/es/locale/source/en_GB";
 import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "./context/theme-provider";
-import { AuthProvider, hasPermissionKey, useAuth } from "./context/auth-provider";
+import {
+  AuthProvider,
+  hasPermissionKey,
+  useAuth,
+  type CurrentUser,
+} from "./context/auth-provider";
 import { ActivationGateProvider } from "./context/activation-gate";
 import {
   AUTH_REQUIRED_EVENT,
   consumeLoginReturnTo,
   storeLoginReturnTo,
 } from "./lib/auth-flow";
+import { resolveRouteAuthorizationRedirect } from "./lib/route-gate";
 import AppShell from "./components/layout/AppShell";
 import {
   ROUTES_WITH_SIDEBAR,
-  getSidebarRouteRequiredPermission,
+  getSidebarRouteRequiredPermissions,
 } from "./components/layout/config/navigation";
 import { getActivation } from "./lib/iam-api";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
@@ -56,8 +62,13 @@ const pageLoaders = {
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
+  adminDashboard: () => import("./pages/AdminDashboard"),
   adminMicrosoftEmails: () => import("./pages/AdminMicrosoftEmails"),
+  adminDomainEmails: () => import("./pages/AdminDomainEmails"),
   adminProjects: () => import("./pages/AdminProjects"),
+  adminUsers: () => import("./pages/AdminUsers"),
+  adminFinance: () => import("./pages/AdminFinance"),
+  adminTickets: () => import("./pages/AdminTickets"),
   proxyManagement: () => import("./pages/ProxyManagement"),
   invite: () => import("./pages/Invite"),
   recharge: () => import("./pages/Recharge"),
@@ -80,8 +91,13 @@ const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
+const AdminDashboard = lazy(pageLoaders.adminDashboard);
 const AdminMicrosoftEmails = lazy(pageLoaders.adminMicrosoftEmails);
+const AdminDomainEmails = lazy(pageLoaders.adminDomainEmails);
 const AdminProjects = lazy(pageLoaders.adminProjects);
+const AdminUsers = lazy(pageLoaders.adminUsers);
+const AdminFinance = lazy(pageLoaders.adminFinance);
+const AdminTickets = lazy(pageLoaders.adminTickets);
 const ProxyManagement = lazy(pageLoaders.proxyManagement);
 const Invite = lazy(pageLoaders.invite);
 const Recharge = lazy(pageLoaders.recharge);
@@ -100,8 +116,13 @@ const routePreloadPriority = [
   "wallet",
   "microsoftEmails",
   "domainEmails",
+  "adminDashboard",
   "adminMicrosoftEmails",
+  "adminDomainEmails",
   "adminProjects",
+  "adminUsers",
+  "adminFinance",
+  "adminTickets",
   "proxyManagement",
   "consoleOverview",
   "invite",
@@ -125,9 +146,49 @@ type RoutePreloadWindow = Window &
     ) => number;
   };
 
-function scheduleRouteModulePreload() {
+const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
+  account: "/account",
+  adminDashboard: "/admin/dashboard",
+  adminDomainEmails: "/admin/domains",
+  adminFinance: "/admin/finance",
+  adminMicrosoftEmails: "/admin/microsoft",
+  adminProjects: "/admin/projects",
+  adminTickets: "/admin/tickets",
+  adminUsers: "/admin/users",
+  consoleOverview: "/console",
+  dashboard: "/dashboard",
+  domainEmails: "/domains",
+  invite: "/invite",
+  microsoftEmails: "/microsoft",
+  orders: "/orders",
+  pickup: "/pickup",
+  projects: "/projects",
+  proxyManagement: "/admin/proxies",
+  recharge: "/recharge",
+  tickets: "/tickets",
+  wallet: "/wallet",
+};
+
+function authorizedPreloadPriority(currentUser: CurrentUser) {
+  return routePreloadPriority.filter((key) => {
+    const route = preloadRouteByLoader[key];
+    if (!route) return false;
+    const requiredPermissions = getSidebarRouteRequiredPermissions(route);
+    return requiredPermissions.every((permission) =>
+      hasPermissionKey(currentUser, permission),
+    );
+  });
+}
+
+function scheduleRouteModulePreload(preloadPriority: PageLoaderKey[]) {
   if (import.meta.env.DEV) return;
-  if (routeModulesPreloadStarted || typeof window === "undefined") return;
+  if (
+    routeModulesPreloadStarted ||
+    preloadPriority.length === 0 ||
+    typeof window === "undefined"
+  ) {
+    return;
+  }
   routeModulesPreloadStarted = true;
   const browserWindow = window as RoutePreloadWindow;
 
@@ -153,7 +214,7 @@ function scheduleRouteModulePreload() {
       return;
     }
 
-    const batch = routePreloadPriority.slice(
+    const batch = preloadPriority.slice(
       cursor,
       cursor + ROUTE_PRELOAD_BATCH_SIZE
     );
@@ -161,7 +222,7 @@ function scheduleRouteModulePreload() {
     if (batch.length === 0) return;
 
     void Promise.allSettled(batch.map((key) => pageLoaders[key]())).finally(() => {
-      if (cursor < routePreloadPriority.length) {
+      if (cursor < preloadPriority.length) {
         browserWindow.setTimeout(loadNextBatch, ROUTE_PRELOAD_BATCH_DELAY_MS);
       }
     });
@@ -190,6 +251,17 @@ function scheduleRouteModulePreload() {
   );
 }
 
+function AuthorizedRoutePreloader() {
+  const { currentUser, loading } = useAuth();
+
+  useEffect(() => {
+    if (loading || !currentUser) return;
+    scheduleRouteModulePreload(authorizedPreloadPriority(currentUser));
+  }, [currentUser, loading]);
+
+  return null;
+}
+
 function scheduleApiDocsPreload() {
   if (apiDocsPreloadStarted || typeof window === "undefined") return;
   apiDocsPreloadStarted = true;
@@ -212,14 +284,6 @@ function scheduleApiDocsPreload() {
     () => browserWindow.setTimeout(preload, 400),
     { once: true }
   );
-}
-
-function AdminDomainEmails() {
-  return <PlaceholderPage titleKey="Admin Domain Emails" />;
-}
-
-function UserManagement() {
-  return <PlaceholderPage titleKey="User Management" />;
 }
 
 function SystemSettings() {
@@ -260,9 +324,32 @@ function RouteGate({ children }: { children: ReactNode }) {
     () => PROTECTED_ROUTES.some((route) => matchesRoute(pathname, route)),
     [pathname]
   );
-  const requiredPermission = useMemo(
-    () => getSidebarRouteRequiredPermission(pathname),
+  const requiredPermissions = useMemo(
+    () => getSidebarRouteRequiredPermissions(pathname),
     [pathname]
+  );
+  const activationRedirectPending =
+    activationNeeded !== null &&
+    ((activationNeeded && pathname !== "/activation") ||
+      (!activationNeeded && pathname === "/activation"));
+  const authorizationRedirect = useMemo(
+    () =>
+      resolveRouteAuthorizationRedirect({
+        activationNeeded,
+        authLoading,
+        currentUser,
+        isProtectedRoute,
+        pathname,
+        requiredPermissions,
+      }),
+    [
+      activationNeeded,
+      authLoading,
+      currentUser,
+      isProtectedRoute,
+      pathname,
+      requiredPermissions,
+    ]
   );
 
   const markActivated = useCallback(() => {
@@ -303,19 +390,13 @@ function RouteGate({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!activationNeeded && !authLoading && !currentUser && isProtectedRoute) {
+    if (authorizationRedirect === "/login") {
       storeLoginReturnTo();
       void navigate({ to: "/login", replace: true });
       return;
     }
 
-    if (
-      !activationNeeded &&
-      !authLoading &&
-      currentUser &&
-      requiredPermission &&
-      !hasPermissionKey(currentUser, requiredPermission)
-    ) {
+    if (authorizationRedirect === "/403") {
       void navigate({ to: "/403", replace: true });
       return;
     }
@@ -329,12 +410,10 @@ function RouteGate({ children }: { children: ReactNode }) {
     }
   }, [
     activationNeeded,
-    authLoading,
+    authorizationRedirect,
     currentUser,
-    isProtectedRoute,
     navigate,
     pathname,
-    requiredPermission,
   ]);
 
   useEffect(() => {
@@ -351,7 +430,12 @@ function RouteGate({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   let content = children;
-  if (activationNeeded === null || (authLoading && isProtectedRoute)) {
+  if (
+    activationNeeded === null ||
+    activationRedirectPending ||
+    (authLoading && isProtectedRoute) ||
+    authorizationRedirect !== null
+  ) {
     content = <Loading />;
   }
 
@@ -413,6 +497,11 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/recharge", component: Recharge }),
   createRoute({
     getParentRoute: () => rootRoute,
+    path: "/admin/dashboard",
+    component: AdminDashboard,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
     path: "/admin/microsoft",
     component: AdminMicrosoftEmails,
   }),
@@ -423,7 +512,13 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/projects", component: AdminProjects }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/proxies", component: ProxyManagement }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/admin/users", component: UserManagement }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/users", component: AdminUsers }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/finance", component: AdminFinance }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/admin/tickets",
+    component: AdminTickets,
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/settings", component: SystemSettings }),
 ]);
 
@@ -438,13 +533,13 @@ declare module "@tanstack/react-router" {
 function App() {
   useEffect(() => {
     scheduleApiDocsPreload();
-    scheduleRouteModulePreload();
   }, []);
 
   return (
     <ThemeProvider>
       <SemiLocaleWrapper>
         <AuthProvider>
+          <AuthorizedRoutePreloader />
           <RouterProvider router={router} />
         </AuthProvider>
       </SemiLocaleWrapper>

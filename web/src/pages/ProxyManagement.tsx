@@ -666,7 +666,6 @@ export default function ProxyManagement() {
   );
 
   const {
-    loadedItems: items,
     loading,
     pagedItems,
     refresh: refreshProxyList,

@@ -11,6 +11,7 @@ export interface SidebarNavItem {
   labelKey: string;
   icon: LucideIcon;
   requiredPermission?: string;
+  requiredPermissions?: string[];
 }
 
 export interface SidebarNavGroup {
@@ -18,4 +19,5 @@ export interface SidebarNavGroup {
   labelKey: string;
   items: SidebarNavItem[];
   requiredPermission?: string;
+  requiredPermissions?: string[];
 }

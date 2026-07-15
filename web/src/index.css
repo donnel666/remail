@@ -502,6 +502,25 @@ body[theme-mode="dark"] .semi-always-light,
   padding: 12px !important;
 }
 
+/* Match the classic NewAPI dashboard without changing Remail's global type scale. */
+.console-dashboard-page {
+  font-family: Lato, "Helvetica Neue", Arial, Helvetica, "Microsoft YaHei", sans-serif;
+}
+
+.console-dashboard-stat-card .semi-card-header,
+.console-dashboard-stat-card .semi-card-body,
+.console-dashboard-ranking-card .semi-card-header,
+.console-dashboard-ranking-card .semi-card-body,
+.console-dashboard-analysis-card .semi-card-header,
+.console-dashboard-analysis-card .semi-card-body {
+  padding: 10px !important;
+}
+
+.console-dashboard-analysis-card .semi-tabs-content {
+  height: 0;
+  padding: 0;
+}
+
 .resources-search-input.semi-input-wrapper {
   border: 1px solid var(--semi-color-border);
   background: var(--semi-color-fill-0);
@@ -3156,4 +3175,270 @@ body[theme-mode="dark"] .semi-always-light,
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* After-sales tickets                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Inbox row ----------------------------------------------------------- */
+
+.ticket-inbox-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 12px 14px;
+  text-align: left;
+  transition: background-color 0.16s ease;
+}
+
+.ticket-inbox-row:hover {
+  background: var(--semi-color-fill-0);
+}
+
+.ticket-inbox-table.is-compact .ticket-inbox-row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.ticket-inbox-unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--semi-color-primary);
+}
+
+/* Detail sheet -------------------------------------------------------- */
+
+.ticket-detail-sheet .semi-sidesheet-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.ticket-detail-sheet .semi-sidesheet-header {
+  padding-bottom: 10px;
+}
+
+.ticket-sheet-order {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--brand) 2%, var(--semi-color-bg-0));
+  padding: 9px 12px;
+}
+
+.ticket-resolution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.ticket-resolution.is-success {
+  background: color-mix(in oklch, #22c55e 8%, var(--semi-color-bg-0));
+  color: #15803d;
+}
+
+.ticket-resolution.is-neutral {
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-1);
+}
+
+.ticket-sheet-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--semi-color-border);
+  padding: 12px 20px;
+}
+
+/* Conversation -------------------------------------------------------- */
+
+.ticket-chat {
+  display: flex;
+  min-height: 160px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 6px 20px 10px;
+}
+
+.ticket-chat-system {
+  display: flex;
+  max-width: 92%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  line-height: 17px;
+  padding: 5px 12px;
+  text-align: center;
+}
+
+.ticket-chat-system-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.ticket-chat-system-time {
+  flex: 0 0 auto;
+  color: var(--semi-color-text-3);
+  font-size: 11px;
+}
+
+.ticket-chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ticket-chat-row.is-self {
+  flex-direction: row-reverse;
+}
+
+.ticket-chat-avatar {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.ticket-chat-avatar.is-user {
+  background: color-mix(in oklch, var(--brand) 14%, var(--semi-color-bg-0));
+  color: color-mix(in oklch, var(--brand) 82%, var(--semi-color-text-0));
+}
+
+.ticket-chat-avatar.is-platform {
+  background: color-mix(in oklch, #0ea5e9 13%, var(--semi-color-bg-0));
+  color: #0284c7;
+}
+
+.ticket-chat-avatar.is-system {
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+}
+
+.ticket-chat-main {
+  display: flex;
+  min-width: 0;
+  max-width: 78%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ticket-chat-row.is-self .ticket-chat-main {
+  align-items: flex-end;
+}
+
+.ticket-chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ticket-chat-name {
+  color: var(--semi-color-text-1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ticket-chat-time {
+  color: var(--semi-color-text-3);
+  font-size: 11px;
+}
+
+.ticket-chat-bubble {
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 20px;
+  padding: 9px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ticket-chat-bubble.is-user {
+  border-top-right-radius: 4px;
+  background: color-mix(in oklch, var(--brand) 10%, var(--semi-color-bg-0));
+  color: var(--semi-color-text-0);
+}
+
+.ticket-chat-row:not(.is-self) .ticket-chat-bubble.is-user {
+  border-top-right-radius: 12px;
+  border-top-left-radius: 4px;
+}
+
+.ticket-chat-bubble.is-platform {
+  border-top-left-radius: 4px;
+  background: color-mix(in oklch, #0ea5e9 8%, var(--semi-color-bg-0));
+  color: var(--semi-color-text-0);
+}
+
+.ticket-chat-row.is-self .ticket-chat-bubble.is-platform {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 4px;
+}
+
+.ticket-chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ticket-chat-attachment {
+  display: inline-flex;
+  max-width: 200px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 8px;
+  background: var(--semi-color-bg-0);
+  color: var(--semi-color-text-1);
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+
+/* Composer ------------------------------------------------------------ */
+
+.ticket-composer {
+  border-top: 1px solid var(--semi-color-border);
+  padding: 12px 20px;
+}
+
+.ticket-composer-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ticket-composer-identity .ticket-chat-avatar {
+  width: 24px;
+  height: 24px;
+}
+
+@media (max-width: 640px) {
+  .ticket-chat-main {
+    max-width: 88%;
+  }
 }

@@ -22,6 +22,15 @@ interface MicrosoftImportEntry {
   bindingAddress: string;
 }
 
+// Mirror the backend/persistence limits for immediate feedback. The backend
+// remains authoritative because administrator imports upload the raw content.
+const MICROSOFT_IMPORT_EMAIL_MAX_LENGTH = 255;
+const MICROSOFT_IMPORT_PASSWORD_MAX_LENGTH = 512;
+const MICROSOFT_IMPORT_CLIENT_ID_MAX_LENGTH = 255;
+const MICROSOFT_IMPORT_REFRESH_TOKEN_MAX_LENGTH = 1024;
+const MICROSOFT_IMPORT_BINDING_ADDRESS_MAX_LENGTH = 320;
+const MICROSOFT_IMPORT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
+
 export function preprocessMicrosoftImportContent(
   content: string,
   strategy: ImportErrorStrategy
@@ -102,7 +111,13 @@ function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
 
   const email = parts[0]?.trim() ?? "";
   const password = parts[1] ?? "";
-  if (email.length === 0 || password.length === 0) return null;
+  if (
+    !isValidMicrosoftImportEmail(email, MICROSOFT_IMPORT_EMAIL_MAX_LENGTH) ||
+    password.length === 0 ||
+    exceedsMicrosoftImportLength(password, MICROSOFT_IMPORT_PASSWORD_MAX_LENGTH)
+  ) {
+    return null;
+  }
 
   const entry: MicrosoftImportEntry = {
     email,
@@ -114,12 +129,30 @@ function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
 
   if (parts.length === 3) {
     entry.bindingAddress = parts[2]?.trim() ?? "";
-    if (entry.bindingAddress.length === 0) return null;
+    if (
+      !isValidMicrosoftImportEmail(
+        entry.bindingAddress,
+        MICROSOFT_IMPORT_BINDING_ADDRESS_MAX_LENGTH
+      )
+    ) {
+      return null;
+    }
   }
   if (parts.length === 4) {
     entry.clientID = parts[2]?.trim() ?? "";
     entry.refreshToken = parts[3]?.trim() ?? "";
-    if (entry.clientID.length === 0 || entry.refreshToken.length === 0) {
+    if (
+      entry.clientID.length === 0 ||
+      entry.refreshToken.length === 0 ||
+      exceedsMicrosoftImportLength(
+        entry.clientID,
+        MICROSOFT_IMPORT_CLIENT_ID_MAX_LENGTH
+      ) ||
+      exceedsMicrosoftImportLength(
+        entry.refreshToken,
+        MICROSOFT_IMPORT_REFRESH_TOKEN_MAX_LENGTH
+      )
+    ) {
       return null;
     }
   }
@@ -130,13 +163,35 @@ function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
     if (
       entry.clientID.length === 0 ||
       entry.refreshToken.length === 0 ||
-      entry.bindingAddress.length === 0
+      exceedsMicrosoftImportLength(
+        entry.clientID,
+        MICROSOFT_IMPORT_CLIENT_ID_MAX_LENGTH
+      ) ||
+      exceedsMicrosoftImportLength(
+        entry.refreshToken,
+        MICROSOFT_IMPORT_REFRESH_TOKEN_MAX_LENGTH
+      ) ||
+      !isValidMicrosoftImportEmail(
+        entry.bindingAddress,
+        MICROSOFT_IMPORT_BINDING_ADDRESS_MAX_LENGTH
+      )
     ) {
       return null;
     }
   }
 
   return entry;
+}
+
+function isValidMicrosoftImportEmail(value: string, maxLength: number) {
+  return (
+    !exceedsMicrosoftImportLength(value, maxLength) &&
+    MICROSOFT_IMPORT_EMAIL_PATTERN.test(value)
+  );
+}
+
+function exceedsMicrosoftImportLength(value: string, maxLength: number) {
+  return Array.from(value).length > maxLength;
 }
 
 function serializeMicrosoftImportEntry(entry: MicrosoftImportEntry) {

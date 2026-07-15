@@ -44,6 +44,16 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     labelKey: "Administrator",
     items: [
       {
+        path: "/admin/dashboard",
+        labelKey: "Data Dashboard",
+        icon: BarChart3,
+        requiredPermissions: [
+          permissionKey("iam:user", "read"),
+          permissionKey("core:resource", "read"),
+          permissionKey("billing:wallet", "read"),
+        ],
+      },
+      {
         path: "/admin/microsoft",
         labelKey: "Admin Microsoft Emails",
         icon: Database,
@@ -74,6 +84,21 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         requiredPermission: permissionKey("iam:user", "read"),
       },
       {
+        path: "/admin/tickets",
+        labelKey: "Ticket Management",
+        icon: Headphones,
+        requiredPermissions: [
+          permissionKey("iam:user", "read"),
+          permissionKey("trade:order", "read"),
+        ],
+      },
+      {
+        path: "/admin/finance",
+        labelKey: "Finance Center",
+        icon: Wallet,
+        requiredPermission: permissionKey("billing:wallet", "read"),
+      },
+      {
         path: "/admin/settings",
         labelKey: "System Settings",
         icon: Settings,
@@ -87,6 +112,8 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((g
   group.items.map((item) => ({
     ...item,
     requiredPermission: item.requiredPermission ?? group.requiredPermission,
+    requiredPermissions:
+      item.requiredPermissions ?? group.requiredPermissions,
   }))
 );
 
@@ -100,18 +127,31 @@ export function getVisibleSidebarNavGroups(permissions: string[]): SidebarNavGro
     items: group.items.filter(
       (item) => {
         const requiredPermission = item.requiredPermission ?? group.requiredPermission;
-        return !requiredPermission || permissionSet.has(requiredPermission);
+        const requiredPermissions =
+          item.requiredPermissions ?? group.requiredPermissions ?? [];
+        return (
+          (!requiredPermission || permissionSet.has(requiredPermission)) &&
+          requiredPermissions.every((permission) => permissionSet.has(permission))
+        );
       }
     ),
   })).filter((group) => group.items.length > 0);
 }
 
-export function getSidebarRouteRequiredPermission(pathname: string) {
+export function getSidebarRouteRequiredPermissions(pathname: string) {
   const matched = SIDEBAR_NAV_ITEMS.find(
     (item) => pathname === item.path || pathname.startsWith(`${item.path}/`)
   );
 
-  return matched?.requiredPermission ?? null;
+  if (!matched) return [];
+  return [
+    ...(matched.requiredPermission ? [matched.requiredPermission] : []),
+    ...(matched.requiredPermissions ?? []),
+  ];
+}
+
+export function getSidebarRouteRequiredPermission(pathname: string) {
+  return getSidebarRouteRequiredPermissions(pathname)[0] ?? null;
 }
 
 export const TOP_NAV_ITEMS: TopNavItem[] = [
