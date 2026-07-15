@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,20 @@ import (
 )
 
 const inventoryStatsCacheTTL = 30 * time.Second
+
+var pinyinMailboxNameParts = [...]string{
+	"an", "ao", "bai", "bao", "bei", "bo", "cai", "chang", "chao", "chen",
+	"cheng", "chun", "da", "dan", "de", "dong", "fan", "fang", "fei", "feng",
+	"gang", "gao", "guang", "gui", "guo", "hai", "han", "hao", "he", "heng",
+	"hong", "hua", "huan", "hui", "ji", "jia", "jian", "jiang", "jie", "jin",
+	"jing", "jun", "kai", "kang", "ke", "lan", "lei", "li", "lian", "liang",
+	"lin", "ling", "long", "lu", "man", "mei", "meng", "min", "ming", "nan",
+	"ning", "peng", "ping", "qi", "qian", "qiang", "qiao", "qin", "qing", "quan",
+	"ren", "rong", "rui", "shan", "sheng", "shi", "shu", "shuang", "song", "tao",
+	"tian", "tong", "wan", "wei", "wen", "xi", "xia", "xian", "xiang", "xiao",
+	"xin", "xing", "xiu", "xuan", "ya", "yan", "yang", "yao", "yi", "ying",
+	"yong", "you", "yu", "yuan", "yun", "zhen", "zhi", "zhong", "zhou", "zhu",
+}
 
 type AllocateCommand struct {
 	OrderNo          string
@@ -745,7 +760,7 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 	if mailbox != nil {
 		return uc.createDomainAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
 	}
-	for _, email := range generatedMailboxVariants(candidate.Domain, config.ProjectID, cmd.OrderNo) {
+	for _, email := range generatedMailboxVariants(candidate.Domain) {
 		mailbox, err = uc.repo.FindOrCreateGeneratedMailbox(ctx, candidate.ResourceID, candidate.OwnerUserID, email)
 		if err != nil {
 			return nil, err
@@ -896,17 +911,39 @@ func plusAliasVariants(email string, projectID uint, orderNo string) []string {
 	return result
 }
 
-func generatedMailboxVariants(domainPart string, projectID uint, orderNo string) []string {
+func generatedMailboxVariants(domainPart string) []string {
 	domainPart = strings.ToLower(strings.TrimSpace(domainPart))
 	if domainPart == "" {
 		return nil
 	}
-	base := strconv.FormatUint(uint64(projectID), 36) + strconv.FormatUint(hash64(orderNo)%1679616, 36)
 	result := make([]string, 0, aliasGenerationWindow)
-	for i := 0; i < aliasGenerationWindow; i++ {
-		result = append(result, "m"+base+strconv.FormatInt(int64(i), 36)+"@"+domainPart)
+	seen := make(map[string]struct{}, aliasGenerationWindow)
+	for len(result) < aliasGenerationWindow {
+		name := generatedMailboxName(rand.IntN(generatedMailboxNameCount()))
+		var suffix strings.Builder
+		for range rand.IntN(7) {
+			suffix.WriteByte(byte('0' + rand.IntN(10)))
+		}
+		email := name + suffix.String() + "@" + domainPart
+		if _, exists := seen[email]; exists {
+			continue
+		}
+		seen[email] = struct{}{}
+		result = append(result, email)
 	}
 	return result
+}
+
+func generatedMailboxNameCount() int {
+	return len(biblicalMailboxNames) + len(pinyinMailboxNameParts)*len(pinyinMailboxNameParts)
+}
+
+func generatedMailboxName(index int) string {
+	if index < len(biblicalMailboxNames) {
+		return biblicalMailboxNames[index]
+	}
+	index -= len(biblicalMailboxNames)
+	return pinyinMailboxNameParts[index/len(pinyinMailboxNameParts)] + pinyinMailboxNameParts[index%len(pinyinMailboxNameParts)]
 }
 
 func splitEmail(email string) (string, string, bool) {

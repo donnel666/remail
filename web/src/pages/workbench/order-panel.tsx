@@ -231,10 +231,6 @@ function OrderAccordionItem({
                     onFetch={(source) => onFetchMail(order, source)}
                     variant="code"
                   />
-                ) : order.productType === "domain" ? (
-                  <Tag color="blue" shape="circle" size="small">
-                    {t("SMTP push")}
-                  </Tag>
                 ) : null}
               </div>
             </div>

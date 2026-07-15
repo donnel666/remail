@@ -132,8 +132,7 @@ func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail
 			continue
 		}
 		if orderScope.LooseMatch {
-			if matchOptionalRule(MailRuleSender, enabled, fetched, orderScope) &&
-				matchOptionalRule(MailRuleSubject, enabled, fetched, orderScope) {
+			if matchRequiredRule(MailRuleSender, enabled, fetched, orderScope) {
 				return true
 			}
 			continue

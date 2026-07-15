@@ -321,11 +321,13 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 }
 
 func (uc *UseCase) saveOrderDelivery(ctx context.Context, scope OrderScope, message domain.Message) error {
-	code := strings.TrimSpace(message.VerificationCode)
-	if code == "" || scope.OrderID == 0 || message.ID == 0 {
+	if scope.OrderID == 0 || message.ID == 0 {
 		return nil
 	}
 	if scope.ServiceMode == "code" {
+		if strings.TrimSpace(message.VerificationCode) == "" {
+			return nil
+		}
 		return uc.repo.CreateCodeOrderDelivery(ctx, scope.OrderID, message)
 	}
 	return uc.repo.AdvancePurchaseOrderDelivery(ctx, scope.OrderID, message)
@@ -600,7 +602,7 @@ func (uc *UseCase) ingestFetchedMessagesWithFence(
 			return 0, 0, latestReceivedAt(messages), &mailIngestError{safe: "Mail message matching failed.", err: err}
 		}
 		messages = append(messages, message)
-		if matchedScope != nil && strings.TrimSpace(message.VerificationCode) != "" {
+		if matchedScope != nil && (strings.TrimSpace(message.VerificationCode) != "" || matchedScope.ServiceMode == "purchase") {
 			matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: message})
 		}
 	}
@@ -833,7 +835,7 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 			candidateMessage := message
 			candidateMessage.Recipient = recipient
 			matched, code, _ := matchAndExtract(fetchedMessageFromDomain(candidateMessage), scope)
-			if matched && strings.TrimSpace(code) != "" {
+			if matched {
 				seenOrders[scope.OrderNo] = struct{}{}
 				matches = append(matches, struct {
 					scope OrderScope
@@ -1031,17 +1033,10 @@ func matchAndExtract(message FetchedMessage, scope OrderScope) (bool, string, st
 		return false, "", "Message did not match recipient project mail rules."
 	}
 	if scope.LooseMatch {
-		if !matchOptionalRule(MailRuleSender, enabled, message, scope) {
+		if !matchRequiredRule(MailRuleSender, enabled, message, scope) {
 			return false, "", "Message did not match sender project mail rules."
 		}
-		if !matchOptionalRule(MailRuleSubject, enabled, message, scope) {
-			return false, "", "Message did not match subject project mail rules."
-		}
-		code := extractVerificationCode(message.Body)
-		if code == "" {
-			return false, "", "Message did not contain an extractable verification code."
-		}
-		return true, code, ""
+		return true, extractVerificationCode(message.Body), ""
 	}
 	for _, ruleType := range []MailRuleType{MailRuleSender, MailRuleSubject} {
 		if !matchRequiredRule(ruleType, enabled, message, scope) {
@@ -1075,11 +1070,6 @@ func matchRequiredRule(ruleType MailRuleType, enabled map[MailRuleType][]string,
 	return len(patterns) > 0 && matchAnyPattern(ruleType, patterns, message, scope)
 }
 
-func matchOptionalRule(ruleType MailRuleType, enabled map[MailRuleType][]string, message FetchedMessage, scope OrderScope) bool {
-	patterns := enabled[ruleType]
-	return len(patterns) == 0 || matchAnyPattern(ruleType, patterns, message, scope)
-}
-
 func matchAnyPattern(ruleType MailRuleType, patterns []string, message FetchedMessage, scope OrderScope) bool {
 	for _, pattern := range patterns {
 		if matchPattern(ruleType, pattern, message, scope) {
@@ -1105,7 +1095,7 @@ func matchPattern(ruleType MailRuleType, pattern string, message FetchedMessage,
 		case "plus":
 			return recipient != "" && recipient == normalizeEmail(scope.Recipient) && recipientKind(scope) == "plus"
 		default:
-			return regexMatch(pattern, recipient)
+			return false
 		}
 	case MailRuleSender:
 		return regexMatch(pattern, message.Sender)
@@ -1210,11 +1200,11 @@ func isDigits(value string) bool {
 }
 
 func bodyPreview(value string) string {
-	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	value = strings.ToValidUTF8(strings.Join(strings.Fields(strings.TrimSpace(value)), " "), "")
 	if len(value) <= 1000 {
 		return value
 	}
-	return value[:1000]
+	return strings.ToValidUTF8(value[:1000], "")
 }
 
 func decodeMIMEHeader(decoder *mime.WordDecoder, value string) string {

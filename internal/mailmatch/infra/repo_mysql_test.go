@@ -89,7 +89,7 @@ func TestAdvancePurchaseOrderDeliveryOnlyMovesForwardMySQL(t *testing.T) {
 	baseAt := time.Now().UTC().Add(-10 * time.Minute)
 	newerAt := baseAt.Add(5 * time.Minute)
 	olderAt := baseAt.Add(-5 * time.Minute)
-	first := domain.Message{ID: seedMailmatchMessage(t, db, "111111", baseAt, "d"), ReceivedAt: baseAt, VerificationCode: "111111"}
+	first := domain.Message{ID: seedMailmatchMessage(t, db, "", baseAt, "d"), ReceivedAt: baseAt}
 	newer := domain.Message{ID: seedMailmatchMessage(t, db, "222222", newerAt, "e"), ReceivedAt: newerAt, VerificationCode: "222222"}
 	older := domain.Message{ID: seedMailmatchMessage(t, db, "333333", olderAt, "f"), ReceivedAt: olderAt, VerificationCode: "333333"}
 

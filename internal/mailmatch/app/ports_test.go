@@ -1,12 +1,50 @@
 package app
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/stretchr/testify/require"
 )
+
+type matchingRepoStub struct {
+	Repository
+	scopes           []OrderScope
+	purchaseDelivery *domain.Message
+}
+
+func (r *matchingRepoStub) ListMatchingScopesByRecipient(context.Context, domain.ResourceType, uint, string, time.Time) ([]OrderScope, error) {
+	return r.scopes, nil
+}
+
+func (r *matchingRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (r *matchingRepoStub) UpsertMessages(_ context.Context, messages []domain.Message) ([]domain.Message, error) {
+	for i := range messages {
+		messages[i].ID = uint(i + 1)
+	}
+	return messages, nil
+}
+
+func (r *matchingRepoStub) AdvancePurchaseOrderDelivery(_ context.Context, _ uint, message domain.Message) error {
+	r.purchaseDelivery = &message
+	return nil
+}
+
+type matchResultStub struct {
+	results []MatchResult
+}
+
+func (s *matchResultStub) NotifyMatchedCode(_ context.Context, result MatchResult) error {
+	s.results = append(s.results, result)
+	return nil
+}
 
 func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
 	scope := OrderScope{
@@ -15,11 +53,13 @@ func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
 		LooseMatch:    true,
 		Rules: []MailRule{
 			{Type: MailRuleRecipient, Pattern: "plus", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
 		},
 	}
 	message := FetchedMessage{
 		Recipient:  "main@example.com",
 		Recipients: []string{"main@example.com", "alias+login@example.com"},
+		Sender:     "sender@example.net",
 		Body:       "Your code is 123456.",
 	}
 
@@ -33,6 +73,7 @@ func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
 func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
 	message := FetchedMessage{
 		Recipient: "name.tag@example.com",
+		Sender:    "sender@example.net",
 		Body:      "Code: 654321",
 	}
 	scope := OrderScope{
@@ -41,6 +82,7 @@ func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
 		LooseMatch:    true,
 		Rules: []MailRule{
 			{Type: MailRuleRecipient, Pattern: "dot", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
 		},
 	}
 
@@ -51,6 +93,22 @@ func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
 	matched, code, _ := matchAndExtractAnyRecipient(message, scope)
 	require.True(t, matched)
 	require.Equal(t, "654321", code)
+}
+
+func TestRecipientRuleRejectsRegexPattern(t *testing.T) {
+	message := FetchedMessage{Recipient: "user@example.com", Sender: "sender@example.net"}
+	scope := OrderScope{
+		Recipient:     "user@example.com",
+		RecipientKind: "exact",
+		LooseMatch:    true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: `.*`, Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}
+
+	matched, _, _ := matchAndExtract(message, scope)
+	require.False(t, matched)
 }
 
 func TestStrictBodyRuleExtractsCaptureGroup(t *testing.T) {
@@ -82,6 +140,7 @@ func TestStrictBodyRuleExtractsCaptureGroup(t *testing.T) {
 func TestLooseModeUsesGenericNumericExtraction(t *testing.T) {
 	message := FetchedMessage{
 		Recipient: "user@example.com",
+		Sender:    "sender@example.net",
 		Body:      "OTP: 87654321",
 	}
 	scope := OrderScope{
@@ -90,6 +149,7 @@ func TestLooseModeUsesGenericNumericExtraction(t *testing.T) {
 		LooseMatch:    true,
 		Rules: []MailRule{
 			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
 			{Type: MailRuleBody, Pattern: `never-match-(\d+)`, Enabled: true},
 		},
 	}
@@ -99,6 +159,64 @@ func TestLooseModeUsesGenericNumericExtraction(t *testing.T) {
 	require.True(t, matched)
 	require.Equal(t, "87654321", code)
 	require.Empty(t, diagnostic)
+}
+
+func TestLooseModeRequiresSenderRule(t *testing.T) {
+	message := FetchedMessage{Recipient: "user@example.com", Sender: "sender@example.net"}
+	scope := OrderScope{
+		Recipient:     "user@example.com",
+		RecipientKind: "exact",
+		LooseMatch:    true,
+		Rules:         []MailRule{{Type: MailRuleRecipient, Pattern: "exact", Enabled: true}},
+	}
+
+	matched, _, _ := matchAndExtract(message, scope)
+	require.False(t, matched)
+}
+
+func TestLooseModeKeepsOrderMailWithoutExtractableCode(t *testing.T) {
+	const orderID = 42
+	repo := &matchingRepoStub{scopes: []OrderScope{{
+		OrderID:       orderID,
+		OrderNo:       "OR_LOOSE",
+		Recipient:     "user@example.com",
+		RecipientKind: "exact",
+		ServiceMode:   "purchase",
+		LooseMatch:    true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+
+	stored, matched, _, err := uc.ingestFetchedMessages(context.Background(), []FetchedMessage{{
+		EmailResourceID: 1,
+		ResourceType:    domain.ResourceTypeDomain,
+		Recipient:       "user@example.com",
+		Sender:          "sender@example.net",
+		Body:            "验证码是：123456789",
+		ReceivedAt:      time.Now().UTC(),
+	}})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, stored)
+	require.Equal(t, 1, matched)
+	require.NotNil(t, repo.purchaseDelivery)
+	require.Equal(t, domain.MessageStatusMatched, repo.purchaseDelivery.Status)
+	require.Equal(t, uint(orderID), *repo.purchaseDelivery.MatchedOrderID)
+	require.Empty(t, repo.purchaseDelivery.VerificationCode)
+	require.Len(t, matches.results, 1)
+	require.Equal(t, "OR_LOOSE", matches.results[0].OrderNo)
+	require.Empty(t, matches.results[0].VerificationCode)
+}
+
+func TestBodyPreviewDoesNotSplitUTF8(t *testing.T) {
+	preview := bodyPreview(strings.Repeat("a", 999) + "中")
+
+	require.True(t, utf8.ValidString(preview))
+	require.LessOrEqual(t, len(preview), 1000)
 }
 
 func TestScopeReadableKeepsPurchaseServiceAfterWarranty(t *testing.T) {

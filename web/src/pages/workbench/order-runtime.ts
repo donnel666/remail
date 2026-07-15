@@ -24,11 +24,10 @@ export function shouldAutoFetchOrderMail(
 export function shouldShowQuickFetchControl(
   order: Pick<
     WorkbenchOrder,
-    "hasDelivery" | "productType" | "serviceMode" | "verificationCode"
+    "hasDelivery" | "serviceMode" | "verificationCode"
   >,
 ) {
   return (
-    order.productType !== "domain" &&
     !order.verificationCode &&
     (!order.hasDelivery || order.serviceMode === "purchase")
   );

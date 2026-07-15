@@ -78,7 +78,7 @@ describe("shouldShowQuickFetchControl", () => {
     ).toBe(false);
   });
 
-  it("does not show the quick fetch control for domain orders", () => {
+  it("shows the quick fetch control for domain orders", () => {
     expect(
       shouldShowQuickFetchControl(
         order({
@@ -86,7 +86,7 @@ describe("shouldShowQuickFetchControl", () => {
           serviceMode: "purchase",
         }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

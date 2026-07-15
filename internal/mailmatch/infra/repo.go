@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	"github.com/donnel666/remail/internal/mailmatch/app"
@@ -508,7 +507,7 @@ func (r *Repo) CreateCodeOrderDelivery(ctx context.Context, orderID uint, messag
 }
 
 func (r *Repo) AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
-	if orderID == 0 || message.ID == 0 || strings.TrimSpace(message.VerificationCode) == "" || message.ReceivedAt.IsZero() {
+	if orderID == 0 || message.ID == 0 || message.ReceivedAt.IsZero() {
 		return domain.ErrInvalidRequest
 	}
 	err := r.dbFor(ctx).Exec(`
@@ -1077,23 +1076,15 @@ func safeDiagnostic(value string) string {
 }
 
 func truncate(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
+	return truncateUTF8Bytes(value, limit)
 }
 
 func truncateUTF8Bytes(value string, limit int) string {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
 	if len(value) <= limit {
 		return value
 	}
-	out := value[:limit]
-	for len(out) > 0 && !utf8.ValidString(out) {
-		out = out[:len(out)-1]
-	}
-	return out
+	return strings.ToValidUTF8(value[:limit], "")
 }
 
 func isDuplicateKeyError(err error) bool {

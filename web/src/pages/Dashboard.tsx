@@ -269,7 +269,7 @@ function toWorkbenchMessages(
       preview: item.bodyPreview,
       receivedAt: item.receivedAt,
       sender: item.sender,
-      status: item.verificationCode ? "matched" : "received",
+      status: "matched",
       subject: item.subject || "(No subject)",
       verificationCode: item.verificationCode,
     };
@@ -843,7 +843,7 @@ export default function Dashboard() {
           result.fetch?.lastSubmittedAt ??
           new Date().toISOString();
         let refreshedDetail: WorkbenchOrder | undefined;
-        if (latestCode) {
+        if (messages.length > 0) {
           try {
             refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
           } catch {
@@ -1018,7 +1018,6 @@ export default function Dashboard() {
           Boolean(mailClientOrder && shouldAutoFetchOrderMail(mailClientOrder))
         }
         email={mailClientParams?.email}
-        fetchEnabled={mailClientOrder?.productType !== "domain"}
         fetchKey={mailClientParams?.orderNo}
         messages={mailClientOrder?.messages ?? []}
         onClose={() => setMailClientParams(null)}

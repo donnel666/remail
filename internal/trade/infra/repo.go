@@ -875,7 +875,7 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 			return fmt.Errorf("reload activated purchase order: %w", err)
 		}
 		changed = true
-		reason := "Purchase activated by matched code at " + matchedAt.UTC().Format(time.RFC3339)
+		reason := "Purchase activated by matched mail at " + matchedAt.UTC().Format(time.RFC3339)
 		return r.appendEvent(txCtx, tx, orderNo, "order.purchase_activated", &previous, &previous, domain.OperatorTypeSystem, reason)
 	})
 	if err != nil {

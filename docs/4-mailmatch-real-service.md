@@ -11,6 +11,7 @@
 | 2026-07-10 | V1.4 | Codex | 修正 V1.2：完整六元素快照改为轻量 `OrderDeliveryHead`，只保存订单到原始 `Message` 的当前交付指针，消除正文重复存储。 |
 | 2026-07-12 | V1.5 | Codex | 补充管理员 Microsoft 资源邮件能力：列表摘要与授权单封正文按需读取分离，资源级手工 Fetch 复用或扩展现有 durable single-flight 事实并继续走 MailTransportFetchPort/ACL；不强制新增任务表或跨域凭据 Port。 |
 | 2026-07-12 | V1.6 | Codex | 收敛资源 Fetch 凭据边界：MailMatch 继续拥有 Fetch/Message 事实，但内部凭据 scope、rotated RT、credential revision 和 root version 统一通过 Core `MicrosoftCredentialPort` 处理；repository 不再直读/直写 Core 表。 |
+| 2026-07-15 | V1.7 | Codex | 明确宽松模式按 `sender + recipient` 两元素唯一匹配；购买订单匹配到邮件即可写交付头并通知 Trade 激活，验证码提取允许为空。严格模式仍要求 `sender + recipient + subject + body` 四元素全部命中。 |
 
 > 核心域。BC-MAILMATCH 保存邮件事实，按项目规则识别订单服务结果。协议收发不在本上下文内。
 
@@ -60,12 +61,12 @@
 | `messageId` | 当前交付对应的原始 `Message.id` |
 | `messageReceivedAt` | 邮件收件时间；购买订单并发推进时的 CAS 比较事实 |
 
-交付头只在邮件唯一命中并提取到验证码后写入，用于停止无效自动收件、固定接码结果和定位购买订单的最新验证码：
+交付头只在邮件唯一命中后写入；接码订单仍要求提取到验证码，购买订单在宽松模式下允许验证码为空：
 
 | 场景 | 写入规则 |
 |------|----------|
-| 接码 `serviceMode=code` | 首次唯一命中后写入一次，后续重复匹配不覆盖。 |
-| 购买 `serviceMode=purchase` | 唯一命中后按 `messageReceivedAt, messageId` 原子推进到最新邮件，旧邮件不能倒退覆盖。 |
+| 接码 `serviceMode=code` | 首次唯一命中且提取到验证码后写入一次，后续重复匹配不覆盖。 |
+| 购买 `serviceMode=purchase` | 严格模式四元素命中，或宽松模式 `sender + recipient` 命中后写入；按 `messageReceivedAt, messageId` 原子推进到最新邮件，验证码可以为空，旧邮件不能倒退覆盖。 |
 
 六元素响应必须通过 `messageId` 读取原始 `Message`，禁止在交付头重复保存发件人、收件人、主题、正文或验证码。`Message` 仍然是结构化邮件事实，匹配仍然按“原始收件人候选 -> 有效分配 -> 项目规则”执行。为控制表体积，`Message` 表不保存 `raw_source/provider_payload`，`rawBody` 只保存用于匹配与展示的正文；需要协议原件时使用 MailTransport 保存的 MinIO 私有 RFC822 对象。交付头不能作为匹配输入，不能绕过规则直接交付。
 
@@ -146,7 +147,7 @@ flowchart TD
 | INV-M8 | 真实服务读取必须按订单窗口和项目规则过滤。 |
 | INV-M9 | 服务凭证读取只通过 `pickup(email + token)` 进入，BC-OPENAPI 只负责 token 事实校验和反查 `orderNo`。 |
 | INV-M10 | pickup 响应统一返回 6 元素：发件人、收件人、收件时间、主题、正文、验证码；不能返回底层邮箱未经过滤的全部邮件。 |
-| INV-M11 | 订单交付头只在唯一命中并提取验证码后写入，不能表达候选关系、冲突关系或匹配历史。 |
+| INV-M11 | 接码订单交付头只在唯一命中并提取验证码后写入；购买订单在宽松模式两元素唯一命中后即可写入，验证码允许为空。交付头不能表达候选关系、冲突关系或匹配历史。 |
 | INV-M12 | 接码订单交付头只写一次；购买订单交付头只能按更新的 `messageReceivedAt, messageId` 前进。 |
 | INV-M13 | pickup 通过交付头读取原始 Message；接码已有交付头时不得重复触发外部拉取。 |
 | INV-M14 | 订单列表只读取交付头摘要，不得因列表加载提交邮件拉取任务。自动收件只针对当前展开且尚未交付的订单。 |
