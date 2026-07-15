@@ -268,6 +268,41 @@ func (r *mockUserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.
 	return r.operationLogs.Create(ctx, log)
 }
 
+func (r *mockUserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	r.mu.Lock()
+	current, ok := r.users[userID]
+	if !ok {
+		r.mu.Unlock()
+		return nil, domain.ErrUserNotFound
+	}
+	if current.Role == domain.RoleSuperAdmin {
+		r.mu.Unlock()
+		return nil, domain.ErrPermissionDenied
+	}
+	cp := *current
+	if enabled != nil {
+		cp.Enabled = *enabled
+	}
+	if role != nil {
+		cp.Role = *role
+	}
+	if userGroupID != nil {
+		cp.UserGroupID = *userGroupID
+		if group, exists := r.userGroups[*userGroupID]; exists {
+			cp.UserGroup = *group
+		}
+	}
+	if incrementTokenVersion {
+		cp.TokenVersion++
+	}
+	r.users[userID] = &cp
+	r.mu.Unlock()
+	if err := r.operationLogs.Create(ctx, log); err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
 func (r *mockUserRepo) CreateFirstUser(ctx context.Context, user *domain.User) error {
 	count, _ := r.Count(ctx)
 	if count > 0 {
@@ -460,6 +495,33 @@ func (r *mockUserRepo) ReplaceUserPermissionPolicies(_ context.Context, userID u
 	return nil
 }
 
+func (r *mockUserRepo) ReplaceUserPermissionPoliciesGuarded(_ context.Context, userID uint, policies []domain.PermissionPolicy, allowSensitive bool) ([]domain.PermissionPolicy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user, ok := r.users[userID]
+	if !ok {
+		return nil, domain.ErrUserNotFound
+	}
+	if user.Role == domain.RoleSuperAdmin {
+		return nil, domain.ErrPermissionDenied
+	}
+	previous := append([]domain.PermissionPolicy(nil), r.policies[userID]...)
+	if !allowSensitive && (mockPoliciesContainSensitive(previous) || mockPoliciesContainSensitive(policies)) {
+		return nil, domain.ErrPermissionDenied
+	}
+	r.policies[userID] = append([]domain.PermissionPolicy(nil), policies...)
+	return previous, nil
+}
+
+func mockPoliciesContainSensitive(policies []domain.PermissionPolicy) bool {
+	for _, policy := range policies {
+		if policy.Action == "sensitive" {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *mockUserRepo) Reload(_ context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -620,6 +682,14 @@ func (c *recordingPermissionChecker) Check(_ context.Context, _ uint, _ domain.R
 }
 
 func (*recordingPermissionChecker) Reload(context.Context) error { return nil }
+
+type permissionMapChecker map[string]bool
+
+func (c permissionMapChecker) Check(_ context.Context, _ uint, _ domain.Role, resource, action string) (bool, error) {
+	return c[resource+":"+action], nil
+}
+
+func (permissionMapChecker) Reload(context.Context) error { return nil }
 
 type mockEmailCodeStore struct {
 	mu        sync.Mutex
@@ -1117,6 +1187,30 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Authentication is required")
 }
 
+func TestGetMeIncludesAdminNavigationAndOperationPermissions(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("GET", "/v1/me", nil)
+	require.NoError(t, err)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	for _, permission := range []string{
+		"billing:wallet:read",
+		"billing:wallet:operate",
+		"billing:card:read",
+		"trade:order:read",
+		"trade:order:operate",
+		"iam:permission:sensitive",
+	} {
+		require.Contains(t, w.Body.String(), `"`+permission+`"`)
+	}
+}
+
 func TestAdminUsers_Unauthenticated(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
@@ -1308,6 +1402,115 @@ func TestPatchAdminUserSameValuesWritesUnchangedOperationLog(t *testing.T) {
 	require.Equal(t, "req-admin-same-values", log.RequestID)
 }
 
+func TestPatchAdminUserRequiresSensitivePermissionForSuperAdminChanges(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:user:write":           true,
+		"iam:permission:sensitive": false,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "sensitive-role-target@test.com")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PATCH",
+		fmt.Sprintf("/v1/admin/users/%d", target.ID),
+		strings.NewReader(`{"role":"super_admin"}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.RoleUser, stored.Role)
+}
+
+func TestPatchAdminUserAllowsOrdinaryChangesWithoutSensitivePermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:user:write": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "ordinary-role-target@test.com")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PATCH",
+		fmt.Sprintf("/v1/admin/users/%d", target.ID),
+		strings.NewReader(`{"role":"admin"}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.RoleAdmin, stored.Role)
+}
+
+func TestPatchAdminUserAllowsSuperAdminChangesWithSensitivePermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:user:write":           true,
+		"iam:permission:sensitive": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "authorized-sensitive-role@test.com")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PATCH",
+		fmt.Sprintf("/v1/admin/users/%d", target.ID),
+		strings.NewReader(`{"role":"super_admin"}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.RoleSuperAdmin, stored.Role)
+}
+
+func TestPatchAdminUserCannotModifyExistingSuperAdminEvenWithSensitivePermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:user:write":           true,
+		"iam:permission:sensitive": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "protected-super-admin@test.com")
+	target.Role = domain.RoleSuperAdmin
+	require.NoError(t, testRepo(h).Update(context.Background(), target))
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PATCH",
+		fmt.Sprintf("/v1/admin/users/%d", target.ID),
+		strings.NewReader(`{"role":"admin"}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.RoleSuperAdmin, stored.Role)
+}
+
 func TestPostAdminRevokeSessionsWritesOperationLog(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
@@ -1344,6 +1547,26 @@ func TestPostAdminRevokeSessionsWritesOperationLog(t *testing.T) {
 	require.Equal(t, "req-revoke", log.RequestID)
 }
 
+func TestPostAdminRevokeSessionsRejectsSuperAdmin(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "protected-revoke-super-admin@test.com")
+	target.Role = domain.RoleSuperAdmin
+	require.NoError(t, testRepo(h).Update(context.Background(), target))
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("POST", fmt.Sprintf("/v1/admin/users/%d/sessions/revoke", target.ID), nil)
+	require.NoError(t, err)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Zero(t, stored.TokenVersion)
+}
+
 func TestPutAdminUserPermissionsWritesOperationLogAndReloads(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
@@ -1372,6 +1595,127 @@ func TestPutAdminUserPermissionsWritesOperationLogAndReloads(t *testing.T) {
 	require.Equal(t, "success", log.Result)
 	require.Equal(t, "User permissions updated.", log.SafeSummary)
 	require.Equal(t, "req-permissions", log.RequestID)
+}
+
+func TestPutAdminUserPermissionsRequiresSensitivePermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:permission:write":     true,
+		"iam:permission:sensitive": false,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "sensitive-policy-target@test.com")
+
+	body := `{"policies":[{"resource":"iam:permission","action":"sensitive","effect":"allow"}]}`
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PUT",
+		fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID),
+		strings.NewReader(body),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	policies, err := testRepo(h).ListUserPermissionPolicies(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Empty(t, policies)
+}
+
+func TestPutAdminUserPermissionsCannotRemoveSensitivePolicyWithoutPermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:permission:write": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "sensitive-policy-removal@test.com")
+	testRepo(h).policies[target.ID] = []domain.PermissionPolicy{{
+		Resource: "iam:permission",
+		Action:   "sensitive",
+		Effect:   "allow",
+	}}
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PUT",
+		fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID),
+		strings.NewReader(`{"policies":[]}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	policies, err := testRepo(h).ListUserPermissionPolicies(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, []domain.PermissionPolicy{{
+		Resource: "iam:permission",
+		Action:   "sensitive",
+		Effect:   "allow",
+	}}, policies)
+}
+
+func TestPutAdminUserPermissionsAllowsSensitivePolicyWithPermission(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:permission:write":     true,
+		"iam:permission:sensitive": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "authorized-sensitive-policy@test.com")
+
+	body := `{"policies":[{"resource":"iam:permission","action":"sensitive","effect":"allow"}]}`
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PUT",
+		fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID),
+		strings.NewReader(body),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	policies, err := testRepo(h).ListUserPermissionPolicies(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, []domain.PermissionPolicy{{
+		Resource: "iam:permission",
+		Action:   "sensitive",
+		Effect:   "allow",
+	}}, policies)
+}
+
+func TestPutAdminUserPermissionsRejectsExistingSuperAdmin(t *testing.T) {
+	h := newTestHandler()
+	h.module.PermissionChecker = permissionMapChecker{
+		"iam:permission:write":     true,
+		"iam:permission:sensitive": true,
+	}
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUser(t, h, "protected-permission-super-admin@test.com")
+	target.Role = domain.RoleSuperAdmin
+	require.NoError(t, testRepo(h).Update(context.Background(), target))
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(
+		"PUT",
+		fmt.Sprintf("/v1/admin/users/%d/permissions", target.ID),
+		strings.NewReader(`{"policies":[]}`),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
 func TestPutAdminUserPermissionsRejectsWildcardAction(t *testing.T) {

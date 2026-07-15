@@ -69,11 +69,14 @@ type UpdateUserGroupRequest struct {
 var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "iam:user", Actions: []string{"read", "write", "operate"}},
 	{Resource: "iam:user_group", Actions: []string{"read", "write"}},
-	{Resource: "iam:permission", Actions: []string{"read", "write"}},
+	{Resource: "iam:permission", Actions: []string{"read", "write", "sensitive"}},
 	{Resource: "iam:invite", Actions: []string{"read", "write", "operate"}},
 	{Resource: "iam:supplier_application", Actions: []string{"read", "operate"}},
 	{Resource: "core:resource", Actions: []string{"read", "write", "operate"}},
 	{Resource: "core:project", Actions: []string{"read", "write", "operate"}},
+	{Resource: "trade:order", Actions: []string{"read", "write", "operate"}},
+	{Resource: "billing:wallet", Actions: []string{"read", "write", "operate", "sensitive"}},
+	{Resource: "billing:card", Actions: []string{"read", "write", "operate", "sensitive"}},
 	{Resource: "proxy:proxy", Actions: []string{"read", "write", "operate"}},
 	{Resource: "alloc:allocation", Actions: []string{"read", "operate"}},
 	{Resource: "mailmatch:message", Actions: []string{"read", "operate"}},
@@ -201,16 +204,7 @@ func (uc *AdminUseCase) GetUserPermissions(ctx context.Context, targetUserID uin
 	return uc.permissions.ListUserPermissionPolicies(ctx, targetUserID)
 }
 
-func (uc *AdminUseCase) SaveUserPermissions(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, policies []domain.PermissionPolicy) error {
-	user, err := uc.repo.FindByID(ctx, targetUserID)
-	if err != nil {
-		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.permissions.update", targetUserID, "failure", "User permission update failed."))
-		return fmt.Errorf("admin permissions find user: %w", err)
-	}
-	if user == nil {
-		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.permissions.update", targetUserID, "failure", "User permission update failed."))
-		return domain.ErrUserNotFound
-	}
+func (uc *AdminUseCase) SaveUserPermissions(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, policies []domain.PermissionPolicy, allowSensitive bool) error {
 	for _, policy := range policies {
 		if !validPermissionPolicy(policy) {
 			_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.permissions.update", targetUserID, "failure", "User permission update failed."))
@@ -218,15 +212,10 @@ func (uc *AdminUseCase) SaveUserPermissions(ctx context.Context, operatorUserID 
 		}
 	}
 
-	previous, err := uc.permissions.ListUserPermissionPolicies(ctx, targetUserID)
+	previous, err := uc.permissions.ReplaceUserPermissionPoliciesGuarded(ctx, targetUserID, policies, allowSensitive)
 	if err != nil {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.permissions.update", targetUserID, "failure", "User permission update failed."))
-		return fmt.Errorf("admin permissions snapshot: %w", err)
-	}
-
-	if err := uc.permissions.ReplaceUserPermissionPolicies(ctx, targetUserID, policies); err != nil {
-		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.permissions.update", targetUserID, "failure", "User permission update failed."))
-		return fmt.Errorf("admin permissions replace: %w", err)
+		return fmt.Errorf("admin permissions guarded replace: %w", err)
 	}
 	if err := uc.permissions.Reload(ctx); err != nil {
 		uc.restoreUserPermissions(ctx, targetUserID, previous)
@@ -319,7 +308,7 @@ type UpdateUserRequest struct {
 
 // UpdateUser updates a user's access role and entitlement group.
 // If the user is disabled, increments tokenVersion and clears sessions (INV-I3).
-func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, req *UpdateUserRequest) (*domain.User, error) {
+func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, req *UpdateUserRequest, allowSensitive bool) (*domain.User, error) {
 	user, err := uc.repo.FindByID(ctx, targetUserID)
 	if err != nil {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
@@ -329,14 +318,20 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
 		return nil, domain.ErrUserNotFound
 	}
+	if user.Role == domain.RoleSuperAdmin || (!allowSensitive && req.Role != nil && *req.Role == domain.RoleSuperAdmin) {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
+		return nil, domain.ErrPermissionDenied
+	}
 
-	changed := false
+	var enabledUpdate *bool
+	var roleUpdate *domain.Role
+	var userGroupUpdate *uint
 	tokenBump := false
 
 	if req.Enabled != nil {
 		if user.Enabled != *req.Enabled {
-			user.Enabled = *req.Enabled
-			changed = true
+			enabled := *req.Enabled
+			enabledUpdate = &enabled
 			if !*req.Enabled {
 				tokenBump = true // Disabling user invalidates sessions
 			}
@@ -350,8 +345,7 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 			return nil, domain.ErrInvalidRole
 		}
 		if user.Role != role {
-			user.Role = role
-			changed = true
+			roleUpdate = &role
 		}
 	}
 
@@ -366,24 +360,28 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 			return nil, domain.ErrInvalidUserGroup
 		}
 		if user.UserGroupID != group.ID {
-			user.UserGroupID = group.ID
-			user.UserGroup = *group
-			changed = true
+			groupID := group.ID
+			userGroupUpdate = &groupID
 		}
 	}
 
-	if !changed {
+	if enabledUpdate == nil && roleUpdate == nil && userGroupUpdate == nil {
 		if err := uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings unchanged.")); err != nil {
 			return nil, fmt.Errorf("admin update unchanged log: %w", err)
 		}
 		return user, nil
 	}
 
-	if tokenBump {
-		user.TokenVersion++
-	}
-
-	if err := uc.repo.UpdateWithOperationLog(ctx, user, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings updated.")); err != nil {
+	updated, err := uc.repo.UpdateNonSuperAdminAccessWithOperationLog(
+		ctx,
+		targetUserID,
+		enabledUpdate,
+		roleUpdate,
+		userGroupUpdate,
+		tokenBump,
+		adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings updated."),
+	)
+	if err != nil {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
 		return nil, fmt.Errorf("admin update user: %w", err)
 	}
@@ -392,23 +390,21 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		_ = uc.sessions.DeleteByUserID(ctx, targetUserID)
 	}
 
-	return user, nil
+	return updated, nil
 }
 
 // ForceLogout increments the user's tokenVersion and clears all sessions.
 func (uc *AdminUseCase) ForceLogout(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint) error {
-	user, err := uc.repo.FindByID(ctx, targetUserID)
+	_, err := uc.repo.UpdateNonSuperAdminAccessWithOperationLog(
+		ctx,
+		targetUserID,
+		nil,
+		nil,
+		nil,
+		true,
+		adminOperationLog(operatorUserID, requestID, path, "iam.user.sessions.revoke", targetUserID, "success", "User sessions revoked."),
+	)
 	if err != nil {
-		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.sessions.revoke", targetUserID, "failure", "User sessions revoke failed."))
-		return fmt.Errorf("admin force logout find user: %w", err)
-	}
-	if user == nil {
-		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.sessions.revoke", targetUserID, "failure", "User sessions revoke failed."))
-		return domain.ErrUserNotFound
-	}
-
-	user.TokenVersion++
-	if err := uc.repo.UpdateWithOperationLog(ctx, user, adminOperationLog(operatorUserID, requestID, path, "iam.user.sessions.revoke", targetUserID, "success", "User sessions revoked.")); err != nil {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.sessions.revoke", targetUserID, "failure", "User sessions revoke failed."))
 		return fmt.Errorf("admin force logout update: %w", err)
 	}
@@ -436,7 +432,7 @@ func validPermissionPolicy(policy domain.PermissionPolicy) bool {
 }
 
 func (uc *AdminUseCase) restoreUserPermissions(ctx context.Context, userID uint, previous []domain.PermissionPolicy) {
-	if err := uc.permissions.ReplaceUserPermissionPolicies(ctx, userID, previous); err != nil {
+	if _, err := uc.permissions.ReplaceUserPermissionPoliciesGuarded(ctx, userID, previous, true); err != nil {
 		return
 	}
 	_ = uc.permissions.Reload(ctx)

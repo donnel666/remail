@@ -538,7 +538,11 @@ func (h *IAMHandler) PutAdminUserPermissions(c *gin.Context) {
 		policies[i] = domain.PermissionPolicy{Resource: policy.Resource, Action: policy.Action, Effect: policy.Effect}
 	}
 	operatorID, _ := middleware.GetCurrentUserID(c)
-	if err := h.module.AdminUseCase.SaveUserPermissions(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), targetUserID, policies); err != nil {
+	allowSensitive, ok := h.currentUserHasPermission(c, "iam:permission", "sensitive")
+	if !ok {
+		return
+	}
+	if err := h.module.AdminUseCase.SaveUserPermissions(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), targetUserID, policies, allowSensitive); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -722,7 +726,11 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 	updateReq := &app.UpdateUserRequest{Enabled: req.Enabled, Role: role, UserGroupID: req.UserGroupID}
 
 	operatorID, _ := middleware.GetCurrentUserID(c)
-	user, err := h.module.AdminUseCase.UpdateUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), uint(targetUserID), updateReq)
+	allowSensitive, ok := h.currentUserHasPermission(c, "iam:permission", "sensitive")
+	if !ok {
+		return
+	}
+	user, err := h.module.AdminUseCase.UpdateUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), uint(targetUserID), updateReq, allowSensitive)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -785,6 +793,34 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 		DefaultLimit: 20,
 		MaxLimit:     1000,
 	})
+}
+
+func (h *IAMHandler) currentUserHasPermission(c *gin.Context, resource, action string) (bool, bool) {
+	userID, userOK := middleware.GetCurrentUserID(c)
+	role, roleOK := middleware.GetCurrentRole(c)
+	if !userOK || !roleOK {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "Authentication is required.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false, false
+	}
+	if h == nil || h.module == nil || h.module.PermissionChecker == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message":   "An unexpected error occurred.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false, false
+	}
+	allowed, err := h.module.PermissionChecker.Check(c.Request.Context(), userID, role, resource, action)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message":   "An unexpected error occurred.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false, false
+	}
+	return allowed, true
 }
 
 func parseUintQueryList(c *gin.Context, name string) ([]uint, bool) {

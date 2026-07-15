@@ -389,6 +389,61 @@ func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User
 	})
 }
 
+func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	var updated *domain.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := make(map[string]any, 4)
+		if enabled != nil {
+			updates["enabled"] = *enabled
+		}
+		if role != nil {
+			updates["role"] = role.String()
+		}
+		if userGroupID != nil {
+			updates["user_group_id"] = *userGroupID
+		}
+		if incrementTokenVersion {
+			updates["token_version"] = gorm.Expr("token_version + 1")
+		}
+		if len(updates) == 0 {
+			return errors.New("user access update has no changes")
+		}
+
+		result := tx.Model(&UserModel{}).
+			Where("id = ? AND role <> ?", userID, domain.RoleSuperAdmin.String()).
+			Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("update non-super-admin access with log: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			var current UserModel
+			if err := tx.Select("id", "role").First(&current, userID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return domain.ErrUserNotFound
+				}
+				return fmt.Errorf("inspect unchanged user access: %w", err)
+			}
+			if domain.Role(current.Role) == domain.RoleSuperAdmin {
+				return domain.ErrPermissionDenied
+			}
+		}
+
+		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
+		}
+		var model UserModel
+		if err := tx.Preload("UserGroup").First(&model, userID).Error; err != nil {
+			return fmt.Errorf("reload updated user access: %w", err)
+		}
+		updated = model.toDomain()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 func applyUserListFilter(q *gorm.DB, filter domain.UserListFilter) *gorm.DB {
 	if len(filter.IDs) > 0 {
 		q = q.Where("id IN ?", filter.IDs)

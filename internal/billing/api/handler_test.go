@@ -60,6 +60,25 @@ func TestBillingRoutesAuthAndScope(t *testing.T) {
 	require.Contains(t, w.Body.String(), "Permission denied.")
 }
 
+func TestBillingAdminMutationPermissionsMatchFrontendContract(t *testing.T) {
+	checker := &recordingBillingPermissionChecker{}
+	router := newBillingAPIRouterWithChecker(nil, map[string]sessionFixture{
+		"admin-session": {userID: 1, role: iamdomain.RoleAdmin, email: "admin@example.com"},
+	}, checker)
+
+	w := httptest.NewRecorder()
+	req := authenticatedJSONRequest(http.MethodPost, "/v1/admin/wallets/2/credit", "admin-session", `{}`)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "billing:wallet:operate", checker.lastPermission())
+
+	w = httptest.NewRecorder()
+	req = authenticatedJSONRequest(http.MethodPatch, "/v1/admin/cards/test-card", "admin-session", `{}`)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "billing:card:write", checker.lastPermission())
+}
+
 func TestBillingCardRedeemRequiresIdempotencyAndUsesSafeError(t *testing.T) {
 	db := newBillingAPITestDB(t)
 	userID := createBillingAPIUser(t, db, "redeem-user@example.com", iamdomain.RoleUser)
@@ -201,11 +220,31 @@ func (f fakePermissionChecker) Check(context.Context, uint, iamdomain.Role, stri
 	return f.allowed, nil
 }
 
+type recordingBillingPermissionChecker struct {
+	calls []string
+}
+
+func (c *recordingBillingPermissionChecker) Check(_ context.Context, _ uint, _ iamdomain.Role, resource, action string) (bool, error) {
+	c.calls = append(c.calls, resource+":"+action)
+	return false, nil
+}
+
+func (c *recordingBillingPermissionChecker) lastPermission() string {
+	if len(c.calls) == 0 {
+		return ""
+	}
+	return c.calls[len(c.calls)-1]
+}
+
 func newBillingAPIRouter(db *gorm.DB, sessions map[string]sessionFixture, allowPermission bool) *gin.Engine {
+	return newBillingAPIRouterWithChecker(db, sessions, fakePermissionChecker{allowed: allowPermission})
+}
+
+func newBillingAPIRouterWithChecker(db *gorm.DB, sessions map[string]sessionFixture, checker middleware.PermissionChecker) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	RegisterBillingRoutes(router.Group("/v1"), NewBillingModule(db), fakeSessionFetcher{sessions: sessions}, fakePermissionChecker{allowed: allowPermission})
+	RegisterBillingRoutes(router.Group("/v1"), NewBillingModule(db), fakeSessionFetcher{sessions: sessions}, checker)
 	return router
 }
 

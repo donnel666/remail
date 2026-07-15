@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/casbin/casbin/v2"
@@ -9,6 +10,7 @@ import (
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const casbinModel = `
@@ -79,11 +81,7 @@ func (s *PermissionService) ListUserPermissionPolicies(ctx context.Context, user
 	if err := s.db.WithContext(ctx).Where("ptype = ? AND v0 = ?", "p", sub).Order("v1 ASC, v2 ASC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list user permissions: %w", err)
 	}
-	policies := make([]domain.PermissionPolicy, len(models))
-	for i, m := range models {
-		policies[i] = domain.PermissionPolicy{Resource: m.V1, Action: m.V2, Effect: m.V3}
-	}
-	return policies, nil
+	return permissionPoliciesFromModels(models), nil
 }
 
 func (s *PermissionService) ReplaceUserPermissionPolicies(ctx context.Context, userID uint, policies []domain.PermissionPolicy) error {
@@ -106,4 +104,77 @@ func (s *PermissionService) ReplaceUserPermissionPolicies(ctx context.Context, u
 		}
 		return nil
 	})
+}
+
+func (s *PermissionService) ReplaceUserPermissionPoliciesGuarded(ctx context.Context, userID uint, policies []domain.PermissionPolicy, allowSensitive bool) ([]domain.PermissionPolicy, error) {
+	var previous []domain.PermissionPolicy
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user UserModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "role").
+			First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrUserNotFound
+			}
+			return fmt.Errorf("lock permission target user: %w", err)
+		}
+		if domain.Role(user.Role) == domain.RoleSuperAdmin {
+			return domain.ErrPermissionDenied
+		}
+
+		var models []CasbinRuleModel
+		sub := fmt.Sprintf("user:%d", userID)
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("ptype = ? AND v0 = ?", "p", sub).
+			Order("v1 ASC, v2 ASC").
+			Find(&models).Error; err != nil {
+			return fmt.Errorf("lock user permissions: %w", err)
+		}
+		previous = permissionPoliciesFromModels(models)
+		if !allowSensitive && (containsSensitivePermissionPolicy(previous) || containsSensitivePermissionPolicy(policies)) {
+			return domain.ErrPermissionDenied
+		}
+
+		if err := tx.Where("ptype = ? AND v0 = ?", "p", sub).Delete(&CasbinRuleModel{}).Error; err != nil {
+			return fmt.Errorf("delete user permissions: %w", err)
+		}
+		for _, policy := range policies {
+			model := &CasbinRuleModel{
+				Ptype: "p",
+				V0:    sub,
+				V1:    policy.Resource,
+				V2:    policy.Action,
+				V3:    policy.Effect,
+			}
+			if err := tx.Create(model).Error; err != nil {
+				return fmt.Errorf("create user permission: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return previous, nil
+}
+
+func permissionPoliciesFromModels(models []CasbinRuleModel) []domain.PermissionPolicy {
+	policies := make([]domain.PermissionPolicy, len(models))
+	for i, model := range models {
+		policies[i] = domain.PermissionPolicy{
+			Resource: model.V1,
+			Action:   model.V2,
+			Effect:   model.V3,
+		}
+	}
+	return policies
+}
+
+func containsSensitivePermissionPolicy(policies []domain.PermissionPolicy) bool {
+	for _, policy := range policies {
+		if policy.Action == "sensitive" {
+			return true
+		}
+	}
+	return false
 }

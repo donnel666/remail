@@ -92,6 +92,20 @@ eft = allow/deny
 4. 最后由业务服务检查数据归属和状态机
 ```
 
+`GET /v1/me` 返回当前用户在后端权限目录中实际生效的权限。新增后台权限时必须同时更新权限目录、Casbin 角色 seed、既有数据库兼容迁移和接口授权测试；只在数据库或前端按钮中增加权限字符串都不构成完整授权链路。
+
+当前管理端关键权限语义：
+
+| 权限 | 用途 |
+|------|------|
+| `billing:wallet/read` | 数据看板、财务概览和钱包读取。 |
+| `billing:wallet/operate` | 管理员调账、提现和冲正。 |
+| `billing:card/read|write` | 卡密查看、创建和状态修改。 |
+| `trade:order/read|operate` | 管理员工单、订单查看、退款和终止。 |
+| `iam:permission/sensitive` | 提升普通用户为 `super_admin`，或增删任何 `sensitive` 用户权限覆盖。只默认授予 `super_admin`。 |
+
+已有 `super_admin` 是受保护身份：用户资料、角色、权限覆盖和强制退出均不能通过普通管理员命令修改。提升新 `super_admin` 必须具备 `iam:permission/sensitive`；相关角色检查和写入必须在同一数据库并发保护边界内完成，不能只依赖前端禁用按钮。
+
 ---
 
 ## 4. 首次激活
@@ -143,7 +157,8 @@ eft = allow/deny
 | INV-I6 | 邀请码使用必须原子递增，不能并发突破次数。 |
 | INV-I7 | 权限变更必须写 OperationLog，并刷新 Casbin enforcer/cache。 |
 | INV-I8 | 首次激活只允许发生一次。 |
-| INV-I9 | 同一用户同时只能有一个 `reviewing` 供应商申请。审批通过只提升角色，不自动发布任何资源。 |
+| INV-I9 | 已有 `super_admin` 不能被管理员用户命令修改或强制退出；提升新 `super_admin` 和增删 `sensitive` policy 必须具备 `iam:permission/sensitive`。 |
+| INV-I10 | 同一用户同时只能有一个 `reviewing` 供应商申请。审批通过只提升角色，不自动发布任何资源。 |
 
 ---
 

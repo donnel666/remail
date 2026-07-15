@@ -142,6 +142,98 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 	require.Equal(t, int64(1), logCount)
 }
 
+func TestUserRepoUpdateNonSuperAdminAccessWithOperationLogProtectsCurrentRoleMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+
+	user := &domain.User{
+		Email:        "stale-admin-update@test.local",
+		PasswordHash: "hash",
+		Enabled:      true,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), user))
+	enabled := false
+
+	require.NoError(t, db.Model(&UserModel{}).
+		Where("id = ?", user.ID).
+		Update("role", domain.RoleSuperAdmin.String()).Error)
+
+	_, err := repo.UpdateNonSuperAdminAccessWithOperationLog(context.Background(), user.ID, &enabled, nil, nil, false, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "iam.user.update",
+		ResourceType:   "user",
+		ResourceID:     fmt.Sprintf("%d", user.ID),
+		Path:           fmt.Sprintf("/v1/admin/users/%d", user.ID),
+		Result:         "success",
+		SafeSummary:    "User access settings updated.",
+		RequestID:      "req-stale-user-update",
+	})
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+
+	var stored UserModel
+	require.NoError(t, db.First(&stored, user.ID).Error)
+	require.Equal(t, domain.RoleSuperAdmin.String(), stored.Role)
+	require.True(t, stored.Enabled)
+
+	var logCount int64
+	require.NoError(t, db.Table("operation_logs").
+		Where("request_id = ?", "req-stale-user-update").
+		Count(&logCount).Error)
+	require.Zero(t, logCount)
+}
+
+func TestUserRepoUpdateNonSuperAdminAccessPreservesUnrelatedConcurrentFieldsMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+
+	user := &domain.User{
+		Email:        "partial-admin-update@test.local",
+		PasswordHash: "hash",
+		Enabled:      true,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), user))
+	require.NoError(t, db.Model(&UserModel{}).
+		Where("id = ?", user.ID).
+		Update("role", domain.RoleAdmin.String()).Error)
+
+	enabled := false
+	updated, err := repo.UpdateNonSuperAdminAccessWithOperationLog(context.Background(), user.ID, &enabled, nil, nil, false, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "iam.user.update",
+		ResourceType:   "user",
+		ResourceID:     fmt.Sprintf("%d", user.ID),
+		Path:           fmt.Sprintf("/v1/admin/users/%d", user.ID),
+		Result:         "success",
+		SafeSummary:    "User access settings updated.",
+		RequestID:      "req-partial-user-update",
+	})
+	require.NoError(t, err)
+	require.False(t, updated.Enabled)
+	require.Equal(t, domain.RoleAdmin, updated.Role)
+
+	var stored UserModel
+	require.NoError(t, db.First(&stored, user.ID).Error)
+	require.False(t, stored.Enabled)
+	require.Equal(t, domain.RoleAdmin.String(), stored.Role)
+
+	updated, err = repo.UpdateNonSuperAdminAccessWithOperationLog(context.Background(), user.ID, nil, nil, nil, true, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "iam.user.sessions.revoke",
+		ResourceType:   "user",
+		ResourceID:     fmt.Sprintf("%d", user.ID),
+		Path:           fmt.Sprintf("/v1/admin/users/%d/sessions/revoke", user.ID),
+		Result:         "success",
+		SafeSummary:    "User sessions revoked.",
+		RequestID:      "req-partial-token-bump",
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.RoleAdmin, updated.Role)
+	require.False(t, updated.Enabled)
+	require.Equal(t, 1, updated.TokenVersion)
+}
+
 func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 	repo := NewUserRepo(db)
@@ -194,17 +286,30 @@ func TestPermissionServiceBaselineMySQL(t *testing.T) {
 	permissions, err := NewPermissionService(db)
 	require.NoError(t, err)
 
-	allowed, err := permissions.Check(context.Background(), 1, domain.RoleAdmin, "iam:user", "read")
-	require.NoError(t, err)
-	require.True(t, allowed)
-
-	allowed, err = permissions.Check(context.Background(), 1, domain.RoleSuperAdmin, "iam:user", "operate")
-	require.NoError(t, err)
-	require.True(t, allowed)
-
-	allowed, err = permissions.Check(context.Background(), 1, domain.RoleUser, "iam:user", "read")
-	require.NoError(t, err)
-	require.False(t, allowed)
+	checks := []struct {
+		role     domain.Role
+		resource string
+		action   string
+		allowed  bool
+	}{
+		{role: domain.RoleAdmin, resource: "iam:user", action: "read", allowed: true},
+		{role: domain.RoleAdmin, resource: "billing:wallet", action: "read", allowed: true},
+		{role: domain.RoleAdmin, resource: "billing:wallet", action: "operate", allowed: true},
+		{role: domain.RoleAdmin, resource: "billing:card", action: "read", allowed: true},
+		{role: domain.RoleAdmin, resource: "trade:order", action: "read", allowed: true},
+		{role: domain.RoleAdmin, resource: "trade:order", action: "write", allowed: true},
+		{role: domain.RoleAdmin, resource: "iam:permission", action: "sensitive", allowed: false},
+		{role: domain.RoleSuperAdmin, resource: "iam:user", action: "operate", allowed: true},
+		{role: domain.RoleSuperAdmin, resource: "iam:permission", action: "sensitive", allowed: true},
+		{role: domain.RoleSuperAdmin, resource: "billing:wallet", action: "sensitive", allowed: true},
+		{role: domain.RoleSuperAdmin, resource: "billing:card", action: "sensitive", allowed: true},
+		{role: domain.RoleUser, resource: "iam:user", action: "read", allowed: false},
+	}
+	for _, check := range checks {
+		allowed, checkErr := permissions.Check(context.Background(), 1, check.role, check.resource, check.action)
+		require.NoError(t, checkErr)
+		require.Equal(t, check.allowed, allowed, "%s %s:%s", check.role, check.resource, check.action)
+	}
 }
 
 func TestPermissionServiceUserDenyOverridesRoleMySQL(t *testing.T) {
@@ -397,4 +502,41 @@ func TestPermissionServiceReplacePoliciesReloadsMySQL(t *testing.T) {
 	allowed, err := permissions.Check(context.Background(), 99, domain.RoleAdmin, "iam:user", "read")
 	require.NoError(t, err)
 	require.False(t, allowed)
+}
+
+func TestPermissionServiceGuardedReplaceProtectsSensitiveAndSuperAdminMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	user := &domain.User{
+		Email:        "guarded-permissions@test.local",
+		PasswordHash: "hash",
+		Enabled:      true,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(context.Background(), user))
+
+	permissions, err := NewPermissionService(db)
+	require.NoError(t, err)
+	sensitive := []domain.PermissionPolicy{{
+		Resource: "iam:permission",
+		Action:   "sensitive",
+		Effect:   "allow",
+	}}
+	require.NoError(t, permissions.ReplaceUserPermissionPolicies(context.Background(), user.ID, sensitive))
+
+	_, err = permissions.ReplaceUserPermissionPoliciesGuarded(context.Background(), user.ID, nil, false)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+	stored, err := permissions.ListUserPermissionPolicies(context.Background(), user.ID)
+	require.NoError(t, err)
+	require.Equal(t, sensitive, stored)
+
+	previous, err := permissions.ReplaceUserPermissionPoliciesGuarded(context.Background(), user.ID, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, sensitive, previous)
+
+	require.NoError(t, db.Model(&UserModel{}).
+		Where("id = ?", user.ID).
+		Update("role", domain.RoleSuperAdmin.String()).Error)
+	_, err = permissions.ReplaceUserPermissionPoliciesGuarded(context.Background(), user.ID, sensitive, true)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
 }

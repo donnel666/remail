@@ -52,9 +52,10 @@ type UserRepository interface {
 	// Returns ErrEmailAlreadyExists on email conflict.
 	CreateFirstUser(ctx context.Context, user *domain.User) error
 
-	// UpdateWithOperationLog updates a user and writes an OperationLog in the
-	// same database transaction.
-	UpdateWithOperationLog(ctx context.Context, user *domain.User, log *governancedomain.OperationLog) error
+	// UpdateNonSuperAdminAccessWithOperationLog applies only the requested access
+	// fields, atomically refuses a row whose current role is super_admin, and
+	// writes the operation log in the same transaction.
+	UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
 }
 
 // InviteRepository defines administrator invite persistence.
@@ -82,7 +83,7 @@ type SupplierApplicationRepository interface {
 // PermissionRepository defines user-level Casbin policy management.
 type PermissionRepository interface {
 	ListUserPermissionPolicies(ctx context.Context, userID uint) ([]domain.PermissionPolicy, error)
-	ReplaceUserPermissionPolicies(ctx context.Context, userID uint, policies []domain.PermissionPolicy) error
+	ReplaceUserPermissionPoliciesGuarded(ctx context.Context, userID uint, policies []domain.PermissionPolicy, allowSensitive bool) ([]domain.PermissionPolicy, error)
 	Reload(ctx context.Context) error
 }
 
