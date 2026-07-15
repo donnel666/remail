@@ -99,10 +99,13 @@ type FetchedMessage struct {
 }
 
 type FetchMessagesRequest struct {
-	Scope     OrderScope
-	SinceAt   time.Time
-	UntilAt   time.Time
-	RequestID string
+	Scope       OrderScope
+	SinceAt     time.Time
+	UntilAt     time.Time
+	RequestID   string
+	FullHistory bool
+	OnMessages  func([]FetchedMessage)
+	OnReset     func()
 }
 
 type FetchMessagesResult struct {

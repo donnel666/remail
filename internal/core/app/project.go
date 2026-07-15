@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -173,11 +174,16 @@ type ProjectMailRuleRequest struct {
 
 // ProjectUseCase handles project/product/rule commands.
 type ProjectUseCase struct {
-	projects ProjectRepository
+	projects    ProjectRepository
+	historyScan func(context.Context, uint, string) error
 }
 
 func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
 	return &ProjectUseCase{projects: projects}
+}
+
+func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string) error) {
+	uc.historyScan = scan
 }
 
 func (uc *ProjectUseCase) List(ctx context.Context, filter ProjectListFilter, offset, limit int) (*ProjectListResult, error) {
@@ -369,6 +375,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.scheduleHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -409,7 +416,12 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 
 func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, projectID uint, requestID, path string) (*domain.ProjectDetail, error) {
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.approve", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project approved.")
-	return uc.projects.TransitionWithLog(ctx, projectID, domain.ProjectStatusReviewing, domain.ProjectStatusListed, "", log)
+	detail, err := uc.projects.TransitionWithLog(ctx, projectID, domain.ProjectStatusReviewing, domain.ProjectStatusListed, "", log)
+	if err != nil {
+		return nil, err
+	}
+	uc.scheduleHistoryScan(ctx, detail, requestID)
+	return detail, nil
 }
 
 func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUserID, projectID uint, req CreateProjectRequest, requestID, path string) (*domain.ProjectDetail, error) {
@@ -443,7 +455,26 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.scheduleHistoryScan(ctx, detail, requestID)
 	return detail, nil
+}
+
+func (uc *ProjectUseCase) scheduleHistoryScan(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
+	if uc.historyScan == nil || detail == nil || detail.Project.ID == 0 || !projectHasMicrosoftProduct(detail.Products) {
+		return
+	}
+	if err := uc.historyScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
+		slog.Warn("project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+	}
+}
+
+func projectHasMicrosoftProduct(products []domain.Product) bool {
+	for _, product := range products {
+		if product.Type == domain.ProductTypeMicrosoft {
+			return true
+		}
+	}
+	return false
 }
 
 func (uc *ProjectUseCase) AdminReject(ctx context.Context, operatorUserID, projectID uint, reviewReason, requestID, path string) (*domain.ProjectDetail, error) {

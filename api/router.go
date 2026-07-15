@@ -167,6 +167,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
+		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
 		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
 		mailMod.SetHistoricalProjectMatcher(mailmatchapi.NewHistoricalProjectMatcherAdapter(mailmatchMod.UseCase))
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)

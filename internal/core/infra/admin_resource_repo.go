@@ -149,6 +149,41 @@ func (r *AdminResourceRepo) LockAdminMicrosoft(ctx context.Context, resourceID u
 	return root.toDomain(), resource.toDomain(), nil
 }
 
+func (r *AdminResourceRepo) MaxMicrosoftResourceID(ctx context.Context) (uint, error) {
+	var maxID uint
+	err := r.dbFor(ctx).Raw(`
+SELECT COALESCE(MAX(er.id), 0)
+FROM email_resources AS er
+JOIN microsoft_resources AS mr ON mr.id = er.id
+WHERE er.type = ? AND mr.status <> ?`, domain.ResourceTypeMicrosoft, domain.MicrosoftStatusDeleted).Scan(&maxID).Error
+	if err != nil {
+		return 0, fmt.Errorf("find maximum microsoft resource id: %w", err)
+	}
+	return maxID, nil
+}
+
+func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxID uint) (*domain.MicrosoftResource, error) {
+	if maxID == 0 || afterID >= maxID {
+		return nil, nil
+	}
+	var resource MicrosoftResourceModel
+	result := r.dbFor(ctx).
+		Table("microsoft_resources AS mr").
+		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.credential_revision").
+		Joins("JOIN email_resources AS er ON er.id = mr.id AND er.type = ?", domain.ResourceTypeMicrosoft).
+		Where("mr.id > ? AND mr.id <= ? AND mr.status <> ?", afterID, maxID, domain.MicrosoftStatusDeleted).
+		Order("mr.id ASC").
+		Limit(1).
+		Scan(&resource)
+	if result.Error != nil {
+		return nil, fmt.Errorf("find next microsoft resource: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return resource.toDomain(), nil
+}
+
 func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain.EmailResource, resource *domain.MicrosoftResource, expectedVersion uint64) error {
 	if root == nil || resource == nil || root.ID == 0 || resource.ID != root.ID || expectedVersion == 0 {
 		return domain.ErrInvalidResourceCommand

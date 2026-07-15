@@ -25,10 +25,11 @@ const (
 // a plain error; the administrator resource worker uses Retryable to decide its
 // durable transition.
 type MailFetchFailure struct {
-	Category    string
-	SafeMessage string
-	Retryable   bool
-	Cause       error
+	Category     string
+	SafeMessage  string
+	Retryable    bool
+	RefreshToken string
+	Cause        error
 }
 
 func (e *MailFetchFailure) Error() string {

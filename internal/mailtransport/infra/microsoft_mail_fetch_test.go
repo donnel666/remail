@@ -18,13 +18,17 @@ import (
 type fakeMicrosoftIMAPClient struct {
 	called      bool
 	accessToken string
+	messages    []MicrosoftFetchedMessage
 	result      MicrosoftMailFetchResult
 	err         error
 }
 
-func (c *fakeMicrosoftIMAPClient) FetchAll(_ context.Context, _ MicrosoftMailFetchRequest, accessToken string) (MicrosoftMailFetchResult, error) {
+func (c *fakeMicrosoftIMAPClient) FetchAll(_ context.Context, req MicrosoftMailFetchRequest, accessToken string) (MicrosoftMailFetchResult, error) {
 	c.called = true
 	c.accessToken = accessToken
+	if req.OnMessages != nil && len(c.messages) > 0 {
+		req.OnMessages(c.messages)
+	}
 	return c.result, c.err
 }
 
@@ -205,9 +209,9 @@ func TestMicrosoftMailFetchClientChecksGraphIdentityBeforeFolders(t *testing.T) 
 		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
 			return microsoftGraphIdentityMismatched, nil
 		},
-		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
+		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
 			folderCalls++
-			return nil, nil
+			return microsoftFolderFetchResult{}, nil
 		},
 	}
 
@@ -231,9 +235,9 @@ func TestMicrosoftMailFetchClientEmptyGraphIdentityCannotReachFolders(t *testing
 		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
 			return microsoftGraphIdentityUnavailable, nil
 		},
-		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
+		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
 			folderCalls++
-			return nil, nil
+			return microsoftFolderFetchResult{}, nil
 		},
 	}
 
@@ -255,8 +259,8 @@ func TestMicrosoftMailFetchClientGraphFolderFailureKeepsRefreshToken(t *testing.
 		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
 			return microsoftGraphIdentityMatched, nil
 		},
-		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
-			return nil, errors.New("temporary folder failure")
+		graphFolderFetch: func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			return microsoftFolderFetchResult{}, errors.New("temporary folder failure")
 		},
 	}
 
@@ -271,6 +275,119 @@ func TestMicrosoftMailFetchClientGraphFolderFailureKeepsRefreshToken(t *testing.
 	require.False(t, result.Valid)
 	require.Equal(t, "request", result.Category)
 	require.Equal(t, "authoritative-refresh-token", result.RefreshToken)
+}
+
+func TestMicrosoftMailFetchClientStreamsInboxAndJunk(t *testing.T) {
+	var fetchedFolders []string
+	client := &MicrosoftMailFetchClient{
+		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
+			return microsoftGraphIdentityMatched, nil
+		},
+		graphFolderFetch: func(_ context.Context, _ *msacl.Session, _ string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			req.OnMessages([]MicrosoftFetchedMessage{{FolderLabel: folder.Label}})
+			return microsoftFolderFetchResult{Count: 1}, nil
+		},
+	}
+
+	result, err := client.fetchGraphAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+		AccessToken:  "access-token",
+		OnMessages: func(messages []MicrosoftFetchedMessage) {
+			fetchedFolders = append(fetchedFolders, messages[0].FolderLabel)
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Equal(t, []string{"Inbox", "Junk"}, fetchedFolders)
+	require.Equal(t, map[string]int{"Inbox": 1, "Junk": 1}, result.FolderCounts)
+	require.Equal(t, 2, result.MessageCount)
+}
+
+func TestMicrosoftMailFetchClientJunkFailureInvalidatesInboxSuccess(t *testing.T) {
+	var folderCalls []string
+	client := &MicrosoftMailFetchClient{
+		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
+			return microsoftGraphIdentityMatched, nil
+		},
+		graphFolderFetch: func(_ context.Context, _ *msacl.Session, _ string, folder MicrosoftMailFolder, _ MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			folderCalls = append(folderCalls, folder.Label)
+			if folder.Label == "Junk" {
+				return microsoftFolderFetchResult{}, errors.New("junk unavailable")
+			}
+			return microsoftFolderFetchResult{Count: 1}, nil
+		},
+	}
+
+	result, err := client.fetchGraphAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+		AccessToken:  "access-token",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, []string{"Inbox", "Junk"}, folderCalls)
+}
+
+func TestMicrosoftMailFetchClientResetsPartialGraphBeforeIMAP(t *testing.T) {
+	client := &MicrosoftMailFetchClient{
+		graphFetch: func(_ context.Context, req MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+			req.OnMessages([]MicrosoftFetchedMessage{{ID: "graph-inbox"}})
+			return microsoftMailFetchFailure("request", "Graph Junk failed.", false), nil
+		},
+		exchangeIMAPToken: func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error) {
+			return "imap-access-token", "imap-refresh-token", MicrosoftMailFetchResult{}, nil
+		},
+	}
+	imapFallback := &fakeMicrosoftIMAPClient{
+		messages: []MicrosoftFetchedMessage{{ID: "imap-inbox"}, {ID: "imap-junk"}},
+		result: MicrosoftMailFetchResult{
+			Valid: true, FolderCounts: map[string]int{"Inbox": 1, "Junk": 1}, MessageCount: 2,
+		},
+	}
+	var messageIDs []string
+	resets := 0
+
+	result, err := client.fetchAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com",
+		ClientID:     "client-id",
+		RefreshToken: "refresh-token",
+		OnMessages: func(messages []MicrosoftFetchedMessage) {
+			for _, message := range messages {
+				messageIDs = append(messageIDs, message.ID)
+			}
+		},
+		OnReset: func() {
+			resets++
+			messageIDs = nil
+		},
+	}, imapFallback)
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Equal(t, 1, resets)
+	require.Equal(t, []string{"imap-inbox", "imap-junk"}, messageIDs)
+}
+
+func TestRequiredMicrosoftMailFoldersCompleted(t *testing.T) {
+	require.False(t, requiredMicrosoftMailFoldersCompleted(map[string]bool{"Inbox": true}))
+	require.False(t, requiredMicrosoftMailFoldersCompleted(map[string]bool{"Junk": true}))
+	require.True(t, requiredMicrosoftMailFoldersCompleted(map[string]bool{"Inbox": true, "Junk": true}))
+}
+
+func TestMicrosoftHistoryNormalizationOmitsUnusedRawPayloads(t *testing.T) {
+	normalizedGraph := normalizeGraphFetchedMessage(graphMessage{ID: "message", Body: graphMessageBody{Content: "body"}}, defaultMicrosoftMailFolders[0], false)
+	require.Equal(t, "body", normalizedGraph.Body)
+	require.Empty(t, normalizedGraph.ProviderPayload)
+
+	var imapMessage MicrosoftFetchedMessage
+	applyIMAPBody(&imapMessage, []byte("Subject: Test\r\n\r\nbody"), false)
+	require.Equal(t, "body", imapMessage.Body)
+	require.Empty(t, imapMessage.RawSource)
 }
 
 func TestMicrosoftMailFetchClientGraphSessionFailureKeepsRefreshToken(t *testing.T) {

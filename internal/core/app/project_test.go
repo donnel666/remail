@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/donnel666/remail/internal/core/domain"
@@ -188,6 +189,12 @@ func TestProjectUseCaseAdminCreateListedRejectsIncompleteRulesAndInvalidWeights(
 func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
+	var scannedProjectID uint
+	uc.SetHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
+		scannedProjectID = projectID
+		require.Equal(t, "req-ok", requestID)
+		return errors.New("queue unavailable")
+	})
 
 	detail, err := uc.AdminCreateListed(context.Background(), 9, validProjectCreateRequest(), "req-ok", "/v1/admin/projects")
 	require.NoError(t, err)
@@ -199,6 +206,24 @@ func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.
 	require.Equal(t, "core.project.create", repo.log.OperationType)
 	require.Equal(t, "req-ok", repo.log.RequestID)
 	require.Equal(t, uint(9), repo.log.OperatorUserID)
+	require.Equal(t, detail.Project.ID, scannedProjectID)
+}
+
+func TestProjectUseCaseSkipsHistoryScanWithoutMicrosoftProduct(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	scanned := false
+	uc.SetHistoryScan(func(context.Context, uint, string) error {
+		scanned = true
+		return nil
+	})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "domain"
+
+	_, err := uc.AdminCreateListed(context.Background(), 9, req, "req-domain", "/v1/admin/projects")
+
+	require.NoError(t, err)
+	require.False(t, scanned)
 }
 
 func TestProjectUseCaseAdminUpdatePreservesDisabledHistoricalProduct(t *testing.T) {
@@ -284,12 +309,18 @@ func TestProjectUseCaseResubmitNormalizesApplicationAndLog(t *testing.T) {
 func TestProjectUseCaseAdminReviewTransitions(t *testing.T) {
 	repo := &fakeProjectRepo{detail: validProjectDetailForUseCase()}
 	uc := NewProjectUseCase(repo)
+	scanned := uint(0)
+	uc.SetHistoryScan(func(_ context.Context, projectID uint, _ string) error {
+		scanned = projectID
+		return nil
+	})
 
 	approved, err := uc.AdminApprove(context.Background(), 9, 55, "req-approve", "/v1/admin/projects/:projectId/approve")
 	require.NoError(t, err)
 	require.Equal(t, domain.ProjectStatusListed, approved.Project.Status)
 	require.Empty(t, approved.Project.ReviewReason)
 	require.Equal(t, "core.project.approve", repo.log.OperationType)
+	require.Equal(t, uint(55), scanned)
 
 	repo.detail = validProjectDetailForUseCase()
 	rejected, err := uc.AdminReject(context.Background(), 9, 56, "规则不清晰", "req-reject", "/v1/admin/projects/:projectId/reject")
@@ -302,6 +333,11 @@ func TestProjectUseCaseAdminReviewTransitions(t *testing.T) {
 func TestProjectUseCaseAdminApproveWithConfig(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
+	scanned := uint(0)
+	uc.SetHistoryScan(func(_ context.Context, projectID uint, _ string) error {
+		scanned = projectID
+		return nil
+	})
 
 	detail, err := uc.AdminApproveWithConfig(context.Background(), 9, 55, validProjectCreateRequest(), "req-approve-config", "/v1/admin/projects/:projectId/approve")
 	require.NoError(t, err)
@@ -310,6 +346,7 @@ func TestProjectUseCaseAdminApproveWithConfig(t *testing.T) {
 	require.Len(t, detail.Products, 1)
 	require.Len(t, detail.MailRules, 2)
 	require.Equal(t, "core.project.approve", repo.log.OperationType)
+	require.Equal(t, uint(55), scanned)
 }
 
 func validProjectCreateRequest() CreateProjectRequest {

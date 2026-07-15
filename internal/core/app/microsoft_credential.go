@@ -54,6 +54,8 @@ type MicrosoftFetchRefreshTokenRotation struct {
 // bounded contexts for Microsoft protocol work.
 type MicrosoftCredentialPort interface {
 	LockMicrosoftCredentialScope(ctx context.Context, resourceID uint) (*MicrosoftCredentialScope, error)
+	MaxMicrosoftResourceID(ctx context.Context) (uint, error)
+	FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID uint) (*MicrosoftCredentialScope, error)
 	ApplyMicrosoftTokenRefreshSuccess(ctx context.Context, update MicrosoftTokenRefreshSuccess) error
 	ApplyMicrosoftTokenRefreshFailure(ctx context.Context, update MicrosoftTokenRefreshFailure) error
 	ApplyMicrosoftFetchRefreshToken(ctx context.Context, update MicrosoftFetchRefreshTokenRotation) error
@@ -62,6 +64,8 @@ type MicrosoftCredentialPort interface {
 type MicrosoftCredentialRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockAdminMicrosoft(ctx context.Context, resourceID uint) (*domain.EmailResource, *domain.MicrosoftResource, error)
+	MaxMicrosoftResourceID(ctx context.Context) (uint, error)
+	FindNextMicrosoft(ctx context.Context, afterID, maxID uint) (*domain.MicrosoftResource, error)
 	SaveAdminMicrosoft(ctx context.Context, root *domain.EmailResource, resource *domain.MicrosoftResource, expectedVersion uint64) error
 }
 
@@ -93,6 +97,24 @@ func (s *MicrosoftCredentialService) LockMicrosoftCredentialScope(ctx context.Co
 		return nil, err
 	}
 	return scope, nil
+}
+
+func (s *MicrosoftCredentialService) MaxMicrosoftResourceID(ctx context.Context) (uint, error) {
+	if s == nil || s.repo == nil {
+		return 0, ErrMicrosoftCredentialNotFound
+	}
+	return s.repo.MaxMicrosoftResourceID(ctx)
+}
+
+func (s *MicrosoftCredentialService) FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID uint) (*MicrosoftCredentialScope, error) {
+	if s == nil || s.repo == nil || maxID == 0 || afterID >= maxID {
+		return nil, nil
+	}
+	resource, err := s.repo.FindNextMicrosoft(ctx, afterID, maxID)
+	if err != nil {
+		return nil, microsoftCredentialError(err)
+	}
+	return microsoftCredentialScope(resource), nil
 }
 
 func (s *MicrosoftCredentialService) ApplyMicrosoftTokenRefreshSuccess(ctx context.Context, update MicrosoftTokenRefreshSuccess) error {

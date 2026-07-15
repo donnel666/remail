@@ -57,6 +57,8 @@ const (
 	QueueBackgroundTokenRefresh = "background_token_refresh"
 	// QueueResource carries admin resource bulk operations (validate/publish/unpublish/delete).
 	QueueResource = "resource"
+	// QueueBackgroundProjectHistory pulls mailbox history for newly listed projects.
+	QueueBackgroundProjectHistory = "background_project_history"
 )
 
 // AllQueueNames is every queue some module enqueues tasks to. The topology test
@@ -69,4 +71,5 @@ var AllQueueNames = []string{
 	QueueBackgroundAlias,
 	QueueBackgroundTokenRefresh,
 	QueueResource,
+	QueueBackgroundProjectHistory,
 }

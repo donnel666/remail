@@ -16,11 +16,16 @@ const (
 	TypeMailmatchFetch           = "mailmatch:fetch"
 	TypeMailmatchResourceFetch   = "mailmatch:resource_fetch"
 	TypeMailmatchFetchDispatcher = "mailmatch:fetch_dispatcher"
+	TypeProjectHistoryScan       = "mailmatch:project_history_scan"
+	TypeProjectHistoryDispatcher = "mailmatch:project_history_dispatcher"
 
-	mailmatchQueueName           = platform.QueueMailfetch
-	mailmatchFetchTaskMaxRetry   = 0
-	mailmatchFetchTaskTimeout    = 60 * time.Second
-	mailmatchDispatchTaskTimeout = 30 * time.Second
+	mailmatchQueueName            = platform.QueueMailfetch
+	mailmatchFetchTaskMaxRetry    = 0
+	mailmatchFetchTaskTimeout     = 60 * time.Second
+	mailmatchDispatchTaskTimeout  = 30 * time.Second
+	projectHistoryTaskMaxRetry    = platform.BackgroundTaskMaxRetry
+	projectHistoryTaskTimeout     = 20 * time.Minute
+	projectHistoryDispatchTimeout = 30 * time.Second
 )
 
 type FetchQueue struct {
@@ -79,6 +84,54 @@ func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.Resource
 			return nil
 		}
 		return fmt.Errorf("enqueue mailmatch resource fetch task: %w", err)
+	}
+	return nil
+}
+
+func (q *FetchQueue) EnqueueProjectHistoryScan(ctx context.Context, task app.ProjectHistoryScanTask) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("project history scan queue is unavailable")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal project history scan task: %w", err)
+	}
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynq.NewTask(TypeProjectHistoryScan, payload),
+		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.TaskID(fmt.Sprintf("project-history:%d:%s", task.JobID, task.DispatchToken)),
+		asynq.MaxRetry(projectHistoryTaskMaxRetry),
+		asynq.Timeout(projectHistoryTaskTimeout),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue project history scan task: %w", err)
+	}
+	return nil
+}
+
+func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("project history dispatcher queue is unavailable")
+	}
+	options := []asynq.Option{
+		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.TaskID(TypeProjectHistoryDispatcher),
+		asynq.MaxRetry(0),
+		asynq.Timeout(projectHistoryDispatchTimeout),
+	}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(TypeProjectHistoryDispatcher, nil), options...)
+	if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue project history dispatcher: %w", err)
 	}
 	return nil
 }

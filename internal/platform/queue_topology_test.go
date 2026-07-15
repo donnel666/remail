@@ -20,7 +20,7 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 		t.Fatal("realtime config must reserve capacity for the 接码 mailfetch queue")
 	}
 	for name := range rt {
-		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueResource {
+		if name == QueueBackgroundValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueResource {
 			t.Fatalf("realtime tier must not serve background queue %s", name)
 		}
 	}
@@ -34,7 +34,7 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}
 	}
-	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueResource] != 2 {
+	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueResource] != 2 {
 		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
 	}
 }

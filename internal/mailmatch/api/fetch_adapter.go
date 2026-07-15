@@ -41,10 +41,28 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		}
 	}
 	var lastFailure error
+	maxMessages := 30
+	if req.FullHistory {
+		maxMessages = 0
+	}
 	for attempt := 0; attempt < maxFetchProxyAttempts; attempt++ {
+		streamed := false
+		var onMessages func([]mailinfra.MicrosoftFetchedMessage)
+		if req.OnMessages != nil {
+			onMessages = func(messages []mailinfra.MicrosoftFetchedMessage) {
+				streamed = true
+				req.OnMessages(microsoftMessagesToMailmatch(req.Scope, messages))
+			}
+		}
 		proxyConfig, err := a.acquireProxy(ctx, req.Scope, req.RequestID, attempt)
 		if err != nil {
-			return nil, err
+			return nil, &mailmatchapp.MailFetchFailure{
+				Category:     "request",
+				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+				Retryable:    true,
+				RefreshToken: strings.TrimSpace(req.Scope.MicrosoftRT),
+				Cause:        err,
+			}
 		}
 		proxyURL := ""
 		proxyID := uint(0)
@@ -59,7 +77,9 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			ProxyURL:     proxyURL,
 			SinceAt:      req.SinceAt,
 			UntilAt:      req.UntilAt,
-			MaxMessages:  30,
+			MaxMessages:  maxMessages,
+			OnMessages:   onMessages,
+			OnReset:      req.OnReset,
 		})
 		if rotated := strings.TrimSpace(result.RefreshToken); rotated != "" {
 			// A mailbox operation can fail after Microsoft has already rotated the
@@ -69,12 +89,19 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		}
 		if err != nil {
 			lastFailure = &mailmatchapp.MailFetchFailure{
-				Category:    "request",
-				SafeMessage: "Microsoft mail service is temporarily unavailable.",
-				Retryable:   true,
-				Cause:       err,
+				Category:     "request",
+				SafeMessage:  "Microsoft mail service is temporarily unavailable.",
+				Retryable:    true,
+				RefreshToken: strings.TrimSpace(req.Scope.MicrosoftRT),
+				Cause:        err,
 			}
 			_ = a.reportProxyFailure(ctx, proxyID, "Microsoft mail fetch failed.")
+			if streamed {
+				if req.OnReset == nil {
+					return nil, lastFailure
+				}
+				req.OnReset()
+			}
 			continue
 		}
 		if result.Valid {
@@ -84,9 +111,17 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				RefreshToken: strings.TrimSpace(result.RefreshToken),
 			}, nil
 		}
-		lastFailure = microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
+		failure := microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
+		failure.RefreshToken = strings.TrimSpace(req.Scope.MicrosoftRT)
+		lastFailure = failure
 		if result.ProxyFailure {
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
+			if streamed {
+				if req.OnReset == nil {
+					return nil, lastFailure
+				}
+				req.OnReset()
+			}
 			continue
 		}
 		if proxyID != 0 {
@@ -119,7 +154,7 @@ func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatc
 	})
 }
 
-func microsoftFetchFailure(category string, safeMessage string, proxyFailure bool) error {
+func microsoftFetchFailure(category string, safeMessage string, proxyFailure bool) *mailmatchapp.MailFetchFailure {
 	category = strings.ToLower(strings.TrimSpace(category))
 	retryable := proxyFailure || category == "request" || category == "auth_timeout"
 	if category == "" {

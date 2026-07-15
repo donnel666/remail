@@ -61,6 +61,14 @@ func (uc *UseCase) MatchMicrosoftHistory(ctx context.Context, req HistoricalProj
 	if scannedAt.IsZero() {
 		scannedAt = uc.now()
 	}
+	matches := historicalProjectMatches(req, scopes, scannedAt)
+	if len(matches) == 0 {
+		return nil
+	}
+	return uc.repo.UpsertMicrosoftProjectMatches(ctx, matches)
+}
+
+func historicalProjectMatches(req HistoricalProjectMatchRequest, scopes []HistoricalProjectScope, scannedAt time.Time) []HistoricalProjectMatch {
 	matches := make([]HistoricalProjectMatch, 0)
 	for _, scope := range scopes {
 		var match *HistoricalProjectMatch
@@ -93,10 +101,7 @@ func (uc *UseCase) MatchMicrosoftHistory(ctx context.Context, req HistoricalProj
 			matches = append(matches, *match)
 		}
 	}
-	if len(matches) == 0 {
-		return nil
-	}
-	return uc.repo.UpsertMicrosoftProjectMatches(ctx, matches)
+	return matches
 }
 
 func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail string, scope HistoricalProjectScope) bool {

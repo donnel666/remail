@@ -27,13 +27,15 @@ import (
 )
 
 const (
-	microsoftGraphAPIBase          = "https://graph.microsoft.com/v1.0"
-	microsoftGraphMessagePageTop   = 100
-	microsoftIMAPTokenURL          = "https://login.live.com/oauth20_token.srf"
-	outlookIMAPAddress             = "outlook.office365.com:993"
-	microsoftIdentityMismatch      = "identity_mismatch"
-	microsoftIMAPOperationTimeout  = 60 * time.Second
-	microsoftProxyHandshakeTimeout = 30 * time.Second
+	microsoftGraphAPIBase           = "https://graph.microsoft.com/v1.0"
+	microsoftGraphMessagePageTop    = 100
+	microsoftIMAPTokenURL           = "https://login.live.com/oauth20_token.srf"
+	outlookIMAPAddress              = "outlook.office365.com:993"
+	microsoftIdentityMismatch       = "identity_mismatch"
+	microsoftIMAPOperationTimeout   = 60 * time.Second
+	microsoftIMAPFullHistoryTimeout = 15 * time.Minute
+	microsoftProxyHandshakeTimeout  = 30 * time.Second
+	microsoftMailStreamBatchSize    = 100
 )
 
 var defaultMicrosoftMailFolders = []MicrosoftMailFolder{
@@ -46,7 +48,7 @@ type MicrosoftMailFetchClient struct {
 	graphFetch        func(context.Context, MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error)
 	newGraphSession   func(context.Context, string, int) (*msacl.Session, error)
 	graphIdentity     func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error)
-	graphFolderFetch  func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error)
+	graphFolderFetch  func(context.Context, *msacl.Session, string, MicrosoftMailFolder, MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error)
 	exchangeIMAPToken func(context.Context, MicrosoftMailFetchRequest) (string, string, MicrosoftMailFetchResult, error)
 }
 
@@ -59,6 +61,8 @@ type MicrosoftMailFetchRequest struct {
 	SinceAt      time.Time
 	UntilAt      time.Time
 	MaxMessages  int
+	OnMessages   func([]MicrosoftFetchedMessage)
+	OnReset      func()
 }
 
 type MicrosoftMailFetchResult struct {
@@ -75,13 +79,14 @@ type MicrosoftMailFetchResult struct {
 	GraphSafeError string
 }
 
-// TODO(P1-I3/mailmatch): Resource health validation stops after RT + mail
-// fetch succeeds. When Project and MailMatch are ready, pass Messages to that
-// bounded context to match project rules and insert binding relationships.
-
 type MicrosoftMailFolder struct {
 	ID    string
 	Label string
+}
+
+type microsoftFolderFetchResult struct {
+	Messages []MicrosoftFetchedMessage
+	Count    int
 }
 
 type MicrosoftFetchedMessage struct {
@@ -173,6 +178,15 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 	if req.EmailAddress == "" || req.ClientID == "" || req.RefreshToken == "" {
 		return microsoftMailFetchFailure("missing_token", "Microsoft mail fetch credentials are incomplete.", false), nil
 	}
+	streamed := false
+	if onMessages := req.OnMessages; onMessages != nil {
+		req.OnMessages = func(messages []MicrosoftFetchedMessage) {
+			if len(messages) > 0 {
+				streamed = true
+			}
+			onMessages(messages)
+		}
+	}
 	graphResult, graphErr := c.fetchGraphAll(ctx, req)
 	if graphErr == nil && graphResult.Valid {
 		return graphResult, nil
@@ -187,6 +201,13 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 	}
 
 	if imapFallback != nil {
+		if streamed {
+			if req.OnReset == nil {
+				return graphResult, graphErr
+			}
+			req.OnReset()
+			streamed = false
+		}
 		imapAccessToken, imapRefreshToken, tokenResult, err := c.exchangeIMAPAccessToken(ctx, req)
 		if err == nil && imapAccessToken != "" {
 			imapResult, imapErr := imapFallback.FetchAll(ctx, req, imapAccessToken)
@@ -311,7 +332,7 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		fetchFolder = c.graphFolderFetch
 	}
 	for _, folder := range defaultMicrosoftMailFolders {
-		messages, err := fetchFolder(ctx, session, accessToken, folder, req)
+		folderResult, err := fetchFolder(ctx, session, accessToken, folder, req)
 		if err != nil {
 			category, message, proxyFailure := classifyMicrosoftGraphFailure(err)
 			failure := microsoftMailFetchFailure(category, message, proxyFailure)
@@ -321,15 +342,17 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 			failure.RefreshToken = refreshToken
 			return failure, nil
 		}
-		result.FolderCounts[folder.Label] = len(messages)
-		result.MessageCount += len(messages)
-		result.Messages = append(result.Messages, messages...)
+		result.FolderCounts[folder.Label] = folderResult.Count
+		result.MessageCount += folderResult.Count
+		result.Messages = append(result.Messages, folderResult.Messages...)
 	}
-	sort.SliceStable(result.Messages, func(i, j int) bool {
-		return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
-	})
-	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
-	result.MessageCount = len(result.Messages)
+	if req.OnMessages == nil {
+		sort.SliceStable(result.Messages, func(i, j int) bool {
+			return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
+		})
+		result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+		result.MessageCount = len(result.Messages)
+	}
 	return result, nil
 }
 
@@ -409,38 +432,48 @@ func isTemporaryMicrosoftMailFetchCategory(category string) bool {
 	}
 }
 
-func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) ([]MicrosoftFetchedMessage, error) {
+func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
 	nextURL := graphFolderMessagesURL(folder, req)
 	headers := map[string]string{
 		"Authorization":    "Bearer " + accessToken,
 		"Accept":           "application/json",
 		"ConsistencyLevel": "eventual",
 	}
-	messages := make([]MicrosoftFetchedMessage, 0)
+	result := microsoftFolderFetchResult{Messages: make([]MicrosoftFetchedMessage, 0)}
 	for strings.TrimSpace(nextURL) != "" {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return microsoftFolderFetchResult{}, err
 		}
 		var page graphMessagesPage
 		resp, err := session.GetJSON(nextURL, headers, &page)
 		if err != nil {
-			return nil, err
+			return microsoftFolderFetchResult{}, err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, &microsoftGraphHTTPError{
+			return microsoftFolderFetchResult{}, &microsoftGraphHTTPError{
 				statusCode: resp.StatusCode,
 				message:    graphErrorMessage(page),
 			}
 		}
+		messages := make([]MicrosoftFetchedMessage, 0, len(page.Value))
 		for _, message := range page.Value {
-			messages = append(messages, normalizeGraphFetchedMessage(message, folder))
+			messages = append(messages, normalizeGraphFetchedMessage(message, folder, req.MaxMessages > 0))
 		}
-		if req.MaxMessages > 0 && len(messages) >= req.MaxMessages {
+		if req.MaxMessages > 0 && result.Count+len(messages) > req.MaxMessages {
+			messages = messages[:req.MaxMessages-result.Count]
+		}
+		result.Count += len(messages)
+		if req.OnMessages != nil && len(messages) > 0 {
+			req.OnMessages(messages)
+		} else {
+			result.Messages = append(result.Messages, messages...)
+		}
+		if req.MaxMessages > 0 && result.Count >= req.MaxMessages {
 			break
 		}
 		nextURL = strings.TrimSpace(page.NextLink)
 	}
-	return limitMicrosoftMessages(messages, req.MaxMessages), nil
+	return result, nil
 }
 
 func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) string {
@@ -488,7 +521,11 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, microsoftIMAPOperationTimeout)
+	operationTimeout := microsoftIMAPOperationTimeout
+	if req.MaxMessages == 0 {
+		operationTimeout = microsoftIMAPFullHistoryTimeout
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 	client, err := dialOutlookIMAPClient(operationCtx, req.ProxyURL)
 	if err != nil {
@@ -518,8 +555,11 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		RefreshToken: req.RefreshToken,
 		FolderCounts: map[string]int{},
 	}
-	selectedFolders := 0
+	completedFolders := map[string]bool{}
 	for _, folder := range imapCandidateFolders(client) {
+		if completedFolders[folder.Label] {
+			continue
+		}
 		if err := operationCtx.Err(); err != nil {
 			_ = client.Logout().Wait()
 			return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", false), err
@@ -528,44 +568,73 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		if err != nil {
 			continue
 		}
-		selectedFolders++
 		count := int(selectData.NumMessages)
-		result.FolderCounts[folder.Label] += count
-		result.MessageCount += count
 		if count == 0 {
+			completedFolders[folder.Label] = true
+			result.FolderCounts[folder.Label] = 0
 			continue
 		}
 		seqSet, err := recentIMAPSeqSet(operationCtx, client, selectData.NumMessages, req.SinceAt, req.MaxMessages)
 		if err != nil || len(seqSet) == 0 {
-			continue
+			return microsoftMailFetchFailure("request", "Microsoft mailbox history could not be read completely.", false), err
 		}
 		bodySection := &imap.FetchItemBodySection{Peek: true}
-		rows, err := client.Fetch(seqSet, &imap.FetchOptions{
+		command := client.Fetch(seqSet, &imap.FetchOptions{
 			Envelope:     true,
 			InternalDate: true,
 			UID:          true,
 			BodySection:  []*imap.FetchItemBodySection{bodySection},
-		}).Collect()
-		if err != nil {
-			continue
+		})
+		batch := make([]MicrosoftFetchedMessage, 0, microsoftMailStreamBatchSize)
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			result.FolderCounts[folder.Label] += len(batch)
+			result.MessageCount += len(batch)
+			if req.OnMessages != nil {
+				req.OnMessages(batch)
+			} else {
+				result.Messages = append(result.Messages, batch...)
+			}
+			batch = batch[:0]
 		}
-		for _, row := range rows {
-			message := normalizeIMAPFetchedMessage(row, folder, bodySection)
+		for data := command.Next(); data != nil; data = command.Next() {
+			row, collectErr := data.Collect()
+			if collectErr != nil {
+				_ = command.Close()
+				return microsoftMailFetchFailure("request", "Microsoft mailbox history could not be read completely.", false), collectErr
+			}
+			message := normalizeIMAPFetchedMessage(row, folder, bodySection, req.MaxMessages > 0)
 			if inMicrosoftFetchWindow(message.ReceivedAt, req.SinceAt, req.UntilAt) {
-				result.Messages = append(result.Messages, message)
+				batch = append(batch, message)
+				if len(batch) == cap(batch) {
+					flush()
+				}
 			}
 		}
+		if err := command.Close(); err != nil {
+			return microsoftMailFetchFailure("request", "Microsoft mailbox history could not be read completely.", false), err
+		}
+		flush()
+		completedFolders[folder.Label] = true
 	}
 	_ = client.Logout().Wait()
-	if selectedFolders == 0 {
-		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", false), nil
+	if !requiredMicrosoftMailFoldersCompleted(completedFolders) {
+		return microsoftMailFetchFailure("request", "Inbox and Junk must both be read completely.", false), nil
 	}
-	sort.SliceStable(result.Messages, func(i, j int) bool {
-		return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
-	})
-	result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
-	result.MessageCount = len(result.Messages)
+	if req.OnMessages == nil {
+		sort.SliceStable(result.Messages, func(i, j int) bool {
+			return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
+		})
+		result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+		result.MessageCount = len(result.Messages)
+	}
 	return result, nil
+}
+
+func requiredMicrosoftMailFoldersCompleted(completed map[string]bool) bool {
+	return completed["Inbox"] && completed["Junk"]
 }
 
 func isDefinitiveMicrosoftIMAPAuthenticationFailure(err error) bool {
@@ -602,6 +671,10 @@ func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Cl
 		return nil, err
 	}
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -762,18 +835,19 @@ func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint
 }
 
 func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {
-	folders := []MicrosoftMailFolder{
+	fallback := []MicrosoftMailFolder{
 		{ID: "INBOX", Label: "Inbox"},
 		{ID: "Junk", Label: "Junk"},
 		{ID: "Junk Email", Label: "Junk"},
 	}
 	if client == nil {
-		return folders
+		return fallback
 	}
 	listed, err := client.List("", "*", nil).Collect()
 	if err != nil {
-		return folders
+		return fallback
 	}
+	folders := make([]MicrosoftMailFolder, 0, len(listed)+len(fallback))
 	for _, item := range listed {
 		name := strings.TrimSpace(item.Mailbox)
 		if name == "" {
@@ -797,6 +871,7 @@ func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {
 			folders = append(folders, MicrosoftMailFolder{ID: name, Label: label})
 		}
 	}
+	folders = append(folders, fallback...)
 	return uniqueMicrosoftMailFolders(folders)
 }
 
@@ -911,7 +986,7 @@ func normalizeMailFetchRequest(req MicrosoftMailFetchRequest) MicrosoftMailFetch
 	return req
 }
 
-func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFolder) MicrosoftFetchedMessage {
+func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFolder, includeProviderPayload bool) MicrosoftFetchedMessage {
 	receivedAt, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.ReceivedDateTime))
 	body := strings.TrimSpace(message.Body.Content)
 	if strings.EqualFold(message.Body.ContentType, "html") {
@@ -920,7 +995,11 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 	if body == "" {
 		body = strings.TrimSpace(message.BodyPreview)
 	}
-	providerPayload, _ := json.Marshal(message)
+	providerPayload := ""
+	if includeProviderPayload {
+		encoded, _ := json.Marshal(message)
+		providerPayload = string(encoded)
+	}
 	return MicrosoftFetchedMessage{
 		ID:                strings.TrimSpace(message.ID),
 		InternetMessageID: strings.TrimSpace(message.InternetMessageID),
@@ -932,7 +1011,7 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 		ReceivedAt:        receivedAt,
 		Preview:           strings.TrimSpace(message.BodyPreview),
 		Body:              body,
-		ProviderPayload:   string(providerPayload),
+		ProviderPayload:   providerPayload,
 		Protocol:          "graph",
 		HasAttachments:    message.HasAttachments,
 	}
@@ -945,7 +1024,7 @@ func derefGraphRecipient(recipient *graphRecipient) graphRecipient {
 	return *recipient
 }
 
-func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder MicrosoftMailFolder, bodySection *imap.FetchItemBodySection) MicrosoftFetchedMessage {
+func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder MicrosoftMailFolder, bodySection *imap.FetchItemBodySection, includeRawSource bool) MicrosoftFetchedMessage {
 	if row == nil {
 		return MicrosoftFetchedMessage{FolderID: folder.ID, FolderLabel: folder.Label, Protocol: "imap"}
 	}
@@ -966,23 +1045,27 @@ func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder Micr
 		}
 	}
 	if bodySection != nil {
-		applyIMAPBody(&message, row.FindBodySection(bodySection))
+		applyIMAPBody(&message, row.FindBodySection(bodySection), includeRawSource)
 	}
 	return message
 }
 
-func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte) {
+func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte, includeRawSource bool) {
 	if message == nil || len(raw) == 0 {
 		return
 	}
 	msg, err := stdmail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
-		message.RawSource = string(raw)
+		if includeRawSource {
+			message.RawSource = string(raw)
+		}
 		message.Body = strings.TrimSpace(string(raw))
 		message.Preview = bodyPreview(message.Body)
 		return
 	}
-	message.RawSource = string(raw)
+	if includeRawSource {
+		message.RawSource = string(raw)
+	}
 	decoder := new(mime.WordDecoder)
 	if subject := decodeMIMEHeader(decoder, msg.Header.Get("Subject")); subject != "" {
 		message.Subject = subject

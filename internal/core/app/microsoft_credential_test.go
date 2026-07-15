@@ -113,6 +113,17 @@ func (r *microsoftCredentialRepositoryStub) LockAdminMicrosoft(_ context.Context
 	return r.root, r.resource, nil
 }
 
+func (r *microsoftCredentialRepositoryStub) MaxMicrosoftResourceID(context.Context) (uint, error) {
+	return r.resource.ID, nil
+}
+
+func (r *microsoftCredentialRepositoryStub) FindNextMicrosoft(_ context.Context, afterID, maxID uint) (*domain.MicrosoftResource, error) {
+	if r.resource.ID <= afterID || r.resource.ID > maxID {
+		return nil, nil
+	}
+	return r.resource, nil
+}
+
 func (r *microsoftCredentialRepositoryStub) SaveAdminMicrosoft(_ context.Context, root *domain.EmailResource, _ *domain.MicrosoftResource, expectedVersion uint64) error {
 	if root.Version != expectedVersion {
 		return domain.ErrResourceVersionConflict

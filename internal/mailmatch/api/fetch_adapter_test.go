@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
@@ -53,4 +54,37 @@ func TestMicrosoftFetchAdapterRetriesWithLatestRotatedRefreshToken(t *testing.T)
 	require.Len(t, client.requests, 2)
 	require.Equal(t, "original-refresh-token", client.requests[0].RefreshToken)
 	require.Equal(t, "rotated-after-first-attempt", client.requests[1].RefreshToken)
+}
+
+func TestMicrosoftFetchAdapterFullHistoryHasNoMessageLimit(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+		FullHistory: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, client.requests, 1)
+	require.Zero(t, client.requests[0].MaxMessages)
+}
+
+func TestMicrosoftFetchAdapterReturnsRotatedTokenOnFetchFailure(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{
+		Category: "graph_forbidden", SafeMessage: "Mailbox permission is unavailable.", RefreshToken: "rotated-refresh-token",
+	}}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "original-refresh-token",
+		},
+	})
+
+	var failure *mailmatchapp.MailFetchFailure
+	require.True(t, errors.As(err, &failure))
+	require.Equal(t, "rotated-refresh-token", failure.RefreshToken)
 }

@@ -26,6 +26,26 @@ func (microsoftResourceProjectMatchModel) TableName() string {
 }
 
 func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.HistoricalProjectScope, error) {
+	return r.listHistoricalProjectScopes(ctx, 0, false)
+}
+
+func (r *Repo) FindHistoricalProjectScope(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
+	scopes, err := r.listHistoricalProjectScopes(ctx, projectID, false)
+	if err != nil || len(scopes) == 0 {
+		return nil, err
+	}
+	return &scopes[0], nil
+}
+
+func (r *Repo) FindHistoricalProjectScopeForUpdate(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
+	scopes, err := r.listHistoricalProjectScopes(ctx, projectID, true)
+	if err != nil || len(scopes) == 0 {
+		return nil, err
+	}
+	return &scopes[0], nil
+}
+
+func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, lock bool) ([]app.HistoricalProjectScope, error) {
 	var rows []struct {
 		ProjectID  uint   `gorm:"column:project_id"`
 		LooseMatch bool   `gorm:"column:loose_match"`
@@ -33,7 +53,7 @@ func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.Historica
 		Pattern    string
 		Enabled    bool
 	}
-	if err := r.dbFor(ctx).
+	query := r.dbFor(ctx).
 		Table("projects AS p").
 		Select("p.id AS project_id, p.loose_match, pmr.rule_type, pmr.pattern, pmr.enabled").
 		Joins("JOIN project_mail_rules AS pmr ON pmr.project_id = p.id AND pmr.enabled = 1").
@@ -43,7 +63,14 @@ func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.Historica
 			FROM project_products pp
 			WHERE pp.project_id = p.id
 			  AND pp.type = 'microsoft'
-		)`).
+		)`)
+	if projectID > 0 {
+		query = query.Where("p.id = ?", projectID)
+	}
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.
 		Order("p.id ASC, pmr.id ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list historical project scopes: %w", err)
