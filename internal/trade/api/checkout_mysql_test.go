@@ -212,7 +212,7 @@ INSERT INTO orders(
 		"microsoft",
 		"purchase",
 		"public_only",
-		"active",
+		"pending_payment",
 		"",
 		"2.000000",
 		"0.000000",
