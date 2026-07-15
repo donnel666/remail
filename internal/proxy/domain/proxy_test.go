@@ -49,10 +49,10 @@ func TestProxyStatusTransitions(t *testing.T) {
 	require.Equal(t, 0, proxy.Errors)
 
 	require.NoError(t, proxy.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusAbnormal, proxy.Status)
+	require.Equal(t, ProxyStatusNormal, proxy.Status)
 	require.Equal(t, 1, proxy.Errors)
 	require.NoError(t, proxy.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusAbnormal, proxy.Status)
+	require.Equal(t, ProxyStatusNormal, proxy.Status)
 	require.Equal(t, 2, proxy.Errors)
 
 	require.NoError(t, proxy.MarkChecking())
@@ -125,14 +125,16 @@ func TestProxyCheckFailureRetryability(t *testing.T) {
 func TestProxyReportFailureRetryability(t *testing.T) {
 	retryable := &Proxy{Status: ProxyStatusNormal}
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
+	require.Equal(t, ProxyStatusNormal, retryable.Status)
 	require.Equal(t, 1, retryable.Errors)
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
+	require.Equal(t, ProxyStatusNormal, retryable.Status)
 	require.Equal(t, 2, retryable.Errors)
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
+	require.Equal(t, ProxyStatusChecking, retryable.Status)
+	require.Equal(t, 3, retryable.Errors)
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
+	require.Equal(t, ProxyStatusChecking, retryable.Status)
 	require.Equal(t, 4, retryable.Errors)
 
 	nonRetryable := &Proxy{Status: ProxyStatusNormal}

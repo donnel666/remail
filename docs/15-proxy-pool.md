@@ -23,6 +23,7 @@
 | 2026-07-03 | V1.16 | Codex | 移除代理单独详情读取接口：管理员列表项已经返回完整 URL，复制、编辑和维护统一使用列表读模型。 |
 | 2026-07-03 | V1.17 | Codex | 补充检测 job `queued/running` stale 恢复策略，避免 worker 硬中断后任务永久卡住。 |
 | 2026-07-03 | V1.18 | Codex | 补充检测 job claim 策略：dispatcher 必须用数据库行锁和状态条件原子 claim，worker 只能从 `queued` 进入 `running`，终态不得被回退。 |
+| 2026-07-15 | V1.19 | Codex | 运行期连续第 3 次可重试错误仅触发异步检测：代理进入 `checking` 并原子创建单检测 job；只有检测失败才写入 `abnormal`。 |
 
 > 支撑域。BC-PROXY 负责 Microsoft 通讯用代理的录入、检测、选择、绑定、轮转和禁用，不拥有 Microsoft 页面流、资源状态或订单状态。
 
@@ -84,6 +85,8 @@
 
 检测属于耗时外部网络任务，不允许在 HTTP 请求内同步等待真实探测。新增和导入代理由后端用例在写入 `checking` 状态后创建 durable check job，不允许依赖前端再补一次检测请求。`POST /v1/admin/proxies/{proxyId}/check` 只负责校验、清空该代理连续错误数、把单个代理置为 `checking`，并在同一事务里写入单个检测 job；`POST /v1/admin/proxies/check` 的 ID 批量模式只负责校验 ID 并写入一个 durable batch job，筛选批量模式只负责校验筛选条件、统计目标代理数并写入一个 durable batch job；批量 worker 再按 ID 或稳定 ID 分段读取代理、逐个清空错误数、置为 `checking` 并写入单个检测 job。成功提交均返回 `202 Accepted`，成功语义以 durable job 已写入为准。Asynq 只作为执行通道：dispatch 失败不得把代理置为异常，只能把 job 保持为 `pending`、写入安全错误和 SystemLog，管理员显式重新检测或后续 dispatcher 可继续处理该 job。dispatcher 还必须扫描超过任务超时预算仍停留在 `queued/running` 的 stale job，并在数据库事务内用行锁和状态条件原子 claim 后重新投递，避免 worker 硬中断后检测永久卡住；已经进入 `succeeded/failed` 的终态 job 不得被 dispatcher 或 worker 回退为 `queued/running`。一个单代理检测任务只执行一次，任务内部最多做 3 次探测尝试；3 次都失败后立即写入 `abnormal` 和安全诊断，不依赖 Asynq 重试继续拖延结论。基础设施失败必须尝试写 SystemLog，管理员需要再次检测时显式触发重新检测。不可重试错误也只能写入 `abnormal`，不得自动禁用。`expired` 状态只影响分配候选，不阻止管理员检测、编辑、删除和禁用；重新检测会先把 `expired` 置为 `checking`，检测结果再由 worker 写回。
 
+运行期的可重试错误采用阈值触发：第 1、2 次只递增连续错误数；第 3 次在同一事务把 `normal` 切为 `checking` 并创建一个 durable 单代理检测 job。只有这一次状态转换可以创建 job；代理已经处于 `checking` 时，后续在飞请求报告的错误不得重复创建检测任务。检测成功写 `normal`，检测任务内部重试耗尽才写 `abnormal`。
+
 管理页按 `country` 聚合为顶部标签卡，`All` 标签展示全部代理；列表筛选支持 `pool`、`ipVersion`、`ipv6`、`status`、`country`、`createdFrom/createdTo` 和搜索。列表必须使用服务器分页和后端筛选，不允许为了本地分页或统计把代理全量拉到浏览器。国家标签和筛选计数通过统计查询返回，只做 `COUNT/GROUP BY`，不返回代理 URL 原文。代理管理属于管理员分组页面，授权管理员列表、创建、更新和检测响应可返回完整 URL；列表行本身就是复制、编辑和维护代理的读契约，不再保留单独详情读取接口。日志、错误响应、SystemLog detail、OperationLog summary 和非授权场景仍必须禁敏。
 
 管理页左上角提供当前筛选范围的批量维护按钮。当前筛选范围内存在非禁用代理时，按钮显示“全部禁用”，调用筛选条件批量禁用接口并同步把匹配代理置为 `disabled`；当前筛选范围内全部代理均为 `disabled` 时，按钮显示“全部启用”，但启用不得直接改成 `normal`，只能对当前筛选下的禁用代理提交异步检测，检测通过后由 worker 写入 `normal`。
@@ -103,7 +106,7 @@ stateDiagram-v2
     [*] --> checking: 创建/重新检测
     checking --> normal: 检测成功
     checking --> abnormal: 检测任务内部重试耗尽
-    normal --> abnormal: 可重试错误
+    normal --> checking: 连续第 3 次可重试错误
     normal --> abnormal: 不可重试错误
     abnormal --> normal: 重新检测成功
     normal --> expired: 到期

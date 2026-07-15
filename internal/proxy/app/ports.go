@@ -43,6 +43,7 @@ type ProxyRepository interface {
 	AcquireSystemProxy(ctx context.Context, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error)
 	ReportSuccess(ctx context.Context, proxyID uint, usedAt time.Time) error
 	ReportFailure(ctx context.Context, proxyID uint, safeError string, retryable bool) (*domain.Proxy, error)
+	ReportFailureAndCreateCheckJob(ctx context.Context, proxyID uint, safeError string, retryable bool, task ProxyCheckTask) (*domain.Proxy, *ProxyCheckJob, error)
 }
 
 type ProxyChecker interface {
@@ -1131,6 +1132,16 @@ func (uc *ProxyUseCase) ReportNonRetryableFailure(ctx context.Context, proxyID u
 
 func (uc *ProxyUseCase) reportFailure(ctx context.Context, proxyID uint, safeError string, retryable bool) error {
 	if proxyID == 0 {
+		return nil
+	}
+	if retryable {
+		_, job, err := uc.proxies.ReportFailureAndCreateCheckJob(ctx, proxyID, safeError, retryable, ProxyCheckTask{ProxyID: proxyID})
+		if err != nil {
+			return err
+		}
+		if job != nil {
+			uc.dispatchProxyCheckJob(ctx, job)
+		}
 		return nil
 	}
 	if _, err := uc.proxies.ReportFailure(ctx, proxyID, safeError, retryable); err != nil {

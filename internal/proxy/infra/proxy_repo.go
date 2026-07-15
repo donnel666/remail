@@ -970,6 +970,51 @@ func (r *ProxyRepo) ReportFailure(ctx context.Context, proxyID uint, safeError s
 	return &updated, nil
 }
 
+func (r *ProxyRepo) ReportFailureAndCreateCheckJob(ctx context.Context, proxyID uint, safeError string, retryable bool, task proxyapp.ProxyCheckTask) (*domain.Proxy, *proxyapp.ProxyCheckJob, error) {
+	var updated domain.Proxy
+	var job *proxyapp.ProxyCheckJob
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model ProxyModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "id = ?", proxyID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrProxyNotFound
+			}
+			return fmt.Errorf("lock proxy failure report: %w", err)
+		}
+		proxy := proxyFromModel(model)
+		wasChecking := proxy.Status == domain.ProxyStatusChecking
+		if err := proxy.ReportFailure(safeError, retryable); err != nil {
+			return err
+		}
+		if err := tx.Model(&ProxyModel{}).
+			Where("id = ?", proxyID).
+			Updates(map[string]any{
+				"status":          string(proxy.Status),
+				"errors":          proxy.Errors,
+				"last_safe_error": proxy.LastSafeError,
+			}).Error; err != nil {
+			return fmt.Errorf("report proxy failure: %w", err)
+		}
+		// The proxy row is locked for this transaction. Only the transition into
+		// checking creates a job, so in-flight requests that report another
+		// failure after the threshold cannot enqueue duplicate health checks.
+		if !wasChecking && proxy.Status == domain.ProxyStatusChecking {
+			task.ProxyID = proxyID
+			createdJob, err := createProxyCheckJobInTx(ctx, tx, proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{})
+			if err != nil {
+				return err
+			}
+			job = createdJob
+		}
+		updated = proxy
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &updated, job, nil
+}
+
 func findBoundResourceProxy(ctx context.Context, tx *gorm.DB, key string, ipVersion domain.ProxyIPVersion, now time.Time) (*domain.Proxy, error) {
 	var binding ProxyBindingModel
 	query := tx.WithContext(ctx).

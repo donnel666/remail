@@ -281,6 +281,10 @@ func (r *fakeProxyRepo) ReportFailure(_ context.Context, _ uint, _ string, _ boo
 	return nil, nil
 }
 
+func (r *fakeProxyRepo) ReportFailureAndCreateCheckJob(_ context.Context, _ uint, _ string, _ bool, _ proxyapp.ProxyCheckTask) (*domain.Proxy, *proxyapp.ProxyCheckJob, error) {
+	return &domain.Proxy{Status: domain.ProxyStatusNormal}, nil, nil
+}
+
 func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) *proxyapp.ProxyCheckJob {
 	if r.nextJobID == 0 {
 		r.nextJobID = 1

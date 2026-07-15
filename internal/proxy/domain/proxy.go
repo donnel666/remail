@@ -205,6 +205,10 @@ func (p *Proxy) MarkExpired(now time.Time) error {
 	return nil
 }
 
+// failureThreshold defines how many consecutive retryable errors trigger
+// a transition to checking status for asynchronous health verification.
+const failureThreshold = 3
+
 func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
 	if p.Status == ProxyStatusDisabled {
 		return nil
@@ -218,10 +222,12 @@ func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
 		return nil
 	}
 	p.Errors++
-	if !CanTransitionProxyStatus(p.Status, ProxyStatusAbnormal) {
-		return ErrInvalidProxyStatus
+	if p.Errors >= failureThreshold && p.Status == ProxyStatusNormal {
+		if !CanTransitionProxyStatus(p.Status, ProxyStatusChecking) {
+			return ErrInvalidProxyStatus
+		}
+		p.Status = ProxyStatusChecking
 	}
-	p.Status = ProxyStatusAbnormal
 	return nil
 }
 

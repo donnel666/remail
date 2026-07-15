@@ -23,6 +23,7 @@ type fakeProxyRepository struct {
 	nextID        uint
 	nextJobID     uint
 	checkJobs     []ProxyCheckJob
+	failureProxy  *domain.Proxy
 
 	resourceAcquireCount int
 	systemAcquireCount   int
@@ -250,6 +251,22 @@ func (r *fakeProxyRepository) ReportSuccess(context.Context, uint, time.Time) er
 func (r *fakeProxyRepository) ReportFailure(context.Context, uint, string, bool) (*domain.Proxy, error) {
 	r.reportFailureCount++
 	return &domain.Proxy{Status: domain.ProxyStatusNormal}, nil
+}
+func (r *fakeProxyRepository) ReportFailureAndCreateCheckJob(_ context.Context, proxyID uint, safeError string, retryable bool, task ProxyCheckTask) (*domain.Proxy, *ProxyCheckJob, error) {
+	r.reportFailureCount++
+	if r.failureProxy == nil {
+		return &domain.Proxy{Status: domain.ProxyStatusNormal}, nil, nil
+	}
+	wasChecking := r.failureProxy.Status == domain.ProxyStatusChecking
+	if err := r.failureProxy.ReportFailure(safeError, retryable); err != nil {
+		return nil, nil, err
+	}
+	if !wasChecking && r.failureProxy.Status == domain.ProxyStatusChecking {
+		task.ProxyID = proxyID
+		job := r.createCheckJob(ProxyCheckJobSingle, task, ProxyCheckBatchJobRequest{})
+		return r.failureProxy, job, nil
+	}
+	return r.failureProxy, nil, nil
 }
 
 func (r *fakeProxyRepository) createCheckJob(kind ProxyCheckJobKind, task ProxyCheckTask, batchTask ProxyCheckBatchJobRequest) *ProxyCheckJob {
@@ -914,4 +931,34 @@ func TestProxyReportsIgnoreDirectRoute(t *testing.T) {
 	require.NoError(t, uc.ReportNonRetryableFailure(context.Background(), 0, "direct request failed"))
 	require.Equal(t, 0, repo.reportSuccessCount)
 	require.Equal(t, 0, repo.reportFailureCount)
+}
+
+func TestProxyRetryableFailuresQueueOneCheckAtThreshold(t *testing.T) {
+	repo := &fakeProxyRepository{
+		failureProxy: &domain.Proxy{ID: 17, Status: domain.ProxyStatusNormal},
+	}
+	queue := &fakeProxyCheckQueue{}
+	uc := NewProxyUseCase(repo, nil, queue, nil, nil)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		require.NoError(t, uc.ReportFailure(context.Background(), 17, "network timeout"))
+		require.Equal(t, domain.ProxyStatusNormal, repo.failureProxy.Status)
+		require.Equal(t, attempt, repo.failureProxy.Errors)
+		require.Empty(t, repo.checkJobs)
+		require.Empty(t, queue.tasks)
+	}
+
+	require.NoError(t, uc.ReportFailure(context.Background(), 17, "network timeout"))
+	require.Equal(t, domain.ProxyStatusChecking, repo.failureProxy.Status)
+	require.Equal(t, 3, repo.failureProxy.Errors)
+	require.Len(t, repo.checkJobs, 1)
+	require.Equal(t, ProxyCheckJobQueued, repo.checkJobs[0].Status)
+	require.Len(t, queue.tasks, 1)
+	require.Equal(t, uint(17), queue.tasks[0].ProxyID)
+
+	require.NoError(t, uc.ReportFailure(context.Background(), 17, "network timeout"))
+	require.Equal(t, domain.ProxyStatusChecking, repo.failureProxy.Status)
+	require.Equal(t, 4, repo.failureProxy.Errors)
+	require.Len(t, repo.checkJobs, 1)
+	require.Len(t, queue.tasks, 1)
 }

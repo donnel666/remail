@@ -255,6 +255,48 @@ func TestProxyRepoRuntimeReportsDoNotMutateDisabledProxyMySQL(t *testing.T) {
 	require.Nil(t, stored.LastUsedAt)
 }
 
+func TestProxyRepoRetryableFailureThresholdCreatesOneCheckJobMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	ctx := context.Background()
+	proxy := &domain.Proxy{
+		Pool:     domain.ProxyPoolResource,
+		URL:      "http://127.0.0.1:18183",
+		ExpireAt: time.Now().UTC().Add(time.Hour),
+		Status:   domain.ProxyStatusNormal,
+		Country:  "US",
+	}
+	require.NoError(t, repo.Create(ctx, proxy))
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		updated, job, err := repo.ReportFailureAndCreateCheckJob(ctx, proxy.ID, "network timeout", true, proxyapp.ProxyCheckTask{ProxyID: proxy.ID})
+		require.NoError(t, err)
+		require.Equal(t, domain.ProxyStatusNormal, updated.Status)
+		require.Equal(t, attempt, updated.Errors)
+		require.Nil(t, job)
+	}
+
+	updated, job, err := repo.ReportFailureAndCreateCheckJob(ctx, proxy.ID, "network timeout", true, proxyapp.ProxyCheckTask{ProxyID: proxy.ID})
+	require.NoError(t, err)
+	require.Equal(t, domain.ProxyStatusChecking, updated.Status)
+	require.Equal(t, 3, updated.Errors)
+	require.NotNil(t, job)
+	require.Equal(t, proxy.ID, job.ProxyID)
+	require.Equal(t, proxyapp.ProxyCheckJobPending, job.Status)
+
+	updated, duplicateJob, err := repo.ReportFailureAndCreateCheckJob(ctx, proxy.ID, "network timeout", true, proxyapp.ProxyCheckTask{ProxyID: proxy.ID})
+	require.NoError(t, err)
+	require.Equal(t, domain.ProxyStatusChecking, updated.Status)
+	require.Equal(t, 4, updated.Errors)
+	require.Nil(t, duplicateJob)
+
+	var jobCount int64
+	require.NoError(t, db.Model(&ProxyCheckJobModel{}).
+		Where("kind = ? AND proxy_id = ?", string(proxyapp.ProxyCheckJobSingle), proxy.ID).
+		Count(&jobCount).Error)
+	require.Equal(t, int64(1), jobCount)
+}
+
 func TestProxyRepoAcquireResourceBindingMySQL(t *testing.T) {
 	db := newProxyMySQLTestDB(t)
 	repo := NewProxyRepo(db)
