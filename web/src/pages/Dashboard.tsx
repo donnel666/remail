@@ -620,6 +620,7 @@ export default function Dashboard() {
       const list = await listOrders({
         limit: orderPageLimit,
         serviceMode: mode,
+        status: "active",
       });
       if (refreshOrdersSeqRef.current.get(mode) !== seq) return;
       const nextOrders = list.items.map(toWorkbenchOrder);
@@ -654,6 +655,7 @@ export default function Dashboard() {
         afterId,
         limit: orderPageLimit,
         serviceMode: mode,
+        status: "active",
       });
       if (refreshOrdersSeqRef.current.get(mode) !== refreshSeq) return;
       const nextOrders = list.items.map(toWorkbenchOrder);
