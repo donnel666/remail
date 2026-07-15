@@ -148,6 +148,26 @@ func TestSendPasswordRecoveryOTTRequestBoundaryAndCanaryRefresh(t *testing.T) {
 	client.requireDone()
 }
 
+func TestSendPasswordRecoveryOTTRateLimitIsClassified(t *testing.T) {
+	flow := testPasswordRecoveryFlow()
+	proof := testPasswordRecoveryProof()
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoverySendOTTURL)
+			return scriptedResponse(req, http.StatusTooManyRequests, req.URL.String(), `{}`, nil), nil
+		},
+	)
+
+	err := sendPasswordRecoveryOTT(session, flow, proof, "qalpha01@recovery.test")
+
+	require.Error(t, err)
+	var authErr *AuthError
+	require.ErrorAs(t, err, &authErr)
+	require.Equal(t, AuthStatusRateLimited, authErr.Status)
+	require.ErrorContains(t, err, "HTTP 429")
+	client.requireDone()
+}
+
 func TestVerifyPasswordRecoveryCodeRequestBoundary(t *testing.T) {
 	flow := testPasswordRecoveryFlow()
 	proof := testPasswordRecoveryProof()
@@ -219,6 +239,38 @@ func TestSecondProofTokenFailsBeforeResetPasswordRequest(t *testing.T) {
 	// The scripted client has no ResetPassword step. Requiring it to be done
 	// proves the r: state did not continue into the destructive endpoint.
 	client.requireDone()
+}
+
+func TestPasswordRecoveryTokenPolicies(t *testing.T) {
+	tests := []struct {
+		name               string
+		token              string
+		bindingConfirmed   bool
+		passwordAuthorized bool
+	}{
+		{name: "authorized", token: "a:authorized-secret", bindingConfirmed: true, passwordAuthorized: true},
+		{name: "second proof", token: "r:second-proof-secret", bindingConfirmed: true, passwordAuthorized: false},
+		{name: "unknown state", token: "x:unknown-secret", bindingConfirmed: false, passwordAuthorized: false},
+		{name: "empty secret", token: "a:", bindingConfirmed: false, passwordAuthorized: false},
+		{name: "malformed", token: "invalid", bindingConfirmed: false, passwordAuthorized: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bindingErr := requireConfirmedPasswordRecoveryToken(tt.token)
+			if tt.bindingConfirmed {
+				require.NoError(t, bindingErr)
+			} else {
+				require.Error(t, bindingErr)
+			}
+
+			passwordErr := requireAuthorizedPasswordRecoveryToken(tt.token)
+			if tt.passwordAuthorized {
+				require.NoError(t, passwordErr)
+			} else {
+				require.Error(t, passwordErr)
+			}
+		})
+	}
 }
 
 func TestResetPasswordViaRecoveryDisabledBeforeNetwork(t *testing.T) {
@@ -331,6 +383,163 @@ func TestEnabledPasswordRecoveryResetRunsOneSendVerifyAndReset(t *testing.T) {
 	client.requireDone()
 }
 
+func TestEnabledPasswordRecoveryResetStopsOnSecondProofToken(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	reader := &passwordRecoverySequenceReader{
+		watcherStarted: make(chan struct{}),
+		sendStarted:    make(chan struct{}),
+	}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, passwordRecoveryEntryURL, passwordRecoveryInitialFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, req.URL.String(), passwordRecoveryPickerFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoverySendOTTURL)
+			select {
+			case <-reader.watcherStarted:
+			case <-time.After(time.Second):
+				require.FailNow(t, "mail watcher did not start before recovery SendOtt")
+			}
+			close(reader.sendStarted)
+			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"after-send"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoveryVerifyCodeURL)
+			return scriptedResponse(req, 200, req.URL.String(), `{"token":"r:second-proof-secret"}`, nil), nil
+		},
+	)
+
+	result, err := resetPasswordViaRecoveryWithSession(
+		session,
+		"owner@example.test",
+		"Strong-Password-2026!",
+		"",
+		PasswordRecoveryResetOptions{
+			EnablePasswordReset:     true,
+			PreferredBindingAddress: "qalpha01@recovery.test",
+			ExpectedBindingAddress:  "qalpha01@recovery.test",
+			CodeTimeout:             time.Second,
+		},
+	)
+
+	require.Error(t, err)
+	require.False(t, result.PasswordReset)
+	var authErr *AuthError
+	require.ErrorAs(t, err, &authErr)
+	require.Equal(t, AuthStatusMFARequired, authErr.Status)
+	// No ResetPassword response is scripted, so completing the client proves
+	// that an r: token never reached the destructive endpoint.
+	client.requireDone()
+}
+
+func TestPasswordRecoveryBindingConfirmationStopsAfterOneVerifiedOTP(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	reader := &passwordRecoverySequenceReader{
+		watcherStarted: make(chan struct{}),
+		sendStarted:    make(chan struct{}),
+	}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, passwordRecoveryEntryURL, passwordRecoveryInitialFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, req.URL.String(), passwordRecoveryPickerFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoverySendOTTURL)
+			select {
+			case <-reader.watcherStarted:
+			case <-time.After(time.Second):
+				require.FailNow(t, "mail watcher did not start before recovery SendOtt")
+			}
+			close(reader.sendStarted)
+			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"after-send"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoveryVerifyCodeURL)
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "654321", payload["code"])
+			require.Equal(t, "after-send", req.Header.Get("canary"))
+			// An r: token requests another proof before a password change, but the
+			// first mailbox OTP itself was verified and is sufficient to confirm
+			// the binding relationship. No ResetPassword request follows.
+			return scriptedResponse(req, 200, req.URL.String(), `{"token":"r:second-proof-secret"}`, nil), nil
+		},
+	)
+
+	confirmed, err := confirmPasswordRecoveryBindingWithSession(session, "owner@example.test", "", PasswordRecoveryConfirmationOptions{
+		PreferredBindingAddress: "qalpha01@recovery.test",
+		ExpectedBindingAddress:  "qalpha01@recovery.test",
+		CodeTimeout:             time.Second,
+	})
+
+	require.NoError(t, err)
+	require.True(t, confirmed.BindingConfirmed)
+	require.Equal(t, "qalpha01@recovery.test", confirmed.Probe.BindingAddress)
+	client.requireDone()
+}
+
+func TestPasswordRecoveryBindingConfirmationRejectsUnknownTokenState(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	reader := &passwordRecoverySequenceReader{
+		watcherStarted: make(chan struct{}),
+		sendStarted:    make(chan struct{}),
+	}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, passwordRecoveryEntryURL, passwordRecoveryInitialFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, req.URL.String(), passwordRecoveryPickerFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoverySendOTTURL)
+			select {
+			case <-reader.watcherStarted:
+			case <-time.After(time.Second):
+				require.FailNow(t, "mail watcher did not start before recovery SendOtt")
+			}
+			close(reader.sendStarted)
+			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"after-send"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, passwordRecoveryVerifyCodeURL)
+			return scriptedResponse(req, 200, req.URL.String(), `{"token":"x:unknown-secret"}`, nil), nil
+		},
+	)
+
+	confirmed, err := confirmPasswordRecoveryBindingWithSession(session, "owner@example.test", "", PasswordRecoveryConfirmationOptions{
+		PreferredBindingAddress: "qalpha01@recovery.test",
+		ExpectedBindingAddress:  "qalpha01@recovery.test",
+		CodeTimeout:             time.Second,
+	})
+
+	require.ErrorContains(t, err, "unknown mailbox verification state")
+	require.False(t, confirmed.BindingConfirmed)
+	client.requireDone()
+}
+
 func TestEnabledPasswordRecoveryResetStopsWhenReprobeBindingDiffers(t *testing.T) {
 	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {
@@ -355,7 +564,7 @@ func TestEnabledPasswordRecoveryResetStopsWhenReprobeBindingDiffers(t *testing.T
 
 	require.Error(t, err)
 	require.False(t, result.PasswordReset)
-	require.ErrorContains(t, err, "changed before password reset")
+	require.ErrorContains(t, err, "changed before verification")
 	client.requireDone() // No SendOtt, VerifyCode, or ResetPassword request was made.
 }
 

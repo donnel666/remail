@@ -161,7 +161,7 @@ func (s *recoveryStore) preflightBindingApply(ctx context.Context, snapshot reco
 		if err != nil {
 			return err
 		}
-		if root.OwnerUserID != snapshot.OwnerUserID || !sameRecoveryAccount(resource, snapshot.AccountEmail) {
+		if root.OwnerUserID != snapshot.OwnerUserID || !sameNormalRecoveryAccount(resource, snapshot.AccountEmail) {
 			return errRecoveryResourceChanged
 		}
 		return ensureNoActiveValidation(txCtx, snapshot.ResourceID)
@@ -174,6 +174,7 @@ func (s *recoveryStore) applyRecoveredBinding(
 	bindingAddress string,
 	operatorUserID uint,
 	requestID string,
+	requireNormalResource bool,
 ) (*mailinfra.MicrosoftRecoveredBindingResult, error) {
 	var applied *mailinfra.MicrosoftRecoveredBindingResult
 	err := s.admin.WithTx(ctx, func(txCtx context.Context) error {
@@ -184,7 +185,9 @@ func (s *recoveryStore) applyRecoveredBinding(
 		if err != nil {
 			return err
 		}
-		if root.OwnerUserID != snapshot.OwnerUserID || !sameRecoveryAccount(resource, snapshot.AccountEmail) {
+		if root.OwnerUserID != snapshot.OwnerUserID ||
+			!sameRecoveryAccount(resource, snapshot.AccountEmail) ||
+			(requireNormalResource && resource.Status != coredomain.MicrosoftStatusNormal) {
 			return errRecoveryResourceChanged
 		}
 		if err := ensureNoActiveValidation(txCtx, snapshot.ResourceID); err != nil {
@@ -324,6 +327,10 @@ func sameRecoveryAccount(resource *coredomain.MicrosoftResource, expected string
 		resource.Status != coredomain.MicrosoftStatusDeleted &&
 		resource.Status != coredomain.MicrosoftStatusDisabled &&
 		strings.EqualFold(strings.TrimSpace(resource.EmailAddress), strings.TrimSpace(expected))
+}
+
+func sameNormalRecoveryAccount(resource *coredomain.MicrosoftResource, expected string) bool {
+	return sameRecoveryAccount(resource, expected) && resource.Status == coredomain.MicrosoftStatusNormal
 }
 
 func samePrivatePassword(current, expected string) bool {

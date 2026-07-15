@@ -37,14 +37,30 @@ type PasswordRecoveryProofInfo struct {
 // PasswordRecoveryProbeResult is safe for an operator-facing command. It
 // contains the masked Microsoft proof and, when local evidence uniquely maps
 // that proof to a mailbox, a recovered binding candidate. A caller must still
-// confirm the candidate through the normal password/OTP login before treating
-// it as verified. It contains no Microsoft session secrets.
+// confirm control of that exact proof through an OTP flow before treating it as
+// verified. It contains no Microsoft session secrets.
 type PasswordRecoveryProbeResult struct {
 	Proofs               []PasswordRecoveryProofInfo
 	MaskedBindingAddress string
 	BindingAddress       string
 	BindingResolved      bool
 	BindingAmbiguous     bool
+}
+
+// PasswordRecoveryConfirmationOptions identifies the exact locally recovered
+// mailbox that may receive one verification code. This flow never calls the
+// password-reset endpoint and never changes account credentials.
+type PasswordRecoveryConfirmationOptions struct {
+	PreferredBindingAddress string
+	ExpectedBindingAddress  string
+	CodeTimeout             time.Duration
+}
+
+// PasswordRecoveryConfirmationResult contains no OTP, authorization token,
+// recovery token, canary, password, or other Microsoft session secret.
+type PasswordRecoveryConfirmationResult struct {
+	Probe            PasswordRecoveryProbeResult
+	BindingConfirmed bool
 }
 
 // PasswordRecoveryResetOptions keeps the destructive part of this flow
@@ -103,6 +119,41 @@ func ProbePasswordRecovery(ctx context.Context, email, proxy, preferredBindingAd
 	}
 	_, result, err := probePasswordRecoveryWithSession(session, email, proxy, preferredBindingAddress)
 	return result, err
+}
+
+// ConfirmPasswordRecoveryBinding discovers the official recovery proof again,
+// sends one OTP to the uniquely resolved expected mailbox, and verifies the
+// code. It stops immediately after verification and cannot reset the password.
+func ConfirmPasswordRecoveryBinding(ctx context.Context, email, proxy string, options PasswordRecoveryConfirmationOptions) (PasswordRecoveryConfirmationResult, error) {
+	if normalizeRecoveryMailbox(options.ExpectedBindingAddress) == "" {
+		return PasswordRecoveryConfirmationResult{}, newAuthError("Microsoft recovery confirmation requires an expected recovery mailbox.", AuthStatusRequestError)
+	}
+	session, err := newBrowserSession(ctx, proxy)
+	if err != nil {
+		return PasswordRecoveryConfirmationResult{}, wrapAuthError("创建 Microsoft 密码恢复确认会话失败", AuthStatusRequestError, err)
+	}
+	return confirmPasswordRecoveryBindingWithSession(session, email, proxy, options)
+}
+
+func confirmPasswordRecoveryBindingWithSession(session *Session, email, proxy string, options PasswordRecoveryConfirmationOptions) (PasswordRecoveryConfirmationResult, error) {
+	expectedBinding := normalizeRecoveryMailbox(options.ExpectedBindingAddress)
+	if expectedBinding == "" {
+		return PasswordRecoveryConfirmationResult{}, newAuthError("Microsoft recovery confirmation requires an expected recovery mailbox.", AuthStatusRequestError)
+	}
+	verified, err := verifyPasswordRecoveryBindingWithSession(
+		session,
+		email,
+		proxy,
+		options.PreferredBindingAddress,
+		expectedBinding,
+		options.CodeTimeout,
+	)
+	result := PasswordRecoveryConfirmationResult{Probe: verified.probe}
+	if err != nil {
+		return result, err
+	}
+	result.BindingConfirmed = true
+	return result, nil
 }
 
 // ResetPasswordViaRecovery performs the same proof-picker discovery, sends a
@@ -207,24 +258,62 @@ func resetPasswordViaRecoveryWithSession(session *Session, email, newPassword, p
 		return PasswordRecoveryResetResult{}, err
 	}
 
-	flow, probe, err := probePasswordRecoveryWithSession(session, email, proxy, options.PreferredBindingAddress)
-	result := PasswordRecoveryResetResult{Probe: probe}
+	verified, err := verifyPasswordRecoveryBindingWithSession(
+		session,
+		email,
+		proxy,
+		options.PreferredBindingAddress,
+		expectedBinding,
+		options.CodeTimeout,
+	)
+	result := PasswordRecoveryResetResult{Probe: verified.probe}
+	if err != nil {
+		return result, err
+	}
+	if err := requireAuthorizedPasswordRecoveryToken(verified.token); err != nil {
+		return result, err
+	}
+	if err := submitPasswordRecoveryReset(session, verified.flow, verified.proof, verified.token, newPassword, options.ExpirePasswordEvery72Days); err != nil {
+		return result, err
+	}
+	result.PasswordReset = true
+	return result, nil
+}
+
+type verifiedPasswordRecoveryBinding struct {
+	flow  *passwordRecoveryFlow
+	proof passwordRecoveryProof
+	probe PasswordRecoveryProbeResult
+	token string
+}
+
+func verifyPasswordRecoveryBindingWithSession(
+	session *Session,
+	email string,
+	proxy string,
+	preferredBindingAddress string,
+	expectedBinding string,
+	codeTimeout time.Duration,
+) (verifiedPasswordRecoveryBinding, error) {
+	flow, probe, err := probePasswordRecoveryWithSession(session, email, proxy, preferredBindingAddress)
+	result := verifiedPasswordRecoveryBinding{flow: flow, probe: probe}
 	if err != nil {
 		return result, err
 	}
 	if !probe.BindingResolved || probe.BindingAddress == "" {
 		return result, newAuthError("Microsoft recovery mailbox could not be resolved uniquely.", AuthStatusUnknownMailbox)
 	}
-	if normalizeRecoveryMailbox(probe.BindingAddress) != expectedBinding {
-		return result, newAuthError("Microsoft recovery mailbox changed before password reset.", AuthStatusUnknownMailbox)
+	if normalizeRecoveryMailbox(probe.BindingAddress) != normalizeRecoveryMailbox(expectedBinding) {
+		return result, newAuthError("Microsoft recovery mailbox changed before verification.", AuthStatusUnknownMailbox)
 	}
 	if eligibility := EvaluateActiveBindingRecoveryEligibility(session.context(), probe); !eligibility.Allowed {
-		return result, newAuthError("Microsoft recovery mailbox is no longer eligible for password reset.", AuthStatusUnknownMailbox)
+		return result, newAuthError("Microsoft recovery mailbox is no longer eligible for verification.", AuthStatusUnknownMailbox)
 	}
 	proof, err := selectPasswordRecoveryEmailProof(flow.proofs, probe.BindingAddress)
 	if err != nil {
 		return result, err
 	}
+	result.proof = proof
 	if flow.apiCanary == "" || flow.recoveryToken == "" || flow.uaid == "" {
 		return result, newAuthError("Microsoft password recovery session is incomplete.", AuthStatusAuthTimeout)
 	}
@@ -233,7 +322,7 @@ func resetPasswordViaRecoveryWithSession(session *Session, email, newPassword, p
 	if err != nil {
 		return result, wrapAuthError("读取辅助邮箱基线失败", AuthStatusRequestError, err, probe.BindingAddress)
 	}
-	watchTimeout := options.CodeTimeout
+	watchTimeout := codeTimeout
 	if watchTimeout <= 0 {
 		watchTimeout = passwordRecoveryDefaultCodeWait
 	}
@@ -252,18 +341,14 @@ func resetPasswordViaRecoveryWithSession(session *Session, email, newPassword, p
 	if err != nil {
 		return result, err
 	}
-
 	verification, err := verifyPasswordRecoveryCode(session, flow, proof, probe.BindingAddress, code)
 	if err != nil {
 		return result, err
 	}
-	if err := requireAuthorizedPasswordRecoveryToken(verification.token); err != nil {
+	if err := requireConfirmedPasswordRecoveryToken(verification.token); err != nil {
 		return result, err
 	}
-	if err := submitPasswordRecoveryReset(session, flow, proof, verification.token, newPassword, options.ExpirePasswordEvery72Days); err != nil {
-		return result, err
-	}
-	result.PasswordReset = true
+	result.token = verification.token
 	return result, nil
 }
 
@@ -436,11 +521,35 @@ func verifyPasswordRecoveryCode(session *Session, flow *passwordRecoveryFlow, pr
 	return passwordRecoveryVerification{token: token}, nil
 }
 
-func requireAuthorizedPasswordRecoveryToken(token string) error {
-	if len(token) < 2 || token[1] != ':' {
-		return newAuthError("Microsoft recovery returned an unknown authorization state.", AuthStatusAuthTimeout)
+func passwordRecoveryTokenState(token string) (byte, error) {
+	if len(token) < 3 || token[1] != ':' || strings.TrimSpace(token[2:]) == "" {
+		return 0, newAuthError("Microsoft recovery returned an unknown authorization state.", AuthStatusAuthTimeout)
 	}
-	switch token[0] {
+	return token[0], nil
+}
+
+func requireConfirmedPasswordRecoveryToken(token string) error {
+	state, err := passwordRecoveryTokenState(token)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case 'a', 'r':
+		// Both states prove that Microsoft accepted the OTP for this mailbox.
+		// The r: state only means a second proof would be required before a
+		// destructive password reset.
+		return nil
+	default:
+		return newAuthError("Microsoft recovery returned an unknown mailbox verification state.", AuthStatusAuthTimeout)
+	}
+}
+
+func requireAuthorizedPasswordRecoveryToken(token string) error {
+	state, err := passwordRecoveryTokenState(token)
+	if err != nil {
+		return err
+	}
+	switch state {
 	case 'a':
 		return nil
 	case 'r':

@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -94,9 +95,31 @@ func main() {
 		}
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "msrecovery:", err)
+		fmt.Fprintln(os.Stderr, "msrecovery:", formatRecoveryCommandError(err))
 		os.Exit(1)
 	}
+}
+
+func formatRecoveryCommandError(err error) string {
+	if err == nil {
+		return ""
+	}
+	category := ""
+	var authErr *msacl.AuthError
+	if errors.As(err, &authErr) {
+		switch strings.TrimSpace(authErr.Status) {
+		case msacl.AuthStatusRateLimited:
+			category = "rate_limited"
+		case msacl.AuthStatusRequestError, msacl.AuthStatusAuthTimeout, msacl.AuthStatusCodeTimeout:
+			category = "retryable"
+		}
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		category = "retryable"
+	}
+	if category == "" {
+		return err.Error()
+	}
+	return "category=" + category + " " + err.Error()
 }
 
 func parseCommandOptions(args []string, stderr io.Writer) (commandOptions, error) {
@@ -215,6 +238,7 @@ func executeCommand(ctx context.Context, options commandOptions) (*commandResult
 		result.RecoveredBinding,
 		options.OperatorUserID,
 		options.RequestID,
+		options.Mode == recoveryModeBinding,
 	)
 	if err != nil {
 		return result, err
@@ -279,24 +303,37 @@ func executeCommand(ctx context.Context, options commandOptions) (*commandResult
 
 func confirmRecoveredBinding(ctx context.Context, snapshot recoverySnapshot, bindingAddress, proxy string) error {
 	bindingAddress = normalizeConcreteRecoveryBinding(bindingAddress)
-	if bindingAddress == "" || strings.TrimSpace(snapshot.Password) == "" {
-		return fmt.Errorf("recovered binding requires password confirmation")
+	if bindingAddress == "" {
+		return fmt.Errorf("recovered binding requires OTP confirmation")
 	}
-	confirmed, err := mailinfra.NewMicrosoftOAuthClient().AcquireToken(ctx, mailinfra.MicrosoftOAuthRequest{
-		EmailAddress:   snapshot.AccountEmail,
-		Password:       snapshot.Password,
-		BindingAddress: bindingAddress,
-		ProxyURL:       proxy,
+	confirmed, err := msacl.ConfirmPasswordRecoveryBinding(ctx, snapshot.AccountEmail, proxy, msacl.PasswordRecoveryConfirmationOptions{
+		PreferredBindingAddress: bindingAddress,
+		ExpectedBindingAddress:  bindingAddress,
+		CodeTimeout:             90 * time.Second,
 	})
 	if err != nil {
-		return fmt.Errorf("recovered binding confirmation is temporarily unavailable")
+		return wrapRecoveredBindingConfirmationError(err)
 	}
-	if !confirmed.Valid ||
-		!strings.EqualFold(strings.TrimSpace(confirmed.BindingStatus), "verified") ||
-		normalizeConcreteRecoveryBinding(confirmed.BindingAddress) != bindingAddress {
-		return fmt.Errorf("recovered binding could not be confirmed through the normal login flow")
+	if !confirmed.BindingConfirmed ||
+		normalizeConcreteRecoveryBinding(confirmed.Probe.BindingAddress) != bindingAddress {
+		return fmt.Errorf("recovered binding could not be confirmed through the Microsoft recovery proof")
 	}
 	return nil
+}
+
+func wrapRecoveredBindingConfirmationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var authErr *msacl.AuthError
+	if errors.As(err, &authErr) && strings.TrimSpace(authErr.Status) == msacl.AuthStatusRateLimited {
+		// Keep a stable, secret-free marker for paced operator tooling. Some
+		// Microsoft recovery endpoints report a rate-limit code in a JSON body
+		// rather than an HTTP 429 status, so matching only the raw HTTP text is
+		// not sufficient.
+		return fmt.Errorf("recovered binding confirmation rate_limited: %w", err)
+	}
+	return fmt.Errorf("recovered binding confirmation is temporarily unavailable: %w", err)
 }
 
 func openRecoveryRuntime(ctx context.Context, historyWindow time.Duration) (*recoveryRuntime, error) {
