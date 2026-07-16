@@ -21,10 +21,12 @@ type auxiliaryQueryHandlerStub struct {
 	page       *mailapp.AuxiliaryMailPage
 	detail     *mailapp.AuxiliaryMessageDetail
 	err        error
+	listFilter mailapp.AuxiliaryMailFilter
 	getRequest mailapp.AuxiliaryMailDetailRequest
 }
 
-func (s *auxiliaryQueryHandlerStub) List(context.Context, mailapp.AuxiliaryMailFilter) (*mailapp.AuxiliaryMailPage, error) {
+func (s *auxiliaryQueryHandlerStub) List(_ context.Context, filter mailapp.AuxiliaryMailFilter) (*mailapp.AuxiliaryMailPage, error) {
+	s.listFilter = filter
 	return s.page, s.err
 }
 
@@ -67,9 +69,10 @@ func TestAdminBindingsHandlerReturnsOnlySummaryContract(t *testing.T) {
 			VerificationCode: &code,
 			ReceivedAt:       receivedAt,
 		}},
-		Total:  1,
-		Offset: 0,
-		Limit:  20,
+		Total:         1,
+		TotalIncluded: true,
+		Offset:        0,
+		Limit:         20,
 	}}
 	recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9")
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -86,6 +89,32 @@ func TestAdminBindingsHandlerReturnsOnlySummaryContract(t *testing.T) {
 	assert.NotContains(t, item, "matchDiagnostic")
 	assert.NotContains(t, item, "objectKey")
 	assert.NotContains(t, item, "raw")
+	assert.Equal(t, float64(1), body["total"])
+	assert.Equal(t, false, body["hasMore"])
+}
+
+func TestAdminBindingsHandlerAcceptsStableCursorAndSkipsRepeatedTotal(t *testing.T) {
+	receivedAt := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	query := &auxiliaryQueryHandlerStub{page: &mailapp.AuxiliaryMailPage{
+		Items:                []mailapp.AuxiliaryMessageSummary{{ID: 8, ReceivedAt: receivedAt}},
+		Limit:                10,
+		HasMore:              true,
+		NextBeforeReceivedAt: &receivedAt,
+		NextBeforeID:         8,
+	}}
+	recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9&beforeReceivedAt=2026-07-12T12%3A00%3A00Z&beforeId=9&includeTotal=false&limit=10")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NotNil(t, query.listFilter.BeforeReceivedAt)
+	assert.Equal(t, receivedAt, *query.listFilter.BeforeReceivedAt)
+	assert.Equal(t, uint(9), query.listFilter.BeforeID)
+	assert.True(t, query.listFilter.SkipTotal)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	assert.NotContains(t, body, "total")
+	assert.Equal(t, true, body["hasMore"])
+	assert.Equal(t, "2026-07-12T12:00:00Z", body["nextBeforeReceivedAt"])
+	assert.Equal(t, float64(8), body["nextBeforeId"])
 }
 
 func TestAdminBindingMessageHandlerPassesAuditContextAndSafeDetail(t *testing.T) {
@@ -141,6 +170,19 @@ func TestAdminBindingsRejectsLimitAboveContract(t *testing.T) {
 	recorder := serveAuxiliaryAdminRoute(t, query, true, "/v1/admin/bindings?resourceId=9&limit=101")
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "Invalid request parameters.")
+}
+
+func TestAdminBindingsRejectsInvalidCursor(t *testing.T) {
+	query := &auxiliaryQueryHandlerStub{page: &mailapp.AuxiliaryMailPage{Items: []mailapp.AuxiliaryMessageSummary{}, Limit: 20}}
+	for _, target := range []string{
+		"/v1/admin/bindings?resourceId=9&beforeId=8",
+		"/v1/admin/bindings?resourceId=9&beforeReceivedAt=invalid&beforeId=8",
+		"/v1/admin/bindings?resourceId=9&beforeReceivedAt=2026-07-12T12%3A00%3A00Z&beforeId=8&offset=1",
+		"/v1/admin/bindings?resourceId=9&includeTotal=invalid",
+	} {
+		recorder := serveAuxiliaryAdminRoute(t, query, true, target)
+		require.Equal(t, http.StatusBadRequest, recorder.Code, target)
+	}
 }
 
 func TestAdminBindingMessageCrossResourceUsesSafeNotFound(t *testing.T) {

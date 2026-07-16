@@ -12,6 +12,7 @@
 | 2026-07-12 | V1.5 | Codex | 补充管理员 Microsoft 资源邮件能力：列表摘要与授权单封正文按需读取分离，资源级手工 Fetch 复用或扩展现有 durable single-flight 事实并继续走 MailTransportFetchPort/ACL；不强制新增任务表或跨域凭据 Port。 |
 | 2026-07-12 | V1.6 | Codex | 收敛资源 Fetch 凭据边界：MailMatch 继续拥有 Fetch/Message 事实，但内部凭据 scope、rotated RT、credential revision 和 root version 统一通过 Core `MicrosoftCredentialPort` 处理；repository 不再直读/直写 Core 表。 |
 | 2026-07-15 | V1.7 | Codex | 明确宽松模式按 `sender + recipient` 两元素唯一匹配；购买订单匹配到邮件即可写交付头并通知 Trade 激活，验证码提取允许为空。严格模式仍要求 `sender + recipient + subject + body` 四元素全部命中。 |
+| 2026-07-16 | V1.8 | Codex | 管理员 Domain/Microsoft 邮件摘要统一要求服务端搜索和 `(receivedAt,id)` 稳定游标；首屏计算后端 `total`，续页跳过重复 `COUNT`，前端按全局页大小无限滚动，禁止全量加载后本地搜索或推算邮件总数。 |
 
 > 核心域。BC-MAILMATCH 保存邮件事实，按项目规则识别订单服务结果。协议收发不在本上下文内。
 
@@ -180,7 +181,7 @@ flowchart TD
 | `MatchResultPort` | 出站到 BC-TRADE | 通知邮件匹配结果。 |
 | `ReadPort` | 入站自 BC-OPENAPI | 服务凭证读取订单结果。 |
 | `HealthPort` | 入站自 BC-AFTERSALE | 售后检测邮箱是否可收件。 |
-| `AdminMessageQueryPort` | 入站自 MailMatch 管理 API/BC-ALLOC | 按 resourceId 分页读取邮件摘要、按 resourceId + messageId 读取单封正文，并批量返回订单 Tab 当前需要的验证码交付摘要；mock-only 邮件计数不进入一期契约。 |
+| `AdminMessageQueryPort` | 入站自 MailMatch 管理 API/BC-ALLOC | 按 resourceId 分页读取邮件摘要并返回后端 `total`、按 resourceId + messageId 读取单封正文，并批量返回订单 Tab 当前需要的验证码交付摘要；不在资源表冗余 `mailCount`。 |
 | `ResourceFetchCommandPort` | 入站自 Core 管理命令入口 | 创建或复用资源级 durable single-flight Fetch 并返回安全任务引用。 |
 | `MicrosoftCredentialPort` | 出站到 BC-CORE | 锁定 Fetch 所需内部 credential scope、校验 revision、在任务完成短事务中保存 rotated RT；Core 统一推进 credential revision/root version，秘密不得序列化。 |
 
@@ -207,7 +208,7 @@ flowchart TD
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `GET` | `/v1/admin/messages?resourceId={resourceId}` | 分页返回 `id/mailbox/recipient/sender/subject/preview/status/verificationCode/orderNo/receivedAt` 等授权摘要，不含正文和对象存储 key。 |
+| `GET` | `/v1/admin/messages?resourceId={resourceId}` | 按 `type/resourceId/search/limit` 服务端筛选分页；首屏以 `includeTotal=true` 返回后端 `total`，续页以 `beforeReceivedAt + beforeId` 稳定游标和 `includeTotal=false` 跳过重复 `COUNT`，`offset` 仅为兼容参数。响应只含 `id/mailbox/recipient/sender/subject/preview/status/verificationCode/orderNo/receivedAt` 等授权摘要，不含正文和对象存储 key；Domain 与 Microsoft 管理页都不得全量加载后本地搜索或计数。 |
 | `GET` | `/v1/admin/messages/{messageId}?resourceId={resourceId}` | 管理员按需读取单封结构化正文、验证码安全展示和匹配诊断；resourceId 必须参与 message 关联校验，避免横向读取。 |
 | `POST` | `/v1/admin/resources/{resourceId}/messages/fetch` | 创建/复用现有资源 single-flight Fetch，返回 `202` 安全任务视图。除 deleted 外，disabled 资源也允许管理员诊断拉取；该命令不执行 enable、不改变 Core 资源状态，凭据或协议条件不满足时返回安全业务错误。 |
 

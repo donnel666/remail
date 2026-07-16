@@ -37,23 +37,30 @@ type AdminMessageDetail struct {
 }
 
 type AdminMessageListQuery struct {
-	ResourceID   uint
-	ResourceType domain.ResourceType
-	Search       string
-	Offset       int
-	Limit        int
+	ResourceID       uint
+	ResourceType     domain.ResourceType
+	Search           string
+	Offset           int
+	Limit            int
+	BeforeReceivedAt *time.Time
+	BeforeID         uint
+	SkipTotal        bool
 }
 
 type AdminMessagePage struct {
-	Items  []AdminMessageSummary
-	Total  int64
-	Offset int
-	Limit  int
+	Items                []AdminMessageSummary
+	Total                int64
+	TotalIncluded        bool
+	Offset               int
+	Limit                int
+	HasMore              bool
+	NextBeforeReceivedAt *time.Time
+	NextBeforeID         uint
 }
 
 type AdminMessageRepository interface {
 	AdminMessageResourceExists(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (bool, error)
-	ListAdminMessageSummaries(ctx context.Context, query AdminMessageListQuery) ([]AdminMessageSummary, int64, error)
+	ListAdminMessageSummaries(ctx context.Context, query AdminMessageListQuery) ([]AdminMessageSummary, int64, bool, error)
 	FindAdminMessageDetailWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*AdminMessageDetail, error)
 }
 
@@ -66,7 +73,7 @@ func NewAdminMessageUseCase(repo AdminMessageRepository) *AdminMessageUseCase {
 }
 
 func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQuery) (*AdminMessagePage, error) {
-	if uc == nil || uc.repo == nil || query.ResourceID == 0 || query.Offset < 0 {
+	if uc == nil || uc.repo == nil || query.ResourceID == 0 || query.Offset < 0 || (query.BeforeReceivedAt == nil) != (query.BeforeID == 0) || (query.BeforeReceivedAt != nil && query.Offset != 0) {
 		return nil, domain.ErrInvalidRequest
 	}
 	query.Search = strings.TrimSpace(query.Search)
@@ -92,19 +99,28 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if !exists {
 		return nil, domain.ErrAdminMessageResourceNotFound
 	}
-	items, total, err := uc.repo.ListAdminMessageSummaries(ctx, query)
+	items, total, hasMore, err := uc.repo.ListAdminMessageSummaries(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	if items == nil {
 		items = []AdminMessageSummary{}
 	}
-	return &AdminMessagePage{
-		Items:  items,
-		Total:  total,
-		Offset: query.Offset,
-		Limit:  query.Limit,
-	}, nil
+	page := &AdminMessagePage{
+		Items:         items,
+		Total:         total,
+		TotalIncluded: !query.SkipTotal,
+		Offset:        query.Offset,
+		Limit:         query.Limit,
+		HasMore:       hasMore,
+	}
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		nextReceivedAt := last.ReceivedAt
+		page.NextBeforeReceivedAt = &nextReceivedAt
+		page.NextBeforeID = last.ID
+	}
+	return page, nil
 }
 
 func (uc *AdminMessageUseCase) Get(

@@ -14,19 +14,22 @@ import (
 )
 
 type auxiliaryMailRepoStub struct {
-	exists bool
-	items  []domain.InboundMail
-	total  int64
-	detail *domain.InboundMail
-	err    error
+	exists  bool
+	items   []domain.InboundMail
+	total   int64
+	hasMore bool
+	detail  *domain.InboundMail
+	err     error
+	filter  AuxiliaryMailFilter
 }
 
 func (r *auxiliaryMailRepoStub) MicrosoftResourceExists(context.Context, uint) (bool, error) {
 	return r.exists, r.err
 }
 
-func (r *auxiliaryMailRepoStub) ListByMicrosoftResource(context.Context, AuxiliaryMailFilter) ([]domain.InboundMail, int64, error) {
-	return append([]domain.InboundMail(nil), r.items...), r.total, r.err
+func (r *auxiliaryMailRepoStub) ListByMicrosoftResource(_ context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
+	r.filter = filter
+	return append([]domain.InboundMail(nil), r.items...), r.total, r.hasMore, r.err
 }
 
 func (r *auxiliaryMailRepoStub) FindByMicrosoftResource(_ context.Context, resourceID, messageID uint) (*domain.InboundMail, error) {
@@ -129,6 +132,43 @@ func TestAuxiliaryMailListReturnsConfiguredEmptyState(t *testing.T) {
 	assert.Nil(t, page.Binding)
 	assert.NotNil(t, page.Items)
 	assert.Empty(t, page.Items)
+}
+
+func TestAuxiliaryMailListReturnsStableContinuationWithoutRepeatedTotal(t *testing.T) {
+	receivedAt := time.Date(2026, time.July, 12, 10, 30, 0, 0, time.UTC)
+	repo := &auxiliaryMailRepoStub{
+		exists:  true,
+		total:   -1,
+		hasMore: true,
+		items: []domain.InboundMail{{
+			ID:         44,
+			ResourceID: 9,
+			ReceivedAt: &receivedAt,
+		}},
+	}
+	service := NewAuxiliaryMailQueryService(
+		repo,
+		bindingQueryRepoStub{},
+		newFileStoreStub(),
+		&auxiliaryOperationLogStub{},
+		nil,
+	)
+
+	page, err := service.List(context.Background(), AuxiliaryMailFilter{
+		ResourceID:       9,
+		Limit:            1,
+		BeforeReceivedAt: &receivedAt,
+		BeforeID:         45,
+		SkipTotal:        true,
+	})
+	require.NoError(t, err)
+	assert.False(t, page.TotalIncluded)
+	assert.True(t, page.HasMore)
+	require.NotNil(t, page.NextBeforeReceivedAt)
+	assert.Equal(t, receivedAt, *page.NextBeforeReceivedAt)
+	assert.Equal(t, uint(44), page.NextBeforeID)
+	assert.Equal(t, uint(45), repo.filter.BeforeID)
+	assert.True(t, repo.filter.SkipTotal)
 }
 
 func TestAuxiliaryMailDetailReadsOneObjectAndWritesSafeAudit(t *testing.T) {

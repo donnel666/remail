@@ -94,9 +94,23 @@ export type AdminDomainItem = Omit<
 export interface AdminDomainDetail extends AdminDomainItem {
   mailServer: AdminMailServer;
   mailboxes: AdminGeneratedMailbox[];
-  messages: AdminDomainMessage[];
   orders: AdminDomainOrder[];
   tasks: AdminDomainTask[];
+}
+
+export interface AdminDomainMessagePage {
+  items: AdminDomainMessage[];
+  total?: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  nextBeforeReceivedAt?: string;
+  nextBeforeId?: number;
+}
+
+export interface AdminDomainMessageCursor {
+  beforeReceivedAt: string;
+  beforeId: number;
 }
 
 export interface AdminDomainListFilter {
@@ -480,15 +494,13 @@ export async function getAdminDomainDetail(
   id: number,
   signal?: AbortSignal
 ): Promise<AdminDomainDetail> {
-  const [domainItem, servers, mailboxes, orders, tasks, messages] =
-    await Promise.all([
-      getAdminDomain(id, signal),
-      listAdminMailServers(signal),
-      listAdminDomainMailboxes(id, signal),
-      listAdminDomainOrders(id, signal),
-      listAdminDomainTasks(id, signal),
-      refreshAdminDomainMessages(id, signal),
-    ]);
+  const [domainItem, servers, mailboxes, orders, tasks] = await Promise.all([
+    getAdminDomain(id, signal),
+    listAdminMailServers(signal),
+    listAdminDomainMailboxes(id, signal),
+    listAdminDomainOrders(id, signal),
+    listAdminDomainTasks(id, signal),
+  ]);
   return {
     ...domainItem,
     mailServer:
@@ -497,7 +509,6 @@ export async function getAdminDomainDetail(
     mailboxes,
     orders,
     tasks,
-    messages,
   };
 }
 
@@ -598,32 +609,37 @@ async function listAdminDomainTasks(
   }
 }
 
-export async function refreshAdminDomainMessages(
+export async function listAdminDomainMessages(
   id: number,
+  search = "",
+  limit = 20,
+  cursor?: AdminDomainMessageCursor,
   signal?: AbortSignal
-): Promise<AdminDomainMessage[]> {
-  const items: MessageDTO[] = [];
-  let offset = 0;
-  for (;;) {
-    const page = await unwrap(
-      await client.GET("/v1/admin/messages", {
-        params: {
-          query: {
-            resourceId: id,
-            type: "domain",
-            offset,
-            limit: PAGE_SIZE,
-          },
+): Promise<AdminDomainMessagePage> {
+  const normalizedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(PAGE_SIZE, Math.trunc(limit)))
+    : 20;
+  const page = await unwrap(
+    await client.GET("/v1/admin/messages", {
+      params: {
+        query: {
+          resourceId: id,
+          type: "domain",
+          search: search.trim() || undefined,
+          offset: cursor ? undefined : 0,
+          beforeReceivedAt: cursor?.beforeReceivedAt,
+          beforeId: cursor?.beforeId,
+          includeTotal: !cursor,
+          limit: normalizedLimit,
         },
-        signal,
-      })
-    );
-    items.push(...page.items);
-    offset += page.items.length;
-    if (offset >= page.total || page.items.length === 0) {
-      return items.map((item) => adminDomainMessage(item, item.preview));
-    }
-  }
+      },
+      signal,
+    })
+  );
+  return {
+    ...page,
+    items: page.items.map((item) => adminDomainMessage(item, item.preview)),
+  };
 }
 
 function adminMailServer(item: ServerDTO): AdminMailServer {

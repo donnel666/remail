@@ -59,11 +59,9 @@ import {
   deleteAdminDomainsByIds,
   disableAdminDomainsByIds,
   getAdminDomainDetail,
-  getAdminDomainMessage,
   listAdminDomainOwners,
   listAdminDomains,
   listAdminMailServers,
-  refreshAdminDomainMessages,
   recoverAdminDomain,
   setAdminDomainsPurposeByFilter,
   setAdminDomainsPurposeByIds,
@@ -116,6 +114,8 @@ export default function AdminDomainEmails() {
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [facets, setFacets] = useState<AdminDomainListResponse["facets"] | null>(
     null
   );
@@ -446,28 +446,6 @@ export default function AdminDomainEmails() {
     },
     [canOperateDomains, detail, refresh, t]
   );
-
-  const refreshDetailMessages = useCallback(async () => {
-    if (!canOperateDomains || !detail) return;
-    const requestId = detailRequestIdRef.current;
-    const detailId = detail.id;
-    setDetailBusy(true);
-    try {
-      const messages = await refreshAdminDomainMessages(detailId);
-      if (detailRequestIdRef.current === requestId) {
-        setDetail((current) =>
-          current?.id === detailId ? { ...current, messages } : current
-        );
-        Toast.success(t("Mail refreshed."));
-      }
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Domain operation failed."));
-    } finally {
-      if (detailRequestIdRef.current === requestId) {
-        setDetailBusy(false);
-      }
-    }
-  }, [canOperateDomains, detail, t]);
 
   const openImport = () => {
     if (!canWriteDomains) return;
@@ -1348,9 +1326,6 @@ export default function AdminDomainEmails() {
         busy={detailBusy}
         detail={detail}
         loading={detailLoading}
-        onLoadMessage={(messageId) =>
-          getAdminDomainMessage(detail!.id, messageId)
-        }
         onCancel={() => {
           detailRequestIdRef.current += 1;
           setDetail(null);
@@ -1385,9 +1360,6 @@ export default function AdminDomainEmails() {
                 openEdit(detail);
               }
             : undefined
-        }
-        onMailFetch={
-          canOperateDomains ? () => refreshDetailMessages() : undefined
         }
         onRecover={
           canOperateDomains

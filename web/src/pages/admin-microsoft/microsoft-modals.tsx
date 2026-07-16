@@ -11,6 +11,7 @@ import {
 } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
+import { SHARED_SEARCH_DEBOUNCE_MS } from "@/hooks/use-debounced-value";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importAdminMicrosoftResources,
@@ -91,7 +92,7 @@ function OwnerSelect({
     if (searchDebounce.current) globalThis.clearTimeout(searchDebounce.current);
     searchDebounce.current = globalThis.setTimeout(() => {
       void searchOwners(keyword);
-    }, 250);
+    }, SHARED_SEARCH_DEBOUNCE_MS);
   };
 
   return (

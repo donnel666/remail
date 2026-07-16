@@ -193,7 +193,13 @@ vi.mock("@/lib/admin-microsoft-api", () => ({
 
 import { MicrosoftDetailSheet } from "./microsoft-detail-sheet";
 
-const EMPTY_PAGE = { items: [], limit: 20, offset: 0, total: 0 };
+const EMPTY_PAGE = {
+  items: [],
+  limit: 20,
+  offset: 0,
+  total: 0,
+  hasMore: false,
+};
 const EMPTY_TASKS = { ...EMPTY_PAGE, succeeded: 0 };
 
 function detail(id: number): AdminMicrosoftResourceDetail {
@@ -341,8 +347,8 @@ describe("admin Microsoft detail sheet runtime", () => {
       expect(mocks.messages).toHaveBeenCalledWith(
         41,
         "",
-        0,
-        100,
+        20,
+        undefined,
         expect.any(AbortSignal)
       )
     );
@@ -352,11 +358,125 @@ describe("admin Microsoft detail sheet runtime", () => {
       expect(mocks.bindingMessages).toHaveBeenCalledWith(
         41,
         "",
-        0,
-        100,
+        20,
+        undefined,
         expect.any(AbortSignal)
       )
     );
+  });
+
+  it("uses the backend mail count and global page size for infinite scroll", async () => {
+    const mail = (id: number) => ({
+      id,
+      mailbox: "main",
+      orderNo: null,
+      preview: `Preview ${id}`,
+      receivedAt: `2026-07-12T00:00:${String(id).padStart(2, "0")}Z`,
+      recipient: `user${id}@outlook.com`,
+      sender: `sender${id}@example.net`,
+      status: "received",
+      subject: `Message ${id}`,
+      verificationCode: null,
+    });
+    mocks.messages
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 20 }, (_, index) => mail(index + 1)),
+        limit: 20,
+        offset: 0,
+        total: 21,
+        hasMore: true,
+        nextBeforeReceivedAt: mail(20).receivedAt,
+        nextBeforeId: 20,
+      })
+      .mockResolvedValueOnce({
+        items: [mail(21)],
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      });
+
+    renderSheet(detail(41));
+    fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
+
+    expect(await screen.findByText("Message 20")).toBeInTheDocument();
+    expect(screen.getByText("Mail count")).toBeInTheDocument();
+    expect(screen.getByText("21")).toBeInTheDocument();
+
+    const scroller = screen.getByTestId("admin-microsoft-message-list");
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 180 },
+    });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(mocks.messages).toHaveBeenCalledWith(
+        41,
+        "",
+        20,
+        {
+          beforeReceivedAt: mail(20).receivedAt,
+          beforeId: 20,
+        },
+        expect.any(AbortSignal)
+      )
+    );
+    expect(await screen.findByText("Message 21")).toBeInTheDocument();
+  });
+
+  it("retries a failed continuation with the same cursor", async () => {
+    const mail = (id: number) => ({
+      id,
+      mailbox: "main",
+      orderNo: null,
+      preview: `Preview ${id}`,
+      receivedAt: `2026-07-12T00:00:${String(id).padStart(2, "0")}Z`,
+      recipient: `user${id}@outlook.com`,
+      sender: `sender${id}@example.net`,
+      status: "received",
+      subject: `Message ${id}`,
+      verificationCode: null,
+    });
+    const cursor = {
+      beforeReceivedAt: mail(1).receivedAt,
+      beforeId: 1,
+    };
+    mocks.messages
+      .mockResolvedValueOnce({
+        items: [mail(1)],
+        limit: 20,
+        offset: 0,
+        total: 2,
+        hasMore: true,
+        nextBeforeReceivedAt: cursor.beforeReceivedAt,
+        nextBeforeId: cursor.beforeId,
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [mail(2)],
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      });
+
+    renderSheet(detail(41));
+    fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
+    expect(await screen.findByText("Message 1")).toBeInTheDocument();
+
+    const scroller = screen.getByTestId("admin-microsoft-message-list");
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 180 },
+    });
+    fireEvent.scroll(scroller);
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Message 2")).toBeInTheDocument();
+    expect(mocks.messages.mock.calls[1]?.[3]).toEqual(cursor);
+    expect(mocks.messages.mock.calls[2]?.[3]).toEqual(cursor);
   });
 
   it("shows safe proxy binding details and the binding expiry in basic info", () => {

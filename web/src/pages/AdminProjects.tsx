@@ -31,7 +31,10 @@ import {
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import {
+  SHARED_SEARCH_DEBOUNCE_MS,
+  useDebouncedValue,
+} from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
@@ -1013,7 +1016,7 @@ function ProjectEditorSheet({
     }
     accessSearchDebounceRef.current = globalThis.setTimeout(() => {
       void searchAccessUsers(keyword);
-    }, 250);
+    }, SHARED_SEARCH_DEBOUNCE_MS);
   }, [searchAccessUsers]);
 
   const addAccessUser = () => {
@@ -1405,6 +1408,8 @@ export default function AdminProjects() {
   const [productTypeFilter, setProductTypeFilter] = useState<ProjectProductTypeFilter>("all");
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [compactMode, setCompactMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);

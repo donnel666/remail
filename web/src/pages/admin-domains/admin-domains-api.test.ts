@@ -24,8 +24,8 @@ vi.mock("@/lib/idempotency", () => ({
 import {
   getAdminDomainDetail,
   listAdminDomainOwners,
+  listAdminDomainMessages,
   listAdminDomains,
-  refreshAdminDomainMessages,
   setAdminDomainsPurposeByFilter,
   updateAdminDomain,
 } from "./admin-domains-api";
@@ -286,12 +286,11 @@ describe("admin domain API adapter", () => {
     expect(detail.mailServer.mxRecord).toBe("mx.example.com");
     expect(detail.mailboxes).toHaveLength(101);
     expect(detail.mailboxes[100].email).toBe("last@real.example.com");
-    expect(detail.messages[0].body).toBe("Real preview");
     expect(
       apiMocks.GET.mock.calls.find(
         ([path]) => path === "/v1/admin/messages"
-      )?.[1]?.params?.query
-    ).toMatchObject({ resourceId: 42, type: "domain" });
+      )
+    ).toBeUndefined();
     expect(
       apiMocks.GET.mock.calls.find(
         ([path]) => path === "/v1/admin/tasks"
@@ -304,20 +303,60 @@ describe("admin domain API adapter", () => {
     ).toMatchObject({ type: "domain", resourceId: 42 });
   });
 
-  it("refreshes domain mail through the real message query", async () => {
+  it("loads one bounded domain-mail page with server-side search and total", async () => {
     apiMocks.GET.mockResolvedValueOnce({
-      data: { items: [], total: 0, offset: 0, limit: 100 },
+      data: { items: [], total: 37, offset: 0, limit: 10, hasMore: false },
     });
 
-    await expect(refreshAdminDomainMessages(42)).resolves.toEqual([]);
+    await expect(
+      listAdminDomainMessages(42, " sender@example.net ", 10)
+    ).resolves.toEqual({
+      items: [],
+      total: 37,
+      offset: 0,
+      limit: 10,
+      hasMore: false,
+    });
 
     expect(apiMocks.GET).toHaveBeenCalledWith("/v1/admin/messages", {
       params: {
         query: {
           resourceId: 42,
           type: "domain",
+          search: "sender@example.net",
           offset: 0,
-          limit: 100,
+          beforeReceivedAt: undefined,
+          beforeId: undefined,
+          includeTotal: true,
+          limit: 10,
+        },
+      },
+      signal: undefined,
+    });
+  });
+
+  it("uses a stable cursor and skips total on domain-mail continuations", async () => {
+    apiMocks.GET.mockResolvedValueOnce({
+      data: { items: [], offset: 0, limit: 20, hasMore: false },
+    });
+
+    const cursor = {
+      beforeReceivedAt: "2026-07-15T00:00:00Z",
+      beforeId: 9,
+    };
+    await listAdminDomainMessages(42, "", 20, cursor);
+
+    expect(apiMocks.GET).toHaveBeenCalledWith("/v1/admin/messages", {
+      params: {
+        query: {
+          resourceId: 42,
+          type: "domain",
+          search: undefined,
+          offset: undefined,
+          beforeReceivedAt: cursor.beforeReceivedAt,
+          beforeId: cursor.beforeId,
+          includeTotal: false,
+          limit: 20,
         },
       },
       signal: undefined,

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -40,15 +41,28 @@ func (h *MailTransportHandler) GetAdminBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
+	beforeReceivedAt, beforeID, ok := parseAdminAuxiliaryCursor(c)
+	if !ok {
+		writeAdminMailBadRequest(c)
+		return
+	}
+	includeTotal, ok := parseOptionalAdminMailBool(c.Query("includeTotal"), true)
+	if !ok || (beforeReceivedAt != nil && offset != 0) {
+		writeAdminMailBadRequest(c)
+		return
+	}
 	if h == nil || h.module == nil || h.module.AuxiliaryMail == nil {
 		writeAdminMailError(c, domain.ErrAuxiliaryMailUnavailable)
 		return
 	}
 	page, err := h.module.AuxiliaryMail.List(c.Request.Context(), mailapp.AuxiliaryMailFilter{
-		ResourceID: resourceID,
-		Search:     strings.TrimSpace(c.Query("search")),
-		Offset:     offset,
-		Limit:      limit,
+		ResourceID:       resourceID,
+		Search:           strings.TrimSpace(c.Query("search")),
+		Offset:           offset,
+		Limit:            limit,
+		BeforeReceivedAt: beforeReceivedAt,
+		BeforeID:         beforeID,
+		SkipTotal:        !includeTotal,
 	})
 	if err != nil {
 		writeAdminMailError(c, err)
@@ -67,12 +81,23 @@ func (h *MailTransportHandler) GetAdminBindings(c *gin.Context) {
 			UpdatedAt:    page.Binding.UpdatedAt,
 		}
 	}
+	var total *int64
+	if page.TotalIncluded {
+		total = &page.Total
+	}
+	var nextBeforeID *uint
+	if page.NextBeforeID != 0 {
+		nextBeforeID = &page.NextBeforeID
+	}
 	c.JSON(http.StatusOK, AdminBindingMessageListResponse{
-		Binding: binding,
-		Items:   items,
-		Total:   page.Total,
-		Offset:  page.Offset,
-		Limit:   page.Limit,
+		Binding:              binding,
+		Items:                items,
+		Total:                total,
+		Offset:               page.Offset,
+		Limit:                page.Limit,
+		HasMore:              page.HasMore,
+		NextBeforeReceivedAt: page.NextBeforeReceivedAt,
+		NextBeforeID:         nextBeforeID,
 	})
 }
 
@@ -137,6 +162,36 @@ func parsePositiveAdminMailUint(value string) (uint, bool) {
 		return 0, false
 	}
 	return uint(parsed), true
+}
+
+func parseOptionalAdminMailBool(raw string, fallback bool) (bool, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback, true
+	}
+	value, err := strconv.ParseBool(raw)
+	return value, err == nil
+}
+
+func parseAdminAuxiliaryCursor(c *gin.Context) (*time.Time, uint, bool) {
+	rawReceivedAt := strings.TrimSpace(c.Query("beforeReceivedAt"))
+	rawID := strings.TrimSpace(c.Query("beforeId"))
+	if rawReceivedAt == "" && rawID == "" {
+		return nil, 0, true
+	}
+	if rawReceivedAt == "" || rawID == "" {
+		return nil, 0, false
+	}
+	receivedAt, err := time.Parse(time.RFC3339Nano, rawReceivedAt)
+	if err != nil {
+		return nil, 0, false
+	}
+	id, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || id == 0 {
+		return nil, 0, false
+	}
+	receivedAt = receivedAt.UTC()
+	return &receivedAt, uint(id), true
 }
 
 func writeAdminMailBadRequest(c *gin.Context) {

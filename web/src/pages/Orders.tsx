@@ -153,6 +153,8 @@ export default function Orders() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [orderFacets, setOrderFacets] = useState<OrderListFacets | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [detailOrder, setDetailOrder] = useState<OrderResponse | null>(null);

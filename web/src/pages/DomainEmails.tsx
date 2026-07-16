@@ -152,6 +152,8 @@ export default function DomainEmails() {
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [resourceFacets, setResourceFacets] =
     useState<ResourceListResponse["facets"] | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);

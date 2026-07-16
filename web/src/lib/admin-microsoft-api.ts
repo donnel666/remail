@@ -12,6 +12,7 @@ import type {
   AdminMicrosoftListFilter,
   AdminMicrosoftListResponse,
   AdminMicrosoftMessageDetail,
+  AdminMicrosoftMessageCursor,
   AdminMicrosoftMessageListResponse,
   AdminMicrosoftMutationResponse,
   AdminMicrosoftOwner,
@@ -496,8 +497,8 @@ async function waitForAdminMicrosoftTask(
 export async function listAdminMicrosoftMessages(
   resourceId: number,
   search = "",
-  offset = 0,
   limit = 100,
+  cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal
 ): Promise<AdminMicrosoftMessageListResponse> {
   return unwrap(
@@ -505,8 +506,12 @@ export async function listAdminMicrosoftMessages(
       params: {
         query: {
           resourceId,
+          type: "microsoft",
           search: search.trim() || undefined,
-          offset: Math.max(0, Math.trunc(offset)),
+          offset: cursor ? undefined : 0,
+          beforeReceivedAt: cursor?.beforeReceivedAt,
+          beforeId: cursor?.beforeId,
+          includeTotal: !cursor,
           limit: pageLimit(limit),
         },
       },
@@ -531,8 +536,8 @@ export async function getAdminMicrosoftMessage(
 export async function listAdminMicrosoftBindingMessages(
   resourceId: number,
   search = "",
-  offset = 0,
   limit = 100,
+  cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal
 ): Promise<AdminMicrosoftBindingMessageListResponse> {
   return unwrap(
@@ -541,7 +546,10 @@ export async function listAdminMicrosoftBindingMessages(
         query: {
           resourceId,
           search: search.trim() || undefined,
-          offset: Math.max(0, Math.trunc(offset)),
+          offset: cursor ? undefined : 0,
+          beforeReceivedAt: cursor?.beforeReceivedAt,
+          beforeId: cursor?.beforeId,
+          includeTotal: !cursor,
           limit: pageLimit(limit),
         },
       },

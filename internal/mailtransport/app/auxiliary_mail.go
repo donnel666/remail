@@ -21,7 +21,7 @@ const (
 
 type AuxiliaryMailRepository interface {
 	MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error)
-	ListByMicrosoftResource(ctx context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, error)
+	ListByMicrosoftResource(ctx context.Context, filter AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error)
 	FindByMicrosoftResource(ctx context.Context, resourceID, messageID uint) (*domain.InboundMail, error)
 }
 
@@ -35,10 +35,13 @@ type AuxiliaryMailQueryPort interface {
 }
 
 type AuxiliaryMailFilter struct {
-	ResourceID uint
-	Search     string
-	Offset     int
-	Limit      int
+	ResourceID       uint
+	Search           string
+	Offset           int
+	Limit            int
+	BeforeReceivedAt *time.Time
+	BeforeID         uint
+	SkipTotal        bool
 }
 
 type AuxiliaryBindingSummary struct {
@@ -75,11 +78,15 @@ type AuxiliaryMessageDetail struct {
 }
 
 type AuxiliaryMailPage struct {
-	Binding *AuxiliaryBindingSummary
-	Items   []AuxiliaryMessageSummary
-	Total   int64
-	Offset  int
-	Limit   int
+	Binding              *AuxiliaryBindingSummary
+	Items                []AuxiliaryMessageSummary
+	Total                int64
+	TotalIncluded        bool
+	Offset               int
+	Limit                int
+	HasMore              bool
+	NextBeforeReceivedAt *time.Time
+	NextBeforeID         uint
 }
 
 type AuxiliaryMailDetailRequest struct {
@@ -115,7 +122,7 @@ func NewAuxiliaryMailQueryService(
 }
 
 func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMailFilter) (*AuxiliaryMailPage, error) {
-	if s == nil || s.repo == nil || s.bindings == nil || filter.ResourceID == 0 || filter.Offset < 0 {
+	if s == nil || s.repo == nil || s.bindings == nil || filter.ResourceID == 0 || filter.Offset < 0 || (filter.BeforeReceivedAt == nil) != (filter.BeforeID == 0) || (filter.BeforeReceivedAt != nil && filter.Offset != 0) {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
@@ -151,7 +158,7 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 		}
 	}
 
-	rows, total, err := s.repo.ListByMicrosoftResource(ctx, filter)
+	rows, total, hasMore, err := s.repo.ListByMicrosoftResource(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list auxiliary mailbox messages: %w", domain.ErrAuxiliaryMailUnavailable, err)
 	}
@@ -159,13 +166,22 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 	for i := range rows {
 		items[i] = auxiliaryMessageSummary(rows[i])
 	}
-	return &AuxiliaryMailPage{
-		Binding: binding,
-		Items:   items,
-		Total:   total,
-		Offset:  filter.Offset,
-		Limit:   filter.Limit,
-	}, nil
+	page := &AuxiliaryMailPage{
+		Binding:       binding,
+		Items:         items,
+		Total:         total,
+		TotalIncluded: !filter.SkipTotal,
+		Offset:        filter.Offset,
+		Limit:         filter.Limit,
+		HasMore:       hasMore,
+	}
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		nextReceivedAt := last.ReceivedAt
+		page.NextBeforeReceivedAt = &nextReceivedAt
+		page.NextBeforeID = last.ID
+	}
+	return page, nil
 }
 
 func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMailDetailRequest) (*AuxiliaryMessageDetail, error) {

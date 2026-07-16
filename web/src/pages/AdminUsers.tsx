@@ -89,8 +89,6 @@ import {
 } from "./admin-users/user-meta";
 
 const ROLE_TABS: AdminUserRole[] = ["user", "supplier", "admin", "super_admin"];
-const SEARCH_DEBOUNCE_MS = 400;
-
 interface DetailState {
   user: AdminUser;
   tab: UserDetailTab;
@@ -115,6 +113,8 @@ export default function AdminUsers() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [facets, setFacets] = useState<AdminUserFacets | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
@@ -128,10 +128,8 @@ export default function AdminUsers() {
     "enable" | "disable" | "logout" | "delete" | "balance" | null
   >(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
-  const [debouncedSearchKeyword, flushSearchKeyword] = useDebouncedValue(
-    searchKeyword,
-    SEARCH_DEBOUNCE_MS
-  );
+  const [debouncedSearchKeyword, flushSearchKeyword] =
+    useDebouncedValue(searchKeyword);
 
   const statsFilter = useMemo<AdminUserListFilter>(() => {
     const filter: AdminUserListFilter = {};

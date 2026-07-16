@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Button,
   Dropdown,
@@ -50,8 +50,6 @@ import {
 import { formatDateTime, renderEnabledTag } from "./finance-meta";
 import { emptyNode } from "./finance-shared";
 
-const SEARCH_DEBOUNCE_MS = 400;
-
 // Same role labels admin-microsoft uses in its owner cell.
 const INVITE_ROLE_LABELS: Record<FinanceUserRole, string> = {
   user: "User",
@@ -67,11 +65,10 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [activePage, setActivePage] = useState(1);
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [debouncedSearch, flushSearch] = useDebouncedValue(
-    searchKeyword,
-    SEARCH_DEBOUNCE_MS
-  );
+  const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
   const [roleFilter, setRoleFilter] =
     useState<FinanceOwnerRoleFilter>("all");
   const [groupFilter, setGroupFilter] = useState<string>("all");

@@ -91,6 +91,8 @@ export default function Tickets() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [facets, setFacets] = useState<MockTicketFacets | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [initialOrder, setInitialOrder] = useState<TicketOrderRef | null>(

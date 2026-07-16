@@ -3013,10 +3013,19 @@ type AdminAuxiliaryMessageSummaryStatus string
 // AdminBindingMessageListResponse defines model for AdminBindingMessageListResponse.
 type AdminBindingMessageListResponse struct {
 	Binding *AdminBindingSummary           `json:"binding"`
+	HasMore bool                           `json:"hasMore"`
 	Items   []AdminAuxiliaryMessageSummary `json:"items"`
 	Limit   int                            `json:"limit"`
-	Offset  int                            `json:"offset"`
-	Total   int64                          `json:"total"`
+
+	// NextBeforeId ID component of the next stable continuation cursor.
+	NextBeforeId *int `json:"nextBeforeId,omitempty"`
+
+	// NextBeforeReceivedAt Timestamp component of the next stable continuation cursor.
+	NextBeforeReceivedAt *time.Time `json:"nextBeforeReceivedAt,omitempty"`
+	Offset               int        `json:"offset"`
+
+	// Total Backend-computed matching count; omitted when includeTotal=false.
+	Total *int64 `json:"total,omitempty"`
 }
 
 // AdminBindingSummary defines model for AdminBindingSummary.
@@ -3240,10 +3249,19 @@ type AdminMessageDetailStatus string
 
 // AdminMessageListResponse defines model for AdminMessageListResponse.
 type AdminMessageListResponse struct {
-	Items  []AdminMessageSummary `json:"items"`
-	Limit  int                   `json:"limit"`
-	Offset int                   `json:"offset"`
-	Total  int64                 `json:"total"`
+	HasMore bool                  `json:"hasMore"`
+	Items   []AdminMessageSummary `json:"items"`
+	Limit   int                   `json:"limit"`
+
+	// NextBeforeId ID component of the next stable continuation cursor.
+	NextBeforeId *int `json:"nextBeforeId,omitempty"`
+
+	// NextBeforeReceivedAt Timestamp component of the next stable continuation cursor.
+	NextBeforeReceivedAt *time.Time `json:"nextBeforeReceivedAt,omitempty"`
+	Offset               int        `json:"offset"`
+
+	// Total Backend-computed matching count; omitted when includeTotal=false.
+	Total *int64 `json:"total,omitempty"`
 }
 
 // AdminMessageSummary defines model for AdminMessageSummary.
@@ -5441,7 +5459,16 @@ type GetAdminBindingsParams struct {
 	ResourceId int     `form:"resourceId" json:"resourceId"`
 	Search     *string `form:"search,omitempty" json:"search,omitempty"`
 	Offset     *int    `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// BeforeReceivedAt Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero.
+	BeforeReceivedAt *time.Time `form:"beforeReceivedAt,omitempty" json:"beforeReceivedAt,omitempty"`
+
+	// BeforeId ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt.
+	BeforeId *int `form:"beforeId,omitempty" json:"beforeId,omitempty"`
+
+	// IncludeTotal Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT.
+	IncludeTotal *bool `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetAdminBindingMessageParams defines parameters for GetAdminBindingMessage.
@@ -5696,7 +5723,16 @@ type GetAdminMessagesParams struct {
 	ResourceId int                         `form:"resourceId" json:"resourceId"`
 	Search     *string                     `form:"search,omitempty" json:"search,omitempty"`
 	Offset     *int                        `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit      *int                        `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// BeforeReceivedAt Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero.
+	BeforeReceivedAt *time.Time `form:"beforeReceivedAt,omitempty" json:"beforeReceivedAt,omitempty"`
+
+	// BeforeId ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt.
+	BeforeId *int `form:"beforeId,omitempty" json:"beforeId,omitempty"`
+
+	// IncludeTotal Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT.
+	IncludeTotal *bool `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetAdminMessagesParamsType defines parameters for GetAdminMessages.
@@ -8131,6 +8167,30 @@ func (siw *ServerInterfaceWrapper) GetAdminBindings(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "beforeReceivedAt" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "beforeReceivedAt", c.Request.URL.Query(), &params.BeforeReceivedAt, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter beforeReceivedAt: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "beforeId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "beforeId", c.Request.URL.Query(), &params.BeforeId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter beforeId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -9945,6 +10005,30 @@ func (siw *ServerInterfaceWrapper) GetAdminMessages(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "beforeReceivedAt" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "beforeReceivedAt", c.Request.URL.Query(), &params.BeforeReceivedAt, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter beforeReceivedAt: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "beforeId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "beforeId", c.Request.URL.Query(), &params.BeforeId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter beforeId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
 		return
 	}
 

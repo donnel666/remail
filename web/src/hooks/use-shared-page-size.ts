@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_STORAGE_KEY = "page-size";
@@ -28,26 +28,58 @@ function writeStoredPageSize(pageSize: number) {
   }
 }
 
-export function useSharedPageSize() {
-  const [pageSize, setPageSizeState] = useState(readStoredPageSize);
+let currentPageSize = readStoredPageSize();
+const subscribers = new Set<() => void>();
+let listeningForStorage = false;
 
-  const setPageSize = useCallback((nextPageSize: number) => {
-    const normalized = normalizePageSize(nextPageSize);
-    setPageSizeState(normalized);
-    writeStoredPageSize(normalized);
-  }, []);
+function emitPageSizeChange() {
+  for (const subscriber of subscribers) subscriber();
+}
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== PAGE_SIZE_STORAGE_KEY) return;
-      setPageSizeState(normalizePageSize(event.newValue));
-    };
+function handleStorage(event: StorageEvent) {
+  if (event.key !== PAGE_SIZE_STORAGE_KEY) return;
+  const nextPageSize = normalizePageSize(event.newValue);
+  if (nextPageSize === currentPageSize) return;
+  currentPageSize = nextPageSize;
+  emitPageSizeChange();
+}
 
+function subscribe(subscriber: () => void) {
+  const firstSubscriber = subscribers.size === 0;
+  subscribers.add(subscriber);
+  if (firstSubscriber) {
+    const storedPageSize = readStoredPageSize();
+    if (storedPageSize !== currentPageSize) {
+      currentPageSize = storedPageSize;
+      emitPageSizeChange();
+    }
+  }
+  if (!listeningForStorage && typeof window !== "undefined") {
     window.addEventListener("storage", handleStorage);
-    return () => {
+    listeningForStorage = true;
+  }
+  return () => {
+    subscribers.delete(subscriber);
+    if (subscribers.size === 0 && listeningForStorage) {
       window.removeEventListener("storage", handleStorage);
-    };
-  }, []);
+      listeningForStorage = false;
+    }
+  };
+}
 
-  return [pageSize, setPageSize] as const;
+function getPageSize() {
+  return currentPageSize;
+}
+
+function setSharedPageSize(nextPageSize: number) {
+  const normalized = normalizePageSize(nextPageSize);
+  writeStoredPageSize(normalized);
+  if (normalized === currentPageSize) return;
+  currentPageSize = normalized;
+  emitPageSizeChange();
+}
+
+export function useSharedPageSize() {
+  const pageSize = useSyncExternalStore(subscribe, getPageSize, getPageSize);
+  return [pageSize, setSharedPageSize] as const;
 }

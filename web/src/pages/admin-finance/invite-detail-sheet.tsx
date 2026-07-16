@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   listMockFinanceInviteUses,
@@ -43,7 +44,9 @@ export function InviteDetailSheet({
   const [uses, setUses] = useState<FinanceInviteUse[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setPage(1), [pageSize]);
 
   useEffect(() => {
     setActiveTab("basic");

@@ -1357,6 +1357,8 @@ export default function Projects() {
   const [viewMode, setViewMode] = useState<ProjectSquareViewMode>("card");
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyMode, setApplyMode] = useState<ApplyModalMode>("create");
   const [applyInitialValue, setApplyInitialValue] = useState<ApplyFormState>();

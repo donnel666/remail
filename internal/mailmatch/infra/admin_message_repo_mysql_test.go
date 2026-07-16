@@ -57,10 +57,11 @@ INSERT INTO mailmatch_messages(
 	require.NoError(t, err)
 	require.False(t, exists)
 
-	items, total, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
+	items, total, hasMore, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
 		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Offset: 0, Limit: 20,
 	})
 	require.NoError(t, err)
+	require.False(t, hasMore)
 	require.Equal(t, int64(2), total)
 	require.Len(t, items, 2)
 	require.Equal(t, "alias", items[0].Mailbox)
@@ -77,14 +78,42 @@ INSERT INTO mailmatch_messages(
 		require.NotContains(t, serializedSummaries, secret)
 	}
 
-	searched, searchedTotal, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
+	searched, searchedTotal, searchedHasMore, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
 		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Search: "main-body-sensitive-canary", Offset: 0, Limit: 20,
 	})
 	require.NoError(t, err)
+	require.False(t, searchedHasMore)
 	require.Equal(t, int64(1), searchedTotal)
 	require.Len(t, searched, 1)
 	require.Equal(t, "Main subject", searched[0].Subject)
 	require.NotContains(t, strings.ToLower(fmt.Sprintf("%+v", searched[0])), "main-body-sensitive-canary")
+
+	for _, wildcard := range []string{"%", "_"} {
+		wildcardItems, wildcardTotal, wildcardHasMore, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
+			ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Search: wildcard, Offset: 0, Limit: 20,
+		})
+		require.NoError(t, err)
+		require.Empty(t, wildcardItems)
+		require.Zero(t, wildcardTotal)
+		require.False(t, wildcardHasMore)
+	}
+
+	firstPage, firstTotal, firstHasMore, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
+		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), firstTotal)
+	require.True(t, firstHasMore)
+	require.Len(t, firstPage, 1)
+	secondPage, skippedTotal, secondHasMore, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
+		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Limit: 1,
+		BeforeReceivedAt: &firstPage[0].ReceivedAt, BeforeID: firstPage[0].ID, SkipTotal: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(-1), skippedTotal)
+	require.False(t, secondHasMore)
+	require.Len(t, secondPage, 1)
+	require.Equal(t, "Main subject", secondPage[0].Subject)
 
 	mainID := adminMessageIDBySubject(t, db, "Main subject")
 	detail, err := repo.FindAdminMessageDetailWithLog(

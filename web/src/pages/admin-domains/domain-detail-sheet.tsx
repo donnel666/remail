@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Empty,
   Input,
   SideSheet,
+  Spin,
   Table,
   Tabs,
   Tag,
@@ -30,10 +31,15 @@ import { ProjectIcon } from "../workbench/project-icon";
 import type {
   AdminDomainDetail,
   AdminDomainMessage,
+  AdminDomainMessageCursor,
   AdminDomainOrder,
   AdminDomainTask,
   AdminGeneratedMailbox,
   AdminMailServer,
+} from "./admin-domains-api";
+import {
+  getAdminDomainMessage,
+  listAdminDomainMessages,
 } from "./admin-domains-api";
 import {
   DomainInfoItem,
@@ -148,6 +154,8 @@ function DomainAliasPanel({
 }) {
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
+
+  useEffect(() => setPage(1), [pageSize]);
   const columns = useMemo(
     () =>
       [
@@ -230,6 +238,8 @@ function DomainTaskPanel({
   const [busy, setBusy] = useState<"validate" | "fetch" | null>(null);
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
+
+  useEffect(() => setPage(1), [pageSize]);
   const succeeded = tasks.filter((task) => task.status === "succeeded").length;
   const successRate =
     tasks.length > 0 ? Math.round((succeeded / tasks.length) * 100) : 0;
@@ -382,63 +392,114 @@ function mailStatusTag(status: AdminDomainMessage["status"], t: TFunction) {
   );
 }
 
-function DomainMailsPanel({
-  messages,
-  onLoadMessage,
+export function DomainMailsPanel({
+  resourceId,
   t,
 }: {
-  messages: AdminDomainMessage[];
-  onLoadMessage?: (messageId: number) => Promise<AdminDomainMessage>;
+  resourceId: number;
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebouncedValue(search);
+  const [pageSize] = useSharedPageSize();
+  const [messages, setMessages] = useState<AdminDomainMessage[]>([]);
+  const [total, setTotal] = useState(0);
+  const [cursor, setCursor] = useState<AdminDomainMessageCursor | null>(null);
+  const [nextCursor, setNextCursor] =
+    useState<AdminDomainMessageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [loadedMessages, setLoadedMessages] = useState<
     Record<number, AdminDomainMessage>
   >({});
-  const filtered = useMemo(() => {
-    const keyword = debouncedSearch.trim().toLowerCase();
-    if (!keyword) return messages;
-    return messages.filter((message) =>
-      [
-        message.sender,
-        message.recipient,
-        message.subject,
-        loadedMessages[message.id]?.body ?? message.body,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword)
-    );
-  }, [debouncedSearch, loadedMessages, messages]);
-  const [selectedId, setSelectedId] = useState<number | null>(
-    filtered[0]?.id ?? null
-  );
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const listScope = `${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
+  const listScopeRef = useRef(listScope);
+
+  useEffect(() => {
+    setMessages([]);
+    setTotal(0);
+    setCursor(null);
+    setNextCursor(null);
+    setHasMore(false);
+    setListError(null);
+    setSelectedId(null);
+    setLoadedMessages({});
+  }, [debouncedSearch, pageSize, resourceId]);
+
+  useEffect(() => {
+    if (listScopeRef.current !== listScope) {
+      listScopeRef.current = listScope;
+      if (cursor) return;
+    }
+    const controller = new AbortController();
+    setListLoading(true);
+    setListError(null);
+    void listAdminDomainMessages(
+      resourceId,
+      debouncedSearch,
+      pageSize,
+      cursor ?? undefined,
+      controller.signal
+    )
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        if (page.total !== undefined) setTotal(page.total);
+        const next =
+          page.hasMore &&
+          page.nextBeforeReceivedAt &&
+          page.nextBeforeId
+            ? {
+                beforeReceivedAt: page.nextBeforeReceivedAt,
+                beforeId: page.nextBeforeId,
+              }
+            : null;
+        setNextCursor(next);
+        setHasMore(next !== null);
+        setMessages((current) => {
+          const nextItems = cursor
+            ? [...current, ...page.items]
+            : page.items;
+          return Array.from(
+            new Map(nextItems.map((message) => [message.id, message])).values()
+          );
+        });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          const message = t("Mail load failed.");
+          setListError(message);
+          Toast.error(message);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setListLoading(false);
+      });
+    return () => controller.abort();
+  }, [cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
 
   useEffect(() => {
     setSelectedId((current) =>
-      current && filtered.some((message) => message.id === current)
+      current && messages.some((message) => message.id === current)
         ? current
-        : filtered[0]?.id ?? null
+        : messages[0]?.id ?? null
     );
-  }, [filtered]);
+  }, [messages]);
 
   const selectedSummary =
-    filtered.find((message) => message.id === selectedId) ?? null;
+    messages.find((message) => message.id === selectedId) ?? null;
   const selected = selectedSummary
     ? loadedMessages[selectedSummary.id] ?? selectedSummary
     : null;
 
   useEffect(() => {
-    setLoadedMessages({});
-  }, [messages]);
-
-  useEffect(() => {
-    if (!selectedId || !onLoadMessage || loadedMessages[selectedId]) return;
-    let cancelled = false;
-    void onLoadMessage(selectedId)
+    if (!selectedId || loadedMessages[selectedId]) return;
+    const controller = new AbortController();
+    void getAdminDomainMessage(resourceId, selectedId, controller.signal)
       .then((message) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoadedMessages((current) => ({
             ...current,
             [message.id]: message,
@@ -446,16 +507,20 @@ function DomainMailsPanel({
         }
       })
       .catch(() => {
-        if (!cancelled) Toast.error(t("Mail load failed."));
+        if (!controller.signal.aborted) Toast.error(t("Mail load failed."));
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedMessages, onLoadMessage, selectedId, t]);
+    return () => controller.abort();
+  }, [loadedMessages, resourceId, selectedId, t]);
 
-  if (messages.length === 0) {
-    return <Empty description={t("No mails yet")} style={{ padding: 32 }} />;
-  }
+  const loadMore = useCallback(
+    (element: HTMLDivElement) => {
+      if (listLoading || listError || !hasMore || !nextCursor) return;
+      const remaining =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      if (remaining < 80) setCursor(nextCursor);
+    },
+    [hasMore, listError, listLoading, nextCursor]
+  );
 
   return (
     <div
@@ -472,12 +537,34 @@ function DomainMailsPanel({
             size="small"
             value={search}
           />
+          <div className="flex items-center justify-between text-xs text-[var(--semi-color-text-2)]">
+            <span>{t("Mail count")}</span>
+            <span className="font-mono tabular-nums">{total}</span>
+          </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
-          {filtered.length === 0 ? (
-            <Empty description={t("No matched mail")} style={{ padding: 24 }} />
+        <div
+          className="min-h-0 flex-1 overflow-auto"
+          data-testid="admin-domain-message-list"
+          onScroll={(event) => loadMore(event.currentTarget)}
+        >
+          {listError && messages.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-[var(--semi-color-text-2)]">
+              <span>{listError}</span>
+              <Button onClick={() => setRetryKey((value) => value + 1)} size="small">
+                {t("Try again")}
+              </Button>
+            </div>
+          ) : listLoading && messages.length === 0 ? (
+            <div className="flex justify-center p-6">
+              <Spin />
+            </div>
+          ) : messages.length === 0 ? (
+            <Empty
+              description={t(debouncedSearch.trim() ? "No matched mail" : "No mails yet")}
+              style={{ padding: 24 }}
+            />
           ) : (
-            filtered.map((message) => (
+            messages.map((message) => (
               <button
                 className={`block w-full border-b border-[var(--semi-color-border)] px-3 py-2.5 text-left transition-colors ${
                   selected?.id === message.id
@@ -516,6 +603,18 @@ function DomainMailsPanel({
               </button>
             ))
           )}
+          {listError && messages.length > 0 ? (
+            <div className="flex items-center justify-center gap-2 p-3 text-xs text-[var(--semi-color-text-2)]">
+              <span>{listError}</span>
+              <Button onClick={() => setRetryKey((value) => value + 1)} size="small">
+                {t("Try again")}
+              </Button>
+            </div>
+          ) : listLoading && messages.length > 0 ? (
+            <div className="flex justify-center p-3">
+              <Spin />
+            </div>
+          ) : null}
         </div>
       </aside>
       <main className="min-h-0 flex-1 overflow-auto p-4">
@@ -591,6 +690,8 @@ function DomainOrdersPanel({
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
+
+  useEffect(() => setPage(1), [pageSize]);
   const totalPages = Math.max(1, Math.ceil(orders.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageItems = orders.slice(
@@ -788,8 +889,6 @@ export function DomainDetailSheet({
   loading,
   onCancel,
   onValidate,
-  onMailFetch,
-  onLoadMessage,
   onRecover,
   onDelete,
   onEdit,
@@ -801,8 +900,6 @@ export function DomainDetailSheet({
   loading: boolean;
   onCancel: () => void;
   onValidate?: () => void;
-  onMailFetch?: () => void;
-  onLoadMessage?: (messageId: number) => Promise<AdminDomainMessage>;
   onRecover?: () => void;
   onDelete?: () => void;
   onEdit?: () => void;
@@ -1017,18 +1114,14 @@ export function DomainDetailSheet({
             ) : null}
             {activeTab === "tasks" ? (
               <DomainTaskPanel
-                onMailFetch={onMailFetch}
+                onMailFetch={onValidate ? () => setActiveTab("mails") : undefined}
                 onValidate={onValidate}
                 tasks={detail.tasks}
                 t={t}
               />
             ) : null}
             {activeTab === "mails" ? (
-              <DomainMailsPanel
-                messages={detail.messages}
-                onLoadMessage={onLoadMessage}
-                t={t}
-              />
+              <DomainMailsPanel resourceId={detail.id} t={t} />
             ) : null}
           </div>
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">

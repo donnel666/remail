@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-export function useDebouncedValue<T>(value: T, delayMs = 3000) {
+export const SHARED_SEARCH_DEBOUNCE_MS = 1_000;
+
+export function useDebouncedValue<T>(
+  value: T,
+  delayMs = SHARED_SEARCH_DEBOUNCE_MS
+) {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {

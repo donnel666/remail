@@ -7196,6 +7196,24 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: beforeReceivedAt
+          in: query
+          description: Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero.
+          schema:
+            type: string
+            format: date-time
+        - name: beforeId
+          in: query
+          description: ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt.
+          schema:
+            type: integer
+            minimum: 1
+        - name: includeTotal
+          in: query
+          description: Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT.
+          schema:
+            type: boolean
+            default: true
         - name: limit
           in: query
           schema:
@@ -7297,6 +7315,24 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: beforeReceivedAt
+          in: query
+          description: Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero.
+          schema:
+            type: string
+            format: date-time
+        - name: beforeId
+          in: query
+          description: ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt.
+          schema:
+            type: integer
+            minimum: 1
+        - name: includeTotal
+          in: query
+          description: Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT.
+          schema:
+            type: boolean
+            default: true
         - name: limit
           in: query
           schema:
@@ -12176,9 +12212,9 @@ components:
       type: object
       required:
         - items
-        - total
         - offset
         - limit
+        - hasMore
       properties:
         items:
           type: array
@@ -12188,6 +12224,7 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Backend-computed matching count; omitted when includeTotal=false.
         offset:
           type: integer
           minimum: 0
@@ -12195,6 +12232,16 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+        hasMore:
+          type: boolean
+        nextBeforeReceivedAt:
+          type: string
+          format: date-time
+          description: Timestamp component of the next stable continuation cursor.
+        nextBeforeId:
+          type: integer
+          minimum: 1
+          description: ID component of the next stable continuation cursor.
       additionalProperties: false
     AdminBindingSummary:
       type: object
@@ -12272,9 +12319,9 @@ components:
       required:
         - binding
         - items
-        - total
         - offset
         - limit
+        - hasMore
       properties:
         binding:
           nullable: true
@@ -12288,6 +12335,7 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Backend-computed matching count; omitted when includeTotal=false.
         offset:
           type: integer
           minimum: 0
@@ -12295,6 +12343,16 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+        hasMore:
+          type: boolean
+        nextBeforeReceivedAt:
+          type: string
+          format: date-time
+          description: Timestamp component of the next stable continuation cursor.
+        nextBeforeId:
+          type: integer
+          minimum: 1
+          description: ID component of the next stable continuation cursor.
       additionalProperties: false
     AdminAllocationItem:
       type: object

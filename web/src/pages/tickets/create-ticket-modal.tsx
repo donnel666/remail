@@ -15,6 +15,7 @@ import { FileImage, Paperclip, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { listOrders, type OrderResponse } from "@/lib/orders-api";
 import { formatLedgerAmount } from "@/pages/orders/order-meta";
@@ -76,6 +77,8 @@ export function CreateTicketModal({
   const [description, setDescription] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [orderSearch, setOrderSearch] = useState("");
+  const [debouncedOrderSearch, flushOrderSearch] =
+    useDebouncedValue(orderSearch);
   const [orders, setOrders] = useState<OrderResponse[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -88,8 +91,9 @@ export function CreateTicketModal({
     setDescription("");
     setAttachments([]);
     setOrderSearch("");
+    flushOrderSearch("");
     setSubmitting(false);
-  }, []);
+  }, [flushOrderSearch]);
 
   useEffect(() => {
     if (!open) {
@@ -107,7 +111,7 @@ export function CreateTicketModal({
     if (!open || ticketType !== "order") return;
     let cancelled = false;
     setOrdersLoading(true);
-    listOrders({ search: orderSearch.trim() || undefined, limit: 40 })
+    listOrders({ search: debouncedOrderSearch.trim() || undefined, limit: 40 })
       .then((response) => {
         if (!cancelled) setOrders(response.items);
       })
@@ -120,7 +124,7 @@ export function CreateTicketModal({
     return () => {
       cancelled = true;
     };
-  }, [open, orderSearch, ticketType]);
+  }, [debouncedOrderSearch, open, ticketType]);
 
   const canSubmit =
     title.trim().length > 0 &&

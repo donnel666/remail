@@ -81,11 +81,13 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 func (r *AdminMessageRepo) ListAdminMessageSummaries(
 	ctx context.Context,
 	query app.AdminMessageListQuery,
-) ([]app.AdminMessageSummary, int64, error) {
+) ([]app.AdminMessageSummary, int64, bool, error) {
 	base := r.adminMessageBaseQuery(ctx, query.ResourceID, query.ResourceType, query.Search)
-	var total int64
-	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count admin message summaries: %w", err)
+	total := int64(-1)
+	if !query.SkipTotal {
+		if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+			return nil, 0, false, fmt.Errorf("count admin message summaries: %w", err)
+		}
 	}
 	var rows []adminMessageRow
 	selectSQL := strings.Join([]string{
@@ -100,19 +102,31 @@ func (r *AdminMessageRepo) ListAdminMessageSummaries(
 		"o.order_no",
 		"m.received_at",
 	}, ", ")
-	if err := base.Session(&gorm.Session{}).
+	pageQuery := base.Session(&gorm.Session{})
+	if query.BeforeReceivedAt != nil {
+		pageQuery = pageQuery.Where(
+			"(m.received_at < ? OR (m.received_at = ? AND m.id < ?))",
+			query.BeforeReceivedAt.UTC(), query.BeforeReceivedAt.UTC(), query.BeforeID,
+		)
+	} else {
+		pageQuery = pageQuery.Offset(query.Offset)
+	}
+	if err := pageQuery.
 		Select(selectSQL).
 		Order("m.received_at DESC, m.id DESC").
-		Offset(query.Offset).
-		Limit(query.Limit).
+		Limit(query.Limit + 1).
 		Scan(&rows).Error; err != nil {
-		return nil, 0, fmt.Errorf("list admin message summaries: %w", err)
+		return nil, 0, false, fmt.Errorf("list admin message summaries: %w", err)
+	}
+	hasMore := len(rows) > query.Limit
+	if hasMore {
+		rows = rows[:query.Limit]
 	}
 	items := make([]app.AdminMessageSummary, len(rows))
 	for i := range rows {
 		items[i] = adminMessageSummaryFromRow(rows[i])
 	}
-	return items, total, nil
+	return items, total, hasMore, nil
 }
 
 func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
@@ -187,14 +201,19 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 	if search == "" {
 		return db
 	}
-	like := "%" + search + "%"
+	like := "%" + escapeAdminMessageLike(search) + "%"
 	return db.Where(`
-        m.recipient LIKE ?
-        OR m.sender LIKE ?
-        OR m.subject LIKE ?
-        OR m.body_preview LIKE ?
-        OR m.raw_body LIKE ?
-        OR m.verification_code LIKE ?`, like, like, like, like, like, like)
+        m.recipient LIKE ? ESCAPE '\\'
+        OR m.sender LIKE ? ESCAPE '\\'
+        OR m.subject LIKE ? ESCAPE '\\'
+        OR m.body_preview LIKE ? ESCAPE '\\'
+        OR m.raw_body LIKE ? ESCAPE '\\'
+        OR m.verification_code LIKE ? ESCAPE '\\'`, like, like, like, like, like, like)
+}
+
+func escapeAdminMessageLike(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
 }
 
 func adminMessageMailboxSelect(resourceType domain.ResourceType) string {

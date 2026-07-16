@@ -187,7 +187,7 @@ export default function Wallet() {
   const [redemptionCode, setRedemptionCode] = useState("");
   const [billingOpen, setBillingOpen] = useState(false);
   const [billingKeyword, setBillingKeyword] = useState("");
-  const [debouncedBillingKeyword] = useDebouncedValue(billingKeyword, 400);
+  const [debouncedBillingKeyword] = useDebouncedValue(billingKeyword);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [referrals, setReferrals] = useState<WalletReferralResponse | null>(null);
   const [referralLink, setReferralLink] = useState("");

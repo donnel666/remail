@@ -38,22 +38,35 @@ func (r *AuxiliaryMailRepo) MicrosoftResourceExists(ctx context.Context, resourc
 	return count > 0, nil
 }
 
-func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter mailapp.AuxiliaryMailFilter) ([]domain.InboundMail, int64, error) {
-	countQuery := r.auxiliaryListQuery(ctx, filter, "inbound_mails")
-	var total int64
-	if err := countQuery.Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count auxiliary messages: %w", err)
+func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter mailapp.AuxiliaryMailFilter) ([]domain.InboundMail, int64, bool, error) {
+	total := int64(-1)
+	if !filter.SkipTotal {
+		countQuery := r.auxiliaryListQuery(ctx, filter, "inbound_mails")
+		if err := countQuery.Count(&total).Error; err != nil {
+			return nil, 0, false, fmt.Errorf("count auxiliary messages: %w", err)
+		}
 	}
 
 	pageQuery := r.auxiliaryListQuery(ctx, filter, "inbound_mails")
+	if filter.BeforeReceivedAt != nil {
+		pageQuery = pageQuery.Where(
+			"(COALESCE(received_at, created_at) < ? OR (COALESCE(received_at, created_at) = ? AND id < ?))",
+			filter.BeforeReceivedAt.UTC(), filter.BeforeReceivedAt.UTC(), filter.BeforeID,
+		)
+	} else {
+		pageQuery = pageQuery.Offset(filter.Offset)
+	}
 	var models []InboundMailModel
 	if err := pageQuery.
 		Select("id, header_from, recipient, subject, body_preview, verification_code, received_at, status, created_at").
 		Order("COALESCE(received_at, created_at) DESC, id DESC").
-		Offset(filter.Offset).
-		Limit(filter.Limit).
+		Limit(filter.Limit + 1).
 		Find(&models).Error; err != nil {
-		return nil, 0, fmt.Errorf("list auxiliary messages: %w", err)
+		return nil, 0, false, fmt.Errorf("list auxiliary messages: %w", err)
+	}
+	hasMore := len(models) > filter.Limit
+	if hasMore {
+		models = models[:filter.Limit]
 	}
 	items := make([]domain.InboundMail, len(models))
 	for i := range models {
@@ -63,7 +76,7 @@ func (r *AuxiliaryMailRepo) ListByMicrosoftResource(ctx context.Context, filter 
 		items[i].SourceObjectKey = ""
 		items[i].EnvelopeFrom = ""
 	}
-	return items, total, nil
+	return items, total, hasMore, nil
 }
 
 func (r *AuxiliaryMailRepo) auxiliaryListQuery(ctx context.Context, filter mailapp.AuxiliaryMailFilter, table string) *gorm.DB {

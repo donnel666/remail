@@ -48,7 +48,7 @@ func TestAdminMessageRoutesRequireSessionAndReadPermission(t *testing.T) {
 
 func TestAdminMessageListReturnsSummaryOnlyAndDetailAuditsBodyRead(t *testing.T) {
 	router, repo, checker := newAdminMessageTestRouter(true)
-	listResponse := performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&offset=0&limit=20&search=body")
+	listResponse := performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&type=domain&offset=20&limit=10&search=body")
 	require.Equal(t, http.StatusOK, listResponse.Code, listResponse.Body.String())
 	require.Equal(t, "mailmatch:message", checker.resource)
 	require.Equal(t, "read", checker.action)
@@ -58,6 +58,13 @@ func TestAdminMessageListReturnsSummaryOnlyAndDetailAuditsBodyRead(t *testing.T)
 	items, ok := list["items"].([]any)
 	require.True(t, ok)
 	require.Len(t, items, 1)
+	require.Equal(t, float64(37), list["total"])
+	require.Equal(t, mailmatchdomain.ResourceTypeDomain, repo.listQuery.ResourceType)
+	require.Equal(t, uint(100), repo.listQuery.ResourceID)
+	require.Equal(t, "body", repo.listQuery.Search)
+	require.Equal(t, 20, repo.listQuery.Offset)
+	require.Equal(t, 10, repo.listQuery.Limit)
+	require.False(t, repo.listQuery.SkipTotal)
 	item, ok := items[0].(map[string]any)
 	require.True(t, ok)
 	for _, forbiddenKey := range []string{"body", "matchDiagnostic", "rawBody", "objectKey", "providerPayload"} {
@@ -85,6 +92,23 @@ func TestAdminMessageListReturnsSummaryOnlyAndDetailAuditsBodyRead(t *testing.T)
 	require.NotContains(t, serializedLog, "main@example.com")
 }
 
+func TestAdminMessageListAcceptsStableCursorAndSkipsRepeatedTotal(t *testing.T) {
+	router, repo, _ := newAdminMessageTestRouter(true)
+	repo.listHasMore = true
+	response := performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&type=domain&beforeReceivedAt=2026-07-12T09%3A00%3A00Z&beforeId=7&includeTotal=false&limit=10")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NotNil(t, repo.listQuery.BeforeReceivedAt)
+	require.Equal(t, time.Date(2026, 7, 12, 9, 0, 0, 0, time.UTC), *repo.listQuery.BeforeReceivedAt)
+	require.Equal(t, uint(7), repo.listQuery.BeforeID)
+	require.True(t, repo.listQuery.SkipTotal)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.NotContains(t, body, "total")
+	require.Equal(t, true, body["hasMore"])
+	require.Equal(t, "2026-07-12T09:00:00Z", body["nextBeforeReceivedAt"])
+	require.Equal(t, float64(7), body["nextBeforeId"])
+}
+
 func TestAdminMessageRoutesUseSafeNotFoundAndValidatePagination(t *testing.T) {
 	router, _, _ := newAdminMessageTestRouter(true)
 
@@ -99,6 +123,12 @@ func TestAdminMessageRoutesUseSafeNotFoundAndValidatePagination(t *testing.T) {
 	response = performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&limit=101")
 	require.Equal(t, http.StatusBadRequest, response.Code)
 	response = performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&offset=-1")
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	response = performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&beforeId=7")
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	response = performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&beforeReceivedAt=2026-07-12T09%3A00%3A00Z&beforeId=7&offset=1")
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	response = performAdminMessageGET(router, "/v1/admin/messages?resourceId=100&includeTotal=invalid")
 	require.Equal(t, http.StatusBadRequest, response.Code)
 }
 
@@ -140,14 +170,17 @@ func (c *adminMessagePermissionChecker) Check(_ context.Context, _ uint, _ iamdo
 }
 
 type adminMessageRepoStub struct {
-	readLog *governancedomain.OperationLog
+	listQuery   mailmatchapp.AdminMessageListQuery
+	listHasMore bool
+	readLog     *governancedomain.OperationLog
 }
 
 func (*adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType) (bool, error) {
 	return resourceID == 100, nil
 }
 
-func (*adminMessageRepoStub) ListAdminMessageSummaries(_ context.Context, _ mailmatchapp.AdminMessageListQuery) ([]mailmatchapp.AdminMessageSummary, int64, error) {
+func (r *adminMessageRepoStub) ListAdminMessageSummaries(_ context.Context, query mailmatchapp.AdminMessageListQuery) ([]mailmatchapp.AdminMessageSummary, int64, bool, error) {
+	r.listQuery = query
 	code := "123456"
 	orderNo := "OR-ADMIN-MESSAGE"
 	return []mailmatchapp.AdminMessageSummary{{
@@ -161,7 +194,7 @@ func (*adminMessageRepoStub) ListAdminMessageSummaries(_ context.Context, _ mail
 		VerificationCode: &code,
 		OrderNo:          &orderNo,
 		ReceivedAt:       time.Date(2026, 7, 12, 9, 0, 0, 0, time.UTC),
-	}}, 1, nil
+	}}, 37, r.listHasMore, nil
 }
 
 func (r *adminMessageRepoStub) FindAdminMessageDetailWithLog(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*mailmatchapp.AdminMessageDetail, error) {

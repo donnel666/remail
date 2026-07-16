@@ -4341,10 +4341,21 @@ export interface components {
         };
         AdminMessageListResponse: {
             items: components["schemas"]["AdminMessageSummary"][];
-            /** Format: int64 */
-            total: number;
+            /**
+             * Format: int64
+             * @description Backend-computed matching count; omitted when includeTotal=false.
+             */
+            total?: number;
             offset: number;
             limit: number;
+            hasMore: boolean;
+            /**
+             * Format: date-time
+             * @description Timestamp component of the next stable continuation cursor.
+             */
+            nextBeforeReceivedAt?: string;
+            /** @description ID component of the next stable continuation cursor. */
+            nextBeforeId?: number;
         };
         AdminBindingSummary: {
             id: number;
@@ -4375,10 +4386,21 @@ export interface components {
         AdminBindingMessageListResponse: {
             binding: components["schemas"]["AdminBindingSummary"] | null;
             items: components["schemas"]["AdminAuxiliaryMessageSummary"][];
-            /** Format: int64 */
-            total: number;
+            /**
+             * Format: int64
+             * @description Backend-computed matching count; omitted when includeTotal=false.
+             */
+            total?: number;
             offset: number;
             limit: number;
+            hasMore: boolean;
+            /**
+             * Format: date-time
+             * @description Timestamp component of the next stable continuation cursor.
+             */
+            nextBeforeReceivedAt?: string;
+            /** @description ID component of the next stable continuation cursor. */
+            nextBeforeId?: number;
         };
         AdminAllocationItem: {
             /** @enum {string} */
@@ -12452,6 +12474,12 @@ export interface operations {
                 resourceId: number;
                 search?: string;
                 offset?: number;
+                /** @description Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero. */
+                beforeReceivedAt?: string;
+                /** @description ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt. */
+                beforeId?: number;
+                /** @description Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT. */
+                includeTotal?: boolean;
                 limit?: number;
             };
             header?: never;
@@ -12515,6 +12543,12 @@ export interface operations {
                 resourceId: number;
                 search?: string;
                 offset?: number;
+                /** @description Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero. */
+                beforeReceivedAt?: string;
+                /** @description ID component of a stable continuation cursor. Must be supplied together with beforeReceivedAt. */
+                beforeId?: number;
+                /** @description Compute and return the matching total. Set false on continuation requests to avoid repeating COUNT. */
+                includeTotal?: boolean;
                 limit?: number;
             };
             header?: never;

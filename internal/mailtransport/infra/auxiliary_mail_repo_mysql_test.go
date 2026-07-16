@@ -47,6 +47,22 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}).Error)
+	older := now.Add(-time.Minute)
+	require.NoError(t, db.Create(&InboundMailModel{
+		HeaderFrom:      "literal@example.com",
+		Recipient:       "proof9201@example.com",
+		Subject:         `Literal % _ \\ marker`,
+		BodyPreview:     `Literal % _ \\ marker`,
+		ReceivedAt:      &older,
+		ParsedAt:        &older,
+		ResourceID:      9201,
+		ResourceType:    "microsoft",
+		OwnerUserID:     9201,
+		SourceObjectKey: "private/9201-literal.eml",
+		Status:          string(domain.InboundStatusStored),
+		CreatedAt:       older,
+		UpdatedAt:       older,
+	}).Error)
 	var first InboundMailModel
 	require.NoError(t, db.Where("resource_id = ?", 9201).First(&first).Error)
 	require.NoError(t, db.Create(&InboundMailModel{
@@ -73,17 +89,52 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, exists)
 
-	items, total, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	items, total, hasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID: 9201,
 		Search:     "654321",
 		Limit:      20,
 	})
 	require.NoError(t, err)
+	assert.False(t, hasMore)
 	assert.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
 	assert.Equal(t, "654321", items[0].VerificationCode)
 	assert.Empty(t, items[0].SourceObjectKey)
 	assert.Empty(t, items[0].EnvelopeFrom)
+
+	for _, wildcard := range []string{"%", "_", `\`} {
+		wildcardItems, wildcardTotal, wildcardHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+			ResourceID: 9201,
+			Search:     wildcard,
+			Limit:      20,
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, wildcardTotal)
+		require.Len(t, wildcardItems, 1)
+		assert.Equal(t, `Literal % _ \\ marker`, wildcardItems[0].Subject)
+		assert.False(t, wildcardHasMore)
+	}
+
+	firstPage, firstTotal, firstHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+		ResourceID: 9201,
+		Limit:      1,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, firstTotal)
+	assert.True(t, firstHasMore)
+	require.Len(t, firstPage, 1)
+	secondPage, skippedTotal, secondHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+		ResourceID:       9201,
+		Limit:            1,
+		BeforeReceivedAt: firstPage[0].ReceivedAt,
+		BeforeID:         firstPage[0].ID,
+		SkipTotal:        true,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, -1, skippedTotal)
+	assert.False(t, secondHasMore)
+	require.Len(t, secondPage, 1)
+	assert.Equal(t, `Literal % _ \\ marker`, secondPage[0].Subject)
 
 	detail, err := repo.FindByMicrosoftResource(context.Background(), 9201, first.ID)
 	require.NoError(t, err)
@@ -97,13 +148,14 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 	exists, err = repo.MicrosoftResourceExists(context.Background(), 9201)
 	require.NoError(t, err)
 	assert.True(t, exists)
-	deletedItems, deletedTotal, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
+	deletedItems, deletedTotal, deletedHasMore, err := repo.ListByMicrosoftResource(context.Background(), mailapp.AuxiliaryMailFilter{
 		ResourceID: 9201,
 		Limit:      20,
 	})
 	require.NoError(t, err)
-	assert.EqualValues(t, 1, deletedTotal)
-	require.Len(t, deletedItems, 1)
+	assert.EqualValues(t, 2, deletedTotal)
+	assert.False(t, deletedHasMore)
+	require.Len(t, deletedItems, 2)
 	deletedDetail, err := repo.FindByMicrosoftResource(context.Background(), 9201, first.ID)
 	require.NoError(t, err)
 	require.NotNil(t, deletedDetail)

@@ -596,13 +596,15 @@ describe("admin Microsoft API adapter", () => {
 
   it("routes each detail tab to its fact owner and forwards AbortSignal", async () => {
     const controller = new AbortController();
-    apiMocks.GET.mockResolvedValue({ data: { items: [], total: 0, offset: 0, limit: 20 } });
+    apiMocks.GET.mockResolvedValue({
+      data: { items: [], total: 0, offset: 0, limit: 20, hasMore: false },
+    });
 
     await listAdminMicrosoftAliases(55, "explicit", 0, 20, controller.signal);
     await listAdminMicrosoftTasks(55, 0, 20, controller.signal);
-    await listAdminMicrosoftMessages(55, "code", 0, 20, controller.signal);
+    await listAdminMicrosoftMessages(55, "code", 20, undefined, controller.signal);
     await getAdminMicrosoftMessage(55, 9, controller.signal);
-    await listAdminMicrosoftBindingMessages(55, "code", 0, 20, controller.signal);
+    await listAdminMicrosoftBindingMessages(55, "code", 20, undefined, controller.signal);
     await getAdminMicrosoftBindingMessage(55, 10, controller.signal);
 
     expect(apiMocks.GET.mock.calls.map((call) => call[0])).toEqual([
@@ -620,8 +622,43 @@ describe("admin Microsoft API adapter", () => {
       bizType: "microsoft_resource",
       bizId: 55,
     });
-    expect(callOptions(apiMocks.GET, 2).params?.query).toMatchObject({ resourceId: 55 });
-    expect(callOptions(apiMocks.GET, 4).params?.query).toMatchObject({ resourceId: 55 });
+    expect(callOptions(apiMocks.GET, 2).params?.query).toMatchObject({
+      resourceId: 55,
+      search: "code",
+      type: "microsoft",
+      offset: 0,
+      includeTotal: true,
+    });
+    expect(callOptions(apiMocks.GET, 4).params?.query).toMatchObject({
+      resourceId: 55,
+      offset: 0,
+      includeTotal: true,
+    });
+  });
+
+  it("uses stable cursors and skips total on Microsoft mail continuations", async () => {
+    apiMocks.GET.mockResolvedValue({
+      data: { items: [], offset: 0, limit: 20, hasMore: false },
+    });
+    const cursor = {
+      beforeReceivedAt: "2026-07-12T08:00:00Z",
+      beforeId: 8,
+    };
+
+    await listAdminMicrosoftMessages(55, "code", 20, cursor);
+    await listAdminMicrosoftBindingMessages(55, "code", 20, cursor);
+
+    for (let index = 0; index < 2; index += 1) {
+      expect(callOptions(apiMocks.GET, index).params?.query).toMatchObject({
+        resourceId: 55,
+        search: "code",
+        offset: undefined,
+        beforeReceivedAt: cursor.beforeReceivedAt,
+        beforeId: cursor.beforeId,
+        includeTotal: false,
+        limit: 20,
+      });
+    }
   });
 
   it("versions independent credential replacement and gives every write a fresh key", async () => {

@@ -84,6 +84,8 @@ export default function AdminTickets() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [facets, setFacets] = useState<MockTicketFacets | null>(null);
   const [detailTicketNo, setDetailTicketNo] = useState<string | null>(null);
 

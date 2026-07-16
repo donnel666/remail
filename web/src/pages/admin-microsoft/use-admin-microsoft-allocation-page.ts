@@ -20,6 +20,8 @@ export function useAdminMicrosoftAllocationPage(resourceId: number) {
     [resourceId]
   );
 
+  useEffect(() => setPage(1), [pageSize, setPage]);
+
   useEffect(() => {
     setItems([]);
     setTotal(0);

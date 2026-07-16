@@ -61,6 +61,11 @@ export type AdminMicrosoftBindingMessageListResponse =
 export type AdminMicrosoftBindingSummary =
   components["schemas"]["AdminBindingSummary"];
 
+export interface AdminMicrosoftMessageCursor {
+  beforeReceivedAt: string;
+  beforeId: number;
+}
+
 export type AdminMicrosoftSupplyScope =
   components["schemas"]["AdminAllocationItem"]["supplyScope"];
 export type AdminMicrosoftAllocationStatus =

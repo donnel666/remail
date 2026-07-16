@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Button,
   DatePicker,
@@ -54,8 +54,6 @@ import { emptyNode } from "./finance-shared";
 import { TransactionAccountCell } from "./transaction-meta";
 import { TransactionDetailSheet } from "./transaction-detail-sheet";
 
-const SEARCH_DEBOUNCE_MS = 400;
-
 const TRANSACTION_TYPES: FinanceTransactionType[] = [
   "recharge",
   "debit",
@@ -97,11 +95,10 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [activePage, setActivePage] = useState(1);
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [debouncedSearch, flushSearch] = useDebouncedValue(
-    searchKeyword,
-    SEARCH_DEBOUNCE_MS
-  );
+  const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
   const [typeFilter, setTypeFilter] = useState<"all" | FinanceTransactionType>(
     "all"
   );

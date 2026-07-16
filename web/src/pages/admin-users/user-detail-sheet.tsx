@@ -453,6 +453,8 @@ function InvitationsTab({ userId }: { userId: number }) {
   const { t } = useTranslation();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [page, setPage] = useState(1);
+
+  useEffect(() => setPage(1), [pageSize]);
   const [overview, setOverview] =
     useState<AdminUserInvitationOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -752,6 +754,8 @@ function WalletTab({
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setPage(1), [pageSize]);
   const [adjustOpen, setAdjustOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -997,6 +1001,8 @@ function ApiKeysTab({
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setPage(1), [pageSize]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminApiKey | null>(null);
   const [name, setName] = useState("");

@@ -28,9 +28,12 @@ type AdminAuxiliaryMessageDetailResponse struct {
 }
 
 type AdminBindingMessageListResponse struct {
-	Binding *AdminBindingSummaryResponse           `json:"binding"`
-	Items   []AdminAuxiliaryMessageSummaryResponse `json:"items"`
-	Total   int64                                  `json:"total"`
-	Offset  int                                    `json:"offset"`
-	Limit   int                                    `json:"limit"`
+	Binding              *AdminBindingSummaryResponse           `json:"binding"`
+	Items                []AdminAuxiliaryMessageSummaryResponse `json:"items"`
+	Total                *int64                                 `json:"total,omitempty"`
+	Offset               int                                    `json:"offset"`
+	Limit                int                                    `json:"limit"`
+	HasMore              bool                                   `json:"hasMore"`
+	NextBeforeReceivedAt *time.Time                             `json:"nextBeforeReceivedAt,omitempty"`
+	NextBeforeID         *uint                                  `json:"nextBeforeId,omitempty"`
 }

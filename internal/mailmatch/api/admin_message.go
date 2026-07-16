@@ -33,10 +33,13 @@ type adminMessageDetailResponse struct {
 }
 
 type adminMessageListResponse struct {
-	Items  []adminMessageSummaryResponse `json:"items"`
-	Total  int64                         `json:"total"`
-	Offset int                           `json:"offset"`
-	Limit  int                           `json:"limit"`
+	Items                []adminMessageSummaryResponse `json:"items"`
+	Total                *int64                        `json:"total,omitempty"`
+	Offset               int                           `json:"offset"`
+	Limit                int                           `json:"limit"`
+	HasMore              bool                          `json:"hasMore"`
+	NextBeforeReceivedAt *time.Time                    `json:"nextBeforeReceivedAt,omitempty"`
+	NextBeforeID         *uint                         `json:"nextBeforeId,omitempty"`
 }
 
 func (h *Handler) GetAdminMessages(c *gin.Context) {
@@ -64,8 +67,19 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 		writeAdminMessageBadRequest(c)
 		return
 	}
+	beforeReceivedAt, beforeID, ok := adminMessageCursor(c)
+	if !ok {
+		writeAdminMessageBadRequest(c)
+		return
+	}
+	includeTotal, ok := optionalBoolQuery(c, "includeTotal", true)
+	if !ok || (beforeReceivedAt != nil && offset != 0) {
+		writeAdminMessageBadRequest(c)
+		return
+	}
 	page, err := h.mod.AdminMessages.List(c.Request.Context(), mailmatchapp.AdminMessageListQuery{
 		ResourceID: resourceID, ResourceType: resourceType, Search: c.Query("search"), Offset: offset, Limit: limit,
+		BeforeReceivedAt: beforeReceivedAt, BeforeID: beforeID, SkipTotal: !includeTotal,
 	})
 	if err != nil {
 		writeAdminMessageError(c, err)
@@ -75,11 +89,17 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 	for i := range page.Items {
 		items[i] = adminMessageSummaryDTO(page.Items[i])
 	}
+	var total *int64
+	if page.TotalIncluded {
+		total = &page.Total
+	}
+	var nextBeforeID *uint
+	if page.NextBeforeID != 0 {
+		nextBeforeID = &page.NextBeforeID
+	}
 	c.JSON(http.StatusOK, adminMessageListResponse{
-		Items:  items,
-		Total:  page.Total,
-		Offset: page.Offset,
-		Limit:  page.Limit,
+		Items: items, Total: total, Offset: page.Offset, Limit: page.Limit, HasMore: page.HasMore,
+		NextBeforeReceivedAt: page.NextBeforeReceivedAt, NextBeforeID: nextBeforeID,
 	})
 }
 
@@ -163,6 +183,36 @@ func nonNegativeIntQuery(c *gin.Context, name string, fallback int) (int, bool) 
 	}
 	value, err := strconv.Atoi(raw)
 	return value, err == nil && value >= 0
+}
+
+func optionalBoolQuery(c *gin.Context, name string, fallback bool) (bool, bool) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return fallback, true
+	}
+	value, err := strconv.ParseBool(raw)
+	return value, err == nil
+}
+
+func adminMessageCursor(c *gin.Context) (*time.Time, uint, bool) {
+	rawReceivedAt := strings.TrimSpace(c.Query("beforeReceivedAt"))
+	rawID := strings.TrimSpace(c.Query("beforeId"))
+	if rawReceivedAt == "" && rawID == "" {
+		return nil, 0, true
+	}
+	if rawReceivedAt == "" || rawID == "" {
+		return nil, 0, false
+	}
+	receivedAt, err := time.Parse(time.RFC3339Nano, rawReceivedAt)
+	if err != nil {
+		return nil, 0, false
+	}
+	id, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || id == 0 {
+		return nil, 0, false
+	}
+	receivedAt = receivedAt.UTC()
+	return &receivedAt, uint(id), true
 }
 
 func writeAdminMessageBadRequest(c *gin.Context) {

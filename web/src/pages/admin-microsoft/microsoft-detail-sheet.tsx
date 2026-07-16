@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Empty,
@@ -75,6 +75,7 @@ import type {
   AdminMicrosoftAuxiliaryMessageSummary,
   AdminMicrosoftMailboxKind,
   AdminMicrosoftMessageDetail,
+  AdminMicrosoftMessageCursor,
   AdminMicrosoftMessageSummary,
   AdminMicrosoftResourceDetail,
   AdminMicrosoftSupplyScope,
@@ -432,7 +433,7 @@ function AliasPanel({
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => setPage(1), [kind, resourceId]);
+  useEffect(() => setPage(1), [kind, pageSize, resourceId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -719,7 +720,7 @@ function TaskDiagnostics({
     total: 0,
   });
 
-  useEffect(() => setPage(1), [detail.id]);
+  useEffect(() => setPage(1), [detail.id, pageSize]);
   useEffect(() => {
     const controller = new AbortController();
     let pollTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
@@ -951,61 +952,98 @@ function ResourceMailsPanel({
 }) {
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebouncedValue(search);
+  const [pageSize] = useSharedPageSize();
   const [addressFilter, setAddressFilter] = useState("all");
   const [messages, setMessages] = useState<MailSummary[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
+  const [cursor, setCursor] = useState<AdminMicrosoftMessageCursor | null>(null);
+  const [nextCursor, setNextCursor] =
+    useState<AdminMicrosoftMessageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MailDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const listScope = `${auxiliary}\u0000${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
+  const listScopeRef = useRef(listScope);
 
   useEffect(() => {
     setMessages([]);
     setTotal(0);
-    setOffset(0);
+    setCursor(null);
+    setNextCursor(null);
+    setHasMore(false);
+    setListError(null);
     setSelectedId(null);
     setSelectedDetail(null);
     setAddressFilter("all");
-  }, [auxiliary, debouncedSearch, resourceId]);
+  }, [auxiliary, debouncedSearch, pageSize, resourceId]);
 
   useEffect(() => {
+    if (listScopeRef.current !== listScope) {
+      listScopeRef.current = listScope;
+      if (cursor) return;
+    }
     const controller = new AbortController();
     setListLoading(true);
+    setListError(null);
     const request = auxiliary
       ? listAdminMicrosoftBindingMessages(
           resourceId,
           debouncedSearch,
-          offset,
-          100,
+          pageSize,
+          cursor ?? undefined,
           controller.signal
         )
       : listAdminMicrosoftMessages(
           resourceId,
           debouncedSearch,
-          offset,
-          100,
+          pageSize,
+          cursor ?? undefined,
           controller.signal
         );
     void request
       .then((response) => {
         if (controller.signal.aborted) return;
-        setTotal(response.total);
+        if (response.total !== undefined) setTotal(response.total);
+        const next =
+          response.hasMore &&
+          response.nextBeforeReceivedAt &&
+          response.nextBeforeId
+            ? {
+                beforeReceivedAt: response.nextBeforeReceivedAt,
+                beforeId: response.nextBeforeId,
+              }
+            : null;
+        setNextCursor(next);
+        setHasMore(next !== null);
         setMessages((current) => {
-          const next = offset === 0 ? response.items : [...current, ...response.items];
-          return Array.from(new Map(next.map((message) => [message.id, message])).values());
+          const nextItems = cursor
+            ? [...current, ...response.items]
+            : response.items;
+          return Array.from(
+            new Map(nextItems.map((message) => [message.id, message])).values()
+          );
         });
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          Toast.error(getIamErrorMessage(t, error, "Microsoft mail load failed."));
+          const message = getIamErrorMessage(
+            t,
+            error,
+            "Microsoft mail load failed."
+          );
+          setListError(message);
+          Toast.error(message);
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setListLoading(false);
       });
     return () => controller.abort();
-  }, [auxiliary, debouncedSearch, offset, resourceId, t]);
+  }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
 
   const addresses = useMemo(() => {
     const map = new Map<string, AdminMicrosoftMailboxKind>();
@@ -1061,24 +1099,12 @@ function ResourceMailsPanel({
 
   const loadMore = useCallback(
     (element: HTMLDivElement) => {
-      if (listLoading || messages.length >= total) return;
+      if (listLoading || listError || !hasMore || !nextCursor) return;
       const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
-      if (remaining < 80) setOffset(messages.length);
+      if (remaining < 80) setCursor(nextCursor);
     },
-    [listLoading, messages.length, total]
+    [hasMore, listError, listLoading, nextCursor]
   );
-
-  if (listLoading && messages.length === 0) {
-    return (
-      <div className="flex items-center justify-center" style={{ height: DRAWER_PANEL_HEIGHT }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (messages.length === 0) {
-    return <Empty description={emptyDescription ?? t("No mails yet")} style={{ padding: 32 }} />;
-  }
 
   return (
     <div
@@ -1099,6 +1125,10 @@ function ResourceMailsPanel({
             size="small"
             value={search}
           />
+          <div className="flex items-center justify-between text-xs text-[var(--semi-color-text-2)]">
+            <span>{t("Mail count")}</span>
+            <span className="font-mono tabular-nums">{total}</span>
+          </div>
           {hideMailboxMeta ? null : (
             <Select
               onChange={(value) => setAddressFilter(String(value))}
@@ -1117,10 +1147,31 @@ function ResourceMailsPanel({
         </div>
         <div
           className="min-h-0 flex-1 overflow-auto"
+          data-testid={
+            auxiliary
+              ? "admin-microsoft-auxiliary-message-list"
+              : "admin-microsoft-message-list"
+          }
           onScroll={(event) => loadMore(event.currentTarget)}
         >
-          {filtered.length === 0 ? (
-            <Empty description={t("No matched mail")} style={{ padding: 24 }} />
+          {listError && messages.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-[var(--semi-color-text-2)]">
+              <span>{listError}</span>
+              <Button onClick={() => setRetryKey((value) => value + 1)} size="small">
+                {t("Try again")}
+              </Button>
+            </div>
+          ) : listLoading && messages.length === 0 ? (
+            <div className="flex justify-center p-6"><Spin /></div>
+          ) : filtered.length === 0 ? (
+            <Empty
+              description={
+                debouncedSearch.trim()
+                  ? t("No matched mail")
+                  : emptyDescription ?? t("No mails yet")
+              }
+              style={{ padding: 24 }}
+            />
           ) : (
             filtered.map((message) => (
               <button
@@ -1158,7 +1209,14 @@ function ResourceMailsPanel({
               </button>
             ))
           )}
-          {listLoading && messages.length > 0 ? (
+          {listError && messages.length > 0 ? (
+            <div className="flex items-center justify-center gap-2 p-3 text-xs text-[var(--semi-color-text-2)]">
+              <span>{listError}</span>
+              <Button onClick={() => setRetryKey((value) => value + 1)} size="small">
+                {t("Try again")}
+              </Button>
+            </div>
+          ) : listLoading && messages.length > 0 ? (
             <div className="flex justify-center p-3"><Spin /></div>
           ) : null}
         </div>

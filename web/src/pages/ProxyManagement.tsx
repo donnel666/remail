@@ -617,6 +617,8 @@ export default function ProxyManagement() {
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [importOpen, setImportOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyItem | null>(null);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);

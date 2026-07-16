@@ -29,8 +29,6 @@ import { formatDateTime, formatMoney } from "./finance-meta";
 import { emptyNode } from "./finance-shared";
 import { BalanceAccountCell } from "./balance-meta";
 
-const SEARCH_DEBOUNCE_MS = 400;
-
 const QUICK_AMOUNTS = [10, 50, 100, -10, -50, -100];
 
 function FinanceAdjustModal({
@@ -311,11 +309,10 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const isMobile = useIsMobile();
   const [pageSize, setPageSize] = useSharedPageSize();
   const [activePage, setActivePage] = useState(1);
+
+  useEffect(() => setActivePage(1), [pageSize]);
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [debouncedSearch, flushSearch] = useDebouncedValue(
-    searchKeyword,
-    SEARCH_DEBOUNCE_MS
-  );
+  const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
   const [compactMode, setCompactMode] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>(
     []
