@@ -143,7 +143,7 @@ type adminMessageRepoStub struct {
 	readLog *governancedomain.OperationLog
 }
 
-func (*adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint) (bool, error) {
+func (*adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType) (bool, error) {
 	return resourceID == 100, nil
 }
 
@@ -164,7 +164,7 @@ func (*adminMessageRepoStub) ListAdminMessageSummaries(_ context.Context, _ mail
 	}}, 1, nil
 }
 
-func (r *adminMessageRepoStub) FindAdminMessageDetailWithLog(_ context.Context, resourceID uint, messageID uint, log *governancedomain.OperationLog) (*mailmatchapp.AdminMessageDetail, error) {
+func (r *adminMessageRepoStub) FindAdminMessageDetailWithLog(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*mailmatchapp.AdminMessageDetail, error) {
 	if resourceID != 100 || messageID != 7 {
 		return nil, mailmatchdomain.ErrMessageNotFound
 	}

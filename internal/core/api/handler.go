@@ -80,21 +80,23 @@ func (h *CoreHandler) GetResources(c *gin.Context) {
 	items := make([]ResourceItemResponse, len(result.Items))
 	for i, item := range result.Items {
 		items[i] = ResourceItemResponse{
-			ID:             item.ID,
-			Type:           string(item.Type),
-			OwnerID:        item.OwnerID,
-			Status:         item.Status,
-			ForSale:        item.ForSale,
-			LongLived:      item.LongLived,
-			GraphAvailable: item.GraphAvailable,
-			LastSafeError:  item.LastSafeError,
-			Email:          item.Email,
-			Domain:         item.Domain,
-			DomainTLD:      item.DomainTLD,
-			MailServerID:   item.MailServerID,
-			Purpose:        item.Purpose,
-			MailboxCount:   item.MailboxCount,
-			CreatedAt:      item.CreatedAt,
+			ID:              item.ID,
+			Type:            string(item.Type),
+			OwnerID:         item.OwnerID,
+			Status:          item.Status,
+			ForSale:         item.ForSale,
+			LongLived:       item.LongLived,
+			GraphAvailable:  item.GraphAvailable,
+			LastSafeError:   item.LastSafeError,
+			Email:           item.Email,
+			Domain:          item.Domain,
+			DomainTLD:       item.DomainTLD,
+			MailServerID:    item.MailServerID,
+			Purpose:         item.Purpose,
+			MailboxCount:    item.MailboxCount,
+			LastAllocatedAt: item.LastAllocatedAt,
+			CreatedAt:       item.CreatedAt,
+			UpdatedAt:       item.UpdatedAt,
 		}
 	}
 
@@ -1982,6 +1984,11 @@ func writeCoreError(c *gin.Context, err error) {
 	case errors.Is(err, coredomain.ErrDuplicateDomain):
 		c.JSON(http.StatusConflict, gin.H{
 			"message":   "Domain already exists.",
+			"requestId": rid,
+		})
+	case errors.Is(err, coredomain.ErrResourceHasAllocation):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "Resource has an active allocation.",
 			"requestId": rid,
 		})
 	case errors.Is(err, coredomain.ErrInvalidImportFormat):

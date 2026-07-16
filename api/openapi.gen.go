@@ -241,6 +241,171 @@ func (e AdminCreateProjectRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for AdminDomainBulkFilterPurpose.
+const (
+	AdminDomainBulkFilterPurposeBinding AdminDomainBulkFilterPurpose = "binding"
+	AdminDomainBulkFilterPurposeNotSale AdminDomainBulkFilterPurpose = "not_sale"
+	AdminDomainBulkFilterPurposeSale    AdminDomainBulkFilterPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainBulkFilterPurpose enum.
+func (e AdminDomainBulkFilterPurpose) Valid() bool {
+	switch e {
+	case AdminDomainBulkFilterPurposeBinding:
+		return true
+	case AdminDomainBulkFilterPurposeNotSale:
+		return true
+	case AdminDomainBulkFilterPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainBulkFilterStatus.
+const (
+	AdminDomainBulkFilterStatusAbnormal AdminDomainBulkFilterStatus = "abnormal"
+	AdminDomainBulkFilterStatusDeleted  AdminDomainBulkFilterStatus = "deleted"
+	AdminDomainBulkFilterStatusDisabled AdminDomainBulkFilterStatus = "disabled"
+	AdminDomainBulkFilterStatusNormal   AdminDomainBulkFilterStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainBulkFilterStatus enum.
+func (e AdminDomainBulkFilterStatus) Valid() bool {
+	switch e {
+	case AdminDomainBulkFilterStatusAbnormal:
+		return true
+	case AdminDomainBulkFilterStatusDeleted:
+		return true
+	case AdminDomainBulkFilterStatusDisabled:
+		return true
+	case AdminDomainBulkFilterStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainBulkSelection0Mode.
+const (
+	AdminDomainBulkSelection0ModeIds AdminDomainBulkSelection0Mode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainBulkSelection0Mode enum.
+func (e AdminDomainBulkSelection0Mode) Valid() bool {
+	switch e {
+	case AdminDomainBulkSelection0ModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainBulkSelection1Mode.
+const (
+	AdminDomainBulkSelection1ModeFilter AdminDomainBulkSelection1Mode = "filter"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainBulkSelection1Mode enum.
+func (e AdminDomainBulkSelection1Mode) Valid() bool {
+	switch e {
+	case AdminDomainBulkSelection1ModeFilter:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainItemOwnerRole.
+const (
+	AdminDomainItemOwnerRoleAdmin      AdminDomainItemOwnerRole = "admin"
+	AdminDomainItemOwnerRoleSuperAdmin AdminDomainItemOwnerRole = "super_admin"
+	AdminDomainItemOwnerRoleSupplier   AdminDomainItemOwnerRole = "supplier"
+	AdminDomainItemOwnerRoleUser       AdminDomainItemOwnerRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainItemOwnerRole enum.
+func (e AdminDomainItemOwnerRole) Valid() bool {
+	switch e {
+	case AdminDomainItemOwnerRoleAdmin:
+		return true
+	case AdminDomainItemOwnerRoleSuperAdmin:
+		return true
+	case AdminDomainItemOwnerRoleSupplier:
+		return true
+	case AdminDomainItemOwnerRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainItemPurpose.
+const (
+	AdminDomainItemPurposeBinding AdminDomainItemPurpose = "binding"
+	AdminDomainItemPurposeNotSale AdminDomainItemPurpose = "not_sale"
+	AdminDomainItemPurposeSale    AdminDomainItemPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainItemPurpose enum.
+func (e AdminDomainItemPurpose) Valid() bool {
+	switch e {
+	case AdminDomainItemPurposeBinding:
+		return true
+	case AdminDomainItemPurposeNotSale:
+		return true
+	case AdminDomainItemPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDomainItemStatus.
+const (
+	AdminDomainItemStatusAbnormal AdminDomainItemStatus = "abnormal"
+	AdminDomainItemStatusDeleted  AdminDomainItemStatus = "deleted"
+	AdminDomainItemStatusDisabled AdminDomainItemStatus = "disabled"
+	AdminDomainItemStatusNormal   AdminDomainItemStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the AdminDomainItemStatus enum.
+func (e AdminDomainItemStatus) Valid() bool {
+	switch e {
+	case AdminDomainItemStatusAbnormal:
+		return true
+	case AdminDomainItemStatusDeleted:
+		return true
+	case AdminDomainItemStatusDisabled:
+		return true
+	case AdminDomainItemStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminMailServerItemStatus.
+const (
+	AdminMailServerItemStatusDisabled AdminMailServerItemStatus = "disabled"
+	AdminMailServerItemStatusOffline  AdminMailServerItemStatus = "offline"
+	AdminMailServerItemStatusOnline   AdminMailServerItemStatus = "online"
+)
+
+// Valid indicates whether the value is a known member of the AdminMailServerItemStatus enum.
+func (e AdminMailServerItemStatus) Valid() bool {
+	switch e {
+	case AdminMailServerItemStatusDisabled:
+		return true
+	case AdminMailServerItemStatusOffline:
+		return true
+	case AdminMailServerItemStatusOnline:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminMessageDetailMailbox.
 const (
 	AdminMessageDetailMailboxAlias AdminMessageDetailMailbox = "alias"
@@ -567,6 +732,7 @@ func (e AdminMicrosoftTokenHealth) Valid() bool {
 
 // Defines values for AdminTaskBizType.
 const (
+	AdminTaskBizTypeDomainResource          AdminTaskBizType = "domain_resource"
 	AdminTaskBizTypeMicrosoftResource       AdminTaskBizType = "microsoft_resource"
 	AdminTaskBizTypeMicrosoftResourceBulk   AdminTaskBizType = "microsoft_resource_bulk"
 	AdminTaskBizTypeMicrosoftResourceImport AdminTaskBizType = "microsoft_resource_import"
@@ -575,6 +741,8 @@ const (
 // Valid indicates whether the value is a known member of the AdminTaskBizType enum.
 func (e AdminTaskBizType) Valid() bool {
 	switch e {
+	case AdminTaskBizTypeDomainResource:
+		return true
 	case AdminTaskBizTypeMicrosoftResource:
 		return true
 	case AdminTaskBizTypeMicrosoftResourceBulk:
@@ -802,6 +970,27 @@ const (
 func (e CheckProxiesRequest1All) Valid() bool {
 	switch e {
 	case CheckProxiesRequest1AllTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateAdminDomainRequestPurpose.
+const (
+	CreateAdminDomainRequestPurposeBinding CreateAdminDomainRequestPurpose = "binding"
+	CreateAdminDomainRequestPurposeNotSale CreateAdminDomainRequestPurpose = "not_sale"
+	CreateAdminDomainRequestPurposeSale    CreateAdminDomainRequestPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the CreateAdminDomainRequestPurpose enum.
+func (e CreateAdminDomainRequestPurpose) Valid() bool {
+	switch e {
+	case CreateAdminDomainRequestPurposeBinding:
+		return true
+	case CreateAdminDomainRequestPurposeNotSale:
+		return true
+	case CreateAdminDomainRequestPurposeSale:
 		return true
 	default:
 		return false
@@ -1120,6 +1309,51 @@ func (e OrderResponseSupplyPolicy) Valid() bool {
 	case OrderResponseSupplyPolicyPrivateFirst:
 		return true
 	case OrderResponseSupplyPolicyPublicOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PatchAdminDomainRequestPurpose.
+const (
+	PatchAdminDomainRequestPurposeBinding PatchAdminDomainRequestPurpose = "binding"
+	PatchAdminDomainRequestPurposeNotSale PatchAdminDomainRequestPurpose = "not_sale"
+	PatchAdminDomainRequestPurposeSale    PatchAdminDomainRequestPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the PatchAdminDomainRequestPurpose enum.
+func (e PatchAdminDomainRequestPurpose) Valid() bool {
+	switch e {
+	case PatchAdminDomainRequestPurposeBinding:
+		return true
+	case PatchAdminDomainRequestPurposeNotSale:
+		return true
+	case PatchAdminDomainRequestPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PatchAdminDomainRequestStatusCommand.
+const (
+	Disable      PatchAdminDomainRequestStatusCommand = "disable"
+	Enable       PatchAdminDomainRequestStatusCommand = "enable"
+	MarkAbnormal PatchAdminDomainRequestStatusCommand = "mark_abnormal"
+	MarkNormal   PatchAdminDomainRequestStatusCommand = "mark_normal"
+)
+
+// Valid indicates whether the value is a known member of the PatchAdminDomainRequestStatusCommand enum.
+func (e PatchAdminDomainRequestStatusCommand) Valid() bool {
+	switch e {
+	case Disable:
+		return true
+	case Enable:
+		return true
+	case MarkAbnormal:
+		return true
+	case MarkNormal:
 		return true
 	default:
 		return false
@@ -1999,6 +2233,87 @@ func (e GetAdminCardsParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminDomainsParamsPurpose.
+const (
+	GetAdminDomainsParamsPurposeBinding GetAdminDomainsParamsPurpose = "binding"
+	GetAdminDomainsParamsPurposeNotSale GetAdminDomainsParamsPurpose = "not_sale"
+	GetAdminDomainsParamsPurposeSale    GetAdminDomainsParamsPurpose = "sale"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminDomainsParamsPurpose enum.
+func (e GetAdminDomainsParamsPurpose) Valid() bool {
+	switch e {
+	case GetAdminDomainsParamsPurposeBinding:
+		return true
+	case GetAdminDomainsParamsPurposeNotSale:
+		return true
+	case GetAdminDomainsParamsPurposeSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminDomainsParamsStatus.
+const (
+	GetAdminDomainsParamsStatusAbnormal GetAdminDomainsParamsStatus = "abnormal"
+	GetAdminDomainsParamsStatusDeleted  GetAdminDomainsParamsStatus = "deleted"
+	GetAdminDomainsParamsStatusDisabled GetAdminDomainsParamsStatus = "disabled"
+	GetAdminDomainsParamsStatusNormal   GetAdminDomainsParamsStatus = "normal"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminDomainsParamsStatus enum.
+func (e GetAdminDomainsParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminDomainsParamsStatusAbnormal:
+		return true
+	case GetAdminDomainsParamsStatusDeleted:
+		return true
+	case GetAdminDomainsParamsStatusDisabled:
+		return true
+	case GetAdminDomainsParamsStatusNormal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminMessagesParamsType.
+const (
+	GetAdminMessagesParamsTypeDomain    GetAdminMessagesParamsType = "domain"
+	GetAdminMessagesParamsTypeMicrosoft GetAdminMessagesParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminMessagesParamsType enum.
+func (e GetAdminMessagesParamsType) Valid() bool {
+	switch e {
+	case GetAdminMessagesParamsTypeDomain:
+		return true
+	case GetAdminMessagesParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminMessageParamsType.
+const (
+	GetAdminMessageParamsTypeDomain    GetAdminMessageParamsType = "domain"
+	GetAdminMessageParamsTypeMicrosoft GetAdminMessageParamsType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminMessageParamsType enum.
+func (e GetAdminMessageParamsType) Valid() bool {
+	switch e {
+	case GetAdminMessageParamsTypeDomain:
+		return true
+	case GetAdminMessageParamsTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminProxiesParamsPool.
 const (
 	GetAdminProxiesParamsPoolResource GetAdminProxiesParamsPool = "resource"
@@ -2088,16 +2403,16 @@ func (e GetAdminProxyBindingsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsPool.
 const (
-	GetAdminProxyStatsParamsPoolResource GetAdminProxyStatsParamsPool = "resource"
-	GetAdminProxyStatsParamsPoolSystem   GetAdminProxyStatsParamsPool = "system"
+	Resource GetAdminProxyStatsParamsPool = "resource"
+	System   GetAdminProxyStatsParamsPool = "system"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
 func (e GetAdminProxyStatsParamsPool) Valid() bool {
 	switch e {
-	case GetAdminProxyStatsParamsPoolResource:
+	case Resource:
 		return true
-	case GetAdminProxyStatsParamsPoolSystem:
+	case System:
 		return true
 	default:
 		return false
@@ -2205,12 +2520,15 @@ func (e GetAdminMicrosoftResourceAliasesParamsKind) Valid() bool {
 
 // Defines values for GetAdminTasksParamsBizType.
 const (
+	GetAdminTasksParamsBizTypeDomainResource    GetAdminTasksParamsBizType = "domain_resource"
 	GetAdminTasksParamsBizTypeMicrosoftResource GetAdminTasksParamsBizType = "microsoft_resource"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminTasksParamsBizType enum.
 func (e GetAdminTasksParamsBizType) Valid() bool {
 	switch e {
+	case GetAdminTasksParamsBizTypeDomainResource:
+		return true
 	case GetAdminTasksParamsBizTypeMicrosoftResource:
 		return true
 	default:
@@ -2469,19 +2787,19 @@ func (e GetResourcesParamsType) Valid() bool {
 
 // Defines values for GetResourcesParamsPurpose.
 const (
-	Binding GetResourcesParamsPurpose = "binding"
-	NotSale GetResourcesParamsPurpose = "not_sale"
-	Sale    GetResourcesParamsPurpose = "sale"
+	GetResourcesParamsPurposeBinding GetResourcesParamsPurpose = "binding"
+	GetResourcesParamsPurposeNotSale GetResourcesParamsPurpose = "not_sale"
+	GetResourcesParamsPurposeSale    GetResourcesParamsPurpose = "sale"
 )
 
 // Valid indicates whether the value is a known member of the GetResourcesParamsPurpose enum.
 func (e GetResourcesParamsPurpose) Valid() bool {
 	switch e {
-	case Binding:
+	case GetResourcesParamsPurposeBinding:
 		return true
-	case NotSale:
+	case GetResourcesParamsPurposeNotSale:
 		return true
-	case Sale:
+	case GetResourcesParamsPurposeSale:
 		return true
 	default:
 		return false
@@ -2739,6 +3057,159 @@ type AdminCreateProjectRequest struct {
 
 // AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
 type AdminCreateProjectRequestAccessType string
+
+// AdminDomainBulkCommandRequest defines model for AdminDomainBulkCommandRequest.
+type AdminDomainBulkCommandRequest struct {
+	Selection AdminDomainBulkSelection `json:"selection"`
+}
+
+// AdminDomainBulkFilter defines model for AdminDomainBulkFilter.
+type AdminDomainBulkFilter struct {
+	CreatedFrom  *time.Time                    `json:"createdFrom,omitempty"`
+	CreatedTo    *time.Time                    `json:"createdTo,omitempty"`
+	MailServerId *int                          `json:"mailServerId,omitempty"`
+	OwnerId      *int                          `json:"ownerId,omitempty"`
+	Purpose      *AdminDomainBulkFilterPurpose `json:"purpose,omitempty"`
+	Search       *string                       `json:"search,omitempty"`
+	Status       *AdminDomainBulkFilterStatus  `json:"status,omitempty"`
+	Tld          *string                       `json:"tld,omitempty"`
+}
+
+// AdminDomainBulkFilterPurpose defines model for AdminDomainBulkFilter.Purpose.
+type AdminDomainBulkFilterPurpose string
+
+// AdminDomainBulkFilterStatus defines model for AdminDomainBulkFilter.Status.
+type AdminDomainBulkFilterStatus string
+
+// AdminDomainBulkResponse defines model for AdminDomainBulkResponse.
+type AdminDomainBulkResponse struct {
+	Affected  int `json:"affected"`
+	Requested int `json:"requested"`
+	Skipped   int `json:"skipped"`
+}
+
+// AdminDomainBulkSelection defines model for AdminDomainBulkSelection.
+type AdminDomainBulkSelection struct {
+	union json.RawMessage
+}
+
+// AdminDomainBulkSelection0 defines model for .
+type AdminDomainBulkSelection0 struct {
+	Mode        AdminDomainBulkSelection0Mode `json:"mode"`
+	ResourceIds []int                         `json:"resourceIds"`
+}
+
+// AdminDomainBulkSelection0Mode defines model for AdminDomainBulkSelection.0.Mode.
+type AdminDomainBulkSelection0Mode string
+
+// AdminDomainBulkSelection1 defines model for .
+type AdminDomainBulkSelection1 struct {
+	Filter AdminDomainBulkFilter         `json:"filter"`
+	Mode   AdminDomainBulkSelection1Mode `json:"mode"`
+}
+
+// AdminDomainBulkSelection1Mode defines model for AdminDomainBulkSelection.1.Mode.
+type AdminDomainBulkSelection1Mode string
+
+// AdminDomainDnsStatusRequest defines model for AdminDomainDnsStatusRequest.
+type AdminDomainDnsStatusRequest struct {
+	// Normal true marks DNS normal; false marks DNS abnormal.
+	Normal bool `json:"normal"`
+}
+
+// AdminDomainFacets defines model for AdminDomainFacets.
+type AdminDomainFacets struct {
+	Purpose struct {
+		All     int `json:"all"`
+		Binding int `json:"binding"`
+		NotSale int `json:"not_sale"`
+		Sale    int `json:"sale"`
+	} `json:"purpose"`
+	Status struct {
+		Abnormal int `json:"abnormal"`
+		All      int `json:"all"`
+		Deleted  int `json:"deleted"`
+		Disabled int `json:"disabled"`
+		Normal   int `json:"normal"`
+	} `json:"status"`
+	Tlds []struct {
+		Count int    `json:"count"`
+		Key   string `json:"key"`
+	} `json:"tlds"`
+}
+
+// AdminDomainItem defines model for AdminDomainItem.
+type AdminDomainItem struct {
+	CreatedAt time.Time `json:"createdAt"`
+	Domain    string    `json:"domain"`
+
+	// DomainTld Backend-derived exact TLD filter value.
+	DomainTld       string                   `json:"domainTld"`
+	Id              int                      `json:"id"`
+	LastAllocatedAt *time.Time               `json:"lastAllocatedAt,omitempty"`
+	LastSafeError   *string                  `json:"lastSafeError,omitempty"`
+	MailServerId    int                      `json:"mailServerId"`
+	MailboxCount    int                      `json:"mailboxCount"`
+	OwnerEmail      openapi_types.Email      `json:"ownerEmail"`
+	OwnerId         int                      `json:"ownerId"`
+	OwnerNickname   string                   `json:"ownerNickname"`
+	OwnerRole       AdminDomainItemOwnerRole `json:"ownerRole"`
+	Purpose         AdminDomainItemPurpose   `json:"purpose"`
+	Status          AdminDomainItemStatus    `json:"status"`
+	UpdatedAt       time.Time                `json:"updatedAt"`
+	Version         int                      `json:"version"`
+}
+
+// AdminDomainItemOwnerRole defines model for AdminDomainItem.OwnerRole.
+type AdminDomainItemOwnerRole string
+
+// AdminDomainItemPurpose defines model for AdminDomainItem.Purpose.
+type AdminDomainItemPurpose string
+
+// AdminDomainItemStatus defines model for AdminDomainItem.Status.
+type AdminDomainItemStatus string
+
+// AdminDomainListResponse defines model for AdminDomainListResponse.
+type AdminDomainListResponse struct {
+	Facets      AdminDomainFacets `json:"facets"`
+	Items       []AdminDomainItem `json:"items"`
+	Limit       int               `json:"limit"`
+	NextAfterId *int              `json:"nextAfterId,omitempty"`
+	Offset      int               `json:"offset"`
+	Total       int               `json:"total"`
+}
+
+// AdminDomainValidationResponse defines model for AdminDomainValidationResponse.
+type AdminDomainValidationResponse struct {
+	Queued int `json:"queued"`
+}
+
+// AdminMailServerItem defines model for AdminMailServerItem.
+type AdminMailServerItem struct {
+	CreatedAt     time.Time                 `json:"createdAt"`
+	DkimRecord    string                    `json:"dkimRecord"`
+	DmarcRecord   string                    `json:"dmarcRecord"`
+	Id            int                       `json:"id"`
+	MxRecord      string                    `json:"mxRecord"`
+	Name          string                    `json:"name"`
+	OwnerId       int                       `json:"ownerId"`
+	PtrRecord     string                    `json:"ptrRecord"`
+	ServerAddress string                    `json:"serverAddress"`
+	SpfRecord     string                    `json:"spfRecord"`
+	Status        AdminMailServerItemStatus `json:"status"`
+	UpdatedAt     time.Time                 `json:"updatedAt"`
+}
+
+// AdminMailServerItemStatus defines model for AdminMailServerItem.Status.
+type AdminMailServerItemStatus string
+
+// AdminMailServerListResponse defines model for AdminMailServerListResponse.
+type AdminMailServerListResponse struct {
+	Items  []AdminMailServerItem `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int                   `json:"total"`
+}
 
 // AdminMessageDetail defines model for AdminMessageDetail.
 type AdminMessageDetail struct {
@@ -3427,6 +3898,17 @@ type CheckProxiesResponse struct {
 	Requested int `json:"requested"`
 }
 
+// CreateAdminDomainRequest defines model for CreateAdminDomainRequest.
+type CreateAdminDomainRequest struct {
+	Domain       string                          `json:"domain"`
+	MailServerId *int                            `json:"mailServerId,omitempty"`
+	OwnerId      int                             `json:"ownerId"`
+	Purpose      CreateAdminDomainRequestPurpose `json:"purpose"`
+}
+
+// CreateAdminDomainRequestPurpose defines model for CreateAdminDomainRequest.Purpose.
+type CreateAdminDomainRequestPurpose string
+
 // CreateCardsRequest defines model for CreateCardsRequest.
 type CreateCardsRequest struct {
 	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
@@ -3958,6 +4440,22 @@ type PasswordResetRequest struct {
 	Email       openapi_types.Email `json:"email"`
 	NewPassword string              `json:"newPassword"`
 }
+
+// PatchAdminDomainRequest defines model for PatchAdminDomainRequest.
+type PatchAdminDomainRequest struct {
+	MailServerId *int                            `json:"mailServerId,omitempty"`
+	OwnerId      *int                            `json:"ownerId,omitempty"`
+	Purpose      *PatchAdminDomainRequestPurpose `json:"purpose,omitempty"`
+
+	// StatusCommand Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
+	StatusCommand *PatchAdminDomainRequestStatusCommand `json:"statusCommand,omitempty"`
+}
+
+// PatchAdminDomainRequestPurpose defines model for PatchAdminDomainRequest.Purpose.
+type PatchAdminDomainRequestPurpose string
+
+// PatchAdminDomainRequestStatusCommand Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
+type PatchAdminDomainRequestStatusCommand string
 
 // PaymentAmount External payment-channel amount limited to 2 decimal places.
 type PaymentAmount = string
@@ -4572,8 +5070,9 @@ type ResourceItem struct {
 	ForSale *bool `json:"forSale,omitempty"`
 
 	// GraphAvailable Whether Microsoft Graph mail fetch is available after validation (Microsoft resources only)
-	GraphAvailable *bool `json:"graphAvailable,omitempty"`
-	Id             int   `json:"id"`
+	GraphAvailable  *bool      `json:"graphAvailable,omitempty"`
+	Id              int        `json:"id"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 
 	// LastSafeError Sanitized abnormal diagnostic summary (Microsoft resources only)
 	LastSafeError *string `json:"lastSafeError,omitempty"`
@@ -4592,8 +5091,9 @@ type ResourceItem struct {
 	Purpose *ResourceItemPurpose `json:"purpose,omitempty"`
 
 	// Status Resource status (e.g., pending/normal/abnormal/disabled/deleted)
-	Status *string `json:"status,omitempty"`
-	Type   string  `json:"type"`
+	Status    *string   `json:"status,omitempty"`
+	Type      string    `json:"type"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // ResourceItemPurpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
@@ -4859,6 +5359,12 @@ type WalletResponse struct {
 // AdminCommandIdempotencyKey defines model for AdminCommandIdempotencyKey.
 type AdminCommandIdempotencyKey = string
 
+// AdminDomainId defines model for AdminDomainId.
+type AdminDomainId = int
+
+// AdminStateCommandIdempotencyKey defines model for AdminStateCommandIdempotencyKey.
+type AdminStateCommandIdempotencyKey = string
+
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
 
@@ -4969,6 +5475,202 @@ type PatchAdminCardParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminDomainMailboxDisableParams defines parameters for PostAdminDomainMailboxDisable.
+type PostAdminDomainMailboxDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminDomainsParams defines parameters for GetAdminDomains.
+type GetAdminDomainsParams struct {
+	// Search Domain, resource ID, owner ID, owner email, or owner nickname search.
+	Search       *string                       `form:"search,omitempty" json:"search,omitempty"`
+	MailServerId *int                          `form:"mailServerId,omitempty" json:"mailServerId,omitempty"`
+	Purpose      *GetAdminDomainsParamsPurpose `form:"purpose,omitempty" json:"purpose,omitempty"`
+	Status       *GetAdminDomainsParamsStatus  `form:"status,omitempty" json:"status,omitempty"`
+	Tld          *string                       `form:"tld,omitempty" json:"tld,omitempty"`
+	OwnerId      *int                          `form:"ownerId,omitempty" json:"ownerId,omitempty"`
+	CreatedFrom  *time.Time                    `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo    *time.Time                    `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	AfterId      *int                          `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Offset       *int                          `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit        *int                          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminDomainsParamsPurpose defines parameters for GetAdminDomains.
+type GetAdminDomainsParamsPurpose string
+
+// GetAdminDomainsParamsStatus defines parameters for GetAdminDomains.
+type GetAdminDomainsParamsStatus string
+
+// PostAdminDomainParams defines parameters for PostAdminDomain.
+type PostAdminDomainParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainsDeleteParams defines parameters for PostAdminDomainsDelete.
+type PostAdminDomainsDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainsDisableParams defines parameters for PostAdminDomainsDisable.
+type PostAdminDomainsDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainsPublishParams defines parameters for PostAdminDomainsPublish.
+type PostAdminDomainsPublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainsUnpublishParams defines parameters for PostAdminDomainsUnpublish.
+type PostAdminDomainsUnpublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainValidationsParams defines parameters for PostAdminDomainValidations.
+type PostAdminDomainValidationsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteAdminDomainParams defines parameters for DeleteAdminDomain.
+type DeleteAdminDomainParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PatchAdminDomainParams defines parameters for PatchAdminDomain.
+type PatchAdminDomainParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainDisableParams defines parameters for PostAdminDomainDisable.
+type PostAdminDomainDisableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainDnsStatusParams defines parameters for PostAdminDomainDnsStatus.
+type PostAdminDomainDnsStatusParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainEnableParams defines parameters for PostAdminDomainEnable.
+type PostAdminDomainEnableParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminDomainMailboxesParams defines parameters for GetAdminDomainMailboxes.
+type GetAdminDomainMailboxesParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminDomainPublishParams defines parameters for PostAdminDomainPublish.
+type PostAdminDomainPublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainRecoverParams defines parameters for PostAdminDomainRecover.
+type PostAdminDomainRecoverParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainUnpublishParams defines parameters for PostAdminDomainUnpublish.
+type PostAdminDomainUnpublishParams struct {
+	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
+	Version ExpectedAdminResourceVersion `form:"version" json:"version"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDomainValidateParams defines parameters for PostAdminDomainValidate.
+type PostAdminDomainValidateParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
 type GetAdminInvitesParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -4989,16 +5691,27 @@ type PatchAdminInviteParams struct {
 
 // GetAdminMessagesParams defines parameters for GetAdminMessages.
 type GetAdminMessagesParams struct {
-	ResourceId int     `form:"resourceId" json:"resourceId"`
-	Search     *string `form:"search,omitempty" json:"search,omitempty"`
-	Offset     *int    `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	// Type Resource type; defaults to microsoft for backward compatibility.
+	Type       *GetAdminMessagesParamsType `form:"type,omitempty" json:"type,omitempty"`
+	ResourceId int                         `form:"resourceId" json:"resourceId"`
+	Search     *string                     `form:"search,omitempty" json:"search,omitempty"`
+	Offset     *int                        `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit      *int                        `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetAdminMessagesParamsType defines parameters for GetAdminMessages.
+type GetAdminMessagesParamsType string
 
 // GetAdminMessageParams defines parameters for GetAdminMessage.
 type GetAdminMessageParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
+
+	// Type Resource type; defaults to microsoft for backward compatibility.
+	Type *GetAdminMessageParamsType `form:"type,omitempty" json:"type,omitempty"`
 }
+
+// GetAdminMessageParamsType defines parameters for GetAdminMessage.
+type GetAdminMessageParamsType string
 
 // PostAdminOrderTimeoutScanParams defines parameters for PostAdminOrderTimeoutScan.
 type PostAdminOrderTimeoutScanParams struct {
@@ -5473,6 +6186,18 @@ type PostAdminMicrosoftResourceValidateParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// GetAdminServersParams defines parameters for GetAdminServers.
+type GetAdminServersParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminServerParams defines parameters for PostAdminServer.
+type PostAdminServerParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminSupplierApplicationsParams defines parameters for GetAdminSupplierApplications.
 type GetAdminSupplierApplicationsParams struct {
 	Status *string `form:"status,omitempty" json:"status,omitempty"`
@@ -5496,7 +6221,7 @@ type PostAdminSupplierApplicationRejectParams struct {
 type GetAdminTasksParams struct {
 	BizType GetAdminTasksParamsBizType `form:"bizType" json:"bizType"`
 
-	// BizId Microsoft resource ID.
+	// BizId Resource ID matching bizType.
 	BizId  int              `form:"bizId" json:"bizId"`
 	Kind   *AdminTaskKind   `form:"kind,omitempty" json:"kind,omitempty"`
 	Status *AdminTaskStatus `form:"status,omitempty" json:"status,omitempty"`
@@ -5902,6 +6627,30 @@ type PostAdminCardsJSONRequestBody = CreateCardsRequest
 // PatchAdminCardJSONRequestBody defines body for PatchAdminCard for application/json ContentType.
 type PatchAdminCardJSONRequestBody = UpdateCardRequest
 
+// PostAdminDomainJSONRequestBody defines body for PostAdminDomain for application/json ContentType.
+type PostAdminDomainJSONRequestBody = CreateAdminDomainRequest
+
+// PostAdminDomainsDeleteJSONRequestBody defines body for PostAdminDomainsDelete for application/json ContentType.
+type PostAdminDomainsDeleteJSONRequestBody = AdminDomainBulkCommandRequest
+
+// PostAdminDomainsDisableJSONRequestBody defines body for PostAdminDomainsDisable for application/json ContentType.
+type PostAdminDomainsDisableJSONRequestBody = AdminDomainBulkCommandRequest
+
+// PostAdminDomainsPublishJSONRequestBody defines body for PostAdminDomainsPublish for application/json ContentType.
+type PostAdminDomainsPublishJSONRequestBody = AdminDomainBulkCommandRequest
+
+// PostAdminDomainsUnpublishJSONRequestBody defines body for PostAdminDomainsUnpublish for application/json ContentType.
+type PostAdminDomainsUnpublishJSONRequestBody = AdminDomainBulkCommandRequest
+
+// PostAdminDomainValidationsJSONRequestBody defines body for PostAdminDomainValidations for application/json ContentType.
+type PostAdminDomainValidationsJSONRequestBody = AdminDomainBulkCommandRequest
+
+// PatchAdminDomainJSONRequestBody defines body for PatchAdminDomain for application/json ContentType.
+type PatchAdminDomainJSONRequestBody = PatchAdminDomainRequest
+
+// PostAdminDomainDnsStatusJSONRequestBody defines body for PostAdminDomainDnsStatus for application/json ContentType.
+type PostAdminDomainDnsStatusJSONRequestBody = AdminDomainDnsStatusRequest
+
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
 
@@ -5992,6 +6741,9 @@ type PatchAdminMicrosoftResourceJSONRequestBody = AdminMicrosoftUpdateRequest
 // PutAdminMicrosoftResourceCredentialsJSONRequestBody defines body for PutAdminMicrosoftResourceCredentials for application/json ContentType.
 type PutAdminMicrosoftResourceCredentialsJSONRequestBody = AdminMicrosoftReplaceCredentialsRequest
 
+// PostAdminServerJSONRequestBody defines body for PostAdminServer for application/json ContentType.
+type PostAdminServerJSONRequestBody = CreateMailServerRequest
+
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
 
@@ -6063,6 +6815,68 @@ type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
+
+// AsAdminDomainBulkSelection0 returns the union data inside the AdminDomainBulkSelection as a AdminDomainBulkSelection0
+func (t AdminDomainBulkSelection) AsAdminDomainBulkSelection0() (AdminDomainBulkSelection0, error) {
+	var body AdminDomainBulkSelection0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminDomainBulkSelection0 overwrites any union data inside the AdminDomainBulkSelection as the provided AdminDomainBulkSelection0
+func (t *AdminDomainBulkSelection) FromAdminDomainBulkSelection0(v AdminDomainBulkSelection0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminDomainBulkSelection0 performs a merge with any union data inside the AdminDomainBulkSelection, using the provided AdminDomainBulkSelection0
+func (t *AdminDomainBulkSelection) MergeAdminDomainBulkSelection0(v AdminDomainBulkSelection0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAdminDomainBulkSelection1 returns the union data inside the AdminDomainBulkSelection as a AdminDomainBulkSelection1
+func (t AdminDomainBulkSelection) AsAdminDomainBulkSelection1() (AdminDomainBulkSelection1, error) {
+	var body AdminDomainBulkSelection1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdminDomainBulkSelection1 overwrites any union data inside the AdminDomainBulkSelection as the provided AdminDomainBulkSelection1
+func (t *AdminDomainBulkSelection) FromAdminDomainBulkSelection1(v AdminDomainBulkSelection1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdminDomainBulkSelection1 performs a merge with any union data inside the AdminDomainBulkSelection, using the provided AdminDomainBulkSelection1
+func (t *AdminDomainBulkSelection) MergeAdminDomainBulkSelection1(v AdminDomainBulkSelection1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t AdminDomainBulkSelection) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *AdminDomainBulkSelection) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsAdminMicrosoftIdsSelection returns the union data inside the AdminMicrosoftBulkSelection as a AdminMicrosoftIdsSelection
 func (t AdminMicrosoftBulkSelection) AsAdminMicrosoftIdsSelection() (AdminMicrosoftIdsSelection, error) {
@@ -6655,6 +7469,63 @@ type ServerInterface interface {
 	// Enable or disable a card key
 	// (PATCH /v1/admin/cards/{cardKey})
 	PatchAdminCard(c *gin.Context, cardKey string, params PatchAdminCardParams)
+	// Disable one generated domain mailbox
+	// (POST /v1/admin/domain-mailboxes/{mailboxId}/disable)
+	PostAdminDomainMailboxDisable(c *gin.Context, mailboxId int, params PostAdminDomainMailboxDisableParams)
+	// List self-hosted domain resources for the administrator console
+	// (GET /v1/admin/domains)
+	GetAdminDomains(c *gin.Context, params GetAdminDomainsParams)
+	// Create a self-hosted domain resource for an explicit owner
+	// (POST /v1/admin/domains)
+	PostAdminDomain(c *gin.Context, params PostAdminDomainParams)
+	// Logically delete selected or all matching domains
+	// (POST /v1/admin/domains/delete)
+	PostAdminDomainsDelete(c *gin.Context, params PostAdminDomainsDeleteParams)
+	// Disable selected domains
+	// (POST /v1/admin/domains/disable)
+	PostAdminDomainsDisable(c *gin.Context, params PostAdminDomainsDisableParams)
+	// Publish selected or all matching private domains
+	// (POST /v1/admin/domains/publish)
+	PostAdminDomainsPublish(c *gin.Context, params PostAdminDomainsPublishParams)
+	// Convert selected or all matching public domains to private
+	// (POST /v1/admin/domains/unpublish)
+	PostAdminDomainsUnpublish(c *gin.Context, params PostAdminDomainsUnpublishParams)
+	// Queue validation for selected or all matching domains
+	// (POST /v1/admin/domains/validations)
+	PostAdminDomainValidations(c *gin.Context, params PostAdminDomainValidationsParams)
+	// Logically delete a domain resource
+	// (DELETE /v1/admin/domains/{domainId})
+	DeleteAdminDomain(c *gin.Context, domainId AdminDomainId, params DeleteAdminDomainParams)
+	// Get one self-hosted domain resource
+	// (GET /v1/admin/domains/{domainId})
+	GetAdminDomain(c *gin.Context, domainId AdminDomainId)
+	// Edit domain owner, purpose, mail server, or an explicit status command
+	// (PATCH /v1/admin/domains/{domainId})
+	PatchAdminDomain(c *gin.Context, domainId AdminDomainId, params PatchAdminDomainParams)
+	// Disable a self-hosted domain resource
+	// (POST /v1/admin/domains/{domainId}/disable)
+	PostAdminDomainDisable(c *gin.Context, domainId AdminDomainId, params PostAdminDomainDisableParams)
+	// Mark a domain DNS state normal or abnormal
+	// (POST /v1/admin/domains/{domainId}/dns-status)
+	PostAdminDomainDnsStatus(c *gin.Context, domainId AdminDomainId, params PostAdminDomainDnsStatusParams)
+	// Enable a disabled domain and queue validation
+	// (POST /v1/admin/domains/{domainId}/enable)
+	PostAdminDomainEnable(c *gin.Context, domainId AdminDomainId, params PostAdminDomainEnableParams)
+	// List generated mailboxes for a self-hosted domain
+	// (GET /v1/admin/domains/{domainId}/mailboxes)
+	GetAdminDomainMailboxes(c *gin.Context, domainId AdminDomainId, params GetAdminDomainMailboxesParams)
+	// Publish one private domain
+	// (POST /v1/admin/domains/{domainId}/publish)
+	PostAdminDomainPublish(c *gin.Context, domainId AdminDomainId, params PostAdminDomainPublishParams)
+	// Recover a deleted domain as private and queue validation
+	// (POST /v1/admin/domains/{domainId}/recover)
+	PostAdminDomainRecover(c *gin.Context, domainId AdminDomainId, params PostAdminDomainRecoverParams)
+	// Convert one public domain to private
+	// (POST /v1/admin/domains/{domainId}/unpublish)
+	PostAdminDomainUnpublish(c *gin.Context, domainId AdminDomainId, params PostAdminDomainUnpublishParams)
+	// Queue validation for one domain resource
+	// (POST /v1/admin/domains/{domainId}/validate)
+	PostAdminDomainValidate(c *gin.Context, domainId AdminDomainId, params PostAdminDomainValidateParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
@@ -6838,6 +7709,12 @@ type ServerInterface interface {
 	// Validate one Microsoft resource
 	// (POST /v1/admin/resources/{resourceId}/validate)
 	PostAdminMicrosoftResourceValidate(c *gin.Context, resourceId int, params PostAdminMicrosoftResourceValidateParams)
+	// List mail servers for administrator domain management
+	// (GET /v1/admin/servers)
+	GetAdminServers(c *gin.Context, params GetAdminServersParams)
+	// Create a mail server owned by the current administrator
+	// (POST /v1/admin/servers)
+	PostAdminServer(c *gin.Context, params PostAdminServerParams)
 	// List supplier applications
 	// (GET /v1/admin/suppliers/applications)
 	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
@@ -6847,7 +7724,7 @@ type ServerInterface interface {
 	// Reject supplier application
 	// (POST /v1/admin/suppliers/applications/{applicationId}/reject)
 	PostAdminSupplierApplicationReject(c *gin.Context, applicationId int, params PostAdminSupplierApplicationRejectParams)
-	// List normalized administrator tasks for a Microsoft resource
+	// List normalized administrator tasks for a Microsoft or domain resource
 	// (GET /v1/admin/tasks)
 	GetAdminTasks(c *gin.Context, params GetAdminTasksParams)
 	// Get one normalized administrator task
@@ -7484,6 +8361,1414 @@ func (siw *ServerInterfaceWrapper) PatchAdminCard(c *gin.Context) {
 	siw.Handler.PatchAdminCard(c, cardKey, params)
 }
 
+// PostAdminDomainMailboxDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainMailboxDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "mailboxId" -------------
+	var mailboxId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "mailboxId", c.Param("mailboxId"), &mailboxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter mailboxId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainMailboxDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainMailboxDisable(c, mailboxId, params)
+}
+
+// GetAdminDomains operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDomains(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDomainsParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "mailServerId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "mailServerId", c.Request.URL.Query(), &params.MailServerId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter mailServerId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "purpose" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "purpose", c.Request.URL.Query(), &params.Purpose, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter purpose: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "tld" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tld", c.Request.URL.Query(), &params.Tld, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter tld: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerId", c.Request.URL.Query(), &params.OwnerId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDomains(c, params)
+}
+
+// PostAdminDomain operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomain(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomain(c, params)
+}
+
+// PostAdminDomainsDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainsDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainsDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainsDelete(c, params)
+}
+
+// PostAdminDomainsDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainsDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainsDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainsDisable(c, params)
+}
+
+// PostAdminDomainsPublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainsPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainsPublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainsPublish(c, params)
+}
+
+// PostAdminDomainsUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainsUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainsUnpublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainsUnpublish(c, params)
+}
+
+// PostAdminDomainValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainValidations(c, params)
+}
+
+// DeleteAdminDomain operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminDomain(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminDomainParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminDomain(c, domainId, params)
+}
+
+// GetAdminDomain operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDomain(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDomain(c, domainId)
+}
+
+// PatchAdminDomain operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminDomain(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminDomainParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminDomain(c, domainId, params)
+}
+
+// PostAdminDomainDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainDisableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainDisable(c, domainId, params)
+}
+
+// PostAdminDomainDnsStatus operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainDnsStatus(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainDnsStatusParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminStateCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainDnsStatus(c, domainId, params)
+}
+
+// PostAdminDomainEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainEnableParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainEnable(c, domainId, params)
+}
+
+// GetAdminDomainMailboxes operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDomainMailboxes(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDomainMailboxesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDomainMailboxes(c, domainId, params)
+}
+
+// PostAdminDomainPublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainPublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainPublish(c, domainId, params)
+}
+
+// PostAdminDomainRecover operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainRecover(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainRecoverParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainRecover(c, domainId, params)
+}
+
+// PostAdminDomainUnpublish operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainUnpublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainUnpublishParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainUnpublish(c, domainId, params)
+}
+
+// PostAdminDomainValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDomainValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "domainId" -------------
+	var domainId AdminDomainId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domainId", c.Param("domainId"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter domainId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDomainValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDomainValidate(c, domainId, params)
+}
+
 // GetAdminInvites operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminInvites(c *gin.Context) {
 
@@ -7631,6 +9916,14 @@ func (siw *ServerInterfaceWrapper) GetAdminMessages(c *gin.Context) {
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAdminMessagesParams
 
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Required query parameter "resourceId" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -7698,6 +9991,14 @@ func (siw *ServerInterfaceWrapper) GetAdminMessage(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, true, "resourceId", c.Request.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -11085,6 +13386,88 @@ func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceValidate(c *gin.Con
 	siw.Handler.PostAdminMicrosoftResourceValidate(c, resourceId, params)
 }
 
+// GetAdminServers operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminServers(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminServersParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminServers(c, params)
+}
+
+// PostAdminServer operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminServer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminServerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminServer(c, params)
+}
+
 // GetAdminSupplierApplications operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminSupplierApplications(c *gin.Context) {
 
@@ -14025,6 +16408,25 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/cards", wrapper.GetAdminCards)
 	router.POST(options.BaseURL+"/v1/admin/cards", wrapper.PostAdminCards)
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
+	router.POST(options.BaseURL+"/v1/admin/domain-mailboxes/:mailboxId/disable", wrapper.PostAdminDomainMailboxDisable)
+	router.GET(options.BaseURL+"/v1/admin/domains", wrapper.GetAdminDomains)
+	router.POST(options.BaseURL+"/v1/admin/domains", wrapper.PostAdminDomain)
+	router.POST(options.BaseURL+"/v1/admin/domains/delete", wrapper.PostAdminDomainsDelete)
+	router.POST(options.BaseURL+"/v1/admin/domains/disable", wrapper.PostAdminDomainsDisable)
+	router.POST(options.BaseURL+"/v1/admin/domains/publish", wrapper.PostAdminDomainsPublish)
+	router.POST(options.BaseURL+"/v1/admin/domains/unpublish", wrapper.PostAdminDomainsUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/domains/validations", wrapper.PostAdminDomainValidations)
+	router.DELETE(options.BaseURL+"/v1/admin/domains/:domainId", wrapper.DeleteAdminDomain)
+	router.GET(options.BaseURL+"/v1/admin/domains/:domainId", wrapper.GetAdminDomain)
+	router.PATCH(options.BaseURL+"/v1/admin/domains/:domainId", wrapper.PatchAdminDomain)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/disable", wrapper.PostAdminDomainDisable)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/dns-status", wrapper.PostAdminDomainDnsStatus)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/enable", wrapper.PostAdminDomainEnable)
+	router.GET(options.BaseURL+"/v1/admin/domains/:domainId/mailboxes", wrapper.GetAdminDomainMailboxes)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/publish", wrapper.PostAdminDomainPublish)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/recover", wrapper.PostAdminDomainRecover)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/unpublish", wrapper.PostAdminDomainUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/validate", wrapper.PostAdminDomainValidate)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
@@ -14086,6 +16488,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/token/refresh", wrapper.PostAdminMicrosoftResourceTokenRefresh)
 	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/unpublish", wrapper.PostAdminMicrosoftResourceUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/validate", wrapper.PostAdminMicrosoftResourceValidate)
+	router.GET(options.BaseURL+"/v1/admin/servers", wrapper.GetAdminServers)
+	router.POST(options.BaseURL+"/v1/admin/servers", wrapper.PostAdminServer)
 	router.GET(options.BaseURL+"/v1/admin/suppliers/applications", wrapper.GetAdminSupplierApplications)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)

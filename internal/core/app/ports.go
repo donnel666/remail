@@ -82,9 +82,6 @@ type EmailResourceRepository interface {
 	// DeleteResourcesByFilterWithLog marks owned private resources matching a server-side filter as deleted with a set-based update.
 	DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error)
 
-	// UpdateDomain updates a domain resource and writes OperationLog.
-	UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error
-
 	// ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.
 	ListMicrosoftStatus(ctx context.Context, ids []uint) ([]MicrosoftStatusResult, error)
 
@@ -201,6 +198,7 @@ type MailServerRepository interface {
 type GeneratedMailboxRepository interface {
 	List(ctx context.Context, domainResourceID uint, ownerUserID uint, offset, limit int) ([]domain.GeneratedMailbox, error)
 	Count(ctx context.Context, domainResourceID uint, ownerUserID uint) (int64, error)
+	DisableWithLog(ctx context.Context, mailboxID uint, log *governancedomain.OperationLog) error
 }
 
 // TXTParser parses resource import TXT files.
@@ -998,21 +996,23 @@ func NewResourceUseCase(resources EmailResourceRepository) *ResourceUseCase {
 
 // ResourceItem is the API-safe view of a resource.
 type ResourceItem struct {
-	ID             uint                `json:"id"`
-	Type           domain.ResourceType `json:"type"`
-	OwnerID        uint                `json:"ownerId"`
-	Status         string              `json:"status"`
-	ForSale        *bool               `json:"forSale,omitempty"`
-	LongLived      *bool               `json:"longLived,omitempty"`
-	GraphAvailable *bool               `json:"graphAvailable,omitempty"`
-	LastSafeError  string              `json:"lastSafeError,omitempty"`
-	Email          string              `json:"email,omitempty"`
-	Domain         string              `json:"domain,omitempty"`
-	DomainTLD      string              `json:"domainTld,omitempty"`
-	MailServerID   uint                `json:"mailServerId,omitempty"`
-	Purpose        string              `json:"purpose,omitempty"`
-	MailboxCount   int                 `json:"mailboxCount,omitempty"`
-	CreatedAt      time.Time           `json:"createdAt"`
+	ID              uint                `json:"id"`
+	Type            domain.ResourceType `json:"type"`
+	OwnerID         uint                `json:"ownerId"`
+	Status          string              `json:"status"`
+	ForSale         *bool               `json:"forSale,omitempty"`
+	LongLived       *bool               `json:"longLived,omitempty"`
+	GraphAvailable  *bool               `json:"graphAvailable,omitempty"`
+	LastSafeError   string              `json:"lastSafeError,omitempty"`
+	Email           string              `json:"email,omitempty"`
+	Domain          string              `json:"domain,omitempty"`
+	DomainTLD       string              `json:"domainTld,omitempty"`
+	MailServerID    uint                `json:"mailServerId,omitempty"`
+	Purpose         string              `json:"purpose,omitempty"`
+	MailboxCount    int                 `json:"mailboxCount,omitempty"`
+	LastAllocatedAt *time.Time          `json:"lastAllocatedAt,omitempty"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	UpdatedAt       time.Time           `json:"updatedAt"`
 }
 
 // MicrosoftResourceDetail is the API-safe view of a Microsoft resource (no credentials).
@@ -1120,6 +1120,7 @@ type ResourceListFilter struct {
 	TLD          string
 	Status       string
 	Purpose      string
+	MailServerID uint
 	// ExcludeBinding is an internal visibility guard for supplier/self-service
 	// resource queries. Auxiliary-mailbox domains are operational platform
 	// resources and must not contribute list items, totals, or facets there.
@@ -1148,14 +1149,16 @@ type MicrosoftStatusResult struct {
 
 // DomainStatusResult holds minimal API-safe status for a domain resource.
 type DomainStatusResult struct {
-	ID            uint
-	Domain        string
-	DomainTLD     string
-	MailServerID  uint
-	Purpose       string
-	Status        string
-	LastSafeError string
-	MailboxCount  int
+	ID              uint
+	Domain          string
+	DomainTLD       string
+	MailServerID    uint
+	Purpose         string
+	Status          string
+	LastSafeError   string
+	MailboxCount    int
+	LastAllocatedAt *time.Time
+	UpdatedAt       time.Time
 }
 
 const (
@@ -1259,6 +1262,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			Type:      r.Type,
 			OwnerID:   r.OwnerUserID,
 			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
 		}
 		switch r.Type {
 		case domain.ResourceTypeMicrosoft:
@@ -1284,6 +1288,8 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 				item.Purpose = s.Purpose
 				item.LastSafeError = s.LastSafeError
 				item.MailboxCount = s.MailboxCount
+				item.LastAllocatedAt = s.LastAllocatedAt
+				item.UpdatedAt = s.UpdatedAt
 			} else {
 				return nil, fmt.Errorf("resource invariant violation: domain resource %d has no subtable status", r.ID)
 			}
@@ -1757,7 +1763,7 @@ func normalizeResourceListFilter(filter ResourceListFilter) (ResourceListFilter,
 
 	switch filter.ResourceType {
 	case "":
-		if filter.Suffix != "" || filter.TLD != "" || filter.Purpose != "" || filter.ForSale != nil || filter.LongLived != nil || filter.GraphAvailable != nil {
+		if filter.Suffix != "" || filter.TLD != "" || filter.Purpose != "" || filter.MailServerID != 0 || filter.ForSale != nil || filter.LongLived != nil || filter.GraphAvailable != nil {
 			return ResourceListFilter{}, domain.ErrInvalidResourceFilter
 		}
 		if filter.Status != "" && !domain.IsValidMicrosoftStatus(filter.Status) && !domain.IsValidDomainStatus(filter.Status) {
@@ -1769,6 +1775,7 @@ func normalizeResourceListFilter(filter ResourceListFilter) (ResourceListFilter,
 	case domain.ResourceTypeMicrosoft:
 		filter.Purpose = ""
 		filter.TLD = ""
+		filter.MailServerID = 0
 		if filter.Suffix != "" {
 			suffix := strings.TrimPrefix(filter.Suffix, "@")
 			normalized, err := domain.NormalizeDomainSuffix(suffix)
@@ -2028,7 +2035,7 @@ func NewDomainMailboxUseCase(mailboxes GeneratedMailboxRepository, resources Ema
 // Non-admin users can only see their own domain resource's mailboxes.
 // Unauthorized access returns ErrForbiddenResource to prevent enumeration.
 func (uc *DomainMailboxUseCase) List(ctx context.Context, domainResourceID, userID uint, isAdmin bool, offset, limit int) (*MailboxListResult, error) {
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 10000 {
 		limit = 20
 	}
 	if offset < 0 {
@@ -2043,7 +2050,7 @@ func (uc *DomainMailboxUseCase) List(ctx context.Context, domainResourceID, user
 	if resource == nil {
 		return nil, domain.ErrForbiddenResource
 	}
-	if resource.Status == domain.DomainStatusDeleted {
+	if resource.Status == domain.DomainStatusDeleted && !isAdmin {
 		return nil, domain.ErrResourceNotFound
 	}
 	if !isAdmin && resource.Purpose == domain.PurposeBinding {
@@ -2076,4 +2083,18 @@ func (uc *DomainMailboxUseCase) List(ctx context.Context, domainResourceID, user
 	}
 
 	return &MailboxListResult{Items: mailboxes, Total: total, Offset: offset, Limit: limit}, nil
+}
+
+// DisableAdmin prevents one generated mailbox from future allocation.
+func (uc *DomainMailboxUseCase) DisableAdmin(ctx context.Context, mailboxID, operatorUserID uint, requestID, requestPath string) error {
+	return uc.mailboxes.DisableWithLog(ctx, mailboxID, &governancedomain.OperationLog{
+		OperatorUserID: operatorUserID,
+		OperationType:  "core.generated_mailbox.disable",
+		ResourceType:   "generated_mailbox",
+		ResourceID:     fmt.Sprintf("%d", mailboxID),
+		Path:           requestPath,
+		Result:         "success",
+		SafeSummary:    "Generated mailbox disabled by administrator.",
+		RequestID:      requestID,
+	})
 }

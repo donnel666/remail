@@ -5411,6 +5411,699 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/admin/domains:
+    get:
+      operationId: getAdminDomains
+      summary: List self-hosted domain resources for the administrator console
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: search
+          in: query
+          description: Domain, resource ID, owner ID, owner email, or owner nickname search.
+          schema:
+            type: string
+            maxLength: 120
+        - name: mailServerId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: purpose
+          in: query
+          schema:
+            type: string
+            enum: [not_sale, sale, binding]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [normal, abnormal, disabled, deleted]
+        - name: tld
+          in: query
+          schema:
+            type: string
+            maxLength: 64
+        - name: ownerId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: afterId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated domain resource list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    post:
+      operationId: postAdminDomain
+      summary: Create a self-hosted domain resource for an explicit owner
+      description: The owner and mail server are validated server-side. Public supply owners must be enabled supplier/admin users, and the mail server must belong to the selected owner.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminDomainRequest"
+      responses:
+        "201":
+          description: Domain resource created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/domains/validations:
+    post:
+      operationId: postAdminDomainValidations
+      summary: Queue validation for selected or all matching domains
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
+      responses:
+        "202":
+          description: Domain validations accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/domains/disable:
+    post:
+      operationId: postAdminDomainsDisable
+      summary: Disable selected domains
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
+      responses:
+        "200":
+          description: Domain bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainBulkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/publish:
+    post:
+      operationId: postAdminDomainsPublish
+      summary: Publish selected or all matching private domains
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
+      responses:
+        "200":
+          description: Domain bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainBulkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/unpublish:
+    post:
+      operationId: postAdminDomainsUnpublish
+      summary: Convert selected or all matching public domains to private
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
+      responses:
+        "200":
+          description: Domain bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainBulkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/delete:
+    post:
+      operationId: postAdminDomainsDelete
+      summary: Logically delete selected or all matching domains
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
+      responses:
+        "200":
+          description: Domain bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainBulkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}:
+    get:
+      operationId: getAdminDomain
+      summary: Get one self-hosted domain resource
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+      responses:
+        "200":
+          description: Domain resource detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: patchAdminDomain
+      summary: Edit domain owner, purpose, mail server, or an explicit status command
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAdminDomainRequest"
+      responses:
+        "200":
+          description: Updated domain resource
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    delete:
+      operationId: deleteAdminDomain
+      summary: Logically delete a domain resource
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Domain deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/mailboxes:
+    get:
+      operationId: getAdminDomainMailboxes
+      summary: List generated mailboxes for a self-hosted domain
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 20
+      responses:
+        "200":
+          description: Generated mailbox list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/admin/domains/{domainId}/validate:
+    post:
+      operationId: postAdminDomainValidate
+      summary: Queue validation for one domain resource
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      responses:
+        "202":
+          description: Domain validation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/dns-status:
+    post:
+      operationId: postAdminDomainDnsStatus
+      summary: Mark a domain DNS state normal or abnormal
+      description: Explicit state-machine command; disabled and deleted domains cannot be changed through this endpoint.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDomainDnsStatusRequest"
+      responses:
+        "204":
+          description: DNS status updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/disable:
+    post:
+      operationId: postAdminDomainDisable
+      summary: Disable a self-hosted domain resource
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Domain disabled
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/enable:
+    post:
+      operationId: postAdminDomainEnable
+      summary: Enable a disabled domain and queue validation
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "200":
+          description: Enabled domain resource
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/publish:
+    post:
+      operationId: postAdminDomainPublish
+      summary: Publish one private domain
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Domain published
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/unpublish:
+    post:
+      operationId: postAdminDomainUnpublish
+      summary: Convert one public domain to private
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "204":
+          description: Domain converted to private
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domains/{domainId}/recover:
+    post:
+      operationId: postAdminDomainRecover
+      summary: Recover a deleted domain as private and queue validation
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AdminDomainId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+      responses:
+        "200":
+          description: Recovered domain resource
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDomainItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/domain-mailboxes/{mailboxId}/disable:
+    post:
+      operationId: postAdminDomainMailboxDisable
+      summary: Disable one generated domain mailbox
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: mailboxId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      responses:
+        "204":
+          description: Generated mailbox disabled
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/servers:
+    get:
+      operationId: getAdminServers
+      summary: List mail servers for administrator domain management
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated mail server list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailServerListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: postAdminServer
+      summary: Create a mail server owned by the current administrator
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMailServerRequest"
+      responses:
+        "201":
+          description: Mail server created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMailServerItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /v1/admin/resources:
     get:
       operationId: getAdminMicrosoftResources
@@ -6373,7 +7066,7 @@ paths:
   /v1/admin/tasks:
     get:
       operationId: getAdminTasks
-      summary: List normalized administrator tasks for a Microsoft resource
+      summary: List normalized administrator tasks for a Microsoft or domain resource
       description: |
         Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
       tags:
@@ -6386,11 +7079,11 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft_resource]
+            enum: [microsoft_resource, domain_resource]
         - name: bizId
           in: query
           required: true
-          description: Microsoft resource ID.
+          description: Resource ID matching bizType.
           schema:
             type: integer
             minimum: 1
@@ -6479,6 +7172,13 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - name: type
+          in: query
+          description: Resource type; defaults to microsoft for backward compatibility.
+          schema:
+            type: string
+            enum: [microsoft, domain]
+            default: microsoft
         - name: resourceId
           in: query
           required: true
@@ -6544,6 +7244,13 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: type
+          in: query
+          description: Resource type; defaults to microsoft for backward compatibility.
+          schema:
+            type: string
+            enum: [microsoft, domain]
+            default: microsoft
       responses:
         "200":
           description: Authorized message body and safe diagnostic
@@ -6695,6 +7402,22 @@ components:
         minLength: 1
         maxLength: 128
       description: Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+    AdminStateCommandIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
+    AdminDomainId:
+      name: domainId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
     ExpectedAdminResourceVersion:
       name: version
       in: query
@@ -8365,6 +9088,7 @@ components:
         - type
         - ownerId
         - createdAt
+        - updatedAt
       properties:
         id:
           type: integer
@@ -8406,7 +9130,14 @@ components:
         mailboxCount:
           type: integer
           description: Generated mailbox count for domain resources.
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
       additionalProperties: false
@@ -10046,6 +10777,330 @@ components:
           description: Defaults to not_sale. Domain creation does not accept sale; suppliers publish private domains through the resource publish endpoint. binding is admin-only and displayed as auxiliary mailbox in Chinese.
       additionalProperties: false
 
+    AdminDomainDnsStatusRequest:
+      type: object
+      required:
+        - normal
+      properties:
+        normal:
+          type: boolean
+          description: true marks DNS normal; false marks DNS abnormal.
+      additionalProperties: false
+
+    CreateAdminDomainRequest:
+      type: object
+      required: [domain, ownerId, purpose]
+      properties:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+        ownerId:
+          type: integer
+          minimum: 1
+        purpose:
+          type: string
+          enum: [not_sale, sale, binding]
+        mailServerId:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    PatchAdminDomainRequest:
+      type: object
+      minProperties: 1
+      properties:
+        ownerId:
+          type: integer
+          minimum: 1
+        purpose:
+          type: string
+          enum: [not_sale, sale, binding]
+        mailServerId:
+          type: integer
+          minimum: 1
+        statusCommand:
+          type: string
+          enum: [mark_normal, mark_abnormal, enable, disable]
+          description: Explicit state-machine command; disabled resources can only use enable, never a DNS result command.
+      additionalProperties: false
+
+    AdminDomainBulkFilter:
+      type: object
+      properties:
+        search:
+          type: string
+          maxLength: 120
+        status:
+          type: string
+          enum: [normal, abnormal, disabled, deleted]
+        purpose:
+          type: string
+          enum: [not_sale, sale, binding]
+        tld:
+          type: string
+          maxLength: 64
+        ownerId:
+          type: integer
+          minimum: 1
+        mailServerId:
+          type: integer
+          minimum: 1
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminDomainBulkSelection:
+      oneOf:
+        - type: object
+          required: [mode, resourceIds]
+          properties:
+            mode:
+              type: string
+              enum: [ids]
+            resourceIds:
+              type: array
+              minItems: 1
+              maxItems: 1000
+              uniqueItems: true
+              items:
+                type: integer
+                minimum: 1
+          additionalProperties: false
+        - type: object
+          required: [mode, filter]
+          properties:
+            mode:
+              type: string
+              enum: [filter]
+            filter:
+              $ref: "#/components/schemas/AdminDomainBulkFilter"
+          additionalProperties: false
+
+    AdminDomainBulkCommandRequest:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminDomainBulkSelection"
+      additionalProperties: false
+
+    AdminDomainBulkResponse:
+      type: object
+      required: [requested, affected, skipped]
+      properties:
+        requested:
+          type: integer
+          minimum: 0
+        affected:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    AdminDomainValidationResponse:
+      type: object
+      required: [queued]
+      properties:
+        queued:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    AdminDomainItem:
+      type: object
+      required:
+        - id
+        - version
+        - ownerId
+        - ownerEmail
+        - ownerNickname
+        - ownerRole
+        - domain
+        - domainTld
+        - mailServerId
+        - purpose
+        - status
+        - mailboxCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        version:
+          type: integer
+          minimum: 1
+        ownerId:
+          type: integer
+        ownerEmail:
+          type: string
+          format: email
+        ownerNickname:
+          type: string
+        ownerRole:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        domain:
+          type: string
+        domainTld:
+          type: string
+          description: Backend-derived exact TLD filter value.
+        mailServerId:
+          type: integer
+        purpose:
+          type: string
+          enum: [not_sale, sale, binding]
+        status:
+          type: string
+          enum: [normal, abnormal, disabled, deleted]
+        mailboxCount:
+          type: integer
+          minimum: 0
+        lastSafeError:
+          type: string
+        lastAllocatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminDomainListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - facets
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDomainItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+        nextAfterId:
+          type: integer
+          minimum: 1
+        facets:
+          $ref: "#/components/schemas/AdminDomainFacets"
+      additionalProperties: false
+
+    AdminDomainFacets:
+      type: object
+      required: [status, purpose, tlds]
+      properties:
+        status:
+          type: object
+          required: [all, normal, abnormal, disabled, deleted]
+          properties:
+            all: { type: integer, minimum: 0 }
+            normal: { type: integer, minimum: 0 }
+            abnormal: { type: integer, minimum: 0 }
+            disabled: { type: integer, minimum: 0 }
+            deleted: { type: integer, minimum: 0 }
+          additionalProperties: false
+        purpose:
+          type: object
+          required: [all, not_sale, sale, binding]
+          properties:
+            all: { type: integer, minimum: 0 }
+            not_sale: { type: integer, minimum: 0 }
+            sale: { type: integer, minimum: 0 }
+            binding: { type: integer, minimum: 0 }
+          additionalProperties: false
+        tlds:
+          type: array
+          items:
+            type: object
+            required: [key, count]
+            properties:
+              key: { type: string }
+              count: { type: integer, minimum: 0 }
+            additionalProperties: false
+      additionalProperties: false
+
+    AdminMailServerItem:
+      type: object
+      required:
+        - id
+        - ownerId
+        - name
+        - serverAddress
+        - mxRecord
+        - spfRecord
+        - dkimRecord
+        - dmarcRecord
+        - ptrRecord
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        ownerId:
+          type: integer
+        name:
+          type: string
+        serverAddress:
+          type: string
+        mxRecord:
+          type: string
+        spfRecord:
+          type: string
+        dkimRecord:
+          type: string
+        dmarcRecord:
+          type: string
+        ptrRecord:
+          type: string
+        status:
+          type: string
+          enum: [online, offline, disabled]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminMailServerListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMailServerItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
     MailboxListResponse:
       type: object
       required:
@@ -10735,7 +11790,7 @@ components:
       enum: [queued, running, succeeded, failed, uncertain, canceled]
     AdminTaskBizType:
       type: string
-      enum: [microsoft_resource, microsoft_resource_import, microsoft_resource_bulk]
+      enum: [microsoft_resource, domain_resource, microsoft_resource_import, microsoft_resource_bulk]
     AdminTaskProgress:
       type: object
       required:

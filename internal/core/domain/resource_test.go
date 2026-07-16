@@ -168,6 +168,30 @@ func TestDomainResource_TransitionStatusRejectsIllegal(t *testing.T) {
 	}
 }
 
+func TestDomainResource_DNSStatusCannotEnableDisabledOrDeleted(t *testing.T) {
+	for _, status := range []MailDomainStatus{DomainStatusDisabled, DomainStatusDeleted} {
+		r := &MailDomainResource{Status: status, LastSafeError: "keep diagnostic"}
+		err := r.MarkDNSStatusAdmin(true)
+		if status == DomainStatusDisabled && !errors.Is(err, ErrInvalidResourceStatus) {
+			t.Fatalf("disabled MarkDNSStatusAdmin() = %v, want ErrInvalidResourceStatus", err)
+		}
+		if status == DomainStatusDeleted && !errors.Is(err, ErrResourceNotFound) {
+			t.Fatalf("deleted MarkDNSStatusAdmin() = %v, want ErrResourceNotFound", err)
+		}
+		if r.Status != status {
+			t.Fatalf("status changed from %q to %q", status, r.Status)
+		}
+	}
+
+	r := &MailDomainResource{Status: DomainStatusDisabled, LastSafeError: "old diagnostic"}
+	if err := r.EnableAdmin(); err != nil {
+		t.Fatalf("EnableAdmin() unexpected error: %v", err)
+	}
+	if r.Status != DomainStatusAbnormal || r.LastSafeError != "" {
+		t.Fatalf("EnableAdmin() status/error = %q/%q", r.Status, r.LastSafeError)
+	}
+}
+
 func TestDomainResource_MarkDeleted(t *testing.T) {
 	allocatedAt := testTime()
 	r := &MailDomainResource{

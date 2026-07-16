@@ -763,6 +763,9 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 	for _, email := range generatedMailboxVariants(candidate.Domain) {
 		mailbox, err = uc.repo.FindOrCreateGeneratedMailbox(ctx, candidate.ResourceID, candidate.OwnerUserID, email)
 		if err != nil {
+			if errors.Is(err, domain.ErrAllocationConflict) {
+				continue
+			}
 			return nil, err
 		}
 		result, err := uc.createDomainAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)

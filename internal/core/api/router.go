@@ -6,7 +6,7 @@ import (
 )
 
 // RegisterCoreRoutes registers all Core (resource) routes on the given router group.
-// P1-I2: supplier resource upload, list, detail. Admin routes come in later iterations.
+// P1-I2: supplier resource upload, list, detail, plus administrator resource operations.
 // The fetcher is used by LoadSession middleware to authenticate users.
 func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
 	h := NewCoreHandler(mod, checker)
@@ -70,6 +70,28 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		admin.POST("/resources/:resourceId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourceUnpublish)
 		admin.DELETE("/resources/:resourceId", middleware.PermissionRequired(checker, "core:resource", "operate"), h.DeleteAdminMicrosoftResource)
 		admin.POST("/resources/:resourceId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourceRecover)
+
+		admin.GET("/domains", middleware.PermissionRequired(checker, "core:resource", "read"), h.GetAdminDomains)
+		admin.POST("/domains", middleware.PermissionRequired(checker, "core:resource", "write"), h.PostAdminDomain)
+		admin.POST("/domains/validations", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainValidations)
+		admin.POST("/domains/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainsDisable)
+		admin.POST("/domains/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainsPublish)
+		admin.POST("/domains/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainsUnpublish)
+		admin.POST("/domains/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainsDelete)
+		admin.GET("/domains/:domainId", middleware.PermissionRequired(checker, "core:resource", "read"), h.GetAdminDomain)
+		admin.PATCH("/domains/:domainId", middleware.PermissionRequired(checker, "core:resource", "write"), h.PatchAdminDomain)
+		admin.GET("/domains/:domainId/mailboxes", middleware.PermissionRequired(checker, "core:resource", "read"), h.GetAdminDomainMailboxes)
+		admin.POST("/domains/:domainId/validate", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainValidate)
+		admin.POST("/domains/:domainId/dns-status", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainDNSStatus)
+		admin.POST("/domains/:domainId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainEnable)
+		admin.POST("/domains/:domainId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainDisable)
+		admin.POST("/domains/:domainId/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainPublish)
+		admin.POST("/domains/:domainId/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainUnpublish)
+		admin.DELETE("/domains/:domainId", middleware.PermissionRequired(checker, "core:resource", "operate"), h.DeleteAdminDomain)
+		admin.POST("/domains/:domainId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainRecover)
+		admin.POST("/domain-mailboxes/:mailboxId/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminDomainMailboxDisable)
+		admin.GET("/servers", middleware.PermissionRequired(checker, "core:resource", "read"), h.GetAdminServers)
+		admin.POST("/servers", middleware.PermissionRequired(checker, "core:resource", "write"), h.PostAdminServer)
 
 		admin.POST("/projects", middleware.PermissionRequired(checker, "core:project", "write"), h.PostAdminProject)
 		admin.POST("/projects/relist", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsRelist)

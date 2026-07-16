@@ -27,6 +27,8 @@ type CoreModule struct {
 	AdminResourceQuery   *coreapp.AdminResourceQuery
 	AdminCommands        *coreapp.AdminResourceCommandService
 	AdminBulk            *coreapp.AdminResourceBulkService
+	AdminDomainQuery     *coreapp.AdminDomainQuery
+	AdminDomainCommands  *coreapp.AdminDomainCommandService
 	MicrosoftCredentials coreapp.MicrosoftCredentialPort
 	BackgroundExecution  BackgroundExecutionGate
 	validationRepo       *coreinfra.ResourceValidationRepo
@@ -54,6 +56,12 @@ func (m *CoreModule) SetAdminResourcePorts(
 	}
 	if m.AdminCommands != nil {
 		m.AdminCommands.SetPorts(owners, bindings, bindingAdmin, allocations)
+	}
+	if m.AdminDomainQuery != nil {
+		m.AdminDomainQuery.SetOwnerQuery(owners)
+	}
+	if m.AdminDomainCommands != nil {
+		m.AdminDomainCommands.SetPorts(owners, allocations)
 	}
 }
 
@@ -91,8 +99,15 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 	validationUseCase := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator)
 	adminRepo := coreinfra.NewAdminResourceRepo(db)
 	adminQuery := coreapp.NewAdminResourceQuery(adminRepo)
+	adminDomainQuery := coreapp.NewAdminDomainQuery(adminRepo)
 	adminCommands := coreapp.NewAdminResourceCommandService(
 		adminRepo,
+		validationUseCase,
+		governanceinfra.NewOperationLogRepo(db),
+	)
+	adminDomainCommands := coreapp.NewAdminDomainCommandService(
+		adminRepo,
+		mailServerRepo,
 		validationUseCase,
 		governanceinfra.NewOperationLogRepo(db),
 	)
@@ -114,6 +129,8 @@ func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.Fil
 		AdminResourceQuery:   adminQuery,
 		AdminCommands:        adminCommands,
 		AdminBulk:            adminBulk,
+		AdminDomainQuery:     adminDomainQuery,
+		AdminDomainCommands:  adminDomainCommands,
 		MicrosoftCredentials: coreapp.NewMicrosoftCredentialService(adminRepo),
 		validationRepo:       validationRepo,
 	}, nil

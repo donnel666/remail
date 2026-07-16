@@ -37,10 +37,11 @@ type AdminMessageDetail struct {
 }
 
 type AdminMessageListQuery struct {
-	ResourceID uint
-	Search     string
-	Offset     int
-	Limit      int
+	ResourceID   uint
+	ResourceType domain.ResourceType
+	Search       string
+	Offset       int
+	Limit        int
 }
 
 type AdminMessagePage struct {
@@ -51,9 +52,9 @@ type AdminMessagePage struct {
 }
 
 type AdminMessageRepository interface {
-	AdminMessageResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	AdminMessageResourceExists(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (bool, error)
 	ListAdminMessageSummaries(ctx context.Context, query AdminMessageListQuery) ([]AdminMessageSummary, int64, error)
-	FindAdminMessageDetailWithLog(ctx context.Context, resourceID uint, messageID uint, log *governancedomain.OperationLog) (*AdminMessageDetail, error)
+	FindAdminMessageDetailWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, messageID uint, log *governancedomain.OperationLog) (*AdminMessageDetail, error)
 }
 
 type AdminMessageUseCase struct {
@@ -69,6 +70,12 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 		return nil, domain.ErrInvalidRequest
 	}
 	query.Search = strings.TrimSpace(query.Search)
+	if query.ResourceType == "" {
+		query.ResourceType = domain.ResourceTypeMicrosoft
+	}
+	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain {
+		return nil, domain.ErrInvalidRequest
+	}
 	if utf8.RuneCountInString(query.Search) > maxAdminMessageSearch {
 		return nil, domain.ErrInvalidRequest
 	}
@@ -78,7 +85,7 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if query.Limit < 1 || query.Limit > maxAdminMessageLimit {
 		return nil, domain.ErrInvalidRequest
 	}
-	exists, err := uc.repo.AdminMessageResourceExists(ctx, query.ResourceID)
+	exists, err := uc.repo.AdminMessageResourceExists(ctx, query.ResourceID, query.ResourceType)
 	if err != nil {
 		return nil, err
 	}
@@ -104,17 +111,22 @@ func (uc *AdminMessageUseCase) Get(
 	ctx context.Context,
 	operatorUserID uint,
 	resourceID uint,
+	resourceType domain.ResourceType,
 	messageID uint,
 	requestID string,
 	path string,
 ) (*AdminMessageDetail, error) {
-	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 {
+	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 || (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain) {
 		return nil, domain.ErrInvalidRequest
 	}
-	return uc.repo.FindAdminMessageDetailWithLog(ctx, resourceID, messageID, &governancedomain.OperationLog{
+	resourceName := "microsoft_message"
+	if resourceType == domain.ResourceTypeDomain {
+		resourceName = "domain_message"
+	}
+	return uc.repo.FindAdminMessageDetailWithLog(ctx, resourceID, resourceType, messageID, &governancedomain.OperationLog{
 		OperatorUserID: operatorUserID,
 		OperationType:  "mailmatch.admin_message.body.read",
-		ResourceType:   "microsoft_message",
+		ResourceType:   resourceName,
 		ResourceID:     fmt.Sprintf("%d", messageID),
 		Path:           strings.TrimSpace(path),
 		Result:         "success",

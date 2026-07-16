@@ -927,7 +927,7 @@
   "Confirm delete domain content": "确定删除域名 {{domain}} 吗？删除后可在“已删除”中恢复。",
   "Admin domains load failed.": "域名邮箱加载失败。",
   "Domain operation failed.": "域名操作失败。",
-  "Domain validation completed.": "域名检测完成。",
+  "Domain validation submitted.": "域名检测任务已提交。",
   "Domain enabled.": "域名已启用。",
   "Domain disabled.": "域名已禁用。",
   "Domain updated.": "域名已更新。",

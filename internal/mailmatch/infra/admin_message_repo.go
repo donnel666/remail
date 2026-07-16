@@ -58,13 +58,18 @@ func NewAdminMessageRepo(db *gorm.DB) *AdminMessageRepo {
 	}
 }
 
-func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (bool, error) {
 	var found uint
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Table("email_resources AS er").
 		Select("er.id").
-		Joins("JOIN microsoft_resources mr ON mr.id = er.id AND mr.resource_type = er.type").
-		Where("er.id = ? AND er.type = ?", resourceID, "microsoft").
+		Where("er.id = ? AND er.type = ?", resourceID, string(resourceType))
+	if resourceType == domain.ResourceTypeDomain {
+		query = query.Joins("JOIN domain_resources dr ON dr.id = er.id")
+	} else {
+		query = query.Joins("JOIN microsoft_resources mr ON mr.id = er.id")
+	}
+	err := query.
 		Limit(1).
 		Scan(&found).Error
 	if err != nil {
@@ -77,7 +82,7 @@ func (r *AdminMessageRepo) ListAdminMessageSummaries(
 	ctx context.Context,
 	query app.AdminMessageListQuery,
 ) ([]app.AdminMessageSummary, int64, error) {
-	base := r.adminMessageBaseQuery(ctx, query.ResourceID, query.Search)
+	base := r.adminMessageBaseQuery(ctx, query.ResourceID, query.ResourceType, query.Search)
 	var total int64
 	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count admin message summaries: %w", err)
@@ -85,7 +90,7 @@ func (r *AdminMessageRepo) ListAdminMessageSummaries(
 	var rows []adminMessageRow
 	selectSQL := strings.Join([]string{
 		"m.id",
-		adminMessageMailboxSQL + " AS mailbox",
+		adminMessageMailboxSelect(query.ResourceType) + " AS mailbox",
 		"m.recipient",
 		"m.sender",
 		"m.subject",
@@ -113,6 +118,7 @@ func (r *AdminMessageRepo) ListAdminMessageSummaries(
 func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
 	ctx context.Context,
 	resourceID uint,
+	resourceType domain.ResourceType,
 	messageID uint,
 	log *governancedomain.OperationLog,
 ) (*app.AdminMessageDetail, error) {
@@ -121,7 +127,7 @@ func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
 		var row adminMessageRow
 		selectSQL := strings.Join([]string{
 			"m.id",
-			adminMessageMailboxSQL + " AS mailbox",
+			adminMessageMailboxSelect(resourceType) + " AS mailbox",
 			"m.recipient",
 			"m.sender",
 			"m.subject",
@@ -133,11 +139,10 @@ func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
 			"m.raw_body AS body",
 			"m.match_diagnostic",
 		}, ", ")
-		err := tx.Table("mailmatch_messages AS m").
+		query := adminMessageBaseQueryDB(tx.WithContext(ctx), resourceID, resourceType, "")
+		err := query.
 			Select(selectSQL).
-			Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id").
-			Joins("LEFT JOIN orders o ON o.id = m.matched_order_id").
-			Where("m.id = ? AND m.email_resource_id = ? AND m.resource_type = ?", messageID, resourceID, "microsoft").
+			Where("m.id = ?", messageID).
 			Take(&row).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.ErrMessageNotFound
@@ -164,12 +169,20 @@ func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
 	return detail, nil
 }
 
-func (r *AdminMessageRepo) adminMessageBaseQuery(ctx context.Context, resourceID uint, search string) *gorm.DB {
-	db := r.db.WithContext(ctx).
+func (r *AdminMessageRepo) adminMessageBaseQuery(ctx context.Context, resourceID uint, resourceType domain.ResourceType, search string) *gorm.DB {
+	return adminMessageBaseQueryDB(r.db.WithContext(ctx), resourceID, resourceType, search)
+}
+
+func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.ResourceType, search string) *gorm.DB {
+	db = db.
 		Table("mailmatch_messages AS m").
-		Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id").
 		Joins("LEFT JOIN orders o ON o.id = m.matched_order_id").
-		Where("m.email_resource_id = ? AND m.resource_type = ?", resourceID, "microsoft")
+		Where("m.email_resource_id = ? AND m.resource_type = ?", resourceID, string(resourceType))
+	if resourceType == domain.ResourceTypeDomain {
+		db = db.Joins("JOIN domain_resources dr ON dr.id = m.email_resource_id")
+	} else {
+		db = db.Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id")
+	}
 	search = strings.TrimSpace(search)
 	if search == "" {
 		return db
@@ -182,6 +195,13 @@ func (r *AdminMessageRepo) adminMessageBaseQuery(ctx context.Context, resourceID
         OR m.body_preview LIKE ?
         OR m.raw_body LIKE ?
         OR m.verification_code LIKE ?`, like, like, like, like, like, like)
+}
+
+func adminMessageMailboxSelect(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeDomain {
+		return "'main'"
+	}
+	return adminMessageMailboxSQL
 }
 
 func adminMessageSummaryFromRow(row adminMessageRow) app.AdminMessageSummary {

@@ -731,6 +731,9 @@ func (r *mockResourceRepo) resourceMatchesFilter(res *coredomain.EmailResource, 
 			if filter.Purpose != "" && string(dr.Purpose) != filter.Purpose {
 				return false
 			}
+			if filter.MailServerID != 0 && dr.MailServerID != filter.MailServerID {
+				return false
+			}
 			tld := coredomain.TLD(dr.Domain)
 			if filter.TLD != "" && tld != filter.TLD {
 				return false
@@ -1014,10 +1017,6 @@ func (r *mockResourceRepo) filteredPrivateIDs(ownerUserID uint, filter coreapp.R
 	return ids
 }
 
-func (r *mockResourceRepo) UpdateDomainWithLog(_ context.Context, _ *coredomain.MailDomainResource, _ *governancedomain.OperationLog) error {
-	return nil
-}
-
 func (r *mockResourceRepo) ListMicrosoftStatus(_ context.Context, ids []uint) ([]coreapp.MicrosoftStatusResult, error) {
 	var result []coreapp.MicrosoftStatusResult
 	for _, id := range ids {
@@ -1044,13 +1043,15 @@ func (r *mockResourceRepo) ListDomainStatus(_ context.Context, ids []uint) ([]co
 				continue
 			}
 			result = append(result, coreapp.DomainStatusResult{
-				ID:           dr.ID,
-				Domain:       dr.Domain,
-				DomainTLD:    coredomain.TLD(dr.Domain),
-				MailServerID: dr.MailServerID,
-				Purpose:      string(dr.Purpose),
-				Status:       string(dr.Status),
-				MailboxCount: 0,
+				ID:              dr.ID,
+				Domain:          dr.Domain,
+				DomainTLD:       coredomain.TLD(dr.Domain),
+				MailServerID:    dr.MailServerID,
+				Purpose:         string(dr.Purpose),
+				Status:          string(dr.Status),
+				MailboxCount:    0,
+				LastAllocatedAt: dr.LastAllocatedAt,
+				UpdatedAt:       dr.UpdatedAt,
 			})
 		}
 	}
@@ -1141,6 +1142,18 @@ func (r *mockGeneratedMailboxRepo) Count(_ context.Context, resourceID uint, own
 		}
 	}
 	return count, nil
+}
+
+func (r *mockGeneratedMailboxRepo) DisableWithLog(_ context.Context, mailboxID uint, _ *governancedomain.OperationLog) error {
+	mailbox := r.mailboxes[mailboxID]
+	if mailbox == nil {
+		return coredomain.ErrResourceNotFound
+	}
+	if mailbox.Status != coredomain.GeneratedMailboxNormal && mailbox.Status != coredomain.GeneratedMailboxDisabled {
+		return coredomain.ErrInvalidResourceStatus
+	}
+	mailbox.Status = coredomain.GeneratedMailboxDisabled
+	return nil
 }
 
 type mockImportRepo struct {
@@ -3747,6 +3760,32 @@ func TestCoreHandler_CreateDomainAllowsAdminBinding(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	require.Len(t, resourceRepo.domains, 1)
 	require.Equal(t, coredomain.PurposeBinding, resourceRepo.domains[1].Purpose)
+}
+
+func TestCoreHandler_AdminDomainManagement(t *testing.T) {
+	lastError := "MX does not point to the configured inbound server."
+	response := toAdminDomainListResponse(&coreapp.AdminDomainListResult{
+		Items: []coreapp.AdminDomainItem{{
+			ID: 42, Version: 7, Domain: "admin.example.com", DomainTLD: "com",
+			Owner:   coreapp.AdminOwnerSummary{ID: 9, Email: "owner@example.com", Nickname: "Owner", Role: "supplier"},
+			Purpose: "sale", Status: "deleted", MailServerID: 3, MailboxCount: 11, LastSafeError: &lastError,
+			CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+		}},
+		Total: 1, Offset: 0, Limit: 20,
+		Facets: coreapp.AdminDomainFacets{
+			Status:  coreapp.AdminDomainStatusFacets{All: 3, Normal: 1, Abnormal: 1, Disabled: 1, Deleted: 1},
+			Purpose: coreapp.AdminDomainPurposeFacets{All: 4, NotSale: 1, Sale: 2, Binding: 1},
+			TLDs:    []coreapp.AdminKeyFacet{{Key: "com", Count: 4}},
+		},
+	})
+
+	require.Equal(t, int64(1), response.Total)
+	require.Equal(t, uint64(7), response.Items[0].Version)
+	require.Equal(t, "owner@example.com", response.Items[0].OwnerEmail)
+	require.Equal(t, "deleted", response.Items[0].Status)
+	require.Equal(t, int64(1), response.Facets.Status.Deleted)
+	require.Equal(t, int64(1), response.Facets.Purpose.Binding)
+	require.Equal(t, "com", response.Facets.TLDs[0].Key)
 }
 
 func TestCoreHandler_DomainMailboxesOwnerAccess(t *testing.T) {

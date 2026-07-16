@@ -50,17 +50,15 @@ INSERT INTO mailmatch_messages(
 )`, now).Error)
 
 	repo := NewAdminMessageRepo(db)
-	exists, err := repo.AdminMessageResourceExists(context.Background(), 100)
+	exists, err := repo.AdminMessageResourceExists(context.Background(), 100, domain.ResourceTypeMicrosoft)
 	require.NoError(t, err)
 	require.True(t, exists)
-	exists, err = repo.AdminMessageResourceExists(context.Background(), 99999)
+	exists, err = repo.AdminMessageResourceExists(context.Background(), 99999, domain.ResourceTypeMicrosoft)
 	require.NoError(t, err)
 	require.False(t, exists)
 
 	items, total, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
-		ResourceID: 100,
-		Offset:     0,
-		Limit:      20,
+		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Offset: 0, Limit: 20,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(2), total)
@@ -80,10 +78,7 @@ INSERT INTO mailmatch_messages(
 	}
 
 	searched, searchedTotal, err := repo.ListAdminMessageSummaries(context.Background(), mailmatchapp.AdminMessageListQuery{
-		ResourceID: 100,
-		Search:     "main-body-sensitive-canary",
-		Offset:     0,
-		Limit:      20,
+		ResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft, Search: "main-body-sensitive-canary", Offset: 0, Limit: 20,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), searchedTotal)
@@ -95,6 +90,7 @@ INSERT INTO mailmatch_messages(
 	detail, err := repo.FindAdminMessageDetailWithLog(
 		context.Background(),
 		100,
+		domain.ResourceTypeMicrosoft,
 		mainID,
 		adminMessageReadLog(1, 100, mainID, "req-admin-message-detail"),
 	)
@@ -106,6 +102,7 @@ INSERT INTO mailmatch_messages(
 	_, err = repo.FindAdminMessageDetailWithLog(
 		context.Background(),
 		101,
+		domain.ResourceTypeMicrosoft,
 		mainID,
 		adminMessageReadLog(1, 101, mainID, "req-admin-message-cross-resource"),
 	)
@@ -144,6 +141,7 @@ INSERT INTO mailmatch_messages(
 	detail, err := repo.FindAdminMessageDetailWithLog(
 		context.Background(),
 		100,
+		domain.ResourceTypeMicrosoft,
 		messageID,
 		adminMessageReadLog(1, 100, messageID, "req-admin-message-sanitize"),
 	)
@@ -157,6 +155,7 @@ INSERT INTO mailmatch_messages(
 	_, err = repo.FindAdminMessageDetailWithLog(
 		context.Background(),
 		100,
+		domain.ResourceTypeMicrosoft,
 		messageID,
 		failingLog,
 	)

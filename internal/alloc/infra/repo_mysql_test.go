@@ -508,6 +508,19 @@ func TestOwnedDomainAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 	require.Contains(t, result.Email, "@d2000.example.com")
 }
 
+func TestFindOrCreateGeneratedMailboxDoesNotReuseDisabledMailboxMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResourcesWithPurpose(t, db, 2, 2000, 1, "not_sale")
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status)
+VALUES (?, ?, ?, ?)`, 2000, 2, "disabled@d2000.example.com", "disabled").Error)
+
+	mailbox, err := NewRepo(db).FindOrCreateGeneratedMailbox(context.Background(), 2000, 2, "disabled@d2000.example.com")
+	require.ErrorIs(t, err, domain.ErrAllocationConflict)
+	require.Nil(t, mailbox)
+}
+
 func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

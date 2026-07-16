@@ -22,7 +22,15 @@ func (s *taskViewRepoStub) MicrosoftResourceExists(context.Context, uint) (bool,
 	return s.exists, s.err
 }
 
+func (s *taskViewRepoStub) DomainResourceExists(context.Context, uint) (bool, error) {
+	return s.exists, s.err
+}
+
 func (s *taskViewRepoStub) ListForMicrosoftResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
+	return s.items, s.total, s.success, s.err
+}
+
+func (s *taskViewRepoStub) ListForDomainResource(context.Context, AdminTaskListFilter) ([]AdminTaskView, int64, int64, error) {
 	return s.items, s.total, s.success, s.err
 }
 

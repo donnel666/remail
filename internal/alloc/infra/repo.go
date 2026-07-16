@@ -868,7 +868,10 @@ func (r *Repo) FindOrCreateGeneratedMailbox(ctx context.Context, resourceID uint
 		}
 	}
 	var found GeneratedMailboxModel
-	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ?", resourceID, model.Email).First(&found).Error; err != nil {
+	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ? AND status = 'normal'", resourceID, model.Email).First(&found).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrAllocationConflict
+		}
 		return nil, fmt.Errorf("find generated mailbox: %w", err)
 	}
 	return &allocapp.GeneratedMailboxCandidate{ID: found.ID, Email: found.Email}, nil

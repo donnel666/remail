@@ -14,6 +14,7 @@ const (
 	AdminTaskMaxLimit     = 100
 
 	AdminTaskBizMicrosoftResource       = "microsoft_resource"
+	AdminTaskBizDomainResource          = "domain_resource"
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
 	AdminTaskBizMicrosoftResourceBulk   = "microsoft_resource_bulk"
 
@@ -152,7 +153,9 @@ type AdminTaskListResult struct {
 
 type AdminTaskViewRepository interface {
 	MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	DomainResourceExists(ctx context.Context, resourceID uint) (bool, error)
 	ListForMicrosoftResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForDomainResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 	FindByRef(ctx context.Context, ref AdminTaskRef) (*AdminTaskView, error)
 }
 
@@ -172,14 +175,27 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 	if err != nil {
 		return nil, err
 	}
-	exists, err := s.repo.MicrosoftResourceExists(ctx, normalized.BizID)
+	var exists bool
+	var items []AdminTaskView
+	var total, succeeded int64
+	switch normalized.BizType {
+	case AdminTaskBizMicrosoftResource:
+		exists, err = s.repo.MicrosoftResourceExists(ctx, normalized.BizID)
+	case AdminTaskBizDomainResource:
+		exists, err = s.repo.DomainResourceExists(ctx, normalized.BizID)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: check microsoft resource", ErrAdminTaskUnavailable)
+		return nil, fmt.Errorf("%w: check task resource", ErrAdminTaskUnavailable)
 	}
 	if !exists {
 		return nil, ErrAdminTaskResourceGone
 	}
-	items, total, succeeded, err := s.repo.ListForMicrosoftResource(ctx, normalized)
+	switch normalized.BizType {
+	case AdminTaskBizMicrosoftResource:
+		items, total, succeeded, err = s.repo.ListForMicrosoftResource(ctx, normalized)
+	case AdminTaskBizDomainResource:
+		items, total, succeeded, err = s.repo.ListForDomainResource(ctx, normalized)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: list normalized tasks", ErrAdminTaskUnavailable)
 	}
@@ -220,7 +236,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	filter.BizType = strings.TrimSpace(filter.BizType)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if filter.BizType != AdminTaskBizMicrosoftResource || filter.BizID == 0 || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource) || filter.BizID == 0 || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	if filter.Limit == 0 {

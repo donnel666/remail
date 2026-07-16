@@ -7,6 +7,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Toast,
   Typography,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
@@ -33,7 +34,7 @@ import type {
   AdminDomainTask,
   AdminGeneratedMailbox,
   AdminMailServer,
-} from "./admin-domains-mock";
+} from "./admin-domains-api";
 import {
   DomainInfoItem,
   domainOwnerRoleLabel,
@@ -383,13 +384,18 @@ function mailStatusTag(status: AdminDomainMessage["status"], t: TFunction) {
 
 function DomainMailsPanel({
   messages,
+  onLoadMessage,
   t,
 }: {
   messages: AdminDomainMessage[];
+  onLoadMessage?: (messageId: number) => Promise<AdminDomainMessage>;
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebouncedValue(search);
+  const [loadedMessages, setLoadedMessages] = useState<
+    Record<number, AdminDomainMessage>
+  >({});
   const filtered = useMemo(() => {
     const keyword = debouncedSearch.trim().toLowerCase();
     if (!keyword) return messages;
@@ -398,13 +404,13 @@ function DomainMailsPanel({
         message.sender,
         message.recipient,
         message.subject,
-        message.body,
+        loadedMessages[message.id]?.body ?? message.body,
       ]
         .join(" ")
         .toLowerCase()
         .includes(keyword)
     );
-  }, [debouncedSearch, messages]);
+  }, [debouncedSearch, loadedMessages, messages]);
   const [selectedId, setSelectedId] = useState<number | null>(
     filtered[0]?.id ?? null
   );
@@ -417,8 +423,35 @@ function DomainMailsPanel({
     );
   }, [filtered]);
 
-  const selected =
+  const selectedSummary =
     filtered.find((message) => message.id === selectedId) ?? null;
+  const selected = selectedSummary
+    ? loadedMessages[selectedSummary.id] ?? selectedSummary
+    : null;
+
+  useEffect(() => {
+    setLoadedMessages({});
+  }, [messages]);
+
+  useEffect(() => {
+    if (!selectedId || !onLoadMessage || loadedMessages[selectedId]) return;
+    let cancelled = false;
+    void onLoadMessage(selectedId)
+      .then((message) => {
+        if (!cancelled) {
+          setLoadedMessages((current) => ({
+            ...current,
+            [message.id]: message,
+          }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) Toast.error(t("Mail load failed."));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedMessages, onLoadMessage, selectedId, t]);
 
   if (messages.length === 0) {
     return <Empty description={t("No mails yet")} style={{ padding: 32 }} />;
@@ -756,6 +789,7 @@ export function DomainDetailSheet({
   onCancel,
   onValidate,
   onMailFetch,
+  onLoadMessage,
   onRecover,
   onDelete,
   onEdit,
@@ -768,6 +802,7 @@ export function DomainDetailSheet({
   onCancel: () => void;
   onValidate?: () => void;
   onMailFetch?: () => void;
+  onLoadMessage?: (messageId: number) => Promise<AdminDomainMessage>;
   onRecover?: () => void;
   onDelete?: () => void;
   onEdit?: () => void;
@@ -989,7 +1024,11 @@ export function DomainDetailSheet({
               />
             ) : null}
             {activeTab === "mails" ? (
-              <DomainMailsPanel messages={detail.messages} t={t} />
+              <DomainMailsPanel
+                messages={detail.messages}
+                onLoadMessage={onLoadMessage}
+                t={t}
+              />
             ) : null}
           </div>
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">

@@ -1370,6 +1370,28 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 		"old-owner@restore-domain.example.com",
 		"normal",
 	).Error)
+	var historicalMailboxID uint
+	require.NoError(t, db.Raw("SELECT id FROM generated_mailboxes WHERE resource_id = ?", originalID).Scan(&historicalMailboxID).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO projects(id, name, target_platform, status) VALUES (?, ?, ?, ?)",
+		10,
+		"Domain Restore History",
+		"test",
+		"listed",
+	).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(id, project_id, type, main_weight, dot_weight, plus_weight)
+VALUES (?, ?, ?, ?, ?, ?)`, 20, 10, "domain", 0, 0, 0).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO allocation_order_guards(order_no, type) VALUES (?, ?)",
+		"restore-domain-history",
+		"domain",
+	).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email, status, released_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+		"restore-domain-history", 10, 20, originalID, "owned", historicalMailboxID,
+		"old-owner@restore-domain.example.com", "released").Error)
 
 	require.NoError(t, repo.DeletePrivateDomainWithLog(context.Background(), 1, originalID, governancedomain.OperationLog{
 		OperatorUserID: 1,
@@ -1426,8 +1448,16 @@ func TestResourceRepoDeletePrivateDomainAndRestoreMySQL(t *testing.T) {
 	require.EqualValues(t, 201, mailServerID)
 
 	var mailboxCount int64
-	require.NoError(t, db.Raw("SELECT COUNT(*) FROM generated_mailboxes WHERE resource_id = ?", originalID).Scan(&mailboxCount).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM generated_mailboxes WHERE resource_id = ? AND status <> ?", originalID, generatedMailboxRetiredStatus).Scan(&mailboxCount).Error)
 	require.Zero(t, mailboxCount)
+	var retiredMailbox GeneratedMailboxModel
+	require.NoError(t, db.First(&retiredMailbox, historicalMailboxID).Error)
+	require.Equal(t, generatedMailboxRetiredStatus, retiredMailbox.Status)
+	require.Equal(t, uint(2), retiredMailbox.OwnerUserID)
+	require.Equal(t, fmt.Sprintf("__retired_%d@invalid.local", historicalMailboxID), retiredMailbox.Email)
+	var historicalAllocationEmail string
+	require.NoError(t, db.Raw("SELECT email FROM domain_allocations WHERE order_no = ?", "restore-domain-history").Scan(&historicalAllocationEmail).Error)
+	require.Equal(t, "old-owner@restore-domain.example.com", historicalAllocationEmail)
 
 	mailboxes, err := NewGeneratedMailboxRepo(db).List(context.Background(), originalID, 2, 0, 20)
 	require.NoError(t, err)

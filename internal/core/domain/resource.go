@@ -375,6 +375,89 @@ func (r *MailDomainResource) TransitionStatus(next MailDomainStatus) error {
 	return nil
 }
 
+// MarkDNSStatusAdmin records a validation result without doubling as an
+// enable command. Disabled resources must be enabled explicitly first.
+func (r *MailDomainResource) MarkDNSStatusAdmin(normal bool) error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Status == DomainStatusDisabled {
+		return ErrInvalidResourceStatus
+	}
+	target := DomainStatusAbnormal
+	if normal {
+		target = DomainStatusNormal
+	}
+	if r.Status == target {
+		if normal {
+			r.LastSafeError = ""
+		}
+		return nil
+	}
+	if err := r.TransitionStatus(target); err != nil {
+		return err
+	}
+	if normal {
+		r.LastSafeError = ""
+	}
+	return nil
+}
+
+func (r *MailDomainResource) DisableAdmin() error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Status == DomainStatusDisabled {
+		return nil
+	}
+	return r.TransitionStatus(DomainStatusDisabled)
+}
+
+func (r *MailDomainResource) EnableAdmin() error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if r.Status != DomainStatusDisabled {
+		return ErrInvalidResourceStatus
+	}
+	r.Status = DomainStatusAbnormal
+	r.LastSafeError = ""
+	return nil
+}
+
+func (r *MailDomainResource) SetPurposeAdmin(purpose ResourcePurpose) error {
+	if r.Status == DomainStatusDeleted {
+		return ErrResourceNotFound
+	}
+	if !IsValidPurpose(purpose) {
+		return ErrInvalidPurpose
+	}
+	r.Purpose = purpose
+	return nil
+}
+
+func (r *MailDomainResource) DeleteAdmin() error {
+	if r.Status == DomainStatusDeleted {
+		return nil
+	}
+	r.Status = DomainStatusDeleted
+	r.Purpose = PurposeNotSale
+	r.LastSafeError = ""
+	r.LastAllocatedAt = nil
+	return nil
+}
+
+func (r *MailDomainResource) RecoverAdmin() error {
+	if r.Status != DomainStatusDeleted {
+		return ErrInvalidResourceStatus
+	}
+	r.Status = DomainStatusAbnormal
+	r.Purpose = PurposeNotSale
+	r.LastSafeError = ""
+	r.LastAllocatedAt = nil
+	return nil
+}
+
 // MarkDeleted applies the user private-delete command. deleted is a terminal
 // command state, not a normal validation-state transition.
 func (r *MailDomainResource) MarkDeleted() error {

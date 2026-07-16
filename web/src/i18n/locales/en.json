@@ -927,7 +927,7 @@
   "Confirm delete domain content": "Delete domain {{domain}}? You can recover it from Deleted.",
   "Admin domains load failed.": "Failed to load domains.",
   "Domain operation failed.": "Domain operation failed.",
-  "Domain validation completed.": "Domain validation completed.",
+  "Domain validation submitted.": "Domain validation submitted.",
   "Domain enabled.": "Domain enabled.",
   "Domain disabled.": "Domain disabled.",
   "Domain updated.": "Domain updated.",

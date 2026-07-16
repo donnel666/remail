@@ -49,6 +49,11 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 		writeAdminMessageBadRequest(c)
 		return
 	}
+	resourceType, ok := adminMessageResourceType(c)
+	if !ok {
+		writeAdminMessageBadRequest(c)
+		return
+	}
 	offset, ok := nonNegativeIntQuery(c, "offset", 0)
 	if !ok {
 		writeAdminMessageBadRequest(c)
@@ -60,10 +65,7 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 		return
 	}
 	page, err := h.mod.AdminMessages.List(c.Request.Context(), mailmatchapp.AdminMessageListQuery{
-		ResourceID: resourceID,
-		Search:     c.Query("search"),
-		Offset:     offset,
-		Limit:      limit,
+		ResourceID: resourceID, ResourceType: resourceType, Search: c.Query("search"), Offset: offset, Limit: limit,
 	})
 	if err != nil {
 		writeAdminMessageError(c, err)
@@ -91,6 +93,11 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 		writeAdminMessageBadRequest(c)
 		return
 	}
+	resourceType, ok := adminMessageResourceType(c)
+	if !ok {
+		writeAdminMessageBadRequest(c)
+		return
+	}
 	messageID64, err := strconv.ParseUint(strings.TrimSpace(c.Param("messageId")), 10, 64)
 	if err != nil || messageID64 == 0 {
 		writeAdminMessageBadRequest(c)
@@ -108,6 +115,7 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 		c.Request.Context(),
 		operatorUserID,
 		resourceID,
+		resourceType,
 		uint(messageID64),
 		middleware.GetRequestID(c),
 		c.FullPath(),
@@ -121,6 +129,11 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 		Body:                        detail.Body,
 		MatchDiagnostic:             detail.MatchDiagnostic,
 	})
+}
+
+func adminMessageResourceType(c *gin.Context) (domain.ResourceType, bool) {
+	value := domain.ResourceType(strings.TrimSpace(c.DefaultQuery("type", string(domain.ResourceTypeMicrosoft))))
+	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain
 }
 
 func adminMessageSummaryDTO(item mailmatchapp.AdminMessageSummary) adminMessageSummaryResponse {

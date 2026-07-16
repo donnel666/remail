@@ -17,6 +17,7 @@ describe("toDomainResource", () => {
       status: "normal",
       mailboxCount: 2,
       createdAt: "2026-07-15T00:00:00Z",
+      updatedAt: "2026-07-15T00:00:00Z",
     };
 
     expect(toDomainResource(resource)).toEqual({

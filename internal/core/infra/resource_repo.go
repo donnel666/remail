@@ -188,6 +188,7 @@ const (
 	resourceImportInsertBatchSize      = 1000
 	microsoftImportRestoreTempTable    = "tmp_microsoft_import_restore"
 	resourceFacetsCacheTTL             = 10 * time.Second
+	generatedMailboxRetiredStatus      = "retired"
 )
 
 // NewResourceRepo creates a new GORM-backed resource repository.
@@ -324,104 +325,136 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 
 func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing DomainResourceModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("domain = ?", dr.Domain).
-			First(&existing).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("find existing domain resource: %w", err)
-		}
-		if err == nil {
-			if domain.MailDomainStatus(existing.Status) != domain.DomainStatusDeleted {
-				return domain.ErrDuplicateDomain
-			}
-
-			now := time.Now().UTC()
-			if err := tx.Where("resource_id = ?", existing.ID).
-				Delete(&GeneratedMailboxModel{}).Error; err != nil {
-				return fmt.Errorf("clear restored domain mailboxes: %w", err)
-			}
-
-			deleteResult := tx.Where("id = ? AND status = ?", existing.ID, string(domain.DomainStatusDeleted)).
-				Delete(&DomainResourceModel{})
-			if deleteResult.Error != nil {
-				return fmt.Errorf("remove deleted domain row before restore: %w", deleteResult.Error)
-			}
-			if deleteResult.RowsAffected == 0 {
-				return domain.ErrDuplicateDomain
-			}
-
-			if err := tx.Model(&EmailResourceModel{}).
-				Where("id = ? AND type = ?", existing.ID, string(domain.ResourceTypeDomain)).
-				Updates(map[string]interface{}{
-					"owner_user_id": resource.OwnerUserID,
-					"updated_at":    now,
-				}).Error; err != nil {
-				return fmt.Errorf("restore deleted domain root: %w", err)
-			}
-
-			restored := &DomainResourceModel{
-				ID:                existing.ID,
-				OwnerUserID:       resource.OwnerUserID,
-				Domain:            dr.Domain,
-				DomainTLD:         domain.TLD(dr.Domain),
-				MailServerID:      dr.MailServerID,
-				Purpose:           string(dr.Purpose),
-				Status:            string(dr.Status),
-				LastSafeError:     dr.LastSafeError,
-				MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
-				AllocBucket:       uint8(existing.ID % 64),
-				CreatedAt:         existing.CreatedAt,
-				UpdatedAt:         now,
-			}
-			if err := tx.Create(restored).Error; err != nil {
-				return fmt.Errorf("restore deleted domain resource: %w", err)
-			}
-
-			resource.ID = existing.ID
-			resource.CreatedAt = existing.CreatedAt
-			resource.UpdatedAt = now
-			dr.ID = existing.ID
-			dr.CreatedAt = existing.CreatedAt
-			dr.UpdatedAt = now
-			return nil
-		}
-
-		root := &EmailResourceModel{
-			Type:        string(resource.Type),
-			OwnerUserID: resource.OwnerUserID,
-		}
-		if err := tx.Create(root).Error; err != nil {
-			return fmt.Errorf("create email resource: %w", err)
-		}
-
-		domainModel := &DomainResourceModel{
-			ID:                root.ID,
-			OwnerUserID:       root.OwnerUserID,
-			Domain:            dr.Domain,
-			DomainTLD:         domain.TLD(dr.Domain),
-			MailServerID:      dr.MailServerID,
-			Purpose:           string(dr.Purpose),
-			Status:            string(dr.Status),
-			LastSafeError:     dr.LastSafeError,
-			MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
-			AllocBucket:       uint8(root.ID % 64),
-		}
-		if err := tx.Create(domainModel).Error; err != nil {
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
-				return domain.ErrDuplicateDomain
-			}
-			return fmt.Errorf("create domain resource: %w", err)
-		}
-		resource.ID = root.ID
-		resource.Version = root.Version
-		resource.CreatedAt = root.CreatedAt
-		resource.UpdatedAt = root.UpdatedAt
-		dr.ID = domainModel.ID
-		dr.CreatedAt = domainModel.CreatedAt
-		dr.UpdatedAt = domainModel.UpdatedAt
-		return nil
+		return createDomainTx(tx, resource, dr)
 	})
+}
+
+func createDomainTx(tx *gorm.DB, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
+	var existing DomainResourceModel
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("domain = ?", dr.Domain).
+		First(&existing).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("find existing domain resource: %w", err)
+	}
+	if err == nil {
+		if domain.MailDomainStatus(existing.Status) != domain.DomainStatusDeleted {
+			return domain.ErrDuplicateDomain
+		}
+
+		now := time.Now().UTC()
+		var activeAllocations int64
+		if err := tx.Table("domain_allocations").
+			Where("resource_id = ? AND status = 'allocated'", existing.ID).
+			Count(&activeAllocations).Error; err != nil {
+			return fmt.Errorf("check restored domain allocations: %w", err)
+		}
+		if activeAllocations > 0 {
+			return domain.ErrResourceHasAllocation
+		}
+		if err := tx.Exec(`
+DELETE gm
+FROM generated_mailboxes AS gm
+LEFT JOIN domain_allocations AS da
+  ON da.mailbox_id = gm.id AND da.resource_id = gm.resource_id
+WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
+			return fmt.Errorf("clear restored domain mailboxes: %w", err)
+		}
+		if err := tx.Model(&GeneratedMailboxModel{}).
+			Where("resource_id = ?", existing.ID).
+			Updates(map[string]any{
+				"email":             gorm.Expr("CONCAT('__retired_', id, '@invalid.local')"),
+				"status":            generatedMailboxRetiredStatus,
+				"last_allocated_at": nil,
+			}).Error; err != nil {
+			return fmt.Errorf("retire restored domain mailbox history: %w", err)
+		}
+
+		if err := tx.Model(&EmailResourceModel{}).
+			Where("id = ? AND type = ?", existing.ID, string(domain.ResourceTypeDomain)).
+			Updates(map[string]interface{}{
+				"owner_user_id": resource.OwnerUserID,
+				"version":       gorm.Expr("version + 1"),
+				"updated_at":    now,
+			}).Error; err != nil {
+			return fmt.Errorf("restore deleted domain root: %w", err)
+		}
+
+		restoreResult := tx.Model(&DomainResourceModel{}).
+			Where("id = ? AND status = ?", existing.ID, string(domain.DomainStatusDeleted)).
+			Updates(map[string]any{
+				"owner_user_id":       resource.OwnerUserID,
+				"domain":              dr.Domain,
+				"domain_tld":          domain.TLD(dr.Domain),
+				"mail_server_id":      dr.MailServerID,
+				"purpose":             string(dr.Purpose),
+				"status":              string(dr.Status),
+				"last_safe_error":     dr.LastSafeError,
+				"mailbox_daily_limit": normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+				"alloc_bucket":        uint8(existing.ID % 64),
+				"last_allocated_at":   nil,
+				"updated_at":          now,
+			})
+		if restoreResult.Error != nil {
+			return fmt.Errorf("restore deleted domain resource: %w", restoreResult.Error)
+		}
+		if restoreResult.RowsAffected == 0 {
+			return domain.ErrDuplicateDomain
+		}
+		if err := tx.Model(&GeneratedMailboxModel{}).
+			Where("resource_id = ?", existing.ID).
+			Update("owner_user_id", resource.OwnerUserID).Error; err != nil {
+			return fmt.Errorf("transfer restored domain mailbox history: %w", err)
+		}
+
+		var restoredRoot EmailResourceModel
+		if err := tx.First(&restoredRoot, existing.ID).Error; err != nil {
+			return fmt.Errorf("read restored domain root: %w", err)
+		}
+		resource.ID = existing.ID
+		resource.Version = restoredRoot.Version
+		resource.CreatedAt = existing.CreatedAt
+		resource.UpdatedAt = now
+		dr.ID = existing.ID
+		dr.CreatedAt = existing.CreatedAt
+		dr.UpdatedAt = now
+		return nil
+	}
+
+	root := &EmailResourceModel{
+		Type:        string(resource.Type),
+		OwnerUserID: resource.OwnerUserID,
+	}
+	if err := tx.Create(root).Error; err != nil {
+		return fmt.Errorf("create email resource: %w", err)
+	}
+
+	domainModel := &DomainResourceModel{
+		ID:                root.ID,
+		OwnerUserID:       root.OwnerUserID,
+		Domain:            dr.Domain,
+		DomainTLD:         domain.TLD(dr.Domain),
+		MailServerID:      dr.MailServerID,
+		Purpose:           string(dr.Purpose),
+		Status:            string(dr.Status),
+		LastSafeError:     dr.LastSafeError,
+		MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+		AllocBucket:       uint8(root.ID % 64),
+	}
+	if err := tx.Create(domainModel).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return domain.ErrDuplicateDomain
+		}
+		return fmt.Errorf("create domain resource: %w", err)
+	}
+	resource.ID = root.ID
+	resource.Version = root.Version
+	resource.CreatedAt = root.CreatedAt
+	resource.UpdatedAt = root.UpdatedAt
+	dr.ID = domainModel.ID
+	dr.CreatedAt = domainModel.CreatedAt
+	dr.UpdatedAt = domainModel.UpdatedAt
+	return nil
 }
 
 func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
@@ -803,6 +836,9 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 		if filter.Purpose != "" {
 			q = q.Where("dr_filter.purpose = ?", filter.Purpose)
 		}
+		if filter.MailServerID != 0 {
+			q = q.Where("dr_filter.mail_server_id = ?", filter.MailServerID)
+		}
 		if filter.TLD != "" {
 			q = q.Where("dr_filter.domain_tld = ?", filter.TLD)
 		}
@@ -1035,6 +1071,8 @@ func resourceFacetsCacheKey(ownerUserID uint, filter coreapp.ResourceListFilter)
 	b.WriteString(strings.TrimSpace(filter.Status))
 	b.WriteString("|purpose=")
 	b.WriteString(strings.TrimSpace(filter.Purpose))
+	b.WriteString("|mailServerId=")
+	b.WriteString(strconv.FormatUint(uint64(filter.MailServerID), 10))
 	b.WriteString("|excludeBinding=")
 	b.WriteString(strconv.FormatBool(filter.ExcludeBinding))
 	b.WriteString("|forSale=")
@@ -1131,22 +1169,24 @@ func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]c
 // ListDomainStatus returns API-safe status for a batch of domain resources.
 func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]coreapp.DomainStatusResult, error) {
 	type domainStatusRow struct {
-		ID            uint
-		Domain        string
-		DomainTLD     string
-		MailServerID  uint
-		Purpose       string
-		Status        string
-		LastSafeError string
-		MailboxCount  int
+		ID              uint
+		Domain          string
+		DomainTLD       string
+		MailServerID    uint
+		Purpose         string
+		Status          string
+		LastSafeError   string
+		MailboxCount    int
+		LastAllocatedAt *time.Time
+		UpdatedAt       time.Time
 	}
 	var rows []domainStatusRow
 	err := r.db.WithContext(ctx).
 		Table("domain_resources AS dr").
-		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, COUNT(gm.id) AS mailbox_count").
-		Joins("LEFT JOIN generated_mailboxes gm ON gm.resource_id = dr.id AND gm.owner_user_id = dr.owner_user_id").
+		Select("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, dr.last_allocated_at, dr.updated_at, COUNT(gm.id) AS mailbox_count").
+		Joins("LEFT JOIN generated_mailboxes gm ON gm.resource_id = dr.id AND gm.owner_user_id = dr.owner_user_id AND gm.status <> ?", generatedMailboxRetiredStatus).
 		Where("dr.id IN ? AND dr.status <> ?", ids, string(domain.DomainStatusDeleted)).
-		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error").
+		Group("dr.id, dr.domain, dr.domain_tld, dr.mail_server_id, dr.purpose, dr.status, dr.last_safe_error, dr.last_allocated_at, dr.updated_at").
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list domain status: %w", err)
@@ -1154,14 +1194,16 @@ func (r *ResourceRepo) ListDomainStatus(ctx context.Context, ids []uint) ([]core
 	result := make([]coreapp.DomainStatusResult, len(rows))
 	for i, row := range rows {
 		result[i] = coreapp.DomainStatusResult{
-			ID:            row.ID,
-			Domain:        row.Domain,
-			DomainTLD:     row.DomainTLD,
-			MailServerID:  row.MailServerID,
-			Purpose:       row.Purpose,
-			Status:        row.Status,
-			LastSafeError: row.LastSafeError,
-			MailboxCount:  row.MailboxCount,
+			ID:              row.ID,
+			Domain:          row.Domain,
+			DomainTLD:       row.DomainTLD,
+			MailServerID:    row.MailServerID,
+			Purpose:         row.Purpose,
+			Status:          row.Status,
+			LastSafeError:   row.LastSafeError,
+			MailboxCount:    row.MailboxCount,
+			LastAllocatedAt: row.LastAllocatedAt,
+			UpdatedAt:       row.UpdatedAt,
 		}
 	}
 	return result, nil
@@ -2077,34 +2119,4 @@ func deleteLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint
 	}
 
 	return idsToDelete, nil
-}
-
-// UpdateDomainWithLog updates a domain resource and writes an OperationLog
-// in the same transaction.
-func (r *ResourceRepo) UpdateDomainWithLog(ctx context.Context, resource *domain.MailDomainResource, log *governancedomain.OperationLog) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		domainName, err := domain.NormalizeDomainName(resource.Domain)
-		if err != nil {
-			return err
-		}
-		resource.Domain = domainName
-		updates := map[string]interface{}{
-			"domain":              domainName,
-			"domain_tld":          domain.TLD(domainName),
-			"mail_server_id":      resource.MailServerID,
-			"purpose":             string(resource.Purpose),
-			"status":              string(resource.Status),
-			"mailbox_daily_limit": normalizeDailyLimit(resource.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
-			"last_safe_error":     resource.LastSafeError,
-			"last_allocated_at":   resource.LastAllocatedAt,
-			"updated_at":          time.Now(),
-		}
-		if err := tx.Model(&DomainResourceModel{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
-			return fmt.Errorf("update domain resource: %w", err)
-		}
-		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
-			return fmt.Errorf("create operation log: %w", err)
-		}
-		return nil
-	})
 }

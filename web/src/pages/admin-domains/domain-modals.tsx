@@ -8,7 +8,7 @@ import type {
   AdminDomainPurpose,
   AdminDomainStatus,
   AdminMailServer,
-} from "./admin-domains-mock";
+} from "./admin-domains-api";
 
 export type DomainEditorMode = "import" | "edit";
 
@@ -21,6 +21,18 @@ export interface DomainDraft {
 }
 
 const MX_TARGET = "mx.aishop6.com";
+
+function ownerAllowsPurpose(
+  owner: AdminDomainOwner | undefined,
+  purpose: AdminDomainPurpose
+) {
+  if (!owner?.enabled) return false;
+  if (purpose === "not_sale") return true;
+  if (purpose === "binding") {
+    return owner.role === "admin" || owner.role === "super_admin";
+  }
+  return owner.role !== "user";
+}
 
 export function DomainFormModal({
   mode,
@@ -63,11 +75,15 @@ export function DomainFormModal({
             : (target.status as DomainDraft["status"]),
       });
     } else {
+      const owner = owners.find((item) => item.enabled);
       setDraft({
         domain: "",
-        ownerId: owners[0]?.id,
+        ownerId: owner?.id,
         purpose: "not_sale",
-        mailServerId: mailServers[0]?.id,
+        mailServerId: mailServers.find(
+          (server) =>
+            server.ownerId === owner?.id && server.status !== "disabled"
+        )?.id,
         status: "abnormal",
       });
     }
@@ -78,6 +94,28 @@ export function DomainFormModal({
     value: DomainDraft[K]
   ) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
+  };
+
+  const selectedOwner = owners.find((owner) => owner.id === draft.ownerId);
+  const mailServerOptions = mailServers.filter(
+    (server) =>
+      server.ownerId === draft.ownerId &&
+      (server.status !== "disabled" || server.id === draft.mailServerId)
+  );
+
+  const selectOwner = (ownerId: number) => {
+    const owner = owners.find((item) => item.id === ownerId);
+    setDraft((previous) => ({
+      ...previous,
+      ownerId,
+      purpose: ownerAllowsPurpose(owner, previous.purpose)
+        ? previous.purpose
+        : "not_sale",
+      mailServerId: mailServers.find(
+        (server) =>
+          server.ownerId === ownerId && server.status !== "disabled"
+      )?.id,
+    }));
   };
 
   const submit = async () => {
@@ -146,8 +184,17 @@ export function DomainFormModal({
           </span>
           <Select
             filter
-            onChange={(value) => setField("ownerId", Number(value))}
+            onChange={(value) => selectOwner(Number(value))}
             optionList={owners.map((owner) => ({
+              disabled:
+                !owner.enabled ||
+                (mode === "edit" &&
+                  owner.id !== target?.ownerId &&
+                  !mailServers.some(
+                    (server) =>
+                      server.ownerId === owner.id &&
+                      server.status !== "disabled"
+                  )),
               label: `${owner.email} · ${owner.nickname} · #${owner.id}`,
               value: owner.id,
             }))}
@@ -168,8 +215,18 @@ export function DomainFormModal({
             value={draft.purpose}
           >
             <Select.Option value="not_sale">{t("Not for sale")}</Select.Option>
-            <Select.Option value="sale">{t("Sale")}</Select.Option>
-            <Select.Option value="binding">{t("Binding")}</Select.Option>
+            <Select.Option
+              disabled={!ownerAllowsPurpose(selectedOwner, "sale")}
+              value="sale"
+            >
+              {t("Sale")}
+            </Select.Option>
+            <Select.Option
+              disabled={!ownerAllowsPurpose(selectedOwner, "binding")}
+              value="binding"
+            >
+              {t("Binding")}
+            </Select.Option>
           </Select>
         </label>
         <label className="block">
@@ -178,7 +235,8 @@ export function DomainFormModal({
           </span>
           <Select
             onChange={(value) => setField("mailServerId", Number(value))}
-            optionList={mailServers.map((server) => ({
+            optionList={mailServerOptions.map((server) => ({
+              disabled: server.status === "disabled",
               label: `${server.name} · ${server.mxRecord}`,
               value: server.id,
             }))}

@@ -146,21 +146,23 @@ type ProjectMailRuleRequest struct {
 
 // ResourceItemResponse is the API-safe resource list item.
 type ResourceItemResponse struct {
-	ID             uint      `json:"id"`
-	Type           string    `json:"type"`
-	OwnerID        uint      `json:"ownerId"`
-	Status         string    `json:"status"`
-	ForSale        *bool     `json:"forSale,omitempty"`
-	LongLived      *bool     `json:"longLived,omitempty"`
-	GraphAvailable *bool     `json:"graphAvailable,omitempty"`
-	LastSafeError  string    `json:"lastSafeError,omitempty"`
-	Email          string    `json:"email,omitempty"`
-	Domain         string    `json:"domain,omitempty"`
-	DomainTLD      string    `json:"domainTld,omitempty"`
-	MailServerID   uint      `json:"mailServerId,omitempty"`
-	Purpose        string    `json:"purpose,omitempty"`
-	MailboxCount   int       `json:"mailboxCount,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID              uint       `json:"id"`
+	Type            string     `json:"type"`
+	OwnerID         uint       `json:"ownerId"`
+	Status          string     `json:"status"`
+	ForSale         *bool      `json:"forSale,omitempty"`
+	LongLived       *bool      `json:"longLived,omitempty"`
+	GraphAvailable  *bool      `json:"graphAvailable,omitempty"`
+	LastSafeError   string     `json:"lastSafeError,omitempty"`
+	Email           string     `json:"email,omitempty"`
+	Domain          string     `json:"domain,omitempty"`
+	DomainTLD       string     `json:"domainTld,omitempty"`
+	MailServerID    uint       `json:"mailServerId,omitempty"`
+	Purpose         string     `json:"purpose,omitempty"`
+	MailboxCount    int        `json:"mailboxCount,omitempty"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 // ResourceListResponse is the paginated resource list response.

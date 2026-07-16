@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   DatePicker,
@@ -53,10 +59,11 @@ import {
   deleteAdminDomainsByIds,
   disableAdminDomainsByIds,
   getAdminDomainDetail,
+  getAdminDomainMessage,
   listAdminDomainOwners,
   listAdminDomains,
   listAdminMailServers,
-  queueAdminDomainMailFetch,
+  refreshAdminDomainMessages,
   recoverAdminDomain,
   setAdminDomainsPurposeByFilter,
   setAdminDomainsPurposeByIds,
@@ -73,7 +80,7 @@ import {
   type AdminDomainStatus,
   type AdminMailServer,
   type CreateAdminDomainRequest,
-} from "./admin-domains/admin-domains-mock";
+} from "./admin-domains/admin-domains-api";
 import { DomainDetailSheet as DomainDetailSheetView } from "./admin-domains/domain-detail-sheet";
 import {
   DomainOwnerIdentity as DomainOwnerIdentityView,
@@ -100,7 +107,6 @@ export default function AdminDomainEmails() {
     () => getAdminDomainCapabilities(currentUser?.permissions ?? []),
     [currentUser?.permissions]
   );
-
   const [activeTld, setActiveTld] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -216,6 +222,7 @@ export default function AdminDomainEmails() {
     total,
   } = useBlockPagedList<AdminDomainItem>({
     activePage,
+    blockSize: 100,
     filterKey: JSON.stringify(listFilter),
     loadBlock: loadDomainBlock,
     onError: (error) => {
@@ -330,7 +337,7 @@ export default function AdminDomainEmails() {
       runRowOperation(
         record.id,
         () => validateAdminDomain(record.id),
-        "Domain validation completed."
+        "Domain validation submitted."
       ),
     [runRowOperation]
   );
@@ -439,6 +446,28 @@ export default function AdminDomainEmails() {
     },
     [canOperateDomains, detail, refresh, t]
   );
+
+  const refreshDetailMessages = useCallback(async () => {
+    if (!canOperateDomains || !detail) return;
+    const requestId = detailRequestIdRef.current;
+    const detailId = detail.id;
+    setDetailBusy(true);
+    try {
+      const messages = await refreshAdminDomainMessages(detailId);
+      if (detailRequestIdRef.current === requestId) {
+        setDetail((current) =>
+          current?.id === detailId ? { ...current, messages } : current
+        );
+        Toast.success(t("Mail refreshed."));
+      }
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Domain operation failed."));
+    } finally {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailBusy(false);
+      }
+    }
+  }, [canOperateDomains, detail, t]);
 
   const openImport = () => {
     if (!canWriteDomains) return;
@@ -1195,6 +1224,7 @@ export default function AdminDomainEmails() {
           </Button>
         </Dropdown>
         <Input
+          name="admin-domain-search"
           prefix={<IconSearch />}
           placeholder={t("Search domain, owner or ID")}
           showClear
@@ -1318,6 +1348,9 @@ export default function AdminDomainEmails() {
         busy={detailBusy}
         detail={detail}
         loading={detailLoading}
+        onLoadMessage={(messageId) =>
+          getAdminDomainMessage(detail!.id, messageId)
+        }
         onCancel={() => {
           detailRequestIdRef.current += 1;
           setDetail(null);
@@ -1354,13 +1387,7 @@ export default function AdminDomainEmails() {
             : undefined
         }
         onMailFetch={
-          canOperateDomains
-            ? () =>
-                runDetailOperation(
-                  () => queueAdminDomainMailFetch(detail!.id),
-                  "Mail fetch submitted."
-                )
-            : undefined
+          canOperateDomains ? () => refreshDetailMessages() : undefined
         }
         onRecover={
           canOperateDomains
@@ -1408,7 +1435,7 @@ export default function AdminDomainEmails() {
             ? () =>
                 runDetailOperation(
                   () => validateAdminDomain(detail!.id),
-                  "Domain validation completed."
+                  "Domain validation submitted."
                 )
             : undefined
         }

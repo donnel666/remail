@@ -61,7 +61,10 @@ SELECT
     'validation' AS source,
     job.id AS source_id,
     job.resource_id AS resource_scope_id,
-    'microsoft_resource' AS biz_type,
+    CASE job.resource_type
+        WHEN 'domain' THEN 'domain_resource'
+        ELSE 'microsoft_resource'
+    END AS biz_type,
     job.resource_id AS biz_id,
     'validation' AS kind,
     job.status AS status,
@@ -79,7 +82,7 @@ SELECT
     NULL AS progress_failed,
     NULL AS reason_buckets
 FROM resource_validation_jobs AS job
-WHERE job.resource_type = 'microsoft'`
+WHERE job.resource_type IN ('microsoft', 'domain')`
 
 const importResourceTaskSelect = `
 SELECT
@@ -265,6 +268,8 @@ UNION ALL
 UNION ALL
 ` + fetchTaskSelect
 
+const domainResourceTaskUnion = validationTaskSelect
+
 const importSingleTaskSelect = `
 SELECT
     'import' AS source,
@@ -346,12 +351,35 @@ func (r *AdminTaskViewRepo) MicrosoftResourceExists(ctx context.Context, resourc
 	return count > 0, nil
 }
 
+func (r *AdminTaskViewRepo) DomainResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("email_resources AS root").
+		Joins("JOIN domain_resources AS domain_resource ON domain_resource.id = root.id").
+		Where("root.id = ? AND root.type = ?", resourceID, "domain").
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check domain task resource: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *AdminTaskViewRepo) ListForMicrosoftResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, microsoftResourceTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, domainResourceTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) listForResource(ctx context.Context, filter governanceapp.AdminTaskListFilter, taskUnion string) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	if r == nil || r.db == nil {
 		return nil, 0, 0, errors.New("administrator task database is unavailable")
 	}
 	outerWhere := `
-FROM (` + microsoftResourceTaskUnion + `) AS normalized
+FROM (` + taskUnion + `) AS normalized
 WHERE normalized.resource_scope_id = ?
   AND (? = '' OR normalized.kind = ?)
   AND (? = '' OR normalized.status = ?)`

@@ -30,6 +30,11 @@ func (s *apiTaskRepoStub) MicrosoftResourceExists(context.Context, uint) (bool, 
 	return s.exists, s.err
 }
 
+func (s *apiTaskRepoStub) DomainResourceExists(context.Context, uint) (bool, error) {
+	s.existsCalls++
+	return s.exists, s.err
+}
+
 func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	s.lists++
 	if s.err != nil {
@@ -39,6 +44,10 @@ func (s *apiTaskRepoStub) ListForMicrosoftResource(context.Context, governanceap
 		return []governanceapp.AdminTaskView{}, 0, 0, nil
 	}
 	return []governanceapp.AdminTaskView{*s.task}, 1, 0, nil
+}
+
+func (s *apiTaskRepoStub) ListForDomainResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return s.ListForMicrosoftResource(ctx, filter)
 }
 
 func (s *apiTaskRepoStub) FindByRef(context.Context, governanceapp.AdminTaskRef) (*governanceapp.AdminTaskView, error) {

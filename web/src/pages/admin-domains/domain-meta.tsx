@@ -8,7 +8,7 @@ import type {
   AdminDomainItem,
   AdminDomainPurpose,
   AdminDomainStatus,
-} from "./admin-domains-mock";
+} from "./admin-domains-api";
 
 const STATUS_TAG: Record<
   AdminDomainStatus,
