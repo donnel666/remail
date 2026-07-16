@@ -3097,7 +3097,7 @@ export interface components {
              * @enum {string}
              */
             purpose?: "not_sale" | "sale" | "binding";
-            /** @description Generated mailbox count for domain resources. */
+            /** @description Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains. */
             mailboxCount?: number;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
@@ -3851,6 +3851,7 @@ export interface components {
             purpose: "not_sale" | "sale" | "binding";
             /** @enum {string} */
             status: "normal" | "abnormal" | "disabled" | "deleted";
+            /** @description Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains. */
             mailboxCount: number;
             lastSafeError?: string;
             /** Format: date-time */

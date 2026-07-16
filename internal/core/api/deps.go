@@ -58,7 +58,7 @@ func (m *CoreModule) SetAdminResourcePorts(
 		m.AdminCommands.SetPorts(owners, bindings, bindingAdmin, allocations)
 	}
 	if m.AdminDomainQuery != nil {
-		m.AdminDomainQuery.SetOwnerQuery(owners)
+		m.AdminDomainQuery.SetPorts(owners, bindings)
 	}
 	if m.AdminDomainCommands != nil {
 		m.AdminDomainCommands.SetPorts(owners, allocations)

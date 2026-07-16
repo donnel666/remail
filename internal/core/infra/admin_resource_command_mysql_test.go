@@ -80,6 +80,10 @@ func (p adminCommandBindingQueryPort) GetByResourceIDs(ctx context.Context, ids 
 	return result, nil
 }
 
+func (adminCommandBindingQueryPort) CountActiveByDomains(context.Context, []string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
 func (p *adminCommandBindingPort) ReplaceAdminInput(ctx context.Context, command coreapp.AdminBindingCommand) error {
 	tx, ok := platform.GormTxFromContext(ctx)
 	if !ok {

@@ -40,6 +40,7 @@
 | 2026-07-15 | V1.33 | Codex | 管理员 Domain 页面接入真实 API：列表增加 owner 富化、完整筛选/facets/deleted 视图；补齐显式编辑、Validate、Enable/Disable、Publish/Unpublish、Delete/Recover 与 ids/filter 批量命令。管理员导入可选择显式 owner，服务端校验 owner 资格、同 owner MailServer、active allocation、版本、幂等回执和 OperationLog；Domain SMTP 入站邮件只刷新真实消息查询，不伪造远程 Fetch 任务。 |
 | 2026-07-15 | V1.34 | Codex | 明确 deleted Domain 恢复时的历史分配兼容：无 allocation 引用的旧生成邮箱物理清理；被 released allocation 引用的行退役并退出邮箱池，订单继续保留交付邮箱快照。owner、Domain、MailServer 和当前邮箱池归属仍在同一短事务内更新。 |
 | 2026-07-16 | V1.35 | Codex | 管理员 Domain 与 Microsoft 邮件 Tab 统一使用服务端搜索与 `(receivedAt,id)` 稳定游标：首屏按全局页大小加载并由后端计算 `total`，续页不重复 `COUNT`，正文仍按单封读取；禁止全量拉取后本地搜索或计数。 |
+| 2026-07-16 | V1.36 | Codex | 修正管理员辅助邮箱域名的 `mailboxCount`：普通 Domain 统计未退役 `GeneratedMailbox`，`purpose=binding` Domain 通过 MailTransport 批量统计当前有效 Microsoft 辅助绑定地址；过期绑定和 deleted Microsoft 资源不计入。 |
 
 > 核心域。BC-CORE 是邮箱资源和项目规则的所有者。分配记录、订单、邮件事实、钱包余额不在本上下文内。
 
@@ -354,7 +355,7 @@ Domain 创建接口只接受 canonical ASCII 域名：服务端必须统一 lowe
 - 同 `resourceId + email` 唯一，查询必须同时按 `resourceId + ownerUserId` 过滤。
 - 分配时优先复用已有 `normal` 邮箱。
 - 允许跨项目复用，同项目唯一由 BC-ALLOC 分配约束兜底。
-- 自建库存展示可用域名数量，同时管理端返回已生成邮箱数量 `mailboxCount`。
+- 自建库存展示可用域名数量，同时管理端返回邮箱数量 `mailboxCount`：`not_sale/sale` 统计未退役 `GeneratedMailbox`，`binding` 统计 MailTransport 当前有效且归属该域名的 Microsoft 辅助绑定地址；禁止前端本地推算。
 - 已删除 Domain 被重新创建恢复时，原 `GeneratedMailbox` 派生邮箱池必须在同一事务中清空，避免跨 owner 继承旧生成邮箱；无 allocation 引用的行物理删除，被 released allocation 引用的行改为内部 `retired` 并从列表、计数、入站解析和后续分配中排除，`DomainAllocation.email` 继续保存历史交付快照；新的邮箱池由后续分配重新生成。
 
 ### 2.7 `MailServer`

@@ -40,6 +40,22 @@ type adminDomainOwnersStub struct {
 	err    error
 }
 
+type adminDomainBindingsStub struct {
+	counts map[string]int64
+}
+
+func (*adminDomainBindingsStub) GetByResourceIDs(context.Context, []uint) (map[uint]AdminBindingSummary, error) {
+	return map[uint]AdminBindingSummary{}, nil
+}
+
+func (s *adminDomainBindingsStub) CountActiveByDomains(_ context.Context, domains []string) (map[string]int64, error) {
+	result := make(map[string]int64, len(domains))
+	for _, value := range domains {
+		result[value] = s.counts[value]
+	}
+	return result, nil
+}
+
 func (s *adminDomainOwnersStub) GetByIDs(_ context.Context, ids []uint) (map[uint]AdminOwnerSummary, error) {
 	result := make(map[uint]AdminOwnerSummary, len(ids))
 	for _, id := range ids {
@@ -113,8 +129,9 @@ func TestAdminDomainQueryUsesOwnerSearchDeletedViewAndCursor(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &adminDomainReadStub{
 		records: []AdminDomainRecord{
-			{ID: 42, Version: 3, OwnerUserID: 9, Domain: "one.example.com", DomainTLD: "com", Purpose: domain.PurposeNotSale, Status: domain.DomainStatusDeleted, CreatedAt: now, UpdatedAt: now},
+			{ID: 42, Version: 3, OwnerUserID: 9, Domain: "one.example.com", DomainTLD: "com", Purpose: domain.PurposeNotSale, Status: domain.DomainStatusDeleted, MailboxCount: 7, CreatedAt: now, UpdatedAt: now},
 			{ID: 41, Version: 2, OwnerUserID: 9, Domain: "two.example.com", DomainTLD: "com", Purpose: domain.PurposeSale, Status: domain.DomainStatusDeleted, CreatedAt: now, UpdatedAt: now},
+			{ID: 40, Version: 1, OwnerUserID: 9, Domain: "binding.example.com", DomainTLD: "com", Purpose: domain.PurposeBinding, Status: domain.DomainStatusNormal, CreatedAt: now, UpdatedAt: now},
 		},
 		facets: AdminDomainFacets{Status: AdminDomainStatusFacets{Deleted: 2}},
 	}
@@ -122,7 +139,7 @@ func TestAdminDomainQueryUsesOwnerSearchDeletedViewAndCursor(t *testing.T) {
 		9: {ID: 9, Email: "owner@example.com", Nickname: "Owner", Role: "supplier", Enabled: true},
 	}}
 	query := NewAdminDomainQuery(repo)
-	query.SetOwnerQuery(owners)
+	query.SetPorts(owners, &adminDomainBindingsStub{counts: map[string]int64{"binding.example.com": 13}})
 
 	result, err := query.List(context.Background(), AdminDomainListFilter{
 		Search: " owner@example.com ", Status: domain.DomainStatusDeleted,
@@ -139,8 +156,18 @@ func TestAdminDomainQueryUsesOwnerSearchDeletedViewAndCursor(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].Owner.Email != "owner@example.com" {
 		t.Fatalf("items = %+v", result.Items)
 	}
+	if result.Items[0].MailboxCount != 7 {
+		t.Fatalf("ordinary mailbox count = %d, want 7", result.Items[0].MailboxCount)
+	}
 	if result.NextAfterID == nil || *result.NextAfterID != 42 {
 		t.Fatalf("nextAfterId = %v, want 42", result.NextAfterID)
+	}
+	detail, err := query.Get(context.Background(), 40)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if detail.MailboxCount != 13 {
+		t.Fatalf("binding mailbox count = %d, want 13", detail.MailboxCount)
 	}
 }
 

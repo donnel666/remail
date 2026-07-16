@@ -3153,20 +3153,22 @@ type AdminDomainItem struct {
 	Domain    string    `json:"domain"`
 
 	// DomainTld Backend-derived exact TLD filter value.
-	DomainTld       string                   `json:"domainTld"`
-	Id              int                      `json:"id"`
-	LastAllocatedAt *time.Time               `json:"lastAllocatedAt,omitempty"`
-	LastSafeError   *string                  `json:"lastSafeError,omitempty"`
-	MailServerId    int                      `json:"mailServerId"`
-	MailboxCount    int                      `json:"mailboxCount"`
-	OwnerEmail      openapi_types.Email      `json:"ownerEmail"`
-	OwnerId         int                      `json:"ownerId"`
-	OwnerNickname   string                   `json:"ownerNickname"`
-	OwnerRole       AdminDomainItemOwnerRole `json:"ownerRole"`
-	Purpose         AdminDomainItemPurpose   `json:"purpose"`
-	Status          AdminDomainItemStatus    `json:"status"`
-	UpdatedAt       time.Time                `json:"updatedAt"`
-	Version         int                      `json:"version"`
+	DomainTld       string     `json:"domainTld"`
+	Id              int        `json:"id"`
+	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
+	LastSafeError   *string    `json:"lastSafeError,omitempty"`
+	MailServerId    int        `json:"mailServerId"`
+
+	// MailboxCount Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains.
+	MailboxCount  int                      `json:"mailboxCount"`
+	OwnerEmail    openapi_types.Email      `json:"ownerEmail"`
+	OwnerId       int                      `json:"ownerId"`
+	OwnerNickname string                   `json:"ownerNickname"`
+	OwnerRole     AdminDomainItemOwnerRole `json:"ownerRole"`
+	Purpose       AdminDomainItemPurpose   `json:"purpose"`
+	Status        AdminDomainItemStatus    `json:"status"`
+	UpdatedAt     time.Time                `json:"updatedAt"`
+	Version       int                      `json:"version"`
 }
 
 // AdminDomainItemOwnerRole defines model for AdminDomainItem.OwnerRole.
@@ -5101,7 +5103,7 @@ type ResourceItem struct {
 	// MailServerId Mail server id for domain resources.
 	MailServerId *int `json:"mailServerId,omitempty"`
 
-	// MailboxCount Generated mailbox count for domain resources.
+	// MailboxCount Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains.
 	MailboxCount *int `json:"mailboxCount,omitempty"`
 	OwnerId      int  `json:"ownerId"`
 

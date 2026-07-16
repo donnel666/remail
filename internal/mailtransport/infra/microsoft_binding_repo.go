@@ -241,6 +241,48 @@ func (r *MicrosoftBindingRepo) FindByResourceIDs(ctx context.Context, resourceID
 	return result, nil
 }
 
+func (r *MicrosoftBindingRepo) CountActiveByDomains(ctx context.Context, domains []string) (map[string]int64, error) {
+	normalized := make([]string, 0, len(domains))
+	seen := make(map[string]struct{}, len(domains))
+	for _, value := range domains {
+		value = strings.ToLower(strings.Trim(strings.TrimSpace(value), "."))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	result := make(map[string]int64, len(normalized))
+	if len(normalized) == 0 {
+		return result, nil
+	}
+	type domainCount struct {
+		Domain string
+		Count  int64
+	}
+	var rows []domainCount
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
+	if err := db.
+		Table("microsoft_binding_mailboxes AS binding").
+		Select("binding.active_binding_domain AS domain, COUNT(*) AS count").
+		Joins("JOIN microsoft_resources AS resource ON resource.id = binding.resource_id").
+		Where("binding.active_binding_domain IN ? AND resource.status <> ?", normalized, "deleted").
+		Group("binding.active_binding_domain").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("count active microsoft bindings by domain: %w", err)
+	}
+	for _, row := range rows {
+		result[row.Domain] = row.Count
+	}
+	return result, nil
+}
+
 // ReplaceAdminInput updates the current MailTransport-owned binding input in
 // the caller's short transaction. addressSet=false preserves the address and,
 // for an owner-only change, the protocol status. If the Microsoft account email

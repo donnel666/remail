@@ -95,22 +95,24 @@ type AdminDomainReadRepository interface {
 }
 
 type AdminDomainQuery struct {
-	repo   AdminDomainReadRepository
-	owners OwnerQueryPort
+	repo     AdminDomainReadRepository
+	owners   OwnerQueryPort
+	bindings BindingQueryPort
 }
 
 func NewAdminDomainQuery(repo AdminDomainReadRepository) *AdminDomainQuery {
 	return &AdminDomainQuery{repo: repo}
 }
 
-func (q *AdminDomainQuery) SetOwnerQuery(owners OwnerQueryPort) {
+func (q *AdminDomainQuery) SetPorts(owners OwnerQueryPort, bindings BindingQueryPort) {
 	if q != nil {
 		q.owners = owners
+		q.bindings = bindings
 	}
 }
 
 func (q *AdminDomainQuery) List(ctx context.Context, filter AdminDomainListFilter, offset, limit int, afterID uint) (*AdminDomainListResult, error) {
-	if q == nil || q.repo == nil || q.owners == nil {
+	if q == nil || q.repo == nil || q.owners == nil || q.bindings == nil {
 		return nil, domain.ErrResourceDependency
 	}
 	filter, err := normalizeAdminDomainFilter(ctx, q.owners, filter)
@@ -150,7 +152,7 @@ func (q *AdminDomainQuery) List(ctx context.Context, filter AdminDomainListFilte
 }
 
 func (q *AdminDomainQuery) Get(ctx context.Context, resourceID uint) (*AdminDomainItem, error) {
-	if q == nil || q.repo == nil || q.owners == nil || resourceID == 0 {
+	if q == nil || q.repo == nil || q.owners == nil || q.bindings == nil || resourceID == 0 {
 		return nil, domain.ErrResourceNotFound
 	}
 	record, err := q.repo.FindAdminDomain(ctx, resourceID)
@@ -169,18 +171,29 @@ func (q *AdminDomainQuery) Get(ctx context.Context, resourceID uint) (*AdminDoma
 
 func (q *AdminDomainQuery) enrich(ctx context.Context, records []AdminDomainRecord) ([]AdminDomainItem, error) {
 	ownerIDs := make([]uint, 0, len(records))
+	bindingDomains := make([]string, 0, len(records))
 	for i := range records {
 		ownerIDs = append(ownerIDs, records[i].OwnerUserID)
+		if records[i].Purpose == domain.PurposeBinding {
+			bindingDomains = append(bindingDomains, records[i].Domain)
+		}
 	}
 	owners, err := q.owners.GetByIDs(ctx, uniqueAdminResourceIDs(ownerIDs))
 	if err != nil {
 		return nil, fmt.Errorf("load admin domain owners: %w", err)
+	}
+	bindingCounts, err := q.bindings.CountActiveByDomains(ctx, bindingDomains)
+	if err != nil {
+		return nil, fmt.Errorf("load admin binding domain usage: %w", err)
 	}
 	items := make([]AdminDomainItem, len(records))
 	for i := range records {
 		owner, ok := owners[records[i].OwnerUserID]
 		if !ok {
 			return nil, fmt.Errorf("%w: owner summary missing", domain.ErrResourceDependency)
+		}
+		if records[i].Purpose == domain.PurposeBinding {
+			records[i].MailboxCount = bindingCounts[strings.ToLower(records[i].Domain)]
 		}
 		items[i] = adminDomainItem(records[i], owner)
 	}

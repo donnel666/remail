@@ -76,6 +76,10 @@ func (p adminHandlerBindingPort) GetByResourceIDs(context.Context, []uint) (map[
 	return map[uint]coreapp.AdminBindingSummary{p.binding.ResourceID: p.binding}, nil
 }
 
+func (adminHandlerBindingPort) CountActiveByDomains(context.Context, []string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
 type adminHandlerBindingAdminPort struct{}
 
 func (adminHandlerBindingAdminPort) ReplaceAdminInput(context.Context, coreapp.AdminBindingCommand) error {

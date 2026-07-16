@@ -18,6 +18,7 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 9201, "normal")
 	createMicrosoftAliasTestResource(t, db, 9202, "normal")
+	createMicrosoftAliasTestResource(t, db, 9203, "deleted")
 	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Create(&MicrosoftBindingMailboxModel{
 		ResourceID:     9201,
@@ -27,6 +28,26 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 		BindingAddress: "proof9201@example.com",
 		Purpose:        "validation",
 		Status:         string(domain.MicrosoftBindingVerified),
+		UpdatedAt:      now,
+	}).Error)
+	require.NoError(t, db.Create(&MicrosoftBindingMailboxModel{
+		ResourceID:     9203,
+		ResourceType:   "microsoft",
+		OwnerUserID:    9203,
+		AccountEmail:   "account9203@outlook.com",
+		BindingAddress: "deleted@example.com",
+		Purpose:        "validation",
+		Status:         string(domain.MicrosoftBindingVerified),
+		UpdatedAt:      now,
+	}).Error)
+	require.NoError(t, db.Create(&MicrosoftBindingMailboxModel{
+		ResourceID:     9202,
+		ResourceType:   "microsoft",
+		OwnerUserID:    9202,
+		AccountEmail:   "account9202@outlook.com",
+		BindingAddress: "expired@example.com",
+		Purpose:        "validation",
+		Status:         string(domain.MicrosoftBindingExpired),
 		UpdatedAt:      now,
 	}).Error)
 	require.NoError(t, db.Create(&InboundMailModel{
@@ -82,6 +103,18 @@ func TestAuxiliaryMailRepoScopesSafeSummariesAndSingleDetailMySQL(t *testing.T) 
 	}).Error)
 
 	repo := NewAuxiliaryMailRepo(db)
+	bindingCounts, err := NewMicrosoftBindingRepo(db).CountActiveByDomains(context.Background(), []string{" EXAMPLE.COM ", "missing.test"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, bindingCounts["example.com"])
+	assert.Zero(t, bindingCounts["missing.test"])
+	var activeDomainIndexCount int64
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = 'microsoft_binding_mailboxes'
+  AND index_name = 'idx_microsoft_binding_active_domain'`).Scan(&activeDomainIndexCount).Error)
+	assert.EqualValues(t, 1, activeDomainIndexCount)
 	exists, err := repo.MicrosoftResourceExists(context.Background(), 9201)
 	require.NoError(t, err)
 	assert.True(t, exists)

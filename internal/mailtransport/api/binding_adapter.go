@@ -133,6 +133,13 @@ func (a *MicrosoftBindingQueryAdapter) GetByResourceIDs(ctx context.Context, res
 	return result, nil
 }
 
+func (a *MicrosoftBindingQueryAdapter) CountActiveByDomains(ctx context.Context, domains []string) (map[string]int64, error) {
+	if a == nil || a.repo == nil {
+		return map[string]int64{}, nil
+	}
+	return a.repo.CountActiveByDomains(ctx, domains)
+}
+
 func (a *MicrosoftBindingInputAdapter) RecordMicrosoftBindingInputs(ctx context.Context, inputs []coreapp.MicrosoftBindingInput) error {
 	if a == nil || a.repo == nil || len(inputs) == 0 {
 		return nil

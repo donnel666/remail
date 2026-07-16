@@ -9165,7 +9165,7 @@ components:
           description: Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
         mailboxCount:
           type: integer
-          description: Generated mailbox count for domain resources.
+          description: Generated-mailbox count for ordinary domain resources; active Microsoft auxiliary-binding count for purpose=binding domains.
         lastAllocatedAt:
           type: string
           format: date-time
@@ -10998,6 +10998,7 @@ components:
         mailboxCount:
           type: integer
           minimum: 0
+          description: Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains.
         lastSafeError:
           type: string
         lastAllocatedAt:

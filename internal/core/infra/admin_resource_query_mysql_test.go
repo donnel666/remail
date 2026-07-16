@@ -59,6 +59,10 @@ func (p adminQueryBindingPort) GetByResourceIDs(_ context.Context, ids []uint) (
 	return result, nil
 }
 
+func (adminQueryBindingPort) CountActiveByDomains(context.Context, []string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
 type adminQueryAliasSchedulePort struct {
 	summary coreapp.AdminAliasScheduleSummary
 }

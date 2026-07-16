@@ -60,10 +60,12 @@ type AdminBindingSummary struct {
 	UpdatedAt     time.Time
 }
 
-// BindingQueryPort is published by MailTransport and only exposes the current
-// binding's safe summary. Auxiliary message bodies stay in MailTransport.
+// BindingQueryPort is published by MailTransport and only exposes safe current
+// binding summaries and aggregate domain usage. Auxiliary message bodies stay
+// in MailTransport.
 type BindingQueryPort interface {
 	GetByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]AdminBindingSummary, error)
+	CountActiveByDomains(ctx context.Context, domains []string) (map[string]int64, error)
 }
 
 type AdminBindingCommand struct {
