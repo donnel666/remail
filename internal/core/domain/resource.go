@@ -23,21 +23,24 @@ const (
 type MicrosoftResourceStatus string
 
 const (
-	MicrosoftStatusPending  MicrosoftResourceStatus = "pending"
-	MicrosoftStatusNormal   MicrosoftResourceStatus = "normal"
-	MicrosoftStatusAbnormal MicrosoftResourceStatus = "abnormal"
-	MicrosoftStatusDisabled MicrosoftResourceStatus = "disabled"
-	MicrosoftStatusDeleted  MicrosoftResourceStatus = "deleted"
+	MicrosoftStatusPending    MicrosoftResourceStatus = "pending"
+	MicrosoftStatusValidating MicrosoftResourceStatus = "validating"
+	MicrosoftStatusNormal     MicrosoftResourceStatus = "normal"
+	MicrosoftStatusAbnormal   MicrosoftResourceStatus = "abnormal"
+	MicrosoftStatusDisabled   MicrosoftResourceStatus = "disabled"
+	MicrosoftStatusDeleted    MicrosoftResourceStatus = "deleted"
 )
 
 // MailDomainStatus represents the status of a domain resource.
 type MailDomainStatus string
 
 const (
-	DomainStatusNormal   MailDomainStatus = "normal"
-	DomainStatusAbnormal MailDomainStatus = "abnormal"
-	DomainStatusDisabled MailDomainStatus = "disabled"
-	DomainStatusDeleted  MailDomainStatus = "deleted"
+	DomainStatusPending    MailDomainStatus = "pending"
+	DomainStatusValidating MailDomainStatus = "validating"
+	DomainStatusNormal     MailDomainStatus = "normal"
+	DomainStatusAbnormal   MailDomainStatus = "abnormal"
+	DomainStatusDisabled   MailDomainStatus = "disabled"
+	DomainStatusDeleted    MailDomainStatus = "deleted"
 )
 
 // ResourcePurpose represents the purpose of a domain resource.
@@ -99,7 +102,7 @@ type MicrosoftResource struct {
 // IsValidMicrosoftStatus returns true if the status is a valid state.
 func IsValidMicrosoftStatus(s string) bool {
 	switch MicrosoftResourceStatus(s) {
-	case MicrosoftStatusPending, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled, MicrosoftStatusDeleted:
+	case MicrosoftStatusPending, MicrosoftStatusValidating, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled, MicrosoftStatusDeleted:
 		return true
 	default:
 		return false
@@ -110,9 +113,11 @@ func IsValidMicrosoftStatus(s string) bool {
 func CanTransitionMicrosoftStatus(from, to MicrosoftResourceStatus) bool {
 	switch from {
 	case MicrosoftStatusPending:
-		return to == MicrosoftStatusNormal || to == MicrosoftStatusAbnormal
+		return to == MicrosoftStatusValidating || to == MicrosoftStatusDisabled
+	case MicrosoftStatusValidating:
+		return to == MicrosoftStatusPending || to == MicrosoftStatusNormal || to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled
 	case MicrosoftStatusNormal:
-		return to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled
+		return to == MicrosoftStatusPending || to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled
 	case MicrosoftStatusAbnormal:
 		return to == MicrosoftStatusPending || to == MicrosoftStatusDisabled
 	case MicrosoftStatusDisabled:
@@ -131,6 +136,27 @@ func (r *MicrosoftResource) TransitionStatus(next MicrosoftResourceStatus) error
 	}
 	r.Status = next
 	return nil
+}
+
+// QueueValidationAdmin marks an eligible resource as waiting for Redis task
+// assignment. An already-validating resource keeps its current assignment.
+func (r *MicrosoftResource) QueueValidationAdmin() (bool, error) {
+	switch r.Status {
+	case MicrosoftStatusDeleted:
+		return false, ErrResourceNotFound
+	case MicrosoftStatusDisabled:
+		return false, ErrInvalidResourceStatus
+	case MicrosoftStatusValidating:
+		return false, nil
+	case MicrosoftStatusPending:
+		changed := r.LastSafeError != ""
+		r.LastSafeError = ""
+		return changed, nil
+	default:
+		r.Status = MicrosoftStatusPending
+		r.LastSafeError = ""
+		return true, nil
+	}
 }
 
 // MarkDeleted applies the user private-delete command. deleted is a terminal
@@ -343,7 +369,7 @@ type MailDomainResource struct {
 // IsValidDomainStatus returns true if the status is a valid state.
 func IsValidDomainStatus(s string) bool {
 	switch MailDomainStatus(s) {
-	case DomainStatusNormal, DomainStatusAbnormal, DomainStatusDisabled, DomainStatusDeleted:
+	case DomainStatusPending, DomainStatusValidating, DomainStatusNormal, DomainStatusAbnormal, DomainStatusDisabled, DomainStatusDeleted:
 		return true
 	default:
 		return false
@@ -353,12 +379,16 @@ func IsValidDomainStatus(s string) bool {
 // CanTransitionDomainStatus returns true when a status transition follows the Core state machine.
 func CanTransitionDomainStatus(from, to MailDomainStatus) bool {
 	switch from {
+	case DomainStatusPending:
+		return to == DomainStatusValidating || to == DomainStatusNormal || to == DomainStatusAbnormal || to == DomainStatusDisabled
+	case DomainStatusValidating:
+		return to == DomainStatusPending || to == DomainStatusNormal || to == DomainStatusAbnormal || to == DomainStatusDisabled
 	case DomainStatusAbnormal:
-		return to == DomainStatusNormal || to == DomainStatusDisabled
+		return to == DomainStatusPending || to == DomainStatusNormal || to == DomainStatusDisabled
 	case DomainStatusNormal:
-		return to == DomainStatusAbnormal || to == DomainStatusDisabled
+		return to == DomainStatusPending || to == DomainStatusAbnormal || to == DomainStatusDisabled
 	case DomainStatusDisabled:
-		return to == DomainStatusAbnormal
+		return to == DomainStatusPending
 	case DomainStatusDeleted:
 		return false
 	default:
@@ -373,6 +403,26 @@ func (r *MailDomainResource) TransitionStatus(next MailDomainStatus) error {
 	}
 	r.Status = next
 	return nil
+}
+
+// QueueValidationAdmin is the domain counterpart of the Microsoft transition.
+func (r *MailDomainResource) QueueValidationAdmin() (bool, error) {
+	switch r.Status {
+	case DomainStatusDeleted:
+		return false, ErrResourceNotFound
+	case DomainStatusDisabled:
+		return false, ErrInvalidResourceStatus
+	case DomainStatusValidating:
+		return false, nil
+	case DomainStatusPending:
+		changed := r.LastSafeError != ""
+		r.LastSafeError = ""
+		return changed, nil
+	default:
+		r.Status = DomainStatusPending
+		r.LastSafeError = ""
+		return true, nil
+	}
 }
 
 // MarkDNSStatusAdmin records a validation result without doubling as an
@@ -420,7 +470,7 @@ func (r *MailDomainResource) EnableAdmin() error {
 	if r.Status != DomainStatusDisabled {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = DomainStatusAbnormal
+	r.Status = DomainStatusPending
 	r.LastSafeError = ""
 	return nil
 }
@@ -451,7 +501,7 @@ func (r *MailDomainResource) RecoverAdmin() error {
 	if r.Status != DomainStatusDeleted {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = DomainStatusAbnormal
+	r.Status = DomainStatusPending
 	r.Purpose = PurposeNotSale
 	r.LastSafeError = ""
 	r.LastAllocatedAt = nil

@@ -146,7 +146,7 @@ SDK 可调用接口示例：
 | `POST` | `/v1/open/resources/imports` | API Key 导入微软邮箱 TXT。 |
 | `GET` | `/v1/open/resources/imports/{importId}` | API Key 查询资源导入任务。 |
 | `POST` | `/v1/open/resources/validations` | API Key 批量提交资源检测。 |
-| `GET` | `/v1/open/resources/validations/{validationId}` | API Key 查询资源检测任务。 |
+资源验证只返回异步受理数量，不提供 `validationId` 或验证任务查询接口；调用方通过资源列表/详情中的 `pending/validating/normal/abnormal` 状态观察结果。
 | `GET` | `/v1/open/servers` | API Key 查询自有邮件服务器。 |
 | `POST` | `/v1/open/servers` | API Key 创建邮件服务器。 |
 | `POST` | `/v1/open/domains` | API Key 创建域名邮箱资源。 |

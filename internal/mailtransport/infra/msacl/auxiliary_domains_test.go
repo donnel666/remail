@@ -54,7 +54,7 @@ func TestSetAuxiliaryDomainsNormalizes(t *testing.T) {
 }
 
 func TestMapExplicitAliasErrorAlreadyBoundShowsMaskedAddress(t *testing.T) {
-	res := mapExplicitAliasError(&AuthError{Status: AuthStatusAlreadyBound, BoundDisplay: "a****b@qq.com"})
+	res := mapExplicitAliasError(&AuthError{Status: AuthStatusAlreadyBound, BoundMailbox: "a****b@qq.com"})
 	if res.Category != "already_bound" {
 		t.Fatalf("category = %q", res.Category)
 	}

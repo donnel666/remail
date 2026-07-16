@@ -45,15 +45,14 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 		Limit:   20,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(6), total)
+	require.Equal(t, int64(5), total)
 	require.Equal(t, int64(2), succeeded)
-	require.Len(t, items, 6)
+	require.Len(t, items, 5)
 
 	byID := make(map[string]governanceapp.AdminTaskView, len(items))
 	for i := range items {
 		byID[items[i].TaskID()] = items[i]
 	}
-	require.Contains(t, byID, "validation:6101")
 	require.Contains(t, byID, "import:6201")
 	require.Contains(t, byID, "alias:6301")
 	require.Contains(t, byID, "alias_schedule:6001")
@@ -97,7 +96,6 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		kind    string
 		bizType string
 	}{
-		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceValidation, ID: 6101}, kind: governanceapp.AdminTaskKindValidation, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceImport, ID: 6201}, kind: governanceapp.AdminTaskKindImport, bizType: governanceapp.AdminTaskBizMicrosoftResourceImport},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAlias, ID: 6301}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAliasSchedule, ID: 6001}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
@@ -127,8 +125,8 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		{Reason: "other", Count: 1},
 	}, task.Progress.ReasonCounts)
 
-	_, err = repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceValidation, ID: 999999})
-	require.ErrorIs(t, err, governanceapp.ErrAdminTaskNotFound)
+	_, err = repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: "validation", ID: 6101})
+	require.ErrorIs(t, err, governanceapp.ErrInvalidAdminTaskQuery)
 }
 
 func seedGovernanceTaskFacts(t *testing.T, db *gorm.DB) {
@@ -149,15 +147,6 @@ INSERT INTO microsoft_resources(
     6001, 'microsoft', 'task-view@outlook.com', 'outlook.com', 'never-return-password',
     'never-return-client', 'never-return-token', 4, 'normal', 80, ?, ?
 )`, base, base).Error)
-
-	require.NoError(t, db.Exec(`
-INSERT INTO resource_validation_jobs(
-    id, resource_id, resource_type, owner_user_id, expected_credential_revision,
-    status, attempts, max_attempts, last_safe_error, created_at, updated_at
-) VALUES (
-    6101, 6001, 'microsoft', 5001, 4,
-    'failed', 3, 3, 'safe validation category', ?, ?
-)`, base.Add(time.Minute), base.Add(time.Minute)).Error)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO resource_imports(

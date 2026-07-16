@@ -18,8 +18,14 @@ export function renderStatusTag(
     );
   } else if (status === "pending") {
     tag = (
-      <Tag color="orange" shape="circle" size="small">
+      <Tag color="blue" shape="circle" size="small">
         {t("Pending")}
+      </Tag>
+    );
+  } else if (status === "validating") {
+    tag = (
+      <Tag color="orange" shape="circle" size="small">
+        {t("Validating")}
       </Tag>
     );
   } else if (status === "abnormal") {

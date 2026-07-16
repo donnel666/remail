@@ -25,7 +25,6 @@ type MicrosoftBindingMailbox struct {
 	Purpose        string
 	Status         MicrosoftBindingStatus
 	CodeMessageID  string
-	BoundDisplay   string
 	Category       string
 	LastSafeError  string
 	SelectedAt     *time.Time

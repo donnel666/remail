@@ -47,7 +47,6 @@ import {
   validateResource,
   validateMicrosoftResourcesBatch,
   validateMicrosoftResourcesByFilter,
-  waitForResourceValidation,
   type ResourceBulkFilter,
   type ResourceListResponse,
   type ResourceListFilter,
@@ -74,7 +73,13 @@ import { renderStatusTag } from "./resources/resource-status-tag";
 import { SupplierApplicationModal } from "./resources/supplier-application-modal";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 
-type StatusFilter = "all" | "normal" | "pending" | "abnormal" | "disabled";
+type StatusFilter =
+  | "all"
+  | "pending"
+  | "validating"
+  | "normal"
+  | "abnormal"
+  | "disabled";
 type BooleanFilter = "all" | "yes" | "no";
 
 function hasSupplierRole(role?: string | null) {
@@ -258,6 +263,7 @@ export default function MicrosoftEmails() {
         disabled: 0,
         normal: 0,
         pending: 0,
+        validating: 0,
       },
     };
   }, [resourceFacets, total]);
@@ -336,19 +342,9 @@ export default function MicrosoftEmails() {
     const controller = new AbortController();
     validationControllersRef.current.add(controller);
     try {
-      const submitted = await validateResource(record.id, controller.signal);
+      await validateResource(record.id, controller.signal);
       Toast.success(t("Resource validation submitted."));
-      const completed = await waitForResourceValidation(submitted.validationId, {
-        signal: controller.signal,
-      });
       await refresh();
-      if (completed.status === "failed") {
-        Toast.error(
-          completed.lastSafeError || t("Resource validation failed.")
-        );
-      } else {
-        Toast.success(t("Resource validation succeeded."));
-      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
@@ -382,12 +378,8 @@ export default function MicrosoftEmails() {
     }
 
     try {
-      const response = await validateMicrosoftResourcesByFilter(
-        microsoftBulkFilter
-      );
-      Toast.success(
-        t("Resource validations submitted.", { count: response.queued })
-      );
+      await validateMicrosoftResourcesByFilter(microsoftBulkFilter);
+      Toast.success(t("Resource validation submitted."));
       setSelectedKeys([]);
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
@@ -957,6 +949,13 @@ export default function MicrosoftEmails() {
                   label={t("Pending")}
                   onSelect={applyStatusFilter}
                   value="pending"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "validating"}
+                  count={resourceStats.status.validating}
+                  label={t("Validating")}
+                  onSelect={applyStatusFilter}
+                  value="validating"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "abnormal"}

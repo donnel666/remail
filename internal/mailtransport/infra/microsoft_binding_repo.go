@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	stdmail "net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,7 +25,6 @@ type MicrosoftBindingMailboxModel struct {
 	Purpose        string     `gorm:"type:varchar(64);not null;default:'validation'"`
 	Status         string     `gorm:"type:varchar(32);not null;default:'pending'"`
 	CodeMessageID  string     `gorm:"type:varchar(255);not null;default:'';column:code_msg_id"`
-	BoundDisplay   string     `gorm:"type:varchar(255);not null;default:'';column:bound_display"`
 	Category       string     `gorm:"type:varchar(64);not null;default:''"`
 	LastSafeError  string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	SelectedAt     *time.Time `gorm:"column:selected_at"`
@@ -78,7 +78,6 @@ type MicrosoftValidationBindingObservationInput struct {
 	AccountEmail string
 	Address      string
 	Status       string
-	BoundDisplay string
 	SafeMessage  string
 }
 
@@ -160,30 +159,24 @@ func (r *MicrosoftBindingRepo) ApplyValidationBindingObservation(ctx context.Con
 	input.AccountEmail = normalizeBindingEmail(input.AccountEmail)
 	input.Address = normalizeBindingEmail(input.Address)
 	input.Status = strings.ToLower(strings.TrimSpace(input.Status))
-	input.BoundDisplay = strings.TrimSpace(input.BoundDisplay)
 	input.SafeMessage = strings.TrimSpace(input.SafeMessage)
 	if r == nil || r.db == nil || input.ResourceID == 0 || input.OwnerUserID == 0 || input.AccountEmail == "" {
 		return false, ErrMicrosoftBindingRecoveryInvalidInput
 	}
-	if input.Address != "" && !isConcreteMicrosoftBindingAddress(input.Address) {
-		maskedExternalObservation := input.BoundDisplay != "" &&
-			strings.Contains(input.Address, "*") && strings.Contains(input.Address, "@")
-		if !maskedExternalObservation {
-			return false, ErrMicrosoftBindingRecoveryInvalidInput
-		}
+	if input.Address != "" && !isConcreteMicrosoftBindingAddress(input.Address) && !isMaskedMicrosoftBindingAddress(input.Address) {
+		return false, ErrMicrosoftBindingRecoveryInvalidInput
 	}
 	if !validMicrosoftBindingObservationStatus(input.Status) {
 		return false, ErrMicrosoftBindingRecoveryInvalidInput
 	}
-	if input.Status == string(domain.MicrosoftBindingVerified) &&
-		(input.Address == "" || input.BoundDisplay != "") {
+	if input.Status == string(domain.MicrosoftBindingVerified) && !isConcreteMicrosoftBindingAddress(input.Address) {
 		return false, ErrMicrosoftBindingRecoveryInvalidInput
 	}
 	tx, ok := platform.GormTxFromContext(ctx)
 	if !ok {
 		return false, ErrMicrosoftBindingRecoveryTransaction
 	}
-	if input.Address == "" && input.BoundDisplay == "" {
+	if input.Address == "" {
 		return false, nil
 	}
 	return applyValidationBindingObservationTx(tx.WithContext(ctx), input)
@@ -229,7 +222,7 @@ func (r *MicrosoftBindingRepo) FindByResourceIDs(ctx context.Context, resourceID
 	}
 	var models []MicrosoftBindingMailboxModel
 	if err := db.
-		Select("id, resource_id, owner_user_id, account_email, binding_address, purpose, status, code_msg_id, bound_display, category, last_safe_error, selected_at, code_sent_at, verified_at, expires_at, created_at, updated_at").
+		Select("id, resource_id, owner_user_id, account_email, binding_address, purpose, status, code_msg_id, category, last_safe_error, selected_at, code_sent_at, verified_at, expires_at, created_at, updated_at").
 		Where("resource_id IN ?", ids).
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("find microsoft bindings by resources: %w", err)
@@ -325,7 +318,6 @@ func replaceMicrosoftBindingAdminInputTx(db *gorm.DB, resourceID, ownerUserID ui
 			updates["purpose"] = "validation"
 			updates["status"] = string(domain.MicrosoftBindingPending)
 			updates["code_msg_id"] = ""
-			updates["bound_display"] = ""
 			updates["category"] = ""
 			updates["last_safe_error"] = ""
 			updates["selected_at"] = now
@@ -456,18 +448,15 @@ func (r *MicrosoftBindingRepo) PreferredAddress(ctx context.Context, resourceID 
 	return model.BindingAddress, nil
 }
 
-// BindingResolved reports whether the resource's recovery-mailbox binding is
-// already a usable fact: either verified against a receivable project-domain
-// address, or resolved to a known external mailbox (bound_display recorded).
-// A pending/timeout/failed-without-display binding is NOT resolved — the
-// relationship still needs to be completed before alias/OTP tasks can run.
+// BindingResolved reports whether the resource has a concrete recovery address.
+// Domain eligibility is evaluated by the caller from the address itself.
 func (r *MicrosoftBindingRepo) BindingResolved(ctx context.Context, resourceID uint) (bool, error) {
 	if resourceID == 0 {
 		return false, nil
 	}
 	var model MicrosoftBindingMailboxModel
 	err := r.db.WithContext(ctx).
-		Select("status, bound_display").
+		Select("binding_address").
 		Where("resource_id = ? AND status <> ?", resourceID, string(domain.MicrosoftBindingExpired)).
 		Order("updated_at DESC").
 		First(&model).Error
@@ -477,10 +466,7 @@ func (r *MicrosoftBindingRepo) BindingResolved(ctx context.Context, resourceID u
 	if err != nil {
 		return false, fmt.Errorf("resolve microsoft binding state: %w", err)
 	}
-	if strings.TrimSpace(model.BoundDisplay) != "" {
-		return true, nil
-	}
-	return model.Status == string(domain.MicrosoftBindingVerified), nil
+	return isConcreteMicrosoftBindingAddress(model.BindingAddress), nil
 }
 
 func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, bindingAddress string, status domain.MicrosoftBindingStatus, safeError string) error {
@@ -497,10 +483,8 @@ func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, 
 	switch status {
 	case domain.MicrosoftBindingCodeSent:
 		updates["code_sent_at"] = now
-		updates["bound_display"] = "" // receivable project-domain recovery; clear any prior external mark
 	case domain.MicrosoftBindingVerified:
 		updates["verified_at"] = now
-		updates["bound_display"] = ""
 	}
 	db := r.db.WithContext(ctx)
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
@@ -513,33 +497,6 @@ func (r *MicrosoftBindingRepo) MarkStatus(ctx context.Context, resourceID uint, 
 	result := query.Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("mark microsoft binding status: %w", result.Error)
-	}
-	return nil
-}
-
-// RecordBoundDisplay records the (masked) external recovery mailbox that a
-// Microsoft account is actually bound to (e.g. a****b@qq.com) on the resource's
-// binding row(s), and marks the binding failed — we cannot receive verification
-// codes at an external address, but the fact is preserved for operators.
-func (r *MicrosoftBindingRepo) RecordBoundDisplay(ctx context.Context, resourceID uint, boundDisplay string, safeError string) error {
-	boundDisplay = strings.TrimSpace(boundDisplay)
-	if resourceID == 0 || boundDisplay == "" {
-		return nil
-	}
-	now := time.Now().UTC()
-	updates := map[string]any{
-		"bound_display":   boundDisplay,
-		"status":          string(domain.MicrosoftBindingFailed),
-		"category":        bindingStatusCategory(domain.MicrosoftBindingFailed),
-		"last_safe_error": strings.TrimSpace(safeError),
-		"updated_at":      now,
-	}
-	db := r.db.WithContext(ctx)
-	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		db = tx.WithContext(ctx)
-	}
-	if err := db.Model(&MicrosoftBindingMailboxModel{}).Where("resource_id = ?", resourceID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("record microsoft binding bound_display: %w", err)
 	}
 	return nil
 }
@@ -603,42 +560,34 @@ func applyValidationBindingObservationTx(tx *gorm.DB, input MicrosoftValidationB
 	if status == "" {
 		status = domain.MicrosoftBindingPending
 	}
-	if currentExists && input.BoundDisplay == "" && status != domain.MicrosoftBindingVerified &&
-		cleanVerifiedMicrosoftBindingMatchesIdentity(current, root.OwnerUserID, input.AccountEmail) {
-		// Validation observations are monotonic for a clean verified binding.
-		// Password failures, OTP timeouts, and locally prepared candidates do not
-		// prove that Microsoft changed the relationship. Resource health may still
-		// become abnormal, but the verified fact remains until a new verified fact,
-		// an explicit external BoundDisplay, or an administrator identity reset.
-		return false, nil
-	}
-
-	if input.BoundDisplay != "" {
-		if !currentExists && !isConcreteMicrosoftBindingAddress(input.Address) {
+	if currentExists && status != domain.MicrosoftBindingVerified &&
+		concreteMicrosoftBindingMatchesIdentity(current, root.OwnerUserID, input.AccountEmail) {
+		// Non-verified concrete candidates and transport failures do not supersede
+		// a clean verified fact. A Microsoft mask is different: it is an observed
+		// relationship fact, so retain the old address only when it still matches.
+		if !isMaskedMicrosoftBindingAddress(input.Address) ||
+			maskedMicrosoftBindingMatches(input.Address, current.BindingAddress) {
 			return false, nil
 		}
-		return applyExternalBindingObservationTx(tx, root, current, currentExists, input)
 	}
 	if input.Address == "" {
 		return false, nil
 	}
-	if err := lockActiveBindingDomainForRecoveryTx(tx, input.Address); err != nil {
-		return false, err
-	}
-
-	var occupied struct {
-		ResourceID uint `gorm:"column:resource_id"`
-	}
-	err = tx.Table("microsoft_binding_mailboxes").
-		Select("resource_id").
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("active_binding_address = ?", input.Address).
-		Take(&occupied).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, fmt.Errorf("lock observed microsoft binding address: %w", err)
-	}
-	if err == nil && occupied.ResourceID != input.ResourceID {
-		return false, ErrMicrosoftBindingAddressOccupied
+	if isConcreteMicrosoftBindingAddress(input.Address) {
+		var occupied struct {
+			ResourceID uint `gorm:"column:resource_id"`
+		}
+		err = tx.Table("microsoft_binding_mailboxes").
+			Select("resource_id").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("active_binding_address = ?", input.Address).
+			Take(&occupied).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, fmt.Errorf("lock observed microsoft binding address: %w", err)
+		}
+		if err == nil && occupied.ResourceID != input.ResourceID {
+			return false, ErrMicrosoftBindingAddressOccupied
+		}
 	}
 
 	category := bindingStatusCategory(status)
@@ -695,7 +644,6 @@ func applyValidationBindingObservationTx(tx *gorm.DB, input MicrosoftValidationB
 			"purpose":         "validation",
 			"status":          string(status),
 			"code_msg_id":     "",
-			"bound_display":   "",
 			"category":        category,
 			"last_safe_error": safeMessage,
 			"selected_at":     now,
@@ -716,85 +664,12 @@ func applyValidationBindingObservationTx(tx *gorm.DB, input MicrosoftValidationB
 	return true, nil
 }
 
-func cleanVerifiedMicrosoftBindingMatchesIdentity(current MicrosoftBindingMailboxModel, ownerUserID uint, accountEmail string) bool {
+func concreteMicrosoftBindingMatchesIdentity(current MicrosoftBindingMailboxModel, ownerUserID uint, accountEmail string) bool {
 	return current.ResourceType == "microsoft" &&
 		current.OwnerUserID == ownerUserID &&
 		normalizeBindingEmail(current.AccountEmail) == accountEmail &&
-		current.Status == string(domain.MicrosoftBindingVerified) &&
-		isConcreteMicrosoftBindingAddress(current.BindingAddress) &&
-		strings.TrimSpace(current.CodeMessageID) == "" &&
-		strings.TrimSpace(current.BoundDisplay) == ""
-}
-
-func applyExternalBindingObservationTx(tx *gorm.DB, root recoveredBindingResourceRoot, current MicrosoftBindingMailboxModel, currentExists bool, input MicrosoftValidationBindingObservationInput) (bool, error) {
-	if !currentExists {
-		if err := lockActiveBindingDomainForRecoveryTx(tx, input.Address); err != nil {
-			return false, err
-		}
-		now := time.Now().UTC()
-		current = MicrosoftBindingMailboxModel{
-			ResourceID:     input.ResourceID,
-			ResourceType:   "microsoft",
-			OwnerUserID:    root.OwnerUserID,
-			AccountEmail:   input.AccountEmail,
-			BindingAddress: input.Address,
-			Purpose:        "validation",
-			Status:         string(domain.MicrosoftBindingFailed),
-			BoundDisplay:   input.BoundDisplay,
-			Category:       bindingStatusCategory(domain.MicrosoftBindingFailed),
-			LastSafeError:  input.SafeMessage,
-			SelectedAt:     &now,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		}
-		if err := tx.Create(&current).Error; err != nil {
-			if isDuplicateKeyError(err) {
-				return false, ErrMicrosoftBindingAddressOccupied
-			}
-			return false, fmt.Errorf("create external microsoft binding observation: %w", err)
-		}
-		return true, nil
-	}
-	category := bindingStatusCategory(domain.MicrosoftBindingFailed)
-	if current.ResourceType == "microsoft" &&
-		current.OwnerUserID == root.OwnerUserID &&
-		normalizeBindingEmail(current.AccountEmail) == input.AccountEmail &&
-		current.Purpose == "validation" &&
-		current.Status == string(domain.MicrosoftBindingFailed) &&
-		current.CodeMessageID == "" &&
-		current.BoundDisplay == input.BoundDisplay &&
-		current.Category == category &&
-		current.LastSafeError == input.SafeMessage &&
-		current.SelectedAt != nil && current.CodeSentAt == nil &&
-		current.VerifiedAt == nil && current.ExpiresAt == nil {
-		return false, nil
-	}
-	now := time.Now().UTC()
-	updated := tx.Model(&MicrosoftBindingMailboxModel{}).
-		Where("id = ?", current.ID).
-		Updates(map[string]any{
-			"resource_type":   "microsoft",
-			"owner_user_id":   root.OwnerUserID,
-			"account_email":   input.AccountEmail,
-			"purpose":         "validation",
-			"status":          string(domain.MicrosoftBindingFailed),
-			"code_msg_id":     "",
-			"bound_display":   input.BoundDisplay,
-			"category":        category,
-			"last_safe_error": input.SafeMessage,
-			"selected_at":     now,
-			"code_sent_at":    nil,
-			"verified_at":     nil,
-			"expires_at":      nil,
-			"updated_at":      now,
-		})
-	if updated.Error != nil {
-		return false, fmt.Errorf("update external microsoft binding observation: %w", updated.Error)
-	}
-	if updated.RowsAffected != 1 {
-		return false, ErrMicrosoftBindingRecoveryConflict
-	}
-	return true, nil
+		current.Status != string(domain.MicrosoftBindingExpired) &&
+		isConcreteMicrosoftBindingAddress(current.BindingAddress)
 }
 
 func validationBindingObservationAlreadyApplied(current MicrosoftBindingMailboxModel, ownerUserID uint, accountEmail, address string, status domain.MicrosoftBindingStatus, category, safeMessage string) bool {
@@ -802,7 +677,7 @@ func validationBindingObservationAlreadyApplied(current MicrosoftBindingMailboxM
 		normalizeBindingEmail(current.AccountEmail) != accountEmail ||
 		normalizeBindingEmail(current.BindingAddress) != address ||
 		current.Purpose != "validation" || current.Status != string(status) ||
-		current.CodeMessageID != "" || current.BoundDisplay != "" || current.Category != category ||
+		current.CodeMessageID != "" || current.Category != category ||
 		current.LastSafeError != safeMessage || current.SelectedAt == nil ||
 		current.ExpiresAt != nil {
 		return false
@@ -929,7 +804,6 @@ func applyRecoveredMicrosoftBindingTx(tx *gorm.DB, input MicrosoftRecoveredBindi
 			"purpose":         "validation",
 			"status":          string(domain.MicrosoftBindingVerified),
 			"code_msg_id":     "",
-			"bound_display":   "",
 			"category":        "",
 			"last_safe_error": "",
 			"selected_at":     now,
@@ -1016,6 +890,23 @@ func isConcreteMicrosoftBindingAddress(address string) bool {
 	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
 }
 
+func isMaskedMicrosoftBindingAddress(address string) bool {
+	local, domain, ok := strings.Cut(normalizeBindingEmail(address), "@")
+	return ok && local != "" && domain != "" && strings.Contains(local, "*") &&
+		!strings.ContainsAny(local, " \t\r\n") && !strings.Contains(domain, "@")
+}
+
+func maskedMicrosoftBindingMatches(maskedAddress, concreteAddress string) bool {
+	maskedLocal, maskedDomain, masked := strings.Cut(normalizeBindingEmail(maskedAddress), "@")
+	concreteLocal, concreteDomain, concrete := strings.Cut(normalizeBindingEmail(concreteAddress), "@")
+	if !masked || !concrete || maskedDomain != concreteDomain || !strings.Contains(maskedLocal, "*") {
+		return false
+	}
+	pattern := "^" + strings.ReplaceAll(regexp.QuoteMeta(maskedLocal), `\*`, ".*") + "$"
+	matched, err := regexp.MatchString(pattern, concreteLocal)
+	return err == nil && matched
+}
+
 func recoveredBindingSnapshotMatches(input MicrosoftRecoveredBindingInput, current MicrosoftBindingMailboxModel, exists bool) bool {
 	if !exists {
 		return input.ExpectedBindingID == 0
@@ -1037,7 +928,6 @@ func recoveredBindingAlreadyApplied(current MicrosoftBindingMailboxModel, ownerU
 		current.Purpose == "validation" &&
 		current.Status == string(domain.MicrosoftBindingVerified) &&
 		current.CodeMessageID == "" &&
-		current.BoundDisplay == "" &&
 		current.Category == "" &&
 		current.LastSafeError == "" &&
 		current.SelectedAt != nil &&
@@ -1059,7 +949,6 @@ func upsertMicrosoftBindingTx(tx *gorm.DB, model *MicrosoftBindingMailboxModel) 
 		"purpose":         firstNonBlank(model.Purpose, "validation"),
 		"status":          model.Status,
 		"code_msg_id":     "",
-		"bound_display":   "",
 		"category":        "",
 		"last_safe_error": "",
 		"selected_at":     now,
@@ -1118,7 +1007,6 @@ func microsoftBindingToDomain(model MicrosoftBindingMailboxModel) domain.Microso
 		Purpose:        model.Purpose,
 		Status:         domain.MicrosoftBindingStatus(model.Status),
 		CodeMessageID:  model.CodeMessageID,
-		BoundDisplay:   model.BoundDisplay,
 		Category:       model.Category,
 		LastSafeError:  model.LastSafeError,
 		SelectedAt:     model.SelectedAt,

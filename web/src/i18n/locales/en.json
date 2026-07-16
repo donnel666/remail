@@ -303,6 +303,7 @@
   "Normal": "Normal",
   "Abnormal": "Abnormal",
   "Pending": "Pending",
+  "Validating": "Validating",
   "Disabled": "Disabled",
   "All statuses": "All statuses",
   "No email resources yet": "No email resources yet",

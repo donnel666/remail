@@ -400,7 +400,7 @@ func handleJSPollingPage(session *Session, page, rawURL string) (string, string,
 		if ptype == 1 && display != "" && strings.Contains(display, "@") {
 			domain := strings.ToLower(strings.SplitN(display, "@", 2)[1])
 			if !domainInProject(domain) {
-				return "", "", &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundDisplay: display}
+				return "", "", &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundMailbox: display}
 			}
 		}
 	}
@@ -593,7 +593,7 @@ func authorizeAccountImpl(ctx context.Context, email, password, proxy string, pr
 		if proof.Type == 1 && display != "" && strings.Contains(display, "@") {
 			domain := strings.ToLower(strings.SplitN(display, "@", 2)[1])
 			if !domainInProject(domain) {
-				return nil, &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundDisplay: display}
+				return nil, &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundMailbox: display}
 			}
 		} else if proof.Type == 2 || proof.Type == 3 {
 			return nil, newAuthError(fmt.Sprintf("需要手机验证 (%s)", display), AuthStatusPhoneVerification)

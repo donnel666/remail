@@ -41,8 +41,6 @@ export type SupplierApplicationRequest =
   components["schemas"]["SupplierApplicationRequest"];
 export type ResourceListResponse =
   components["schemas"]["ResourceListResponse"];
-export type ResourceValidationResponse =
-  components["schemas"]["ResourceValidationResponse"];
 export type SupplierApplicationSubmitResponse = JsonResponse<
   operations["postSupplierApplication"],
   201
@@ -134,7 +132,7 @@ export async function getResourceImportStatus(
 }
 
 export async function validateResource(resourceId: number, signal?: AbortSignal) {
-  return unwrap<ResourceValidationResponse>(
+  return unwrap<ResourceValidationsResponse>(
     await client.POST("/v1/resources/{resourceId}/validate", {
       params: {
         header: csrfHeader(),
@@ -143,39 +141,6 @@ export async function validateResource(resourceId: number, signal?: AbortSignal)
       signal,
     })
   );
-}
-
-export async function getResourceValidationStatus(
-  validationId: number,
-  signal?: AbortSignal
-) {
-  return unwrap<ResourceValidationResponse>(
-    await client.GET("/v1/resources/validations/{validationId}", {
-      params: { path: { validationId } },
-      signal,
-    })
-  );
-}
-
-export async function waitForResourceValidation(
-  validationId: number,
-  options: {
-    intervalMs?: number;
-    maxAttempts?: number;
-    signal?: AbortSignal;
-  } = {}
-) {
-  const intervalMs = options.intervalMs ?? 2000;
-  const maxAttempts = options.maxAttempts ?? 30;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    throwIfAborted(options.signal);
-    const status = await getResourceValidationStatus(validationId, options.signal);
-    if (status.status === "succeeded" || status.status === "failed") {
-      return status;
-    }
-    await abortableDelay(intervalMs, options.signal);
-  }
-  return getResourceValidationStatus(validationId, options.signal);
 }
 
 export async function validateResourcesBatch(

@@ -39,9 +39,9 @@ func TestValidationBindingCommitPortSharesCoreResultTransactionMySQL(t *testing.
 	validationRepo.SetMicrosoftValidationBindingCommitPort(
 		NewMicrosoftValidationBindingCommitAdapter(mailinfra.NewMicrosoftBindingRepo(db)),
 	)
-	successJob, successClaim := createRunningValidationBindingJob(t, db, validationRepo, 101)
+	successTask := createRunningValidationBindingTask(t, db, 101)
 
-	require.NoError(t, validationRepo.ApplyMicrosoftResult(context.Background(), successJob.ID, 101, successClaim, coreapp.MicrosoftValidationResult{
+	require.NoError(t, validationRepo.ApplyMicrosoftResult(context.Background(), successTask, coreapp.MicrosoftValidationResult{
 		Valid: true,
 		RecoveredBinding: &coreapp.MicrosoftRecoveredBinding{
 			Address: "recovered@binding-commit.test",
@@ -53,12 +53,12 @@ func TestValidationBindingCommitPortSharesCoreResultTransactionMySQL(t *testing.
 	require.Equal(t, "recovered@binding-commit.test", successBinding.BindingAddress)
 	require.Equal(t, string(maildomain.MicrosoftBindingVerified), successBinding.Status)
 	require.EqualValues(t, 2, validationBindingRootVersion(t, db, 101))
-	var successStored coreinfra.ResourceValidationModel
-	require.NoError(t, db.First(&successStored, successJob.ID).Error)
-	require.Equal(t, string(domain.ResourceValidationSucceeded), successStored.Status)
+	var successStored coreinfra.MicrosoftResourceModel
+	require.NoError(t, db.First(&successStored, 101).Error)
+	require.Equal(t, string(domain.MicrosoftStatusNormal), successStored.Status)
 
-	rollbackJob, rollbackClaim := createRunningValidationBindingJob(t, db, validationRepo, 102)
-	err := validationRepo.ApplyMicrosoftResult(context.Background(), rollbackJob.ID, 102, rollbackClaim, coreapp.MicrosoftValidationResult{
+	rollbackTask := createRunningValidationBindingTask(t, db, 102)
+	err := validationRepo.ApplyMicrosoftResult(context.Background(), rollbackTask, coreapp.MicrosoftValidationResult{
 		Valid: true,
 		RecoveredBinding: &coreapp.MicrosoftRecoveredBinding{
 			Address: "must-rollback@binding-commit.test",
@@ -73,10 +73,37 @@ func TestValidationBindingCommitPortSharesCoreResultTransactionMySQL(t *testing.
 	require.NoError(t, db.Model(&mailinfra.MicrosoftBindingMailboxModel{}).Where("resource_id = ?", 102).Count(&rollbackBindings).Error)
 	require.Zero(t, rollbackBindings, "binding write must roll back when Core cannot finish its result")
 	require.EqualValues(t, 1, validationBindingRootVersion(t, db, 102))
-	var rollbackStored coreinfra.ResourceValidationModel
-	require.NoError(t, db.First(&rollbackStored, rollbackJob.ID).Error)
-	require.Equal(t, string(domain.ResourceValidationRunning), rollbackStored.Status)
-	require.Equal(t, rollbackClaim, rollbackStored.ClaimToken)
+	var rollbackStored coreinfra.MicrosoftResourceModel
+	require.NoError(t, db.First(&rollbackStored, 102).Error)
+	require.Equal(t, string(domain.MicrosoftStatusValidating), rollbackStored.Status)
+}
+
+func TestValidationBindingCommitStoresMasksWithoutConcreteUniquenessMySQL(t *testing.T) {
+	db := validationBindingMySQL.Database(t, validationBindingMigrationsDir(t))
+	createValidationBindingFixture(t, db, 107, "masked-one@outlook.com")
+	createValidationBindingFixture(t, db, 108, "masked-two@outlook.com")
+
+	validationRepo := coreinfra.NewResourceValidationRepo(db)
+	validationRepo.SetMicrosoftValidationBindingCommitPort(
+		NewMicrosoftValidationBindingCommitAdapter(mailinfra.NewMicrosoftBindingRepo(db)),
+	)
+	for _, resourceID := range []uint{107, 108} {
+		task := createRunningValidationBindingTask(t, db, resourceID)
+		require.NoError(t, validationRepo.ApplyMicrosoftResult(context.Background(), task, coreapp.MicrosoftValidationResult{
+			Valid: true,
+			BindingObservation: &coreapp.MicrosoftBindingObservation{
+				Address: "a*****b@binding-commit.test",
+				Status:  string(maildomain.MicrosoftBindingFailed),
+			},
+		}, nil))
+	}
+
+	var bindings []mailinfra.MicrosoftBindingMailboxModel
+	require.NoError(t, db.Where("resource_id IN ?", []uint{107, 108}).Order("resource_id").Find(&bindings).Error)
+	require.Len(t, bindings, 2)
+	for _, binding := range bindings {
+		require.Equal(t, "a*****b@binding-commit.test", binding.BindingAddress)
+	}
 }
 
 func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t *testing.T) {
@@ -116,8 +143,7 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 		RequestID: "req-admin-identity-email-only", Path: "/v1/admin/resources/:resourceId",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
+	require.NotNil(t, result)
 
 	var emailOnlyResource coreinfra.MicrosoftResourceModel
 	require.NoError(t, db.First(&emailOnlyResource, 103).Error)
@@ -128,7 +154,6 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 	require.EqualValues(t, 2, emailOnlyResource.CredentialRevision)
 	require.Equal(t, string(domain.MicrosoftStatusPending), emailOnlyResource.Status)
 	assertAdminIdentityBindingReset(t, db, 103, emailOnly, "email-only@binding.test")
-	assertAdminIdentityValidationJob(t, db, 103, 2)
 
 	emailWithCredentials := "new-with-credentials@outlook.com"
 	result, err = service.Edit(context.Background(), coreapp.AdminMicrosoftEditCommand{
@@ -140,8 +165,7 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 		RequestID: "req-admin-identity-new-credentials", Path: "/v1/admin/resources/:resourceId",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
+	require.NotNil(t, result)
 
 	var credentialResource coreinfra.MicrosoftResourceModel
 	require.NoError(t, db.First(&credentialResource, 104).Error)
@@ -152,7 +176,6 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 	require.EqualValues(t, 2, credentialResource.CredentialRevision)
 	require.Equal(t, string(domain.MicrosoftStatusPending), credentialResource.Status)
 	assertAdminIdentityBindingReset(t, db, 104, emailWithCredentials, "new-credentials@binding.test")
-	assertAdminIdentityValidationJob(t, db, 104, 2)
 
 	newOwnerID := uint(106)
 	result, err = service.Edit(context.Background(), coreapp.AdminMicrosoftEditCommand{
@@ -161,8 +184,7 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 		RequestID: "req-admin-identity-owner-only", Path: "/v1/admin/resources/:resourceId",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
+	require.NotNil(t, result)
 
 	var ownerOnlyResource coreinfra.MicrosoftResourceModel
 	require.NoError(t, db.First(&ownerOnlyResource, 105).Error)
@@ -179,7 +201,6 @@ func TestAdminMicrosoftEmailIdentityChangeResetsBindingAndOldCredentialsMySQL(t 
 	require.Equal(t, string(maildomain.MicrosoftBindingVerified), ownerOnlyBinding.Status)
 	require.Equal(t, "old-code-message", ownerOnlyBinding.CodeMessageID)
 	require.NotNil(t, ownerOnlyBinding.VerifiedAt)
-	assertAdminIdentityValidationJob(t, db, 105, 2)
 }
 
 func validationBindingMigrationsDir(t *testing.T) string {
@@ -235,22 +256,16 @@ func createValidationBindingDomainFixture(t *testing.T, db *gorm.DB, ownerID, re
 	).Error)
 }
 
-func createRunningValidationBindingJob(t *testing.T, db *gorm.DB, repo *coreinfra.ResourceValidationRepo, resourceID uint) (*domain.ResourceValidation, string) {
+func createRunningValidationBindingTask(t *testing.T, db *gorm.DB, resourceID uint) coreapp.ResourceValidationTask {
 	t.Helper()
-	job := &domain.ResourceValidation{
-		ResourceID: resourceID, ResourceType: domain.ResourceTypeMicrosoft, OwnerUserID: resourceID,
-		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
+	require.NoError(t, db.Model(&coreinfra.MicrosoftResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+		"status": string(domain.MicrosoftStatusValidating),
+	}).Error)
+	return coreapp.ResourceValidationTask{
+		ResourceID: resourceID, ResourceType: domain.ResourceTypeMicrosoft,
+		OwnerUserID: resourceID, ExpectedCredentialRevision: 1,
 		RequestID: "req-binding-commit",
 	}
-	created, err := repo.CreateWithLog(context.Background(), job, nil)
-	require.NoError(t, err)
-	require.True(t, created)
-	claim := "11111111-1111-4111-8111-111111111111"
-	require.NoError(t, db.Model(&coreinfra.ResourceValidationModel{}).Where("id = ?", job.ID).Updates(map[string]any{
-		"status":      string(domain.ResourceValidationRunning),
-		"claim_token": claim,
-	}).Error)
-	return job, claim
 }
 
 func validationBindingRootVersion(t *testing.T, db *gorm.DB, resourceID uint) uint64 {
@@ -263,6 +278,10 @@ func validationBindingRootVersion(t *testing.T, db *gorm.DB, resourceID uint) ui
 type adminIdentityValidationQueue struct{}
 
 func (adminIdentityValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
+	return nil
+}
+
+func (adminIdentityValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
 	return nil
 }
 
@@ -327,7 +346,7 @@ func createAdminIdentityBindingFixture(t *testing.T, db *gorm.DB, resourceID uin
 		ResourceID: resourceID, ResourceType: "microsoft", OwnerUserID: resourceID,
 		AccountEmail: accountEmail, BindingAddress: bindingAddress, Purpose: "validation",
 		Status: string(maildomain.MicrosoftBindingVerified), CodeMessageID: "old-code-message",
-		BoundDisplay: "ol***@external.test", Category: "old-category", LastSafeError: "old safe error",
+		Category: "old-category", LastSafeError: "old safe error",
 		SelectedAt: &staleAt, CodeSentAt: &staleAt, VerifiedAt: &staleAt, ExpiresAt: ptrTime(staleAt.Add(time.Hour)),
 	}).Error)
 }
@@ -341,20 +360,11 @@ func assertAdminIdentityBindingReset(t *testing.T, db *gorm.DB, resourceID uint,
 	require.Equal(t, "validation", binding.Purpose)
 	require.Equal(t, string(maildomain.MicrosoftBindingPending), binding.Status)
 	require.Empty(t, binding.CodeMessageID)
-	require.Empty(t, binding.BoundDisplay)
 	require.Empty(t, binding.Category)
 	require.Empty(t, binding.LastSafeError)
 	require.Nil(t, binding.CodeSentAt)
 	require.Nil(t, binding.VerifiedAt)
 	require.Nil(t, binding.ExpiresAt)
-}
-
-func assertAdminIdentityValidationJob(t *testing.T, db *gorm.DB, resourceID uint, expectedRevision uint64) {
-	t.Helper()
-	var job coreinfra.ResourceValidationModel
-	require.NoError(t, db.Where("resource_id = ?", resourceID).First(&job).Error)
-	require.Equal(t, string(domain.ResourceValidationQueued), job.Status)
-	require.Equal(t, expectedRevision, job.ExpectedCredentialRevision)
 }
 
 func ptrTime(value time.Time) *time.Time {

@@ -1,0 +1,498 @@
+package infra
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	coreapp "github.com/donnel666/remail/internal/core/app"
+	"github.com/donnel666/remail/internal/core/domain"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+const (
+	validationAssignmentStaleAfter  = time.Hour
+	validationAssignmentSettleAfter = time.Second
+)
+
+func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
+	ctx context.Context,
+	resourceID uint,
+	resourceType domain.ResourceType,
+	ownerUserID uint,
+	log *governancedomain.OperationLog,
+) error {
+	if r == nil || r.db == nil || resourceID == 0 || ownerUserID == 0 || !domain.IsValidResourceType(resourceType) {
+		return domain.ErrInvalidResourceCommand
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ? AND owner_user_id = ?", resourceID, string(resourceType), ownerUserID).
+			First(&root).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return fmt.Errorf("lock resource for validation request: %w", err)
+		}
+		now := time.Now().UTC()
+		switch resourceType {
+		case domain.ResourceTypeMicrosoft:
+			var resource MicrosoftResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+				return fmt.Errorf("lock microsoft validation request: %w", err)
+			}
+			switch domain.MicrosoftResourceStatus(resource.Status) {
+			case domain.MicrosoftStatusDeleted:
+				return domain.ErrResourceNotFound
+			case domain.MicrosoftStatusDisabled:
+				return domain.ErrInvalidResourceStatus
+			case domain.MicrosoftStatusValidating:
+			default:
+				if err := tx.Model(&MicrosoftResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+					"status": string(domain.MicrosoftStatusPending), "last_safe_error": "", "updated_at": now,
+				}).Error; err != nil {
+					return fmt.Errorf("mark microsoft validation pending: %w", err)
+				}
+			}
+		case domain.ResourceTypeDomain:
+			var resource DomainResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+				return fmt.Errorf("lock domain validation request: %w", err)
+			}
+			switch domain.MailDomainStatus(resource.Status) {
+			case domain.DomainStatusDeleted:
+				return domain.ErrResourceNotFound
+			case domain.DomainStatusDisabled:
+				return domain.ErrInvalidResourceStatus
+			case domain.DomainStatusValidating:
+			default:
+				if err := tx.Model(&DomainResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+					"status": string(domain.DomainStatusPending), "last_safe_error": "", "updated_at": now,
+				}).Error; err != nil {
+					return fmt.Errorf("mark domain validation pending: %w", err)
+				}
+			}
+		}
+		if log != nil {
+			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+				return fmt.Errorf("create resource validation operation log: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context, task coreapp.ResourceValidationBatchTask, limit int) (*coreapp.ResourceValidationBatchPageResult, error) {
+	if r == nil || r.db == nil || task.OwnerUserID == 0 || limit <= 0 {
+		return nil, domain.ErrInvalidResourceCommand
+	}
+	result := &coreapp.ResourceValidationBatchPageResult{AfterID: task.AfterID, ThroughID: task.ThroughID}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		selection := task.Selection
+		if !selection.AllowBinding {
+			selection.Filter.ExcludeBinding = true
+		}
+		if selection.Mode == coreapp.ResourceBulkSelectionFilter && result.ThroughID == 0 {
+			throughID, err := captureValidationBatchThroughID(ctx, tx, task.OwnerUserID, selection)
+			if err != nil {
+				return err
+			}
+			result.ThroughID = throughID
+			if throughID == 0 {
+				result.Done = true
+				return nil
+			}
+		}
+
+		var candidates []validationCandidateRow
+		var err error
+		switch selection.Mode {
+		case coreapp.ResourceBulkSelectionIDs:
+			pageIDs := validationBatchIDPage(selection.ResourceIDs, task.AfterID, limit+1)
+			result.Done = len(pageIDs) <= limit
+			if len(pageIDs) > limit {
+				pageIDs = pageIDs[:limit]
+			}
+			result.Processed = len(pageIDs)
+			if len(pageIDs) == 0 {
+				result.Done = true
+				return nil
+			}
+			result.AfterID = pageIDs[len(pageIDs)-1]
+			candidates, err = selectAvailableValidationCandidatesByIDs(ctx, tx, task.OwnerUserID, pageIDs, selection.Filter.ResourceType, selection.AllowBinding, selection.AdminScope)
+		case coreapp.ResourceBulkSelectionFilter:
+			candidates, err = selectValidationCandidatesByFilter(ctx, tx, task.OwnerUserID, selection, task.AfterID, result.ThroughID, limit+1)
+			result.Done = len(candidates) <= limit
+			if len(candidates) > limit {
+				candidates = candidates[:limit]
+			}
+			result.Processed = len(candidates)
+			if len(candidates) == 0 {
+				result.Done = true
+				return nil
+			}
+			result.AfterID = candidates[len(candidates)-1].ID
+		default:
+			return domain.ErrInvalidResourceType
+		}
+		if err != nil {
+			return err
+		}
+		if result.AfterID == task.AfterID {
+			return fmt.Errorf("resource validation Redis batch made no progress")
+		}
+		return markValidationCandidatesPendingTx(ctx, tx, candidates)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func captureValidationBatchThroughID(ctx context.Context, tx *gorm.DB, ownerUserID uint, selection coreapp.ResourceBulkSelection) (uint, error) {
+	query := tx.WithContext(ctx).Table("email_resources AS er").
+		Select("COALESCE(MAX(er.id), 0)").
+		Where("er.type = ?", string(selection.Filter.ResourceType))
+	if !selection.AdminScope {
+		query = query.Where("er.owner_user_id = ?", ownerUserID)
+	} else if selection.Filter.OwnerID > 0 {
+		query = query.Where("er.owner_user_id = ?", selection.Filter.OwnerID)
+	}
+	var throughID uint
+	if err := query.Row().Scan(&throughID); err != nil {
+		return 0, fmt.Errorf("capture Redis validation batch high-water mark: %w", err)
+	}
+	return throughID, nil
+}
+
+func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, limit int) ([]coreapp.ResourceValidationTask, error) {
+	if r == nil || r.db == nil || limit <= 0 {
+		return nil, nil
+	}
+	var candidates []validationCandidateRow
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		staleBefore := now.Add(-validationAssignmentStaleAfter)
+		if err := resetValidationAssignmentsTx(tx, staleBefore, false); err != nil {
+			return err
+		}
+		var assigned int64
+		if err := tx.Raw(`
+SELECT COUNT(*)
+FROM (
+    SELECT id FROM microsoft_resources WHERE status = ?
+    UNION ALL
+    SELECT id FROM domain_resources WHERE status = ?
+    LIMIT ?
+) AS assigned_validations`,
+			string(domain.MicrosoftStatusValidating),
+			string(domain.DomainStatusValidating),
+			limit,
+		).Scan(&assigned).Error; err != nil {
+			return fmt.Errorf("count assigned Redis validations: %w", err)
+		}
+		remaining := limit - int(assigned)
+		if remaining <= 0 {
+			return nil
+		}
+		if err := tx.WithContext(ctx).
+			Table("email_resources AS er").
+			Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
+			Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
+			Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
+			Where("(er.type = ? AND ms.status = ?) OR (er.type = ? AND dr.status = ?)",
+				string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusPending),
+				string(domain.ResourceTypeDomain), string(domain.DomainStatusPending)).
+			Where("(er.type = ? AND ms.updated_at <= ?) OR (er.type = ? AND dr.updated_at <= ?)",
+				string(domain.ResourceTypeMicrosoft), now.Add(-validationAssignmentSettleAfter),
+				string(domain.ResourceTypeDomain), now.Add(-validationAssignmentSettleAfter)).
+			Order("er.id ASC").Limit(remaining).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Find(&candidates).Error; err != nil {
+			return fmt.Errorf("claim pending resource validations: %w", err)
+		}
+		return markValidationCandidatesValidatingTx(ctx, tx, candidates)
+	})
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]coreapp.ResourceValidationTask, len(candidates))
+	for i := range candidates {
+		tasks[i] = coreapp.ResourceValidationTask{
+			ResourceID: candidates[i].ID, ResourceType: domain.ResourceType(candidates[i].ResourceType),
+			OwnerUserID: candidates[i].OwnerUserID, ExpectedCredentialRevision: candidates[i].CredentialRevision,
+		}
+	}
+	return tasks, nil
+}
+
+func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
+	if r == nil || r.db == nil || task.ResourceID == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	var result *gorm.DB
+	switch task.ResourceType {
+	case domain.ResourceTypeMicrosoft:
+		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND status = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ExpectedCredentialRevision).
+			Updates(map[string]any{"status": string(domain.MicrosoftStatusPending), "updated_at": now})
+	case domain.ResourceTypeDomain:
+		result = r.db.WithContext(ctx).Model(&DomainResourceModel{}).
+			Where("id = ? AND status = ?", task.ResourceID, string(domain.DomainStatusValidating)).
+			Updates(map[string]any{"status": string(domain.DomainStatusPending), "updated_at": now})
+	default:
+		return domain.ErrInvalidResourceType
+	}
+	if result.Error != nil {
+		return fmt.Errorf("release Redis validation assignment: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *ResourceValidationRepo) ResetValidationAssignments(ctx context.Context) error {
+	if r == nil || r.db == nil {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return resetValidationAssignmentsTx(tx, time.Time{}, true)
+	})
+}
+
+func resetValidationAssignmentsTx(tx *gorm.DB, staleBefore time.Time, all bool) error {
+	now := time.Now().UTC()
+	reset := func(model any, validating, pending string) error {
+		query := tx.Model(model).Where("status = ?", validating)
+		if !all {
+			query = query.Where("updated_at < ?", staleBefore)
+		}
+		if err := query.Updates(map[string]any{"status": pending, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := reset(&MicrosoftResourceModel{}, string(domain.MicrosoftStatusValidating), string(domain.MicrosoftStatusPending)); err != nil {
+		return fmt.Errorf("reset microsoft validation assignments: %w", err)
+	}
+	if err := reset(&DomainResourceModel{}, string(domain.DomainStatusValidating), string(domain.DomainStatusPending)); err != nil {
+		return fmt.Errorf("reset domain validation assignments: %w", err)
+	}
+	return nil
+}
+
+func (r *ResourceValidationRepo) SaveMicrosoftProgress(ctx context.Context, task coreapp.ResourceValidationTask, result coreapp.MicrosoftValidationResult) error {
+	stale := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		root, ms, err := lockRedisMicrosoftValidationStateTx(tx, task)
+		if err != nil {
+			if errors.Is(err, coreapp.ErrValidationResultStale) {
+				stale = true
+				return nil
+			}
+			return err
+		}
+		now := time.Now().UTC()
+		bindingChanged, err := r.commitMicrosoftValidationBindingWithSavepointTx(ctx, tx, root, ms, result)
+		if errors.Is(err, coreapp.ErrValidationResultStale) {
+			stale = true
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{}
+		if result.CredentialsAuthoritative {
+			if value := strings.TrimSpace(result.ClientID); value != "" && value != ms.ClientID {
+				updates["client_id"] = value
+			}
+			if value := strings.TrimSpace(result.RefreshToken); value != "" && value != ms.RefreshToken {
+				updates["refresh_token"] = value
+			}
+		}
+		credentialsChanged := len(updates) > 0
+		if credentialsChanged {
+			// This is progress inside the same Redis task generation. Keep the
+			// credential revision stable so an Asynq retry retains its fence.
+			updates["credential_updated_at"] = now
+			updates["token_last_refreshed_at"] = now
+			updates["token_last_request_id"] = task.RequestID
+			updates["updated_at"] = now
+			updated := tx.Model(&MicrosoftResourceModel{}).
+				Where("id = ? AND status = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ExpectedCredentialRevision).
+				Updates(updates)
+			if updated.Error != nil {
+				return fmt.Errorf("save Redis validation progress: %w", updated.Error)
+			}
+			if updated.RowsAffected == 0 {
+				stale = true
+				return nil
+			}
+		}
+		if bindingChanged || credentialsChanged {
+			return bumpResourceVersionTx(tx, root.ID, now)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return coreapp.ErrValidationResultStale
+	}
+	return nil
+}
+
+func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task coreapp.ResourceValidationTask, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {
+	stale := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		root, ms, err := lockRedisMicrosoftValidationStateTx(tx, task)
+		if err != nil {
+			if errors.Is(err, coreapp.ErrValidationResultStale) {
+				stale = true
+				return nil
+			}
+			return err
+		}
+		now := time.Now().UTC()
+		if _, err := r.commitMicrosoftValidationBindingWithSavepointTx(ctx, tx, root, ms, result); err != nil {
+			if errors.Is(err, coreapp.ErrValidationResultStale) {
+				stale = true
+				return nil
+			}
+			return err
+		}
+		safeMessage := safeValidationMessage(result.SafeMessage)
+		nextStatus := string(domain.MicrosoftStatusAbnormal)
+		if result.Valid {
+			nextStatus = string(domain.MicrosoftStatusNormal)
+			safeMessage = ""
+		}
+		updates := map[string]any{
+			"status": nextStatus, "quality_score": validationQualityScore(result.Valid),
+			"graph_available": false, "last_safe_error": safeMessage, "updated_at": now,
+		}
+		credentialsChanged := false
+		if result.Valid || result.CredentialsAuthoritative {
+			if value := strings.TrimSpace(result.ClientID); value != "" && value != ms.ClientID {
+				updates["client_id"] = value
+				credentialsChanged = true
+			}
+			if value := strings.TrimSpace(result.RefreshToken); value != "" && value != ms.RefreshToken {
+				updates["refresh_token"] = value
+				credentialsChanged = true
+			}
+		}
+		if result.Valid {
+			updates["graph_available"] = result.GraphAvailable
+			if result.RTExpireAt != nil {
+				updates["rt_expire_at"] = result.RTExpireAt
+			}
+		}
+		if credentialsChanged {
+			updates["credential_revision"] = ms.CredentialRevision + 1
+			updates["credential_updated_at"] = now
+			updates["token_last_refreshed_at"] = now
+			updates["token_last_request_id"] = task.RequestID
+		}
+		updated := tx.Model(&MicrosoftResourceModel{}).
+			Where("id = ? AND status = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ExpectedCredentialRevision).
+			Updates(updates)
+		if updated.Error != nil {
+			return fmt.Errorf("apply Redis microsoft validation result: %w", updated.Error)
+		}
+		if updated.RowsAffected == 0 {
+			stale = true
+			return nil
+		}
+		if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+			return err
+		}
+		return createSystemLogInTx(ctx, tx, systemLog)
+	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return coreapp.ErrValidationResultStale
+	}
+	return nil
+}
+
+func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, task coreapp.ResourceValidationTask, result coreapp.DomainValidationResult, systemLog *governancedomain.SystemLog) error {
+	stale := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ?", task.ResourceID, string(domain.ResourceTypeDomain)).
+			First(&root).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				stale = true
+				return nil
+			}
+			return fmt.Errorf("lock Redis domain validation root: %w", err)
+		}
+		var resource DomainResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
+			return fmt.Errorf("lock Redis domain validation resource: %w", err)
+		}
+		if domain.MailDomainStatus(resource.Status) != domain.DomainStatusValidating {
+			stale = true
+			return nil
+		}
+		safeMessage := safeValidationMessage(result.SafeMessage)
+		nextStatus := string(domain.DomainStatusAbnormal)
+		if result.Valid {
+			nextStatus = string(domain.DomainStatusNormal)
+			safeMessage = ""
+		}
+		now := time.Now().UTC()
+		updated := tx.Model(&DomainResourceModel{}).
+			Where("id = ? AND status = ?", task.ResourceID, string(domain.DomainStatusValidating)).
+			Updates(map[string]any{"status": nextStatus, "last_safe_error": safeMessage, "updated_at": now})
+		if updated.Error != nil {
+			return fmt.Errorf("apply Redis domain validation result: %w", updated.Error)
+		}
+		if updated.RowsAffected == 0 {
+			stale = true
+			return nil
+		}
+		if err := bumpResourceVersionTx(tx, root.ID, now); err != nil {
+			return err
+		}
+		return createSystemLogInTx(ctx, tx, systemLog)
+	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return coreapp.ErrValidationResultStale
+	}
+	return nil
+}
+
+func lockRedisMicrosoftValidationStateTx(tx *gorm.DB, task coreapp.ResourceValidationTask) (*EmailResourceModel, *MicrosoftResourceModel, error) {
+	var root EmailResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND type = ? AND owner_user_id = ?", task.ResourceID, string(domain.ResourceTypeMicrosoft), task.OwnerUserID).
+		First(&root).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, coreapp.ErrValidationResultStale
+		}
+		return nil, nil, fmt.Errorf("lock Redis microsoft validation root: %w", err)
+	}
+	var resource MicrosoftResourceModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
+		return nil, nil, fmt.Errorf("lock Redis microsoft validation resource: %w", err)
+	}
+	if domain.MicrosoftResourceStatus(resource.Status) != domain.MicrosoftStatusValidating || resource.CredentialRevision != task.ExpectedCredentialRevision {
+		return nil, nil, coreapp.ErrValidationResultStale
+	}
+	return &root, &resource, nil
+}
+
+var _ coreapp.ResourceValidationRepository = (*ResourceValidationRepo)(nil)

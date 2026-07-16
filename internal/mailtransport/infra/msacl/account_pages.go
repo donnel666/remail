@@ -9,7 +9,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var transientRequestMarkers = []string{
@@ -244,7 +243,7 @@ func identityBoundMailbox(ctx context.Context, page, email, proxy string, proofD
 	return ""
 }
 
-func identityBoundDisplay(page string, proofData []ProofData) string {
+func identityBoundAddress(page string, proofData []ProofData) string {
 	proofs := extractIdentityProofs(page)
 	ourProof := findOurIdentityProof(proofs)
 	maskedEmail := asString(ourProof["name"])
@@ -271,8 +270,7 @@ func alreadyBoundError(display, boundMailbox string) *AuthError {
 	return &AuthError{
 		Message:      message,
 		Status:       AuthStatusAlreadyBound,
-		BoundMailbox: boundMailbox,
-		BoundDisplay: display,
+		BoundMailbox: firstNonEmpty(boundMailbox, display),
 	}
 }
 
@@ -298,7 +296,7 @@ func handleIdentityPage(session *Session, page, rawURL, proxy, email string, pro
 				logInfo("identity 页: 已绑定本项目辅助邮箱, 继续接码验证")
 				return handleOTPVerification(session, page, rawURL, email, proxy, proofData, preferredBindingAddress)
 			}
-			display := firstNonEmpty(boundMailbox, identityBoundDisplay(page, proofData))
+			display := firstNonEmpty(boundMailbox, identityBoundAddress(page, proofData))
 			logInfo("identity 页: 账号已绑定辅助邮箱, 跳过")
 			return "", "", "", alreadyBoundError(display, boundMailbox)
 		}
@@ -352,98 +350,103 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 	logDebug("OTP 验证: masked_email=%s", maskedEmail)
 
 	realMailbox := lookupRealMailbox(session.context(), maskedEmail, email, proxy, preferredBindingAddress)
-	if realMailbox == "" {
+	resolveByRecipient := realMailbox == ""
+	if resolveByRecipient && !UsesActiveAuxiliaryDomain(maskedEmail) {
 		return "", "", "", newAuthError(fmt.Sprintf("找不到 %s 对应的真实邮箱, 跳过", maskedEmail), AuthStatusUnknownMailbox)
 	}
-	logInfo("OTP 验证: 已匹配真实邮箱")
-	logDebug("OTP 验证: real_mailbox=%s", realMailbox)
-
-	seenKeys, err := snapshotMailboxKeys(session.context(), realMailbox, proxy)
+	if resolveByRecipient {
+		logInfo("OTP 验证: 规则无法推算, 将通过本轮实际收件地址反推")
+	} else {
+		logInfo("OTP 验证: 已匹配真实邮箱")
+		logDebug("OTP 验证: real_mailbox=%s", realMailbox)
+	}
+	lease, err := claimCodeMailLease(session.context(), maskedEmail)
 	if err != nil {
-		return "", "", "", wrapAuthError(fmt.Sprintf("读取验证码邮箱基线失败: %s", err), AuthStatusRequestError, err, realMailbox)
+		return "", "", "", err
 	}
+	defer lease.releaseIfUnsent(session.context())
+
+	var seenKeys map[string]struct{}
+	if resolveByRecipient {
+		seenKeys, err = snapshotMaskedMailboxKeys(session.context(), maskedEmail, proxy)
+	} else {
+		seenKeys, err = snapshotMailboxKeys(session.context(), realMailbox, proxy)
+	}
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("读取验证码邮箱基线失败: %s", err), AuthStatusRequestError, err, firstNonEmpty(realMailbox, maskedEmail))
+	}
+	var watcher *MailWatcher
+	if !resolveByRecipient {
+		watcher = startCodeWatcher(session.context(), realMailbox, proxy, 0, seenKeys)
+	}
+	confirmProof := realMailbox
+	if resolveByRecipient {
+		confirmProof = maskedEmail
+	}
+	if err := lease.markSent(session.context()); err != nil {
+		return "", "", "", err
+	}
+	resp, err := session.Post("https://account.live.com/API/Proofs/SendOtt", requestOptions{
+		JSON: map[string]any{
+			"token":                  token,
+			"purpose":                purpose,
+			"epid":                   epid,
+			"autoVerification":       false,
+			"autoVerificationFailed": false,
+			"confirmProof":           confirmProof,
+			"HFId":                   "",
+			"HId":                    "",
+			"HSId":                   "",
+			"HSol":                   "",
+			"HType":                  "",
+			"HPId":                   "",
+		},
+		Headers: corsHeaders(session, map[string]string{
+			"Content-Type": "application/json; charset=utf-8",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+			"canary":       apiCanary,
+		}),
+	})
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("SendOtt 请求异常: %s", err), AuthStatusRequestError, err, confirmProof)
+	}
+	logInfo("SendOtt 响应: status=%d", resp.StatusCode)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", "", newAuthError(fmt.Sprintf("SendOtt 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
+	}
+	var result map[string]any
+	if err := resp.JSON(&result); err != nil {
+		return "", "", "", newAuthError(fmt.Sprintf("SendOtt 返回非 JSON (HTTP %d)", resp.StatusCode))
+	}
+	if errMap := asMap(result["error"]); errMap != nil {
+		return "", "", "", newAuthError(fmt.Sprintf("SendOtt 失败: code=%s", asString(errMap["code"])))
+	}
+	if value := asString(result["apiCanary"]); value != "" {
+		apiCanary = value
+	}
+	logInfo("OTP 验证: 验证码已发送")
+
 	var code string
-	var lastErr error
-	for ottAttempt := 1; ottAttempt <= 3; ottAttempt++ {
-		if ottAttempt > 1 {
-			if err := session.sleep(2 * time.Second); err != nil {
-				return "", "", "", wrapAuthError(fmt.Sprintf("OTP 重试取消: %s", err), AuthStatusRequestError, err)
-			}
-			seenKeys, err = snapshotMailboxKeys(session.context(), realMailbox, proxy)
-			if err != nil {
-				return "", "", "", wrapAuthError(fmt.Sprintf("刷新验证码邮箱基线失败: %s", err), AuthStatusRequestError, err, realMailbox)
-			}
-			logInfo("OTP 重试 #%d: 重新发送验证码 (排除旧邮件)", ottAttempt)
-		}
-		watcher := startCodeWatcher(session.context(), realMailbox, proxy, 0, seenKeys)
-		resp, err := session.Post("https://account.live.com/API/Proofs/SendOtt", requestOptions{
-			JSON: map[string]any{
-				"token":                  token,
-				"purpose":                purpose,
-				"epid":                   epid,
-				"autoVerification":       false,
-				"autoVerificationFailed": false,
-				"confirmProof":           realMailbox,
-				"HFId":                   "",
-				"HId":                    "",
-				"HSId":                   "",
-				"HSol":                   "",
-				"HType":                  "",
-				"HPId":                   "",
-			},
-			Headers: corsHeaders(session, map[string]string{
-				"Content-Type": "application/json; charset=utf-8",
-				"Origin":       "https://account.live.com",
-				"Referer":      rawURL,
-				"canary":       apiCanary,
-			}),
-		})
-		if err != nil {
-			return "", "", "", wrapAuthError(fmt.Sprintf("SendOtt 请求异常: %s", err), AuthStatusRequestError, err, realMailbox)
-		}
-		logInfo("SendOtt 响应: status=%d", resp.StatusCode)
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
-		}
-		var result map[string]any
-		if err := resp.JSON(&result); err != nil {
-			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 返回非 JSON (HTTP %d)", resp.StatusCode))
-		}
-		if errMap := asMap(result["error"]); errMap != nil {
-			return "", "", "", newAuthError(fmt.Sprintf("SendOtt 失败: code=%s", asString(errMap["code"])))
-		}
-		if value := asString(result["apiCanary"]); value != "" {
-			apiCanary = value
-		}
-		logInfo("OTP 验证: 验证码已发送 (第%d次)", ottAttempt)
-
+	if resolveByRecipient {
+		code, realMailbox, err = mailWaitMaskedCode(session.context(), maskedEmail, proxy, 0, seenKeys)
+	} else {
 		code, err = watcher.getCode(0)
-		if err == nil {
-			logInfo("OTP 验证: 收到验证码")
-			lastErr = nil
-			break
-		}
-		lastErr = err
-		authErr, _ := err.(*AuthError)
-		if ottAttempt < 3 && authErr != nil && authErr.Status == AuthStatusCodeTimeout {
-			logWarning("OTP 收码超时 (第%d次), 准备重试", ottAttempt)
-			continue
-		}
+	}
+	if err != nil {
 		status := AuthStatusRequestError
-		if authErr != nil && authErr.Status != "" {
+		if authErr, ok := err.(*AuthError); ok && authErr.Status != "" {
 			status = authErr.Status
 		}
-		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, err), status, realMailbox)
+		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, err), status, firstNonEmpty(realMailbox, maskedEmail))
 	}
-	if lastErr != nil {
-		status := AuthStatusRequestError
-		if authErr, ok := lastErr.(*AuthError); ok && authErr.Status != "" {
-			status = authErr.Status
-		}
-		return "", "", "", newAuthError(fmt.Sprintf("OTP 验证收码失败 (%s): %s", maskedEmail, lastErr), status, realMailbox)
-	}
+	logInfo("OTP 验证: 收到验证码")
 
-	resp, err := session.Post("https://account.live.com/API/Proofs/VerifyCode", requestOptions{
+	verificationBinding := realMailbox
+	if resolveByRecipient {
+		verificationBinding = maskedEmail
+	}
+	resp, err = session.Post("https://account.live.com/API/Proofs/VerifyCode", requestOptions{
 		JSON: map[string]any{
 			"code":         code,
 			"action":       "IptVerify",
@@ -459,16 +462,16 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		}),
 	})
 	if err != nil {
-		return "", "", "", wrapAuthError(fmt.Sprintf("VerifyCode 请求异常: %s", err), AuthStatusRequestError, err, realMailbox)
+		return "", "", "", wrapAuthError(fmt.Sprintf("VerifyCode 请求异常: %s", err), AuthStatusRequestError, err, verificationBinding)
 	}
 	logInfo("OTP 验证码提交响应: status=%d", resp.StatusCode)
 	logDebug("OTP 验证码提交响应 url=%s", resp.URL)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, realMailbox)
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, verificationBinding)
 	}
 	var verifyResult map[string]any
 	if err := resp.JSON(&verifyResult); err != nil {
-		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 返回非 JSON (HTTP %d)", resp.StatusCode), AuthStatusRequestError, realMailbox)
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 返回非 JSON (HTTP %d)", resp.StatusCode), AuthStatusRequestError, verificationBinding)
 	}
 	if rawError, exists := verifyResult["error"]; exists && rawError != nil {
 		errMap := asMap(rawError)
@@ -480,7 +483,7 @@ func handleOTPVerification(session *Session, page, rawURL, email, proxy string, 
 		}
 		logWarning("VerifyCode 失败: code=%s message=%s", code, message)
 		logDebug("VerifyCode 失败响应 keys=%v", sortedAnyKeys(verifyResult))
-		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", code, message), AuthStatusVerifyCodeError, realMailbox)
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyCode 失败: code=%s, message=%s", code, message), AuthStatusVerifyCodeError, verificationBinding)
 	}
 	route := asString(verifyResult["route"])
 	finalURL := returnURL
@@ -627,12 +630,21 @@ func accountEmailMaskPattern(accountEmail string) *regexp.Regexp {
 }
 
 func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy string, preferredBindingAddress string) string {
-	// Preferred (import-supplied) binding address wins if it matches the mask —
-	// domain-agnostic; may even be an operator-recorded external address.
-	if preferred := strings.ToLower(strings.TrimSpace(preferredBindingAddress)); preferred != "" && mailboxMatchesMasked(maskedEmail, preferred) {
+	// A preferred project mailbox wins if it matches the mask. External
+	// mailboxes are intentionally not returned because this service cannot read
+	// their OTP; the caller will fail before asking Microsoft to send one.
+	if preferred := normalizeRecoveryMailbox(preferredBindingAddress); preferred != "" && UsesActiveAuxiliaryDomain(preferred) && mailboxMatchesMasked(maskedEmail, preferred) {
 		logInfo("通过导入输入找到当前账号真实辅助邮箱")
 		logDebug("导入输入匹配: account=%s, real_mailbox=%s", accountEmail, preferred)
 		return preferred
+	}
+	// Pure rules run before any historical/content lookup.  When either rule
+	// matches, login authorization can snapshot and read that exact mailbox;
+	// recipient-based recovery is only for the remaining random-local-part case.
+	if inferred := InferBindingAddress(accountEmail, maskedEmail); inferred != "" {
+		logInfo("通过辅助邮箱规则直接推算真实地址")
+		logDebug("规则推算匹配: account=%s, masked_email=%s, real_mailbox=%s", accountEmail, maskedEmail, inferred)
+		return inferred
 	}
 	// Decide which binding domains to resolve against. If the masked proof
 	// already carries a domain, only that domain is relevant AND it must be one
@@ -669,6 +681,13 @@ func lookupRealMailbox(ctx context.Context, maskedEmail, accountEmail, proxy str
 		logWarning("辅助邮箱掩码匹配到多个域候选, 保持未解析: account=%s, candidates=%v", accountEmail, firstN(candidates, 5))
 	}
 	return ""
+}
+
+// ResolveBindingAddress reuses the existing proof-resolution order without
+// sending Microsoft mail.  Callers use it before starting a protocol flow;
+// the flow itself still performs its normal OTP confirmation.
+func ResolveBindingAddress(ctx context.Context, maskedEmail, accountEmail, proxy, preferredBindingAddress string) string {
+	return lookupRealMailbox(ctx, maskedEmail, accountEmail, proxy, preferredBindingAddress)
 }
 
 // resolveRealMailboxForDomain resolves the account's real recovery mailbox on a
@@ -777,17 +796,6 @@ func resolveRealMailboxForDomain(ctx context.Context, maskedEmail, accountEmail,
 		return ""
 	}
 
-	// Deterministic naming is a useful last-resort candidate, but it is not
-	// stronger than account-associated historical evidence. Returning it only
-	// after the evidence searches prevents a guessed mask match from hiding a
-	// different concrete mailbox already present in the receiving system. The
-	// caller must still prove this candidate through the normal OTP login before
-	// persisting it as verified.
-	if generated, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedEmail, generated) {
-		logInfo("通过辅助邮箱生成规则匹配候选地址")
-		logDebug("生成规则候选: account=%s, masked_email=%s, candidate=%s", accountEmail, maskedEmail, generated)
-		return generated
-	}
 	return ""
 }
 

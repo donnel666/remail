@@ -64,7 +64,6 @@ func (s *MicrosoftAliasStore) expediteAdminScheduleInTx(
 		Signature          string `gorm:"column:resource_signature"`
 		BindingAddress     string `gorm:"column:binding_address"`
 		BindingStatus      string `gorm:"column:binding_status"`
-		BoundDisplay       string `gorm:"column:bound_display"`
 		BindingAccount     string `gorm:"column:binding_account_email"`
 		ResourceEmail      string `gorm:"column:resource_email"`
 		BindingDomainReady bool   `gorm:"column:binding_domain_ready"`
@@ -74,10 +73,9 @@ SELECT
     mr.id AS id,
     mr.status AS status,
     mr.email_address AS resource_email,
-    COALESCE(binding.binding_address, '') AS binding_address,
-    COALESCE(binding.status, '') AS binding_status,
-    COALESCE(binding.bound_display, '') AS bound_display,
-    COALESCE(binding.account_email, '') AS binding_account_email,
+	    COALESCE(binding.binding_address, '') AS binding_address,
+	    COALESCE(binding.status, '') AS binding_status,
+	    COALESCE(binding.account_email, '') AS binding_account_email,
     EXISTS (
         SELECT 1
         FROM domain_resources AS binding_domain
@@ -92,10 +90,9 @@ SELECT
         mr.password,
         mr.client_id,
         mr.refresh_token,
-        COALESCE(binding.account_email, ''),
-        COALESCE(binding.binding_address, ''),
-        COALESCE(binding.status, ''),
-        COALESCE(binding.bound_display, '')
+	        COALESCE(binding.account_email, ''),
+	        COALESCE(binding.binding_address, ''),
+	        COALESCE(binding.status, '')
     ), 256) AS resource_signature
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_binding_mailboxes AS binding
@@ -170,9 +167,13 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 			resource.Signature,
 			schedule.LastSafeError,
 			microsoftAliasBindingReady(
-				resource.BindingStatus,
 				resource.BindingAddress,
-				resource.BoundDisplay,
+				resource.BindingAccount,
+				resource.ResourceEmail,
+				resource.BindingDomainReady,
+			),
+			microsoftAliasBindingRecoverable(
+				resource.BindingAddress,
 				resource.BindingAccount,
 				resource.ResourceEmail,
 				resource.BindingDomainReady,

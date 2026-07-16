@@ -1,7 +1,12 @@
 import type { ResourceItem } from "@/lib/resources-api";
 
 export type UsageScope = "private" | "public_sale";
-export type DomainStatus = "normal" | "abnormal" | "disabled";
+export type DomainStatus =
+  | "pending"
+  | "validating"
+  | "normal"
+  | "abnormal"
+  | "disabled";
 
 export interface DomainResource {
   id: number;
@@ -35,6 +40,10 @@ export function getTldCounts(items: DomainResource[]) {
 
 function mapDomainStatus(status?: string): DomainStatus {
   switch (status) {
+    case "pending":
+      return "pending";
+    case "validating":
+      return "validating";
     case "normal":
       return "normal";
     case "disabled":

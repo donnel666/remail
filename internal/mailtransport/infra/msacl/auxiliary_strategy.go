@@ -33,6 +33,37 @@ func DeterministicAuxiliaryAddress(accountEmail string) (string, error) {
 	return deterministicAuxiliaryAddress(accountEmail)
 }
 
+// InferBindingAddress returns the only address that can be derived locally
+// from a Microsoft masked proof.  The deterministic system rule is checked
+// first, followed by the resource's local part on the proof domain.  An empty
+// result means the proof is external, malformed, or belongs to the random
+// system-local-part case and therefore needs recipient-based recovery.
+//
+// This helper is intentionally side-effect free so login authorization and
+// alias preflight can share the exact same inference order.
+func InferBindingAddress(accountEmail, maskedProof string) string {
+	maskedProof = strings.ToLower(strings.TrimSpace(maskedProof))
+	if maskedProof == "" || !strings.Contains(maskedProof, "*") {
+		return ""
+	}
+	_, domain, ok := strings.Cut(maskedProof, "@")
+	if !ok || !domainInProject(domain) {
+		return ""
+	}
+	if candidate, err := deterministicAuxiliaryAddressForDomain(accountEmail, domain); err == nil && mailboxMatchesMasked(maskedProof, candidate) {
+		return candidate
+	}
+	if candidate := accountLocalAuxiliaryAddressForDomain(accountEmail, domain); candidate != "" && mailboxMatchesMasked(maskedProof, candidate) {
+		return candidate
+	}
+	return ""
+}
+
+func UsesActiveAuxiliaryDomain(address string) bool {
+	_, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(address)), "@")
+	return ok && domainInProject(domain)
+}
+
 func deterministicAuxiliaryAddressForDomain(accountEmail, domainName string) (string, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(accountEmail))
 	local, sourceDomain, ok := strings.Cut(normalizedEmail, "@")
@@ -87,7 +118,7 @@ func mailboxMatchesMasked(maskedEmail, auxiliary string) bool {
 	maskedEmail = strings.ToLower(strings.TrimSpace(maskedEmail))
 	auxiliary = strings.ToLower(strings.TrimSpace(auxiliary))
 	if maskedEmail == "" || auxiliary == "" {
-		return true
+		return false
 	}
 	maskLocal, maskDomain, maskOK := strings.Cut(maskedEmail, "@")
 	auxLocal, auxDomain, auxOK := strings.Cut(auxiliary, "@")

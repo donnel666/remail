@@ -10,30 +10,35 @@ import (
 
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
-// ResourceValidationRepository persists durable validation jobs and applies
-// resource state changes after the external ACL has finished.
+// ResourceValidationRepository owns the resource pending/validating state and
+// applies results from temporary Redis tasks.
 type ResourceValidationRepository interface {
-	CreateWithLog(ctx context.Context, job *domain.ResourceValidation, log *governancedomain.OperationLog) (bool, error)
-	CreateBatchWithLog(ctx context.Context, ownerUserID uint, selection ResourceBulkSelection, log *governancedomain.OperationLog, requestID, path string) (*ResourceBatchValidationResult, error)
-	FindByID(ctx context.Context, id uint) (*domain.ResourceValidation, error)
-	CreatePendingValidationJobs(ctx context.Context, limit int) (int, error)
-	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]domain.ResourceValidation, error)
-	MarkRunning(ctx context.Context, id uint, dispatchToken string) (claimToken string, claimed bool, err error)
-	ReleaseDispatch(ctx context.Context, id uint, dispatchToken string) error
-	MarkFailed(ctx context.Context, id uint, claimToken string, safeError string) error
-	MarkRetryableFailure(ctx context.Context, id uint, claimToken string, safeError string) (bool, error)
-	SaveMicrosoftProgress(ctx context.Context, jobID uint, resourceID uint, claimToken string, result MicrosoftValidationResult) error
-	ApplyMicrosoftResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
-	ApplyDomainResult(ctx context.Context, jobID uint, resourceID uint, claimToken string, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
-	MarkDispatchFailed(ctx context.Context, id uint, dispatchToken string, safeError string) error
+	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
+	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
+	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
+	ReleaseValidation(ctx context.Context, task ResourceValidationTask) error
+	ResetValidationAssignments(ctx context.Context) error
+	SaveMicrosoftProgress(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult) error
+	ApplyMicrosoftResult(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
+	ApplyDomainResult(ctx context.Context, task ResourceValidationTask, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
 }
 
 // ResourceValidationQueue enqueues asynchronous resource validation work.
 type ResourceValidationQueue interface {
 	EnqueueResourceValidation(ctx context.Context, task ResourceValidationTask) error
+	EnqueueResourceValidationBatch(ctx context.Context, task ResourceValidationBatchTask) error
 	EnqueueResourceValidationDispatcher(ctx context.Context, delay time.Duration) error
+}
+
+// resourceValidationBatchLeaseQueue is implemented by the Redis queue. The
+// lease exists only while one cursor chain is active and fences an expired old
+// cursor from deleting or extending a later submission with the same BatchID.
+type resourceValidationBatchLeaseQueue interface {
+	RefreshResourceValidationBatch(ctx context.Context, task ResourceValidationBatchTask) (bool, error)
+	ReleaseResourceValidationBatch(ctx context.Context, task ResourceValidationBatchTask) error
 }
 
 // ResourceValidationPort is implemented by BC-MAILTRANSPORT ACL adapters.
@@ -44,8 +49,8 @@ type ResourceValidationPort interface {
 
 // MicrosoftValidationBindingCommitPort is implemented by MailTransport. Core
 // invokes it only from fenced validation progress/result transactions, after
-// the resource root, Microsoft subtype, and running validation job have all
-// been locked and the expected credential revision has been checked.
+// the resource root and Microsoft subtype have been locked and the expected
+// credential revision has been checked.
 // Implementations must join the caller-owned transaction carried by ctx.
 type MicrosoftValidationBindingCommitPort interface {
 	CommitValidationBinding(ctx context.Context, command MicrosoftValidationBindingCommand) (changed bool, err error)
@@ -86,8 +91,9 @@ type MicrosoftValidationResult struct {
 	// RecoveredBinding is a complete, uniquely resolved, locally receivable
 	// recovery-mailbox fact. It intentionally contains no proof mask, token,
 	// code, or other Microsoft protocol material.
-	RecoveredBinding   *MicrosoftRecoveredBinding
-	BindingObservation *MicrosoftBindingObservation
+	RecoveredBinding     *MicrosoftRecoveredBinding
+	BindingObservation   *MicrosoftBindingObservation
+	ReleaseRecoveryLease func(context.Context) error
 }
 
 // MicrosoftRecoveredBinding carries the optimistic binding snapshot captured
@@ -103,12 +109,11 @@ type MicrosoftRecoveredBinding struct {
 
 // MicrosoftBindingObservation is the ordinary binding outcome produced by a
 // validation login. Unlike RecoveredBinding it carries no recovery proof and
-// cannot replace a concurrently changed binding outside Core's job fence.
+// cannot replace a concurrently changed binding outside Core's result fence.
 type MicrosoftBindingObservation struct {
-	Address      string
-	Status       string
-	BoundDisplay string
-	SafeMessage  string
+	Address     string
+	Status      string
+	SafeMessage string
 }
 
 // MicrosoftValidationBindingCommand is assembled by Core from the fenced
@@ -136,40 +141,44 @@ type DomainValidationResult struct {
 }
 
 type ResourceValidationTask struct {
-	JobID         uint   `json:"jobId"`
-	DispatchToken string `json:"dispatchToken"`
-	RequestID     string `json:"requestId"`
+	ResourceID                 uint                `json:"resourceId"`
+	ResourceType               domain.ResourceType `json:"resourceType"`
+	OwnerUserID                uint                `json:"ownerUserId"`
+	ExpectedCredentialRevision uint64              `json:"expectedCredentialRevision,omitempty"`
+	RequestID                  string              `json:"requestId,omitempty"`
 }
 
-type DispatchResourceValidationJobsResult struct {
+// ResourceValidationBatchTask is deliberately Redis-only coordination. A lost
+// batch can be submitted again.
+type ResourceValidationBatchTask struct {
+	BatchID     string                `json:"batchId"`
+	ClaimToken  string                `json:"claimToken,omitempty"`
+	OwnerUserID uint                  `json:"ownerUserId"`
+	Selection   ResourceBulkSelection `json:"selection"`
+	AfterID     uint                  `json:"afterId"`
+	ThroughID   uint                  `json:"throughId"`
+	RequestID   string                `json:"requestId"`
+	Path        string                `json:"path"`
+}
+
+type ResourceValidationBatchPageResult struct {
+	Processed int
+	AfterID   uint
+	ThroughID uint
+	Done      bool
+}
+
+type DispatchResourceValidationsResult struct {
 	Attempted int
 	Queued    int
 	Failed    int
 }
 
-// ResourceBatchValidationResult reports a bulk validation submission.
-// Queued is the number of resources or durable jobs actually moved into the
-// validation flow before the request returns. Created is internal-only.
+// ResourceBatchValidationResult reports acceptance into Redis. Explicit IDs
+// have an exact bounded count; filter matching is intentionally deferred.
 type ResourceBatchValidationResult struct {
 	Requested int
 	Queued    int
-	Created   int
-}
-
-type ValidationResultView struct {
-	ValidationID       uint       `json:"validationId"`
-	ResourceID         uint       `json:"resourceId"`
-	ResourceType       string     `json:"resourceType"`
-	Status             string     `json:"status"`
-	CredentialRevision uint64     `json:"credentialRevision,omitempty"`
-	Attempts           int        `json:"attempts"`
-	MaxAttempts        int        `json:"maxAttempts"`
-	LastSafeError      string     `json:"lastSafeError,omitempty"`
-	RequestID          string     `json:"requestId"`
-	StartedAt          *time.Time `json:"startedAt,omitempty"`
-	FinishedAt         *time.Time `json:"finishedAt,omitempty"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 type ResourceValidationUseCase struct {
@@ -178,7 +187,6 @@ type ResourceValidationUseCase struct {
 	queue        ResourceValidationQueue
 	validator    ResourceValidationPort
 	aliasTrigger MicrosoftAliasScheduleTriggerPort
-	now          func() time.Time
 }
 
 func (uc *ResourceValidationUseCase) SetMicrosoftAliasScheduleTrigger(trigger MicrosoftAliasScheduleTriggerPort) {
@@ -190,26 +198,22 @@ func (uc *ResourceValidationUseCase) SetMicrosoftAliasScheduleTrigger(trigger Mi
 const ResourceValidationMaxExplicitIDs = 10_000
 
 const (
-	resourceValidationRunningStaleAfter = 20 * time.Minute
-	resourceValidationQueuedLease       = time.Hour
+	resourceValidationBatchPageSize = 1000
+	resourceValidationDispatchDelay = time.Second
 )
 
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
 
-// ErrValidationResultStale means the durable job was fenced off because the
-// resource credentials or command state changed while the external Microsoft
-// call was in flight. The repository has already made the job terminal; the
-// worker must not retry the stale payload or overwrite the newer state.
+// ErrValidationResultStale means a Redis task was fenced off because the
+// resource credentials or command state changed while the external call was
+// in flight. The worker must not retry the stale payload or overwrite newer
+// resource state.
 var ErrValidationResultStale = errors.New("resource validation result is stale")
 
-// ErrValidationBindingRejected means the remote validation resolved a binding
-// fact that cannot be committed as this resource's active recovery mailbox
-// (for example, the address is already assigned or its local binding domain is
-// no longer active). This is a terminal validation result, not a stale worker
-// fence and not a transient infrastructure failure.
+// ErrValidationBindingRejected classifies a supplementary Binding fact that
+// cannot be committed. Repositories must roll that Binding attempt back to a
+// savepoint; it is never a resource-health result.
 var ErrValidationBindingRejected = errors.New("resource validation binding was rejected")
-
-const MicrosoftValidationBindingRejectedMessage = "Microsoft recovery mailbox is unavailable or already assigned."
 
 func NewResourceValidationUseCase(resources EmailResourceRepository, validations ResourceValidationRepository, queue ResourceValidationQueue, validator ResourceValidationPort) *ResourceValidationUseCase {
 	return &ResourceValidationUseCase{
@@ -217,11 +221,13 @@ func NewResourceValidationUseCase(resources EmailResourceRepository, validations
 		validations: validations,
 		queue:       queue,
 		validator:   validator,
-		now:         func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint, userID uint, isAdmin bool, requestID, path string) (*ValidationResultView, error) {
+func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint, userID uint, isAdmin bool, requestID, path string) (*ResourceBatchValidationResult, error) {
+	if uc == nil || uc.resources == nil || uc.validations == nil || uc.queue == nil || resourceID == 0 || userID == 0 {
+		return nil, domain.ErrInvalidResourceCommand
+	}
 	resource, err := uc.resources.FindByID(ctx, resourceID)
 	if err != nil {
 		return nil, err
@@ -262,16 +268,6 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 	default:
 		return nil, domain.ErrInvalidResourceType
 	}
-
-	job := &domain.ResourceValidation{
-		ResourceID:   resource.ID,
-		ResourceType: resource.Type,
-		OwnerUserID:  resource.OwnerUserID,
-		Status:       domain.ResourceValidationQueued,
-		MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
-		RequestID:    strings.TrimSpace(requestID),
-		Path:         strings.TrimSpace(path),
-	}
 	log := &governancedomain.OperationLog{
 		OperatorUserID: userID,
 		OperationType:  "core.resource.validate",
@@ -279,23 +275,20 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 		ResourceID:     fmt.Sprintf("%d", resource.ID),
 		Path:           path,
 		Result:         "success",
-		SafeSummary:    "Resource validation queued.",
+		SafeSummary:    "Resource validation marked pending for asynchronous execution.",
 		RequestID:      requestID,
 	}
-	created, err := uc.validations.CreateWithLog(ctx, job, log)
-	if err != nil {
+	if err := uc.validations.MarkResourcePendingWithLog(ctx, resource.ID, resource.Type, resource.OwnerUserID, log); err != nil {
 		return nil, err
 	}
-	if !created {
-		return validationView(job), nil
-	}
-
 	uc.ScheduleDispatcher(ctx, 0)
-
-	return validationView(job), nil
+	return &ResourceBatchValidationResult{Requested: 1, Queued: 1}, nil
 }
 
 func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection ResourceBulkSelection, userID uint, isAdmin bool, requestID, path string) (*ResourceBatchValidationResult, error) {
+	if uc == nil || uc.queue == nil || userID == 0 || (selection.AdminScope && !isAdmin) {
+		return nil, domain.ErrInvalidResourceCommand
+	}
 	selection.AllowBinding = isAdmin
 	if !selection.AllowBinding {
 		selection.Filter.ExcludeBinding = true
@@ -320,160 +313,132 @@ func (uc *ResourceValidationUseCase) CreateBatch(ctx context.Context, selection 
 		return nil, domain.ErrInvalidResourceType
 	}
 
-	log := &governancedomain.OperationLog{
-		OperatorUserID: userID,
-		OperationType:  "core.resource.validate_batch",
-		ResourceType:   "resource",
-		ResourceID:     "batch",
-		Path:           path,
-		Result:         "success",
-		SafeSummary:    "Resource validations queued.",
-		RequestID:      requestID,
+	batchID := strings.TrimSpace(selection.BatchKey)
+	selection.BatchKey = ""
+	if batchID == "" {
+		batchID = platform.NewUUIDV7String()
 	}
-	result, err := uc.validations.CreateBatchWithLog(ctx, userID, selection, log, requestID, path)
-	if err != nil {
+	if err := uc.queue.EnqueueResourceValidationBatch(ctx, ResourceValidationBatchTask{
+		BatchID: batchID, OwnerUserID: userID, Selection: selection,
+		RequestID: strings.TrimSpace(requestID), Path: strings.TrimSpace(path),
+	}); err != nil {
 		return nil, err
 	}
-	if result != nil && result.Queued > 0 {
-		uc.ScheduleDispatcher(ctx, 0)
+	result := &ResourceBatchValidationResult{}
+	if selection.Mode == ResourceBulkSelectionIDs {
+		result.Requested = len(selection.ResourceIDs)
+		result.Queued = len(selection.ResourceIDs)
 	}
 	return result, nil
 }
 
-func (uc *ResourceValidationUseCase) Get(ctx context.Context, validationID uint, userID uint, isAdmin bool) (*ValidationResultView, error) {
-	job, err := uc.validations.FindByID(ctx, validationID)
-	if err != nil {
-		return nil, err
+func (uc *ResourceValidationUseCase) ProcessBatch(ctx context.Context, task ResourceValidationBatchTask) error {
+	if uc == nil || uc.validations == nil || uc.queue == nil || strings.TrimSpace(task.BatchID) == "" || task.OwnerUserID == 0 {
+		return domain.ErrInvalidResourceCommand
 	}
-	if job == nil {
-		return nil, domain.ErrResourceNotFound
-	}
-	if !isAdmin && job.OwnerUserID != userID {
-		return nil, domain.ErrForbiddenResource
-	}
-	if !isAdmin && job.ResourceType == domain.ResourceTypeDomain {
-		if uc.resources == nil {
-			return nil, domain.ErrForbiddenResource
-		}
-		resource, err := uc.resources.FindDomainByID(ctx, job.ResourceID)
+	if leases, ok := uc.queue.(resourceValidationBatchLeaseQueue); ok {
+		owned, err := leases.RefreshResourceValidationBatch(ctx, task)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if resource == nil || resource.Purpose == domain.PurposeBinding {
-			return nil, domain.ErrForbiddenResource
+		if !owned {
+			return nil
 		}
 	}
-	return validationView(job), nil
+	page, err := uc.validations.MarkValidationBatchPending(ctx, task, resourceValidationBatchPageSize)
+	if err != nil {
+		return err
+	}
+	if page.Processed > 0 {
+		uc.ScheduleDispatcher(ctx, 0)
+	}
+	if page.Done {
+		return uc.ReleaseBatch(ctx, task)
+	}
+	task.AfterID = page.AfterID
+	task.ThroughID = page.ThroughID
+	return uc.queue.EnqueueResourceValidationBatch(ctx, task)
+}
+
+// ReleaseBatch deletes only the live Redis lease owned by this cursor token.
+// Completed Asynq tasks already use Retention(0), so no per-resource history is
+// retained after execution.
+func (uc *ResourceValidationUseCase) ReleaseBatch(ctx context.Context, task ResourceValidationBatchTask) error {
+	if uc == nil || uc.queue == nil {
+		return nil
+	}
+	leases, ok := uc.queue.(resourceValidationBatchLeaseQueue)
+	if !ok {
+		return nil
+	}
+	return leases.ReleaseResourceValidationBatch(ctx, task)
 }
 
 func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceValidationTask) error {
-	if task.JobID == 0 {
-		return domain.ErrResourceNotFound
+	if uc == nil || uc.resources == nil || uc.validations == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || !domain.IsValidResourceType(task.ResourceType) {
+		return domain.ErrInvalidResourceCommand
 	}
-	if strings.TrimSpace(task.DispatchToken) == "" {
-		// Payloads queued before durable dispatch fencing was introduced are
-		// harmless no-ops. The dispatcher will create a fresh fenced task.
-		return nil
-	}
-	job, err := uc.validations.FindByID(ctx, task.JobID)
-	if err != nil {
-		return err
-	}
-	if job == nil {
-		return domain.ErrResourceNotFound
-	}
-	if domain.IsTerminalValidationStatus(job.Status) {
-		return nil
-	}
-
-	claimToken, claimed, err := uc.validations.MarkRunning(ctx, task.JobID, task.DispatchToken)
-	if err != nil {
-		return err
-	}
-	if !claimed {
-		return nil
-	}
-	job.ClaimToken = claimToken
-
 	var processErr error
-	switch job.ResourceType {
+	switch task.ResourceType {
 	case domain.ResourceTypeMicrosoft:
-		processErr = uc.processMicrosoft(ctx, job)
+		processErr = uc.processMicrosoft(ctx, task)
 	case domain.ResourceTypeDomain:
-		processErr = uc.processDomain(ctx, job)
+		processErr = uc.processDomain(ctx, task)
 	default:
 		processErr = domain.ErrInvalidResourceType
 	}
-	if processErr == nil {
+	if processErr == nil || errors.Is(processErr, ErrValidationResultStale) || errors.Is(processErr, domain.ErrInvalidResourceStatus) || errors.Is(processErr, domain.ErrResourceNotFound) {
 		return nil
 	}
-	if errors.Is(processErr, ErrValidationTemporaryUnavailable) {
-		uc.ScheduleDispatcher(ctx, time.Second)
-		// The durable job has already returned to queued with its attempt count
-		// updated. Retrying this Asynq payload would carry a consumed dispatch
-		// token and can only be a no-op; the dispatcher owns the next generation.
-		return nil
+	if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+		return processErr
 	}
-
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if _, recoveryErr := uc.validations.MarkRetryableFailure(
-		recoveryCtx,
-		job.ID,
-		job.ClaimToken,
-		"Resource validation processing failed temporarily.",
-	); recoveryErr == nil || errors.Is(recoveryErr, domain.ErrInvalidResourceStatus) {
-		return nil
+	if err := uc.validations.ReleaseValidation(recoveryCtx, task); err != nil && !errors.Is(err, domain.ErrInvalidResourceStatus) {
+		slog.Warn(
+			"release exhausted Redis validation assignment failed",
+			"resource_id", task.ResourceID,
+			"request_id", task.RequestID,
+			"error", err,
+		)
 	}
-	return processErr
+	return nil
 }
 
-func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceValidationJobsResult, error) {
+func (uc *ResourceValidationUseCase) ResetAssignments(ctx context.Context) error {
+	if uc == nil || uc.validations == nil {
+		return nil
+	}
+	if err := uc.validations.ResetValidationAssignments(ctx); err != nil {
+		return err
+	}
+	uc.ScheduleDispatcher(ctx, 0)
+	return nil
+}
+
+func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceValidationsResult, error) {
 	if uc == nil || uc.validations == nil || uc.queue == nil {
 		return nil, ErrValidationTemporaryUnavailable
 	}
 	if limit <= 0 {
 		limit = 100
 	}
-	now := uc.now()
-	jobs, err := uc.validations.ClaimDispatchable(
-		ctx,
-		limit,
-		now.Add(-resourceValidationRunningStaleAfter),
-		now.Add(-resourceValidationQueuedLease),
-	)
+	tasks, err := uc.validations.ClaimPendingValidations(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
+	result := &DispatchResourceValidationsResult{Attempted: len(tasks)}
 	var dispatchErrors []error
-	if remaining := limit - len(jobs); remaining > 0 {
-		if _, err := uc.validations.CreatePendingValidationJobs(ctx, remaining); err != nil {
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("create pending resource validation jobs: %w", err))
-		}
-		expandedJobs, err := uc.validations.ClaimDispatchable(
-			ctx,
-			remaining,
-			now.Add(-resourceValidationRunningStaleAfter),
-			now.Add(-resourceValidationQueuedLease),
-		)
-		if err != nil {
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("claim pending resource validations: %w", err))
-		} else {
-			jobs = append(jobs, expandedJobs...)
-		}
-	}
-	result := &DispatchResourceValidationJobsResult{Attempted: len(jobs)}
-	for _, job := range jobs {
-		err := uc.queue.EnqueueResourceValidation(ctx, ResourceValidationTask{
-			JobID:         job.ID,
-			DispatchToken: job.DispatchToken,
-			RequestID:     job.RequestID,
-		})
-		if err != nil {
+	for _, task := range tasks {
+		if err := uc.queue.EnqueueResourceValidation(ctx, task); err != nil {
 			result.Failed++
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue validation job %d: %w", job.ID, err))
-			if releaseErr := uc.validations.MarkDispatchFailed(ctx, job.ID, job.DispatchToken, "Resource validation queue is unavailable; dispatcher will retry."); releaseErr != nil {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf("release validation job %d after enqueue failure: %w", job.ID, releaseErr))
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue validation for resource %d: %w", task.ResourceID, err))
+			recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			releaseErr := uc.validations.ReleaseValidation(recoveryCtx, task)
+			cancel()
+			if releaseErr != nil {
+				dispatchErrors = append(dispatchErrors, fmt.Errorf("release resource %d after enqueue failure: %w", task.ResourceID, releaseErr))
 			}
 			continue
 		}
@@ -482,49 +447,49 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 	return result, errors.Join(dispatchErrors...)
 }
 
-// ReleaseDispatch returns a fenced task to the durable dispatcher without
-// changing its validation lifecycle. It is used when runtime admission control
-// decides that background work should yield before the job starts.
+// ReleaseDispatch returns a Redis-assigned resource to pending when the task
+// cannot be admitted before its final Asynq attempt.
 func (uc *ResourceValidationUseCase) ReleaseDispatch(ctx context.Context, task ResourceValidationTask) error {
-	if uc == nil || uc.validations == nil || task.JobID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if uc == nil || uc.validations == nil || task.ResourceID == 0 {
 		return nil
 	}
-	return uc.validations.ReleaseDispatch(ctx, task.JobID, task.DispatchToken)
+	return uc.validations.ReleaseValidation(ctx, task)
 }
 
 func (uc *ResourceValidationUseCase) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
 	if uc == nil || uc.queue == nil {
 		return
 	}
-	_ = uc.queue.EnqueueResourceValidationDispatcher(ctx, delay)
+	_ = uc.queue.EnqueueResourceValidationDispatcher(ctx, max(delay, resourceValidationDispatchDelay))
 }
 
-func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *domain.ResourceValidation) error {
-	ms, err := uc.resources.FindMicrosoftByID(ctx, job.ResourceID)
+func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task ResourceValidationTask) error {
+	ms, err := uc.resources.FindMicrosoftByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
 	}
 	if ms == nil || ms.Status == domain.MicrosoftStatusDeleted {
-		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource not found.")
+		return domain.ErrResourceNotFound
 	}
-	if ms.Status == domain.MicrosoftStatusDisabled {
-		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource status does not allow validation.")
+	if ms.Status != domain.MicrosoftStatusValidating || ms.CredentialRevision != task.ExpectedCredentialRevision {
+		return ErrValidationResultStale
 	}
 	var result MicrosoftValidationResult
 	if uc.validator == nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Microsoft mail service is temporarily unavailable.")
+		return ErrValidationTemporaryUnavailable
 	}
 	result, err = uc.validator.ValidateMicrosoft(ctx, MicrosoftValidationRequest{
-		ResourceID:   job.ResourceID,
-		OwnerUserID:  job.OwnerUserID,
+		ResourceID:   task.ResourceID,
+		OwnerUserID:  task.OwnerUserID,
 		EmailAddress: ms.EmailAddress,
 		Password:     ms.Password,
 		ClientID:     ms.ClientID,
 		RefreshToken: ms.RefreshToken,
-		RequestID:    job.RequestID,
+		RequestID:    task.RequestID,
 	})
+	defer releaseMicrosoftValidationRecoveryLease(ctx, task, result.ReleaseRecoveryLease)
 	if err != nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Microsoft mail service is temporarily unavailable.")
+		return ErrValidationTemporaryUnavailable
 	}
 	if result.SafeMessage == "" {
 		if result.Valid {
@@ -534,79 +499,78 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, job *
 		}
 	}
 	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		if err := uc.validations.SaveMicrosoftProgress(ctx, job.ID, job.ResourceID, job.ClaimToken, result); err != nil {
+		if err := uc.validations.SaveMicrosoftProgress(ctx, task, result); err != nil {
 			if errors.Is(err, ErrValidationResultStale) {
 				return nil
 			}
-			if errors.Is(err, ErrValidationBindingRejected) {
-				// The remote proof may have completed before a local uniqueness or
-				// active-domain constraint changed. Make that a terminal binding
-				// failure instead of leaving a pending resource with a failed job.
-				result.Valid = false
-				result.Category = "binding"
-				result.SafeMessage = MicrosoftValidationBindingRejectedMessage
-				result.RecoveredBinding = nil
-				result.BindingObservation = nil
-				applyErr := uc.validations.ApplyMicrosoftResult(
-					ctx,
-					job.ID,
-					job.ResourceID,
-					job.ClaimToken,
-					result,
-					validationSystemLog(job, false, result.Category, result.SafeMessage),
-				)
-				if errors.Is(applyErr, ErrValidationResultStale) || errors.Is(applyErr, ErrValidationBindingRejected) {
-					return nil
-				}
-				return applyErr
-			}
 			return err
 		}
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
+		return ErrValidationTemporaryUnavailable
 	}
-	err = uc.validations.ApplyMicrosoftResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
-	if errors.Is(err, ErrValidationResultStale) || errors.Is(err, ErrValidationBindingRejected) {
+	err = uc.validations.ApplyMicrosoftResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
+	if errors.Is(err, ErrValidationResultStale) {
 		return nil
 	}
-	if err != nil || !result.Valid || uc.aliasTrigger == nil {
+	if err != nil {
 		return err
+	}
+	if !result.Valid {
+		return nil
+	}
+	if uc.aliasTrigger == nil {
+		return nil
 	}
 	// Alias scheduling is its own durable concern. A transient failure here
 	// must not turn an already-committed validation success back into a retry;
 	// the daily alias scan remains the recovery path.
-	if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, job.ResourceID); triggerErr != nil {
+	if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, task.ResourceID); triggerErr != nil {
 		slog.Warn(
 			"microsoft alias schedule trigger deferred after validation",
-			"resource_id", job.ResourceID,
-			"validation_id", job.ID,
-			"request_id", job.RequestID,
+			"resource_id", task.ResourceID,
+			"request_id", task.RequestID,
 		)
 	}
 	return nil
 }
 
-func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *domain.ResourceValidation) error {
-	dr, err := uc.resources.FindDomainByID(ctx, job.ResourceID)
+func releaseMicrosoftValidationRecoveryLease(ctx context.Context, task ResourceValidationTask, release func(context.Context) error) {
+	if release == nil {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := release(releaseCtx); err != nil {
+		slog.Warn(
+			"microsoft binding recovery lease release deferred after validation",
+			"resource_id", task.ResourceID,
+			"request_id", task.RequestID,
+			"error", err,
+		)
+	}
+}
+
+func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task ResourceValidationTask) error {
+	dr, err := uc.resources.FindDomainByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
 	}
 	if dr == nil || dr.Status == domain.DomainStatusDeleted {
-		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource not found.")
+		return domain.ErrResourceNotFound
 	}
-	if dr.Status == domain.DomainStatusDisabled {
-		return uc.markValidationFailed(ctx, job.ID, job.ClaimToken, "Resource status does not allow validation.")
+	if dr.Status != domain.DomainStatusValidating {
+		return ErrValidationResultStale
 	}
 	var result DomainValidationResult
 	if uc.validator == nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Domain DNS service is temporarily unavailable.")
+		return ErrValidationTemporaryUnavailable
 	}
 	result, err = uc.validator.ValidateDomain(ctx, DomainValidationRequest{
-		ResourceID: job.ResourceID,
+		ResourceID: task.ResourceID,
 		Domain:     dr.Domain,
-		RequestID:  job.RequestID,
+		RequestID:  task.RequestID,
 	})
 	if err != nil {
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, "Domain DNS service is temporarily unavailable.")
+		return ErrValidationTemporaryUnavailable
 	}
 	if result.SafeMessage == "" {
 		if result.Valid {
@@ -616,39 +580,23 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, job *dom
 		}
 	}
 	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		return uc.markValidationRetryableFailure(ctx, job.ID, job.ClaimToken, result.SafeMessage)
+		return ErrValidationTemporaryUnavailable
 	}
-	return uc.validations.ApplyDomainResult(ctx, job.ID, job.ResourceID, job.ClaimToken, result, validationSystemLog(job, result.Valid, result.Category, result.SafeMessage))
-}
-
-func (uc *ResourceValidationUseCase) markValidationFailed(ctx context.Context, jobID uint, claimToken string, safeError string) error {
-	if err := uc.validations.MarkFailed(ctx, jobID, claimToken, safeError); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (uc *ResourceValidationUseCase) markValidationRetryableFailure(ctx context.Context, jobID uint, claimToken string, safeError string) error {
-	exhausted, err := uc.validations.MarkRetryableFailure(ctx, jobID, claimToken, safeError)
-	if err != nil {
-		return err
-	}
-	if exhausted {
-		return nil
-	}
-	return ErrValidationTemporaryUnavailable
+	return uc.validations.ApplyDomainResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
 }
 
 func isRetryableValidationCategory(category string) bool {
-	switch strings.TrimSpace(category) {
-	case "request", "auth_timeout", "code_timeout", "code_error":
-		return true
-	default:
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "oauth_invalid_grant", "refresh_token_expired", "oauth_refresh_token_expired",
+		"oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password",
+		"unknown_mailbox", "locked", "account_abnormal", "dns":
 		return false
+	default:
+		return true
 	}
 }
 
-func validationSystemLog(job *domain.ResourceValidation, valid bool, category string, safeMessage string) *governancedomain.SystemLog {
+func validationSystemLog(task ResourceValidationTask, valid bool, category string, safeMessage string) *governancedomain.SystemLog {
 	if valid {
 		return nil
 	}
@@ -656,9 +604,9 @@ func validationSystemLog(job *domain.ResourceValidation, valid bool, category st
 		Level:     "warning",
 		Module:    "core",
 		EventType: "resource.validation_failed",
-		RequestID: job.RequestID,
+		RequestID: task.RequestID,
 		BizType:   "resource",
-		BizID:     fmt.Sprintf("%d", job.ResourceID),
+		BizID:     fmt.Sprintf("%d", task.ResourceID),
 		Message:   "Resource validation failed.",
 		Detail:    safeValidationDetail(category, safeMessage),
 	}
@@ -677,32 +625,4 @@ func safeValidationDetail(category, message string) string {
 	default:
 		return "Resource validation failed."
 	}
-}
-
-func validationView(job *domain.ResourceValidation) *ValidationResultView {
-	if job == nil {
-		return nil
-	}
-	return &ValidationResultView{
-		ValidationID:       job.ID,
-		ResourceID:         job.ResourceID,
-		ResourceType:       string(job.ResourceType),
-		Status:             string(job.Status),
-		CredentialRevision: job.ExpectedCredentialRevision,
-		Attempts:           job.Attempts,
-		MaxAttempts:        job.MaxAttempts,
-		LastSafeError:      job.LastSafeError,
-		RequestID:          job.RequestID,
-		StartedAt:          job.StartedAt,
-		FinishedAt:         job.FinishedAt,
-		CreatedAt:          job.CreatedAt,
-		UpdatedAt:          job.UpdatedAt,
-	}
-}
-
-func IsNonRetryableValidationError(err error) bool {
-	return errors.Is(err, domain.ErrResourceNotFound) ||
-		errors.Is(err, domain.ErrForbiddenResource) ||
-		errors.Is(err, domain.ErrInvalidResourceType) ||
-		errors.Is(err, domain.ErrInvalidResourceStatus)
 }

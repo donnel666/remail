@@ -56,6 +56,9 @@ func TestExtractPasswordRecoveryServerDataBalancesNestedObjectsAndStrings(t *tes
 }
 
 func TestProbePasswordRecoveryUsesInitialGETPOSTAndReturnsNoSecrets(t *testing.T) {
+	previousDomains := activeAuxiliaryDomains()
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
 	session, client := newScriptedSession(t,
 		func(req *http.Request, follow bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, passwordRecoveryEntryURL)
@@ -321,6 +324,74 @@ func (*passwordRecoverySequenceReader) SearchByContent(context.Context, string, 
 	return nil, nil
 }
 
+type maskedPasswordRecoveryReader struct {
+	sent atomic.Bool
+}
+
+func (*maskedPasswordRecoveryReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
+	return nil, nil
+}
+
+func (*maskedPasswordRecoveryReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
+	return nil, nil
+}
+
+func (r *maskedPasswordRecoveryReader) ListMasked(context.Context, string, int) ([]EmailObj, error) {
+	if !r.sent.Load() {
+		return nil, nil
+	}
+	return []EmailObj{{
+		ID: 2, To: "qalpha01@recovery.test", From: "account-security-noreply@accountprotection.microsoft.com",
+		Subject: "Microsoft security code", Preview: "Security code 654321",
+	}}, nil
+}
+
+func TestPasswordRecoveryFallsBackToMaskedRecipientRecovery(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	reader := &maskedPasswordRecoveryReader{}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, passwordRecoveryEntryURL, passwordRecoveryInitialFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, req.URL.String(), passwordRecoveryPickerFixture, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "qa*****@recovery.test", payload["confirmProof"])
+			reader.sent.Store(true)
+			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"after-send"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "qalpha01@recovery.test", payload["confirmProof"])
+			require.Equal(t, "654321", payload["code"])
+			return scriptedResponse(req, 200, req.URL.String(), `{"token":"a:confirmed-secret"}`, nil), nil
+		},
+	)
+
+	confirmed, err := confirmPasswordRecoveryBindingWithSession(
+		session,
+		"owner@example.test",
+		"",
+		PasswordRecoveryConfirmationOptions{
+			ExpectedBindingAddress: "qa*****@recovery.test",
+			CodeTimeout:            time.Second,
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, confirmed.BindingConfirmed)
+	require.True(t, confirmed.Probe.BindingResolved)
+	require.Equal(t, "qalpha01@recovery.test", confirmed.Probe.BindingAddress)
+	client.requireDone()
+}
+
 func TestEnabledPasswordRecoveryResetRunsOneSendVerifyAndReset(t *testing.T) {
 	previousReader := activeMailboxReader()
 	previousDomains := activeAuxiliaryDomains()
@@ -541,6 +612,9 @@ func TestPasswordRecoveryBindingConfirmationRejectsUnknownTokenState(t *testing.
 }
 
 func TestEnabledPasswordRecoveryResetStopsWhenReprobeBindingDiffers(t *testing.T) {
+	previousDomains := activeAuxiliaryDomains()
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
 	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {
 			return scriptedResponse(req, 200, passwordRecoveryEntryURL, passwordRecoveryInitialFixture, nil), nil

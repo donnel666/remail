@@ -65,31 +65,27 @@ func (s recoverySnapshot) recoveredBindingInput(address string) mailinfra.Micros
 
 type passwordCommitResult struct {
 	CredentialRevision uint64
-	ValidationJobID    uint
-	ValidationCreated  bool
 }
 
 type recoveryStore struct {
-	db          *gorm.DB
-	resources   *coreinfra.ResourceRepo
-	admin       *coreinfra.AdminResourceRepo
-	validations *coreinfra.ResourceValidationRepo
-	bindings    *mailinfra.MicrosoftBindingRepo
-	aliases     *mailinfra.MicrosoftAliasStore
-	users       *iaminfra.UserRepo
-	logs        *governanceinfra.OperationLogRepo
+	db        *gorm.DB
+	resources *coreinfra.ResourceRepo
+	admin     *coreinfra.AdminResourceRepo
+	bindings  *mailinfra.MicrosoftBindingRepo
+	aliases   *mailinfra.MicrosoftAliasStore
+	users     *iaminfra.UserRepo
+	logs      *governanceinfra.OperationLogRepo
 }
 
 func newRecoveryStore(db *gorm.DB) *recoveryStore {
 	return &recoveryStore{
-		db:          db,
-		resources:   coreinfra.NewResourceRepo(db),
-		admin:       coreinfra.NewAdminResourceRepo(db),
-		validations: coreinfra.NewResourceValidationRepo(db),
-		bindings:    mailinfra.NewMicrosoftBindingRepo(db),
-		aliases:     mailinfra.NewMicrosoftAliasStore(db),
-		users:       iaminfra.NewUserRepo(db),
-		logs:        governanceinfra.NewOperationLogRepo(db),
+		db:        db,
+		resources: coreinfra.NewResourceRepo(db),
+		admin:     coreinfra.NewAdminResourceRepo(db),
+		bindings:  mailinfra.NewMicrosoftBindingRepo(db),
+		aliases:   mailinfra.NewMicrosoftAliasStore(db),
+		users:     iaminfra.NewUserRepo(db),
+		logs:      governanceinfra.NewOperationLogRepo(db),
 	}
 }
 
@@ -164,7 +160,7 @@ func (s *recoveryStore) preflightBindingApply(ctx context.Context, snapshot reco
 		if root.OwnerUserID != snapshot.OwnerUserID || !sameNormalRecoveryAccount(resource, snapshot.AccountEmail) {
 			return errRecoveryResourceChanged
 		}
-		return ensureNoActiveValidation(txCtx, snapshot.ResourceID)
+		return ensureNoActiveValidation(resource)
 	})
 }
 
@@ -190,7 +186,7 @@ func (s *recoveryStore) applyRecoveredBinding(
 			(requireNormalResource && resource.Status != coredomain.MicrosoftStatusNormal) {
 			return errRecoveryResourceChanged
 		}
-		if err := ensureNoActiveValidation(txCtx, snapshot.ResourceID); err != nil {
+		if err := ensureNoActiveValidation(resource); err != nil {
 			return err
 		}
 		applied, err = s.bindings.ApplyRecoveredBinding(txCtx, snapshot.recoveredBindingInput(bindingAddress))
@@ -240,7 +236,7 @@ func (s *recoveryStore) preflightPasswordReset(ctx context.Context, snapshot rec
 			!samePrivatePassword(resource.Password, snapshot.Password) {
 			return errRecoveryResourceChanged
 		}
-		if err := ensureNoActiveValidation(txCtx, snapshot.ResourceID); err != nil {
+		if err := ensureNoActiveValidation(resource); err != nil {
 			return err
 		}
 		return ensureAliasActivityPaused(txCtx, snapshot.ResourceID)
@@ -283,20 +279,6 @@ func (s *recoveryStore) commitPasswordReset(
 			return fmt.Errorf("%w: %v", errRecoveryPasswordReconciliation, err)
 		}
 
-		job := &coredomain.ResourceValidation{
-			ResourceID:                 snapshot.ResourceID,
-			ResourceType:               coredomain.ResourceTypeMicrosoft,
-			OwnerUserID:                root.OwnerUserID,
-			ExpectedCredentialRevision: resource.CredentialRevision,
-			Status:                     coredomain.ResourceValidationQueued,
-			MaxAttempts:                coredomain.ResourceValidationDefaultMaxAttempts,
-			RequestID:                  requestID,
-			Path:                       "cmd/msrecovery",
-		}
-		created, err := s.validations.CreateWithLog(txCtx, job, nil)
-		if err != nil {
-			return fmt.Errorf("%w: %v", errRecoveryPasswordReconciliation, err)
-		}
 		if err := s.logs.Create(txCtx, &governancedomain.OperationLog{
 			OperatorUserID: operatorUserID,
 			OperationType:  "core.microsoft_password.reset",
@@ -309,11 +291,7 @@ func (s *recoveryStore) commitPasswordReset(
 		}); err != nil {
 			return fmt.Errorf("%w: %v", errRecoveryPasswordReconciliation, err)
 		}
-		committed = passwordCommitResult{
-			CredentialRevision: resource.CredentialRevision,
-			ValidationJobID:    job.ID,
-			ValidationCreated:  created,
-		}
+		committed = passwordCommitResult{CredentialRevision: resource.CredentialRevision}
 		return nil
 	})
 	if err != nil {
@@ -340,27 +318,11 @@ func samePrivatePassword(current, expected string) bool {
 	return subtle.ConstantTimeCompare([]byte(current), []byte(expected)) == 1
 }
 
-func ensureNoActiveValidation(ctx context.Context, resourceID uint) error {
-	tx, ok := platform.GormTxFromContext(ctx)
-	if !ok {
-		return errors.New("active validation check requires a transaction")
+func ensureNoActiveValidation(resource *coredomain.MicrosoftResource) error {
+	if resource != nil && resource.Status == coredomain.MicrosoftStatusValidating {
+		return errRecoveryValidationActive
 	}
-	var job coreinfra.ResourceValidationModel
-	err := tx.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("resource_id = ? AND status IN ?", resourceID, []string{
-			string(coredomain.ResourceValidationQueued),
-			string(coredomain.ResourceValidationRunning),
-		}).
-		Order("id DESC").
-		Take(&job).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check active resource validation: %w", err)
-	}
-	return fmt.Errorf("%w: job_id=%d status=%s", errRecoveryValidationActive, job.ID, job.Status)
+	return nil
 }
 
 func ensureAliasActivityPaused(ctx context.Context, resourceID uint) error {

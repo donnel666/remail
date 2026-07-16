@@ -118,7 +118,7 @@ func TestLookupRealMailboxPrefersAccountLocalMailboxWithExactAccountEvidence(t *
 	require.Equal(t, "brittanycoleman1901@recovery.test", resolved)
 }
 
-func TestLookupRealMailboxRejectsAccountLocalMailboxWithoutExactAccountEvidence(t *testing.T) {
+func TestLookupRealMailboxUsesAccountLocalRuleWithoutHistoricalEvidence(t *testing.T) {
 	previousReader := activeMailboxReader()
 	defer SetMailboxReader(previousReader)
 	defer SetAuxiliaryDomains([]string{"aishop6.com"})
@@ -141,7 +141,7 @@ func TestLookupRealMailboxRejectsAccountLocalMailboxWithoutExactAccountEvidence(
 		"",
 		"",
 	)
-	require.Empty(t, resolved)
+	require.Equal(t, "brittanycoleman1901@recovery.test", resolved)
 }
 
 func TestLookupRealMailboxCountsOnlyFullMaskMatches(t *testing.T) {
@@ -164,7 +164,7 @@ func TestLookupRealMailboxCountsOnlyFullMaskMatches(t *testing.T) {
 	require.Equal(t, "qalpha01@recovery.test", resolved)
 }
 
-func TestLookupRealMailboxPrefersUniqueHistoricalEvidenceOverDeterministicGuess(t *testing.T) {
+func TestLookupRealMailboxPrefersInferenceOverHistoricalEvidence(t *testing.T) {
 	previousReader := activeMailboxReader()
 	defer SetMailboxReader(previousReader)
 	defer SetAuxiliaryDomains([]string{"aishop6.com"})
@@ -185,6 +185,73 @@ func TestLookupRealMailboxPrefersUniqueHistoricalEvidenceOverDeterministicGuess(
 		"",
 		"",
 	)
-	require.Equal(t, historical, resolved)
-	require.NotEqual(t, generated, resolved)
+	require.Equal(t, generated, resolved)
+	require.NotEqual(t, historical, resolved)
+}
+
+func TestInferBindingAddressChecksDeterministicThenResourcePrefix(t *testing.T) {
+	previousDomains := activeAuxiliaryDomains()
+	defer SetAuxiliaryDomains(previousDomains)
+	SetAuxiliaryDomains([]string{"recovery.test"})
+
+	generated, err := deterministicAuxiliaryAddressForDomain("owner@example.test", "recovery.test")
+	require.NoError(t, err)
+	require.Equal(t, generated, InferBindingAddress("owner@example.test", maskForTest(generated)))
+	require.Equal(t, "owner@recovery.test", InferBindingAddress("owner@example.test", "o*****r@recovery.test"))
+	require.Empty(t, InferBindingAddress("owner@example.test", "o*****r@external.test"))
+	require.Empty(t, InferBindingAddress("owner@example.test", "q*****@recovery.test"))
+}
+
+func TestLookupRealMailboxDoesNotTreatMaskedPreferredAddressAsConcrete(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	defer SetMailboxReader(previousReader)
+	defer SetAuxiliaryDomains(previousDomains)
+	SetMailboxReader(recoveryEvidenceReader{})
+	SetAuxiliaryDomains([]string{"recovery.test"})
+
+	resolved := lookupRealMailbox(
+		context.Background(),
+		"q*****9@recovery.test",
+		"owner@example.test",
+		"",
+		"q*****9@recovery.test",
+	)
+	require.Empty(t, resolved)
+
+	created, err := createTempMailbox(context.Background(), "owner@example.test", "q*****9@recovery.test")
+	require.NoError(t, err)
+	require.NotEqual(t, "q*****9@recovery.test", created)
+	require.NotContains(t, created, "*")
+}
+
+func TestLookupRealMailboxRejectsExternalPreferredAddress(t *testing.T) {
+	previousReader := activeMailboxReader()
+	previousDomains := activeAuxiliaryDomains()
+	defer SetMailboxReader(previousReader)
+	defer SetAuxiliaryDomains(previousDomains)
+	SetMailboxReader(recoveryEvidenceReader{})
+	SetAuxiliaryDomains([]string{"recovery.test"})
+
+	resolved := lookupRealMailbox(
+		context.Background(),
+		"o*****r@external.test",
+		"owner@example.test",
+		"",
+		"owner@external.test",
+	)
+	require.Empty(t, resolved, "external proof must fail before Microsoft sends an unreadable OTP")
+}
+
+func TestMailboxMatchesMaskedRejectsMissingAddresses(t *testing.T) {
+	require.False(t, mailboxMatchesMasked("", "owner@recovery.test"))
+	require.False(t, mailboxMatchesMasked("o*****r@recovery.test", ""))
+}
+
+func maskForTest(address string) string {
+	local, domain, ok := strings.Cut(address, "@")
+	if !ok || len(local) < 2 {
+		return address
+	}
+	return local[:1] + "*****" + local[len(local)-1:] + "@" + domain
 }

@@ -19,6 +19,7 @@ import type {
   AdminMicrosoftResourceDetail,
   AdminMicrosoftResourceSelection,
   AdminMicrosoftTaskAcceptedResponse,
+  AdminMicrosoftValidationResponse,
   AdminMicrosoftAsyncTask,
   AdminMicrosoftTaskListResponse,
   ImportAdminMicrosoftResourcesRequest,
@@ -271,7 +272,7 @@ export async function replaceAdminMicrosoftCredentials(
 
 export async function validateAdminMicrosoftResource(
   resourceId: number
-): Promise<AdminMicrosoftTaskAcceptedResponse> {
+): Promise<AdminMicrosoftValidationResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/{resourceId}/validate", {
       params: {
@@ -583,7 +584,7 @@ export function validateAdminMicrosoftResourcesByFilter(
 
 async function validateAdminMicrosoftResources(
   selection: AdminMicrosoftResourceSelection
-): Promise<AdminMicrosoftTaskAcceptedResponse> {
+): Promise<AdminMicrosoftValidationResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/validations", {
       body: { selection },

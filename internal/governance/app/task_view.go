@@ -18,7 +18,6 @@ const (
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
 	AdminTaskBizMicrosoftResourceBulk   = "microsoft_resource_bulk"
 
-	AdminTaskKindValidation    = "validation"
 	AdminTaskKindImport        = "import"
 	AdminTaskKindAlias         = "alias"
 	AdminTaskKindToken         = "token"
@@ -35,7 +34,6 @@ const (
 	AdminTaskStatusUncertain = "uncertain"
 	AdminTaskStatusCanceled  = "canceled"
 
-	AdminTaskSourceValidation    = "validation"
 	AdminTaskSourceImport        = "import"
 	AdminTaskSourceAlias         = "alias"
 	AdminTaskSourceAliasSchedule = "alias_schedule"
@@ -84,8 +82,7 @@ func ParseAdminTaskRef(value string) (AdminTaskRef, error) {
 
 func isAdminTaskSource(value string) bool {
 	switch value {
-	case AdminTaskSourceValidation,
-		AdminTaskSourceImport,
+	case AdminTaskSourceImport,
 		AdminTaskSourceAlias,
 		AdminTaskSourceAliasSchedule,
 		AdminTaskSourceToken,
@@ -256,8 +253,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 
 func isAdminTaskKind(value string) bool {
 	switch value {
-	case AdminTaskKindValidation,
-		AdminTaskKindImport,
+	case AdminTaskKindImport,
 		AdminTaskKindAlias,
 		AdminTaskKindToken,
 		AdminTaskKindFetch,

@@ -256,7 +256,7 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 			var reason string
 			var itemErr error
 			if command.Action == AdminResourceBulkValidate {
-				changed, reason, itemErr = s.commands.validateOneForBulk(txCtx, resourceID, command.RequestID, command.Path)
+				changed, reason, itemErr = s.commands.validateOneForBulk(txCtx, resourceID)
 			} else {
 				changed, reason, itemErr = s.commands.applyStateOneForBulk(txCtx, AdminMicrosoftStateCommand(command.Action), resourceID)
 			}
@@ -316,22 +316,27 @@ func (s *AdminResourceBulkService) ScheduleDispatcher(ctx context.Context, delay
 	_ = s.queue.EnqueueAdminResourceBulkDispatcher(ctx, delay)
 }
 
-func (s *AdminResourceCommandService) validateOneForBulk(ctx context.Context, resourceID uint, requestID, path string) (bool, string, error) {
+func (s *AdminResourceCommandService) validateOneForBulk(ctx context.Context, resourceID uint) (bool, string, error) {
 	if s == nil || s.repo == nil || s.validation == nil {
 		return false, "", domain.ErrResourceDependency
 	}
-	created := false
+	accepted := false
 	err := s.repo.WithTx(ctx, func(txCtx context.Context) error {
 		root, resource, err := s.repo.LockAdminMicrosoft(txCtx, resourceID)
 		if err != nil {
 			return err
 		}
-		if resource.Status == domain.MicrosoftStatusDeleted || resource.Status == domain.MicrosoftStatusDisabled {
-			return domain.ErrInvalidResourceStatus
+		changed, err := resource.QueueValidationAdmin()
+		if err != nil {
+			return err
 		}
-		_, wasCreated, err := s.createValidationTx(txCtx, root, resource, requestID, path)
-		created = wasCreated
-		return err
+		if changed {
+			if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, root.Version); err != nil {
+				return err
+			}
+		}
+		accepted = resource.Status != domain.MicrosoftStatusValidating
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrResourceNotFound) {
@@ -342,7 +347,7 @@ func (s *AdminResourceCommandService) validateOneForBulk(ctx context.Context, re
 		}
 		return false, "", err
 	}
-	if !created {
+	if !accepted {
 		return false, "active_task_reused", nil
 	}
 	return true, "", nil

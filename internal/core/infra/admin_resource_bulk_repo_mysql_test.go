@@ -486,58 +486,6 @@ func TestAdminResourceBulkSerializesConcurrentIdempotentRequestsMySQL(t *testing
 	require.EqualValues(t, 1, logCount)
 }
 
-func TestAdminResourceBulkValidationTracksReusedAndInvalidResourcesMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
-	insertAdminCommandUsers(t, db)
-	resourceRepo := NewResourceRepo(db)
-	validationRepo := NewResourceValidationRepo(db)
-	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
-	adminRepo := NewAdminResourceRepo(db)
-	commands := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
-	commands.SetPorts(adminCommandOwners(), nil, &adminCommandBindingPort{}, &adminCommandAllocationGuard{})
-	queue := &adminBulkQueueStub{}
-	service := coreapp.NewAdminResourceBulkService(NewAdminResourceBulkRepo(db), queue, commands)
-
-	pendingRoot := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
-	pending := &domain.MicrosoftResource{EmailAddress: "bulk-validation@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending}
-	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), pendingRoot, pending))
-	disabledRoot := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
-	disabled := &domain.MicrosoftResource{EmailAddress: "bulk-disabled@outlook.com", Password: "secret", Status: domain.MicrosoftStatusDisabled}
-	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), disabledRoot, disabled))
-
-	command, _, err := service.Submit(
-		context.Background(),
-		coreapp.AdminResourceBulkValidate,
-		coreapp.AdminResourceBulkSelection{
-			Mode:        coreapp.AdminResourceBulkIDs,
-			ResourceIDs: []uint{disabledRoot.ID, pendingRoot.ID, 999999},
-		},
-		9,
-		"bulk-validation-key",
-		"req-bulk-validation",
-		"/v1/admin/resources/validations",
-	)
-	require.NoError(t, err)
-	require.NoError(t, service.DispatchPending(context.Background(), 10))
-	require.Len(t, queue.tasks, 1)
-	require.NoError(t, service.Process(context.Background(), queue.tasks[0]))
-
-	stored, err := service.Get(context.Background(), command.ID)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", stored.Status)
-	require.Equal(t, 3, stored.MatchedCount)
-	require.Equal(t, 3, stored.ProcessedCount)
-	require.Equal(t, 1, stored.AffectedCount)
-	require.Equal(t, 2, stored.SkippedCount)
-	require.EqualValues(t, 1, stored.ReasonCounts["invalid_state"])
-	require.EqualValues(t, 1, stored.ReasonCounts["not_found"])
-
-	var jobs []ResourceValidationModel
-	require.NoError(t, db.Where("resource_id = ?", pendingRoot.ID).Find(&jobs).Error)
-	require.Len(t, jobs, 1)
-	require.EqualValues(t, 1, jobs[0].ExpectedCredentialRevision)
-}
-
 func TestAdminResourceBulkPageRollsBackStateAndProgressTogetherMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	insertAdminCommandUsers(t, db)

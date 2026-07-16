@@ -32,4 +32,24 @@ describe("toDomainResource", () => {
       createdAt: "2026-07-15T00:00:00Z",
     });
   });
+
+  it.each(["pending", "validating"] as const)(
+    "preserves the %s validation lifecycle state",
+    (status) => {
+      const resource: ResourceItem = {
+        id: 43,
+        type: "domain",
+        ownerId: 7,
+        domain: "validation.example.com",
+        domainTld: ".com",
+        mailServerId: 3,
+        purpose: "not_sale",
+        status,
+        createdAt: "2026-07-15T00:00:00Z",
+        updatedAt: "2026-07-15T00:00:00Z",
+      };
+
+      expect(toDomainResource(resource)?.status).toBe(status);
+    }
+  );
 });

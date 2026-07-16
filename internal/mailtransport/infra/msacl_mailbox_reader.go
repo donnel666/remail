@@ -124,6 +124,27 @@ func (r *MSACLMailboxReader) SearchByContent(ctx context.Context, content string
 	return filtered, nil
 }
 
+func (r *MSACLMailboxReader) ListMasked(ctx context.Context, maskedMailbox string, limit int) ([]msacl.EmailObj, error) {
+	local, domainName, ok := strings.Cut(strings.ToLower(strings.TrimSpace(maskedMailbox)), "@")
+	firstStar := strings.Index(local, "*")
+	lastStar := strings.LastIndex(local, "*")
+	if !ok || firstStar < 0 || domainName == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	pattern := escapeMSACLLike(local[:firstStar]) + "%" + escapeMSACLLike(local[lastStar+1:]+"@"+domainName)
+	var rows []InboundMailModel
+	if err := r.db.WithContext(ctx).Model(&InboundMailModel{}).
+		Where("status IN ?", msaclReadableInboundStatuses()).
+		Where("LOWER(recipient) LIKE ? ESCAPE '!'", pattern).
+		Order("created_at DESC, id DESC").Limit(limit * 4).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list masked inbound mailbox: %w", err)
+	}
+	return r.rowsToEmailObjects(ctx, rows)
+}
+
 func escapeMSACLLike(value string) string {
 	replacer := strings.NewReplacer(
 		`!`, `!!`,

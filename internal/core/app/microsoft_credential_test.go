@@ -82,6 +82,21 @@ func TestMicrosoftCredentialServiceMutations(t *testing.T) {
 		require.Equal(t, now, repo.resource.CredentialUpdatedAt)
 		require.Equal(t, uint64(2), repo.root.Version)
 	})
+
+	t.Run("rotation returns an in-flight validation to pending", func(t *testing.T) {
+		repo := newMicrosoftCredentialRepositoryStub()
+		repo.resource.Status = domain.MicrosoftStatusValidating
+		service := NewMicrosoftCredentialService(repo)
+
+		err := service.ApplyMicrosoftFetchRefreshToken(context.Background(), MicrosoftFetchRefreshTokenRotation{
+			ResourceID: 10, ExpectedCredentialRevision: 4,
+			RefreshToken: "validation-fenced-token", Now: now,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), repo.resource.CredentialRevision)
+		require.Equal(t, domain.MicrosoftStatusPending, repo.resource.Status)
+	})
 }
 
 type microsoftCredentialRepositoryStub struct {

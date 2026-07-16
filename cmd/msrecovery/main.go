@@ -67,8 +67,6 @@ type commandResult struct {
 	PasswordReset            bool                              `json:"password_reset"`
 	DatabasePasswordUpdated  bool                              `json:"database_password_updated"`
 	CredentialRevision       uint64                            `json:"credential_revision,omitempty"`
-	ValidationJobID          uint                              `json:"validation_job_id,omitempty"`
-	ValidationCreated        bool                              `json:"validation_created"`
 	PasswordArtifactRetained bool                              `json:"password_artifact_retained"`
 }
 
@@ -292,8 +290,6 @@ func executeCommand(ctx context.Context, options commandOptions) (*commandResult
 	}
 	result.DatabasePasswordUpdated = true
 	result.CredentialRevision = committed.CredentialRevision
-	result.ValidationJobID = committed.ValidationJobID
-	result.ValidationCreated = committed.ValidationCreated
 	if err := artifact.Remove(); err != nil {
 		return result, fmt.Errorf("password reset completed but artifact cleanup failed: %w", err)
 	}
@@ -483,11 +479,10 @@ func writeCommandResult(w io.Writer, jsonOutput bool, result commandResult) erro
 	if result.PasswordReset || result.DatabasePasswordUpdated || result.PasswordArtifactRetained {
 		fmt.Fprintf(
 			w,
-			"password_reset=%t database_updated=%t credential_revision=%d validation_job_id=%d artifact_retained=%t\n",
+			"password_reset=%t database_updated=%t credential_revision=%d artifact_retained=%t\n",
 			result.PasswordReset,
 			result.DatabasePasswordUpdated,
 			result.CredentialRevision,
-			result.ValidationJobID,
 			result.PasswordArtifactRetained,
 		)
 	}

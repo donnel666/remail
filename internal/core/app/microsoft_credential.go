@@ -189,9 +189,13 @@ func (s *MicrosoftCredentialService) mutate(
 		if resource.CredentialRevision != expectedCredentialRevision {
 			return ErrMicrosoftCredentialChanged
 		}
+		previousRevision := resource.CredentialRevision
 		changed, err := apply(resource)
 		if err != nil || !changed {
 			return err
+		}
+		if resource.Status == domain.MicrosoftStatusValidating && resource.CredentialRevision != previousRevision {
+			resource.Status = domain.MicrosoftStatusPending
 		}
 		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, root.Version); err != nil {
 			return microsoftCredentialError(err)

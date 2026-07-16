@@ -56,6 +56,7 @@ export const STATUS_META: Record<
   { color: "green" | "orange" | "red" | "grey" | "blue"; label: string }
 > = {
   pending: { color: "blue", label: "Pending" },
+  validating: { color: "orange", label: "Validating" },
   normal: { color: "green", label: "Normal" },
   abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },
@@ -182,9 +183,7 @@ export function ownerRoleLabel(role: AdminMicrosoftOwnerRole) {
 
 export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
   switch (kind) {
-    case "validation":
-      return "Validation";
-    case "import":
+	case "import":
       return "Import";
     case "alias":
       return "Alias replenishment";

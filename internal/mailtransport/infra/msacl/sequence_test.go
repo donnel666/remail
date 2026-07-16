@@ -357,6 +357,28 @@ func (*sequencedMailboxReader) SearchByContent(context.Context, string, int) ([]
 	return nil, nil
 }
 
+type maskedSequenceMailboxReader struct {
+	sent atomic.Bool
+}
+
+func (*maskedSequenceMailboxReader) List(context.Context, string, int, bool) ([]EmailObj, error) {
+	return nil, nil
+}
+
+func (*maskedSequenceMailboxReader) SearchByContent(context.Context, string, int) ([]EmailObj, error) {
+	return nil, nil
+}
+
+func (r *maskedSequenceMailboxReader) ListMasked(context.Context, string, int) ([]EmailObj, error) {
+	if !r.sent.Load() {
+		return nil, nil
+	}
+	return []EmailObj{{
+		ID: 2, To: "xrandom9@aishop6.com", From: "account-security-noreply@accountprotection.microsoft.com",
+		Subject: "Microsoft security code", Preview: "Security code 654321",
+	}}, nil
+}
+
 func TestOTPSequenceStartsWatcherBeforeSendAndRefreshesCanary(t *testing.T) {
 	previousReader := activeMailboxReader()
 	reader := &sequencedMailboxReader{
@@ -412,6 +434,46 @@ func TestOTPSequenceStartsWatcherBeforeSendAndRefreshesCanary(t *testing.T) {
 	require.Equal(t, `<html>verified</html>`, nextPage)
 	require.Equal(t, "https://account.live.com/return?route=verified", nextURL)
 	require.Equal(t, "proof@aishop6.com", mailbox)
+	client.requireDone()
+}
+
+func TestOTPSequenceFallsBackToMaskedRecipientRecovery(t *testing.T) {
+	previousReader := activeMailboxReader()
+	reader := &maskedSequenceMailboxReader{}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, "https://account.live.com/API/Proofs/SendOtt")
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
+			require.Equal(t, "x*****9@aishop6.com", payload["confirmProof"])
+			reader.sent.Store(true)
+			return scriptedResponse(req, 200, req.URL.String(), `{"apiCanary":"refreshed-canary"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, "https://account.live.com/API/Proofs/VerifyCode")
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
+			require.Equal(t, "xrandom9@aishop6.com", payload["confirmProof"])
+			require.Equal(t, "654321", payload["code"])
+			return scriptedResponse(req, 200, req.URL.String(), `{"route":"verified"}`, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			return scriptedResponse(req, 200, req.URL.String(), `<html>verified</html>`, nil), nil
+		},
+	)
+	proofs, err := json.Marshal(`[{"type":"Email","name":"x*****9@aishop6.com","epid":"proof-id"}]`)
+	require.NoError(t, err)
+	page := fmt.Sprintf(
+		`{"apiCanary":"initial-canary","token":"proof-token","proofPurpose":"UnfamiliarLocationHard","rawProofList":%s,"return":{"url":"https://account.live.com/return"}}`,
+		proofs,
+	)
+
+	_, _, mailbox, err := handleOTPVerification(session, page, "https://account.live.com/identity/confirm", "owner@example.com", "", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, "xrandom9@aishop6.com", mailbox)
 	client.requireDone()
 }
 

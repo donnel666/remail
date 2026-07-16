@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	resourceValidationDispatcherInterval = 2 * time.Second
+	resourceValidationDispatcherInterval = 30 * time.Second
 	resourceValidationDispatchMaximum    = 128
 	backgroundLegacyReleaseTimeout       = 5 * time.Second
 )
@@ -80,7 +80,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
-		limit := backgroundDispatchLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
+		limit := backgroundValidationAssignmentLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
@@ -99,16 +99,54 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		return nil
 	})
+	mux.HandleFunc(coreinfra.TypeResourceValidationBatch, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.ValidationUseCase == nil {
+			return nil
+		}
+		var payload coreapp.ResourceValidationBatchTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			slog.Warn("discard malformed resource validation batch task", "error", err)
+			return nil
+		}
+		if payload.BatchID == "" || payload.OwnerUserID == 0 {
+			slog.Warn("discard resource validation batch task without identity")
+			cleanupResourceValidationBatch(ctx, module, payload)
+			return nil
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupResourceValidationBatch(ctx, module, payload)
+				return nil
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		if err := module.ValidationUseCase.ProcessBatch(ctx, payload); err != nil {
+			slog.Warn("resource validation batch task failed", "batch_id", payload.BatchID, "error", err)
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupResourceValidationBatch(ctx, module, payload)
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 	mux.HandleFunc(coreinfra.TypeResourceValidation, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
 		var payload coreapp.ResourceValidationTask
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-			return fmt.Errorf("decode resource validation task: %w: %w", err, asynq.SkipRetry)
+			slog.Warn("discard malformed resource validation task", "error", err)
+			return nil
 		}
-		if payload.JobID == 0 || payload.DispatchToken == "" {
-			return fmt.Errorf("decode resource validation task: identity is missing: %w", asynq.SkipRetry)
+		if payload.ResourceID == 0 || payload.OwnerUserID == 0 || !coredomain.IsValidResourceType(payload.ResourceType) {
+			slog.Warn("discard resource validation task without identity")
+			return nil
 		}
 		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
 		if err != nil {
@@ -119,8 +157,14 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 				defer cancel()
 				if err := module.ValidationUseCase.ReleaseDispatch(recoveryCtx, payload); err != nil {
-					return fmt.Errorf("release legacy resource validation dispatch: %w", err)
+					slog.Warn(
+						"release exhausted resource validation admission failed",
+						"resource_id", payload.ResourceID,
+						"request_id", payload.RequestID,
+						"error", err,
+					)
 				}
+				module.ValidationUseCase.ScheduleDispatcher(recoveryCtx, time.Second)
 				return nil
 			}
 			return platform.ErrBackgroundExecutionDeferred
@@ -128,24 +172,22 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		defer release()
 		slog.Info(
 			"processing resource validation task",
-			"job_id", payload.JobID,
+			"resource_id", payload.ResourceID,
 			"request_id", payload.RequestID,
 		)
 		if err := module.ValidationUseCase.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"resource validation task failed",
-				"job_id", payload.JobID,
+				"resource_id", payload.ResourceID,
 				"request_id", payload.RequestID,
 				"error", err,
 			)
-			if coreapp.IsNonRetryableValidationError(err) {
-				return fmt.Errorf("non-retryable resource validation task failure: %w: %w", err, asynq.SkipRetry)
-			}
 			return err
 		}
+		module.ValidationUseCase.ScheduleDispatcher(ctx, time.Second)
 		slog.Info(
 			"resource validation task finished",
-			"job_id", payload.JobID,
+			"resource_id", payload.ResourceID,
 			"request_id", payload.RequestID,
 		)
 		return nil
@@ -210,6 +252,17 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 	})
 }
 
+func cleanupResourceValidationBatch(ctx context.Context, module *CoreModule, task coreapp.ResourceValidationBatchTask) {
+	if module == nil || module.ValidationUseCase == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+	defer cancel()
+	if err := module.ValidationUseCase.ReleaseBatch(cleanupCtx, task); err != nil {
+		slog.Warn("release resource validation batch lease failed", "batch_id", task.BatchID, "error", err)
+	}
+}
+
 func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecutionGate) (func(), bool, error) {
 	if err := ctx.Err(); err != nil {
 		return func() {}, false, err
@@ -238,6 +291,22 @@ func backgroundDispatchLimit(gate BackgroundExecutionGate, maximum int) int {
 	return min(maximum, max(0, capacity.Available()))
 }
 
+func backgroundValidationAssignmentLimit(gate BackgroundExecutionGate, maximum int) int {
+	if maximum <= 0 {
+		return 0
+	}
+	if gate == nil {
+		return maximum
+	}
+	snapshotter, ok := gate.(interface {
+		Snapshot() platform.BackgroundLoadSnapshot
+	})
+	if !ok {
+		return backgroundDispatchLimit(gate, maximum)
+	}
+	return min(maximum, max(0, snapshotter.Snapshot().Limit))
+}
+
 func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, result *coreapp.MicrosoftImportProcessResult) (int, error) {
 	if module == nil || module.ValidationUseCase == nil || result == nil || len(result.ImportedResourceIDs) == 0 {
 		return 0, nil
@@ -254,8 +323,8 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 	return len(result.ImportedResourceIDs), nil
 }
 
-// StartResourceValidationDispatcher seeds the durable validation dispatcher
-// until the returned cleanup function is called.
+// StartResourceValidationDispatcher periodically recovers pending validation
+// work until the returned cleanup function is called.
 func StartResourceValidationDispatcher(ctx context.Context, module *CoreModule) func(context.Context) {
 	return startResourceValidationDispatcher(ctx, module, resourceValidationDispatcherInterval)
 }
@@ -269,7 +338,9 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+	if err := module.ValidationUseCase.ResetAssignments(ctx); err != nil {
+		slog.Warn("reset resource validation assignments at startup failed", "error", err)
+	}
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(interval)

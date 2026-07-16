@@ -67,3 +67,46 @@ func TestExtractCodeFromEmail(t *testing.T) {
 		})
 	}
 }
+
+func TestUniqueMaskedCodeCandidateRejectsEmptyRecipient(t *testing.T) {
+	code, recipient, ambiguous := uniqueMaskedCodeCandidate(
+		"q*****9@recovery.test",
+		[]EmailObj{{
+			ID:      1,
+			Subject: "Your Microsoft security code is 445566",
+			Preview: "Your Microsoft security code is 445566",
+		}},
+		nil,
+	)
+
+	if code != "" || recipient != "" || ambiguous {
+		t.Fatalf("unexpected masked candidate: code=%q recipient=%q ambiguous=%v", code, recipient, ambiguous)
+	}
+}
+
+func TestUniqueMaskedCodeCandidateRejectsDifferentCodesForOneRecipient(t *testing.T) {
+	const msSender = "account-security-noreply@accountprotection.microsoft.com"
+	emails := []EmailObj{
+		{ID: 1, To: "qalpha9@recovery.test", From: msSender, Subject: "Microsoft security code", Preview: "Security code 445566"},
+		{ID: 2, To: "qalpha9@recovery.test", From: msSender, Subject: "Microsoft security code", Preview: "Security code 778899"},
+	}
+	code, recipient, ambiguous := uniqueMaskedCodeCandidate("q*****9@recovery.test", emails, nil)
+	if code != "" || recipient != "" || !ambiguous {
+		t.Fatalf("unexpected masked candidate: code=%q recipient=%q ambiguous=%v", code, recipient, ambiguous)
+	}
+}
+
+func TestUniqueMaskedCodeCandidateIgnoresNonMicrosoftCodeMail(t *testing.T) {
+	code, recipient, ambiguous := uniqueMaskedCodeCandidate(
+		"q*****9@recovery.test",
+		[]EmailObj{{
+			ID: 1, To: "qalpha9@recovery.test", From: "noreply@example.net",
+			Subject: "Microsoft security code", Preview: "Security code 445566",
+		}},
+		nil,
+	)
+
+	if code != "" || recipient != "" || ambiguous {
+		t.Fatalf("unexpected masked candidate: code=%q recipient=%q ambiguous=%v", code, recipient, ambiguous)
+	}
+}

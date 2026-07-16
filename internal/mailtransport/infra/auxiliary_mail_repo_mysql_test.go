@@ -246,7 +246,6 @@ func TestMicrosoftBindingRepoAdminInputSemanticsAndCallerTransactionMySQL(t *tes
 		Updates(map[string]any{
 			"status":          string(domain.MicrosoftBindingFailed),
 			"code_msg_id":     "stale-code-message",
-			"bound_display":   "st***@external.test",
 			"category":        "already_bound",
 			"last_safe_error": "stale binding state",
 			"code_sent_at":    staleTime,
@@ -270,7 +269,6 @@ func TestMicrosoftBindingRepoAdminInputSemanticsAndCallerTransactionMySQL(t *tes
 	assert.Equal(t, "preserve@example.com", current.BindingAddress)
 	assert.Equal(t, string(domain.MicrosoftBindingPending), current.Status)
 	assert.Empty(t, current.CodeMessageID)
-	assert.Empty(t, current.BoundDisplay)
 	assert.Empty(t, current.Category)
 	assert.Empty(t, current.LastSafeError)
 	assert.Nil(t, current.CodeSentAt)
@@ -282,7 +280,6 @@ func TestMicrosoftBindingRepoAdminInputSemanticsAndCallerTransactionMySQL(t *tes
 		Updates(map[string]any{
 			"status":          string(domain.MicrosoftBindingFailed),
 			"code_msg_id":     "replacement-stale-code",
-			"bound_display":   "re***@external.test",
 			"category":        "already_bound",
 			"last_safe_error": "replacement stale binding state",
 			"code_sent_at":    staleTime,
@@ -303,7 +300,6 @@ func TestMicrosoftBindingRepoAdminInputSemanticsAndCallerTransactionMySQL(t *tes
 	assert.Equal(t, "replacement@example.com", current.BindingAddress)
 	assert.Equal(t, string(domain.MicrosoftBindingPending), current.Status)
 	assert.Empty(t, current.CodeMessageID)
-	assert.Empty(t, current.BoundDisplay)
 	assert.Empty(t, current.Category)
 	assert.Empty(t, current.LastSafeError)
 	assert.Nil(t, current.CodeSentAt)
@@ -341,7 +337,6 @@ func TestMicrosoftBindingRepoApplyRecoveredBindingRepairsAndIsIdempotentMySQL(t 
 		Purpose:        "validation",
 		Status:         string(domain.MicrosoftBindingTimeout),
 		CodeMessageID:  "stale-message-id",
-		BoundDisplay:   "wr***@aishop6.com",
 		Category:       "code_timeout",
 		LastSafeError:  "stale safe error",
 		SelectedAt:     &oldTime,
@@ -379,7 +374,6 @@ func TestMicrosoftBindingRepoApplyRecoveredBindingRepairsAndIsIdempotentMySQL(t 
 	assert.Equal(t, "validation", stored.Purpose)
 	assert.Equal(t, string(domain.MicrosoftBindingVerified), stored.Status)
 	assert.Empty(t, stored.CodeMessageID)
-	assert.Empty(t, stored.BoundDisplay)
 	assert.Empty(t, stored.Category)
 	assert.Empty(t, stored.LastSafeError)
 	assert.NotNil(t, stored.SelectedAt)
@@ -553,7 +547,6 @@ func TestMicrosoftBindingRepoValidationObservationRequiresCallerTransactionMySQL
 	require.Equal(t, "observed@observation.test", stored.BindingAddress)
 	require.Equal(t, string(domain.MicrosoftBindingVerified), stored.Status)
 	require.NotNil(t, stored.VerifiedAt)
-	require.Empty(t, stored.BoundDisplay)
 
 	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
 		Where("resource_id = ?", 9230).
@@ -597,24 +590,54 @@ func TestMicrosoftBindingRepoValidationObservationRequiresCallerTransactionMySQL
 			preserved := loadBindingForAdminTest(t, db, 9230)
 			require.Equal(t, string(domain.MicrosoftBindingVerified), preserved.Status)
 			require.Equal(t, "observed@observation.test", preserved.BindingAddress)
-			require.Empty(t, preserved.BoundDisplay)
 			require.NotNil(t, preserved.VerifiedAt)
 		})
 	}
 
+	matchingMask := input
+	matchingMask.Address = "o*****d@observation.test"
+	matchingMask.Status = string(domain.MicrosoftBindingFailed)
+	matchingMask.SafeMessage = "temporary masked observation"
+	tx = db.Begin()
+	require.NoError(t, tx.Error)
+	changed, err = repo.ApplyValidationBindingObservation(platform.WithGormTx(context.Background(), tx), matchingMask)
+	require.NoError(t, err)
+	require.False(t, changed, "a matching Microsoft mask must preserve the more precise verified address")
+	require.NoError(t, tx.Commit().Error)
+	stored = loadBindingForAdminTest(t, db, 9230)
+	require.Equal(t, "observed@observation.test", stored.BindingAddress)
+	require.Equal(t, string(domain.MicrosoftBindingVerified), stored.Status)
+
+	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
+		Where("resource_id = ?", 9230).
+		Updates(map[string]any{
+			"status":      string(domain.MicrosoftBindingFailed),
+			"category":    bindingStatusCategory(domain.MicrosoftBindingFailed),
+			"verified_at": nil,
+		}).Error)
+	tx = db.Begin()
+	require.NoError(t, tx.Error)
+	changed, err = repo.ApplyValidationBindingObservation(platform.WithGormTx(context.Background(), tx), matchingMask)
+	require.NoError(t, err)
+	require.False(t, changed, "a matching mask must not downgrade a concrete address based on workflow status")
+	require.NoError(t, tx.Commit().Error)
+	stored = loadBindingForAdminTest(t, db, 9230)
+	require.Equal(t, "observed@observation.test", stored.BindingAddress)
+	require.Equal(t, string(domain.MicrosoftBindingFailed), stored.Status)
+
 	external := input
+	external.Address = "e******@external.test"
 	external.Status = string(domain.MicrosoftBindingFailed)
-	external.BoundDisplay = "e******@external.test"
 	external.SafeMessage = "Microsoft account is already bound to an external recovery mailbox."
 	tx = db.Begin()
 	require.NoError(t, tx.Error)
 	changed, err = repo.ApplyValidationBindingObservation(platform.WithGormTx(context.Background(), tx), external)
 	require.NoError(t, err)
-	require.True(t, changed, "an explicit external BoundDisplay is authoritative enough to replace the verified fact")
+	require.True(t, changed, "a newly observed incompatible mask must replace the stale verified address")
 	require.NoError(t, tx.Commit().Error)
 	stored = loadBindingForAdminTest(t, db, 9230)
 	require.Equal(t, string(domain.MicrosoftBindingFailed), stored.Status)
-	require.Equal(t, "e******@external.test", stored.BoundDisplay)
+	require.Equal(t, "e******@external.test", stored.BindingAddress)
 }
 
 func TestMicrosoftBindingRepoExternalObservationRepairsLegacyInvariantAndIsIdempotentMySQL(t *testing.T) {
@@ -628,11 +651,10 @@ func TestMicrosoftBindingRepoExternalObservationRepairsLegacyInvariantAndIsIdemp
 		ResourceType:   "microsoft",
 		OwnerUserID:    9232,
 		AccountEmail:   accountEmail,
-		BindingAddress: "candidate@external-observation.test",
+		BindingAddress: "e******@external.test",
 		Purpose:        "legacy",
 		Status:         string(domain.MicrosoftBindingFailed),
 		CodeMessageID:  "legacy-external-message",
-		BoundDisplay:   "e******@external.test",
 		Category:       bindingStatusCategory(domain.MicrosoftBindingFailed),
 		LastSafeError:  "An external recovery mailbox is already bound.",
 		ExpiresAt:      &expiresAt,
@@ -643,8 +665,8 @@ func TestMicrosoftBindingRepoExternalObservationRepairsLegacyInvariantAndIsIdemp
 		ResourceID:   9232,
 		OwnerUserID:  9232,
 		AccountEmail: accountEmail,
-		Address:      "candidate@external-observation.test",
-		BoundDisplay: "e******@external.test",
+		Address:      "e******@external.test",
+		Status:       string(domain.MicrosoftBindingFailed),
 		SafeMessage:  "An external recovery mailbox is already bound.",
 	}
 	tx := db.Begin()
@@ -658,7 +680,7 @@ func TestMicrosoftBindingRepoExternalObservationRepairsLegacyInvariantAndIsIdemp
 	require.Equal(t, "validation", stored.Purpose)
 	require.Equal(t, string(domain.MicrosoftBindingFailed), stored.Status)
 	require.Empty(t, stored.CodeMessageID)
-	require.Equal(t, "e******@external.test", stored.BoundDisplay)
+	require.Equal(t, "e******@external.test", stored.BindingAddress)
 	require.NotNil(t, stored.SelectedAt)
 	require.Nil(t, stored.CodeSentAt)
 	require.Nil(t, stored.VerifiedAt)
@@ -674,11 +696,9 @@ func TestMicrosoftBindingRepoExternalObservationRepairsLegacyInvariantAndIsIdemp
 	require.NoError(t, tx.Commit().Error)
 }
 
-func TestMicrosoftBindingRepoExternalObservationCreatesOnlyFromConcreteCandidateMySQL(t *testing.T) {
+func TestMicrosoftBindingRepoExternalObservationPersistsMaskAsAddressMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 9233, "normal")
-	createMicrosoftAliasTestResource(t, db, 9234, "normal")
-	createMicrosoftAliasTestResource(t, db, 9235, "normal")
 	createActiveBindingDomainForRecoveryTest(t, db, 9294, 9295, "external-create.test")
 	repo := NewMicrosoftBindingRepo(db)
 
@@ -689,53 +709,19 @@ func TestMicrosoftBindingRepoExternalObservationCreatesOnlyFromConcreteCandidate
 		ResourceID:   9233,
 		OwnerUserID:  9233,
 		AccountEmail: account9233,
-		Address:      "candidate@external-create.test",
-		BoundDisplay: "e******@external.test",
+		Address:      "e******@external.test",
+		Status:       string(domain.MicrosoftBindingFailed),
 		SafeMessage:  "An external recovery mailbox is already bound.",
 	})
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.NoError(t, tx.Commit().Error)
 	stored := loadBindingForAdminTest(t, db, 9233)
-	require.Equal(t, "candidate@external-create.test", stored.BindingAddress)
+	require.Equal(t, "e******@external.test", stored.BindingAddress)
 	require.Equal(t, string(domain.MicrosoftBindingFailed), stored.Status)
-	require.Equal(t, "e******@external.test", stored.BoundDisplay)
 	require.NotNil(t, stored.SelectedAt)
 	_, versionAfterCreate := loadBindingRecoveryResource(t, db, 9233)
 	require.Equal(t, version9233, versionAfterCreate, "Core owns the observation transaction's root version advance")
-
-	account9234, _ := loadBindingRecoveryResource(t, db, 9234)
-	tx = db.Begin()
-	require.NoError(t, tx.Error)
-	changed, err = repo.ApplyValidationBindingObservation(platform.WithGormTx(context.Background(), tx), MicrosoftValidationBindingObservationInput{
-		ResourceID:   9234,
-		OwnerUserID:  9234,
-		AccountEmail: account9234,
-		Address:      "c*******@external-create.test",
-		BoundDisplay: "e******@external.test",
-	})
-	require.NoError(t, err)
-	require.False(t, changed)
-	require.NoError(t, tx.Commit().Error)
-
-	account9235, _ := loadBindingRecoveryResource(t, db, 9235)
-	tx = db.Begin()
-	require.NoError(t, tx.Error)
-	changed, err = repo.ApplyValidationBindingObservation(platform.WithGormTx(context.Background(), tx), MicrosoftValidationBindingObservationInput{
-		ResourceID:   9235,
-		OwnerUserID:  9235,
-		AccountEmail: account9235,
-		BoundDisplay: "e******@external.test",
-	})
-	require.NoError(t, err)
-	require.False(t, changed)
-	require.NoError(t, tx.Commit().Error)
-
-	var count int64
-	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
-		Where("resource_id IN ?", []uint{9234, 9235}).
-		Count(&count).Error)
-	require.Zero(t, count, "masked or absent proof addresses must never become local binding rows")
 }
 
 func TestMicrosoftBindingRepoStandaloneRecoveryRejectsDisabledBindingDomainMySQL(t *testing.T) {

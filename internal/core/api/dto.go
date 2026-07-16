@@ -176,11 +176,12 @@ type ResourceListResponse struct {
 }
 
 type ResourceFacetCountsResponse struct {
-	All      int64 `json:"all"`
-	Normal   int64 `json:"normal"`
-	Pending  int64 `json:"pending"`
-	Abnormal int64 `json:"abnormal"`
-	Disabled int64 `json:"disabled"`
+	All        int64 `json:"all"`
+	Normal     int64 `json:"normal"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
+	Abnormal   int64 `json:"abnormal"`
+	Disabled   int64 `json:"disabled"`
 }
 
 type ResourceBooleanFacetsResponse struct {
@@ -257,17 +258,6 @@ type DeleteResourcesResponse struct {
 	Requested          int    `json:"requested"`
 	Deleted            int    `json:"deleted"`
 	DeletedResourceIDs []uint `json:"deletedResourceIds,omitempty"`
-}
-
-// ResourceValidationResponse returns an asynchronous validation job view.
-type ResourceValidationResponse struct {
-	ValidationID  uint      `json:"validationId"`
-	ResourceID    uint      `json:"resourceId"`
-	ResourceType  string    `json:"resourceType"`
-	Status        string    `json:"status"`
-	LastSafeError string    `json:"lastSafeError,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // ResourceValidationsResponse returns a bulk asynchronous validation submission result.

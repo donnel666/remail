@@ -25,15 +25,12 @@ func (s *coreBackgroundExecutionGateStub) TryAcquire() (func(), bool) {
 }
 
 func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t *testing.T) {
-	repo := newMockValidationRepo(nil)
-	now := time.Now().UTC()
-	repo.jobs[1] = &coredomain.ResourceValidation{
-		ID:            1,
-		Status:        coredomain.ResourceValidationQueued,
-		DispatchToken: "dispatch-token",
-		DispatchedAt:  &now,
-		MaxAttempts:   coredomain.ResourceValidationDefaultMaxAttempts,
-	}
+	resources := newMockResourceRepo()
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	require.NoError(t, resources.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
+		EmailAddress: "load@example.com", Password: "secret", Status: coredomain.MicrosoftStatusValidating, CredentialRevision: 3,
+	}))
+	repo := newMockValidationRepo(resources)
 	gate := &coreBackgroundExecutionGateStub{}
 	module := &CoreModule{
 		ValidationUseCase:   coreapp.NewResourceValidationUseCase(nil, repo, &mockValidationQueue{}, nil),
@@ -42,17 +39,15 @@ func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t
 	mux := asynq.NewServeMux()
 	RegisterCoreTaskHandlers(mux, module)
 	encoded, err := json.Marshal(coreapp.ResourceValidationTask{
-		JobID:         1,
-		DispatchToken: "dispatch-token",
+		ResourceID: root.ID, ResourceType: coredomain.ResourceTypeMicrosoft,
+		OwnerUserID: 1, ExpectedCredentialRevision: 3,
 	})
 	require.NoError(t, err)
 
 	err = mux.ProcessTask(context.Background(), asynq.NewTask(coreinfra.TypeResourceValidation, encoded))
 
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
-	require.Equal(t, "dispatch-token", repo.jobs[1].DispatchToken)
-	require.NotNil(t, repo.jobs[1].DispatchedAt)
-	require.Equal(t, coredomain.ResourceValidationQueued, repo.jobs[1].Status)
+	require.Equal(t, coredomain.MicrosoftStatusValidating, resources.microsoft[root.ID].Status)
 	require.False(t, gate.released.Load(), "a denied task never owns a permit")
 }
 
@@ -61,6 +56,10 @@ type dispatcherCountingQueue struct {
 }
 
 func (*dispatcherCountingQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
+	return nil
+}
+
+func (*dispatcherCountingQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
 	return nil
 }
 

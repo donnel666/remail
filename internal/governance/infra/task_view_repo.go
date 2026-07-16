@@ -56,34 +56,30 @@ type adminTaskReasonRow struct {
 	Count    int64  `gorm:"column:count"`
 }
 
-const validationTaskSelect = `
+const emptyTaskSelect = `
 SELECT
-    'validation' AS source,
-    job.id AS source_id,
-    job.resource_id AS resource_scope_id,
-    CASE job.resource_type
-        WHEN 'domain' THEN 'domain_resource'
-        ELSE 'microsoft_resource'
-    END AS biz_type,
-    job.resource_id AS biz_id,
-    'validation' AS kind,
-    job.status AS status,
-    job.attempts AS attempts,
-    job.max_attempts AS max_attempts,
-    job.expected_credential_revision AS credential_revision,
-    job.created_at AS queued_at,
-    job.started_at AS started_at,
-    job.finished_at AS finished_at,
-    job.updated_at AS updated_at,
+    'import' AS source,
+    0 AS source_id,
+    0 AS resource_scope_id,
+    'resource' AS biz_type,
+    0 AS biz_id,
+    'import' AS kind,
+    'succeeded' AS status,
+    0 AS attempts,
+    1 AS max_attempts,
+    NULL AS credential_revision,
+    CURRENT_TIMESTAMP AS queued_at,
+    NULL AS started_at,
+    NULL AS finished_at,
+    CURRENT_TIMESTAMP AS updated_at,
     NULL AS progress_total,
     NULL AS progress_processed,
     NULL AS progress_succeeded,
     NULL AS progress_skipped,
     NULL AS progress_failed,
     NULL AS reason_buckets
-FROM resource_validation_jobs AS job
-WHERE job.resource_type IN ('microsoft', 'domain')`
-
+FROM (SELECT 1) AS empty_task
+WHERE 1 = 0`
 const importResourceTaskSelect = `
 SELECT
     'import' AS source,
@@ -253,9 +249,7 @@ FROM mailmatch_resource_fetch_jobs AS job`
 // fact stores an aggregate selection and checkpoint, not immutable per-resource
 // membership; re-evaluating selection_json after resource changes would invent
 // history. They remain available through the source-qualified Q08 lookup.
-const microsoftResourceTaskUnion = validationTaskSelect + `
-UNION ALL
-` + importResourceTaskSelect + `
+const microsoftResourceTaskUnion = importResourceTaskSelect + `
 UNION ALL
 ` + aliasAttemptTaskSelect + `
 UNION ALL
@@ -268,7 +262,7 @@ UNION ALL
 UNION ALL
 ` + fetchTaskSelect
 
-const domainResourceTaskUnion = validationTaskSelect
+const domainResourceTaskUnion = emptyTaskSelect
 
 const importSingleTaskSelect = `
 SELECT
@@ -446,8 +440,6 @@ LIMIT 1`, ref.ID).Scan(&row)
 
 func singleTaskSelect(source string) (string, error) {
 	switch source {
-	case governanceapp.AdminTaskSourceValidation:
-		return validationTaskSelect, nil
 	case governanceapp.AdminTaskSourceImport:
 		return importSingleTaskSelect, nil
 	case governanceapp.AdminTaskSourceAlias:

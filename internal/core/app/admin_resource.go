@@ -179,12 +179,13 @@ type AdminMicrosoftRecord struct {
 }
 
 type AdminFacetCounts struct {
-	All      int64
-	Pending  int64
-	Normal   int64
-	Abnormal int64
-	Disabled int64
-	Deleted  int64
+	All        int64
+	Pending    int64
+	Validating int64
+	Normal     int64
+	Abnormal   int64
+	Disabled   int64
+	Deleted    int64
 }
 
 type AdminBooleanFacets struct {
@@ -695,13 +696,10 @@ type AdminMicrosoftEditCommand struct {
 	Path              string
 }
 
-type AdminMicrosoftMutationResult struct {
-	ValidationTask *ValidationResultView `json:"validationTask,omitempty"`
-}
+type AdminMicrosoftMutationResult struct{}
 
 type AdminMicrosoftValidationResult struct {
-	Task   *ValidationResultView `json:"task"`
-	Reused bool                  `json:"reused"`
+	Accepted int `json:"accepted"`
 }
 
 type AdminReasonCount struct {
@@ -1060,17 +1058,10 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, command.Version); err != nil {
 			return err
 		}
-		// Keep the cross-context mutation order aligned with validation result
-		// commits: resource root -> Microsoft subtype -> validation job -> binding.
-		// Both writes still share this caller-owned transaction, so a later binding
-		// or audit failure rolls the saved resource and queued job back together.
+		// The resource and binding writes share this caller-owned transaction, so
+		// a later binding or audit failure rolls the mutation back atomically.
 		if validationRequired {
-			task, created, err := s.createValidationTx(txCtx, root, resource, command.RequestID, command.Path)
-			if err != nil {
-				return err
-			}
-			result.ValidationTask = task
-			shouldSchedule = created
+			shouldSchedule = true
 		}
 		if identityChanged || bindingAddressChanged {
 			if s.bindings == nil {
@@ -1144,12 +1135,7 @@ func (s *AdminResourceCommandService) Enable(ctx context.Context, resourceID uin
 		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, version); err != nil {
 			return err
 		}
-		task, created, err := s.createValidationTx(txCtx, root, resource, requestID, path)
-		if err != nil {
-			return err
-		}
-		result.ValidationTask = task
-		shouldSchedule = created
+		shouldSchedule = true
 		if err := s.logs.Create(txCtx, adminResourceOperationLog(operatorUserID, "core.admin_resource.enable", root.ID, requestID, path, "Microsoft resource enabled and queued for validation.")); err != nil {
 			return err
 		}
@@ -1201,12 +1187,7 @@ func (s *AdminResourceCommandService) Recover(ctx context.Context, resourceID ui
 		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, version); err != nil {
 			return err
 		}
-		task, created, err := s.createValidationTx(txCtx, root, resource, requestID, path)
-		if err != nil {
-			return err
-		}
-		result.ValidationTask = task
-		shouldSchedule = created
+		shouldSchedule = true
 		if err := s.logs.Create(txCtx, adminResourceOperationLog(operatorUserID, "core.admin_resource.recover", root.ID, requestID, path, "Microsoft resource recovered and queued for validation.")); err != nil {
 			return err
 		}
@@ -1430,15 +1411,8 @@ func (s *AdminResourceCommandService) Validate(ctx context.Context, resourceID u
 	shouldSchedule := false
 	err = s.repo.WithTx(ctx, func(txCtx context.Context) error {
 		replayed, err := s.reserveAdminCommand(txCtx, receipt, result)
-		if err != nil {
+		if err != nil || replayed {
 			return err
-		}
-		if replayed {
-			if result.Task == nil || result.Task.ValidationID == 0 {
-				return domain.ErrResourceDependency
-			}
-			result.Reused = true
-			return nil
 		}
 		root, resource, err := s.repo.LockAdminMicrosoft(txCtx, resourceID)
 		if err != nil {
@@ -1450,14 +1424,18 @@ func (s *AdminResourceCommandService) Validate(ctx context.Context, resourceID u
 		if resource.Status == domain.MicrosoftStatusDisabled {
 			return domain.ErrInvalidResourceStatus
 		}
-		task, created, err := s.createValidationTx(txCtx, root, resource, requestID, path)
+		changed, err := resource.QueueValidationAdmin()
 		if err != nil {
 			return err
 		}
-		result.Task = task
-		result.Reused = !created
-		shouldSchedule = created
-		if err := s.logs.Create(txCtx, adminResourceOperationLog(operatorUserID, "core.admin_resource.validate", root.ID, requestID, path, "Microsoft resource validation queued.")); err != nil {
+		if changed {
+			if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, root.Version); err != nil {
+				return err
+			}
+		}
+		result.Accepted = 1
+		shouldSchedule = true
+		if err := s.logs.Create(txCtx, adminResourceOperationLog(operatorUserID, "core.admin_resource.validate", root.ID, requestID, path, "Microsoft resource validation marked pending.")); err != nil {
 			return err
 		}
 		return s.completeAdminCommand(txCtx, operatorUserID, idempotencyKey, result)
@@ -1471,26 +1449,59 @@ func (s *AdminResourceCommandService) Validate(ctx context.Context, resourceID u
 	return result, nil
 }
 
-func (s *AdminResourceCommandService) ValidateImportOwner(ctx context.Context, ownerID uint) (*AdminOwnerSummary, error) {
-	return s.validateOwner(ctx, ownerID, false)
+func (s *AdminResourceCommandService) SubmitValidationBatch(
+	ctx context.Context,
+	selection AdminResourceBulkSelection,
+	operatorUserID uint,
+	idempotencyKey, requestID, path string,
+) (*ResourceBatchValidationResult, error) {
+	if s == nil || s.validation == nil || s.owners == nil || operatorUserID == 0 {
+		return nil, domain.ErrInvalidResourceCommand
+	}
+	key, err := normalizeAdminResourceIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	selection, err = normalizeAdminBulkSelection(selection)
+	if err != nil {
+		return nil, err
+	}
+	if selection.Mode == AdminResourceBulkFilter && selection.Filter.Search != "" {
+		matched, err := s.owners.SearchAdminOwners(ctx, selection.Filter.Search, 1000)
+		if err != nil {
+			return nil, fmt.Errorf("search admin resource owners for validation: %w", err)
+		}
+		for _, owner := range matched {
+			if owner.ID > 0 {
+				selection.Filter.OwnerIDs = append(selection.Filter.OwnerIDs, owner.ID)
+			}
+		}
+		selection.Filter.OwnerIDs = uniqueAdminResourceIDs(selection.Filter.OwnerIDs)
+	}
+	fingerprint, err := adminBulkFingerprint(AdminResourceBulkValidate, selection)
+	if err != nil {
+		return nil, err
+	}
+	batch := ResourceBulkSelection{
+		Mode: ResourceBulkSelectionMode(selection.Mode), ResourceIDs: selection.ResourceIDs,
+		AdminScope: true, AllowBinding: true,
+		BatchKey: "admin-microsoft:" + adminSensitiveValueFingerprint(fmt.Sprintf("%d:%s:%s", operatorUserID, key, fingerprint)),
+		Filter:   ResourceBulkFilter{ResourceType: domain.ResourceTypeMicrosoft},
+	}
+	if selection.Mode == AdminResourceBulkFilter {
+		batch.Filter = ResourceBulkFilter{
+			ResourceType: domain.ResourceTypeMicrosoft,
+			Search:       selection.Filter.Search, Suffix: selection.Filter.Suffix, Status: string(selection.Filter.Status),
+			ForSale: selection.Filter.ForSale, LongLived: selection.Filter.LongLived, GraphAvailable: selection.Filter.GraphAvailable,
+			TokenHealth: selection.Filter.TokenHealth, OwnerIDs: selection.Filter.OwnerIDs, AdminSearch: true,
+			CreatedFrom: selection.Filter.CreatedFrom, CreatedTo: selection.Filter.CreatedTo,
+		}
+	}
+	return s.validation.CreateBatch(ctx, batch, operatorUserID, true, requestID, path)
 }
 
-func (s *AdminResourceCommandService) createValidationTx(ctx context.Context, root *domain.EmailResource, resource *domain.MicrosoftResource, requestID, path string) (*ValidationResultView, bool, error) {
-	job := &domain.ResourceValidation{
-		ResourceID:   root.ID,
-		ResourceType: domain.ResourceTypeMicrosoft,
-		OwnerUserID:  root.OwnerUserID,
-		Status:       domain.ResourceValidationQueued,
-		MaxAttempts:  domain.ResourceValidationDefaultMaxAttempts,
-		RequestID:    strings.TrimSpace(requestID),
-		Path:         strings.TrimSpace(path),
-	}
-	created, err := s.validation.validations.CreateWithLog(ctx, job, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	_ = resource
-	return validationView(job), created, nil
+func (s *AdminResourceCommandService) ValidateImportOwner(ctx context.Context, ownerID uint) (*AdminOwnerSummary, error) {
+	return s.validateOwner(ctx, ownerID, false)
 }
 
 func (s *AdminResourceCommandService) validateOwner(ctx context.Context, ownerID uint, requireSupplier bool) (*AdminOwnerSummary, error) {

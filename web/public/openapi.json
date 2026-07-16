@@ -1407,34 +1407,6 @@
           "queued"
         ]
       },
-      "ResourceValidation": {
-        "type": "object",
-        "properties": {
-          "validationId": {
-            "type": "integer"
-          },
-          "resourceId": {
-            "type": "integer"
-          },
-          "resourceType": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "lastSafeError": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "ValidateResourcesRequest": {
         "type": "object",
         "properties": {
@@ -2814,7 +2786,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResourceValidation"
+                  "$ref": "#/components/schemas/ResourceValidationsResponse"
                 }
               }
             }
@@ -3015,66 +2987,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResourceValidationsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/v1/open/resources/validations/{validationId}": {
-      "get": {
-        "tags": [
-          "Resources"
-        ],
-        "operationId": "getResourceValidation",
-        "summary": "查询资源检测任务",
-        "security": [
-          {
-            "remailApiKey": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "validationId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "请求成功。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResourceValidation"
                 }
               }
             }

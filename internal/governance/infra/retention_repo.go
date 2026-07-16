@@ -36,10 +36,6 @@ func (r *RetentionRepo) DeleteAllocationDailyUsagesBefore(ctx context.Context, b
 	return r.deleteBySQL(ctx, "DELETE FROM allocation_daily_usages WHERE usage_date < ? ORDER BY usage_date LIMIT ?", before.UTC().Format("2006-01-02"), limit)
 }
 
-func (r *RetentionRepo) DeleteResourceValidationJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
-	return r.deleteBySQL(ctx, "DELETE FROM resource_validation_jobs WHERE status IN ('succeeded', 'failed') AND updated_at < ? LIMIT ?", before, limit)
-}
-
 func (r *RetentionRepo) DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	return r.deleteBySQL(ctx, "DELETE FROM proxy_check_jobs WHERE status IN ('succeeded', 'failed') AND updated_at < ? LIMIT ?", before, limit)
 }

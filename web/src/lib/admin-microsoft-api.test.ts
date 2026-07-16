@@ -62,6 +62,7 @@ const EMPTY_FACETS: AdminMicrosoftFacets = {
   status: {
     all: 0,
     pending: 0,
+    validating: 0,
     normal: 0,
     abnormal: 0,
     disabled: 0,
@@ -91,16 +92,16 @@ const SYNC_BULK = {
 };
 
 const ACCEPTED_TASK_RESPONSE = {
-  taskId: "validation:42",
+  taskId: "token:42",
   requestId: "request-accepted-42",
   status: "queued",
   accepted: 1,
   reused: false,
   task: {
-    taskId: "validation:42",
+	 taskId: "token:42",
     bizType: "microsoft_resource",
     bizId: 42,
-    kind: "validation",
+	 kind: "token",
     status: "queued",
     attempts: 0,
     maxAttempts: 3,
@@ -564,19 +565,22 @@ describe("admin Microsoft API adapter", () => {
     expect(apiMocks.PATCH).not.toHaveBeenCalled();
   });
 
-  it("maps all four manual tasks to dedicated durable commands", async () => {
-    apiMocks.POST.mockResolvedValue({ data: ACCEPTED_TASK_RESPONSE });
+  it("keeps validation ephemeral while the other manual tasks stay durable", async () => {
+    apiMocks.POST
+      .mockResolvedValueOnce({ data: { requested: 1, queued: 1 } })
+      .mockResolvedValue({ data: ACCEPTED_TASK_RESPONSE });
 
-    const results = await Promise.all([
+    const [validation, ...durableTasks] = await Promise.all([
       validateAdminMicrosoftResource(55),
       refreshAdminMicrosoftToken(55),
       createAdminMicrosoftExplicitAlias(55),
       fetchAdminMicrosoftMail(55),
     ]);
 
-    for (const result of results) {
+    expect(validation).toEqual({ requested: 1, queued: 1 });
+    for (const result of durableTasks) {
       expect(result).toMatchObject({
-        taskId: "validation:42",
+		taskId: "token:42",
         requestId: "request-accepted-42",
         status: "queued",
         accepted: 1,

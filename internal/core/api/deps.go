@@ -84,18 +84,17 @@ func (m *CoreModule) SetMicrosoftValidationBindingCommitPort(port coreapp.Micros
 }
 
 // NewCoreModule wires up all Core module dependencies.
-func NewCoreModule(db *gorm.DB, _ redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client, validator coreapp.ResourceValidationPort, bindingRecorder coreapp.MicrosoftBindingInputRecorder) (*CoreModule, error) {
+func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governanceapp.FilePort, asynqClient *asynq.Client, validator coreapp.ResourceValidationPort, bindingRecorder coreapp.MicrosoftBindingInputRecorder) (*CoreModule, error) {
 	txtParser := coreinfra.NewTXTParser()
 	resourceRepo := coreinfra.NewResourceRepo(db)
 	importRepo := coreinfra.NewResourceImportRepo(db)
 	importQueue := coreinfra.NewResourceImportQueue(asynqClient)
 	validationRepo := coreinfra.NewResourceValidationRepo(db)
-	validationQueue := coreinfra.NewResourceValidationQueue(asynqClient)
+	validationQueue := coreinfra.NewResourceValidationQueue(asynqClient, redisClient)
 	mailServerRepo := coreinfra.NewMailServerRepo(db)
 	mailboxRepo := coreinfra.NewGeneratedMailboxRepo(db)
 	projectRepo := coreinfra.NewProjectRepo(db)
 	importUseCase := coreapp.NewImportUseCase(resourceRepo, importRepo, txtParser, files, importQueue, bindingRecorder)
-	importUseCase.SetImportedValidationCreator(validationRepo)
 	validationUseCase := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, validationQueue, validator)
 	adminRepo := coreinfra.NewAdminResourceRepo(db)
 	adminQuery := coreapp.NewAdminResourceQuery(adminRepo)

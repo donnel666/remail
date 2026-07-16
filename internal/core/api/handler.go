@@ -445,7 +445,7 @@ func (h *CoreHandler) PostResourceValidate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, toValidationResponse(result))
+	c.JSON(http.StatusAccepted, ResourceValidationsResponse{Requested: result.Requested, Queued: result.Queued})
 }
 
 // POST /v1/resources/validations
@@ -502,27 +502,6 @@ func (h *CoreHandler) PostResourceValidations(c *gin.Context) {
 		Requested: result.Requested,
 		Queued:    result.Queued,
 	})
-}
-
-// GET /v1/resources/validations/:validationId
-func (h *CoreHandler) GetResourceValidation(c *gin.Context) {
-	userID, ok := requireCurrentUserID(c)
-	if !ok {
-		return
-	}
-	validationID, ok := parseUintParam(c, "validationId", "Invalid validation id.")
-	if !ok {
-		return
-	}
-
-	role, _ := middleware.GetCurrentRole(c)
-	result, err := h.module.ValidationUseCase.Get(c.Request.Context(), validationID, userID, role.HasAdminAccess())
-	if err != nil {
-		writeCoreError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, toValidationResponse(result))
 }
 
 // --- Projects ---
@@ -1142,18 +1121,6 @@ func (h *CoreHandler) checkProjectReadPermission(c *gin.Context, userID uint, ro
 	return allowed, false
 }
 
-func toValidationResponse(result *coreapp.ValidationResultView) ResourceValidationResponse {
-	return ResourceValidationResponse{
-		ValidationID:  result.ValidationID,
-		ResourceID:    result.ResourceID,
-		ResourceType:  result.ResourceType,
-		Status:        result.Status,
-		LastSafeError: result.LastSafeError,
-		CreatedAt:     result.CreatedAt,
-		UpdatedAt:     result.UpdatedAt,
-	}
-}
-
 func projectListFilterFromQuery(c *gin.Context, scope coreapp.ProjectListScope, userID uint, isAdmin bool) (coreapp.ProjectListFilter, bool) {
 	filter := coreapp.ProjectListFilter{
 		Scope:          scope,
@@ -1246,11 +1213,12 @@ func toResourceListFacetsResponse(facets *coreapp.ResourceListFacets) *ResourceL
 	}
 	return &ResourceListFacetsResponse{
 		Status: ResourceFacetCountsResponse{
-			All:      facets.Status.All,
-			Normal:   facets.Status.Normal,
-			Pending:  facets.Status.Pending,
-			Abnormal: facets.Status.Abnormal,
-			Disabled: facets.Status.Disabled,
+			All:        facets.Status.All,
+			Normal:     facets.Status.Normal,
+			Pending:    facets.Status.Pending,
+			Validating: facets.Status.Validating,
+			Abnormal:   facets.Status.Abnormal,
+			Disabled:   facets.Status.Disabled,
 		},
 		Private: ResourceBooleanFacetsResponse{
 			All: facets.Private.All,

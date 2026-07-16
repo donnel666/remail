@@ -66,3 +66,40 @@ func TestNewMSACLMailboxReaderWithContentWindow(t *testing.T) {
 func TestEscapeMSACLLikeTreatsAccountMaskLiterally(t *testing.T) {
 	require.Equal(t, `qa!%!_**8\@example.test!!`, escapeMSACLLike(`qa%_**8\@example.test!`))
 }
+
+func TestMSACLMailboxReaderListsOnlyRecipientsMatchingMaskMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	now := time.Date(2026, time.July, 16, 12, 0, 0, 0, time.UTC)
+	parsedAt := now
+	for resourceID := uint(9301); resourceID <= 9305; resourceID++ {
+		createMicrosoftAliasTestResource(t, db, resourceID, "normal")
+	}
+	for i, recipient := range []string{
+		"xalpha9@recovery.test",
+		"xalpha9@recovery.test",
+		"xalpha8@recovery.test",
+		"yalpha9@recovery.test",
+		"xalpha9@other.test",
+	} {
+		require.NoError(t, db.Create(&InboundMailModel{
+			EnvelopeFrom:    "account-security-noreply@accountprotection.microsoft.com",
+			Recipient:       recipient,
+			ParsedAt:        &parsedAt,
+			ResourceID:      uint(9301 + i),
+			ResourceType:    "microsoft",
+			OwnerUserID:     uint(9301 + i),
+			SourceObjectKey: recipient + time.Duration(i).String(),
+			Status:          "stored",
+			CreatedAt:       now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:       now.Add(time.Duration(i) * time.Second),
+		}).Error)
+	}
+
+	emails, err := NewMSACLMailboxReader(db, failingMSACLFileStore{}).
+		ListMasked(context.Background(), "x*****9@recovery.test", 50)
+
+	require.NoError(t, err)
+	require.Len(t, emails, 2)
+	require.Equal(t, "xalpha9@recovery.test", emails[0].To)
+	require.Equal(t, "xalpha9@recovery.test", emails[1].To)
+}

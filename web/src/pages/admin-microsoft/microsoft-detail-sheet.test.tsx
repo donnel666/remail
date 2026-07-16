@@ -525,12 +525,12 @@ describe("admin Microsoft detail sheet runtime", () => {
       mocks.tasks
         .mockResolvedValueOnce({
           ...EMPTY_TASKS,
-          items: [{ status: "running", taskId: "validation:42" }],
+		  items: [{ status: "running", taskId: "token:42" }],
           total: 1,
         })
         .mockResolvedValueOnce({
           ...EMPTY_TASKS,
-          items: [{ status: "succeeded", taskId: "validation:42" }],
+		  items: [{ status: "succeeded", taskId: "token:42" }],
           succeeded: 1,
           total: 1,
         });
@@ -561,7 +561,7 @@ describe("admin Microsoft detail sheet runtime", () => {
     try {
       mocks.tasks.mockResolvedValueOnce({
         ...EMPTY_TASKS,
-        items: [{ status: "queued", taskId: "validation:43" }],
+		items: [{ status: "queued", taskId: "token:43" }],
         total: 1,
       });
       renderSheet(detail(43));

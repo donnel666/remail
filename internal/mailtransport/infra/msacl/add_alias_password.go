@@ -41,11 +41,9 @@ type userProof struct {
 	Type    int    `json:"type"`
 }
 
-// extractFirstUserProof pulls the first email proof (type==1 with an "@" in the
-// display) from the identity page's ServerData.arrUserProofs. Returns the proof
-// token (used as AltEmailE on send and SentProofIDE on verify) and its masked
-// display. Empty strings if the page has no usable proof.
-func extractFirstUserProof(page string) (data, display string) {
+// extractMatchingUserProof returns the proof that matches the preflighted
+// concrete Binding address.
+func extractMatchingUserProof(page, bindingAddress string) (data, display string) {
 	m := arrUserProofsRE.FindStringSubmatch(page)
 	if len(m) < 2 {
 		return "", ""
@@ -54,15 +52,16 @@ func extractFirstUserProof(page string) (data, display string) {
 	if err := json.Unmarshal([]byte(m[1]), &proofs); err != nil {
 		return "", ""
 	}
+	firstDisplay := ""
 	for _, p := range proofs {
-		if p.Type == 1 && strings.Contains(p.Display, "@") {
+		if p.Type == 1 && strings.Contains(p.Display, "@") && firstDisplay == "" {
+			firstDisplay = p.Display
+		}
+		if p.Type == 1 && strings.Contains(p.Display, "@") && mailboxMatchesMasked(p.Display, bindingAddress) {
 			return p.Data, p.Display
 		}
 	}
-	if len(proofs) > 0 {
-		return proofs[0].Data, proofs[0].Display
-	}
-	return "", ""
+	return "", firstDisplay
 }
 
 // loginForExplicitAliasPassword performs the password login → eOTT_OneTimePassword
@@ -72,7 +71,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		return "", "", fmt.Errorf("password login requires a binding mailbox address")
 	}
 	if strings.Contains(bindingAddress, "*") {
-		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundDisplay: bindingAddress}
+		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundMailbox: bindingAddress}
 	}
 	if strings.TrimSpace(password) == "" {
 		return "", "", newAuthError("password login requires the account password", AuthStatusPasswordError)
@@ -155,18 +154,21 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	logDebug("PWD 提交凭据后落 %s pageID=%s", currentURL, extractPageID(page))
 
 	// 身份验证页内嵌 arrUserProofs。若未直接出现 (JS 轮询页), 尝试推进一步再取。
-	proofData, proofDisplay := extractFirstUserProof(page)
+	proofData, proofDisplay := extractMatchingUserProof(page, bindingAddress)
 	if proofData == "" {
 		logInfo("PWD 身份页无 arrUserProofs, 尝试 handleJSPollingPage")
 		if p2, u2, jerr := handleJSPollingPage(session, page, currentURL); jerr == nil {
 			page, currentURL = p2, u2
-			proofData, proofDisplay = extractFirstUserProof(page)
+			proofData, proofDisplay = extractMatchingUserProof(page, bindingAddress)
 		}
 	}
 	idPPFT := extractPPFT(page)
 	verifyPostURL := firstNonEmpty(extractPostURL(page), currentURL)
 	uaid = firstNonEmpty(getQueryParam(verifyPostURL, "uaid"), getQueryParam(currentURL, "uaid"), uaid)
 	if proofData == "" || idPPFT == "" {
+		if proofData == "" && proofDisplay != "" {
+			return "", "", &AuthError{Message: "Microsoft 当前辅助邮箱与本地 Binding 不一致", Status: AuthStatusAlreadyBound, BoundMailbox: proofDisplay}
+		}
 		_ = os.WriteFile("/tmp/msacl_pwd_identity_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o644)
 		return "", "", newExplicitAliasStageError(
 			"密码登录未到达身份验证页 (缺 arrUserProofs/PPFT)",
@@ -179,6 +181,11 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	// 记录发码前基线 (发码前, 避免秒到的码被吞入 seen)
 	ctx, cancel := context.WithTimeout(session.context(), 120*time.Second)
 	defer cancel()
+	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)))
+	if err != nil {
+		return "", "", err
+	}
+	defer lease.releaseIfUnsent(ctx)
 	seen, err := snapshotMailboxKeys(ctx, bindingAddress, proxy)
 	if err != nil {
 		logWarning("PWD snapshotMailboxKeys 失败: %v", err)
@@ -187,6 +194,9 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	// ---- 步骤5: GetOneTimeCode purpose=eOTT_OneTimePassword & UIMode=11 ----
 	logInfo("PWD 步骤5: GetOneTimeCode (eOTT_OneTimePassword) 发码到 %s", bindingAddress)
 	sendURL := fmt.Sprintf("https://login.live.com/GetOneTimeCode.srf?id=%s&client_id=%s", otcLoginID, otcLoginClientID)
+	if err := lease.markSent(ctx); err != nil {
+		return "", "", err
+	}
 	sendResp, err := session.Post(sendURL, requestOptions{
 		Data: map[string]string{
 			"login":                  email,
@@ -271,7 +281,9 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 
 	// ---- 步骤8: 收敛到 AddAssocId (KMSI/passkey 等中断) ----
 	logInfo("PWD 步骤8: 收敛到 AddAssocId")
-	return convergeExplicitAliasToAddAssocID(session, page, currentURL)
+	page, currentURL, err = convergeExplicitAliasToAddAssocID(session, page, currentURL)
+	releaseCompletedCodeMailLease(session.context(), lease)
+	return page, currentURL, err
 }
 
 // convergeExplicitAliasToAddAssocID drives the post-verify interrupt chain

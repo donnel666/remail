@@ -58,8 +58,13 @@ func TestMicrosoftResource_TransitionStatus(t *testing.T) {
 		from MicrosoftResourceStatus
 		to   MicrosoftResourceStatus
 	}{
-		{MicrosoftStatusPending, MicrosoftStatusNormal},
-		{MicrosoftStatusPending, MicrosoftStatusAbnormal},
+		{MicrosoftStatusPending, MicrosoftStatusValidating},
+		{MicrosoftStatusPending, MicrosoftStatusDisabled},
+		{MicrosoftStatusValidating, MicrosoftStatusPending},
+		{MicrosoftStatusValidating, MicrosoftStatusNormal},
+		{MicrosoftStatusValidating, MicrosoftStatusAbnormal},
+		{MicrosoftStatusValidating, MicrosoftStatusDisabled},
+		{MicrosoftStatusNormal, MicrosoftStatusPending},
 		{MicrosoftStatusNormal, MicrosoftStatusAbnormal},
 		{MicrosoftStatusNormal, MicrosoftStatusDisabled},
 		{MicrosoftStatusAbnormal, MicrosoftStatusPending},
@@ -83,7 +88,7 @@ func TestMicrosoftResource_TransitionStatus(t *testing.T) {
 func TestMicrosoftResource_TransitionStatusRejectsIllegal(t *testing.T) {
 	r := &MicrosoftResource{Status: MicrosoftStatusNormal}
 
-	err := r.TransitionStatus(MicrosoftStatusPending)
+	err := r.TransitionStatus(MicrosoftStatusValidating)
 
 	if !errors.Is(err, ErrInvalidResourceStatus) {
 		t.Fatalf("expected ErrInvalidResourceStatus, got %v", err)
@@ -135,11 +140,19 @@ func TestDomainResource_TransitionStatus(t *testing.T) {
 		from MailDomainStatus
 		to   MailDomainStatus
 	}{
+		{DomainStatusPending, DomainStatusValidating},
+		{DomainStatusPending, DomainStatusDisabled},
+		{DomainStatusValidating, DomainStatusPending},
+		{DomainStatusValidating, DomainStatusNormal},
+		{DomainStatusValidating, DomainStatusAbnormal},
+		{DomainStatusValidating, DomainStatusDisabled},
+		{DomainStatusAbnormal, DomainStatusPending},
 		{DomainStatusAbnormal, DomainStatusNormal},
 		{DomainStatusAbnormal, DomainStatusDisabled},
 		{DomainStatusNormal, DomainStatusAbnormal},
+		{DomainStatusNormal, DomainStatusPending},
 		{DomainStatusNormal, DomainStatusDisabled},
-		{DomainStatusDisabled, DomainStatusAbnormal},
+		{DomainStatusDisabled, DomainStatusPending},
 	}
 
 	for _, tt := range valid {
@@ -187,7 +200,7 @@ func TestDomainResource_DNSStatusCannotEnableDisabledOrDeleted(t *testing.T) {
 	if err := r.EnableAdmin(); err != nil {
 		t.Fatalf("EnableAdmin() unexpected error: %v", err)
 	}
-	if r.Status != DomainStatusAbnormal || r.LastSafeError != "" {
+	if r.Status != DomainStatusPending || r.LastSafeError != "" {
 		t.Fatalf("EnableAdmin() status/error = %q/%q", r.Status, r.LastSafeError)
 	}
 }

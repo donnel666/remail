@@ -28,7 +28,6 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		auth.POST("/resources/:resourceId/publish", h.PostResourcePublish)
 		auth.POST("/resources/:resourceId/validate", h.PostResourceValidate)
 		auth.POST("/resources/validations", h.PostResourceValidations)
-		auth.GET("/resources/validations/:validationId", h.GetResourceValidation)
 
 		// Project square and user project applications
 		auth.GET("/projects", h.GetProjects)

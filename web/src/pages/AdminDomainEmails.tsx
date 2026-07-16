@@ -270,7 +270,15 @@ export default function AdminDomainEmails() {
   const stats = useMemo(() => {
     if (facets) return { status: facets.status, purpose: facets.purpose };
     return {
-      status: { all: total, normal: 0, abnormal: 0, disabled: 0, deleted: 0 },
+      status: {
+        all: total,
+        pending: 0,
+        validating: 0,
+        normal: 0,
+        abnormal: 0,
+        disabled: 0,
+        deleted: 0,
+      },
       purpose: { all: total, not_sale: 0, sale: 0, binding: 0 },
     };
   }, [facets, total]);
@@ -630,10 +638,8 @@ export default function AdminDomainEmails() {
         if (!canOperateDomains) return;
         setBulkBusy("check");
         try {
-          const response = await validateAdminDomainsByFilter(listFilter);
-          Toast.success(
-            t("Domain validations submitted.", { count: response.queued })
-          );
+          await validateAdminDomainsByFilter(listFilter);
+          Toast.success(t("Resource validation submitted."));
           setSelectedKeys([]);
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Domain operation failed."));
@@ -1125,6 +1131,20 @@ export default function AdminDomainEmails() {
                   label={t("All")}
                   onSelect={applyStatusFilter}
                   value="all"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "pending"}
+                  count={stats.status.pending}
+                  label={t("Pending")}
+                  onSelect={applyStatusFilter}
+                  value="pending"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "validating"}
+                  count={stats.status.validating}
+                  label={t("Validating")}
+                  onSelect={applyStatusFilter}
+                  value="validating"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "normal"}

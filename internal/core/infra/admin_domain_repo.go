@@ -106,6 +106,12 @@ func (r *AdminResourceRepo) AdminDomainFacets(ctx context.Context, filter coreap
 	}
 	for _, row := range statusRows {
 		switch domain.MailDomainStatus(row.Key) {
+		case domain.DomainStatusPending:
+			result.Status.Pending = row.Count
+			result.Status.All += row.Count
+		case domain.DomainStatusValidating:
+			result.Status.Validating = row.Count
+			result.Status.All += row.Count
 		case domain.DomainStatusNormal:
 			result.Status.Normal = row.Count
 			result.Status.All += row.Count

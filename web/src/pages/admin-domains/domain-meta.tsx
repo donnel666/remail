@@ -12,8 +12,10 @@ import type {
 
 const STATUS_TAG: Record<
   AdminDomainStatus,
-  { color: "green" | "orange" | "grey" | "red"; label: string }
+  { color: "green" | "blue" | "orange" | "grey" | "red"; label: string }
 > = {
+  pending: { color: "blue", label: "Pending" },
+  validating: { color: "orange", label: "Validating" },
   normal: { color: "green", label: "Normal" },
   abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },

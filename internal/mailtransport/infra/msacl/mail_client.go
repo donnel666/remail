@@ -26,6 +26,10 @@ type MailboxReader interface {
 	SearchByContent(ctx context.Context, content string, limit int) ([]EmailObj, error)
 }
 
+type MaskedMailboxReader interface {
+	ListMasked(ctx context.Context, maskedMailbox string, limit int) ([]EmailObj, error)
+}
+
 var mailboxReaderState = struct {
 	sync.RWMutex
 	reader MailboxReader
@@ -194,7 +198,7 @@ func createTempMailbox(ctx context.Context, accountEmail string, preferredBindin
 	if err := contextOrBackground(ctx).Err(); err != nil {
 		return "", wrapAuthError(fmt.Sprintf("生成辅助邮箱取消: %s", err), AuthStatusRequestError, err)
 	}
-	if preferred := strings.ToLower(strings.TrimSpace(preferredBindingAddress)); preferred != "" {
+	if preferred := normalizeRecoveryMailbox(preferredBindingAddress); preferred != "" {
 		logInfo("使用导入指定辅助邮箱")
 		logDebug("辅助邮箱地址: %s", preferred)
 		return preferred, nil
@@ -275,6 +279,30 @@ func mailListByContent(ctx context.Context, content, proxy string, limit int) ([
 		return reader.SearchByContent(ctx, content, limit)
 	}
 	return cloudMailListByContent(ctx, content, proxy, limit)
+}
+
+func mailListMasked(ctx context.Context, maskedMailbox, proxy string, limit int) ([]EmailObj, error) {
+	if reader := activeMailboxReader(); reader != nil {
+		if maskedReader, ok := reader.(MaskedMailboxReader); ok {
+			return maskedReader.ListMasked(ctx, maskedMailbox, limit)
+		}
+	}
+	local, _, ok := strings.Cut(strings.ToLower(strings.TrimSpace(maskedMailbox)), "@")
+	if !ok {
+		return nil, nil
+	}
+	prefix := strings.SplitN(local, "*", 2)[0]
+	emails, err := mailList(ctx, prefix, proxy, limit, true)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]EmailObj, 0, len(emails))
+	for _, email := range emails {
+		if mailboxMatchesMasked(maskedMailbox, email.To) {
+			filtered = append(filtered, email)
+		}
+	}
+	return filtered, nil
 }
 
 func cloudMailListByContent(ctx context.Context, content, proxy string, limit int) ([]EmailObj, error) {
@@ -422,6 +450,89 @@ func snapshotMailboxKeys(ctx context.Context, mailbox, proxy string) (map[string
 		keys[mailMessageKey(email)] = struct{}{}
 	}
 	return keys, nil
+}
+
+func snapshotMaskedMailboxKeys(ctx context.Context, maskedMailbox, proxy string) (map[string]struct{}, error) {
+	emails, err := mailListMasked(ctx, maskedMailbox, proxy, 50)
+	if err != nil {
+		return nil, err
+	}
+	keys := make(map[string]struct{}, len(emails))
+	for _, email := range emails {
+		keys[mailMessageKey(email)] = struct{}{}
+	}
+	return keys, nil
+}
+
+func mailWaitMaskedCode(ctx context.Context, maskedMailbox, proxy string, timeout int, seenKeys map[string]struct{}) (string, string, error) {
+	ctx = contextOrBackground(ctx)
+	if timeout <= 0 {
+		timeout = mailPollTimeout
+	}
+	if seenKeys == nil {
+		seenKeys = map[string]struct{}{}
+	}
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return "", "", wrapAuthError("掩码辅助邮箱验证码轮询取消", AuthStatusRequestError, err)
+		}
+		emails, err := mailListMasked(ctx, maskedMailbox, proxy, 50)
+		if err != nil {
+			if err := sleepContext(ctx, time.Duration(normalizedMailPollInterval())*time.Second); err != nil {
+				return "", "", err
+			}
+			continue
+		}
+		code, recipient, ambiguous := uniqueMaskedCodeCandidate(maskedMailbox, emails, seenKeys)
+		if ambiguous {
+			return "", "", newAuthError("掩码辅助邮箱匹配到多个实际收件地址", AuthStatusVerifyCodeError)
+		}
+		if code != "" {
+			return code, recipient, nil
+		}
+		if err := sleepContext(ctx, time.Duration(normalizedMailPollInterval())*time.Second); err != nil {
+			return "", "", err
+		}
+	}
+	return "", "", newAuthError("辅助邮箱验证码接收超时", AuthStatusCodeTimeout)
+}
+
+func uniqueMaskedCodeCandidate(maskedMailbox string, emails []EmailObj, seenKeys map[string]struct{}) (string, string, bool) {
+	byRecipient := make(map[string]string)
+	ambiguous := false
+	for _, email := range emails {
+		if _, seen := seenKeys[mailMessageKey(email)]; seen {
+			continue
+		}
+		recipient := strings.ToLower(strings.TrimSpace(email.To))
+		if recipient == "" || !mailboxMatchesMasked(maskedMailbox, recipient) {
+			continue
+		}
+		if !isMicrosoftSecurityCodeEmail(email) {
+			continue
+		}
+		if code := extractCodeFromEmail(email); code != "" {
+			if previous, exists := byRecipient[recipient]; exists && previous != code {
+				ambiguous = true
+			} else if !exists {
+				byRecipient[recipient] = code
+			}
+		}
+	}
+	if ambiguous || len(byRecipient) != 1 {
+		return "", "", ambiguous || len(byRecipient) > 1
+	}
+	for recipient, code := range byRecipient {
+		return code, recipient, false
+	}
+	return "", "", false
+}
+
+func isMicrosoftSecurityCodeEmail(email EmailObj) bool {
+	from := strings.ToLower(strings.TrimSpace(email.From))
+	return strings.Contains(from, "@accountprotection.microsoft.com") ||
+		strings.Contains(from, "account-security-noreply")
 }
 
 func mailWaitCode(ctx context.Context, mailbox, proxy string, timeout int, seenKeys map[string]struct{}) (string, error) {

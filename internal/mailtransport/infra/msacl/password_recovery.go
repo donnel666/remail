@@ -47,9 +47,10 @@ type PasswordRecoveryProbeResult struct {
 	BindingAmbiguous     bool
 }
 
-// PasswordRecoveryConfirmationOptions identifies the exact locally recovered
-// mailbox that may receive one verification code. This flow never calls the
-// password-reset endpoint and never changes account credentials.
+// PasswordRecoveryConfirmationOptions identifies either the exact locally
+// recovered mailbox or Microsoft's masked proof that may receive one
+// verification code. This flow never calls the password-reset endpoint and
+// never changes account credentials.
 type PasswordRecoveryConfirmationOptions struct {
 	PreferredBindingAddress string
 	ExpectedBindingAddress  string
@@ -125,7 +126,7 @@ func ProbePasswordRecovery(ctx context.Context, email, proxy, preferredBindingAd
 // sends one OTP to the uniquely resolved expected mailbox, and verifies the
 // code. It stops immediately after verification and cannot reset the password.
 func ConfirmPasswordRecoveryBinding(ctx context.Context, email, proxy string, options PasswordRecoveryConfirmationOptions) (PasswordRecoveryConfirmationResult, error) {
-	if normalizeRecoveryMailbox(options.ExpectedBindingAddress) == "" {
+	if normalizeExpectedRecoveryBinding(options.ExpectedBindingAddress) == "" {
 		return PasswordRecoveryConfirmationResult{}, newAuthError("Microsoft recovery confirmation requires an expected recovery mailbox.", AuthStatusRequestError)
 	}
 	session, err := newBrowserSession(ctx, proxy)
@@ -136,7 +137,7 @@ func ConfirmPasswordRecoveryBinding(ctx context.Context, email, proxy string, op
 }
 
 func confirmPasswordRecoveryBindingWithSession(session *Session, email, proxy string, options PasswordRecoveryConfirmationOptions) (PasswordRecoveryConfirmationResult, error) {
-	expectedBinding := normalizeRecoveryMailbox(options.ExpectedBindingAddress)
+	expectedBinding := normalizeExpectedRecoveryBinding(options.ExpectedBindingAddress)
 	if expectedBinding == "" {
 		return PasswordRecoveryConfirmationResult{}, newAuthError("Microsoft recovery confirmation requires an expected recovery mailbox.", AuthStatusRequestError)
 	}
@@ -300,16 +301,36 @@ func verifyPasswordRecoveryBindingWithSession(
 	if err != nil {
 		return result, err
 	}
-	if !probe.BindingResolved || probe.BindingAddress == "" {
+	maskedProof := normalizeRecoveryMask(probe.MaskedBindingAddress)
+	resolveByRecipient := !probe.BindingResolved || probe.BindingAddress == ""
+	if expectedMask := normalizeRecoveryMask(expectedBinding); expectedMask != "" {
+		maskedProof = expectedMask
+		resolveByRecipient = true
+	} else if expectedMailbox := normalizeRecoveryMailbox(expectedBinding); expectedMailbox != "" && resolveByRecipient {
+		if maskedProof == "" || !mailboxMatchesMasked(maskedProof, expectedMailbox) {
+			return result, newAuthError("Microsoft recovery mailbox changed before verification.", AuthStatusUnknownMailbox)
+		}
+		probe.BindingAddress = expectedMailbox
+		probe.BindingResolved = true
+		result.probe = probe
+		resolveByRecipient = false
+	}
+	if resolveByRecipient && (maskedProof == "" || !UsesActiveAuxiliaryDomain(maskedProof)) {
 		return result, newAuthError("Microsoft recovery mailbox could not be resolved uniquely.", AuthStatusUnknownMailbox)
 	}
-	if normalizeRecoveryMailbox(probe.BindingAddress) != normalizeRecoveryMailbox(expectedBinding) {
-		return result, newAuthError("Microsoft recovery mailbox changed before verification.", AuthStatusUnknownMailbox)
+	if !resolveByRecipient {
+		if normalizeRecoveryMailbox(probe.BindingAddress) != normalizeRecoveryMailbox(expectedBinding) {
+			return result, newAuthError("Microsoft recovery mailbox changed before verification.", AuthStatusUnknownMailbox)
+		}
+		if eligibility := EvaluateActiveBindingRecoveryEligibility(session.context(), probe); !eligibility.Allowed {
+			return result, newAuthError("Microsoft recovery mailbox is no longer eligible for verification.", AuthStatusUnknownMailbox)
+		}
 	}
-	if eligibility := EvaluateActiveBindingRecoveryEligibility(session.context(), probe); !eligibility.Allowed {
-		return result, newAuthError("Microsoft recovery mailbox is no longer eligible for verification.", AuthStatusUnknownMailbox)
+	proofAddress := probe.BindingAddress
+	if resolveByRecipient {
+		proofAddress = maskedProof
 	}
-	proof, err := selectPasswordRecoveryEmailProof(flow.proofs, probe.BindingAddress)
+	proof, err := selectPasswordRecoveryEmailProof(flow.proofs, proofAddress)
 	if err != nil {
 		return result, err
 	}
@@ -317,10 +338,20 @@ func verifyPasswordRecoveryBindingWithSession(
 	if flow.apiCanary == "" || flow.recoveryToken == "" || flow.uaid == "" {
 		return result, newAuthError("Microsoft password recovery session is incomplete.", AuthStatusAuthTimeout)
 	}
-
-	seenKeys, err := snapshotMailboxKeys(session.context(), probe.BindingAddress, proxy)
+	lease, err := claimCodeMailLease(session.context(), proof.Name)
 	if err != nil {
-		return result, wrapAuthError("读取辅助邮箱基线失败", AuthStatusRequestError, err, probe.BindingAddress)
+		return result, err
+	}
+	defer lease.releaseIfUnsent(session.context())
+
+	var seenKeys map[string]struct{}
+	if resolveByRecipient {
+		seenKeys, err = snapshotMaskedMailboxKeys(session.context(), maskedProof, proxy)
+	} else {
+		seenKeys, err = snapshotMailboxKeys(session.context(), probe.BindingAddress, proxy)
+	}
+	if err != nil {
+		return result, wrapAuthError("读取辅助邮箱基线失败", AuthStatusRequestError, err, proofAddress)
 	}
 	watchTimeout := codeTimeout
 	if watchTimeout <= 0 {
@@ -330,16 +361,35 @@ func verifyPasswordRecoveryBindingWithSession(
 	if watchSeconds <= 0 {
 		watchSeconds = 1
 	}
-	watchCtx, cancelWatcher := context.WithCancel(session.context())
-	defer cancelWatcher()
-	watcher := startCodeWatcher(watchCtx, probe.BindingAddress, proxy, watchSeconds, seenKeys)
+	var watcher *MailWatcher
+	if !resolveByRecipient {
+		watchCtx, cancelWatcher := context.WithCancel(session.context())
+		defer cancelWatcher()
+		watcher = startCodeWatcher(watchCtx, probe.BindingAddress, proxy, watchSeconds, seenKeys)
+	}
 
-	if err := sendPasswordRecoveryOTT(session, flow, proof, probe.BindingAddress); err != nil {
+	if err := lease.markSent(session.context()); err != nil {
 		return result, err
 	}
-	code, err := watcher.getCode(watchSeconds + normalizedMailPollInterval() + normalizedMailLateArrivalGrace() + 5)
+	if err := sendPasswordRecoveryOTT(session, flow, proof, proofAddress); err != nil {
+		return result, err
+	}
+	var code string
+	if resolveByRecipient {
+		code, probe.BindingAddress, err = mailWaitMaskedCode(session.context(), maskedProof, proxy, watchSeconds, seenKeys)
+		probe.BindingAddress = normalizeRecoveryMailbox(probe.BindingAddress)
+		probe.BindingResolved = probe.BindingAddress != ""
+		result.probe = probe
+	} else {
+		code, err = watcher.getCode(watchSeconds + normalizedMailPollInterval() + normalizedMailLateArrivalGrace() + 5)
+	}
 	if err != nil {
 		return result, err
+	}
+	if resolveByRecipient {
+		if eligibility := EvaluateActiveBindingRecoveryEligibility(session.context(), probe); !eligibility.Allowed {
+			return result, newAuthError("Microsoft recovery mailbox is no longer eligible for verification.", AuthStatusUnknownMailbox)
+		}
 	}
 	verification, err := verifyPasswordRecoveryCode(session, flow, proof, probe.BindingAddress, code)
 	if err != nil {
@@ -463,7 +513,8 @@ func buildPasswordRecoveryProbeResult(ctx context.Context, proofs []passwordReco
 func selectPasswordRecoveryEmailProof(proofs []passwordRecoveryProof, bindingAddress string) (passwordRecoveryProof, error) {
 	var matches []passwordRecoveryProof
 	for _, proof := range proofs {
-		if isPasswordRecoveryEmailProof(proof) && proof.EPID != "" && mailboxMatchesMasked(proof.Name, bindingAddress) {
+		if isPasswordRecoveryEmailProof(proof) && proof.EPID != "" &&
+			(normalizeRecoveryMailbox(proof.Name) == normalizeRecoveryMailbox(bindingAddress) || mailboxMatchesMasked(proof.Name, bindingAddress)) {
 			matches = append(matches, proof)
 		}
 	}
@@ -471,6 +522,13 @@ func selectPasswordRecoveryEmailProof(proofs []passwordRecoveryProof, bindingAdd
 		return passwordRecoveryProof{}, newAuthError("Microsoft recovery email proof is missing or ambiguous.", AuthStatusUnknownMailbox)
 	}
 	return matches[0], nil
+}
+
+func normalizeExpectedRecoveryBinding(value string) string {
+	if mailbox := normalizeRecoveryMailbox(value); mailbox != "" {
+		return mailbox
+	}
+	return normalizeRecoveryMask(value)
 }
 
 func isPasswordRecoveryEmailProof(proof passwordRecoveryProof) bool {

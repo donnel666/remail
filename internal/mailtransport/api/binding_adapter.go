@@ -72,7 +72,6 @@ func (a *MicrosoftValidationBindingCommitAdapter) CommitValidationBinding(ctx co
 			AccountEmail: command.AccountEmail,
 			Address:      observation.Address,
 			Status:       observation.Status,
-			BoundDisplay: observation.BoundDisplay,
 			SafeMessage:  observation.SafeMessage,
 		})
 		if err != nil {

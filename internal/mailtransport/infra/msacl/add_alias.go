@@ -1083,7 +1083,7 @@ func mapExplicitAliasError(err error) ExplicitAliasResult {
 	case AuthStatusAlreadyBound:
 		display := ""
 		if authErr != nil {
-			display = strings.TrimSpace(firstNonEmpty(authErr.BoundDisplay, authErr.BoundMailbox))
+			display = strings.TrimSpace(authErr.BoundMailbox)
 		}
 		message := "Microsoft account recovery mailbox cannot be used."
 		if display != "" {

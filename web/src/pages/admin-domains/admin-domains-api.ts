@@ -3,7 +3,13 @@ import { apiClient as client, csrfHeader, unwrap } from "@/lib/api-client";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 
 export type AdminDomainPurpose = "not_sale" | "sale" | "binding";
-export type AdminDomainStatus = "normal" | "abnormal" | "disabled" | "deleted";
+export type AdminDomainStatus =
+  | "pending"
+  | "validating"
+  | "normal"
+  | "abnormal"
+  | "disabled"
+  | "deleted";
 export type AdminMailServerStatus = "online" | "offline" | "disabled";
 export type AdminMailboxStatus = "normal" | "disabled";
 export type AdminOwnerRole = "user" | "supplier" | "admin" | "super_admin";
@@ -63,7 +69,7 @@ export interface AdminDomainOrder {
 
 export interface AdminDomainTask {
   id: number;
-  kind: "validation" | "alias_replenishment" | "mail_fetch";
+  kind: "alias_replenishment" | "mail_fetch";
   status: "queued" | "running" | "succeeded" | "failed";
   remainingAttempts: number;
   queuedAt: string;
@@ -706,12 +712,7 @@ function adminDomainTask(item: TaskDTO): AdminDomainTask {
   const sourceId = Number(parts[parts.length - 1]);
   return {
     id: Number.isFinite(sourceId) ? sourceId : 0,
-    kind:
-      item.kind === "validation"
-        ? "validation"
-        : item.kind === "fetch"
-          ? "mail_fetch"
-          : "alias_replenishment",
+	  kind: item.kind === "fetch" ? "mail_fetch" : "alias_replenishment",
     status:
       item.status === "queued" ||
       item.status === "running" ||

@@ -32,11 +32,13 @@ type adminDomainItemResponse struct {
 }
 
 type adminDomainStatusFacetsResponse struct {
-	All      int64 `json:"all"`
-	Normal   int64 `json:"normal"`
-	Abnormal int64 `json:"abnormal"`
-	Disabled int64 `json:"disabled"`
-	Deleted  int64 `json:"deleted"`
+	All        int64 `json:"all"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
+	Normal     int64 `json:"normal"`
+	Abnormal   int64 `json:"abnormal"`
+	Disabled   int64 `json:"disabled"`
+	Deleted    int64 `json:"deleted"`
 }
 
 type adminDomainPurposeFacetsResponse struct {
@@ -330,7 +332,26 @@ func (h *CoreHandler) PostAdminDomainRecover(c *gin.Context) {
 }
 
 func (h *CoreHandler) PostAdminDomainValidations(c *gin.Context) {
-	h.applyAdminDomainBulk(c, "validate", true)
+	if h.module == nil || h.module.AdminDomainCommands == nil || !requireAdminIdempotencyKey(c) {
+		return
+	}
+	var req adminDomainBulkCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeAdminInvalidBody(c, err)
+		return
+	}
+	selection, ok := toAdminDomainBulkSelection(c, req.Selection)
+	if !ok {
+		return
+	}
+	result, err := h.module.AdminDomainCommands.SubmitValidationBatch(
+		c.Request.Context(), selection, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+	)
+	if err != nil {
+		writeAdminResourceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, adminDomainValidationResponse{Queued: result.Queued})
 }
 
 func (h *CoreHandler) PostAdminDomainsDisable(c *gin.Context) {
@@ -590,7 +611,8 @@ func toAdminDomainListResponse(result *coreapp.AdminDomainListResult) adminDomai
 		Items: items, Total: result.Total, Offset: result.Offset, Limit: result.Limit, NextAfterID: result.NextAfterID,
 		Facets: adminDomainFacetsResponse{
 			Status: adminDomainStatusFacetsResponse{
-				All: result.Facets.Status.All, Normal: result.Facets.Status.Normal, Abnormal: result.Facets.Status.Abnormal,
+				All: result.Facets.Status.All, Pending: result.Facets.Status.Pending, Validating: result.Facets.Status.Validating,
+				Normal: result.Facets.Status.Normal, Abnormal: result.Facets.Status.Abnormal,
 				Disabled: result.Facets.Status.Disabled, Deleted: result.Facets.Status.Deleted,
 			},
 			Purpose: adminDomainPurposeFacetsResponse{

@@ -879,7 +879,7 @@ export interface paths {
         put?: never;
         /**
          * Queue asynchronous resource validation
-         * @description Creates a durable validation job and returns immediately. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in the backend worker.
+         * @description Marks the resource pending and returns immediately. The dispatcher assigns bounded Redis/Asynq work according to current system capacity; Microsoft OAuth/Graph checks and domain DNS checks never run in HTTP.
          */
         post: operations["postResourceValidate"];
         delete?: never;
@@ -899,26 +899,9 @@ export interface paths {
         put?: never;
         /**
          * Queue asynchronous resource validations in batch
-         * @description Persists the selection as a durable batch and returns immediately; child validation jobs are expanded later under the current background-work budget. Filter batches capture an inclusive resource-ID high-water mark, so resources created after acceptance are excluded. Microsoft OAuth/Graph checks and domain DNS checks run asynchronously in backend workers. This endpoint is the batch counterpart of POST /v1/resources/{resourceId}/validate and avoids client-side request loops.
+         * @description Enqueues the selection as an ephemeral Redis/Asynq cursor and returns immediately. The worker expands Microsoft and Domain selections one bounded page at a time and changes matching resources to pending. The dispatcher then changes only a capacity-bounded set to validating and enqueues their Redis tasks. Completed page and resource tasks are removed immediately; no validation batch or job history is stored in MySQL or retained in Redis. This endpoint is the batch counterpart of POST /v1/resources/{resourceId}/validate and avoids client-side request loops.
          */
         post: operations["postResourceValidations"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/resources/validations/{validationId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get resource validation status */
-        get: operations["getResourceValidation"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1684,7 +1667,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Queue validation for selected or all matching domains */
+        /**
+         * Queue validation for selected or all matching domains
+         * @description Stores only an ephemeral Redis/Asynq cursor. The worker marks bounded pages pending, and the capacity-aware dispatcher creates temporary per-domain Redis tasks that are deleted immediately after completion.
+         */
         post: operations["postAdminDomainValidations"];
         delete?: never;
         options?: never;
@@ -2024,7 +2010,7 @@ export interface paths {
         put?: never;
         /**
          * Validate selected or all matching Microsoft resources
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selection modes persist a durable batch before returning 202. Filter mode captures the normalized filter and an ID high-water mark; the client must not enumerate all matching IDs.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selections are queued as ephemeral Redis/Asynq cursors. Filter mode is expanded in bounded pages; the client must not enumerate all matching IDs.
          */
         post: operations["postAdminMicrosoftResourceValidations"];
         delete?: never;
@@ -2136,7 +2122,7 @@ export interface paths {
         head?: never;
         /**
          * Atomically edit a Microsoft resource
-         * @description Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`; supplying `bindingAddress` additionally requires `mailtransport:binding/write`. Session authentication, CSRF, and an idempotency key are required. Resource, owner, current binding input, optional complete credentials, validation fact, and OperationLog are committed atomically. `status`, derived health, task state, and binding verification state are not accepted. Email or owner changes conflict with an active Allocation.
+         * @description Base fields require `core:resource/write`. Supplying `forSale` or `credentials` additionally requires `core:resource/operate`; supplying `bindingAddress` additionally requires `mailtransport:binding/write`. Session authentication, CSRF, and an idempotency key are required. Resource, owner, current binding input, optional complete credentials, pending state, and OperationLog are committed atomically. `status`, derived health, task state, and binding verification state are not accepted. Email or owner changes conflict with an active Allocation.
          */
         patch: operations["patchAdminMicrosoftResource"];
         trace?: never;
@@ -2151,7 +2137,7 @@ export interface paths {
         get?: never;
         /**
          * Replace Microsoft credentials as one write-only set
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The complete credential set replaces the previous revision, clears derived token health, moves the resource to pending, and creates or reuses a durable validation fact in the same transaction. No credential value is returned.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The complete credential set replaces the previous revision, clears derived token health, and moves the resource to pending. The dispatcher later assigns an ephemeral Redis task. No credential value is returned.
          */
         put: operations["putAdminMicrosoftResourceCredentials"];
         post?: never;
@@ -2172,7 +2158,7 @@ export interface paths {
         put?: never;
         /**
          * Validate one Microsoft resource
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Creates or reuses the resource's active durable validation and returns only after that fact commits. Disabled and deleted resources return 409; Microsoft network work never runs in the HTTP transaction.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Marks the resource pending and wakes the capacity-aware Redis dispatcher. Disabled and deleted resources return 409; Microsoft network work never runs in the HTTP transaction.
          */
         post: operations["postAdminMicrosoftResourceValidate"];
         delete?: never;
@@ -2192,7 +2178,7 @@ export interface paths {
         put?: never;
         /**
          * Enable a disabled Microsoft resource
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Atomically changes `disabled` to `pending`, clears untrusted derived health, and creates or reuses a validation fact. The 200 response confirms the durable local state, not successful Microsoft validation.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Atomically changes `disabled` to `pending` and clears untrusted derived health. The dispatcher later assigns an ephemeral Redis task; the 200 response does not imply successful Microsoft validation.
          */
         post: operations["postAdminMicrosoftResourceEnable"];
         delete?: never;
@@ -2272,7 +2258,7 @@ export interface paths {
         put?: never;
         /**
          * Recover a logically deleted Microsoft resource
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Atomically changes a deleted resource to pending and private, clears derived health, and creates or reuses validation. A non-deleted resource, stale version, or reused email identity returns 409.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, an idempotency key, and the last observed integer resource `version`. Atomically changes a deleted resource to pending and private, clears derived health, and notifies the Redis dispatcher after commit. A non-deleted resource, stale version, or reused email identity returns 409.
          */
         post: operations["postAdminMicrosoftResourceRecover"];
         delete?: never;
@@ -3058,6 +3044,7 @@ export interface components {
             all: number;
             normal: number;
             pending: number;
+            validating: number;
             abnormal: number;
             disabled: number;
         };
@@ -3074,7 +3061,7 @@ export interface components {
             id: number;
             type: string;
             ownerId: number;
-            /** @description Resource status (e.g., pending/normal/abnormal/disabled/deleted) */
+            /** @description Resource status (pending waits for assignment; validating has a live Redis/Asynq assignment). */
             status?: string;
             /** @description Microsoft resource is available for sale (Microsoft resources only) */
             forSale?: boolean;
@@ -3129,7 +3116,7 @@ export interface components {
              * @enum {string}
              */
             purpose: "not_sale" | "sale" | "binding";
-            /** @description Domain resource status (normal/abnormal/disabled/deleted) */
+            /** @description Domain resource status (pending/validating/normal/abnormal/disabled/deleted) */
             status: string;
             lastSafeError?: string;
             /** Format: date-time */
@@ -3146,20 +3133,6 @@ export interface components {
             /** @enum {string} */
             status: "processing" | "imported" | "failed";
             imported: number;
-            lastSafeError?: string;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        ResourceValidationResponse: {
-            validationId: number;
-            resourceId: number;
-            /** @enum {string} */
-            resourceType: "microsoft" | "domain";
-            /** @enum {string} */
-            status: "queued" | "running" | "succeeded" | "failed";
-            /** @description Sanitized validation diagnostic. Never contains credentials, tokens, email bodies, or upstream raw details. */
             lastSafeError?: string;
             /** Format: date-time */
             createdAt: string;
@@ -3418,9 +3391,9 @@ export interface components {
             accesses?: components["schemas"]["ProjectAccess"][];
         };
         ResourceValidationsResponse: {
-            /** @description Number of eligible resources matched by the submitted selection. */
+            /** @description Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred. */
             requested: number;
-            /** @description Number of resources actually moved into pending validation, plus any immediately persisted revalidation jobs. */
+            /** @description Number of explicit IDs accepted for asynchronous pending-state expansion. Filter submissions return zero until the Redis worker expands them. */
             queued: number;
         };
         PublishResourcesRequest: {
@@ -3803,7 +3776,7 @@ export interface components {
         AdminDomainBulkFilter: {
             search?: string;
             /** @enum {string} */
-            status?: "normal" | "abnormal" | "disabled" | "deleted";
+            status?: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
             /** @enum {string} */
             purpose?: "not_sale" | "sale" | "binding";
             tld?: string;
@@ -3850,7 +3823,7 @@ export interface components {
             /** @enum {string} */
             purpose: "not_sale" | "sale" | "binding";
             /** @enum {string} */
-            status: "normal" | "abnormal" | "disabled" | "deleted";
+            status: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
             /** @description Generated-mailbox count for ordinary domains; active Microsoft auxiliary-binding count for purpose=binding domains. */
             mailboxCount: number;
             lastSafeError?: string;
@@ -3872,6 +3845,8 @@ export interface components {
         AdminDomainFacets: {
             status: {
                 all: number;
+                pending: number;
+                validating: number;
                 normal: number;
                 abnormal: number;
                 disabled: number;
@@ -3927,7 +3902,7 @@ export interface components {
             createdAt: string;
         };
         /** @enum {string} */
-        AdminMicrosoftResourceStatus: "pending" | "normal" | "abnormal" | "disabled" | "deleted";
+        AdminMicrosoftResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
         /**
          * @description `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
          * @enum {string}
@@ -3993,6 +3968,8 @@ export interface components {
             all: number;
             /** Format: int64 */
             pending: number;
+            /** Format: int64 */
+            validating: number;
             /** Format: int64 */
             normal: number;
             /** Format: int64 */
@@ -4142,8 +4119,6 @@ export interface components {
         };
         AdminMicrosoftMutationResponse: {
             resource: components["schemas"]["AdminMicrosoftResourceDetail"];
-            /** @description Durable validation task created or reused by this mutation; null when the edit did not require validation. */
-            validationTask: components["schemas"]["AdminTaskView"] | null;
         };
         AdminMicrosoftBulkFilter: {
             /** @enum {string} */
@@ -4194,7 +4169,7 @@ export interface components {
             reasonCounts: components["schemas"]["AdminReasonCount"][];
         };
         /** @enum {string} */
-        AdminTaskKind: "validation" | "import" | "alias" | "token" | "fetch" | "bulk_validation" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        AdminTaskKind: "import" | "alias" | "token" | "fetch" | "bulk_validation" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
@@ -4216,7 +4191,7 @@ export interface components {
             taskId: string;
             kind: components["schemas"]["AdminTaskKind"];
             status: components["schemas"]["AdminTaskStatus"];
-            /** @description Credential revision fixed when a validation, token, or fetch task was submitted; null for tasks that do not read credentials. */
+            /** @description Credential revision fixed when a token or fetch task was submitted; null for tasks that do not read credentials. */
             credentialRevision: number | null;
             /** Format: date-time */
             updatedAt: string;
@@ -4230,7 +4205,7 @@ export interface components {
             attempts: number;
             maxAttempts: number;
             remainingAttempts: number;
-            /** @description Immutable credential revision captured at submission for validation, token, and fetch work; workers must not apply results to a different revision. */
+            /** @description Immutable credential revision captured at submission for token and fetch work; workers must not apply results to a different revision. */
             credentialRevision: number | null;
             /** Format: date-time */
             queuedAt: string;
@@ -7900,7 +7875,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResourceValidationResponse"];
+                    "application/json": components["schemas"]["ResourceValidationsResponse"];
                 };
             };
             /** @description Invalid resource id */
@@ -8004,55 +7979,6 @@ export interface operations {
             };
             /** @description Invalid resource status/filter */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getResourceValidation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                validationId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resource validation status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ResourceValidationResponse"];
-                };
-            };
-            /** @description Invalid validation id */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation job not found */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10914,7 +10840,7 @@ export interface operations {
                 search?: string;
                 mailServerId?: number;
                 purpose?: "not_sale" | "sale" | "binding";
-                status?: "normal" | "abnormal" | "disabled" | "deleted";
+                status?: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
                 tld?: string;
                 ownerId?: number;
                 createdFrom?: string;
@@ -11732,13 +11658,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Durable validation batch accepted */
+            /** @description Ephemeral Redis validation batch accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                    "application/json": components["schemas"]["ResourceValidationsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12003,7 +11929,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Atomic edit committed; validationTask is null when no validation was required */
+            /** @description Atomic edit committed; changes that require validation leave the resource pending */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12041,7 +11967,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential revision replaced and validation durably accepted */
+            /** @description Credential revision replaced and resource left pending for Redis validation */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12075,13 +12001,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Durable validation accepted or an active validation reused */
+            /** @description Resource validation accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                    "application/json": components["schemas"]["ResourceValidationsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12112,7 +12038,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Resource is pending and validation is durably accepted */
+            /** @description Resource is pending and the Redis dispatcher is notified */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12254,7 +12180,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Resource recovered to pending and validation durably accepted */
+            /** @description Resource recovered to pending and the Redis dispatcher is notified */
             200: {
                 headers: {
                     [name: string]: unknown;

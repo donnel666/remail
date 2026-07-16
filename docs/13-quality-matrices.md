@@ -349,7 +349,7 @@ API/SDK：
 - [ ] 每条 `explicit_aliases.owner_user_id` 必须是成功事务中按 `users.id ASC` 确定并共享锁定的第一个 `role=super_admin`；不得继承主资源供应商 owner，不得为空，也不得降级给普通 admin。历史记录迁移和重复 alias 再确认都必须收敛到该 owner；系统没有 `super_admin` 时成功落库整体回滚。
 - [ ] 交易走同步请求路径即时成交；接码拉取额外获得 32-worker 专用实时池，长任务占满共享池时也保证有 worker 可用。
 - [ ] 异步执行分为 32-worker 接码实时池、64-worker 邮件交付/default 前台池和 32-worker 验证/显式别名后台池；后台两队列都有积压时按 3:1 调度，单队列可借满空闲容量。
-- [ ] 验证/显式别名 dispatch outstanding 水位按 idle/moderate/busy/critical 动态限制为 64/16/2/0；任务真正领取 durable job 或发起外部请求前还须经过全实例共享的 execution admission，执行上限为 32/8/2/0，繁忙时已经进入 Redis 的任务也必须让路。
+- [ ] 资源验证 dispatcher 必须保证全库 `validating` 临时分配水位不超过当前自适应 execution window，不能因周期唤醒持续堆积 Redis；显式别名仍从 durable schedule 领取，并在发起外部请求前经过同一 execution admission。
 
 ### 12.3 数据保留
 

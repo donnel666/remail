@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,40 +337,39 @@ func TestRecoverBindingForValidationSkipsCompleteVerifiedBindingWithoutProbe(t *
 	require.Zero(t, probeCalls)
 }
 
-func TestBindingSnapshotRequiresCompleteVerifiedAddress(t *testing.T) {
+func TestBindingSnapshotUsesConcreteAddressIndependentOfExecutionStatus(t *testing.T) {
 	const accountEmail = "owner@example.test"
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(nil, accountEmail))
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
+	require.False(t, bindingSnapshotHasConcreteAddress(nil, accountEmail))
+	require.False(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingVerified,
 		AccountEmail:   accountEmail,
 		BindingAddress: "qa*****@recovery.test",
 	}, accountEmail))
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
+	require.True(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingPending,
 		AccountEmail:   accountEmail,
 		BindingAddress: "qa01@recovery.test",
 	}, accountEmail))
-	require.True(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
+	require.True(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingVerified,
 		AccountEmail:   accountEmail,
 		BindingAddress: "qa01@recovery.test",
 	}, accountEmail))
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
+	require.False(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingVerified,
 		AccountEmail:   "old-owner@example.test",
 		BindingAddress: "qa01@recovery.test",
 	}, accountEmail))
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
-		Status:         maildomain.MicrosoftBindingVerified,
-		AccountEmail:   accountEmail,
-		BindingAddress: "qa01@recovery.test",
-		BoundDisplay:   "qa***@recovery.test",
-	}, accountEmail))
-	require.False(t, bindingSnapshotHasCompleteVerifiedAddress(&maildomain.MicrosoftBindingMailbox{
+	require.True(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingVerified,
 		AccountEmail:   accountEmail,
 		BindingAddress: "qa01@recovery.test",
 		CodeMessageID:  "legacy-code-message",
+	}, accountEmail))
+	require.False(t, bindingSnapshotHasConcreteAddress(&maildomain.MicrosoftBindingMailbox{
+		Status:         maildomain.MicrosoftBindingExpired,
+		AccountEmail:   accountEmail,
+		BindingAddress: "qa01@recovery.test",
 	}, accountEmail))
 	require.Empty(t, bindingSnapshotPreferredAddress(&maildomain.MicrosoftBindingMailbox{
 		Status:         maildomain.MicrosoftBindingVerified,
@@ -402,7 +402,7 @@ func TestPrepareBindingAddressReplacesMaskedSnapshotWithDeterministicCandidate(t
 	}
 	expected := deterministicBindingAddress(t, req.EmailAddress)
 
-	actual, err := adapter.prepareBindingAddress(req, "qa*****@recovery.test")
+	actual, err := adapter.prepareBindingAddress(req, maskedBindingAddress(t, expected))
 
 	require.NoError(t, err)
 	require.Equal(t, expected, actual)
@@ -421,27 +421,28 @@ func TestShouldFallbackRefreshTokenOnlyForExplicitExpiredCategories(t *testing.T
 	}
 }
 
-func TestBindingObservationNeverPersistsMaskedAddress(t *testing.T) {
+func TestBindingObservationPersistsMaskInBindingAddress(t *testing.T) {
 	observation := bindingObservationFromOAuthResult(mailinfra.MicrosoftOAuthResult{
 		BindingAddress: "QA*****@Recovery.test",
 		BindingStatus:  string(maildomain.MicrosoftBindingFailed),
 		SafeMessage:    "Microsoft account is already bound.",
 	})
 	require.Equal(t, &coreapp.MicrosoftBindingObservation{
-		Status:       string(maildomain.MicrosoftBindingFailed),
-		BoundDisplay: "qa*****@recovery.test",
-		SafeMessage:  "Microsoft account is already bound.",
+		Address:     "qa*****@recovery.test",
+		Status:      string(maildomain.MicrosoftBindingFailed),
+		SafeMessage: "Microsoft account is already bound.",
 	}, observation)
 }
 
 func TestPreparedBindingObservationUsesOnlyCompleteCandidate(t *testing.T) {
 	result := coreapp.MicrosoftValidationResult{BindingObservation: &coreapp.MicrosoftBindingObservation{
-		Status:       string(maildomain.MicrosoftBindingFailed),
-		BoundDisplay: "qa*****@recovery.test",
+		Address: "qa*****@recovery.test",
+		Status:  string(maildomain.MicrosoftBindingFailed),
 	}}
 	ensurePreparedBindingObservation(&result, mailinfra.MicrosoftOAuthResult{}, "qa*****@recovery.test")
-	require.Empty(t, result.BindingObservation.Address)
+	require.Equal(t, "qa*****@recovery.test", result.BindingObservation.Address)
 
+	result.BindingObservation.Address = ""
 	ensurePreparedBindingObservation(&result, mailinfra.MicrosoftOAuthResult{}, "qalpha01@recovery.test")
 	require.Equal(t, "qalpha01@recovery.test", result.BindingObservation.Address)
 }
@@ -702,7 +703,7 @@ func TestValidateMicrosoftRTWithCompleteVerifiedBindingSkipsPasswordAndRecovery(
 	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftLegacyVerifiedSnapshotMustPassCurrentBindingFlow(t *testing.T) {
+func TestValidateMicrosoftLegacyBindingMetadataDoesNotBlockRTSuccess(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*maildomain.MicrosoftBindingMailbox)
@@ -711,12 +712,6 @@ func TestValidateMicrosoftLegacyVerifiedSnapshotMustPassCurrentBindingFlow(t *te
 			name: "stale_account_email",
 			mutate: func(binding *maildomain.MicrosoftBindingMailbox) {
 				binding.AccountEmail = "old-account@example.test"
-			},
-		},
-		{
-			name: "stale_bound_display",
-			mutate: func(binding *maildomain.MicrosoftBindingMailbox) {
-				binding.BoundDisplay = "ve*****@recovery.test"
 			},
 		},
 		{
@@ -763,12 +758,9 @@ func TestValidateMicrosoftLegacyVerifiedSnapshotMustPassCurrentBindingFlow(t *te
 
 			require.NoError(t, err)
 			require.True(t, result.Valid)
-			require.Equal(t, 1, oauth.acquireCalls, "legacy verified metadata cannot bypass current password binding confirmation")
+			require.Zero(t, oauth.acquireCalls)
 			require.Zero(t, probeCalls)
-			require.Equal(t, &coreapp.MicrosoftBindingObservation{
-				Address: "verified@recovery.test",
-				Status:  string(maildomain.MicrosoftBindingVerified),
-			}, result.BindingObservation)
+			require.Nil(t, result.BindingObservation)
 		})
 	}
 }
@@ -808,7 +800,7 @@ func TestValidateMicrosoftRTIdentityMismatchKeepsRotatedCredentialsButFailsResou
 	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftRTUnresolvedBindingUsesSupplementaryPasswordButKeepsRefreshCredentials(t *testing.T) {
+func TestValidateMicrosoftRTUnresolvedBindingSkipsSupplementaryPassword(t *testing.T) {
 	proxies := purposeProxyStub()
 	oauth := &microsoftOAuthProtocolStub{
 		result:        verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
@@ -844,19 +836,16 @@ func TestValidateMicrosoftRTUnresolvedBindingUsesSupplementaryPasswordButKeepsRe
 	require.Equal(t, "refresh-client", fetcher.request.ClientID)
 	require.Equal(t, "refresh-token-2", fetcher.request.RefreshToken)
 	require.Equal(t, "refresh-access", fetcher.request.AccessToken)
-	require.Equal(t, 1, oauth.acquireCalls)
+	require.Zero(t, oauth.acquireCalls)
 	require.Zero(t, probeCalls)
-	require.Equal(t, &coreapp.MicrosoftBindingObservation{
-		Address: "verified@recovery.test",
-		Status:  string(maildomain.MicrosoftBindingVerified),
-	}, result.BindingObservation)
+	require.Nil(t, result.BindingObservation)
 	require.Equal(t, proxydomain.ProxyPurposeAuth, proxies.requests[0].Purpose)
-	require.Equal(t, proxydomain.ProxyPurposeBinding, proxies.requests[1].Purpose)
+	require.Len(t, proxies.requests, 1)
 }
 
-func TestValidateMicrosoftRTUnresolvedBindingRequiresPasswordAndPreservesRotatedRT(t *testing.T) {
+func TestValidateMicrosoftRTUnresolvedBindingWithoutPasswordKeepsResourceNormal(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{result: verifiedOAuthResult("rotated-client", "rotated-refresh", "rotated-access", "")}
-	fetcher := &microsoftMailFetcherStub{}
+	fetcher := successfulMicrosoftFetcher()
 	adapter := &ResourceValidationAdapter{
 		microsoft: oauth,
 		fetcher:   fetcher,
@@ -871,16 +860,17 @@ func TestValidateMicrosoftRTUnresolvedBindingRequiresPasswordAndPreservesRotated
 	})
 
 	require.NoError(t, err)
-	require.False(t, result.Valid)
-	require.Equal(t, "password", result.Category)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Category)
+	require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 	require.True(t, result.CredentialsAuthoritative)
 	require.Equal(t, "rotated-client", result.ClientID)
 	require.Equal(t, "rotated-refresh", result.RefreshToken)
 	require.Zero(t, oauth.acquireCalls)
-	require.Zero(t, fetcher.calls)
+	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftRTSupplementaryFailurePreservesRefreshCredentials(t *testing.T) {
+func TestValidateMicrosoftRTSupplementaryFailureKeepsResourceNormal(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{
 		result: verifiedOAuthResult("rotated-client", "rotated-refresh", "rotated-access", ""),
 		acquireResult: mailinfra.MicrosoftOAuthResult{
@@ -888,7 +878,7 @@ func TestValidateMicrosoftRTSupplementaryFailurePreservesRefreshCredentials(t *t
 			SafeMessage: "Microsoft authorization timed out.",
 		},
 	}
-	fetcher := &microsoftMailFetcherStub{}
+	fetcher := successfulMicrosoftFetcher()
 	adapter := &ResourceValidationAdapter{
 		microsoft:             oauth,
 		fetcher:               fetcher,
@@ -905,15 +895,16 @@ func TestValidateMicrosoftRTSupplementaryFailurePreservesRefreshCredentials(t *t
 	})
 
 	require.NoError(t, err)
-	require.False(t, result.Valid)
-	require.Equal(t, "auth_timeout", result.Category)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Category)
+	require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 	require.True(t, result.CredentialsAuthoritative)
 	require.Equal(t, "rotated-client", result.ClientID)
 	require.Equal(t, "rotated-refresh", result.RefreshToken)
-	require.Zero(t, fetcher.calls)
+	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftRTAlreadyBoundProbeCandidateRequiresPasswordConfirmation(t *testing.T) {
+func TestValidateMicrosoftRTSuccessDoesNotProbeOrConfirmBinding(t *testing.T) {
 	proxies := purposeProxyStub()
 	acquireCall := 0
 	oauth := &microsoftOAuthProtocolStub{
@@ -922,10 +913,10 @@ func TestValidateMicrosoftRTAlreadyBoundProbeCandidateRequiresPasswordConfirmati
 			acquireCall++
 			if acquireCall == 1 {
 				return mailinfra.MicrosoftOAuthResult{
-					Category:      "already_bound",
-					BoundDisplay:  "qa*****@recovery.test",
-					BindingStatus: string(maildomain.MicrosoftBindingFailed),
-					SafeMessage:   "Microsoft account is already bound to another recovery mailbox.",
+					Category:       "already_bound",
+					BindingAddress: "qa*****@recovery.test",
+					BindingStatus:  string(maildomain.MicrosoftBindingFailed),
+					SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 				}, nil
 			}
 			require.Equal(t, "qalpha01@recovery.test", request.BindingAddress)
@@ -962,15 +953,14 @@ func TestValidateMicrosoftRTAlreadyBoundProbeCandidateRequiresPasswordConfirmati
 	require.True(t, result.CredentialsAuthoritative)
 	require.Equal(t, "refresh-client", result.ClientID, "RT-valid confirmation must not replace refreshed credentials")
 	require.Equal(t, "refresh-token-2", result.RefreshToken)
-	require.NotNil(t, result.RecoveredBinding)
-	require.Equal(t, "qalpha01@recovery.test", result.RecoveredBinding.Address)
+	require.Nil(t, result.RecoveredBinding)
 	require.Nil(t, result.BindingObservation)
-	require.Equal(t, 2, oauth.acquireCalls, "normal already-bound response must be followed by one confirmation login")
-	require.Equal(t, 1, probeCalls)
+	require.Zero(t, oauth.acquireCalls)
+	require.Zero(t, probeCalls)
 	require.Equal(t, "refresh-client", fetcher.request.ClientID)
 }
 
-func TestValidateMicrosoftRTRecoveryConfirmationTimeoutDoesNotVerifyCandidate(t *testing.T) {
+func TestValidateMicrosoftRTSuccessDoesNotEnterRecoveryConfirmation(t *testing.T) {
 	acquireCall := 0
 	oauth := &microsoftOAuthProtocolStub{
 		result: verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
@@ -978,9 +968,9 @@ func TestValidateMicrosoftRTRecoveryConfirmationTimeoutDoesNotVerifyCandidate(t 
 			acquireCall++
 			if acquireCall == 1 {
 				return mailinfra.MicrosoftOAuthResult{
-					Category:     "already_bound",
-					BoundDisplay: "qa*****@recovery.test",
-					SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+					Category:       "already_bound",
+					BindingAddress: "qa*****@recovery.test",
+					SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 				}, nil
 			}
 			return mailinfra.MicrosoftOAuthResult{
@@ -1003,28 +993,25 @@ func TestValidateMicrosoftRTRecoveryConfirmationTimeoutDoesNotVerifyCandidate(t 
 	})
 
 	require.NoError(t, err)
-	require.False(t, result.Valid)
-	require.Equal(t, "code_timeout", result.Category)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Category)
+	require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 	require.True(t, result.CredentialsAuthoritative)
 	require.Equal(t, "refresh-client", result.ClientID)
 	require.Nil(t, result.RecoveredBinding)
-	require.Equal(t, &coreapp.MicrosoftBindingObservation{
-		Address:     "qalpha01@recovery.test",
-		Status:      string(maildomain.MicrosoftBindingTimeout),
-		SafeMessage: "Auxiliary mailbox verification code was not received in time.",
-	}, result.BindingObservation)
-	require.Equal(t, 2, oauth.acquireCalls)
-	require.Equal(t, 1, fetcher.calls, "RT fetch may complete before the binding confirmation gate")
+	require.Nil(t, result.BindingObservation)
+	require.Zero(t, oauth.acquireCalls)
+	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftRTExternalBoundDisplayMayRemainValidWhenProbeIsIneligible(t *testing.T) {
+func TestValidateMicrosoftRTSuccessDoesNotProbeExternalMask(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{
 		result: verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
 		acquireResult: mailinfra.MicrosoftOAuthResult{
-			Category:      "already_bound",
-			BoundDisplay:  "a****b@external.test",
-			BindingStatus: string(maildomain.MicrosoftBindingFailed),
-			SafeMessage:   "Microsoft account is already bound to another recovery mailbox.",
+			Category:       "already_bound",
+			BindingAddress: "a****b@external.test",
+			BindingStatus:  string(maildomain.MicrosoftBindingFailed),
+			SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 		},
 	}
 	fetcher := successfulMicrosoftFetcher()
@@ -1052,13 +1039,11 @@ func TestValidateMicrosoftRTExternalBoundDisplayMayRemainValidWhenProbeIsIneligi
 	require.True(t, result.Valid)
 	require.True(t, result.CredentialsAuthoritative)
 	require.Nil(t, result.RecoveredBinding)
-	require.NotNil(t, result.BindingObservation)
-	require.Equal(t, "a****b@external.test", result.BindingObservation.BoundDisplay)
-	require.Equal(t, string(maildomain.MicrosoftBindingFailed), result.BindingObservation.Status)
-	require.Equal(t, 1, oauth.acquireCalls)
+	require.Nil(t, result.BindingObservation)
+	require.Zero(t, oauth.acquireCalls)
 }
 
-func TestValidateMicrosoftRTMaskedProofWithoutExplicitDisplayCannotBecomeNormal(t *testing.T) {
+func TestValidateMicrosoftRTSuccessDoesNotProbeMaskedSnapshot(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{
 		result: verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
 		acquireResult: mailinfra.MicrosoftOAuthResult{
@@ -1090,13 +1075,13 @@ func TestValidateMicrosoftRTMaskedProofWithoutExplicitDisplayCannotBecomeNormal(
 	})
 
 	require.NoError(t, err)
-	require.False(t, result.Valid)
-	require.Equal(t, "request", result.Category)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Category)
+	require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 	require.True(t, result.CredentialsAuthoritative)
 	require.Nil(t, result.RecoveredBinding)
-	require.NotNil(t, result.BindingObservation)
-	require.NotContains(t, result.BindingObservation.Address, "*")
-	require.Equal(t, "qa*****@recovery.test", result.BindingObservation.BoundDisplay)
+	require.Nil(t, result.BindingObservation)
+	require.Zero(t, oauth.acquireCalls)
 }
 
 func TestValidateMicrosoftNonRTFullBindingUsesPasswordCredentialsWithoutProbe(t *testing.T) {
@@ -1142,6 +1127,8 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 		refreshResult    mailinfra.MicrosoftOAuthResult
 		wantClientID     string
 		wantRefreshToken string
+		wantValid        bool
+		wantObservation  bool
 	}{
 		{
 			name: "non_rt",
@@ -1150,6 +1137,8 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 			},
 			wantClientID:     "password-client",
 			wantRefreshToken: "password-refresh",
+			wantValid:        true,
+			wantObservation:  true,
 		},
 		{
 			name: "invalid_rt_fallback",
@@ -1162,6 +1151,8 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 			},
 			wantClientID:     "password-client",
 			wantRefreshToken: "password-refresh",
+			wantValid:        true,
+			wantObservation:  true,
 		},
 		{
 			name: "valid_rt_supplementary",
@@ -1172,6 +1163,7 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 			refreshResult:    verifiedOAuthResult("refresh-client", "refresh-token-new", "refresh-access", ""),
 			wantClientID:     "refresh-client",
 			wantRefreshToken: "refresh-token-new",
+			wantValid:        true,
 		},
 	}
 
@@ -1188,7 +1180,7 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 					BindingAddress: "",
 				},
 			}
-			fetcher := &microsoftMailFetcherStub{}
+			fetcher := successfulMicrosoftFetcher()
 			adapter := &ResourceValidationAdapter{
 				microsoft:             oauth,
 				fetcher:               fetcher,
@@ -1199,18 +1191,44 @@ func TestValidateMicrosoftPasswordFlowsCannotVerifyCandidateWithoutProtocolAddre
 			result, err := adapter.ValidateMicrosoft(context.Background(), tt.request)
 
 			require.NoError(t, err)
-			require.False(t, result.Valid)
-			require.Equal(t, "request", result.Category)
+			require.Equal(t, tt.wantValid, result.Valid)
+			require.Empty(t, result.Category)
+			require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 			require.True(t, result.CredentialsAuthoritative)
 			require.Equal(t, tt.wantClientID, result.ClientID)
 			require.Equal(t, tt.wantRefreshToken, result.RefreshToken)
 			require.Nil(t, result.RecoveredBinding)
-			require.NotNil(t, result.BindingObservation)
-			require.Equal(t, string(maildomain.MicrosoftBindingPending), result.BindingObservation.Status)
-			require.NotEmpty(t, result.BindingObservation.Address)
-			require.Zero(t, fetcher.calls)
+			if tt.wantObservation {
+				require.NotNil(t, result.BindingObservation)
+				require.Equal(t, string(maildomain.MicrosoftBindingPending), result.BindingObservation.Status)
+				require.NotEmpty(t, result.BindingObservation.Address)
+			} else {
+				require.Nil(t, result.BindingObservation)
+			}
+			require.Equal(t, 1, fetcher.calls)
 		})
 	}
+}
+
+func TestValidateMicrosoftPasswordFlowRequiresRefreshTokenBeforeMailFetch(t *testing.T) {
+	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
+		Valid: true, ClientID: "password-client", AccessToken: "temporary-access-token",
+	}}
+	fetcher := successfulMicrosoftFetcher()
+	adapter := &ResourceValidationAdapter{
+		microsoft: oauth,
+		fetcher:   fetcher,
+		bindings:  &microsoftValidationBindingStoreStub{},
+	}
+
+	result, err := adapter.ValidateMicrosoft(context.Background(), coreapp.MicrosoftValidationRequest{
+		ResourceID: 1134, EmailAddress: "owner@example.test", Password: "private-password",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Valid)
+	require.Equal(t, "request", result.Category)
+	require.Zero(t, fetcher.calls, "an access token without an RT is not a usable validation result")
 }
 
 func TestValidateMicrosoftFailedPasswordFlowsCannotEmitVerifiedBinding(t *testing.T) {
@@ -1221,6 +1239,7 @@ func TestValidateMicrosoftFailedPasswordFlowsCannotEmitVerifiedBinding(t *testin
 		wantAuthoritative   bool
 		wantAuthoritativeRT string
 		wantAuthoritativeID string
+		wantValid           bool
 	}{
 		{
 			name: "non_rt",
@@ -1248,6 +1267,7 @@ func TestValidateMicrosoftFailedPasswordFlowsCannotEmitVerifiedBinding(t *testin
 			wantAuthoritative:   true,
 			wantAuthoritativeID: "refresh-client",
 			wantAuthoritativeRT: "refresh-token-new",
+			wantValid:           true,
 		},
 	}
 
@@ -1266,6 +1286,9 @@ func TestValidateMicrosoftFailedPasswordFlowsCannotEmitVerifiedBinding(t *testin
 				},
 			}
 			fetcher := &microsoftMailFetcherStub{}
+			if tt.wantValid {
+				fetcher = successfulMicrosoftFetcher()
+			}
 			adapter := &ResourceValidationAdapter{
 				microsoft:             oauth,
 				fetcher:               fetcher,
@@ -1276,18 +1299,28 @@ func TestValidateMicrosoftFailedPasswordFlowsCannotEmitVerifiedBinding(t *testin
 			result, err := adapter.ValidateMicrosoft(context.Background(), tt.request)
 
 			require.NoError(t, err)
-			require.False(t, result.Valid)
-			require.Equal(t, "password", result.Category)
+			require.Equal(t, tt.wantValid, result.Valid)
+			if tt.wantValid {
+				require.Empty(t, result.Category)
+				require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
+			} else {
+				require.Equal(t, "password", result.Category)
+			}
 			require.Equal(t, tt.wantAuthoritative, result.CredentialsAuthoritative)
 			if tt.wantAuthoritative {
 				require.Equal(t, tt.wantAuthoritativeID, result.ClientID)
 				require.Equal(t, tt.wantAuthoritativeRT, result.RefreshToken)
 			}
 			require.Nil(t, result.RecoveredBinding)
-			require.NotNil(t, result.BindingObservation)
-			require.Equal(t, "candidate@recovery.test", result.BindingObservation.Address)
-			require.Equal(t, string(maildomain.MicrosoftBindingPending), result.BindingObservation.Status)
-			require.Zero(t, fetcher.calls)
+			if tt.wantValid {
+				require.Nil(t, result.BindingObservation)
+				require.Equal(t, 1, fetcher.calls)
+			} else {
+				require.NotNil(t, result.BindingObservation)
+				require.Equal(t, "candidate@recovery.test", result.BindingObservation.Address)
+				require.Equal(t, string(maildomain.MicrosoftBindingPending), result.BindingObservation.Status)
+				require.Zero(t, fetcher.calls)
+			}
 		})
 	}
 }
@@ -1298,9 +1331,9 @@ func TestValidateMicrosoftNonRTAlreadyBoundConfirmsCandidateThenUsesNewCredentia
 		acquireCall++
 		if acquireCall == 1 {
 			return mailinfra.MicrosoftOAuthResult{
-				Category:     "already_bound",
-				BoundDisplay: "qa*****@recovery.test",
-				SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+				Category:       "already_bound",
+				BindingAddress: "qa*****@recovery.test",
+				SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 			}, nil
 		}
 		require.Equal(t, "qalpha01@recovery.test", request.BindingAddress)
@@ -1337,9 +1370,9 @@ func TestValidateMicrosoftRTInvalidGrantAlreadyBoundConfirmsCandidateThenUsesPas
 			acquireCall++
 			if acquireCall == 1 {
 				return mailinfra.MicrosoftOAuthResult{
-					Category:     "already_bound",
-					BoundDisplay: "qa*****@recovery.test",
-					SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+					Category:       "already_bound",
+					BindingAddress: "qa*****@recovery.test",
+					SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 				}, nil
 			}
 			require.Equal(t, "qalpha01@recovery.test", request.BindingAddress)
@@ -1373,9 +1406,9 @@ func TestValidateMicrosoftRecoveryConfirmationTemporaryFailureKeepsCandidateUnve
 		acquireCall++
 		if acquireCall == 1 {
 			return mailinfra.MicrosoftOAuthResult{
-				Category:     "already_bound",
-				BoundDisplay: "qa*****@recovery.test",
-				SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+				Category:       "already_bound",
+				BindingAddress: "qa*****@recovery.test",
+				SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 			}, nil
 		}
 		return mailinfra.MicrosoftOAuthResult{
@@ -1404,14 +1437,15 @@ func TestValidateMicrosoftRecoveryConfirmationTemporaryFailureKeepsCandidateUnve
 		Status:      string(maildomain.MicrosoftBindingTimeout),
 		SafeMessage: "Auxiliary mailbox verification code was not received in time.",
 	}, result.BindingObservation)
+	require.Nil(t, result.ReleaseRecoveryLease, "a sent but unresolved code mail must keep the mask leased until TTL")
 	require.Zero(t, fetcher.calls)
 }
 
 func TestValidateMicrosoftSecondAlreadyBoundConfirmationDoesNotLoopOrRecover(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
-		Category:     "already_bound",
-		BoundDisplay: "qa*****@recovery.test",
-		SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+		Category:       "already_bound",
+		BindingAddress: "qa*****@recovery.test",
+		SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 	}}
 	adapter := recoveryEnabledAdapter(oauth, &microsoftMailFetcherStub{})
 
@@ -1439,8 +1473,8 @@ func TestValidateMicrosoftRecoveryConfirmationMustReturnSameCompleteAddress(t *t
 		acquireCall++
 		if acquireCall == 1 {
 			return mailinfra.MicrosoftOAuthResult{
-				Category:     "already_bound",
-				BoundDisplay: "qa*****@recovery.test",
+				Category:       "already_bound",
+				BindingAddress: "qa*****@recovery.test",
 			}, nil
 		}
 		return verifiedOAuthResult("confirmed-client", "confirmed-refresh", "confirmed-access", "different@recovery.test"), nil
@@ -1468,8 +1502,8 @@ func TestValidateMicrosoftRecoveryConfirmationCannotInferMissingProtocolAddress(
 		acquireCall++
 		if acquireCall == 1 {
 			return mailinfra.MicrosoftOAuthResult{
-				Category:     "already_bound",
-				BoundDisplay: "qa*****@recovery.test",
+				Category:       "already_bound",
+				BindingAddress: "qa*****@recovery.test",
 			}, nil
 		}
 		return mailinfra.MicrosoftOAuthResult{
@@ -1500,12 +1534,11 @@ func TestValidateMicrosoftRecoveryConfirmationCannotInferMissingProtocolAddress(
 	require.Zero(t, fetcher.calls)
 }
 
-func TestValidateMicrosoftHistoricalBoundDisplayDoesNotSkipCurrentBindingFlow(t *testing.T) {
+func TestValidateMicrosoftExistingConcreteBindingDoesNotBlockRTSuccess(t *testing.T) {
 	bindings := &microsoftValidationBindingStoreStub{binding: &maildomain.MicrosoftBindingMailbox{
 		ID:             41,
 		ResourceID:     119,
 		BindingAddress: "pending@recovery.test",
-		BoundDisplay:   "old****@external.test",
 		Status:         maildomain.MicrosoftBindingFailed,
 	}}
 	oauth := &microsoftOAuthProtocolStub{
@@ -1533,16 +1566,15 @@ func TestValidateMicrosoftHistoricalBoundDisplayDoesNotSkipCurrentBindingFlow(t 
 
 	require.NoError(t, err)
 	require.True(t, result.Valid)
-	require.Equal(t, 1, oauth.acquireCalls, "historical display is only a hint and cannot replace current remote confirmation")
-	require.Zero(t, probeCalls, "current full verified response does not need recovery")
+	require.Zero(t, oauth.acquireCalls)
+	require.Zero(t, probeCalls)
 }
 
-func TestValidateMicrosoftMaskedSnapshotIsNeverSentAsBindingCandidate(t *testing.T) {
+func TestValidateMicrosoftMaskedSnapshotDoesNotStartSupplementaryLoginAfterRTSuccess(t *testing.T) {
 	bindings := &microsoftValidationBindingStoreStub{binding: &maildomain.MicrosoftBindingMailbox{
 		ID:             42,
 		ResourceID:     120,
 		BindingAddress: "qa*****@recovery.test",
-		BoundDisplay:   "qa*****@recovery.test",
 		Status:         maildomain.MicrosoftBindingFailed,
 	}}
 	expected := deterministicBindingAddress(t, "owner@example.test")
@@ -1571,7 +1603,7 @@ func TestValidateMicrosoftMaskedSnapshotIsNeverSentAsBindingCandidate(t *testing
 
 	require.NoError(t, err)
 	require.True(t, result.Valid)
-	require.Equal(t, 1, oauth.acquireCalls)
+	require.Zero(t, oauth.acquireCalls)
 }
 
 func TestValidateMicrosoftRecoveryProbeRotatesBindingProxyWithoutCondemningIt(t *testing.T) {
@@ -1588,8 +1620,8 @@ func TestValidateMicrosoftRecoveryProbeRotatesBindingProxyWithoutCondemningIt(t 
 		acquireCall++
 		if acquireCall == 1 {
 			return mailinfra.MicrosoftOAuthResult{
-				Category:     "already_bound",
-				BoundDisplay: "qa*****@recovery.test",
+				Category:       "already_bound",
+				BindingAddress: "qa*****@recovery.test",
 			}, nil
 		}
 		return verifiedOAuthResult("confirmed-client", "confirmed-refresh", "confirmed-access", "qalpha01@recovery.test"), nil
@@ -1634,9 +1666,9 @@ func TestValidateMicrosoftRecoveryProbeRotatesBindingProxyWithoutCondemningIt(t 
 
 func TestValidateMicrosoftExhaustedTemporaryRecoveryProbeReturnsRetryablePendingObservation(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
-		Category:     "already_bound",
-		BoundDisplay: "qa*****@recovery.test",
-		SafeMessage:  "Microsoft account is already bound to another recovery mailbox.",
+		Category:       "already_bound",
+		BindingAddress: "qa*****@recovery.test",
+		SafeMessage:    "Microsoft account is already bound to another recovery mailbox.",
 	}}
 	probeCalls := 0
 	adapter := &ResourceValidationAdapter{
@@ -1676,8 +1708,8 @@ func TestValidateMicrosoftExhaustedTemporaryRecoveryProbeReturnsRetryablePending
 
 func TestValidateMicrosoftPropagatesRecoveryProbeCancellationAfterNormalFlow(t *testing.T) {
 	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
-		Category:     "already_bound",
-		BoundDisplay: "qa*****@recovery.test",
+		Category:       "already_bound",
+		BindingAddress: "qa*****@recovery.test",
 	}}
 	fetcher := &microsoftMailFetcherStub{}
 	adapter := &ResourceValidationAdapter{
@@ -1704,8 +1736,8 @@ func TestValidateMicrosoftPropagatesRecoveryProbeCancellationAfterNormalFlow(t *
 func TestValidateMicrosoftPropagatesCancellationDuringRecoveryEligibility(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	oauth := &microsoftOAuthProtocolStub{acquireResult: mailinfra.MicrosoftOAuthResult{
-		Category:     "already_bound",
-		BoundDisplay: "qa*****@recovery.test",
+		Category:       "already_bound",
+		BindingAddress: "qa*****@recovery.test",
 	}}
 	adapter := &ResourceValidationAdapter{
 		microsoft: oauth,
@@ -1730,7 +1762,7 @@ func TestValidateMicrosoftPropagatesCancellationDuringRecoveryEligibility(t *tes
 	require.Equal(t, 1, oauth.acquireCalls)
 }
 
-func TestValidateMicrosoftFetchProxyRetryDoesNotRepeatConfirmedBindingFlow(t *testing.T) {
+func TestValidateMicrosoftFetchProxyRetryDoesNotStartBindingFlow(t *testing.T) {
 	proxies := purposeProxyStub()
 	oauth := &microsoftOAuthProtocolStub{
 		result:        verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
@@ -1762,9 +1794,9 @@ func TestValidateMicrosoftFetchProxyRetryDoesNotRepeatConfirmedBindingFlow(t *te
 	require.NoError(t, err)
 	require.True(t, result.Valid)
 	require.Equal(t, 2, oauth.calls)
-	require.Equal(t, 1, oauth.acquireCalls, "run-local confirmed binding must suppress duplicate OTP/password binding work")
+	require.Zero(t, oauth.acquireCalls)
 	require.Equal(t, 2, fetcher.calls)
-	require.Equal(t, "confirmed@recovery.test", result.BindingObservation.Address)
+	require.Nil(t, result.BindingObservation)
 }
 
 func TestFetchMicrosoftValidationKeepsRotatedTokenReturnedWithError(t *testing.T) {
@@ -1826,7 +1858,7 @@ func TestValidateMicrosoftOuterRetryPreservesLastAuthoritativeRotatedCredentials
 	require.Equal(t, 1, fetcher.calls)
 }
 
-func TestValidateMicrosoftBindingProxyFailureIsNotReportedAgainstOuterAuthProxy(t *testing.T) {
+func TestValidateMicrosoftRTSuccessDoesNotAcquireBindingProxy(t *testing.T) {
 	proxies := purposeProxyStub()
 	oauth := &microsoftOAuthProtocolStub{
 		result: verifiedOAuthResult("refresh-client", "refresh-token-2", "refresh-access", ""),
@@ -1839,7 +1871,7 @@ func TestValidateMicrosoftBindingProxyFailureIsNotReportedAgainstOuterAuthProxy(
 	adapter := &ResourceValidationAdapter{
 		proxies:               proxies,
 		microsoft:             oauth,
-		fetcher:               &microsoftMailFetcherStub{},
+		fetcher:               successfulMicrosoftFetcher(),
 		bindings:              &microsoftValidationBindingStoreStub{},
 		probePasswordRecovery: neverProbe(t),
 	}
@@ -1853,11 +1885,12 @@ func TestValidateMicrosoftBindingProxyFailureIsNotReportedAgainstOuterAuthProxy(
 	})
 
 	require.NoError(t, err)
-	require.False(t, result.Valid)
-	require.Equal(t, "request", result.Category)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Category)
+	require.Equal(t, "Microsoft resource validation succeeded.", result.SafeMessage)
 	require.True(t, result.CredentialsAuthoritative)
-	require.Equal(t, maxMicrosoftProxyAttempts+1, oauth.acquireCalls)
-	require.NotContains(t, proxies.failures, uint(100), "binding failures must not condemn the auth proxy")
+	require.Zero(t, oauth.acquireCalls)
+	require.Empty(t, proxies.failures)
 	require.Contains(t, proxies.successes, uint(100), "successful RT refresh must settle the auth proxy as healthy")
 }
 
@@ -1936,6 +1969,14 @@ func deterministicBindingAddress(t *testing.T, accountEmail string) string {
 	address, err := msacl.DeterministicAuxiliaryAddress(accountEmail)
 	require.NoError(t, err)
 	return address
+}
+
+func maskedBindingAddress(t *testing.T, address string) string {
+	t.Helper()
+	local, domain, ok := strings.Cut(address, "@")
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(local), 2)
+	return local[:1] + "*****" + local[len(local)-1:] + "@" + domain
 }
 
 func neverProbe(t *testing.T) func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error) {

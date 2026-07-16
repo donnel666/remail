@@ -45,13 +45,13 @@ func (s *taskViewRepoStub) FindByRef(context.Context, AdminTaskRef) (*AdminTaskV
 }
 
 func TestParseAdminTaskRefRequiresQualifiedNumericSource(t *testing.T) {
-	ref, err := ParseAdminTaskRef("validation:42")
+	ref, err := ParseAdminTaskRef("token:42")
 	require.NoError(t, err)
-	require.Equal(t, AdminTaskSourceValidation, ref.Source)
+	require.Equal(t, AdminTaskSourceToken, ref.Source)
 	require.Equal(t, uint64(42), ref.ID)
-	require.Equal(t, "validation:42", ref.String())
+	require.Equal(t, "token:42", ref.String())
 
-	for _, value := range []string{"42", "validation:", "unknown:1", "validation:0", "validation:1:2", "validation:secret"} {
+	for _, value := range []string{"42", "validation:42", "token:", "unknown:1", "token:0", "token:1:2", "token:secret"} {
 		_, err := ParseAdminTaskRef(value)
 		require.ErrorIs(t, err, ErrInvalidAdminTaskQuery, value)
 	}
@@ -62,10 +62,10 @@ func TestAdminTaskQueryServiceListUsesStableDefaults(t *testing.T) {
 	repo := &taskViewRepoStub{
 		exists: true,
 		items: []AdminTaskView{{
-			Ref:       AdminTaskRef{Source: AdminTaskSourceValidation, ID: 9},
+			Ref:       AdminTaskRef{Source: AdminTaskSourceToken, ID: 9},
 			BizType:   AdminTaskBizMicrosoftResource,
 			BizID:     7,
-			Kind:      AdminTaskKindValidation,
+			Kind:      AdminTaskKindToken,
 			Status:    AdminTaskStatusQueued,
 			QueuedAt:  now,
 			UpdatedAt: now,
@@ -80,7 +80,7 @@ func TestAdminTaskQueryServiceListUsesStableDefaults(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, AdminTaskDefaultLimit, result.Limit)
 	require.Len(t, result.Items, 1)
-	require.Equal(t, "validation:9", result.Items[0].TaskID())
+	require.Equal(t, "token:9", result.Items[0].TaskID())
 
 	_, err = service.List(context.Background(), AdminTaskListFilter{BizType: AdminTaskBizMicrosoftResource, BizID: 7, Status: "done"})
 	require.ErrorIs(t, err, ErrInvalidAdminTaskQuery)

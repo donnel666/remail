@@ -43,11 +43,13 @@ type AdminDomainRecord struct {
 }
 
 type AdminDomainStatusFacets struct {
-	All      int64
-	Normal   int64
-	Abnormal int64
-	Disabled int64
-	Deleted  int64
+	All        int64
+	Pending    int64
+	Validating int64
+	Normal     int64
+	Abnormal   int64
+	Disabled   int64
+	Deleted    int64
 }
 
 type AdminDomainPurposeFacets struct {
@@ -299,8 +301,7 @@ type AdminDomainEditCommand struct {
 }
 
 type AdminDomainMutationResult struct {
-	ResourceID     uint                  `json:"resourceId"`
-	ValidationTask *ValidationResultView `json:"validationTask,omitempty"`
+	ResourceID uint `json:"resourceId"`
 }
 
 type AdminDomainBulkSelectionMode string
@@ -578,12 +579,7 @@ func (s *AdminDomainCommandService) mutate(ctx context.Context, command AdminDom
 			}
 		}
 		if command.StatusCommand == AdminDomainEnable || command.Action == AdminDomainRecover {
-			task, created, err := s.queueValidationTx(txCtx, root, command.RequestID, command.Path)
-			if err != nil {
-				return err
-			}
-			result.ValidationTask = task
-			shouldSchedule = created
+			shouldSchedule = true
 		}
 		summary := "Domain resource command applied."
 		if !changed {
@@ -627,13 +623,17 @@ func (s *AdminDomainCommandService) Validate(ctx context.Context, resourceID, op
 		if resource.Status == domain.DomainStatusDisabled {
 			return domain.ErrInvalidResourceStatus
 		}
-		task, created, err := s.queueValidationTx(txCtx, root, requestID, path)
+		changed, err := resource.QueueValidationAdmin()
 		if err != nil {
 			return err
 		}
-		result.ValidationTask = task
-		shouldSchedule = created
-		if err := s.logs.Create(txCtx, adminDomainOperationLog(operatorUserID, "core.admin_domain.validate", root.ID, requestID, path, "Domain resource validation queued.")); err != nil {
+		if changed {
+			if err := s.repo.SaveAdminDomain(txCtx, root, resource, root.Version, root.OwnerUserID); err != nil {
+				return err
+			}
+		}
+		shouldSchedule = true
+		if err := s.logs.Create(txCtx, adminDomainOperationLog(operatorUserID, "core.admin_domain.validate", root.ID, requestID, path, "Domain resource validation marked pending.")); err != nil {
 			return err
 		}
 		return s.complete(txCtx, operatorUserID, key, result)
@@ -642,6 +642,47 @@ func (s *AdminDomainCommandService) Validate(ctx context.Context, resourceID, op
 		s.validation.ScheduleDispatcher(ctx, 0)
 	}
 	return result, err
+}
+
+func (s *AdminDomainCommandService) SubmitValidationBatch(
+	ctx context.Context,
+	selection AdminDomainBulkSelection,
+	operatorUserID uint,
+	idempotencyKey, requestID, path string,
+) (*ResourceBatchValidationResult, error) {
+	if s == nil || s.validation == nil || s.owners == nil || operatorUserID == 0 {
+		return nil, domain.ErrInvalidResourceCommand
+	}
+	key, err := normalizeAdminResourceIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	selection, fingerprintValue, err := s.normalizeBulkSelection(ctx, selection)
+	if err != nil {
+		return nil, err
+	}
+	fingerprint, err := adminResourceCommandFingerprint(struct {
+		Selection any `json:"selection"`
+	}{fingerprintValue})
+	if err != nil {
+		return nil, err
+	}
+	batch := ResourceBulkSelection{
+		Mode: ResourceBulkSelectionMode(selection.Mode), ResourceIDs: selection.ResourceIDs,
+		AdminScope: true, AllowBinding: true,
+		BatchKey: "admin-domain:" + adminSensitiveValueFingerprint(fmt.Sprintf("%d:%s:%s", operatorUserID, key, fingerprint)),
+		Filter:   ResourceBulkFilter{ResourceType: domain.ResourceTypeDomain},
+	}
+	if selection.Mode == AdminDomainBulkFilter {
+		batch.Filter = ResourceBulkFilter{
+			ResourceType: domain.ResourceTypeDomain,
+			Search:       selection.Filter.Search, TLD: selection.Filter.TLD, Status: string(selection.Filter.Status),
+			Purpose: string(selection.Filter.Purpose), MailServerID: selection.Filter.MailServerID,
+			OwnerID: selection.Filter.OwnerID, OwnerIDs: selection.Filter.OwnerIDs, AdminSearch: true,
+			CreatedFrom: selection.Filter.CreatedFrom, CreatedTo: selection.Filter.CreatedTo,
+		}
+	}
+	return s.validation.CreateBatch(ctx, batch, operatorUserID, true, requestID, path)
 }
 
 func (s *AdminDomainCommandService) ApplyBulk(ctx context.Context, action string, selection AdminDomainBulkSelection, operatorUserID uint, idempotencyKey, requestID, path string) (*AdminDomainBulkResult, error) {
@@ -692,15 +733,21 @@ func (s *AdminDomainCommandService) ApplyBulk(ctx context.Context, action string
 				return lockErr
 			}
 			if action == "validate" {
-				if resource.Status == domain.DomainStatusDeleted || resource.Status == domain.DomainStatusDisabled {
-					result.Skipped++
-					continue
+				changed, queueErr := resource.QueueValidationAdmin()
+				if queueErr != nil {
+					if errors.Is(queueErr, domain.ErrResourceNotFound) || errors.Is(queueErr, domain.ErrInvalidResourceStatus) {
+						result.Skipped++
+						continue
+					}
+					return queueErr
 				}
-				_, created, err := s.queueValidationTx(txCtx, root, requestID, path)
+				if changed {
+					err = s.repo.SaveAdminDomain(txCtx, root, resource, root.Version, root.OwnerUserID)
+				}
 				if err != nil {
 					return err
 				}
-				shouldSchedule = shouldSchedule || created
+				shouldSchedule = shouldSchedule || resource.Status != domain.DomainStatusValidating
 				result.Affected++
 				continue
 			}
@@ -808,22 +855,6 @@ func (s *AdminDomainCommandService) normalizeBulkSelection(ctx context.Context, 
 	default:
 		return AdminDomainBulkSelection{}, nil, domain.ErrInvalidResourceCommand
 	}
-}
-
-func (s *AdminDomainCommandService) queueValidationTx(ctx context.Context, root *domain.EmailResource, requestID, path string) (*ValidationResultView, bool, error) {
-	if s.validation == nil || s.validation.validations == nil || root == nil {
-		return nil, false, domain.ErrResourceDependency
-	}
-	job := &domain.ResourceValidation{
-		ResourceID: root.ID, ResourceType: domain.ResourceTypeDomain, OwnerUserID: root.OwnerUserID,
-		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
-		RequestID: strings.TrimSpace(requestID), Path: strings.TrimSpace(path),
-	}
-	created, err := s.validation.validations.CreateWithLog(ctx, job, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	return validationView(job), created, nil
 }
 
 func (s *AdminDomainCommandService) validateOwner(ctx context.Context, ownerID uint, purpose domain.ResourcePurpose) (*AdminOwnerSummary, error) {

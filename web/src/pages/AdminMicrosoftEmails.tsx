@@ -334,6 +334,7 @@ export default function AdminMicrosoftEmails() {
         disabled: 0,
         normal: 0,
         pending: 0,
+        validating: 0,
       },
       suffixes: [],
       tokenHealth: { all: total, expired: 0, expiring: 0, missing: 0, valid: 0 },
@@ -498,7 +499,7 @@ export default function AdminMicrosoftEmails() {
     setBulkBusy("check");
     try {
       const response = await validateAdminMicrosoftResourcesByIds(selectedKeys);
-      Toast.success(t("Resource validations submitted.", { count: response.accepted }));
+      Toast.success(t("Resource validations submitted.", { count: response.queued }));
       setSelectedKeys([]);
       await refreshAfterMutation();
     } catch (error) {
@@ -572,8 +573,8 @@ export default function AdminMicrosoftEmails() {
       onOk: async () => {
         setBulkBusy("check");
         try {
-          const response = await validateAdminMicrosoftResourcesByFilter(listFilter);
-          Toast.success(t("Resource validations submitted.", { count: response.accepted }));
+          await validateAdminMicrosoftResourcesByFilter(listFilter);
+          Toast.success(t("Resource validation submitted."));
           setSelectedKeys([]);
           await refreshAfterMutation();
         } catch (error) {
@@ -1071,7 +1072,7 @@ export default function AdminMicrosoftEmails() {
                 {t("Status")}
               </div>
               <div className="mb-2 space-y-1">
-                {(["all", "normal", "pending", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
+                {(["all", "pending", "validating", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
                   (value) => (
                     <StatisticFilterOption
                       active={statusFilter === value}

@@ -92,12 +92,13 @@ type adminMicrosoftResourceItemResponse struct {
 }
 
 type adminMicrosoftStatusFacetResponse struct {
-	All      int64 `json:"all"`
-	Pending  int64 `json:"pending"`
-	Normal   int64 `json:"normal"`
-	Abnormal int64 `json:"abnormal"`
-	Disabled int64 `json:"disabled"`
-	Deleted  int64 `json:"deleted"`
+	All        int64 `json:"all"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
+	Normal     int64 `json:"normal"`
+	Abnormal   int64 `json:"abnormal"`
+	Disabled   int64 `json:"disabled"`
+	Deleted    int64 `json:"deleted"`
 }
 
 type adminMicrosoftBooleanFacetResponse struct {
@@ -205,8 +206,7 @@ type adminMicrosoftReplaceCredentialsRequest struct {
 }
 
 type adminMicrosoftMutationResponse struct {
-	Resource       adminMicrosoftDetailResponse `json:"resource"`
-	ValidationTask *adminTaskViewResponse       `json:"validationTask"`
+	Resource adminMicrosoftDetailResponse `json:"resource"`
 }
 
 type adminTaskAcceptedResponse struct {
@@ -498,12 +498,12 @@ func (h *CoreHandler) PatchAdminMicrosoftResource(c *gin.Context) {
 			Password: request.Credentials.Password, ClientID: request.Credentials.ClientID, RefreshToken: request.Credentials.RefreshToken,
 		}
 	}
-	result, err := h.module.AdminCommands.Edit(c.Request.Context(), command)
+	_, err := h.module.AdminCommands.Edit(c.Request.Context(), command)
 	if err != nil {
 		writeAdminResourceError(c, err)
 		return
 	}
-	h.writeAdminMutation(c, resourceID, result)
+	h.writeAdminMutation(c, resourceID)
 }
 
 func (h *CoreHandler) PutAdminMicrosoftResourceCredentials(c *gin.Context) {
@@ -519,7 +519,7 @@ func (h *CoreHandler) PutAdminMicrosoftResourceCredentials(c *gin.Context) {
 		writeAdminInvalidBody(c, err)
 		return
 	}
-	result, err := h.module.AdminCommands.ReplaceCredentials(c.Request.Context(), coreapp.AdminMicrosoftEditCommand{
+	_, err := h.module.AdminCommands.ReplaceCredentials(c.Request.Context(), coreapp.AdminMicrosoftEditCommand{
 		ResourceID:     resourceID,
 		Version:        request.Version,
 		Credentials:    &coreapp.AdminMicrosoftCredentials{Password: request.Password, ClientID: request.ClientID, RefreshToken: request.RefreshToken},
@@ -530,7 +530,7 @@ func (h *CoreHandler) PutAdminMicrosoftResourceCredentials(c *gin.Context) {
 		writeAdminResourceError(c, err)
 		return
 	}
-	h.writeAdminMutation(c, resourceID, result)
+	h.writeAdminMutation(c, resourceID)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceValidate(c *gin.Context) {
@@ -548,11 +548,7 @@ func (h *CoreHandler) PostAdminMicrosoftResourceValidate(c *gin.Context) {
 		writeAdminResourceError(c, err)
 		return
 	}
-	task := toAdminValidationTask(result.Task)
-	c.JSON(http.StatusAccepted, adminTaskAcceptedResponse{
-		TaskID: task.TaskID, RequestID: result.Task.RequestID, Status: task.Status, Accepted: 1,
-		Task: task, Reused: result.Reused,
-	})
+	c.JSON(http.StatusAccepted, ResourceValidationsResponse{Requested: result.Accepted, Queued: result.Accepted})
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceEnable(c *gin.Context) {
@@ -563,14 +559,14 @@ func (h *CoreHandler) PostAdminMicrosoftResourceEnable(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.module.AdminCommands.Enable(
+	_, err := h.module.AdminCommands.Enable(
 		c.Request.Context(), resourceID, version, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
 	)
 	if err != nil {
 		writeAdminResourceError(c, err)
 		return
 	}
-	h.writeAdminMutation(c, resourceID, result)
+	h.writeAdminMutation(c, resourceID)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceRecover(c *gin.Context) {
@@ -581,14 +577,14 @@ func (h *CoreHandler) PostAdminMicrosoftResourceRecover(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.module.AdminCommands.Recover(
+	_, err := h.module.AdminCommands.Recover(
 		c.Request.Context(), resourceID, version, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
 	)
 	if err != nil {
 		writeAdminResourceError(c, err)
 		return
 	}
-	h.writeAdminMutation(c, resourceID, result)
+	h.writeAdminMutation(c, resourceID)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceDisable(c *gin.Context) {
@@ -624,7 +620,26 @@ func (h *CoreHandler) PostAdminMicrosoftResourcesDelete(c *gin.Context) {
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceValidations(c *gin.Context) {
-	h.submitAdminResourceBulk(c, coreapp.AdminResourceBulkValidate)
+	if !requireAdminIdempotencyKey(c) {
+		return
+	}
+	var request adminMicrosoftBulkCommandRequest
+	if err := bindAdminResourceJSON(c, &request); err != nil {
+		writeAdminInvalidBody(c, err)
+		return
+	}
+	selection, ok := toAdminBulkSelection(c, request.Selection)
+	if !ok {
+		return
+	}
+	result, err := h.module.AdminCommands.SubmitValidationBatch(
+		c.Request.Context(), selection, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+	)
+	if err != nil {
+		writeAdminResourceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, ResourceValidationsResponse{Requested: result.Requested, Queued: result.Queued})
 }
 
 func (h *CoreHandler) applyAdminResourceState(c *gin.Context, command coreapp.AdminMicrosoftStateCommand) {
@@ -715,23 +730,6 @@ func (h *CoreHandler) applyAdminResourceStateBulk(c *gin.Context, stateCommand c
 	h.submitAdminResourceBulkSelection(c, bulkAction, selection)
 }
 
-func (h *CoreHandler) submitAdminResourceBulk(c *gin.Context, action coreapp.AdminResourceBulkAction) {
-	if !validAdminIdempotencyKey(c.GetHeader("Idempotency-Key")) {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	var request adminMicrosoftBulkCommandRequest
-	if err := bindAdminResourceJSON(c, &request); err != nil {
-		writeAdminInvalidBody(c, err)
-		return
-	}
-	selection, ok := toAdminBulkSelection(c, request.Selection)
-	if !ok {
-		return
-	}
-	h.submitAdminResourceBulkSelection(c, action, selection)
-}
-
 func (h *CoreHandler) submitAdminResourceBulkSelection(c *gin.Context, action coreapp.AdminResourceBulkAction, selection coreapp.AdminResourceBulkSelection) {
 	if h.module == nil || h.module.AdminBulk == nil {
 		writeAdminResourceError(c, domain.ErrResourceDependency)
@@ -751,18 +749,13 @@ func (h *CoreHandler) submitAdminResourceBulkSelection(c *gin.Context, action co
 	})
 }
 
-func (h *CoreHandler) writeAdminMutation(c *gin.Context, resourceID uint, result *coreapp.AdminMicrosoftMutationResult) {
+func (h *CoreHandler) writeAdminMutation(c *gin.Context, resourceID uint) {
 	detail, err := h.module.AdminResourceQuery.Get(c.Request.Context(), resourceID)
 	if err != nil {
 		writeAdminResourceError(c, err)
 		return
 	}
-	response := adminMicrosoftMutationResponse{Resource: toAdminMicrosoftDetailResponse(detail)}
-	if result != nil && result.ValidationTask != nil {
-		task := toAdminValidationTask(result.ValidationTask)
-		response.ValidationTask = &task
-	}
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, adminMicrosoftMutationResponse{Resource: toAdminMicrosoftDetailResponse(detail)})
 }
 
 func adminMicrosoftFilterFromQuery(c *gin.Context) (coreapp.AdminMicrosoftListFilter, bool) {
@@ -861,24 +854,6 @@ func toAdminTaskSummary(task *coreapp.AdminTaskSummary) *adminTaskSummaryRespons
 		return nil
 	}
 	return &adminTaskSummaryResponse{TaskID: task.TaskID, Kind: task.Kind, Status: task.Status, CredentialRevision: task.CredentialRevision, UpdatedAt: task.UpdatedAt}
-}
-
-func toAdminValidationTask(task *coreapp.ValidationResultView) adminTaskViewResponse {
-	var revision *uint64
-	if task.CredentialRevision > 0 {
-		value := task.CredentialRevision
-		revision = &value
-	}
-	remaining := task.MaxAttempts - task.Attempts
-	if remaining < 0 {
-		remaining = 0
-	}
-	return adminTaskViewResponse{
-		TaskID: fmt.Sprintf("validation:%d", task.ValidationID), Kind: "validation", BizType: "microsoft_resource", BizID: task.ResourceID,
-		Status: task.Status, CredentialRevision: revision, Attempts: task.Attempts, MaxAttempts: task.MaxAttempts,
-		RemainingAttempts: remaining, Progress: nil, QueuedAt: task.CreatedAt, StartedAt: task.StartedAt,
-		FinishedAt: task.FinishedAt, UpdatedAt: task.UpdatedAt,
-	}
 }
 
 func toAdminImportResponse(item *coreapp.ResourceImportStatusView, reused bool) adminMicrosoftImportResponse {

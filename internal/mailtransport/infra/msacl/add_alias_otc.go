@@ -36,7 +36,7 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 		// A masked binding address (e.g. a****b@qq.com) is a recorded external
 		// recovery mailbox we cannot receive codes at — fail fast instead of
 		// sending an OTP to an unroutable address.
-		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundDisplay: bindingAddress}
+		return "", "", &AuthError{Message: "辅助邮箱为掩码/外部地址, 无法接收验证码", Status: AuthStatusAlreadyBound, BoundMailbox: bindingAddress}
 	}
 
 	// ---- reused lines 302–386: GET AddAssocId → submit email → GetCredentialType ----
@@ -113,17 +113,17 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	if len(proofData) == 0 {
 		return "", "", newExplicitAliasStageError("GetCredentialType 未返回邮箱 proof", AuthStatusAuthTimeout, explicitAliasStageAccountPageIncomplete)
 	}
-	// Pick the first type=1 email proof whose display looks like an email
-	// (matches the Python reference: type==1 and "@" in display).
 	var proofDataToken string
+	var proofDisplay string
 	for _, p := range proofData {
-		if p.Type == 1 && strings.Contains(p.Display, "@") {
+		if p.Type == 1 && strings.Contains(p.Display, "@") && mailboxMatchesMasked(p.Display, bindingAddress) {
 			proofDataToken = p.Data
+			proofDisplay = p.Display
 			break
 		}
 	}
 	if proofDataToken == "" {
-		return "", "", newExplicitAliasStageError("GetCredentialType 未返回 type=1 邮箱 proof", AuthStatusAuthTimeout, explicitAliasStageAccountPageIncomplete)
+		return "", "", &AuthError{Message: "Microsoft 当前辅助邮箱与本地 Binding 不一致", Status: AuthStatusAlreadyBound, BoundMailbox: firstEmailProofDisplay(proofData)}
 	}
 	logInfo("OTC 选中邮箱 proof 辅助=%s", bindingAddress)
 
@@ -135,6 +135,11 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// bindAuxiliaryEmail pattern (starts the watcher before SendOtt).
 	ctx, cancel := context.WithTimeout(session.context(), 100*time.Second)
 	defer cancel()
+	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)))
+	if err != nil {
+		return "", "", err
+	}
+	defer lease.releaseIfUnsent(ctx)
 	seen, err := snapshotMailboxKeys(ctx, bindingAddress, proxy)
 	if err != nil {
 		logWarning("OTC snapshotMailboxKeys 失败: %v", err)
@@ -144,6 +149,9 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// 3. Send OTP via GetOneTimeCode.srf
 	logInfo("OTC 步骤4: GetOneTimeCode 发码到 %s", bindingAddress)
 	sendURL := fmt.Sprintf("https://login.live.com/GetOneTimeCode.srf?id=%s&client_id=%s", otcLoginID, otcLoginClientID)
+	if err := lease.markSent(ctx); err != nil {
+		return "", "", err
+	}
 	sendResp, err := session.Post(sendURL, requestOptions{
 		Data: map[string]string{
 			"login":                  email,
@@ -248,7 +256,18 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// type=27 验码后微软会串联若干中断 (KMSI, passkey 强制注册, 再 KMSI, ...);
 	// 交给共享的收敛循环 (add_alias_password.go) 处理到别名管理页。
 	logInfo("OTC 步骤7: 收敛到 AddAssocId (验码后落点=%s pageID=%s)", currentURL, extractPageID(page))
-	return convergeExplicitAliasToAddAssocID(session, page, currentURL)
+	page, currentURL, err = convergeExplicitAliasToAddAssocID(session, page, currentURL)
+	releaseCompletedCodeMailLease(session.context(), lease)
+	return page, currentURL, err
+}
+
+func firstEmailProofDisplay(proofs []ProofData) string {
+	for _, proof := range proofs {
+		if proof.Type == 1 && strings.Contains(proof.Display, "@") {
+			return proof.Display
+		}
+	}
+	return ""
 }
 
 // SyncAndAddExplicitAliasesResult contains the outcome of a single "login →
@@ -265,9 +284,7 @@ type SyncAndAddExplicitAliasesResult struct {
 }
 
 // SyncAndAddExplicitAliases performs a single login session that:
-//  1. Logs in via email OTC (mechanism 1, eOTT_OtcLogin). If the code is not
-//     received (eOTT_OtcLogin daily limit reached), it falls back to a password
-//     login (mechanism 2, the INDEPENDENT eOTT_OneTimePassword channel).
+//  1. Logs in via email OTC (mechanism 1, eOTT_OtcLogin).
 //  2. GET account.live.com/names/manage and lists all existing aliases
 //  3. Creates each candidate in candidates (addSingleExplicitAlias, reusing session)
 //
@@ -276,6 +293,17 @@ type SyncAndAddExplicitAliasesResult struct {
 // SUCCEEDING login proceeds to list+add — a fallback replaces the failed login,
 // it never doubles the work.
 func SyncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bindingAddress string, candidates []string) *SyncAndAddExplicitAliasesResult {
+	return syncAndAddExplicitAliases(ctx, email, password, proxy, bindingAddress, candidates, false)
+}
+
+// SyncAndAddExplicitAliasesWithPasswordBinding uses the existing password
+// login path when the local Binding was absent and Microsoft may need to add or
+// confirm that proof before alias management can continue.
+func SyncAndAddExplicitAliasesWithPasswordBinding(ctx context.Context, email, password, proxy, bindingAddress string, candidates []string) *SyncAndAddExplicitAliasesResult {
+	return syncAndAddExplicitAliases(ctx, email, password, proxy, bindingAddress, candidates, true)
+}
+
+func syncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bindingAddress string, candidates []string, forcePasswordBinding bool) *SyncAndAddExplicitAliasesResult {
 	ctx = contextOrBackground(ctx)
 	session, err := newBrowserSession(ctx, proxy)
 	if err != nil {
@@ -288,16 +316,14 @@ func SyncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bind
 		}
 	}
 
-	// Step 1: OTC login (mechanism 1). On a code timeout — eOTT_OtcLogin's daily
-	// 3-send limit reached — fall back to the password login (mechanism 2), which
-	// uses the independent eOTT_OneTimePassword channel (another 3 codes/day). A
-	// fresh session is required; the OTC session is mid-challenge. The password
-	// login then does the SAME one-login list+add below (no redundant login).
+	// Step 1: OTC login (mechanism 1). A sent-but-unprocessed code keeps the
+	// normalized mask leased, so a timeout must end this attempt; a second channel
+	// may not send another code to the same mask in the same recovery window.
 	//
 	// MSACL_FORCE_PASSWORD_LOGIN=1 skips OTC and uses the password login directly
 	// (debug/ops override, e.g. when eOTT_OtcLogin is known-exhausted).
 	var currentURL string
-	if os.Getenv("MSACL_FORCE_PASSWORD_LOGIN") == "1" && strings.TrimSpace(password) != "" {
+	if (forcePasswordBinding || os.Getenv("MSACL_FORCE_PASSWORD_LOGIN") == "1") && strings.TrimSpace(password) != "" {
 		logWarning("MSACL_FORCE_PASSWORD_LOGIN=1: 跳过 OTC, 直接密码登录 (第二套 eOTT_OneTimePassword)")
 		if _, currentURL, err = loginForExplicitAliasPassword(session, email, password, proxy, bindingAddress); err != nil {
 			mapped := mapExplicitAliasError(err)
@@ -305,24 +331,7 @@ func SyncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bind
 		}
 	} else if _, currentURL, err = loginForExplicitAliasOTC(session, email, proxy, bindingAddress); err != nil {
 		mapped := mapExplicitAliasError(err)
-		if mapped.Category != "code_timeout" || strings.TrimSpace(password) == "" {
-			return &SyncAndAddExplicitAliasesResult{
-				OverallFailure: &mapped,
-			}
-		}
-		logWarning("OTC 登录收码失败(code_timeout), 切换密码登录(第二套 eOTT_OneTimePassword)")
-		session, err = newBrowserSession(ctx, proxy)
-		if err != nil {
-			f := ExplicitAliasResult{
-				Category:    "request",
-				SafeMessage: fmt.Sprintf("创建浏览器会话失败: %s", err),
-			}
-			return &SyncAndAddExplicitAliasesResult{OverallFailure: &f}
-		}
-		if _, currentURL, err = loginForExplicitAliasPassword(session, email, password, proxy, bindingAddress); err != nil {
-			mapped2 := mapExplicitAliasError(err)
-			return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped2}
-		}
+		return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
 	}
 
 	// Step 2: List existing aliases from names/manage. That page is often

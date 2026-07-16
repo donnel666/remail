@@ -3,7 +3,6 @@ package infra
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,10 +58,8 @@ func (p adminCommandOwnerPort) ValidateTargetOwner(_ context.Context, id uint) (
 }
 
 type adminCommandBindingPort struct {
-	commands                     []coreapp.AdminBindingCommand
-	err                          error
-	requireValidationBeforeWrite bool
-	observedValidationID         uint
+	commands []coreapp.AdminBindingCommand
+	err      error
 }
 
 type adminCommandBindingQueryPort map[uint]coreapp.AdminBindingSummary
@@ -85,20 +82,9 @@ func (adminCommandBindingQueryPort) CountActiveByDomains(context.Context, []stri
 }
 
 func (p *adminCommandBindingPort) ReplaceAdminInput(ctx context.Context, command coreapp.AdminBindingCommand) error {
-	tx, ok := platform.GormTxFromContext(ctx)
+	_, ok := platform.GormTxFromContext(ctx)
 	if !ok {
 		return errors.New("binding command is not in the core transaction")
-	}
-	if p.requireValidationBeforeWrite {
-		var job ResourceValidationModel
-		if err := tx.Where(
-			"resource_id = ? AND status IN ?",
-			command.ResourceID,
-			[]string{string(domain.ResourceValidationQueued), string(domain.ResourceValidationRunning)},
-		).Order("id DESC").Take(&job).Error; err != nil {
-			return fmt.Errorf("validation job must be created before binding write: %w", err)
-		}
-		p.observedValidationID = job.ID
 	}
 	p.commands = append(p.commands, command)
 	return p.err
@@ -132,6 +118,10 @@ func (adminCommandValidationQueue) EnqueueResourceValidation(context.Context, co
 	return nil
 }
 
+func (adminCommandValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
+	return nil
+}
+
 func (adminCommandValidationQueue) EnqueueResourceValidationDispatcher(context.Context, time.Duration) error {
 	return nil
 }
@@ -144,7 +134,7 @@ func (p failingAdminCommandOperationLogPort) Create(context.Context, *governance
 	return p.err
 }
 
-func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testing.T) {
+func TestAdminResourceCommandEditCommitsAggregateBindingPendingStateAndLogMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	adminRepo := NewAdminResourceRepo(db)
@@ -152,7 +142,7 @@ func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testi
 	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
 	service := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
 	owners := adminCommandOwners()
-	binding := &adminCommandBindingPort{requireValidationBeforeWrite: true}
+	binding := &adminCommandBindingPort{}
 	guard := &adminCommandAllocationGuard{}
 	service.SetPorts(owners, adminCommandBindingQueryPort{}, binding, guard)
 	insertAdminCommandUsers(t, db)
@@ -195,11 +185,7 @@ func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testi
 		Path:           "/v1/admin/resources/:resourceId",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.Equal(t, root.ID, result.ValidationTask.ResourceID)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
-	require.Equal(t, result.ValidationTask.ValidationID, binding.observedValidationID,
-		"administrator edits must acquire/supersede the validation job before writing the binding")
+	require.NotNil(t, result)
 	require.True(t, guard.called)
 	require.Len(t, binding.commands, 1)
 	require.True(t, binding.commands[0].BindingAddressSet)
@@ -225,13 +211,6 @@ func TestAdminResourceCommandEditCommitsAggregateBindingTaskAndLogMySQL(t *testi
 	require.True(t, stored.LongLived)
 	require.False(t, stored.GraphAvailable)
 	require.Equal(t, 0, stored.QualityScore, "identity invalidation clears the previously derived score")
-
-	var jobs []ResourceValidationModel
-	require.NoError(t, db.Where("resource_id = ?", root.ID).Find(&jobs).Error)
-	require.Len(t, jobs, 1)
-	require.EqualValues(t, 2, jobs[0].ExpectedCredentialRevision)
-	require.Equal(t, string(domain.ResourceValidationQueued), jobs[0].Status)
-	require.Equal(t, uint(2), jobs[0].OwnerUserID)
 
 	var log struct {
 		OperationType string
@@ -283,7 +262,7 @@ func TestAdminResourceCommandEditPreservesUnchangedVerifiedBindingMySQL(t *testi
 		RequestID: "req-admin-edit-same-binding", Path: "/v1/admin/resources/:resourceId",
 	})
 	require.NoError(t, err)
-	require.Nil(t, result.ValidationTask)
+	require.NotNil(t, result)
 	require.Empty(t, bindingWriter.commands, "an unchanged verified binding must not be reset to pending")
 
 	var storedRoot EmailResourceModel
@@ -296,9 +275,6 @@ func TestAdminResourceCommandEditPreservesUnchangedVerifiedBindingMySQL(t *testi
 	require.True(t, stored.LongLived)
 	require.EqualValues(t, 1, stored.CredentialRevision)
 
-	var validationJobs int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", root.ID).Count(&validationJobs).Error)
-	require.Zero(t, validationJobs)
 	var log struct{ SafeSummary string }
 	require.NoError(t, db.Raw(
 		"SELECT safe_summary FROM operation_logs WHERE request_id = ?",
@@ -356,13 +332,11 @@ func TestAdminResourceCommandEditNoOpCompletesWithoutAggregateOrBindingChangesMy
 	result, err := service.Edit(context.Background(), unchangedCommand)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Nil(t, result.ValidationTask)
 
 	// The completed receipt makes an exact retry a pure replay.
 	replayed, err := service.Edit(context.Background(), unchangedCommand)
 	require.NoError(t, err)
 	require.NotNil(t, replayed)
-	require.Nil(t, replayed.ValidationTask)
 
 	bindingAddress := " VERIFIED-AUX@EXAMPLE.NET "
 	result, err = service.Edit(context.Background(), coreapp.AdminMicrosoftEditCommand{
@@ -373,7 +347,6 @@ func TestAdminResourceCommandEditNoOpCompletesWithoutAggregateOrBindingChangesMy
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Nil(t, result.ValidationTask)
 
 	var rootAfter EmailResourceModel
 	require.NoError(t, db.First(&rootAfter, root.ID).Error)
@@ -386,10 +359,6 @@ func TestAdminResourceCommandEditNoOpCompletesWithoutAggregateOrBindingChangesMy
 	require.Equal(t, resourceBefore.QualityScore, resourceAfter.QualityScore)
 	require.Empty(t, bindingWriter.commands)
 	require.False(t, guard.called)
-
-	var validationJobs int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", root.ID).Count(&validationJobs).Error)
-	require.Zero(t, validationJobs)
 
 	var logs []struct {
 		RequestID   string
@@ -444,11 +413,9 @@ func TestAdminResourceCommandEditRollsBackWhenBindingFailsMySQL(t *testing.T) {
 	var stored MicrosoftResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, 91, stored.QualityScore)
-	var jobs, logs, receipts int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", root.ID).Count(&jobs).Error)
+	var logs, receipts int64
 	require.NoError(t, db.Table("operation_logs").Where("request_id = ?", "req-admin-edit-rollback").Count(&logs).Error)
 	require.NoError(t, db.Model(&AdminResourceCommandReceiptModel{}).Where("operator_user_id = ? AND idempotency_key = ?", 9, "admin-edit-rollback").Count(&receipts).Error)
-	require.Zero(t, jobs)
 	require.Zero(t, logs)
 	require.Zero(t, receipts)
 }
@@ -495,17 +462,13 @@ func TestAdminResourceEditRollsBackAggregateAndReceiptAfterPanicMySQL(t *testing
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, 91, stored.QualityScore)
 
-	var jobs, logs, receipts int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).
-		Where("resource_id = ?", root.ID).
-		Count(&jobs).Error)
+	var logs, receipts int64
 	require.NoError(t, db.Table("operation_logs").
 		Where("request_id = ?", "req-admin-edit-panic-rollback").
 		Count(&logs).Error)
 	require.NoError(t, db.Model(&AdminResourceCommandReceiptModel{}).
 		Where("operator_user_id = ? AND idempotency_key = ?", 9, "admin-edit-panic-rollback").
 		Count(&receipts).Error)
-	require.Zero(t, jobs)
 	require.Zero(t, logs)
 	require.Zero(t, receipts)
 }
@@ -552,129 +515,15 @@ func TestAdminResourceEnableRollsBackStateValidationReceiptWhenOperationLogFails
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, string(domain.MicrosoftStatusDisabled), stored.Status)
 
-	var jobs, receipts, logs int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).
-		Where("resource_id = ?", root.ID).
-		Count(&jobs).Error)
+	var receipts, logs int64
 	require.NoError(t, db.Model(&AdminResourceCommandReceiptModel{}).
 		Where("operator_user_id = ? AND idempotency_key = ?", 9, "enable-log-rollback-key").
 		Count(&receipts).Error)
 	require.NoError(t, db.Table("operation_logs").
 		Where("request_id = ?", "req-enable-log-rollback").
 		Count(&logs).Error)
-	require.Zero(t, jobs)
 	require.Zero(t, receipts)
 	require.Zero(t, logs)
-}
-
-func TestAdminResourceCredentialEditSupersedesOlderActiveValidationMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
-	resourceRepo := NewResourceRepo(db)
-	adminRepo := NewAdminResourceRepo(db)
-	validationRepo := NewResourceValidationRepo(db)
-	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
-	service := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
-	service.SetPorts(adminCommandOwners(), adminCommandBindingQueryPort{}, &adminCommandBindingPort{}, &adminCommandAllocationGuard{})
-	insertAdminCommandUsers(t, db)
-
-	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
-	resource := &domain.MicrosoftResource{
-		EmailAddress: "supersede-validation@outlook.com", Password: "before", ClientID: "client-before", RefreshToken: "rt-before", Status: domain.MicrosoftStatusPending,
-	}
-	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
-	oldJob := &domain.ResourceValidation{
-		ResourceID: root.ID, ResourceType: domain.ResourceTypeMicrosoft, OwnerUserID: 1,
-		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
-	}
-	created, err := validationRepo.CreateWithLog(context.Background(), oldJob, nil)
-	require.NoError(t, err)
-	require.True(t, created)
-	require.EqualValues(t, 1, oldJob.ExpectedCredentialRevision)
-
-	result, err := service.ReplaceCredentials(context.Background(), coreapp.AdminMicrosoftEditCommand{
-		ResourceID: root.ID, Version: root.Version,
-		Credentials:    &coreapp.AdminMicrosoftCredentials{Password: "after", ClientID: "client-after", RefreshToken: "rt-after"},
-		OperatorUserID: 9, IdempotencyKey: "admin-credentials-supersede", RequestID: "req-supersede-validation", Path: "/v1/admin/resources/:resourceId/credentials",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.NotEqual(t, oldJob.ID, result.ValidationTask.ValidationID)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
-
-	var oldStored, newStored ResourceValidationModel
-	require.NoError(t, db.First(&oldStored, oldJob.ID).Error)
-	require.Equal(t, string(domain.ResourceValidationFailed), oldStored.Status)
-	require.Contains(t, oldStored.LastSafeError, "superseded")
-	require.NoError(t, db.First(&newStored, result.ValidationTask.ValidationID).Error)
-	require.Equal(t, string(domain.ResourceValidationQueued), newStored.Status)
-	require.EqualValues(t, 2, newStored.ExpectedCredentialRevision)
-}
-
-func TestAdminResourceBindingEditSupersedesOlderRunningValidationMySQL(t *testing.T) {
-	db := newCoreMySQLTestDB(t)
-	resourceRepo := NewResourceRepo(db)
-	adminRepo := NewAdminResourceRepo(db)
-	validationRepo := NewResourceValidationRepo(db)
-	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
-	service := coreapp.NewAdminResourceCommandService(adminRepo, validation, governanceinfra.NewOperationLogRepo(db))
-	bindingWriter := &adminCommandBindingPort{}
-	insertAdminCommandUsers(t, db)
-
-	root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
-	resource := &domain.MicrosoftResource{
-		EmailAddress: "binding-supersede@outlook.com", Password: "password", ClientID: "client", RefreshToken: "refresh", Status: domain.MicrosoftStatusNormal,
-		GraphAvailable: true, QualityScore: 100,
-	}
-	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
-	oldJob := &domain.ResourceValidation{
-		ResourceID: root.ID, ResourceType: domain.ResourceTypeMicrosoft, OwnerUserID: 1,
-		Status: domain.ResourceValidationQueued, MaxAttempts: domain.ResourceValidationDefaultMaxAttempts,
-	}
-	created, err := validationRepo.CreateWithLog(context.Background(), oldJob, nil)
-	require.NoError(t, err)
-	require.True(t, created)
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("id = ?", oldJob.ID).Updates(map[string]any{
-		"status":      string(domain.ResourceValidationRunning),
-		"claim_token": "binding-supersede-old-claim",
-	}).Error)
-
-	service.SetPorts(
-		adminCommandOwners(),
-		adminCommandBindingQueryPort{root.ID: {
-			ResourceID: root.ID, EmailAddress: "old-binding@example.net", Status: "pending",
-		}},
-		bindingWriter,
-		&adminCommandAllocationGuard{},
-	)
-	newBinding := "new-binding@example.net"
-	result, err := service.Edit(context.Background(), coreapp.AdminMicrosoftEditCommand{
-		ResourceID: root.ID, Version: root.Version,
-		BindingAddressSet: true, BindingAddress: &newBinding,
-		OperatorUserID: 9, IdempotencyKey: "admin-binding-supersede", RequestID: "req-binding-supersede", Path: "/v1/admin/resources/:resourceId",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, result.ValidationTask)
-	require.NotEqual(t, oldJob.ID, result.ValidationTask.ValidationID)
-	require.EqualValues(t, 2, result.ValidationTask.CredentialRevision)
-	require.Len(t, bindingWriter.commands, 1)
-
-	var stored MicrosoftResourceModel
-	require.NoError(t, db.First(&stored, root.ID).Error)
-	require.EqualValues(t, 2, stored.CredentialRevision)
-	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
-	require.False(t, stored.GraphAvailable)
-	require.Equal(t, 0, stored.QualityScore)
-	require.Equal(t, "client", stored.ClientID)
-	require.Equal(t, "refresh", stored.RefreshToken)
-
-	var oldStored, newStored ResourceValidationModel
-	require.NoError(t, db.First(&oldStored, oldJob.ID).Error)
-	require.Equal(t, string(domain.ResourceValidationFailed), oldStored.Status)
-	require.Empty(t, oldStored.ClaimToken)
-	require.Contains(t, oldStored.LastSafeError, "superseded")
-	require.NoError(t, db.First(&newStored, result.ValidationTask.ValidationID).Error)
-	require.Equal(t, string(domain.ResourceValidationQueued), newStored.Status)
-	require.EqualValues(t, 2, newStored.ExpectedCredentialRevision)
 }
 
 func TestAdminResourceDeleteUsesAllocationGuardAndVersionMySQL(t *testing.T) {
@@ -738,24 +587,25 @@ func TestAdminResourceCredentialCommandIdempotencyReplaysWithoutSecretsOrSideEff
 	}
 	first, err := service.ReplaceCredentials(context.Background(), command)
 	require.NoError(t, err)
-	require.NotNil(t, first.ValidationTask)
+	require.NotNil(t, first)
 
 	command.RequestID = "req-credentials-replay"
 	replayed, err := service.ReplaceCredentials(context.Background(), command)
 	require.NoError(t, err)
-	require.NotNil(t, replayed.ValidationTask)
-	require.Equal(t, first.ValidationTask.ValidationID, replayed.ValidationTask.ValidationID)
+	require.NotNil(t, replayed)
 
 	var rootAfter EmailResourceModel
 	require.NoError(t, db.First(&rootAfter, root.ID).Error)
 	require.EqualValues(t, 2, rootAfter.Version)
-	var jobs, logs, replayLogs int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", root.ID).Count(&jobs).Error)
+	var logs, replayLogs int64
 	require.NoError(t, db.Table("operation_logs").Where("operation_type = ? AND resource_id = ?", "core.admin_resource.credentials.replace", root.ID).Count(&logs).Error)
 	require.NoError(t, db.Table("operation_logs").Where("request_id = ?", "req-credentials-replay").Count(&replayLogs).Error)
-	require.Equal(t, int64(1), jobs)
 	require.Equal(t, int64(1), logs)
 	require.Zero(t, replayLogs)
+	var stored MicrosoftResourceModel
+	require.NoError(t, db.First(&stored, root.ID).Error)
+	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
+	require.EqualValues(t, 2, stored.CredentialRevision)
 
 	var receipt AdminResourceCommandReceiptModel
 	require.NoError(t, db.Where("operator_user_id = ? AND idempotency_key = ?", 9, command.IdempotencyKey).First(&receipt).Error)
@@ -848,7 +698,7 @@ func TestAdminResourceStateAndBatchIdempotencyReplayStableResultsMySQL(t *testin
 	require.ErrorIs(t, err, domain.ErrResourceIdempotencyConflict)
 }
 
-func TestAdminResourceValidateIdempotencyKeepsOriginalTaskMySQL(t *testing.T) {
+func TestAdminResourceValidateIdempotencyKeepsPendingStateAndSingleLogMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	adminRepo := NewAdminResourceRepo(db)
@@ -866,23 +716,22 @@ func TestAdminResourceValidateIdempotencyKeepsOriginalTaskMySQL(t *testing.T) {
 		context.Background(), root.ID, 9, "validate-replay-key", "req-validate-first", "/v1/admin/resources/:resourceId/validate",
 	)
 	require.NoError(t, err)
-	require.NotNil(t, first.Task)
-	require.False(t, first.Reused)
+	require.Equal(t, 1, first.Accepted)
 	replayed, err := service.Validate(
 		context.Background(), root.ID, 9, "validate-replay-key", "req-validate-replay", "/v1/admin/resources/:resourceId/validate",
 	)
 	require.NoError(t, err)
-	require.True(t, replayed.Reused)
-	require.Equal(t, first.Task.ValidationID, replayed.Task.ValidationID)
+	require.Equal(t, first, replayed)
 
-	var jobs, logs int64
-	require.NoError(t, db.Model(&ResourceValidationModel{}).Where("resource_id = ?", root.ID).Count(&jobs).Error)
+	var logs int64
 	require.NoError(t, db.Table("operation_logs").Where("operation_type = ? AND resource_id = ?", "core.admin_resource.validate", root.ID).Count(&logs).Error)
-	require.Equal(t, int64(1), jobs)
 	require.Equal(t, int64(1), logs)
+	var stored MicrosoftResourceModel
+	require.NoError(t, db.First(&stored, root.ID).Error)
+	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
 }
 
-func TestAdminResourceEnableAndRecoverIdempotencyKeepOriginalValidationTasksMySQL(t *testing.T) {
+func TestAdminResourceEnableAndRecoverIdempotencyKeepPendingStateMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	resourceRepo := NewResourceRepo(db)
 	adminRepo := NewAdminResourceRepo(db)
@@ -905,9 +754,11 @@ func TestAdminResourceEnableAndRecoverIdempotencyKeepOriginalValidationTasksMySQ
 		"enable-replay-key", "req-enable-replay", "/v1/admin/resources/:resourceId/enable",
 	)
 	require.NoError(t, err)
-	require.NotNil(t, firstEnable.ValidationTask)
-	require.NotNil(t, replayedEnable.ValidationTask)
-	require.Equal(t, firstEnable.ValidationTask.ValidationID, replayedEnable.ValidationTask.ValidationID)
+	require.NotNil(t, firstEnable)
+	require.NotNil(t, replayedEnable)
+	var enabled MicrosoftResourceModel
+	require.NoError(t, db.First(&enabled, disabledRoot.ID).Error)
+	require.Equal(t, string(domain.MicrosoftStatusPending), enabled.Status)
 
 	deletedRoot := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
 	deletedResource := &domain.MicrosoftResource{EmailAddress: "idempotent-recover@outlook.com", Password: "password", Status: domain.MicrosoftStatusDeleted, ForSale: false}
@@ -922,9 +773,11 @@ func TestAdminResourceEnableAndRecoverIdempotencyKeepOriginalValidationTasksMySQ
 		"recover-replay-key", "req-recover-replay", "/v1/admin/resources/:resourceId/recover",
 	)
 	require.NoError(t, err)
-	require.NotNil(t, firstRecover.ValidationTask)
-	require.NotNil(t, replayedRecover.ValidationTask)
-	require.Equal(t, firstRecover.ValidationTask.ValidationID, replayedRecover.ValidationTask.ValidationID)
+	require.NotNil(t, firstRecover)
+	require.NotNil(t, replayedRecover)
+	var recovered MicrosoftResourceModel
+	require.NoError(t, db.First(&recovered, deletedRoot.ID).Error)
+	require.Equal(t, string(domain.MicrosoftStatusPending), recovered.Status)
 
 	var enableLogs, recoverLogs int64
 	require.NoError(t, db.Table("operation_logs").Where("operation_type = ? AND resource_id = ?", "core.admin_resource.enable", disabledRoot.ID).Count(&enableLogs).Error)

@@ -23,6 +23,8 @@
 | 2026-07-12 | V1.16 | Codex | 补充管理员 Microsoft 运维边界：新增 BindingAdmin/BindingQuery/AuxiliaryMail Query Port，并把“创建显式别名”定义为受配额、admission、fencing 和 reconciliation 约束的 schedule expedite；管理页面可见但不能直接推进协议状态。 |
 | 2026-07-12 | V1.17 | Codex | 收敛管理员 RT 刷新与 alias 入口：协议任务继续归 MailTransport，但凭据 scope、revision、Core version 和诊断统一经 tx-bound `MicrosoftCredentialPort` 回到 Core；alias expedite 只保留带 receipt/audit 的唯一命令入口。 |
 | 2026-07-12 | V1.18 | Codex | 明确 BindingAdmin 同值更新为 no-op：地址未变化时保留 verified/时间/诊断；owner 或主邮箱同步不触发新的绑定验证。 |
+| 2026-07-16 | V1.19 | Codex | 定稿验证、辅助邮箱恢复与显式别名流程：`binding_address` 直接保存空值/掩码/完整地址，masked/system/ready 全部实时派生；validation 与 alias 共用相同掩码租约，只有相同规范化掩码串行。完整契约见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
+| 2026-07-16 | V1.20 | Codex | 补充登录授权发码的辅助邮箱识别：所有 masked proof 先走规则推算；可推算时按完整邮箱精确匹配登录验证码，不可推算时才通过实际 recipient 反推；登录和忘记密码发码共用掩码租约。 |
 
 > 支撑域。BC-MAILTRANSPORT 封装协议细节，只提供结构化结果，不做项目匹配和订单判断。
 
@@ -76,12 +78,11 @@ stateDiagram-v2
 |------|------|
 | `id` | 绑定 ID |
 | `resourceId` | Microsoft 资源 ID |
-| `bindingAddress` | 辅助邮箱地址 |
+| `bindingAddress` | 地址权威事实；允许为空、Microsoft 掩码或完整邮箱，分类由格式和当前系统 binding 域名实时派生 |
 | `microsoftEmail` | 待验证 Microsoft 邮箱 |
 | `status` | `pending/code_sent/verified/timeout/failed/expired` |
 | `purpose` | 用途 |
 | `codeMsgId` | 验证码邮件 ID |
-| `boundDisplay` | Microsoft 页面展示的绑定信息 |
 | `category/message` | 内部安全诊断，不作为公开 API 响应码 |
 | `selectedAt/expireAt/verifiedAt` | 时间 |
 
@@ -191,6 +192,7 @@ Microsoft 拉取用途必须显式传入：
 | INV-MT8 | 辅助邮箱摘要不得返回正文，但可以返回 UI 已确认的验证码安全展示；普通日志、任务响应、错误和导出不得返回正文或验证码。Microsoft 密码/RT/AT、RFC822 objectKey 或上游原文没有响应例外；辅助邮箱完整地址只对具备 binding read 权限的管理员可见，完成 resource/message 关联校验的授权单封详情可以返回 UI 已确认的解析正文和验证码。 |
 | INV-MT9 | Alias expedite 不新增配额、不替换 uncertain candidate、不绕过资源状态/admission/fencing；HTTP 只持久化/唤醒任务并返回 `202`。 |
 | INV-MT10 | Binding 输入与 Core 资源编辑需要原子保存时，MailTransport repository 必须使用调用方 tx-bound context；事务内不得执行 Microsoft、SMTP、MinIO 或其他网络调用。 |
+| INV-MT11 | 登录授权或忘记密码准备向 masked proof 发码前，必须先执行规则推算并取得共享规范化掩码租约；推算成功按完整邮箱精确收码，只有推算失败才按掩码和实际 recipient 反推。 |
 
 ---
 
@@ -205,8 +207,8 @@ Microsoft 拉取用途必须显式传入：
 | `InboundPort` | 出站到 BC-MAILMATCH | SMTP 入站邮件落库。 |
 | `BindingCodeWaitPort` | 出站到 BC-MAILMATCH | Microsoft ACL 等待辅助邮箱验证码。 |
 | `ProxyPort` | 出站到 BC-PROXY | 获取 Microsoft 通讯代理并上报代理成功/失败。 |
-| `BindingQueryPort` | 入站自 Core 概要/ MailTransport 管理 API | 按 resourceId 或管理筛选读取绑定地址、状态、boundDisplay、时间和安全诊断；不返回验证码或原文。 |
-| `BindingAdminPort` | 入站自 Core 管理 Facade | 在短事务内设置/替换/清除 bindingAddress 输入并维护唯一性；owner 转移时同步收敛当前 Binding owner，但不改写历史 InboundMail owner；不允许人工推进协议结果状态。 |
+| `BindingQueryPort` | 入站自 Core 概要/ MailTransport 管理 API | 按 resourceId 或管理筛选读取唯一权威的 bindingAddress、执行状态、时间和安全诊断；不返回验证码或原文。 |
+| `BindingAdminPort` | 入站自 Core 管理 Facade | 在短事务内设置/替换/清除 bindingAddress 输入；只对完整 active 地址维护精确唯一性，掩码不占用 concrete 唯一槽位；owner 转移时同步收敛当前 Binding owner，但不改写历史 InboundMail owner；不允许人工推进协议结果状态。 |
 | `AuxiliaryMailQueryPort` | 入站自 MailTransport 管理 API | 只在 resourceId 对应 Binding 作用域内分页读取辅助邮箱收码邮件摘要，并按 messageId 授权读取正文/验证码；永不返回 objectKey。 |
 | `AliasQueryPort` | 入站自 Core aliases 管理查询 | 读取显式别名 schedule 安全摘要，供 Core 与自身 alias inventory 组合；一期不发布内部 attempt DTO。 |
 | `AliasExpediteCommand` | 管理 HTTP 入口 | 先创建/复用幂等 receipt 并写 OperationLog，再提前 schedule 和唤醒 dispatcher；这是唯一写入口，内部复用 active attempt，保持配额、admission、fencing 和 reconciliation。 |
@@ -218,15 +220,17 @@ P1-I3 补充：
 |------|------|------|
 | `ResourceValidationPort` | 入站自 BC-CORE worker | 验证 Microsoft RT/获取 RT、自建域名 MX；只返回结构化结果，不直接修改资源状态。 |
 
-`ResourceValidationPort` 返回的 `request/auth_timeout` 分类只表示协议请求、代理、DNS、授权轮询超时或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据；只有密码、账号异常、DNS 配置错误等确定性分类才允许 Core 把资源状态写为 `abnormal`。
+`ResourceValidationPort` 返回的 `request/auth_timeout` 分类只表示协议请求、代理、DNS、授权轮询超时或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据。Microsoft 资源只有在无法获得权威可用 RT，或最终 RT 发生确定性收件失败时才允许 Core 写 `abnormal`；辅助邮箱掩码、外部域名、恢复超时、验证码错误和 Binding 持久化失败本身都不是资源异常证据。
 
-P1-I3 Microsoft 验证流程使用同一个 `Binding` 实体承接辅助邮箱事实。Core 导入 TXT 时只把 `bindingAddress` 作为输入交给 MailTransport，MailTransport 写入 `pending` 绑定记录；同一 active `bindingAddress` 只能归属一个 Microsoft 资源，避免 SMTP RCPT 解析歧义。验证 worker 进入 Microsoft 页面流后复用该地址，或在没有输入时按 ACL 规则生成地址。SMTP 入站解析辅助邮箱地址后写入 `InboundMail(resourceType=microsoft)`，`BindingCodeWaitPort` 读取本机 `InboundMail` 的 RFC822 原文并沿用 ACL 的验证码提取规则。该流程不改变 Microsoft 页面交互策略，只替换本系统的输入、收码和状态回写端口。
+P1-I3 Microsoft 验证流程使用同一个 `Binding` 实体承接辅助邮箱事实。Core 导入 TXT 时只把 `bindingAddress` 作为输入交给 MailTransport，MailTransport 写入 `pending` 绑定记录；完整 active 地址只能归属一个 Microsoft 资源，避免 SMTP RCPT 精确归属歧义，掩码不占用 concrete 地址唯一槽位。验证 worker 进入 Microsoft 页面流后复用该地址；没有输入时先读取 Microsoft Email proof，只有确认没有 proof 且页面流要求新增绑定时才生成系统地址。SMTP 入站只使用完整地址解析资源并写入 `InboundMail(resourceType=microsoft)`；掩码必须先推算或恢复为完整地址，`BindingCodeWaitPort` 再读取本机 RFC822 原文并沿用 ACL 的验证码提取规则。
 
-管理员修改辅助邮箱不是验证状态覆盖。`BindingAdminPort.SetAddress` 先校验地址格式、同一 active 地址唯一性和当前是否存在运行中的绑定/验证尝试；发生冲突返回 `409`。规范化后的地址与当前值相同时必须 no-op，保留 `verified`、验证时间和安全诊断；只有实际替换或清除地址才开启新一轮输入并置为 `pending`。owner 或主邮箱变化只同步当前 Binding 的身份字段，不重置地址协议状态。替换成功保留旧 InboundMail/审计事实，清除地址也不删除历史收码邮件。若同一个管理保存请求还修改 Core email/owner/凭据，Core 先完成全部业务校验并开启短事务，再通过 tx-bound context 调用 `BindingAdminPort`，任一写失败整体回滚。成功与失败 OperationLog 只记录固定安全摘要。
+管理员修改辅助邮箱不是验证状态覆盖。`BindingAdminPort.SetAddress` 先校验空值/掩码/完整地址格式，只对完整 active 地址校验唯一性，并检查当前是否存在运行中的绑定/验证尝试；发生冲突返回 `409`。规范化后的地址与当前值相同时必须 no-op，保留 `verified`、验证时间和安全诊断；只有实际替换或清除地址才开启新一轮输入并置为 `pending`。owner 或主邮箱变化只同步当前 Binding 的身份字段，不重置地址协议状态。替换成功保留旧 InboundMail/审计事实，清除地址也不删除历史收码邮件。若同一个管理保存请求还修改 Core email/owner/凭据，Core 先完成全部业务校验并开启短事务，再通过 tx-bound context 调用 `BindingAdminPort`，任一写失败整体回滚。成功与失败 OperationLog 只记录固定安全摘要。
 
-没有导入指定 `bindingAddress` 时，验证 worker 必须在进入 Microsoft 页面流前先按 ACL 确定性规则生成辅助邮箱并写入 `MicrosoftBindingMailbox(pending)`。这样 SMTP `RCPT TO` 在 Microsoft 发验证码前已经能解析到资源根，避免验证码邮件先到而绑定事实后写造成拒收或收码不可见。验证开始时重复写入同一资源绑定记录是新一轮验证尝试，只允许把 `pending/code_sent/timeout/failed` 这类当前尝试状态重置为 `pending`；已有 `verified` 绑定事实不得在入口阶段清空，只能由后续真实验证结果推进。
+没有导入指定 `bindingAddress` 时，worker 必须先检查 Microsoft 是否已经存在 Email proof：有 proof 就把完整地址或掩码直接写入 `bindingAddress` 并按规则分类；只有确认没有 proof、需要新绑定时，才按 ACL 确定性规则生成系统辅助邮箱并在 Microsoft 发码前写入 `MicrosoftBindingMailbox(pending)`，确保 SMTP `RCPT TO` 可以解析资源归属。完整地址、掩码和系统域名资格的判断不依赖 Binding 执行状态，详见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。
 
 P1-I3 Microsoft 资源验证的资源健康判断止于“RT 可用且收件接口可读”。MailTransport 必须先完成 RT 获取或刷新，再优先通过 Graph 分页读取收件箱和垃圾箱；Graph 失败时使用同一 RT 换 IMAP token 回退 Outlook IMAP。Graph 或 IMAP 任一路径读取正常，即 `ResourceValidationPort` 可返回成功。Port 同时返回 `graphAvailable`：Graph 路径成功为 `true`，IMAP 回退成功为 `false`。该字段是协议能力事实，不是资源状态。读取到的全量结构化邮件会交给 BC-MAILMATCH 执行第三步项目识别并写入 `microsoft_resource_project_matches`；该步骤失败只记录诊断，不改变资源健康结果。
+
+密码登录授权 RT 自身触发 Email proof/OTP 时，也必须调用共享辅助邮箱识别。worker 先用系统确定性规则和资源同前缀规则匹配掩码：得到唯一完整地址时，在发码前取得该掩码租约、快照精确邮箱并直接匹配本轮登录验证码；无法推算时，才快照系统域名/掩码范围，并从新邮件实际 recipient 反推完整地址。登录授权与忘记密码只是不同的 Microsoft 发码和确认接口，使用同一个租约、基线、邮件归属和持久化规则。
 
 ---
 

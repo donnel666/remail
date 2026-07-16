@@ -25,6 +25,10 @@ type failingAdminOperationLogWriter struct {
 
 type uncertainAdminAliasCreator struct{}
 
+func (uncertainAdminAliasCreator) PrepareMicrosoftAliasBinding(_ context.Context, request mailapp.MicrosoftAliasCreationRequest) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
+	return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: request.BindingAddress}, nil
+}
+
 func (uncertainAdminAliasCreator) GenerateMicrosoftAliasCandidates(int) ([]string, error) {
 	return []string{"uncertain-admin-task@outlook.com"}, nil
 }
@@ -571,10 +575,9 @@ SELECT SHA2(CONCAT_WS(
     mr.password,
     mr.client_id,
     mr.refresh_token,
-    COALESCE(binding.account_email, ''),
-    COALESCE(binding.binding_address, ''),
-    COALESCE(binding.status, ''),
-    COALESCE(binding.bound_display, '')
+	COALESCE(binding.account_email, ''),
+	COALESCE(binding.binding_address, ''),
+	COALESCE(binding.status, '')
 ), 256) AS resource_signature
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_binding_mailboxes AS binding

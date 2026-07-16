@@ -191,6 +191,7 @@ func NewMailTransportModule(
 	inboundResolver := mailinfra.NewInboundResourceResolver(db)
 	inboundQueue := mailinfra.NewInboundMailQueue(asynqClient)
 	bindingRepo := mailinfra.NewMicrosoftBindingRepo(db)
+	recoveryLeaseStore := mailinfra.NewMicrosoftBindingRecoveryLeaseStore(db)
 	auxiliaryMailRepo := mailinfra.NewAuxiliaryMailRepo(db)
 	aliasStore := mailinfra.NewMicrosoftAliasStore(db)
 	aliasQueue := mailinfra.NewMicrosoftAliasQueue(asynqClient)
@@ -201,6 +202,7 @@ func NewMailTransportModule(
 		files,
 		microsoftBindingRecoveryHistoryWindow,
 	))
+	msacl.SetRecoveryLeaseStore(recoveryLeaseStore)
 	// Source the auxiliary (recovery) mailbox domains from domain_resources
 	// (purpose='binding') instead of a hardcoded default; load once now and
 	// refresh periodically in StartDispatchers. The same repo also feeds the

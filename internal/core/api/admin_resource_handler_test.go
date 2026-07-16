@@ -169,60 +169,37 @@ func (r *adminHandlerCommandRepo) SaveAdminMicrosoft(_ context.Context, root *do
 	return nil
 }
 
-type adminHandlerValidationRepo struct {
-	nextID uint
-}
+type adminHandlerValidationRepo struct{}
 
-func (r *adminHandlerValidationRepo) CreateWithLog(_ context.Context, job *domain.ResourceValidation, _ *governancedomain.OperationLog) (bool, error) {
-	if r.nextID == 0 {
-		r.nextID = 100
-	}
-	job.ID = r.nextID
-	r.nextID++
-	job.ExpectedCredentialRevision = 2
-	job.CreatedAt = time.Now().UTC()
-	job.UpdatedAt = job.CreatedAt
-	return true, nil
+func (*adminHandlerValidationRepo) MarkResourcePendingWithLog(context.Context, uint, domain.ResourceType, uint, *governancedomain.OperationLog) error {
+	return nil
 }
-
-func (*adminHandlerValidationRepo) CreateBatchWithLog(context.Context, uint, coreapp.ResourceBulkSelection, *governancedomain.OperationLog, string, string) (*coreapp.ResourceBatchValidationResult, error) {
+func (*adminHandlerValidationRepo) MarkValidationBatchPending(context.Context, coreapp.ResourceValidationBatchTask, int) (*coreapp.ResourceValidationBatchPageResult, error) {
+	return &coreapp.ResourceValidationBatchPageResult{Done: true}, nil
+}
+func (*adminHandlerValidationRepo) ClaimPendingValidations(context.Context, int) ([]coreapp.ResourceValidationTask, error) {
 	return nil, nil
 }
-func (*adminHandlerValidationRepo) FindByID(context.Context, uint) (*domain.ResourceValidation, error) {
-	return nil, nil
-}
-func (*adminHandlerValidationRepo) CreatePendingValidationJobs(context.Context, int) (int, error) {
-	return 0, nil
-}
-func (*adminHandlerValidationRepo) ClaimDispatchable(context.Context, int, time.Time, time.Time) ([]domain.ResourceValidation, error) {
-	return nil, nil
-}
-func (*adminHandlerValidationRepo) MarkRunning(context.Context, uint, string) (string, bool, error) {
-	return "", false, nil
-}
-func (*adminHandlerValidationRepo) ReleaseDispatch(context.Context, uint, string) error { return nil }
-func (*adminHandlerValidationRepo) MarkFailed(context.Context, uint, string, string) error {
+func (*adminHandlerValidationRepo) ReleaseValidation(context.Context, coreapp.ResourceValidationTask) error {
 	return nil
 }
-func (*adminHandlerValidationRepo) MarkRetryableFailure(context.Context, uint, string, string) (bool, error) {
-	return false, nil
-}
-func (*adminHandlerValidationRepo) SaveMicrosoftProgress(context.Context, uint, uint, string, coreapp.MicrosoftValidationResult) error {
+func (*adminHandlerValidationRepo) ResetValidationAssignments(context.Context) error { return nil }
+func (*adminHandlerValidationRepo) SaveMicrosoftProgress(context.Context, coreapp.ResourceValidationTask, coreapp.MicrosoftValidationResult) error {
 	return nil
 }
-func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, uint, uint, string, coreapp.MicrosoftValidationResult, *governancedomain.SystemLog) error {
+func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, coreapp.ResourceValidationTask, coreapp.MicrosoftValidationResult, *governancedomain.SystemLog) error {
 	return nil
 }
-func (*adminHandlerValidationRepo) ApplyDomainResult(context.Context, uint, uint, string, coreapp.DomainValidationResult, *governancedomain.SystemLog) error {
-	return nil
-}
-func (*adminHandlerValidationRepo) MarkDispatchFailed(context.Context, uint, string, string) error {
+func (*adminHandlerValidationRepo) ApplyDomainResult(context.Context, coreapp.ResourceValidationTask, coreapp.DomainValidationResult, *governancedomain.SystemLog) error {
 	return nil
 }
 
 type adminHandlerValidationQueue struct{}
 
 func (adminHandlerValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
+	return nil
+}
+func (adminHandlerValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
 	return nil
 }
 func (adminHandlerValidationQueue) EnqueueResourceValidationDispatcher(context.Context, time.Duration) error {
@@ -781,7 +758,7 @@ func TestAdminMicrosoftCredentialMutationResponseAndReceiptAreSafe(t *testing.T)
 		require.NotContains(t, body, forbidden)
 	}
 	require.Contains(t, body, `"passwordConfigured":true`)
-	require.Contains(t, body, `"validationTask"`)
+	require.NotContains(t, body, `"validationTask"`)
 	require.Len(t, logs.items, 1)
 	for _, secret := range []string{"handler-secret-password", "handler-secret-client", "handler-secret-refresh"} {
 		require.NotContains(t, logs.items[0].SafeSummary, secret)
@@ -795,7 +772,7 @@ func TestAdminMicrosoftCredentialMutationResponseAndReceiptAreSafe(t *testing.T)
 	}
 }
 
-func TestAdminMicrosoftValidateAcceptedResponsePublishesFlatDurableMetadata(t *testing.T) {
+func TestAdminMicrosoftValidateAcceptedResponsePublishesRedisAcceptance(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	now := time.Now().UTC()
 	repo := &adminHandlerCommandRepo{
@@ -812,7 +789,7 @@ func TestAdminMicrosoftValidateAcceptedResponsePublishesFlatDurableMetadata(t *t
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/admin/resources/42/validate", nil)
 	c.Request.Header.Set("Idempotency-Key", "validate-accepted-key")
 	c.Params = gin.Params{{Key: "resourceId", Value: "42"}}
-	c.Set("request_id", "durable-validation-request")
+	c.Set("request_id", "redis-validation-request")
 	middleware.SetCurrentUser(c, 9, iamdomain.RoleAdmin, "admin@test.local", "session")
 
 	handler.PostAdminMicrosoftResourceValidate(c)
@@ -820,15 +797,11 @@ func TestAdminMicrosoftValidateAcceptedResponsePublishesFlatDurableMetadata(t *t
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
-	require.Equal(t, "validation:100", payload["taskId"])
-	require.Equal(t, "durable-validation-request", payload["requestId"])
-	require.Equal(t, "queued", payload["status"])
-	require.Equal(t, float64(1), payload["accepted"])
-	require.Equal(t, false, payload["reused"])
-	task, ok := payload["task"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, payload["taskId"], task["taskId"])
-	require.Equal(t, payload["status"], task["status"])
+	require.Equal(t, float64(1), payload["requested"])
+	require.Equal(t, float64(1), payload["queued"])
+	for _, removed := range []string{"taskId", "requestId", "status", "accepted", "reused", "task"} {
+		require.NotContains(t, payload, removed)
+	}
 }
 
 func TestAdminMicrosoftBulkHandlersKeepSyncIDsAndAsyncFilterContracts(t *testing.T) {

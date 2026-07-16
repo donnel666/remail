@@ -152,10 +152,6 @@ type MicrosoftBindingInputRecorder interface {
 	RecordMicrosoftBindingInputs(ctx context.Context, inputs []MicrosoftBindingInput) error
 }
 
-type ImportedValidationCreator interface {
-	CreateImportedValidationBatch(ctx context.Context, ownerUserID uint, resourceIDs []uint, requestID string, path string) error
-}
-
 type MicrosoftBindingInput struct {
 	OwnerUserID    uint
 	EmailAddress   string
@@ -208,25 +204,18 @@ type TXTParser interface {
 
 // ImportUseCase handles supplier resource import operations.
 type ImportUseCase struct {
-	resources         EmailResourceRepository
-	imports           ResourceImportRepository
-	parser            TXTParser
-	files             governanceapp.FilePort
-	queue             ResourceImportQueue
-	bindingRecorder   MicrosoftBindingInputRecorder
-	validationCreator ImportedValidationCreator
+	resources       EmailResourceRepository
+	imports         ResourceImportRepository
+	parser          TXTParser
+	files           governanceapp.FilePort
+	queue           ResourceImportQueue
+	bindingRecorder MicrosoftBindingInputRecorder
 }
 
 const (
 	adminResourceImportRunningStale  = 45 * time.Minute
 	adminResourceImportDispatchLease = 60 * time.Minute
 )
-
-func (uc *ImportUseCase) SetImportedValidationCreator(creator ImportedValidationCreator) {
-	if uc != nil {
-		uc.validationCreator = creator
-	}
-}
 
 // NewImportUseCase creates a new ImportUseCase.
 func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort, queue ResourceImportQueue, recorders ...MicrosoftBindingInputRecorder) *ImportUseCase {
@@ -612,28 +601,16 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 	for _, line := range lines {
 		linesByEmail[microsoftEmailKey(line.Email)] = line
 	}
-	afterCreate := func(txCtx context.Context, created []domain.MicrosoftResource, createdIDs []uint) error {
+	afterCreate := func(txCtx context.Context, created []domain.MicrosoftResource, _ []uint) error {
 		chunkLines := make([]domain.MicrosoftImportLine, 0, len(created))
 		for _, item := range created {
 			if line, ok := linesByEmail[microsoftEmailKey(item.EmailAddress)]; ok {
 				chunkLines = append(chunkLines, line)
 			}
 		}
-		if uc.validationCreator != nil {
-			if err := uc.validationCreator.CreateImportedValidationBatch(
-				txCtx,
-				task.OwnerUserID,
-				createdIDs,
-				task.RequestID,
-				"/v1/resources/imports",
-			); err != nil {
-				return err
-			}
-		}
-		// Use the same root/subtype -> validation job -> binding order as
-		// administrator edits and validation result commits. These imported
-		// resources are still uncommitted, and any binding failure rolls the
-		// jobs and resources back with the enclosing import transaction.
+		// Imported Microsoft resources are created as pending. The import worker
+		// wakes the validation dispatcher after commit, so no validation job or
+		// second durable batch belongs inside this transaction.
 		return uc.recordMicrosoftBindingInputs(txCtx, task.OwnerUserID, chunkLines)
 	}
 	importedResourceIDs, err := uc.imports.CreateMicrosoftResourcesAndMarkSucceeded(
@@ -1052,11 +1029,12 @@ type ResourceListResult struct {
 }
 
 type ResourceFacetCounts struct {
-	All      int64
-	Normal   int64
-	Pending  int64
-	Abnormal int64
-	Disabled int64
+	All        int64
+	Normal     int64
+	Pending    int64
+	Validating int64
+	Abnormal   int64
+	Disabled   int64
 }
 
 type ResourceBooleanFacets struct {
@@ -1103,33 +1081,44 @@ const (
 
 // ResourceBulkSelection describes the resource set for a bulk command.
 type ResourceBulkSelection struct {
-	Mode        ResourceBulkSelectionMode
-	ResourceIDs []uint
-	Filter      ResourceBulkFilter
+	Mode        ResourceBulkSelectionMode `json:"mode"`
+	ResourceIDs []uint                    `json:"resourceIds,omitempty"`
+	Filter      ResourceBulkFilter        `json:"filter,omitempty"`
 	// AllowBinding defaults to false so ordinary self-service batches cannot
 	// select auxiliary-mailbox domains.
 	AllowBinding bool `json:"allowBinding,omitempty"`
+	// AdminScope is set only by administrator application services. It lets the
+	// Redis batch worker select resources across owners without exposing that
+	// authority through the public request DTO.
+	AdminScope bool `json:"adminScope,omitempty"`
+	// BatchKey optionally makes the live Redis task idempotent while it exists.
+	// It is intentionally excluded from the nested selection payload.
+	BatchKey string `json:"-"`
 }
 
 // ResourceListFilter is the server-side filter shared by resource lists and
 // "all matching" bulk commands.
 type ResourceListFilter struct {
-	ResourceType domain.ResourceType
-	Search       string
-	Suffix       string
-	TLD          string
-	Status       string
-	Purpose      string
-	MailServerID uint
+	ResourceType domain.ResourceType `json:"resourceType"`
+	Search       string              `json:"search,omitempty"`
+	Suffix       string              `json:"suffix,omitempty"`
+	TLD          string              `json:"tld,omitempty"`
+	Status       string              `json:"status,omitempty"`
+	Purpose      string              `json:"purpose,omitempty"`
+	MailServerID uint                `json:"mailServerId,omitempty"`
+	OwnerID      uint                `json:"ownerId,omitempty"`
+	OwnerIDs     []uint              `json:"ownerIds,omitempty"`
+	TokenHealth  string              `json:"tokenHealth,omitempty"`
+	AdminSearch  bool                `json:"adminSearch,omitempty"`
 	// ExcludeBinding is an internal visibility guard for supplier/self-service
 	// resource queries. Auxiliary-mailbox domains are operational platform
 	// resources and must not contribute list items, totals, or facets there.
-	ExcludeBinding bool
-	ForSale        *bool
-	LongLived      *bool
-	GraphAvailable *bool
-	CreatedFrom    *time.Time
-	CreatedTo      *time.Time
+	ExcludeBinding bool       `json:"excludeBinding,omitempty"`
+	ForSale        *bool      `json:"forSale,omitempty"`
+	LongLived      *bool      `json:"longLived,omitempty"`
+	GraphAvailable *bool      `json:"graphAvailable,omitempty"`
+	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo      *time.Time `json:"createdTo,omitempty"`
 }
 
 // ResourceBulkFilter keeps bulk command APIs on the same filter semantics as

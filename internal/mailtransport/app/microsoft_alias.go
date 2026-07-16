@@ -36,9 +36,8 @@ const (
 	// so explicit-alias creation can never succeed and the schedule is skipped.
 	MicrosoftAliasExternalRecoveryMessage = "Recovery mailbox is external; explicit-alias creation is skipped."
 	// MicrosoftAliasBindingUnresolvedMessage marks accounts whose recovery
-	// mailbox is absent, unverified, empty, or masked. Alias creation must wait
-	// until validation has established a concrete verified binding.
-	MicrosoftAliasBindingUnresolvedMessage = "Recovery mailbox binding is not verified; explicit-alias creation is paused."
+	// mailbox is absent or still masked after preflight.
+	MicrosoftAliasBindingUnresolvedMessage = "Recovery mailbox address is unresolved; explicit-alias creation is paused."
 )
 
 var microsoftAliasQuotaLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -88,6 +87,8 @@ type MicrosoftAliasCreationRequest struct {
 	EmailAddress   string
 	Password       string
 	BindingAddress string
+	RecoveryMask   string
+	BindingMissing bool
 	Candidates     []string
 	ReconcileOnly  bool
 }
@@ -103,6 +104,14 @@ type MicrosoftAliasCreationResult struct {
 	ProxyFailure    bool
 }
 
+type MicrosoftAliasBindingPreparationResult struct {
+	BindingAddress       string
+	Category             string
+	SafeMessage          string
+	ProxyFailure         bool
+	ReleaseRecoveryLease func(context.Context) error
+}
+
 type MicrosoftAliasScheduleStore interface {
 	EnsureSchedules(ctx context.Context, now time.Time) (int64, error)
 	EnsureScheduleForResource(ctx context.Context, resourceID uint, now time.Time) (bool, error)
@@ -110,6 +119,7 @@ type MicrosoftAliasScheduleStore interface {
 	Claim(ctx context.Context, task MicrosoftAliasTask, now time.Time) (*MicrosoftAliasAccount, bool, error)
 	CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, string, error)
 	ReloadEligibleAccount(ctx context.Context, resourceID uint, claimToken string) (*MicrosoftAliasAccount, bool, string, error)
+	SaveBindingAddress(ctx context.Context, resourceID uint, claimToken, expectedAddress, bindingAddress string) error
 	Reserve(ctx context.Context, resourceID uint, claimToken string, candidates []string, yearStart, yearEnd, weekStart, weekEnd, now time.Time) ([]MicrosoftAliasAttempt, MicrosoftAliasUsage, error)
 	Usage(ctx context.Context, resourceID uint, yearStart, yearEnd, weekStart, weekEnd time.Time) (MicrosoftAliasUsage, error)
 	Complete(ctx context.Context, resourceID uint, claimToken string, outcomes []MicrosoftAliasAttemptOutcome, completedAt time.Time) error
@@ -153,6 +163,7 @@ type MicrosoftAliasQueue interface {
 }
 
 type MicrosoftAliasCreator interface {
+	PrepareMicrosoftAliasBinding(ctx context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasBindingPreparationResult, error)
 	GenerateMicrosoftAliasCandidates(count int) ([]string, error)
 	CreateMicrosoftAliases(ctx context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasCreationResult, error)
 }
@@ -286,6 +297,71 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
 		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
 	}
+	prepared, prepareErr := s.creator.PrepareMicrosoftAliasBinding(ctx, MicrosoftAliasCreationRequest{
+		ResourceID:     account.ResourceID,
+		EmailAddress:   account.EmailAddress,
+		Password:       account.Password,
+		BindingAddress: account.BindingAddress,
+	})
+	if prepared.ReleaseRecoveryLease != nil {
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_ = prepared.ReleaseRecoveryLease(releaseCtx)
+			cancel()
+		}()
+	}
+	recoveryMask := ""
+	bindingMissing := strings.TrimSpace(account.BindingAddress) == ""
+	if strings.Contains(strings.SplitN(strings.ToLower(strings.TrimSpace(account.BindingAddress)), "@", 2)[0], "*") {
+		recoveryMask = strings.ToLower(strings.TrimSpace(account.BindingAddress))
+	}
+	prepared.BindingAddress = strings.ToLower(strings.TrimSpace(prepared.BindingAddress))
+	if prepareErr != nil || prepared.ProxyFailure {
+		if prepared.BindingAddress != "" && prepared.BindingAddress != strings.ToLower(strings.TrimSpace(account.BindingAddress)) {
+			if err := s.store.SaveBindingAddress(ctx, task.ResourceID, account.ClaimToken, account.BindingAddress, prepared.BindingAddress); errors.Is(err, ErrMicrosoftAliasStaleClaim) {
+				return nil
+			} else if err != nil {
+				return fmt.Errorf("save observed microsoft alias binding address: %w", err)
+			}
+		}
+		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
+		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
+	}
+	if prepared.Category == "external_binding" {
+		if prepared.BindingAddress != "" && prepared.BindingAddress != strings.ToLower(strings.TrimSpace(account.BindingAddress)) {
+			if err := s.store.SaveBindingAddress(ctx, task.ResourceID, account.ClaimToken, account.BindingAddress, prepared.BindingAddress); errors.Is(err, ErrMicrosoftAliasStaleClaim) {
+				return nil
+			} else if err != nil {
+				return fmt.Errorf("save external microsoft alias binding address: %w", err)
+			}
+		}
+		return ignoreStaleAliasClaim(s.store.Pause(ctx, task.ResourceID, account.ClaimToken, MicrosoftAliasExternalRecoveryMessage))
+	}
+	if isPermanentAliasCategory(prepared.Category) {
+		message := safeAliasMessage(prepared.SafeMessage)
+		if message == "" {
+			message = defaultAliasSafeMessage(prepared.Category)
+		}
+		return ignoreStaleAliasClaim(s.store.Pause(ctx, task.ResourceID, account.ClaimToken, message))
+	}
+	if prepared.BindingAddress == "" {
+		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
+		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, MicrosoftAliasBindingUnresolvedMessage, true))
+	}
+	if err := s.store.SaveBindingAddress(ctx, task.ResourceID, account.ClaimToken, account.BindingAddress, prepared.BindingAddress); errors.Is(err, ErrMicrosoftAliasStaleClaim) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("save microsoft alias binding address: %w", err)
+	}
+	if prepared.ReleaseRecoveryLease != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err := prepared.ReleaseRecoveryLease(releaseCtx)
+		cancel()
+		if err != nil {
+			next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
+			return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
+		}
+	}
 	currentAccount, eligible, ineligibleMessage, err := s.store.ReloadEligibleAccount(ctx, task.ResourceID, account.ClaimToken)
 	if errors.Is(err, ErrMicrosoftAliasStaleClaim) {
 		return nil
@@ -352,6 +428,8 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		EmailAddress:   account.EmailAddress,
 		Password:       account.Password,
 		BindingAddress: account.BindingAddress,
+		RecoveryMask:   recoveryMask,
+		BindingMissing: bindingMissing,
 		Candidates:     reservedAliases,
 	})
 	if createErr != nil {

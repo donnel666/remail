@@ -49,7 +49,7 @@ const (
 	QueueMailtransport = "mailtransport"
 	// QueueDefault carries assorted foreground work (imports, allocation, proxy checks).
 	QueueDefault = "default"
-	// QueueBackgroundValidation carries resource validation jobs.
+	// QueueBackgroundValidation carries temporary resource validation tasks.
 	QueueBackgroundValidation = "background_validation"
 	// QueueBackgroundAlias carries Microsoft explicit-alias creation.
 	QueueBackgroundAlias = "background_alias"

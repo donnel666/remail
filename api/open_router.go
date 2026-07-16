@@ -47,7 +47,6 @@ func registerOpenRoutes(
 	open.POST("/resources/imports", coreHandler.PostResourceImport)
 	open.GET("/resources/imports/:importId", coreHandler.GetResourceImport)
 	open.POST("/resources/validations", coreHandler.PostResourceValidations)
-	open.GET("/resources/validations/:validationId", coreHandler.GetResourceValidation)
 	open.GET("/servers", coreHandler.GetServers)
 	open.POST("/servers", coreHandler.PostServer)
 	open.POST("/domains", coreHandler.PostDomain)

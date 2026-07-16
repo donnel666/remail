@@ -93,11 +93,6 @@ INSERT INTO microsoft_binding_mailboxes(
     'binding@test.local', 'pending'
 )`).Error)
 	require.NoError(t, db.Exec(`
-INSERT INTO resource_validation_jobs(
-    resource_id, resource_type, owner_user_id, expected_credential_revision,
-    status, max_attempts
-) VALUES (9401, 'microsoft', 9301, 1, 'succeeded', 3)`).Error)
-	require.NoError(t, db.Exec(`
 INSERT INTO inbound_mails(
     envelope_from, recipient, resource_id, resource_type, owner_user_id,
     source_object_key, status
@@ -119,20 +114,11 @@ INSERT INTO inbound_mails(
 	require.NoError(t, db.Raw("SELECT owner_user_id FROM microsoft_binding_mailboxes WHERE resource_id = 9401").Scan(&currentOwner).Error)
 	require.Equal(t, uint(9302), currentOwner)
 
-	var validationOwner uint
 	var inboundOwner uint
-	require.NoError(t, db.Raw("SELECT owner_user_id FROM resource_validation_jobs WHERE resource_id = 9401").Scan(&validationOwner).Error)
 	require.NoError(t, db.Raw("SELECT owner_user_id FROM inbound_mails WHERE resource_id = 9401").Scan(&inboundOwner).Error)
-	require.Equal(t, uint(9301), validationOwner)
 	require.Equal(t, uint(9301), inboundOwner)
 
 	require.Error(t, db.Exec("UPDATE microsoft_resources SET quality_score = 101 WHERE id = 9401").Error)
-	require.Error(t, db.Exec(`
-INSERT INTO resource_validation_jobs(resource_id, resource_type, owner_user_id, status)
-VALUES (999999, 'microsoft', 9301, 'failed')`).Error)
-	require.Error(t, db.Exec(`
-INSERT INTO resource_validation_jobs(resource_id, resource_type, owner_user_id, status)
-VALUES (9401, 'microsoft', 999999, 'failed')`).Error)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO microsoft_token_refresh_jobs(
@@ -186,13 +172,11 @@ INSERT INTO admin_resource_bulk_commands(
 	require.Equal(t, int64(6), permissionCount)
 
 	// Application rollback must not rewrite or delete historical owner
-	// snapshots. Migration 00009 therefore keeps the split resource/user FKs
-	// instead of attempting to restore the incompatible legacy composite FK.
+	// snapshots. Migration 00009 therefore keeps the historical owner on mail
+	// facts instead of attempting to rewrite it with the current resource owner.
 	require.NoError(t, goose.SetDialect("mysql"))
 	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 8))
-	require.NoError(t, db.Raw("SELECT owner_user_id FROM resource_validation_jobs WHERE resource_id = 9401").Scan(&validationOwner).Error)
 	require.NoError(t, db.Raw("SELECT owner_user_id FROM inbound_mails WHERE resource_id = 9401").Scan(&inboundOwner).Error)
-	require.Equal(t, uint(9301), validationOwner)
 	require.Equal(t, uint(9301), inboundOwner)
 
 	// The relaxed rollback schema is also a supported source for a later

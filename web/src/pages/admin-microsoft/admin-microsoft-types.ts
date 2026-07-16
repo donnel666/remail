@@ -32,6 +32,8 @@ export type AdminMicrosoftTaskListResponse =
   components["schemas"]["AdminTaskListResponse"];
 export type AdminMicrosoftTaskAcceptedResponse =
   components["schemas"]["AdminTaskAcceptedResponse"];
+export type AdminMicrosoftValidationResponse =
+  components["schemas"]["ResourceValidationsResponse"];
 
 export type AdminMicrosoftAliasKind =
   components["schemas"]["AdminMicrosoftAliasItem"]["kind"];

@@ -98,7 +98,6 @@ func TestMapAuthErrorAlreadyBoundPreservesBindingStateWithoutLeakingDisplay(t *t
 		Message:      "已绑定辅助邮箱(masked@example.com)",
 		Status:       AuthStatusAlreadyBound,
 		BoundMailbox: "binding@example.com",
-		BoundDisplay: "masked@example.com",
 	}, false)
 
 	assert.False(t, result.Valid)
@@ -107,7 +106,14 @@ func TestMapAuthErrorAlreadyBoundPreservesBindingStateWithoutLeakingDisplay(t *t
 	assert.Equal(t, "binding@example.com", result.BindingAddress)
 	assert.Equal(t, string(maildomain.MicrosoftBindingFailed), result.BindingStatus)
 	assert.NotContains(t, result.SafeMessage, "masked@example.com")
-	// The masked recovery mailbox is exposed via the structured field, not the
-	// public SafeMessage.
-	assert.Equal(t, "masked@example.com", result.BoundDisplay)
+}
+
+func TestMapAuthErrorAlreadyBoundStoresMaskInBindingAddress(t *testing.T) {
+	result := mapAuthError(&AuthError{
+		Message:      "已绑定辅助邮箱(masked@example.com)",
+		Status:       AuthStatusAlreadyBound,
+		BoundMailbox: "m*****d@example.com",
+	}, false)
+
+	assert.Equal(t, "m*****d@example.com", result.BindingAddress)
 }

@@ -360,6 +360,8 @@ func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter cor
 		switch domain.MicrosoftResourceStatus(row.Status) {
 		case domain.MicrosoftStatusPending:
 			facets.Status.Pending = row.Count
+		case domain.MicrosoftStatusValidating:
+			facets.Status.Validating = row.Count
 		case domain.MicrosoftStatusNormal:
 			facets.Status.Normal = row.Count
 		case domain.MicrosoftStatusAbnormal:
@@ -370,7 +372,7 @@ func (r *AdminResourceRepo) AdminMicrosoftFacets(ctx context.Context, filter cor
 			facets.Status.Deleted = row.Count
 		}
 	}
-	facets.Status.All = facets.Status.Pending + facets.Status.Normal + facets.Status.Abnormal + facets.Status.Disabled
+	facets.Status.All = facets.Status.Pending + facets.Status.Validating + facets.Status.Normal + facets.Status.Abnormal + facets.Status.Disabled
 
 	var err error
 	if facets.ForSale, err = r.adminBooleanFacets(ctx, filter, now, "for_sale", "mr.for_sale"); err != nil {

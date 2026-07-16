@@ -23,7 +23,6 @@ type AuthError struct {
 	Status       string
 	Stage        string
 	BoundMailbox string
-	BoundDisplay string
 	Cause        error
 }
 
@@ -48,9 +47,6 @@ func newAuthError(message string, status ...string) *AuthError {
 	}
 	if len(status) > 1 {
 		err.BoundMailbox = status[1]
-	}
-	if len(status) > 2 {
-		err.BoundDisplay = status[2]
 	}
 	return err
 }

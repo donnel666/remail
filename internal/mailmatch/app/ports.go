@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
 )
@@ -51,27 +52,28 @@ type MailRule struct {
 }
 
 type OrderScope struct {
-	OrderID           uint
-	OrderNo           string
-	UserID            uint
-	ProjectID         uint
-	ProductID         uint
-	ServiceMode       string
-	OrderStatus       string
-	AllocationType    domain.ResourceType
-	AllocationID      uint
-	RecipientKind     string
-	EmailResourceID   uint
-	Recipient         string
-	ReceiveStartedAt  *time.Time
-	ReceiveUntil      *time.Time
-	ActivatedAt       *time.Time
-	AfterSaleUntil    *time.Time
-	LooseMatch        bool
-	Rules             []MailRule
-	MicrosoftEmail    string
-	MicrosoftClientID string
-	MicrosoftRT       string
+	OrderID            uint
+	OrderNo            string
+	UserID             uint
+	ProjectID          uint
+	ProductID          uint
+	ServiceMode        string
+	OrderStatus        string
+	AllocationType     domain.ResourceType
+	AllocationID       uint
+	RecipientKind      string
+	EmailResourceID    uint
+	Recipient          string
+	ReceiveStartedAt   *time.Time
+	ReceiveUntil       *time.Time
+	ActivatedAt        *time.Time
+	AfterSaleUntil     *time.Time
+	LooseMatch         bool
+	Rules              []MailRule
+	MicrosoftEmail     string
+	MicrosoftClientID  string
+	MicrosoftRT        string
+	CredentialRevision uint64
 }
 
 type OrderDelivery struct {
@@ -153,7 +155,6 @@ type Repository interface {
 	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
 	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
 	UpsertMicrosoftProjectMatches(ctx context.Context, matches []HistoricalProjectMatch) error
-	UpdateMicrosoftRefreshToken(ctx context.Context, resourceID uint, refreshToken string) error
 }
 
 type FetchQueue interface {
@@ -194,11 +195,12 @@ type FetchSubmitResult struct {
 }
 
 type UseCase struct {
-	repo      Repository
-	queue     FetchQueue
-	transport MailTransportFetchPort
-	matches   MatchResultPort
-	now       func() time.Time
+	repo        Repository
+	queue       FetchQueue
+	transport   MailTransportFetchPort
+	matches     MatchResultPort
+	credentials coreapp.MicrosoftCredentialPort
+	now         func() time.Time
 }
 
 func NewUseCase(repo Repository, queue FetchQueue, transport MailTransportFetchPort, matches MatchResultPort) *UseCase {
@@ -208,6 +210,12 @@ func NewUseCase(repo Repository, queue FetchQueue, transport MailTransportFetchP
 		transport: transport,
 		matches:   matches,
 		now:       func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (uc *UseCase) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
+	if uc != nil {
+		uc.credentials = credentials
 	}
 }
 
@@ -530,7 +538,18 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	if strings.TrimSpace(fetched.RefreshToken) != "" &&
 		strings.TrimSpace(fetched.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT) &&
 		scope.AllocationType == domain.ResourceTypeMicrosoft {
-		if err := uc.repo.UpdateMicrosoftRefreshToken(ctx, scope.EmailResourceID, fetched.RefreshToken); err != nil {
+		if uc.credentials == nil {
+			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Microsoft credential refresh failed.", false, uc.now())
+			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
+			return fmt.Errorf("microsoft credential service is unavailable")
+		}
+		err := uc.credentials.ApplyMicrosoftFetchRefreshToken(ctx, coreapp.MicrosoftFetchRefreshTokenRotation{
+			ResourceID:                 scope.EmailResourceID,
+			ExpectedCredentialRevision: scope.CredentialRevision,
+			RefreshToken:               fetched.RefreshToken,
+			Now:                        uc.now(),
+		})
+		if err != nil && !errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) && !errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) && !errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
 			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Microsoft credential refresh failed.", false, uc.now())
 			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
 			return err

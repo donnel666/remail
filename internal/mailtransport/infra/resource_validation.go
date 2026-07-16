@@ -43,10 +43,6 @@ type MicrosoftOAuthResult struct {
 	Category       string
 	SafeMessage    string
 	ProxyFailure   bool
-	// BoundDisplay is the masked recovery mailbox (e.g. a****b@qq.com) an account
-	// is already bound to when that mailbox is on an external (non-binding)
-	// domain we cannot receive codes at.
-	BoundDisplay string
 }
 
 func NewMicrosoftOAuthClient() *MicrosoftOAuthClient {
@@ -90,9 +86,6 @@ func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOA
 		Category:       result.Category,
 		SafeMessage:    result.SafeMessage,
 		ProxyFailure:   result.ProxyFailure,
-		// Masked external recovery mailbox (already_bound) preserved for
-		// bound_display persistence and operator visibility.
-		BoundDisplay: strings.TrimSpace(result.BoundDisplay),
 	}, nil
 }
 

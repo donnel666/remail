@@ -38,6 +38,9 @@ func (m *Module) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredent
 	if m.resourceFetchRepo != nil {
 		m.resourceFetchRepo.SetMicrosoftCredentialPort(credentials)
 	}
+	if m.UseCase != nil {
+		m.UseCase.SetMicrosoftCredentialPort(credentials)
+	}
 	if m.ProjectHistory != nil {
 		m.ProjectHistory.SetMicrosoftCredentialPort(credentials)
 	}

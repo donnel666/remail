@@ -191,7 +191,6 @@ function DomainAliasPanel({
 }
 
 function taskLabel(kind: AdminDomainTask["kind"]) {
-  if (kind === "validation") return "Validation";
   if (kind === "alias_replenishment") return "Alias replenishment";
   return "Mail fetch";
 }

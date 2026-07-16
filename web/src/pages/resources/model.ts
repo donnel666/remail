@@ -2,7 +2,12 @@ import type { ResourceItem } from "@/lib/resources-api";
 
 export type UsageScope = "private" | "public_sale";
 export type LifetimeType = "short_lived" | "long_lived";
-export type ResourceStatus = "pending" | "normal" | "abnormal" | "disabled";
+export type ResourceStatus =
+  | "pending"
+  | "validating"
+  | "normal"
+  | "abnormal"
+  | "disabled";
 
 export interface EmailResource {
   id: number;
@@ -41,6 +46,7 @@ export function isNormal(status: ResourceStatus) {
 export function toResourceStatus(status?: string): ResourceStatus {
   switch (status) {
     case "pending":
+    case "validating":
     case "normal":
     case "abnormal":
     case "disabled":

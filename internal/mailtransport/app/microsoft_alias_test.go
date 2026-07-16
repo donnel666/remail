@@ -49,6 +49,8 @@ type fakeMicrosoftAliasStore struct {
 	adminCommand        MicrosoftAliasExpediteCommand
 	adminCommandLog     *governancedomain.OperationLog
 	adminCommandReuse   bool
+	savedBindingAddress string
+	saveBindingErr      error
 }
 
 func (f *fakeMicrosoftAliasStore) EnsureSchedules(context.Context, time.Time) (int64, error) {
@@ -108,6 +110,17 @@ func (f *fakeMicrosoftAliasStore) ReloadEligibleAccount(_ context.Context, _ uin
 	clone := *account
 	clone.ClaimToken = claimToken
 	return &clone, true, "", nil
+}
+
+func (f *fakeMicrosoftAliasStore) SaveBindingAddress(_ context.Context, _ uint, _ string, _ string, bindingAddress string) error {
+	if f.saveBindingErr != nil {
+		return f.saveBindingErr
+	}
+	f.savedBindingAddress = bindingAddress
+	if f.account != nil {
+		f.account.BindingAddress = bindingAddress
+	}
+	return nil
 }
 
 func (f *fakeMicrosoftAliasStore) Reserve(context.Context, uint, string, []string, time.Time, time.Time, time.Time, time.Time, time.Time) ([]MicrosoftAliasAttempt, MicrosoftAliasUsage, error) {
@@ -203,6 +216,22 @@ type fakeMicrosoftAliasCreator struct {
 	candidates    []string
 	result        MicrosoftAliasCreationResult
 	request       MicrosoftAliasCreationRequest
+	prepareResult *MicrosoftAliasBindingPreparationResult
+	prepareErr    error
+}
+
+func (f *fakeMicrosoftAliasCreator) PrepareMicrosoftAliasBinding(_ context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasBindingPreparationResult, error) {
+	if f.prepareResult != nil {
+		return *f.prepareResult, f.prepareErr
+	}
+	if f.prepareErr != nil {
+		return MicrosoftAliasBindingPreparationResult{}, f.prepareErr
+	}
+	address := req.BindingAddress
+	if address == "" {
+		address = "binding@recovery.test"
+	}
+	return MicrosoftAliasBindingPreparationResult{BindingAddress: address}, nil
 }
 
 func (f *fakeMicrosoftAliasCreator) GenerateMicrosoftAliasCandidates(count int) ([]string, error) {
@@ -418,12 +447,149 @@ func TestMicrosoftAliasProcessCreatesTwoAndWaitsForNextCalendarWeek(t *testing.T
 	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
 	assert.Equal(t, 2, creator.count)
 	assert.False(t, creator.reconcileOnly)
+	assert.True(t, creator.request.BindingMissing)
 	require.Len(t, store.outcomes, 2)
 	assert.Equal(t, MicrosoftAliasAttemptSucceeded, store.outcomes[0].Status)
 	assert.Equal(t, MicrosoftAliasAttemptSucceeded, store.outcomes[1].Status)
 	assert.Equal(t, now, store.completedAt)
 	assert.Equal(t, weekEnd, store.deferredAt)
 	assert.Empty(t, store.deferredSafe)
+}
+
+func TestMicrosoftAliasProcessPersistsPreparedBindingBeforeQuota(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{
+			ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret",
+			BindingAddress: "o*****r@recovery.test", ResourceStatus: "normal",
+		},
+		reserveUsage: MicrosoftAliasUsage{WeekCount: MicrosoftAliasWeeklyLimit},
+	}
+	released := false
+	creator := &fakeMicrosoftAliasCreator{prepareResult: &MicrosoftAliasBindingPreparationResult{
+		BindingAddress: "owner@recovery.test",
+		ReleaseRecoveryLease: func(context.Context) error {
+			require.Equal(t, "owner@recovery.test", store.savedBindingAddress)
+			released = true
+			return nil
+		},
+	}}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.Equal(t, "owner@recovery.test", store.savedBindingAddress)
+	require.Equal(t, "owner@recovery.test", store.account.BindingAddress)
+	require.True(t, released)
+}
+
+func TestMicrosoftAliasProcessReleasesCompletedRecoveryLeaseWhenBindingSaveFails(t *testing.T) {
+	tests := []struct {
+		name    string
+		saveErr error
+		wantErr bool
+	}{
+		{name: "stale claim", saveErr: ErrMicrosoftAliasStaleClaim},
+		{name: "database error", saveErr: errors.New("database unavailable"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeMicrosoftAliasStore{
+				claimed: true,
+				account: &MicrosoftAliasAccount{
+					ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret",
+					BindingAddress: "o*****r@recovery.test", ResourceStatus: "normal",
+				},
+				saveBindingErr: tt.saveErr,
+			}
+			released := false
+			creator := &fakeMicrosoftAliasCreator{prepareResult: &MicrosoftAliasBindingPreparationResult{
+				BindingAddress: "owner@recovery.test",
+				ReleaseRecoveryLease: func(ctx context.Context) error {
+					released = ctx.Err() == nil
+					return nil
+				},
+			}}
+
+			err := NewMicrosoftAliasService(store, nil, creator).Process(context.Background(), microsoftAliasTestTask(42))
+
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.True(t, released)
+		})
+	}
+}
+
+func TestMicrosoftAliasProcessPausesExternalBindingBeforeQuota(t *testing.T) {
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{
+			ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret",
+			ResourceStatus: "normal",
+		},
+	}
+	creator := &fakeMicrosoftAliasCreator{prepareResult: &MicrosoftAliasBindingPreparationResult{
+		BindingAddress: "o*****r@external.test",
+		Category:       "external_binding",
+	}}
+	service := NewMicrosoftAliasService(store, nil, creator)
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.True(t, store.paused)
+	require.Equal(t, MicrosoftAliasExternalRecoveryMessage, store.pausedSafe)
+	require.Equal(t, "o*****r@external.test", store.savedBindingAddress)
+	require.Zero(t, store.reserveCalls)
+	require.Zero(t, creator.generateCalls)
+}
+
+func TestMicrosoftAliasProcessPersistsObservedMaskBeforeRetryingRecovery(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{
+			ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret",
+			BindingAddress: "old@recovery.test", ResourceStatus: "normal",
+		},
+	}
+	creator := &fakeMicrosoftAliasCreator{
+		prepareResult: &MicrosoftAliasBindingPreparationResult{BindingAddress: "x*****9@recovery.test"},
+		prepareErr:    errors.New("recovery code timed out"),
+	}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.Equal(t, "x*****9@recovery.test", store.savedBindingAddress)
+	require.Equal(t, now.Add(microsoftAliasTransientDelay(42, 1)), store.deferredAt)
+	require.True(t, store.deferredFailed)
+	require.Zero(t, store.reserveCalls)
+}
+
+func TestMicrosoftAliasProcessPausesPermanentPreflightFailures(t *testing.T) {
+	for _, category := range []string{"password", "mfa", "locked"} {
+		t.Run(category, func(t *testing.T) {
+			store := &fakeMicrosoftAliasStore{
+				claimed: true,
+				account: &MicrosoftAliasAccount{
+					ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret", ResourceStatus: "normal",
+				},
+			}
+			creator := &fakeMicrosoftAliasCreator{prepareResult: &MicrosoftAliasBindingPreparationResult{
+				Category: category,
+			}}
+
+			require.NoError(t, NewMicrosoftAliasService(store, nil, creator).Process(
+				context.Background(), microsoftAliasTestTask(42),
+			))
+			require.True(t, store.paused)
+			require.Zero(t, store.reserveCalls)
+			require.Zero(t, creator.generateCalls)
+		})
+	}
 }
 
 func TestMicrosoftAliasProcessHonorsCalendarWeeklyLimit(t *testing.T) {

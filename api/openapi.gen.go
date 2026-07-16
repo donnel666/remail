@@ -264,10 +264,12 @@ func (e AdminDomainBulkFilterPurpose) Valid() bool {
 
 // Defines values for AdminDomainBulkFilterStatus.
 const (
-	AdminDomainBulkFilterStatusAbnormal AdminDomainBulkFilterStatus = "abnormal"
-	AdminDomainBulkFilterStatusDeleted  AdminDomainBulkFilterStatus = "deleted"
-	AdminDomainBulkFilterStatusDisabled AdminDomainBulkFilterStatus = "disabled"
-	AdminDomainBulkFilterStatusNormal   AdminDomainBulkFilterStatus = "normal"
+	AdminDomainBulkFilterStatusAbnormal   AdminDomainBulkFilterStatus = "abnormal"
+	AdminDomainBulkFilterStatusDeleted    AdminDomainBulkFilterStatus = "deleted"
+	AdminDomainBulkFilterStatusDisabled   AdminDomainBulkFilterStatus = "disabled"
+	AdminDomainBulkFilterStatusNormal     AdminDomainBulkFilterStatus = "normal"
+	AdminDomainBulkFilterStatusPending    AdminDomainBulkFilterStatus = "pending"
+	AdminDomainBulkFilterStatusValidating AdminDomainBulkFilterStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminDomainBulkFilterStatus enum.
@@ -280,6 +282,10 @@ func (e AdminDomainBulkFilterStatus) Valid() bool {
 	case AdminDomainBulkFilterStatusDisabled:
 		return true
 	case AdminDomainBulkFilterStatusNormal:
+		return true
+	case AdminDomainBulkFilterStatusPending:
+		return true
+	case AdminDomainBulkFilterStatusValidating:
 		return true
 	default:
 		return false
@@ -363,10 +369,12 @@ func (e AdminDomainItemPurpose) Valid() bool {
 
 // Defines values for AdminDomainItemStatus.
 const (
-	AdminDomainItemStatusAbnormal AdminDomainItemStatus = "abnormal"
-	AdminDomainItemStatusDeleted  AdminDomainItemStatus = "deleted"
-	AdminDomainItemStatusDisabled AdminDomainItemStatus = "disabled"
-	AdminDomainItemStatusNormal   AdminDomainItemStatus = "normal"
+	AdminDomainItemStatusAbnormal   AdminDomainItemStatus = "abnormal"
+	AdminDomainItemStatusDeleted    AdminDomainItemStatus = "deleted"
+	AdminDomainItemStatusDisabled   AdminDomainItemStatus = "disabled"
+	AdminDomainItemStatusNormal     AdminDomainItemStatus = "normal"
+	AdminDomainItemStatusPending    AdminDomainItemStatus = "pending"
+	AdminDomainItemStatusValidating AdminDomainItemStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminDomainItemStatus enum.
@@ -379,6 +387,10 @@ func (e AdminDomainItemStatus) Valid() bool {
 	case AdminDomainItemStatusDisabled:
 		return true
 	case AdminDomainItemStatusNormal:
+		return true
+	case AdminDomainItemStatusPending:
+		return true
+	case AdminDomainItemStatusValidating:
 		return true
 	default:
 		return false
@@ -681,11 +693,12 @@ func (e AdminMicrosoftResourceItemType) Valid() bool {
 
 // Defines values for AdminMicrosoftResourceStatus.
 const (
-	AdminMicrosoftResourceStatusAbnormal AdminMicrosoftResourceStatus = "abnormal"
-	AdminMicrosoftResourceStatusDeleted  AdminMicrosoftResourceStatus = "deleted"
-	AdminMicrosoftResourceStatusDisabled AdminMicrosoftResourceStatus = "disabled"
-	AdminMicrosoftResourceStatusNormal   AdminMicrosoftResourceStatus = "normal"
-	AdminMicrosoftResourceStatusPending  AdminMicrosoftResourceStatus = "pending"
+	AdminMicrosoftResourceStatusAbnormal   AdminMicrosoftResourceStatus = "abnormal"
+	AdminMicrosoftResourceStatusDeleted    AdminMicrosoftResourceStatus = "deleted"
+	AdminMicrosoftResourceStatusDisabled   AdminMicrosoftResourceStatus = "disabled"
+	AdminMicrosoftResourceStatusNormal     AdminMicrosoftResourceStatus = "normal"
+	AdminMicrosoftResourceStatusPending    AdminMicrosoftResourceStatus = "pending"
+	AdminMicrosoftResourceStatusValidating AdminMicrosoftResourceStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminMicrosoftResourceStatus enum.
@@ -700,6 +713,8 @@ func (e AdminMicrosoftResourceStatus) Valid() bool {
 	case AdminMicrosoftResourceStatusNormal:
 		return true
 	case AdminMicrosoftResourceStatusPending:
+		return true
+	case AdminMicrosoftResourceStatusValidating:
 		return true
 	default:
 		return false
@@ -764,7 +779,6 @@ const (
 	AdminTaskKindFetch          AdminTaskKind = "fetch"
 	AdminTaskKindImport         AdminTaskKind = "import"
 	AdminTaskKindToken          AdminTaskKind = "token"
-	AdminTaskKindValidation     AdminTaskKind = "validation"
 )
 
 // Valid indicates whether the value is a known member of the AdminTaskKind enum.
@@ -785,8 +799,6 @@ func (e AdminTaskKind) Valid() bool {
 	case AdminTaskKindImport:
 		return true
 	case AdminTaskKindToken:
-		return true
-	case AdminTaskKindValidation:
 		return true
 	default:
 		return false
@@ -1930,48 +1942,6 @@ func (e ResourceItemPurpose) Valid() bool {
 	}
 }
 
-// Defines values for ResourceValidationResponseResourceType.
-const (
-	ResourceValidationResponseResourceTypeDomain    ResourceValidationResponseResourceType = "domain"
-	ResourceValidationResponseResourceTypeMicrosoft ResourceValidationResponseResourceType = "microsoft"
-)
-
-// Valid indicates whether the value is a known member of the ResourceValidationResponseResourceType enum.
-func (e ResourceValidationResponseResourceType) Valid() bool {
-	switch e {
-	case ResourceValidationResponseResourceTypeDomain:
-		return true
-	case ResourceValidationResponseResourceTypeMicrosoft:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ResourceValidationResponseStatus.
-const (
-	ResourceValidationResponseStatusFailed    ResourceValidationResponseStatus = "failed"
-	ResourceValidationResponseStatusQueued    ResourceValidationResponseStatus = "queued"
-	ResourceValidationResponseStatusRunning   ResourceValidationResponseStatus = "running"
-	ResourceValidationResponseStatusSucceeded ResourceValidationResponseStatus = "succeeded"
-)
-
-// Valid indicates whether the value is a known member of the ResourceValidationResponseStatus enum.
-func (e ResourceValidationResponseStatus) Valid() bool {
-	switch e {
-	case ResourceValidationResponseStatusFailed:
-		return true
-	case ResourceValidationResponseStatusQueued:
-		return true
-	case ResourceValidationResponseStatusRunning:
-		return true
-	case ResourceValidationResponseStatusSucceeded:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for SupplierApplicationResponseStatus.
 const (
 	SupplierApplicationResponseStatusApproved  SupplierApplicationResponseStatus = "approved"
@@ -2256,10 +2226,12 @@ func (e GetAdminDomainsParamsPurpose) Valid() bool {
 
 // Defines values for GetAdminDomainsParamsStatus.
 const (
-	GetAdminDomainsParamsStatusAbnormal GetAdminDomainsParamsStatus = "abnormal"
-	GetAdminDomainsParamsStatusDeleted  GetAdminDomainsParamsStatus = "deleted"
-	GetAdminDomainsParamsStatusDisabled GetAdminDomainsParamsStatus = "disabled"
-	GetAdminDomainsParamsStatusNormal   GetAdminDomainsParamsStatus = "normal"
+	GetAdminDomainsParamsStatusAbnormal   GetAdminDomainsParamsStatus = "abnormal"
+	GetAdminDomainsParamsStatusDeleted    GetAdminDomainsParamsStatus = "deleted"
+	GetAdminDomainsParamsStatusDisabled   GetAdminDomainsParamsStatus = "disabled"
+	GetAdminDomainsParamsStatusNormal     GetAdminDomainsParamsStatus = "normal"
+	GetAdminDomainsParamsStatusPending    GetAdminDomainsParamsStatus = "pending"
+	GetAdminDomainsParamsStatusValidating GetAdminDomainsParamsStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminDomainsParamsStatus enum.
@@ -2272,6 +2244,10 @@ func (e GetAdminDomainsParamsStatus) Valid() bool {
 	case GetAdminDomainsParamsStatusDisabled:
 		return true
 	case GetAdminDomainsParamsStatusNormal:
+		return true
+	case GetAdminDomainsParamsStatusPending:
+		return true
+	case GetAdminDomainsParamsStatusValidating:
 		return true
 	default:
 		return false
@@ -2739,25 +2715,25 @@ func (e GetRechargesParamsScope) Valid() bool {
 
 // Defines values for GetRechargesParamsStatus.
 const (
-	GetRechargesParamsStatusCallback   GetRechargesParamsStatus = "callback"
-	GetRechargesParamsStatusCredited   GetRechargesParamsStatus = "credited"
-	GetRechargesParamsStatusFailed     GetRechargesParamsStatus = "failed"
-	GetRechargesParamsStatusPaying     GetRechargesParamsStatus = "paying"
-	GetRechargesParamsStatusReconciled GetRechargesParamsStatus = "reconciled"
+	Callback   GetRechargesParamsStatus = "callback"
+	Credited   GetRechargesParamsStatus = "credited"
+	Failed     GetRechargesParamsStatus = "failed"
+	Paying     GetRechargesParamsStatus = "paying"
+	Reconciled GetRechargesParamsStatus = "reconciled"
 )
 
 // Valid indicates whether the value is a known member of the GetRechargesParamsStatus enum.
 func (e GetRechargesParamsStatus) Valid() bool {
 	switch e {
-	case GetRechargesParamsStatusCallback:
+	case Callback:
 		return true
-	case GetRechargesParamsStatusCredited:
+	case Credited:
 		return true
-	case GetRechargesParamsStatusFailed:
+	case Failed:
 		return true
-	case GetRechargesParamsStatusPaying:
+	case Paying:
 		return true
-	case GetRechargesParamsStatusReconciled:
+	case Reconciled:
 		return true
 	default:
 		return false
@@ -2826,16 +2802,16 @@ func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 
 // Defines values for GetWalletTransactionsParamsScope.
 const (
-	All  GetWalletTransactionsParamsScope = "all"
-	Mine GetWalletTransactionsParamsScope = "mine"
+	GetWalletTransactionsParamsScopeAll  GetWalletTransactionsParamsScope = "all"
+	GetWalletTransactionsParamsScopeMine GetWalletTransactionsParamsScope = "mine"
 )
 
 // Valid indicates whether the value is a known member of the GetWalletTransactionsParamsScope enum.
 func (e GetWalletTransactionsParamsScope) Valid() bool {
 	switch e {
-	case All:
+	case GetWalletTransactionsParamsScopeAll:
 		return true
-	case Mine:
+	case GetWalletTransactionsParamsScopeMine:
 		return true
 	default:
 		return false
@@ -3135,11 +3111,13 @@ type AdminDomainFacets struct {
 		Sale    int `json:"sale"`
 	} `json:"purpose"`
 	Status struct {
-		Abnormal int `json:"abnormal"`
-		All      int `json:"all"`
-		Deleted  int `json:"deleted"`
-		Disabled int `json:"disabled"`
-		Normal   int `json:"normal"`
+		Abnormal   int `json:"abnormal"`
+		All        int `json:"all"`
+		Deleted    int `json:"deleted"`
+		Disabled   int `json:"disabled"`
+		Normal     int `json:"normal"`
+		Pending    int `json:"pending"`
+		Validating int `json:"validating"`
 	} `json:"status"`
 	Tlds []struct {
 		Count int    `json:"count"`
@@ -3455,9 +3433,6 @@ type AdminMicrosoftImportResponseStatus string
 // AdminMicrosoftMutationResponse defines model for AdminMicrosoftMutationResponse.
 type AdminMicrosoftMutationResponse struct {
 	Resource AdminMicrosoftResourceDetail `json:"resource"`
-
-	// ValidationTask Durable validation task created or reused by this mutation; null when the edit did not require validation.
-	ValidationTask *AdminTaskView `json:"validationTask"`
 }
 
 // AdminMicrosoftOwnerSummary defines model for AdminMicrosoftOwnerSummary.
@@ -3615,11 +3590,12 @@ type AdminMicrosoftStatusFacet struct {
 	Abnormal int64 `json:"abnormal"`
 
 	// All All matching non-deleted resources when the status dimension is ignored.
-	All      int64 `json:"all"`
-	Deleted  int64 `json:"deleted"`
-	Disabled int64 `json:"disabled"`
-	Normal   int64 `json:"normal"`
-	Pending  int64 `json:"pending"`
+	All        int64 `json:"all"`
+	Deleted    int64 `json:"deleted"`
+	Disabled   int64 `json:"disabled"`
+	Normal     int64 `json:"normal"`
+	Pending    int64 `json:"pending"`
+	Validating int64 `json:"validating"`
 }
 
 // AdminMicrosoftSuffixFacet defines model for AdminMicrosoftSuffixFacet.
@@ -3749,7 +3725,7 @@ type AdminTaskStatus string
 
 // AdminTaskSummary defines model for AdminTaskSummary.
 type AdminTaskSummary struct {
-	// CredentialRevision Credential revision fixed when a validation, token, or fetch task was submitted; null for tasks that do not read credentials.
+	// CredentialRevision Credential revision fixed when a token or fetch task was submitted; null for tasks that do not read credentials.
 	CredentialRevision *int            `json:"credentialRevision"`
 	Kind               AdminTaskKind   `json:"kind"`
 	Status             AdminTaskStatus `json:"status"`
@@ -3763,7 +3739,7 @@ type AdminTaskView struct {
 	BizId    int              `json:"bizId"`
 	BizType  AdminTaskBizType `json:"bizType"`
 
-	// CredentialRevision Immutable credential revision captured at submission for validation, token, and fetch work; workers must not apply results to a different revision.
+	// CredentialRevision Immutable credential revision captured at submission for token and fetch work; workers must not apply results to a different revision.
 	CredentialRevision *int               `json:"credentialRevision"`
 	FinishedAt         *time.Time         `json:"finishedAt"`
 	Kind               AdminTaskKind      `json:"kind"`
@@ -4096,7 +4072,7 @@ type DomainResourceDetail struct {
 	// Purpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
 	Purpose DomainResourceDetailPurpose `json:"purpose"`
 
-	// Status Domain resource status (normal/abnormal/disabled/deleted)
+	// Status Domain resource status (pending/validating/normal/abnormal/disabled/deleted)
 	Status string `json:"status"`
 }
 
@@ -5066,11 +5042,12 @@ type ResourceBulkSelection1Mode string
 
 // ResourceFacetCounts defines model for ResourceFacetCounts.
 type ResourceFacetCounts struct {
-	Abnormal int `json:"abnormal"`
-	All      int `json:"all"`
-	Disabled int `json:"disabled"`
-	Normal   int `json:"normal"`
-	Pending  int `json:"pending"`
+	Abnormal   int `json:"abnormal"`
+	All        int `json:"all"`
+	Disabled   int `json:"disabled"`
+	Normal     int `json:"normal"`
+	Pending    int `json:"pending"`
+	Validating int `json:"validating"`
 }
 
 // ResourceItem defines model for ResourceItem.
@@ -5110,7 +5087,7 @@ type ResourceItem struct {
 	// Purpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
 	Purpose *ResourceItemPurpose `json:"purpose,omitempty"`
 
-	// Status Resource status (e.g., pending/normal/abnormal/disabled/deleted)
+	// Status Resource status (pending waits for assignment; validating has a live Redis/Asynq assignment).
 	Status    *string   `json:"status,omitempty"`
 	Type      string    `json:"type"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -5145,31 +5122,12 @@ type ResourceListResponse struct {
 	Total       int                 `json:"total"`
 }
 
-// ResourceValidationResponse defines model for ResourceValidationResponse.
-type ResourceValidationResponse struct {
-	CreatedAt time.Time `json:"createdAt"`
-
-	// LastSafeError Sanitized validation diagnostic. Never contains credentials, tokens, email bodies, or upstream raw details.
-	LastSafeError *string                                `json:"lastSafeError,omitempty"`
-	ResourceId    int                                    `json:"resourceId"`
-	ResourceType  ResourceValidationResponseResourceType `json:"resourceType"`
-	Status        ResourceValidationResponseStatus       `json:"status"`
-	UpdatedAt     time.Time                              `json:"updatedAt"`
-	ValidationId  int                                    `json:"validationId"`
-}
-
-// ResourceValidationResponseResourceType defines model for ResourceValidationResponse.ResourceType.
-type ResourceValidationResponseResourceType string
-
-// ResourceValidationResponseStatus defines model for ResourceValidationResponse.Status.
-type ResourceValidationResponseStatus string
-
 // ResourceValidationsResponse defines model for ResourceValidationsResponse.
 type ResourceValidationsResponse struct {
-	// Queued Number of resources actually moved into pending validation, plus any immediately persisted revalidation jobs.
+	// Queued Number of explicit IDs accepted for asynchronous pending-state expansion. Filter submissions return zero until the Redis worker expands them.
 	Queued int `json:"queued"`
 
-	// Requested Number of eligible resources matched by the submitted selection.
+	// Requested Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred.
 	Requested int `json:"requested"`
 }
 
@@ -7903,9 +7861,6 @@ type ServerInterface interface {
 	// Queue asynchronous resource validations in batch
 	// (POST /v1/resources/validations)
 	PostResourceValidations(c *gin.Context, params PostResourceValidationsParams)
-	// Get resource validation status
-	// (GET /v1/resources/validations/{validationId})
-	GetResourceValidation(c *gin.Context, validationId int)
 	// Delete an owned private resource
 	// (DELETE /v1/resources/{resourceId})
 	DeleteResource(c *gin.Context, resourceId int, params DeleteResourceParams)
@@ -15882,33 +15837,6 @@ func (siw *ServerInterfaceWrapper) PostResourceValidations(c *gin.Context) {
 	siw.Handler.PostResourceValidations(c, params)
 }
 
-// GetResourceValidation operation middleware
-func (siw *ServerInterfaceWrapper) GetResourceValidation(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "validationId" -------------
-	var validationId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "validationId", c.Param("validationId"), &validationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter validationId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetResourceValidation(c, validationId)
-}
-
 // DeleteResource operation middleware
 func (siw *ServerInterfaceWrapper) DeleteResource(c *gin.Context) {
 
@@ -16626,7 +16554,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/resources/imports/:importId", wrapper.GetResourceImport)
 	router.POST(options.BaseURL+"/v1/resources/publish", wrapper.PostResourcePublishBatch)
 	router.POST(options.BaseURL+"/v1/resources/validations", wrapper.PostResourceValidations)
-	router.GET(options.BaseURL+"/v1/resources/validations/:validationId", wrapper.GetResourceValidation)
 	router.DELETE(options.BaseURL+"/v1/resources/:resourceId", wrapper.DeleteResource)
 	router.GET(options.BaseURL+"/v1/resources/:resourceId", wrapper.GetResourceDetail)
 	router.POST(options.BaseURL+"/v1/resources/:resourceId/publish", wrapper.PostResourcePublish)

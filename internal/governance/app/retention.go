@@ -22,7 +22,6 @@ type RetentionRepository interface {
 	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error)
 	DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
-	DeleteResourceValidationJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteSystemLogsBefore(ctx context.Context, before time.Time, limit int) (int64, error)
@@ -113,9 +112,6 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, retentionBatchSize)
-	}))
-	summary = append(summary, s.deleteLoop(ctx, "resource_validation_jobs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteResourceValidationJobsTerminalBefore(ctx, before, retentionBatchSize)
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "proxy_check_jobs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteProxyCheckJobsTerminalBefore(ctx, before, retentionBatchSize)

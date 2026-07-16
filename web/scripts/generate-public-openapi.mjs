@@ -554,18 +554,6 @@ const schemas = {
     },
     required: ["requested", "queued"],
   },
-  ResourceValidation: {
-    type: "object",
-    properties: {
-      validationId: { type: "integer" },
-      resourceId: { type: "integer" },
-      resourceType: { type: "string" },
-      status: { type: "string" },
-      lastSafeError: { type: "string" },
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
-    },
-  },
   ValidateResourcesRequest: {
     type: "object",
     properties: {
@@ -928,7 +916,7 @@ const spec = {
         security: apiKeySecurity,
         parameters: [{ name: "resourceId", in: "path", required: true, schema: { type: "integer" } }],
         responses: {
-          "202": accepted(ref("ResourceValidation")),
+	          "202": accepted(ref("ResourceValidationsResponse")),
           ...errorResponses,
         },
       },
@@ -982,19 +970,6 @@ const spec = {
         requestBody: json(ref("ValidateResourcesRequest")),
         responses: {
           "202": accepted(ref("ResourceValidationsResponse")),
-          ...errorResponses,
-        },
-      },
-    },
-    "/v1/open/resources/validations/{validationId}": {
-      get: {
-        tags: ["Resources"],
-        operationId: "getResourceValidation",
-        summary: "查询资源检测任务",
-        security: apiKeySecurity,
-        parameters: [{ name: "validationId", in: "path", required: true, schema: { type: "integer" } }],
-        responses: {
-          "200": ok(ref("ResourceValidation")),
           ...errorResponses,
         },
       },
