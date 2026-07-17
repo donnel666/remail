@@ -24,6 +24,7 @@ import {
 } from "@/lib/projects-api";
 
 import { MailboxClientModal } from "./workbench/mailbox-client";
+import { ApplyProjectModal } from "./apply-project-modal";
 import {
   mergeOrderRuntimeState,
   shouldAutoFetchOrderMail,
@@ -88,6 +89,7 @@ type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
 
 const checkoutBatchStorageKey = "remail.workbench.checkoutBatch";
 const checkoutBatchConcurrency = 5;
+const inventoryFetchConcurrency = 6;
 const orderPageLimit = 100;
 const initialOrderCursors: Record<ServiceMode, number | undefined> = {
   code: undefined,
@@ -433,6 +435,7 @@ function apiErrorMessage(err: unknown, fallback: string) {
 
 export default function Dashboard() {
   const { t } = useTranslation();
+  const [applyOpen, setApplyOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [inventoryScope, setInventoryScope] =
     useState<InventoryScope>("private_first");
@@ -591,12 +594,34 @@ export default function Dashboard() {
         (project) => project.status === "listed",
       );
       setProjects(listed.map((project) => toWorkbenchProject(project)));
+      // Totals aren't in the project list payload; fetch them for every project
+      // so the list shows stock without needing a selection.
+      void loadAllProjectInventory(listed.map((project) => String(project.id)));
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
     }
   }
 
-  async function loadProjectInventory(projectId: string) {
+  async function loadAllProjectInventory(projectIds: string[]) {
+    // ponytail: capped per-project fan-out; add a bulk inventory endpoint if
+    // project counts grow past a couple hundred. Backend caches per project (30s TTL).
+    for (
+      let start = 0;
+      start < projectIds.length;
+      start += inventoryFetchConcurrency
+    ) {
+      await Promise.all(
+        projectIds
+          .slice(start, start + inventoryFetchConcurrency)
+          .map((id) => loadProjectInventory(id, { silent: true })),
+      );
+    }
+  }
+
+  async function loadProjectInventory(
+    projectId: string,
+    { silent = false }: { silent?: boolean } = {},
+  ) {
     const numericProjectId = Number(projectId);
     if (!Number.isInteger(numericProjectId) || numericProjectId <= 0) return;
     try {
@@ -609,7 +634,9 @@ export default function Dashboard() {
         ),
       );
     } catch (err) {
-      Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      if (!silent) {
+        Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
+      }
     }
   }
 
@@ -961,6 +988,7 @@ export default function Dashboard() {
       <div className="workbench-responsive-shell">
         <div className="workbench-layout">
           <ProjectListPanel
+            onApply={() => setApplyOpen(true)}
             onSearchChange={setProjectSearch}
             onSelectProject={handleSelectProject}
             projects={filteredProjects}
@@ -1011,6 +1039,13 @@ export default function Dashboard() {
           />
         </div>
       </div>
+
+      <ApplyProjectModal
+        mode="create"
+        onCancel={() => setApplyOpen(false)}
+        onSuccess={() => setApplyOpen(false)}
+        visible={applyOpen}
+      />
 
       <MailboxClientModal
         autoFetchEnabled={

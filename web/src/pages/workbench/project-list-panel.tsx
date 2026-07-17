@@ -7,8 +7,10 @@ import { cn } from "@/lib/utils";
 
 import { ProjectIcon } from "./project-icon";
 import type { ServiceMode, WorkbenchProject } from "./types";
+import { formatCompactNumber } from "./utils";
 
 export function ProjectListPanel({
+  onApply,
   onSearchChange,
   onSelectProject,
   projects,
@@ -16,6 +18,7 @@ export function ProjectListPanel({
   selectedProjectId,
   serviceMode,
 }: {
+  onApply: () => void;
   onSearchChange: (value: string) => void;
   onSelectProject: (projectId: string) => void;
   projects: WorkbenchProject[];
@@ -35,6 +38,16 @@ export function ProjectListPanel({
         <Tag color="orange" shape="circle">
           {projects.length}
         </Tag>
+      </div>
+
+      <div className="workbench-apply-row">
+        <button
+          className="workbench-apply-button"
+          onClick={onApply}
+          type="button"
+        >
+          {t("Apply project")}
+        </button>
       </div>
 
       <Input
@@ -96,8 +109,10 @@ export function ProjectListPanel({
                   >
                     {project.visibility === "private" ? t("Private") : t("Public")}
                   </Tag>
-                  <span className="font-mono-data text-[12px] text-[var(--semi-color-text-2)]">
-                    {project.inventoryLoaded ? inventory : "--"}
+                  <span className="workbench-product-stock">
+                    {project.inventoryLoaded
+                      ? `${t("Stock")} ${formatCompactNumber(inventory)}`
+                      : "--"}
                   </span>
                 </span>
               </button>

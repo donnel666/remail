@@ -1798,6 +1798,36 @@ body[theme-mode="dark"] .semi-always-light,
   width: calc(100% - 24px);
 }
 
+.workbench-apply-row {
+  flex: 0 0 auto;
+  padding: 12px 12px 0;
+}
+
+.workbench-apply-button {
+  display: flex;
+  width: 100%;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  background: var(--semi-color-bg-0);
+  padding: 8px;
+  color: var(--semi-color-text-1);
+  font-size: 13px;
+  font-weight: 700;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.workbench-apply-button:hover {
+  border-color: var(--semi-color-primary-light-active);
+  color: var(--semi-color-primary);
+}
+
 .workbench-project-list,
 .workbench-product-list {
   min-height: 0;
