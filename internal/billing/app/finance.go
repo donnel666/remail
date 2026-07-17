@@ -268,7 +268,7 @@ func (uc *WalletUseCase) BulkSetCardStatus(ctx context.Context, selection CardBu
 			return nil, err
 		}
 		dir := uc.lookupUsers(ctx, cardOwnerIDs(all))
-		af := AdminCardFilter{Search: f.Search, Status: f.Status, OwnerRole: f.OwnerRole, OwnerGroupID: f.OwnerGroupID}
+		af := AdminCardFilter(f)
 		for _, card := range all {
 			if cardMatchesAdminFilter(card, af, dir) {
 				keys = append(keys, card.Key)

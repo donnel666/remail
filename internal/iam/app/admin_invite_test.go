@@ -225,8 +225,8 @@ func TestUpdateInviteExpireAtTriState(t *testing.T) {
 	}
 
 	require.NotNil(t, run(nil).ExpireAt, "absent (nil carrier) leaves the existing expiry")
-	var clear *time.Time
-	require.Nil(t, run(&clear).ExpireAt, "null (carrier -> nil) clears the expiry")
+	var cleared *time.Time
+	require.Nil(t, run(&cleared).ExpireAt, "null (carrier -> nil) clears the expiry")
 	next := time.Now().Add(2 * time.Hour)
 	np := &next
 	require.Equal(t, &next, run(&np).ExpireAt, "value sets the expiry")
