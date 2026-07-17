@@ -1070,7 +1070,11 @@ func (s *MicrosoftAliasStore) Reserve(
 ) ([]mailapp.MicrosoftAliasAttempt, mailapp.MicrosoftAliasUsage, error) {
 	var attempts []mailapp.MicrosoftAliasAttempt
 	var usage mailapp.MicrosoftAliasUsage
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := withAliasDeadlockRetry(ctx, s.db, func(tx *gorm.DB) error {
+		// The transaction can run more than once (deadlock retry); reset the
+		// captured accumulators so a retry does not append onto a partial result.
+		attempts = attempts[:0]
+		usage = mailapp.MicrosoftAliasUsage{}
 		var schedule MicrosoftAliasScheduleModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("resource_id = ? AND status = ? AND claim_token = ?", resourceID, "running", claimToken).
