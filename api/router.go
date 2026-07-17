@@ -11,9 +11,12 @@ import (
 
 	"github.com/donnel666/remail/api/health"
 	"github.com/donnel666/remail/api/middleware"
+	aftersaleapi "github.com/donnel666/remail/internal/aftersale/api"
+	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
+	dashboardapi "github.com/donnel666/remail/internal/dashboard/api"
 	governanceapi "github.com/donnel666/remail/internal/governance/api"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
@@ -167,6 +170,17 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
 
+		// Aftersale module (support tickets over orders/general, refunds via Trade).
+		aftersaleMod := aftersaleapi.NewModule(p.DB, tradeMod.UseCase, fileStore)
+		aftersaleMod.UseCase.SetOwnerLookupPort(ticketRequesterDirectory{owners: iamMod.AdminResourceOwners})
+		if p.SMTP.TicketMailEnabled {
+			aftersaleMod.UseCase.SetMailer(
+				aftersaleMailAdapter{delivery: mailMod.DeliveryUseCase, from: p.SMTP.TicketMailFrom},
+				aftersaleapp.TicketMailConfig{ReplyLocalPart: p.SMTP.TicketReplyLocalPart, ReplyDomain: p.SMTP.TicketReplyDomain},
+			)
+		}
+		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)
+
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
@@ -178,12 +192,27 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		})
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
 		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
-		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
+		// Inbound mail: ticket reply plus-addresses go to aftersale, everything
+		// else keeps flowing to mailmatch's resource inbound consumer.
+		mailmatchInbound := mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase)
+		if p.SMTP.TicketMailEnabled {
+			mailMod.SetInboundConsumer(ticketInboundRouter{
+				ticket:   aftersaleapi.NewInboundConsumer(aftersaleMod.UseCase, p.SMTP.TicketReplyLocalPart),
+				fallback: mailmatchInbound,
+			})
+		} else {
+			mailMod.SetInboundConsumer(mailmatchInbound)
+		}
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, iamMod.PermissionChecker)
+
+		// Dashboard module (read-only console analytics; self-contained raw-SQL
+		// aggregates over orders, code receipts, wallets, projects and users).
+		dashboardMod := dashboardapi.NewModule(p.DB)
+		dashboardapi.RegisterRoutes(v1, dashboardMod, iamSessionFetcher)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)

@@ -162,6 +162,7 @@ func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTas
 		Purpose:        mail.Purpose,
 		From:           mail.Sender,
 		To:             mail.Recipient,
+		ReplyTo:        mail.ReplyTo,
 		Subject:        mail.Subject,
 		TextBody:       mail.TextBody,
 		HTMLBody:       mail.HTMLBody,

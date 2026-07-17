@@ -29,9 +29,9 @@ import { formatTicketAmount } from "./ticket-meta";
 import {
   createTicket,
   getOrderAfterSaleState,
-  type MockTicket,
-  type MockTicketType,
-} from "./tickets-mock";
+  type Ticket,
+  type TicketType,
+} from "./tickets-api";
 
 interface PendingAttachment {
   id: string;
@@ -63,14 +63,14 @@ export function CreateTicketModal({
   onOpenChange: (value: boolean) => void;
   initialOrder?: TicketOrderRef | null;
   onCreated: () => void;
-  onViewTicket: (ticket: MockTicket) => void;
+  onViewTicket: (ticket: Ticket) => void;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentReadIdRef = useRef(0);
 
-  const [ticketType, setTicketType] = useState<MockTicketType>("order");
+  const [ticketType, setTicketType] = useState<TicketType>("order");
   const [selectedOrder, setSelectedOrder] =
     useState<TicketOrderRef | null>(null);
   const [title, setTitle] = useState("");
@@ -131,7 +131,7 @@ export function CreateTicketModal({
     description.trim().length > 0 &&
     (ticketType === "general" || selectedOrder !== null);
 
-  const switchType = (type: MockTicketType) => {
+  const switchType = (type: TicketType) => {
     if (type === ticketType) return;
     setTicketType(type);
     if (type === "general") setSelectedOrder(null);
@@ -336,7 +336,7 @@ export function CreateTicketModal({
             type="button"
             buttonSize="middle"
             value={ticketType}
-            onChange={(event) => switchType(event.target.value as MockTicketType)}
+            onChange={(event) => switchType(event.target.value as TicketType)}
           >
             <Radio value="order">{t("Order ticket")}</Radio>
             <Radio value="general">{t("General ticket")}</Radio>

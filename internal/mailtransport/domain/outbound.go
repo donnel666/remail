@@ -35,6 +35,7 @@ type OutboundMessage struct {
 	Purpose        OutboundPurpose
 	From           string
 	To             string
+	ReplyTo        string
 	Subject        string
 	TextBody       string
 	HTMLBody       string
@@ -47,6 +48,7 @@ type OutboundMail struct {
 	Purpose        OutboundPurpose `json:"purpose"`
 	Sender         string          `json:"sender"`
 	Recipient      string          `json:"recipient"`
+	ReplyTo        string          `json:"replyTo"`
 	Subject        string          `json:"subject"`
 	TextBody       string          `json:"textBody"`
 	HTMLBody       string          `json:"htmlBody"`
@@ -65,6 +67,7 @@ func NewOutboundMail(message OutboundMessage, now time.Time) *OutboundMail {
 		Purpose:        message.Purpose,
 		Sender:         message.From,
 		Recipient:      message.To,
+		ReplyTo:        message.ReplyTo,
 		Subject:        message.Subject,
 		TextBody:       message.TextBody,
 		HTMLBody:       message.HTMLBody,

@@ -8861,8 +8861,399 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/tickets:
+    get:
+      operationId: getTickets
+      summary: List the caller's after-sales tickets
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketTypeQuery"
+        - $ref: "#/components/parameters/TicketStatusQuery"
+        - $ref: "#/components/parameters/TicketSearchQuery"
+        - $ref: "#/components/parameters/CreatedFromQuery"
+        - $ref: "#/components/parameters/CreatedToQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/AfterIdQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Ticket list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: postTicket
+      summary: Open an after-sales ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/tickets/{ticketNo}:
+    get:
+      operationId: getTicket
+      summary: Get one ticket with its conversation
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+      responses:
+        "200":
+          description: Ticket detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/tickets/{ticketNo}/attachments/{attachmentNo}:
+    get:
+      operationId: getTicketAttachment
+      summary: Download one ticket image attachment
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - name: attachmentNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Attachment image bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/tickets/{ticketNo}/messages:
+    post:
+      operationId: postTicketMessage
+      summary: Reply on the caller's own ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyTicketRequest"
+      responses:
+        "200":
+          description: Ticket after the reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/tickets/{ticketNo}/read:
+    post:
+      operationId: postTicketRead
+      summary: Mark the caller's ticket as read
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Marked read
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/tickets/{ticketNo}/close:
+    post:
+      operationId: postTicketClose
+      summary: Close the caller's own ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Ticket after closing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/tickets:
+    get:
+      operationId: getAdminTickets
+      summary: List every after-sales ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketTypeQuery"
+        - $ref: "#/components/parameters/TicketStatusQuery"
+        - $ref: "#/components/parameters/TicketSearchQuery"
+        - $ref: "#/components/parameters/CreatedFromQuery"
+        - $ref: "#/components/parameters/CreatedToQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/AfterIdQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Ticket list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/admin/tickets/{ticketNo}/messages:
+    post:
+      operationId: postAdminTicketMessage
+      summary: Reply as the platform on any ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyTicketRequest"
+      responses:
+        "200":
+          description: Ticket after the reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/tickets/{ticketNo}/read:
+    post:
+      operationId: postAdminTicketRead
+      summary: Mark a ticket as read for the platform
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Marked read
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/admin/tickets/{ticketNo}/close:
+    post:
+      operationId: postAdminTicketClose
+      summary: Close a ticket as the platform
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Ticket after closing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/admin/tickets/{ticketNo}/refund:
+    post:
+      operationId: postAdminTicketRefund
+      summary: Refund the linked order and close the ticket
+      tags:
+        - Aftersale
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TicketNoPath"
+      responses:
+        "200":
+          description: Ticket after refund and close
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
 components:
   parameters:
+    TicketNoPath:
+      name: ticketNo
+      in: path
+      required: true
+      schema:
+        type: string
+    TicketTypeQuery:
+      name: ticketType
+      in: query
+      schema:
+        type: string
+        enum: [order, general]
+    TicketStatusQuery:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [open, processing, closed]
+    TicketSearchQuery:
+      name: search
+      in: query
+      schema:
+        type: string
+        maxLength: 120
+    CreatedFromQuery:
+      name: createdFrom
+      in: query
+      schema:
+        type: string
+        format: date-time
+    CreatedToQuery:
+      name: createdTo
+      in: query
+      schema:
+        type: string
+        format: date-time
+    OffsetQuery:
+      name: offset
+      in: query
+      description: Row offset used when afterId is absent.
+      schema:
+        type: integer
+        default: 0
+    AfterIdQuery:
+      name: afterId
+      in: query
+      description: Last ticket id from the previous page.
+      schema:
+        type: integer
+    LimitQuery:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -10130,6 +10521,138 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FinanceHotItem"
+      additionalProperties: false
+
+    DashboardResponse:
+      type: object
+      description: Aggregated analytics for the signed-in user's console overview.
+      required:
+        - stats
+        - trend
+        - projectSeries
+        - projectCodeRanking
+        - codeRatio
+        - purchaseRatio
+        - todayCodeRanking
+        - historicalCodeRanking
+        - todayCurrentUserRank
+        - historicalCurrentUserRank
+      properties:
+        stats:
+          $ref: "#/components/schemas/DashboardStats"
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardTrendPoint"
+        projectSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardProjectSeries"
+        projectCodeRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRankItem"
+        codeRatio:
+          type: number
+        purchaseRatio:
+          type: number
+        todayCodeRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRankItem"
+        historicalCodeRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRankItem"
+        todayCurrentUserRank:
+          $ref: "#/components/schemas/DashboardRankItem"
+        historicalCurrentUserRank:
+          $ref: "#/components/schemas/DashboardRankItem"
+      additionalProperties: false
+
+    DashboardStats:
+      type: object
+      required:
+        - walletBalance
+        - historicalSpend
+        - todayOrders
+        - totalOrders
+        - todayCodeReceipts
+        - totalCodeReceipts
+        - codeSuccessRate
+        - averageCodeReceiptSeconds
+      properties:
+        walletBalance:
+          type: number
+        historicalSpend:
+          type: number
+        todayOrders:
+          type: integer
+        totalOrders:
+          type: integer
+        todayCodeReceipts:
+          type: integer
+        totalCodeReceipts:
+          type: integer
+        codeSuccessRate:
+          type: number
+        averageCodeReceiptSeconds:
+          type: integer
+      additionalProperties: false
+
+    DashboardTrendPoint:
+      type: object
+      required:
+        - label
+        - orders
+        - codeOrders
+        - receivedCodes
+        - averageCodeReceiptSeconds
+        - spend
+      properties:
+        label:
+          type: string
+        orders:
+          type: integer
+        codeOrders:
+          type: integer
+        receivedCodes:
+          type: integer
+        averageCodeReceiptSeconds:
+          type: integer
+        spend:
+          type: number
+      additionalProperties: false
+
+    DashboardProjectSeries:
+      type: object
+      required:
+        - name
+        - spend
+      properties:
+        name:
+          type: string
+        spend:
+          type: array
+          items:
+            type: number
+      additionalProperties: false
+
+    DashboardRankItem:
+      type: object
+      required:
+        - name
+        - count
+        - rank
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+        rank:
+          type: integer
+        isCurrentUser:
+          type: boolean
       additionalProperties: false
 
     CardKey:
@@ -14789,4 +15312,239 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+      additionalProperties: false
+
+    CreateTicketRequest:
+      type: object
+      required:
+        - ticketType
+        - title
+        - firstMessage
+      properties:
+        ticketType:
+          type: string
+          enum: [order, general]
+        title:
+          type: string
+        firstMessage:
+          type: string
+        orderNo:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: string
+          description: Image attachments as base64 data URLs.
+      additionalProperties: false
+
+    ReplyTicketRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: string
+          description: Image attachments as base64 data URLs.
+      additionalProperties: false
+
+    TicketOrderResponse:
+      type: object
+      required:
+        - orderNo
+        - deliveryEmail
+        - payAmount
+        - serviceMode
+        - hasSupplier
+      properties:
+        orderNo:
+          type: string
+        projectName:
+          type: string
+        projectLogoUrl:
+          type: string
+        deliveryEmail:
+          type: string
+        payAmount:
+          type: string
+        serviceMode:
+          type: string
+          enum: [code, purchase]
+        afterSaleUntil:
+          type: string
+          format: date-time
+        hasSupplier:
+          type: boolean
+      additionalProperties: false
+
+    TicketResolutionResponse:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [refunded, closed]
+        refundAmount:
+          type: string
+      additionalProperties: false
+
+    TicketMessageResponse:
+      type: object
+      required:
+        - id
+        - senderType
+        - content
+        - createdAt
+      properties:
+        id:
+          type: integer
+        senderType:
+          type: string
+          enum: [user, platform, system]
+        senderName:
+          type: string
+        senderUserId:
+          type: integer
+        senderEmail:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    TicketResponse:
+      type: object
+      required:
+        - id
+        - ticketNo
+        - ticketType
+        - title
+        - status
+        - requesterUserId
+        - requesterEmail
+        - requesterName
+        - requesterRole
+        - requesterGroupName
+        - requesterUnreadCount
+        - platformUnreadCount
+        - messages
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        ticketNo:
+          type: string
+        ticketType:
+          type: string
+          enum: [order, general]
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, processing, closed]
+        order:
+          $ref: "#/components/schemas/TicketOrderResponse"
+        requesterUserId:
+          type: integer
+        requesterEmail:
+          type: string
+        requesterName:
+          type: string
+        requesterRole:
+          type: string
+        requesterGroupName:
+          type: string
+        resolution:
+          $ref: "#/components/schemas/TicketResolutionResponse"
+        requesterUnreadCount:
+          type: integer
+        platformUnreadCount:
+          type: integer
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketMessageResponse"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    TicketTypeFacets:
+      type: object
+      required: [all, order, general]
+      properties:
+        all:
+          type: integer
+          format: int64
+        order:
+          type: integer
+          format: int64
+        general:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    TicketStatusFacets:
+      type: object
+      required: [all, open, processing, closed]
+      properties:
+        all:
+          type: integer
+          format: int64
+        open:
+          type: integer
+          format: int64
+        processing:
+          type: integer
+          format: int64
+        closed:
+          type: integer
+          format: int64
+      additionalProperties: false
+
+    TicketFacets:
+      type: object
+      required: [ticketType, status]
+      properties:
+        ticketType:
+          $ref: "#/components/schemas/TicketTypeFacets"
+        status:
+          $ref: "#/components/schemas/TicketStatusFacets"
+      additionalProperties: false
+
+    TicketListResponse:
+      type: object
+      required: [items, total, offset, hasNext, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketResponse"
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+        nextAfterId:
+          type: integer
+        hasNext:
+          type: boolean
+        limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/TicketFacets"
       additionalProperties: false

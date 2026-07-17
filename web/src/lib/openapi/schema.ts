@@ -1487,6 +1487,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current user's console data dashboard
+         * @description Aggregated analytics for the signed-in user's console overview — orders,
+         *     code receipts, spend, project spend series, project code-receipt ranking,
+         *     and today/all-time cross-user code-receipt leaderboards — over the
+         *     selected date range. Available to any authenticated user; scoped to the
+         *     caller. Buckets are hourly when the range is a single day, else daily.
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet": {
         parameters: {
             query?: never;
@@ -2903,6 +2927,194 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's after-sales tickets */
+        get: operations["getTickets"];
+        put?: never;
+        /** Open an after-sales ticket */
+        post: operations["postTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tickets/{ticketNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one ticket with its conversation */
+        get: operations["getTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tickets/{ticketNo}/attachments/{attachmentNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one ticket image attachment */
+        get: operations["getTicketAttachment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tickets/{ticketNo}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reply on the caller's own ticket */
+        post: operations["postTicketMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tickets/{ticketNo}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark the caller's ticket as read */
+        post: operations["postTicketRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tickets/{ticketNo}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close the caller's own ticket */
+        post: operations["postTicketClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every after-sales ticket */
+        get: operations["getAdminTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tickets/{ticketNo}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reply as the platform on any ticket */
+        post: operations["postAdminTicketMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tickets/{ticketNo}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a ticket as read for the platform */
+        post: operations["postAdminTicketRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tickets/{ticketNo}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close a ticket as the platform */
+        post: operations["postAdminTicketClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/tickets/{ticketNo}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refund the linked order and close the ticket */
+        post: operations["postAdminTicketRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3354,6 +3566,47 @@ export interface components {
             trend: components["schemas"]["FinanceTrendPoint"][];
             hotProjects: components["schemas"]["FinanceHotItem"][];
             hotProducts: components["schemas"]["FinanceHotItem"][];
+        };
+        /** @description Aggregated analytics for the signed-in user's console overview. */
+        DashboardResponse: {
+            stats: components["schemas"]["DashboardStats"];
+            trend: components["schemas"]["DashboardTrendPoint"][];
+            projectSeries: components["schemas"]["DashboardProjectSeries"][];
+            projectCodeRanking: components["schemas"]["DashboardRankItem"][];
+            codeRatio: number;
+            purchaseRatio: number;
+            todayCodeRanking: components["schemas"]["DashboardRankItem"][];
+            historicalCodeRanking: components["schemas"]["DashboardRankItem"][];
+            todayCurrentUserRank: components["schemas"]["DashboardRankItem"];
+            historicalCurrentUserRank: components["schemas"]["DashboardRankItem"];
+        };
+        DashboardStats: {
+            walletBalance: number;
+            historicalSpend: number;
+            todayOrders: number;
+            totalOrders: number;
+            todayCodeReceipts: number;
+            totalCodeReceipts: number;
+            codeSuccessRate: number;
+            averageCodeReceiptSeconds: number;
+        };
+        DashboardTrendPoint: {
+            label: string;
+            orders: number;
+            codeOrders: number;
+            receivedCodes: number;
+            averageCodeReceiptSeconds: number;
+            spend: number;
+        };
+        DashboardProjectSeries: {
+            name: string;
+            spend: number[];
+        };
+        DashboardRankItem: {
+            name: string;
+            count: number;
+            rank: number;
+            isCurrentUser?: boolean;
         };
         CardKey: {
             cardKey: string;
@@ -5189,6 +5442,104 @@ export interface components {
             offset: number;
             limit: number;
         };
+        CreateTicketRequest: {
+            /** @enum {string} */
+            ticketType: "order" | "general";
+            title: string;
+            firstMessage: string;
+            orderNo?: string;
+            /** @description Image attachments as base64 data URLs. */
+            attachments?: string[];
+        };
+        ReplyTicketRequest: {
+            content: string;
+            /** @description Image attachments as base64 data URLs. */
+            attachments?: string[];
+        };
+        TicketOrderResponse: {
+            orderNo: string;
+            projectName?: string;
+            projectLogoUrl?: string;
+            deliveryEmail: string;
+            payAmount: string;
+            /** @enum {string} */
+            serviceMode: "code" | "purchase";
+            /** Format: date-time */
+            afterSaleUntil?: string;
+            hasSupplier: boolean;
+        };
+        TicketResolutionResponse: {
+            /** @enum {string} */
+            kind: "refunded" | "closed";
+            refundAmount?: string;
+        };
+        TicketMessageResponse: {
+            id: number;
+            /** @enum {string} */
+            senderType: "user" | "platform" | "system";
+            senderName?: string;
+            senderUserId?: number;
+            senderEmail?: string;
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+            attachments?: string[];
+        };
+        TicketResponse: {
+            id: number;
+            ticketNo: string;
+            /** @enum {string} */
+            ticketType: "order" | "general";
+            title: string;
+            /** @enum {string} */
+            status: "open" | "processing" | "closed";
+            order?: components["schemas"]["TicketOrderResponse"];
+            requesterUserId: number;
+            requesterEmail: string;
+            requesterName: string;
+            requesterRole: string;
+            requesterGroupName: string;
+            resolution?: components["schemas"]["TicketResolutionResponse"];
+            requesterUnreadCount: number;
+            platformUnreadCount: number;
+            messages: components["schemas"]["TicketMessageResponse"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        TicketTypeFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            order: number;
+            /** Format: int64 */
+            general: number;
+        };
+        TicketStatusFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            open: number;
+            /** Format: int64 */
+            processing: number;
+            /** Format: int64 */
+            closed: number;
+        };
+        TicketFacets: {
+            ticketType: components["schemas"]["TicketTypeFacets"];
+            status: components["schemas"]["TicketStatusFacets"];
+        };
+        TicketListResponse: {
+            items: components["schemas"]["TicketResponse"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            nextAfterId?: number;
+            hasNext: boolean;
+            limit: number;
+            facets?: components["schemas"]["TicketFacets"];
+        };
     };
     responses: {
         /** @description Malformed JSON, path, query, pagination, enum, or multipart input */
@@ -5265,6 +5616,17 @@ export interface components {
         };
     };
     parameters: {
+        TicketNoPath: string;
+        TicketTypeQuery: "order" | "general";
+        TicketStatusQuery: "open" | "processing" | "closed";
+        TicketSearchQuery: string;
+        CreatedFromQuery: string;
+        CreatedToQuery: string;
+        /** @description Row offset used when afterId is absent. */
+        OffsetQuery: number;
+        /** @description Last ticket id from the previous page. */
+        AfterIdQuery: number;
+        LimitQuery: number;
         /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
         CsrfToken: string;
         /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
@@ -11230,6 +11592,47 @@ export interface operations {
             };
         };
     };
+    getDashboard: {
+        parameters: {
+            query?: {
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Console dashboard aggregates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getWallet: {
         parameters: {
             query?: never;
@@ -14980,6 +15383,363 @@ export interface operations {
             404: components["responses"]["NotFound"];
             502: components["responses"]["BadGateway"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getTickets: {
+        parameters: {
+            query?: {
+                ticketType?: components["parameters"]["TicketTypeQuery"];
+                status?: components["parameters"]["TicketStatusQuery"];
+                search?: components["parameters"]["TicketSearchQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getTicketAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+                attachmentNo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attachment image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postTicketMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket after the reply */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    postTicketRead: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Marked read */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postTicketClose: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket after closing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminTickets: {
+        parameters: {
+            query?: {
+                ticketType?: components["parameters"]["TicketTypeQuery"];
+                status?: components["parameters"]["TicketStatusQuery"];
+                search?: components["parameters"]["TicketSearchQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminTicketMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket after the reply */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    postAdminTicketRead: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Marked read */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminTicketClose: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket after closing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postAdminTicketRefund: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket after refund and close */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
 }

@@ -1285,6 +1285,24 @@ func (e CreateProjectApplicationRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for CreateTicketRequestTicketType.
+const (
+	CreateTicketRequestTicketTypeGeneral CreateTicketRequestTicketType = "general"
+	CreateTicketRequestTicketTypeOrder   CreateTicketRequestTicketType = "order"
+)
+
+// Valid indicates whether the value is a known member of the CreateTicketRequestTicketType enum.
+func (e CreateTicketRequestTicketType) Valid() bool {
+	switch e {
+	case CreateTicketRequestTicketTypeGeneral:
+		return true
+	case CreateTicketRequestTicketTypeOrder:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeleteProxiesRequest0All.
 const (
 	DeleteProxiesRequest0AllFalse DeleteProxiesRequest0All = false
@@ -2287,6 +2305,102 @@ func (e SupplierApplicationResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for TicketMessageResponseSenderType.
+const (
+	TicketMessageResponseSenderTypePlatform TicketMessageResponseSenderType = "platform"
+	TicketMessageResponseSenderTypeSystem   TicketMessageResponseSenderType = "system"
+	TicketMessageResponseSenderTypeUser     TicketMessageResponseSenderType = "user"
+)
+
+// Valid indicates whether the value is a known member of the TicketMessageResponseSenderType enum.
+func (e TicketMessageResponseSenderType) Valid() bool {
+	switch e {
+	case TicketMessageResponseSenderTypePlatform:
+		return true
+	case TicketMessageResponseSenderTypeSystem:
+		return true
+	case TicketMessageResponseSenderTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketOrderResponseServiceMode.
+const (
+	TicketOrderResponseServiceModeCode     TicketOrderResponseServiceMode = "code"
+	TicketOrderResponseServiceModePurchase TicketOrderResponseServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the TicketOrderResponseServiceMode enum.
+func (e TicketOrderResponseServiceMode) Valid() bool {
+	switch e {
+	case TicketOrderResponseServiceModeCode:
+		return true
+	case TicketOrderResponseServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketResolutionResponseKind.
+const (
+	TicketResolutionResponseKindClosed   TicketResolutionResponseKind = "closed"
+	TicketResolutionResponseKindRefunded TicketResolutionResponseKind = "refunded"
+)
+
+// Valid indicates whether the value is a known member of the TicketResolutionResponseKind enum.
+func (e TicketResolutionResponseKind) Valid() bool {
+	switch e {
+	case TicketResolutionResponseKindClosed:
+		return true
+	case TicketResolutionResponseKindRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketResponseStatus.
+const (
+	TicketResponseStatusClosed     TicketResponseStatus = "closed"
+	TicketResponseStatusOpen       TicketResponseStatus = "open"
+	TicketResponseStatusProcessing TicketResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the TicketResponseStatus enum.
+func (e TicketResponseStatus) Valid() bool {
+	switch e {
+	case TicketResponseStatusClosed:
+		return true
+	case TicketResponseStatusOpen:
+		return true
+	case TicketResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketResponseTicketType.
+const (
+	TicketResponseTicketTypeGeneral TicketResponseTicketType = "general"
+	TicketResponseTicketTypeOrder   TicketResponseTicketType = "order"
+)
+
+// Valid indicates whether the value is a known member of the TicketResponseTicketType enum.
+func (e TicketResponseTicketType) Valid() bool {
+	switch e {
+	case TicketResponseTicketTypeGeneral:
+		return true
+	case TicketResponseTicketTypeOrder:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransactionItemBalanceBucket.
 const (
 	TransactionItemBalanceBucketConsumer          TransactionItemBalanceBucket = "consumer"
@@ -2419,6 +2533,45 @@ func (e UserResponseRole) Valid() bool {
 	case UserResponseRoleSupplier:
 		return true
 	case UserResponseRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketStatusQuery.
+const (
+	TicketStatusQueryClosed     TicketStatusQuery = "closed"
+	TicketStatusQueryOpen       TicketStatusQuery = "open"
+	TicketStatusQueryProcessing TicketStatusQuery = "processing"
+)
+
+// Valid indicates whether the value is a known member of the TicketStatusQuery enum.
+func (e TicketStatusQuery) Valid() bool {
+	switch e {
+	case TicketStatusQueryClosed:
+		return true
+	case TicketStatusQueryOpen:
+		return true
+	case TicketStatusQueryProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketTypeQuery.
+const (
+	TicketTypeQueryGeneral TicketTypeQuery = "general"
+	TicketTypeQueryOrder   TicketTypeQuery = "order"
+)
+
+// Valid indicates whether the value is a known member of the TicketTypeQuery enum.
+func (e TicketTypeQuery) Valid() bool {
+	switch e {
+	case TicketTypeQueryGeneral:
+		return true
+	case TicketTypeQueryOrder:
 		return true
 	default:
 		return false
@@ -2902,6 +3055,45 @@ func (e GetAdminTasksParamsBizType) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminTicketsParamsTicketType.
+const (
+	GetAdminTicketsParamsTicketTypeGeneral GetAdminTicketsParamsTicketType = "general"
+	GetAdminTicketsParamsTicketTypeOrder   GetAdminTicketsParamsTicketType = "order"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTicketsParamsTicketType enum.
+func (e GetAdminTicketsParamsTicketType) Valid() bool {
+	switch e {
+	case GetAdminTicketsParamsTicketTypeGeneral:
+		return true
+	case GetAdminTicketsParamsTicketTypeOrder:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminTicketsParamsStatus.
+const (
+	GetAdminTicketsParamsStatusClosed     GetAdminTicketsParamsStatus = "closed"
+	GetAdminTicketsParamsStatusOpen       GetAdminTicketsParamsStatus = "open"
+	GetAdminTicketsParamsStatusProcessing GetAdminTicketsParamsStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTicketsParamsStatus enum.
+func (e GetAdminTicketsParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminTicketsParamsStatusClosed:
+		return true
+	case GetAdminTicketsParamsStatusOpen:
+		return true
+	case GetAdminTicketsParamsStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminTransactionsParamsType.
 const (
 	CardRedeem       GetAdminTransactionsParamsType = "card_redeem"
@@ -2961,22 +3153,22 @@ func (e GetAdminTransactionsParamsDirection) Valid() bool {
 
 // Defines values for GetAdminUsersParamsRole.
 const (
-	GetAdminUsersParamsRoleAdmin      GetAdminUsersParamsRole = "admin"
-	GetAdminUsersParamsRoleSuperAdmin GetAdminUsersParamsRole = "super_admin"
-	GetAdminUsersParamsRoleSupplier   GetAdminUsersParamsRole = "supplier"
-	GetAdminUsersParamsRoleUser       GetAdminUsersParamsRole = "user"
+	Admin      GetAdminUsersParamsRole = "admin"
+	SuperAdmin GetAdminUsersParamsRole = "super_admin"
+	Supplier   GetAdminUsersParamsRole = "supplier"
+	User       GetAdminUsersParamsRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminUsersParamsRole enum.
 func (e GetAdminUsersParamsRole) Valid() bool {
 	switch e {
-	case GetAdminUsersParamsRoleAdmin:
+	case Admin:
 		return true
-	case GetAdminUsersParamsRoleSuperAdmin:
+	case SuperAdmin:
 		return true
-	case GetAdminUsersParamsRoleSupplier:
+	case Supplier:
 		return true
-	case GetAdminUsersParamsRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -3054,16 +3246,16 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 
 // Defines values for PostOrderParamsServiceMode.
 const (
-	PostOrderParamsServiceModeCode     PostOrderParamsServiceMode = "code"
-	PostOrderParamsServiceModePurchase PostOrderParamsServiceMode = "purchase"
+	Code     PostOrderParamsServiceMode = "code"
+	Purchase PostOrderParamsServiceMode = "purchase"
 )
 
 // Valid indicates whether the value is a known member of the PostOrderParamsServiceMode enum.
 func (e PostOrderParamsServiceMode) Valid() bool {
 	switch e {
-	case PostOrderParamsServiceModeCode:
+	case Code:
 		return true
-	case PostOrderParamsServiceModePurchase:
+	case Purchase:
 		return true
 	default:
 		return false
@@ -3265,6 +3457,45 @@ func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	case PostResourceImportMultipartBodyErrorStrategyAbort:
 		return true
 	case PostResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetTicketsParamsTicketType.
+const (
+	General GetTicketsParamsTicketType = "general"
+	Order   GetTicketsParamsTicketType = "order"
+)
+
+// Valid indicates whether the value is a known member of the GetTicketsParamsTicketType enum.
+func (e GetTicketsParamsTicketType) Valid() bool {
+	switch e {
+	case General:
+		return true
+	case Order:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetTicketsParamsStatus.
+const (
+	Closed     GetTicketsParamsStatus = "closed"
+	Open       GetTicketsParamsStatus = "open"
+	Processing GetTicketsParamsStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
+func (e GetTicketsParamsStatus) Valid() bool {
+	switch e {
+	case Closed:
+		return true
+	case Open:
+		return true
+	case Processing:
 		return true
 	default:
 		return false
@@ -4758,9 +4989,72 @@ type CreateProxyRequest struct {
 	Url string `json:"url"`
 }
 
+// CreateTicketRequest defines model for CreateTicketRequest.
+type CreateTicketRequest struct {
+	// Attachments Image attachments as base64 data URLs.
+	Attachments  *[]string                     `json:"attachments,omitempty"`
+	FirstMessage string                        `json:"firstMessage"`
+	OrderNo      *string                       `json:"orderNo,omitempty"`
+	TicketType   CreateTicketRequestTicketType `json:"ticketType"`
+	Title        string                        `json:"title"`
+}
+
+// CreateTicketRequestTicketType defines model for CreateTicketRequest.TicketType.
+type CreateTicketRequestTicketType string
+
 // CurrentInviteResponse defines model for CurrentInviteResponse.
 type CurrentInviteResponse struct {
 	InviteCode string `json:"inviteCode"`
+}
+
+// DashboardProjectSeries defines model for DashboardProjectSeries.
+type DashboardProjectSeries struct {
+	Name  string    `json:"name"`
+	Spend []float32 `json:"spend"`
+}
+
+// DashboardRankItem defines model for DashboardRankItem.
+type DashboardRankItem struct {
+	Count         int    `json:"count"`
+	IsCurrentUser *bool  `json:"isCurrentUser,omitempty"`
+	Name          string `json:"name"`
+	Rank          int    `json:"rank"`
+}
+
+// DashboardResponse Aggregated analytics for the signed-in user's console overview.
+type DashboardResponse struct {
+	CodeRatio                 float32                  `json:"codeRatio"`
+	HistoricalCodeRanking     []DashboardRankItem      `json:"historicalCodeRanking"`
+	HistoricalCurrentUserRank DashboardRankItem        `json:"historicalCurrentUserRank"`
+	ProjectCodeRanking        []DashboardRankItem      `json:"projectCodeRanking"`
+	ProjectSeries             []DashboardProjectSeries `json:"projectSeries"`
+	PurchaseRatio             float32                  `json:"purchaseRatio"`
+	Stats                     DashboardStats           `json:"stats"`
+	TodayCodeRanking          []DashboardRankItem      `json:"todayCodeRanking"`
+	TodayCurrentUserRank      DashboardRankItem        `json:"todayCurrentUserRank"`
+	Trend                     []DashboardTrendPoint    `json:"trend"`
+}
+
+// DashboardStats defines model for DashboardStats.
+type DashboardStats struct {
+	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
+	CodeSuccessRate           float32 `json:"codeSuccessRate"`
+	HistoricalSpend           float32 `json:"historicalSpend"`
+	TodayCodeReceipts         int     `json:"todayCodeReceipts"`
+	TodayOrders               int     `json:"todayOrders"`
+	TotalCodeReceipts         int     `json:"totalCodeReceipts"`
+	TotalOrders               int     `json:"totalOrders"`
+	WalletBalance             float32 `json:"walletBalance"`
+}
+
+// DashboardTrendPoint defines model for DashboardTrendPoint.
+type DashboardTrendPoint struct {
+	AverageCodeReceiptSeconds int     `json:"averageCodeReceiptSeconds"`
+	CodeOrders                int     `json:"codeOrders"`
+	Label                     string  `json:"label"`
+	Orders                    int     `json:"orders"`
+	ReceivedCodes             int     `json:"receivedCodes"`
+	Spend                     float32 `json:"spend"`
 }
 
 // DeleteProxiesRequest defines model for DeleteProxiesRequest.
@@ -5866,6 +6160,13 @@ type RegisterRequest struct {
 	Password   string              `json:"password"`
 }
 
+// ReplyTicketRequest defines model for ReplyTicketRequest.
+type ReplyTicketRequest struct {
+	// Attachments Image attachments as base64 data URLs.
+	Attachments *[]string `json:"attachments,omitempty"`
+	Content     string    `json:"content"`
+}
+
 // ResourceBooleanFacets defines model for ResourceBooleanFacets.
 type ResourceBooleanFacets struct {
 	All int `json:"all"`
@@ -6095,6 +6396,104 @@ type SupplierApplicationResponse struct {
 // SupplierApplicationResponseStatus defines model for SupplierApplicationResponse.Status.
 type SupplierApplicationResponseStatus string
 
+// TicketFacets defines model for TicketFacets.
+type TicketFacets struct {
+	Status     TicketStatusFacets `json:"status"`
+	TicketType TicketTypeFacets   `json:"ticketType"`
+}
+
+// TicketListResponse defines model for TicketListResponse.
+type TicketListResponse struct {
+	Facets      *TicketFacets    `json:"facets,omitempty"`
+	HasNext     bool             `json:"hasNext"`
+	Items       []TicketResponse `json:"items"`
+	Limit       int              `json:"limit"`
+	NextAfterId *int             `json:"nextAfterId,omitempty"`
+	Offset      int              `json:"offset"`
+	Total       int64            `json:"total"`
+}
+
+// TicketMessageResponse defines model for TicketMessageResponse.
+type TicketMessageResponse struct {
+	Attachments  *[]string                       `json:"attachments,omitempty"`
+	Content      string                          `json:"content"`
+	CreatedAt    time.Time                       `json:"createdAt"`
+	Id           int                             `json:"id"`
+	SenderEmail  *string                         `json:"senderEmail,omitempty"`
+	SenderName   *string                         `json:"senderName,omitempty"`
+	SenderType   TicketMessageResponseSenderType `json:"senderType"`
+	SenderUserId *int                            `json:"senderUserId,omitempty"`
+}
+
+// TicketMessageResponseSenderType defines model for TicketMessageResponse.SenderType.
+type TicketMessageResponseSenderType string
+
+// TicketOrderResponse defines model for TicketOrderResponse.
+type TicketOrderResponse struct {
+	AfterSaleUntil *time.Time                     `json:"afterSaleUntil,omitempty"`
+	DeliveryEmail  string                         `json:"deliveryEmail"`
+	HasSupplier    bool                           `json:"hasSupplier"`
+	OrderNo        string                         `json:"orderNo"`
+	PayAmount      string                         `json:"payAmount"`
+	ProjectLogoUrl *string                        `json:"projectLogoUrl,omitempty"`
+	ProjectName    *string                        `json:"projectName,omitempty"`
+	ServiceMode    TicketOrderResponseServiceMode `json:"serviceMode"`
+}
+
+// TicketOrderResponseServiceMode defines model for TicketOrderResponse.ServiceMode.
+type TicketOrderResponseServiceMode string
+
+// TicketResolutionResponse defines model for TicketResolutionResponse.
+type TicketResolutionResponse struct {
+	Kind         TicketResolutionResponseKind `json:"kind"`
+	RefundAmount *string                      `json:"refundAmount,omitempty"`
+}
+
+// TicketResolutionResponseKind defines model for TicketResolutionResponse.Kind.
+type TicketResolutionResponseKind string
+
+// TicketResponse defines model for TicketResponse.
+type TicketResponse struct {
+	CreatedAt            time.Time                 `json:"createdAt"`
+	Id                   int                       `json:"id"`
+	Messages             []TicketMessageResponse   `json:"messages"`
+	Order                *TicketOrderResponse      `json:"order,omitempty"`
+	PlatformUnreadCount  int                       `json:"platformUnreadCount"`
+	RequesterEmail       string                    `json:"requesterEmail"`
+	RequesterGroupName   string                    `json:"requesterGroupName"`
+	RequesterName        string                    `json:"requesterName"`
+	RequesterRole        string                    `json:"requesterRole"`
+	RequesterUnreadCount int                       `json:"requesterUnreadCount"`
+	RequesterUserId      int                       `json:"requesterUserId"`
+	Resolution           *TicketResolutionResponse `json:"resolution,omitempty"`
+	Status               TicketResponseStatus      `json:"status"`
+	TicketNo             string                    `json:"ticketNo"`
+	TicketType           TicketResponseTicketType  `json:"ticketType"`
+	Title                string                    `json:"title"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+}
+
+// TicketResponseStatus defines model for TicketResponse.Status.
+type TicketResponseStatus string
+
+// TicketResponseTicketType defines model for TicketResponse.TicketType.
+type TicketResponseTicketType string
+
+// TicketStatusFacets defines model for TicketStatusFacets.
+type TicketStatusFacets struct {
+	All        int64 `json:"all"`
+	Closed     int64 `json:"closed"`
+	Open       int64 `json:"open"`
+	Processing int64 `json:"processing"`
+}
+
+// TicketTypeFacets defines model for TicketTypeFacets.
+type TicketTypeFacets struct {
+	All     int64 `json:"all"`
+	General int64 `json:"general"`
+	Order   int64 `json:"order"`
+}
+
 // TransactionItem defines model for TransactionItem.
 type TransactionItem struct {
 	// Amount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
@@ -6248,6 +6647,15 @@ type AdminDomainId = int
 // AdminStateCommandIdempotencyKey defines model for AdminStateCommandIdempotencyKey.
 type AdminStateCommandIdempotencyKey = string
 
+// AfterIdQuery defines model for AfterIdQuery.
+type AfterIdQuery = int
+
+// CreatedFromQuery defines model for CreatedFromQuery.
+type CreatedFromQuery = time.Time
+
+// CreatedToQuery defines model for CreatedToQuery.
+type CreatedToQuery = time.Time
+
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
 
@@ -6257,8 +6665,26 @@ type ExpectedAdminResourceVersion = int
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
+// LimitQuery defines model for LimitQuery.
+type LimitQuery = int
+
+// OffsetQuery defines model for OffsetQuery.
+type OffsetQuery = int
+
 // OptionalCsrfToken defines model for OptionalCsrfToken.
 type OptionalCsrfToken = string
+
+// TicketNoPath defines model for TicketNoPath.
+type TicketNoPath = string
+
+// TicketSearchQuery defines model for TicketSearchQuery.
+type TicketSearchQuery = string
+
+// TicketStatusQuery defines model for TicketStatusQuery.
+type TicketStatusQuery string
+
+// TicketTypeQuery defines model for TicketTypeQuery.
+type TicketTypeQuery string
 
 // BadGateway defines model for BadGateway.
 type BadGateway = Error
@@ -7203,6 +7629,55 @@ type GetAdminTasksParams struct {
 // GetAdminTasksParamsBizType defines parameters for GetAdminTasks.
 type GetAdminTasksParamsBizType string
 
+// GetAdminTicketsParams defines parameters for GetAdminTickets.
+type GetAdminTicketsParams struct {
+	TicketType  *GetAdminTicketsParamsTicketType `form:"ticketType,omitempty" json:"ticketType,omitempty"`
+	Status      *GetAdminTicketsParamsStatus     `form:"status,omitempty" json:"status,omitempty"`
+	Search      *TicketSearchQuery               `form:"search,omitempty" json:"search,omitempty"`
+	CreatedFrom *CreatedFromQuery                `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery                  `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId *AfterIdQuery `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *LimitQuery   `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetAdminTicketsParamsTicketType defines parameters for GetAdminTickets.
+type GetAdminTicketsParamsTicketType string
+
+// GetAdminTicketsParamsStatus defines parameters for GetAdminTickets.
+type GetAdminTicketsParamsStatus string
+
+// PostAdminTicketCloseParams defines parameters for PostAdminTicketClose.
+type PostAdminTicketCloseParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminTicketMessageParams defines parameters for PostAdminTicketMessage.
+type PostAdminTicketMessageParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminTicketReadParams defines parameters for PostAdminTicketRead.
+type PostAdminTicketReadParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminTicketRefundParams defines parameters for PostAdminTicketRefund.
+type PostAdminTicketRefundParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminTransactionsParams defines parameters for GetAdminTransactions.
 type GetAdminTransactionsParams struct {
 	Offset      *int                                 `form:"offset,omitempty" json:"offset,omitempty"`
@@ -7414,6 +7889,12 @@ type PostCardRedeemParams struct {
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetDashboardParams defines parameters for GetDashboard.
+type GetDashboardParams struct {
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
 }
 
 // PostDomainParams defines parameters for PostDomain.
@@ -7698,6 +8179,52 @@ type PostSupplierApplicationParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetTicketsParams defines parameters for GetTickets.
+type GetTicketsParams struct {
+	TicketType  *GetTicketsParamsTicketType `form:"ticketType,omitempty" json:"ticketType,omitempty"`
+	Status      *GetTicketsParamsStatus     `form:"status,omitempty" json:"status,omitempty"`
+	Search      *TicketSearchQuery          `form:"search,omitempty" json:"search,omitempty"`
+	CreatedFrom *CreatedFromQuery           `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery             `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId *AfterIdQuery `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *LimitQuery   `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetTicketsParamsTicketType defines parameters for GetTickets.
+type GetTicketsParamsTicketType string
+
+// GetTicketsParamsStatus defines parameters for GetTickets.
+type GetTicketsParamsStatus string
+
+// PostTicketParams defines parameters for PostTicket.
+type PostTicketParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostTicketCloseParams defines parameters for PostTicketClose.
+type PostTicketCloseParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostTicketMessageParams defines parameters for PostTicketMessage.
+type PostTicketMessageParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostTicketReadParams defines parameters for PostTicketRead.
+type PostTicketReadParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostWalletReferralTransferParams defines parameters for PostWalletReferralTransfer.
 type PostWalletReferralTransferParams struct {
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
@@ -7865,6 +8392,9 @@ type PostAdminServerJSONRequestBody = CreateMailServerRequest
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
 
+// PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
+type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
+
 // PostAdminUserJSONRequestBody defines body for PostAdminUser for application/json ContentType.
 type PostAdminUserJSONRequestBody = AdminCreateUserRequest
 
@@ -7957,6 +8487,12 @@ type PostServerJSONRequestBody = CreateMailServerRequest
 
 // PostSupplierApplicationJSONRequestBody defines body for PostSupplierApplication for application/json ContentType.
 type PostSupplierApplicationJSONRequestBody = SupplierApplicationRequest
+
+// PostTicketJSONRequestBody defines body for PostTicket for application/json ContentType.
+type PostTicketJSONRequestBody = CreateTicketRequest
+
+// PostTicketMessageJSONRequestBody defines body for PostTicketMessage for application/json ContentType.
+type PostTicketMessageJSONRequestBody = ReplyTicketRequest
 
 // PostRegisterJSONRequestBody defines body for PostRegister for application/json ContentType.
 type PostRegisterJSONRequestBody = RegisterRequest
@@ -8905,6 +9441,21 @@ type ServerInterface interface {
 	// Get one normalized administrator task
 	// (GET /v1/admin/tasks/{taskId})
 	GetAdminTask(c *gin.Context, taskId string)
+	// List every after-sales ticket
+	// (GET /v1/admin/tickets)
+	GetAdminTickets(c *gin.Context, params GetAdminTicketsParams)
+	// Close a ticket as the platform
+	// (POST /v1/admin/tickets/{ticketNo}/close)
+	PostAdminTicketClose(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketCloseParams)
+	// Reply as the platform on any ticket
+	// (POST /v1/admin/tickets/{ticketNo}/messages)
+	PostAdminTicketMessage(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketMessageParams)
+	// Mark a ticket as read for the platform
+	// (POST /v1/admin/tickets/{ticketNo}/read)
+	PostAdminTicketRead(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketReadParams)
+	// Refund the linked order and close the ticket
+	// (POST /v1/admin/tickets/{ticketNo}/refund)
+	PostAdminTicketRefund(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketRefundParams)
 	// List transactions
 	// (GET /v1/admin/transactions)
 	GetAdminTransactions(c *gin.Context, params GetAdminTransactionsParams)
@@ -9010,6 +9561,9 @@ type ServerInterface interface {
 	// Redeem a card key into consumer balance
 	// (POST /v1/cards/redeem)
 	PostCardRedeem(c *gin.Context, params PostCardRedeemParams)
+	// Current user's console data dashboard
+	// (GET /v1/dashboard)
+	GetDashboard(c *gin.Context, params GetDashboardParams)
 	// Create a domain resource
 	// (POST /v1/domains)
 	PostDomain(c *gin.Context, params PostDomainParams)
@@ -9127,6 +9681,27 @@ type ServerInterface interface {
 	// Get current user's latest supplier application
 	// (GET /v1/suppliers/applications/current)
 	GetCurrentSupplierApplication(c *gin.Context)
+	// List the caller's after-sales tickets
+	// (GET /v1/tickets)
+	GetTickets(c *gin.Context, params GetTicketsParams)
+	// Open an after-sales ticket
+	// (POST /v1/tickets)
+	PostTicket(c *gin.Context, params PostTicketParams)
+	// Get one ticket with its conversation
+	// (GET /v1/tickets/{ticketNo})
+	GetTicket(c *gin.Context, ticketNo TicketNoPath)
+	// Download one ticket image attachment
+	// (GET /v1/tickets/{ticketNo}/attachments/{attachmentNo})
+	GetTicketAttachment(c *gin.Context, ticketNo TicketNoPath, attachmentNo string)
+	// Close the caller's own ticket
+	// (POST /v1/tickets/{ticketNo}/close)
+	PostTicketClose(c *gin.Context, ticketNo TicketNoPath, params PostTicketCloseParams)
+	// Reply on the caller's own ticket
+	// (POST /v1/tickets/{ticketNo}/messages)
+	PostTicketMessage(c *gin.Context, ticketNo TicketNoPath, params PostTicketMessageParams)
+	// Mark the caller's ticket as read
+	// (POST /v1/tickets/{ticketNo}/read)
+	PostTicketRead(c *gin.Context, ticketNo TicketNoPath, params PostTicketReadParams)
 	// Register a new user
 	// (POST /v1/users)
 	PostRegister(c *gin.Context)
@@ -15512,6 +16087,329 @@ func (siw *ServerInterfaceWrapper) GetAdminTask(c *gin.Context) {
 	siw.Handler.GetAdminTask(c, taskId)
 }
 
+// GetAdminTickets operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminTickets(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminTicketsParams
+
+	// ------------- Optional query parameter "ticketType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ticketType", c.Request.URL.Query(), &params.TicketType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminTickets(c, params)
+}
+
+// PostAdminTicketClose operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTicketClose(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTicketCloseParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTicketClose(c, ticketNo, params)
+}
+
+// PostAdminTicketMessage operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTicketMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTicketMessageParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTicketMessage(c, ticketNo, params)
+}
+
+// PostAdminTicketRead operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTicketRead(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTicketReadParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTicketRead(c, ticketNo, params)
+}
+
+// PostAdminTicketRefund operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTicketRefund(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTicketRefundParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTicketRefund(c, ticketNo, params)
+}
+
 // GetAdminTransactions operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminTransactions(c *gin.Context) {
 
@@ -17256,6 +18154,43 @@ func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
 	siw.Handler.PostCardRedeem(c, params)
 }
 
+// GetDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetDashboard(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDashboardParams
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetDashboard(c, params)
+}
+
 // PostDomain operation middleware
 func (siw *ServerInterfaceWrapper) PostDomain(c *gin.Context) {
 
@@ -18991,6 +19926,361 @@ func (siw *ServerInterfaceWrapper) GetCurrentSupplierApplication(c *gin.Context)
 	siw.Handler.GetCurrentSupplierApplication(c)
 }
 
+// GetTickets operation middleware
+func (siw *ServerInterfaceWrapper) GetTickets(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTicketsParams
+
+	// ------------- Optional query parameter "ticketType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ticketType", c.Request.URL.Query(), &params.TicketType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetTickets(c, params)
+}
+
+// PostTicket operation middleware
+func (siw *ServerInterfaceWrapper) PostTicket(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTicketParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTicket(c, params)
+}
+
+// GetTicket operation middleware
+func (siw *ServerInterfaceWrapper) GetTicket(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetTicket(c, ticketNo)
+}
+
+// GetTicketAttachment operation middleware
+func (siw *ServerInterfaceWrapper) GetTicketAttachment(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "attachmentNo" -------------
+	var attachmentNo string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "attachmentNo", c.Param("attachmentNo"), &attachmentNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter attachmentNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetTicketAttachment(c, ticketNo, attachmentNo)
+}
+
+// PostTicketClose operation middleware
+func (siw *ServerInterfaceWrapper) PostTicketClose(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTicketCloseParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTicketClose(c, ticketNo, params)
+}
+
+// PostTicketMessage operation middleware
+func (siw *ServerInterfaceWrapper) PostTicketMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTicketMessageParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTicketMessage(c, ticketNo, params)
+}
+
+// PostTicketRead operation middleware
+func (siw *ServerInterfaceWrapper) PostTicketRead(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTicketReadParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTicketRead(c, ticketNo, params)
+}
+
 // PostRegister operation middleware
 func (siw *ServerInterfaceWrapper) PostRegister(c *gin.Context) {
 
@@ -19289,6 +20579,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
 	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
 	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
+	router.GET(options.BaseURL+"/v1/admin/tickets", wrapper.GetAdminTickets)
+	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/close", wrapper.PostAdminTicketClose)
+	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/messages", wrapper.PostAdminTicketMessage)
+	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/read", wrapper.PostAdminTicketRead)
+	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/refund", wrapper.PostAdminTicketRefund)
 	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
 	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
@@ -19324,6 +20619,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
 	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
+	router.GET(options.BaseURL+"/v1/dashboard", wrapper.GetDashboard)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
@@ -19363,6 +20659,13 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/v1/sessions/current", wrapper.DeleteSession)
 	router.POST(options.BaseURL+"/v1/suppliers/applications", wrapper.PostSupplierApplication)
 	router.GET(options.BaseURL+"/v1/suppliers/applications/current", wrapper.GetCurrentSupplierApplication)
+	router.GET(options.BaseURL+"/v1/tickets", wrapper.GetTickets)
+	router.POST(options.BaseURL+"/v1/tickets", wrapper.PostTicket)
+	router.GET(options.BaseURL+"/v1/tickets/:ticketNo", wrapper.GetTicket)
+	router.GET(options.BaseURL+"/v1/tickets/:ticketNo/attachments/:attachmentNo", wrapper.GetTicketAttachment)
+	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/close", wrapper.PostTicketClose)
+	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/messages", wrapper.PostTicketMessage)
+	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/read", wrapper.PostTicketRead)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)

@@ -28,8 +28,8 @@ import {
   getTicket,
   markTicketRead,
   refundAndCloseTicket,
-  type MockTicket,
-} from "./tickets-mock";
+  type Ticket,
+} from "./tickets-api";
 
 const { Text } = Typography;
 
@@ -50,7 +50,7 @@ export function TicketDetailSheet({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [ticket, setTicket] = useState<MockTicket | null>(null);
+  const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -84,7 +84,7 @@ export function TicketDetailSheet({
 
   // Both replies and quick actions run through here so the list stays in sync.
   const applyUpdate = useCallback(
-    (next: MockTicket) => {
+    (next: Ticket) => {
       setTicket(next);
       onChanged();
     },
@@ -92,7 +92,7 @@ export function TicketDetailSheet({
   );
 
   const runAction = useCallback(
-    async (action: () => Promise<MockTicket>, successKey: string) => {
+    async (action: () => Promise<Ticket>, successKey: string) => {
       setActionBusy(true);
       try {
         const next = await action();

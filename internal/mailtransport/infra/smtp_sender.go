@@ -155,6 +155,11 @@ func newSMTPMessage(from string, to string, message domain.OutboundMessage) (*go
 	if err := msg.To(to); err != nil {
 		return nil, err
 	}
+	if replyTo := strings.TrimSpace(message.ReplyTo); replyTo != "" {
+		if err := msg.ReplyTo(replyTo); err != nil {
+			return nil, err
+		}
+	}
 	msg.SetDate()
 	msg.SetMessageID()
 	msg.Subject(headerValue(message.Subject))

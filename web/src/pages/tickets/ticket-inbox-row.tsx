@@ -10,7 +10,7 @@ import {
   renderTicketTypeTag,
   senderLabel,
 } from "./ticket-meta";
-import type { MockTicket } from "./tickets-mock";
+import type { Ticket } from "./tickets-api";
 
 const AVATAR_COLORS = [
   "amber",
@@ -36,7 +36,7 @@ function avatarInitial(name: string, email: string) {
   return source[0]?.toUpperCase() ?? "?";
 }
 
-function lastMessagePreview(ticket: MockTicket, t: TFunction) {
+function lastMessagePreview(ticket: Ticket, t: TFunction) {
   const last = ticket.messages[ticket.messages.length - 1];
   if (!last) return ticket.title;
   const text = last.content.replace(/\s+/g, " ").trim();
@@ -53,7 +53,7 @@ export function TicketInboxRow({
   t,
   onClick,
 }: {
-  ticket: MockTicket;
+  ticket: Ticket;
   showRequester: boolean;
   viewerRole: "user" | "platform";
   t: TFunction;

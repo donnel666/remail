@@ -8,9 +8,9 @@ import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { formatTicketDateTime } from "./ticket-meta";
 import {
   replyTicket,
-  type MockTicket,
-  type MockTicketMessage,
-} from "./tickets-mock";
+  type Ticket,
+  type TicketMessage,
+} from "./tickets-api";
 
 const AVATAR_COLORS = [
   "amber",
@@ -45,13 +45,6 @@ function initialOf(name?: string | null, email?: string | null) {
   return source[0]?.toUpperCase() ?? "?";
 }
 
-function isImageAttachment(value: string) {
-  return (
-    /^(blob:|data:image)/.test(value) ||
-    /^https?:\/\/.*\.(png|jpe?g|gif|webp|bmp|svg)(?:[?#].*)?$/i.test(value)
-  );
-}
-
 interface PendingImage {
   id: string;
   url: string;
@@ -80,9 +73,9 @@ export function TicketConversation({
   sending,
   replyEnabled = true,
 }: {
-  ticket: MockTicket;
+  ticket: Ticket;
   viewerRole: "user" | "platform";
-  onReplied: (next: MockTicket) => void;
+  onReplied: (next: Ticket) => void;
   sending?: boolean;
   replyEnabled?: boolean;
 }) {
@@ -116,7 +109,7 @@ export function TicketConversation({
   const selfName =
     currentUser?.name || currentUser?.nickname || currentUser?.email || "";
 
-  const identityFor = (message: MockTicketMessage) => {
+  const identityFor = (message: TicketMessage) => {
     const isCurrentSender =
       message.senderUserId !== undefined &&
       message.senderUserId === currentUser?.id;
@@ -213,10 +206,9 @@ export function TicketConversation({
 
           const isSelf = message.senderType === viewerRole;
           const identity = identityFor(message);
-          const images = (message.attachments ?? []).filter(isImageAttachment);
-          const files = (message.attachments ?? []).filter(
-            (item) => !isImageAttachment(item)
-          );
+          // Ticket attachments are always images served from the attachments
+          // endpoint, so every attachment renders inline.
+          const images = message.attachments ?? [];
 
           return (
             <div
@@ -266,15 +258,6 @@ export function TicketConversation({
                           style={{ borderRadius: 8, objectFit: "cover" }}
                           width={84}
                         />
-                      ))}
-                    </div>
-                  ) : null}
-                  {files.length > 0 ? (
-                    <div className="ticket-chat-attachments">
-                      {files.map((name, index) => (
-                        <span className="ticket-chat-attachment" key={index}>
-                          <span className="truncate">{name}</span>
-                        </span>
                       ))}
                     </div>
                   ) : null}

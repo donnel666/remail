@@ -113,6 +113,17 @@ func RoleRequired(allowedRoles ...domain.Role) gin.HandlerFunc {
 // PermissionRequired requires a Casbin-backed permission.
 // Must be used after LoadSession + AuthRequired.
 func PermissionRequired(checker PermissionChecker, resource, action string) gin.HandlerFunc {
+	return permissionGuard(checker, [][2]string{{resource, action}})
+}
+
+// PermissionRequiredAny requires any one of the given resource/action pairs.
+// Used when the frontend gates an action on an OR of permission keys (e.g. a
+// support action allowed to either user operators or order operators).
+func PermissionRequiredAny(checker PermissionChecker, pairs ...[2]string) gin.HandlerFunc {
+	return permissionGuard(checker, pairs)
+}
+
+func permissionGuard(checker PermissionChecker, pairs [][2]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := GetCurrentUserID(c)
 		if !ok {
@@ -134,23 +145,25 @@ func PermissionRequired(checker PermissionChecker, resource, action string) gin.
 			return
 		}
 
-		allowed, err := checker.Check(c.Request.Context(), userID, role, resource, action)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"message":   "An unexpected error occurred.",
-				"requestId": GetRequestID(c),
-			})
-			return
-		}
-		if !allowed {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"message":   "Permission denied.",
-				"requestId": GetRequestID(c),
-			})
-			return
+		for _, pair := range pairs {
+			allowed, err := checker.Check(c.Request.Context(), userID, role, pair[0], pair[1])
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"message":   "An unexpected error occurred.",
+					"requestId": GetRequestID(c),
+				})
+				return
+			}
+			if allowed {
+				c.Next()
+				return
+			}
 		}
 
-		c.Next()
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"message":   "Permission denied.",
+			"requestId": GetRequestID(c),
+		})
 	}
 }
 

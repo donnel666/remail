@@ -45,15 +45,15 @@ import { TicketInboxRow } from "./tickets/ticket-inbox-row";
 import { ticketTypeLabel } from "./tickets/ticket-meta";
 import {
   listAllTickets,
-  type MockTicket,
-  type MockTicketFacets,
-  type MockTicketListFilter,
-  type MockTicketStatus,
-  type MockTicketType,
-} from "./tickets/tickets-mock";
+  type Ticket,
+  type TicketFacets,
+  type TicketListFilter,
+  type TicketStatus,
+  type TicketType,
+} from "./tickets/tickets-api";
 
-type TypeFilter = "all" | MockTicketType;
-type StatusFilter = "all" | MockTicketStatus;
+type TypeFilter = "all" | TicketType;
+type StatusFilter = "all" | TicketStatus;
 
 const STATUS_OPTIONS: StatusFilter[] = ["all", "open", "processing", "closed"];
 
@@ -86,15 +86,15 @@ export default function AdminTickets() {
   const [pageSize, setPageSize] = useSharedPageSize();
 
   useEffect(() => setActivePage(1), [pageSize]);
-  const [facets, setFacets] = useState<MockTicketFacets | null>(null);
+  const [facets, setFacets] = useState<TicketFacets | null>(null);
   const [detailTicketNo, setDetailTicketNo] = useState<string | null>(null);
 
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
 
-  const listFilter = useMemo<MockTicketListFilter>(() => {
-    const filter: MockTicketListFilter = {};
+  const listFilter = useMemo<TicketListFilter>(() => {
+    const filter: TicketListFilter = {};
     const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
@@ -130,7 +130,7 @@ export default function AdminTickets() {
     refresh: refreshList,
     total,
     updateLoadedItems,
-  } = useBlockPagedList<MockTicket, MockTicketFacets>({
+  } = useBlockPagedList<Ticket, TicketFacets>({
     activePage,
     filterKey: JSON.stringify(listFilter),
     loadBlock: loadTicketBlock,
@@ -188,7 +188,7 @@ export default function AdminTickets() {
       [
         {
           key: "ticket",
-          render: (_: unknown, record: MockTicket) => (
+          render: (_: unknown, record: Ticket) => (
             <TicketInboxRow
               onClick={() => openDetail(record.ticketNo)}
               showRequester

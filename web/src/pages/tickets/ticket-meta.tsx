@@ -1,10 +1,10 @@
 import { Tag } from "@douyinfe/semi-ui";
 
 import type {
-  MockTicketSender,
-  MockTicketStatus,
-  MockTicketType,
-} from "./tickets-mock";
+  TicketSender,
+  TicketStatus,
+  TicketType,
+} from "./tickets-api";
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -28,14 +28,14 @@ type TagColor =
   | "violet"
   | "white";
 
-export const TICKET_STATUS_VALUES: MockTicketStatus[] = [
+export const TICKET_STATUS_VALUES: TicketStatus[] = [
   "open",
   "processing",
   "closed",
 ];
 
 const STATUS_META: Record<
-  MockTicketStatus,
+  TicketStatus,
   { color: TagColor; labelKey: string }
 > = {
   open: { color: "amber", labelKey: "Ticket status open" },
@@ -43,11 +43,11 @@ const STATUS_META: Record<
   closed: { color: "grey", labelKey: "Ticket status closed" },
 };
 
-export function ticketStatusLabel(status: MockTicketStatus, t: Translator) {
+export function ticketStatusLabel(status: TicketStatus, t: Translator) {
   return t(STATUS_META[status].labelKey);
 }
 
-export function renderTicketStatusTag(status: MockTicketStatus, t: Translator) {
+export function renderTicketStatusTag(status: TicketStatus, t: Translator) {
   const meta = STATUS_META[status];
   return (
     <Tag color={meta.color} shape="circle">
@@ -56,11 +56,11 @@ export function renderTicketStatusTag(status: MockTicketStatus, t: Translator) {
   );
 }
 
-export function ticketTypeLabel(type: MockTicketType, t: Translator) {
+export function ticketTypeLabel(type: TicketType, t: Translator) {
   return type === "order" ? t("Order ticket") : t("General ticket");
 }
 
-export function renderTicketTypeTag(type: MockTicketType, t: Translator) {
+export function renderTicketTypeTag(type: TicketType, t: Translator) {
   return (
     <Tag color={type === "order" ? "orange" : "teal"} shape="circle">
       {ticketTypeLabel(type, t)}
@@ -69,7 +69,7 @@ export function renderTicketTypeTag(type: MockTicketType, t: Translator) {
 }
 
 const SENDER_META: Record<
-  MockTicketSender,
+  TicketSender,
   { color: TagColor; labelKey: string }
 > = {
   user: { color: "orange", labelKey: "Ticket sender user" },
@@ -77,11 +77,11 @@ const SENDER_META: Record<
   system: { color: "grey", labelKey: "System role" },
 };
 
-export function senderLabel(sender: MockTicketSender, t: Translator) {
+export function senderLabel(sender: TicketSender, t: Translator) {
   return t(SENDER_META[sender].labelKey);
 }
 
-export function renderSenderTag(sender: MockTicketSender, t: Translator) {
+export function renderSenderTag(sender: TicketSender, t: Translator) {
   const meta = SENDER_META[sender];
   return (
     <Tag color={meta.color} shape="circle" size="small">

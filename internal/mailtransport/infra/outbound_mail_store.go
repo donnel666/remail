@@ -20,6 +20,7 @@ type OutboundMailModel struct {
 	Purpose        string     `gorm:"type:varchar(64);not null"`
 	Sender         string     `gorm:"type:varchar(320);not null"`
 	Recipient      string     `gorm:"type:varchar(320);not null"`
+	ReplyTo        string     `gorm:"type:varchar(320);not null;column:reply_to"`
 	Subject        string     `gorm:"type:varchar(500);not null"`
 	TextBody       string     `gorm:"type:mediumtext;not null;column:text_body"`
 	HTMLBody       string     `gorm:"type:mediumtext;not null;column:html_body"`
@@ -201,6 +202,7 @@ func outboundMailModel(mail *domain.OutboundMail) *OutboundMailModel {
 		Purpose:        string(mail.Purpose),
 		Sender:         mail.Sender,
 		Recipient:      mail.Recipient,
+		ReplyTo:        mail.ReplyTo,
 		Subject:        mail.Subject,
 		TextBody:       mail.TextBody,
 		HTMLBody:       mail.HTMLBody,
@@ -221,6 +223,7 @@ func outboundMailFromModel(model OutboundMailModel) *domain.OutboundMail {
 		Purpose:        domain.OutboundPurpose(model.Purpose),
 		Sender:         model.Sender,
 		Recipient:      model.Recipient,
+		ReplyTo:        model.ReplyTo,
 		Subject:        model.Subject,
 		TextBody:       model.TextBody,
 		HTMLBody:       model.HTMLBody,
