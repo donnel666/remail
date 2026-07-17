@@ -33,4 +33,9 @@ func RegisterAdminRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Se
 		middleware.PermissionRequired(checker, "mailmatch:message", "operate"),
 		h.PostAdminMicrosoftResourceMessagesFetch,
 	)
+	admin.POST(
+		"/resources/:resourceId/projects/scan",
+		middleware.PermissionRequired(checker, "core:resource", "operate"),
+		h.PostAdminMicrosoftResourceProjectScan,
+	)
 }

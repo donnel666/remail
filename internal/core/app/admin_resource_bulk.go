@@ -18,6 +18,9 @@ type AdminResourceBulkAction string
 
 const (
 	AdminResourceBulkValidate  AdminResourceBulkAction = "validate"
+	AdminResourceBulkAlias     AdminResourceBulkAction = "alias"
+	AdminResourceBulkHistory   AdminResourceBulkAction = "history"
+	AdminResourceBulkToken     AdminResourceBulkAction = "token"
 	AdminResourceBulkPublish   AdminResourceBulkAction = "publish"
 	AdminResourceBulkUnpublish AdminResourceBulkAction = "unpublish"
 	AdminResourceBulkDelete    AdminResourceBulkAction = "delete"
@@ -107,11 +110,29 @@ type AdminResourceBulkQueue interface {
 	EnqueueAdminResourceBulkDispatcher(ctx context.Context, delay time.Duration) error
 }
 
+type AdminResourceMaintenanceCommand struct {
+	Action         AdminResourceBulkAction
+	ResourceID     uint
+	OperatorUserID uint
+	IdempotencyKey string
+	RequestID      string
+	Path           string
+}
+
+// AdminResourceMaintenancePort submits work to the existing MailTransport or
+// MailMatch task lifecycle. Expected per-resource conflicts are returned as a
+// safe skip reason; transient infrastructure failures remain errors so the
+// durable bulk page can retry with the same child idempotency keys.
+type AdminResourceMaintenancePort interface {
+	SubmitAdminResourceMaintenance(ctx context.Context, command AdminResourceMaintenanceCommand) (skipReason string, err error)
+}
+
 type AdminResourceBulkService struct {
-	repo     AdminResourceBulkRepository
-	queue    AdminResourceBulkQueue
-	commands *AdminResourceCommandService
-	now      func() time.Time
+	repo        AdminResourceBulkRepository
+	queue       AdminResourceBulkQueue
+	commands    *AdminResourceCommandService
+	maintenance AdminResourceMaintenancePort
+	now         func() time.Time
 }
 
 const (
@@ -123,6 +144,12 @@ const (
 
 func NewAdminResourceBulkService(repo AdminResourceBulkRepository, queue AdminResourceBulkQueue, commands *AdminResourceCommandService) *AdminResourceBulkService {
 	return &AdminResourceBulkService{repo: repo, queue: queue, commands: commands, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *AdminResourceBulkService) SetMaintenancePort(port AdminResourceMaintenancePort) {
+	if s != nil {
+		s.maintenance = port
+	}
 }
 
 func (s *AdminResourceBulkService) Submit(ctx context.Context, action AdminResourceBulkAction, selection AdminResourceBulkSelection, operatorUserID uint, idempotencyKey, requestID, path string) (*AdminResourceBulkCommand, bool, error) {
@@ -250,6 +277,46 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 	// acceptance time (repo CreateWithLog), so per-page processing must never
 	// re-add matches or the command would report roughly double the real count.
 	matched := 0
+	if isAdminResourceMaintenanceAction(command.Action) {
+		if s.maintenance == nil {
+			return s.retry(ctx, command, domain.ErrResourceDependency)
+		}
+		for _, resourceID := range ids {
+			reason, eligibilityErr := s.commands.maintenanceEligibilityForBulk(ctx, command.Action, resourceID)
+			if eligibilityErr != nil {
+				return s.retry(ctx, command, eligibilityErr)
+			}
+			if reason != "" {
+				skipped++
+				reasons[reason]++
+				continue
+			}
+			reason, itemErr := s.maintenance.SubmitAdminResourceMaintenance(ctx, AdminResourceMaintenanceCommand{
+				Action:         command.Action,
+				ResourceID:     resourceID,
+				OperatorUserID: command.OperatorUserID,
+				IdempotencyKey: fmt.Sprintf("bulk:%d:%s:%d", command.ID, command.Action, resourceID),
+				RequestID:      command.RequestID,
+				Path:           command.Path,
+			})
+			if itemErr != nil {
+				return s.retry(ctx, command, itemErr)
+			}
+			if reason == "" {
+				affected++
+				continue
+			}
+			skipped++
+			reasons[reason]++
+		}
+		if err := s.repo.CompletePage(ctx, command.ID, command.ClaimToken, checkpoint, matched, len(ids), affected, skipped, reasons, done); err != nil {
+			return s.retry(ctx, command, err)
+		}
+		if !done {
+			s.ScheduleDispatcher(ctx, 0)
+		}
+		return nil
+	}
 	err = s.commands.repo.WithTx(ctx, func(txCtx context.Context) error {
 		for _, resourceID := range ids {
 			var changed bool
@@ -285,6 +352,49 @@ func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResour
 		s.ScheduleDispatcher(ctx, 0)
 	}
 	return nil
+}
+
+func (s *AdminResourceCommandService) maintenanceEligibilityForBulk(ctx context.Context, action AdminResourceBulkAction, resourceID uint) (string, error) {
+	if s == nil || s.repo == nil || resourceID == 0 {
+		return "", domain.ErrResourceDependency
+	}
+	var reason string
+	err := s.repo.WithTx(ctx, func(txCtx context.Context) error {
+		_, resource, err := s.repo.LockAdminMicrosoft(txCtx, resourceID)
+		if err != nil {
+			return err
+		}
+		if resource.Status == domain.MicrosoftStatusDeleted {
+			reason = "not_found"
+			return nil
+		}
+		switch action {
+		case AdminResourceBulkAlias:
+			if resource.Status != domain.MicrosoftStatusNormal {
+				reason = "invalid_state"
+			}
+		case AdminResourceBulkHistory:
+			if resource.Status != domain.MicrosoftStatusNormal {
+				reason = "invalid_state"
+			} else if strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
+				reason = "credentials_missing"
+			}
+		case AdminResourceBulkToken:
+			if strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
+				reason = "credentials_missing"
+			}
+		default:
+			return domain.ErrInvalidResourceCommand
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceNotFound) {
+			return "not_found", nil
+		}
+		return "", err
+	}
+	return reason, nil
 }
 
 // ReleaseDispatch returns a fenced, not-yet-started command to its durable
@@ -411,7 +521,22 @@ func (s *AdminResourceCommandService) applyStateOneForBulk(ctx context.Context, 
 
 func validAdminBulkAction(action AdminResourceBulkAction) bool {
 	switch action {
-	case AdminResourceBulkValidate, AdminResourceBulkPublish, AdminResourceBulkUnpublish, AdminResourceBulkDelete:
+	case AdminResourceBulkValidate,
+		AdminResourceBulkAlias,
+		AdminResourceBulkHistory,
+		AdminResourceBulkToken,
+		AdminResourceBulkPublish,
+		AdminResourceBulkUnpublish,
+		AdminResourceBulkDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAdminResourceMaintenanceAction(action AdminResourceBulkAction) bool {
+	switch action {
+	case AdminResourceBulkAlias, AdminResourceBulkHistory, AdminResourceBulkToken:
 		return true
 	default:
 		return false

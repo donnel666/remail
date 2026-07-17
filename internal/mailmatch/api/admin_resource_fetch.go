@@ -54,6 +54,14 @@ type adminResourceFetchReasonCount struct {
 }
 
 func (h *Handler) PostAdminMicrosoftResourceMessagesFetch(c *gin.Context) {
+	h.postAdminMicrosoftResourceFetch(c, domain.ResourceFetchJobFetch)
+}
+
+func (h *Handler) PostAdminMicrosoftResourceProjectScan(c *gin.Context) {
+	h.postAdminMicrosoftResourceFetch(c, domain.ResourceFetchJobHistory)
+}
+
+func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.ResourceFetchJobKind) {
 	if h == nil || h.mod == nil || h.mod.ResourceFetch == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"message":   "Mail service is temporarily unavailable.",
@@ -86,6 +94,7 @@ func (h *Handler) PostAdminMicrosoftResourceMessagesFetch(c *gin.Context) {
 		return
 	}
 	result, err := h.mod.ResourceFetch.Submit(c.Request.Context(), mailmatchapp.ResourceFetchSubmitCommand{
+		Kind:           kind,
 		ResourceID:     uint(resourceID64),
 		OperatorUserID: operatorUserID,
 		IdempotencyKey: idempotencyKey,
@@ -117,7 +126,7 @@ func adminResourceFetchTaskResponse(job domain.ResourceFetchJob) adminResourceFe
 		TaskID:             "fetch:" + strconv.FormatUint(uint64(job.ID), 10),
 		BizType:            "microsoft_resource",
 		BizID:              job.ResourceID,
-		Kind:               "fetch",
+		Kind:               string(job.Kind),
 		Status:             string(job.Status),
 		Attempts:           job.Attempts,
 		MaxAttempts:        maxAttempts,

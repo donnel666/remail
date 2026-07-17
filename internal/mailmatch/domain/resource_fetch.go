@@ -10,7 +10,12 @@ import (
 // the latter belongs to the legacy order-scoped mailmatch_fetch_jobs table.
 type ResourceFetchJobStatus string
 
+type ResourceFetchJobKind string
+
 const (
+	ResourceFetchJobFetch   ResourceFetchJobKind = "fetch"
+	ResourceFetchJobHistory ResourceFetchJobKind = "history"
+
 	ResourceFetchJobQueued    ResourceFetchJobStatus = "queued"
 	ResourceFetchJobRunning   ResourceFetchJobStatus = "running"
 	ResourceFetchJobSucceeded ResourceFetchJobStatus = "succeeded"
@@ -25,6 +30,7 @@ const (
 // ExpectedCredentialRevision.
 type ResourceFetchJob struct {
 	ID                         uint
+	Kind                       ResourceFetchJobKind
 	ResourceID                 uint
 	OperatorUserID             uint
 	ExpectedCredentialRevision uint64
@@ -48,6 +54,10 @@ type ResourceFetchJob struct {
 	FinishedAt                 *time.Time
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
+}
+
+func IsValidResourceFetchJobKind(kind ResourceFetchJobKind) bool {
+	return kind == ResourceFetchJobFetch || kind == ResourceFetchJobHistory
 }
 
 // ResourceFetchScope is the private, in-process input for MailTransport. It is

@@ -22,7 +22,11 @@ const (
 	AdminTaskKindAlias         = "alias"
 	AdminTaskKindToken         = "token"
 	AdminTaskKindFetch         = "fetch"
+	AdminTaskKindHistory       = "history"
 	AdminTaskKindBulkValidate  = "bulk_validation"
+	AdminTaskKindBulkAlias     = "bulk_alias"
+	AdminTaskKindBulkHistory   = "bulk_history"
+	AdminTaskKindBulkToken     = "bulk_token"
 	AdminTaskKindBulkPublish   = "bulk_publish"
 	AdminTaskKindBulkUnpublish = "bulk_unpublish"
 	AdminTaskKindBulkDelete    = "bulk_delete"
@@ -257,7 +261,11 @@ func isAdminTaskKind(value string) bool {
 		AdminTaskKindAlias,
 		AdminTaskKindToken,
 		AdminTaskKindFetch,
+		AdminTaskKindHistory,
 		AdminTaskKindBulkValidate,
+		AdminTaskKindBulkAlias,
+		AdminTaskKindBulkHistory,
+		AdminTaskKindBulkToken,
 		AdminTaskKindBulkPublish,
 		AdminTaskKindBulkUnpublish,
 		AdminTaskKindBulkDelete:

@@ -39,6 +39,8 @@ import {
   listAdminMicrosoftOwners,
   listAdminMicrosoftResources,
   listAdminMicrosoftTasks,
+  maintainAdminMicrosoftResourcesByFilter,
+  maintainAdminMicrosoftResourcesByIds,
   publishAdminMicrosoftResource,
   recoverAdminMicrosoftResource,
   refreshAdminMicrosoftToken,
@@ -462,6 +464,48 @@ describe("admin Microsoft API adapter", () => {
     expect(new Set(apiMocks.POST.mock.calls.map((_, index) =>
       callOptions(apiMocks.POST, index).params?.header?.["Idempotency-Key"]
     )).size).toBe(3);
+  });
+
+  it("submits one durable maintenance command for ids or the current filter", async () => {
+    apiMocks.POST
+      .mockResolvedValueOnce({ data: ACCEPTED_TASK_RESPONSE })
+      .mockResolvedValueOnce({ data: ACCEPTED_TASK_RESPONSE });
+
+    await maintainAdminMicrosoftResourcesByIds("alias", [7, 7, 8]);
+    await maintainAdminMicrosoftResourcesByFilter("history", {
+      search: " owner@example.com ",
+      status: "normal",
+      suffix: "@outlook.com",
+    });
+
+    expect(apiMocks.POST.mock.calls.map((call) => call[0])).toEqual([
+      "/v1/admin/resources/maintenance",
+      "/v1/admin/resources/maintenance",
+    ]);
+    expect(callOptions(apiMocks.POST, 0).body).toEqual({
+      action: "alias",
+      selection: { mode: "ids", resourceIds: [7, 8] },
+    });
+    expect(callOptions(apiMocks.POST, 1).body).toEqual({
+      action: "history",
+      selection: {
+        mode: "filter",
+        filter: {
+          type: "microsoft",
+          search: "owner@example.com",
+          status: "normal",
+          forSale: undefined,
+          longLived: undefined,
+          graphAvailable: undefined,
+          tokenHealth: undefined,
+          suffix: "outlook.com",
+          createdFrom: undefined,
+          createdTo: undefined,
+        },
+      },
+    });
+    expectCommandHeader(apiMocks.POST, 0);
+    expectCommandHeader(apiMocks.POST, 1);
   });
 
   it("keeps filter-mode commands pending until the durable task finishes", async () => {

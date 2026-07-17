@@ -191,8 +191,16 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Token refresh";
     case "fetch":
       return "Mail fetch";
+    case "history":
+      return "Project scan";
     case "bulk_validation":
       return "Validation";
+    case "bulk_alias":
+      return "Alias replenishment";
+    case "bulk_history":
+      return "Project scan";
+    case "bulk_token":
+      return "Token refresh";
     case "bulk_publish":
       return "Put on sale";
     case "bulk_unpublish":

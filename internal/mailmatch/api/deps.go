@@ -60,15 +60,17 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, asynqClient *asynq.Cli
 	if trade != nil {
 		projectHistory.SetHistoricalMicrosoftUsagePort(historicalMicrosoftUsageAdapter{trade: trade})
 	}
+	resourceFetch := mailmatchapp.NewResourceFetchUseCase(
+		resourceFetchRepo,
+		queue,
+		transport,
+		useCase,
+		governanceinfra.NewSystemLogRepo(db),
+	)
+	resourceFetch.SetProjectHistoryScan(projectHistory)
 	return &Module{
-		UseCase: useCase,
-		ResourceFetch: mailmatchapp.NewResourceFetchUseCase(
-			resourceFetchRepo,
-			queue,
-			transport,
-			useCase,
-			governanceinfra.NewSystemLogRepo(db),
-		),
+		UseCase:           useCase,
+		ResourceFetch:     resourceFetch,
 		ProjectHistory:    projectHistory,
 		AdminMessages:     mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
 		resourceFetchRepo: resourceFetchRepo,

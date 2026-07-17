@@ -21,6 +21,15 @@ type adminBulkQueueStub struct {
 	dispatchers int
 }
 
+type adminBulkMaintenanceStub struct {
+	calls []coreapp.AdminResourceMaintenanceCommand
+}
+
+func (s *adminBulkMaintenanceStub) SubmitAdminResourceMaintenance(_ context.Context, command coreapp.AdminResourceMaintenanceCommand) (string, error) {
+	s.calls = append(s.calls, command)
+	return "", nil
+}
+
 type failSecondBulkAllocationGuard struct {
 	calls int
 }
@@ -41,6 +50,69 @@ func (q *adminBulkQueueStub) EnqueueAdminResourceBulk(_ context.Context, task co
 func (q *adminBulkQueueStub) EnqueueAdminResourceBulkDispatcher(context.Context, time.Duration) error {
 	q.dispatchers++
 	return nil
+}
+
+func TestAdminResourceBulkMaintenanceUsesExistingDurableCommandMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	insertAdminCommandUsers(t, db)
+	resourceRepo := NewResourceRepo(db)
+	validationRepo := NewResourceValidationRepo(db)
+	validation := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, adminCommandValidationQueue{}, nil)
+	commands := coreapp.NewAdminResourceCommandService(NewAdminResourceRepo(db), validation, governanceinfra.NewOperationLogRepo(db))
+	commands.SetPorts(adminCommandOwners(), nil, &adminCommandBindingPort{}, &adminCommandAllocationGuard{})
+	queue := &adminBulkQueueStub{}
+	maintenance := &adminBulkMaintenanceStub{}
+	service := coreapp.NewAdminResourceBulkService(NewAdminResourceBulkRepo(db), queue, commands)
+	service.SetMaintenancePort(maintenance)
+
+	resourceIDs := make([]uint, 3)
+	for i := range resourceIDs {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		status := domain.MicrosoftStatusNormal
+		if i == len(resourceIDs)-1 {
+			status = domain.MicrosoftStatusDisabled
+		}
+		resource := &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("bulk-maintenance-%d@outlook.com", i), Password: "secret",
+			ClientID: "client", RefreshToken: "refresh", Status: status,
+		}
+		require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+		resourceIDs[i] = root.ID
+	}
+
+	command, reused, err := service.Submit(
+		context.Background(),
+		coreapp.AdminResourceBulkHistory,
+		coreapp.AdminResourceBulkSelection{Mode: coreapp.AdminResourceBulkIDs, ResourceIDs: resourceIDs},
+		9,
+		"bulk-maintenance-key",
+		"req-bulk-maintenance",
+		"/v1/admin/resources/maintenance",
+	)
+	require.NoError(t, err)
+	require.False(t, reused)
+	require.Equal(t, len(resourceIDs), command.MatchedCount)
+
+	require.NoError(t, service.DispatchPending(context.Background(), 10))
+	require.Len(t, queue.tasks, 1)
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0]))
+
+	stored, err := service.Get(context.Background(), command.ID)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", stored.Status)
+	require.Equal(t, len(resourceIDs), stored.ProcessedCount)
+	require.Equal(t, len(resourceIDs)-1, stored.AffectedCount)
+	require.Equal(t, 1, stored.SkippedCount)
+	require.EqualValues(t, 1, stored.ReasonCounts["invalid_state"])
+	require.Len(t, maintenance.calls, len(resourceIDs)-1)
+	for i, call := range maintenance.calls {
+		require.Equal(t, coreapp.AdminResourceBulkHistory, call.Action)
+		require.Equal(t, resourceIDs[i], call.ResourceID)
+		require.Equal(t, uint(9), call.OperatorUserID)
+		require.Equal(t, fmt.Sprintf("bulk:%d:history:%d", command.ID, resourceIDs[i]), call.IdempotencyKey)
+		require.Equal(t, "req-bulk-maintenance", call.RequestID)
+		require.Equal(t, "/v1/admin/resources/maintenance", call.Path)
+	}
 }
 
 func TestAdminResourceBulkFilterRunsDurablyAndIsIdempotentMySQL(t *testing.T) {

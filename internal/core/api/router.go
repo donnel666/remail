@@ -54,6 +54,7 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		admin.POST("/resources/imports", middleware.PermissionRequired(checker, "core:resource", "write"), h.PostAdminMicrosoftResourceImport)
 		admin.GET("/resources/imports/:importId", middleware.PermissionRequired(checker, "core:resource", "read"), h.GetAdminMicrosoftResourceImport)
 		admin.POST("/resources/validations", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourceValidations)
+		admin.POST("/resources/maintenance", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourcesMaintenance)
 		admin.POST("/resources/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourcesDisable)
 		admin.POST("/resources/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourcesPublish)
 		admin.POST("/resources/unpublish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.PostAdminMicrosoftResourcesUnpublish)

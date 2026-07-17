@@ -99,6 +99,14 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	}
 	requestedResourceID := job.ResourceID
 	operatorUserID := job.OperatorUserID
+	requestedKind := job.Kind
+	if requestedKind == "" {
+		requestedKind = domain.ResourceFetchJobFetch
+	}
+	if !domain.IsValidResourceFetchJobKind(requestedKind) {
+		return false, domain.ErrInvalidRequest
+	}
+	job.Kind = requestedKind
 	reused := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		receipt, err := findResourceFetchRequest(tx, operatorUserID, idempotencyKey)
@@ -114,6 +122,9 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 				return fmt.Errorf("find idempotent resource fetch job: %w", err)
 			}
 			*job = resourceFetchJobModelToDomain(existing)
+			if job.Kind != requestedKind {
+				return domain.ErrResourceFetchIdempotencyConflict
+			}
 			reused = receipt.Reused
 			return r.createResourceFetchOperationLog(txCtx, tx, job, reused, log)
 		}
@@ -134,7 +145,11 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		createNew := false
 		switch {
 		case err == nil && active.ExpectedCredentialRevision == scope.CredentialRevision:
-			*job = resourceFetchJobModelToDomain(active)
+			activeJob := resourceFetchJobModelToDomain(active)
+			if activeJob.Kind != requestedKind {
+				return domain.ErrResourceFetchJobConflict
+			}
+			*job = activeJob
 			reused = true
 		case err == nil:
 			now := time.Now().UTC()
@@ -230,11 +245,19 @@ func (r *ResourceFetchRepo) createResourceFetchOperationLog(
 		return nil
 	}
 	log.SafeSummary = fmt.Sprintf(
-		"Microsoft resource mail fetch accepted; task=fetch:%d; reused=%t.",
+		"Microsoft resource %s accepted; task=fetch:%d; reused=%t.",
+		resourceFetchOperationLabel(job.Kind),
 		job.ID,
 		reused,
 	)
 	return r.operationLogs.CreateInTx(ctx, tx, log)
+}
+
+func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
+	if kind == domain.ResourceFetchJobHistory {
+		return "project history scan"
+	}
+	return "mail fetch"
 }
 
 func findResourceFetchRequest(tx *gorm.DB, operatorUserID uint, idempotencyKey string) (*ResourceFetchRequestModel, error) {
@@ -578,6 +601,24 @@ func (r *ResourceFetchRepo) CompleteResourceFetch(
 	})
 }
 
+func (r *ResourceFetchRepo) CompleteResourceFetchTask(
+	ctx context.Context,
+	jobID uint,
+	claimToken string,
+	now time.Time,
+	log *governancedomain.SystemLog,
+) error {
+	return r.finishResourceFetchJob(ctx, jobID, claimToken, map[string]any{
+		"status":          string(domain.ResourceFetchJobSucceeded),
+		"fetched_count":   0,
+		"stored_count":    0,
+		"matched_count":   0,
+		"last_safe_error": "",
+		"finished_at":     now,
+		"updated_at":      now,
+	}, log)
+}
+
 func (r *ResourceFetchRepo) MarkResourceFetchCanceled(
 	ctx context.Context,
 	jobID uint,
@@ -763,8 +804,13 @@ func normalizeResourceFetchMaxAttempts(value int) int {
 }
 
 func resourceFetchJobModelToDomain(model ResourceFetchJobModel) domain.ResourceFetchJob {
+	kind := domain.ResourceFetchJobFetch
+	if model.SinceAt == nil && model.UntilAt == nil {
+		kind = domain.ResourceFetchJobHistory
+	}
 	return domain.ResourceFetchJob{
 		ID:                         model.ID,
+		Kind:                       kind,
 		ResourceID:                 model.ResourceID,
 		OperatorUserID:             model.OperatorUserID,
 		ExpectedCredentialRevision: model.ExpectedCredentialRevision,
@@ -791,6 +837,10 @@ func resourceFetchJobModelToDomain(model ResourceFetchJobModel) domain.ResourceF
 }
 
 func resourceFetchJobModelFromDomain(item domain.ResourceFetchJob) ResourceFetchJobModel {
+	sinceAt, untilAt := item.SinceAt, item.UntilAt
+	if item.Kind == domain.ResourceFetchJobHistory {
+		sinceAt, untilAt = nil, nil
+	}
 	return ResourceFetchJobModel{
 		ID:                         item.ID,
 		ResourceID:                 item.ResourceID,
@@ -803,8 +853,8 @@ func resourceFetchJobModelFromDomain(item domain.ResourceFetchJob) ResourceFetch
 		FetchedCount:               item.FetchedCount,
 		StoredCount:                item.StoredCount,
 		MatchedCount:               item.MatchedCount,
-		SinceAt:                    item.SinceAt,
-		UntilAt:                    item.UntilAt,
+		SinceAt:                    sinceAt,
+		UntilAt:                    untilAt,
 		ClaimToken:                 strings.TrimSpace(item.ClaimToken),
 		DispatchToken:              strings.TrimSpace(item.DispatchToken),
 		LastSafeError:              safeDiagnostic(item.LastSafeError),

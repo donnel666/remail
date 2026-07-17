@@ -1999,7 +1999,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/resources/validations": {
+    "/v1/admin/resources/maintenance": {
         parameters: {
             query?: never;
             header?: never;
@@ -2009,10 +2009,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Validate selected or all matching Microsoft resources
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selections are queued as ephemeral Redis/Asynq cursors. Filter mode is expanded in bounded pages; the client must not enumerate all matching IDs.
+         * Submit Microsoft resource maintenance in bulk
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The command snapshots the selected resource IDs and reuses the existing validation, alias, project-history, and refresh-token task lifecycles. Ineligible resources are counted in safe skip buckets; the client submits one batch command and never loops over single-resource endpoints.
          */
-        post: operations["postAdminMicrosoftResourceValidations"];
+        post: operations["postAdminMicrosoftResourcesMaintenance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2325,6 +2325,26 @@ export interface paths {
          * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch persists or reuses a resource-level single-flight fetch job before returning 202. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
          */
         post: operations["postAdminMicrosoftResourceMessagesFetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/resources/{resourceId}/projects/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a full Microsoft project-history scan
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. MailMatch reuses the existing resource-level durable job lifecycle and full-history matcher; no second task table or resource status machine is created. The normalized task state is administrator-only.
+         */
+        post: operations["postAdminMicrosoftResourceProjectScan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4152,6 +4172,12 @@ export interface components {
         AdminMicrosoftBulkCommandRequest: {
             selection: components["schemas"]["AdminMicrosoftBulkSelection"];
         };
+        /** @enum {string} */
+        AdminMicrosoftMaintenanceAction: "validate" | "alias" | "history" | "token";
+        AdminMicrosoftMaintenanceRequest: {
+            action: components["schemas"]["AdminMicrosoftMaintenanceAction"];
+            selection: components["schemas"]["AdminMicrosoftBulkSelection"];
+        };
         AdminReasonCount: {
             /** @description Stable safe reason bucket; never a raw database or upstream error. */
             reason: string;
@@ -4169,7 +4195,7 @@ export interface components {
             reasonCounts: components["schemas"]["AdminReasonCount"][];
         };
         /** @enum {string} */
-        AdminTaskKind: "import" | "alias" | "token" | "fetch" | "bulk_validation" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        AdminTaskKind: "import" | "alias" | "token" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
@@ -11640,7 +11666,7 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
-    postAdminMicrosoftResourceValidations: {
+    postAdminMicrosoftResourcesMaintenance: {
         parameters: {
             query?: never;
             header: {
@@ -11654,17 +11680,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AdminMicrosoftBulkCommandRequest"];
+                "application/json": components["schemas"]["AdminMicrosoftMaintenanceRequest"];
             };
         };
         responses: {
-            /** @description Ephemeral Redis validation batch accepted */
+            /** @description Durable Microsoft maintenance batch accepted or reused */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResourceValidationsResponse"];
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12315,6 +12341,40 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Durable resource fetch accepted or reused */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTaskAcceptedResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminMicrosoftResourceProjectScan: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable project-history scan accepted or reused */
             202: {
                 headers: {
                     [name: string]: unknown;

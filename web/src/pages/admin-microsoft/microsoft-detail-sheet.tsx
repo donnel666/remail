@@ -33,6 +33,7 @@ import {
   listAdminMicrosoftMessages,
   listAdminMicrosoftTasks,
   refreshAdminMicrosoftToken,
+  scanAdminMicrosoftProjects,
   validateAdminMicrosoftResource,
 } from "@/lib/admin-microsoft-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -696,7 +697,7 @@ function RelatedOrdersTable({ resourceId, t }: { resourceId: number; t: TFunctio
   );
 }
 
-type TaskActionKey = "validate" | "token" | "alias" | "fetch";
+type TaskActionKey = "validate" | "token" | "alias" | "history" | "fetch";
 
 function TaskDiagnostics({
   detail,
@@ -870,6 +871,12 @@ function TaskDiagnostics({
       label: "Create explicit alias",
       action: createAdminMicrosoftExplicitAlias,
       successKey: "Explicit alias creation submitted.",
+    },
+    {
+      key: "history",
+      label: "Scan projects",
+      action: scanAdminMicrosoftProjects,
+      successKey: "Project history scan submitted.",
     },
     {
       key: "fetch",
@@ -1290,7 +1297,7 @@ export function MicrosoftDetailSheet({
   onReplaceCredentials,
   onTogglePublish,
   onToggleDisabled,
-  onValidate,
+  onMaintain,
 }: {
   busy: boolean;
   detail: AdminMicrosoftResourceDetail | null;
@@ -1303,7 +1310,7 @@ export function MicrosoftDetailSheet({
   onReplaceCredentials: () => void;
   onTogglePublish: () => void;
   onToggleDisabled: () => void;
-  onValidate: () => void;
+  onMaintain: () => void;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -1383,7 +1390,7 @@ export function MicrosoftDetailSheet({
               <Button loading={busy} onClick={onRecover} type="primary">{t("Recover")}</Button>
             ) : (
               <>
-                <Button loading={busy} onClick={onValidate} type="tertiary">{t("Check")}</Button>
+                <Button disabled={busy} onClick={onMaintain} type="tertiary">{t("Maintenance")}</Button>
                 <Button disabled={busy} onClick={onEdit} type="tertiary">{t("Edit")}</Button>
                 <Button loading={busy} onClick={onTogglePublish} type="tertiary">
                   {detail.forSale ? t("Convert to private") : t("Put on sale")}

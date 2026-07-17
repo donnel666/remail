@@ -6255,12 +6255,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /v1/admin/resources/validations:
+  /v1/admin/resources/maintenance:
     post:
-      operationId: postAdminMicrosoftResourceValidations
-      summary: Validate selected or all matching Microsoft resources
+      operationId: postAdminMicrosoftResourcesMaintenance
+      summary: Submit Microsoft resource maintenance in bulk
       description: |
-        Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selections are queued as ephemeral Redis/Asynq cursors. Filter mode is expanded in bounded pages; the client must not enumerate all matching IDs.
+        Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The command snapshots the selected resource IDs and reuses the existing validation, alias, project-history, and refresh-token task lifecycles. Ineligible resources are counted in safe skip buckets; the client submits one batch command and never loops over single-resource endpoints.
       tags:
         - Admin
       security:
@@ -6273,14 +6273,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+              $ref: "#/components/schemas/AdminMicrosoftMaintenanceRequest"
       responses:
         "202":
-          description: Ephemeral Redis validation batch accepted
+          description: Durable Microsoft maintenance batch accepted or reused
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ResourceValidationsResponse"
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -7007,6 +7007,45 @@ paths:
       responses:
         "202":
           description: Durable resource fetch accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTaskAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/{resourceId}/projects/scan:
+    post:
+      operationId: postAdminMicrosoftResourceProjectScan
+      summary: Queue a full Microsoft project-history scan
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. MailMatch reuses the existing resource-level durable job lifecycle and full-history matcher; no second task table or resource status machine is created. The normalized task state is administrator-only.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: Durable project-history scan accepted or reused
           content:
             application/json:
               schema:
@@ -11692,6 +11731,20 @@ components:
         selection:
           $ref: "#/components/schemas/AdminMicrosoftBulkSelection"
       additionalProperties: false
+    AdminMicrosoftMaintenanceAction:
+      type: string
+      enum: [validate, alias, history, token]
+    AdminMicrosoftMaintenanceRequest:
+      type: object
+      required:
+        - action
+        - selection
+      properties:
+        action:
+          $ref: "#/components/schemas/AdminMicrosoftMaintenanceAction"
+        selection:
+          $ref: "#/components/schemas/AdminMicrosoftBulkSelection"
+      additionalProperties: false
     AdminReasonCount:
       type: object
       required:
@@ -11747,7 +11800,11 @@ components:
         - alias
         - token
         - fetch
+        - history
         - bulk_validation
+        - bulk_alias
+        - bulk_history
+        - bulk_token
         - bulk_publish
         - bulk_unpublish
         - bulk_delete

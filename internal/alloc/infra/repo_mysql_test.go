@@ -456,7 +456,7 @@ func TestListActiveByRecipientMySQL(t *testing.T) {
 	require.Empty(t, items)
 }
 
-func TestReleaseMakesMicrosoftMainReusableMySQL(t *testing.T) {
+func TestReleaseKeepsMicrosoftMainOutOfItsHistoricalProjectMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
@@ -471,10 +471,28 @@ func TestReleaseMakesMicrosoftMainReusableMySQL(t *testing.T) {
 	require.NoError(t, err)
 	_, err = uc.ReleaseByOrder(context.Background(), "ord-release-1")
 	require.NoError(t, err)
-	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-release-2",
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-release-same-project",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type)
+VALUES (11, 'Other Project', 'alloc', 'listed', 'public')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 11, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-release-other-project",
+		BuyerUserID:      2,
+		ProjectProductID: 21,
 		SupplyScope:      domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)

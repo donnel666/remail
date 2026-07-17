@@ -168,6 +168,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{
+			aliases: mailMod.MicrosoftAliases,
+			tokens:  mailMod.TokenRefresh,
+			history: mailmatchMod.ResourceFetch,
+		})
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
 		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
 		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))

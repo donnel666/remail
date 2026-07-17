@@ -42,6 +42,14 @@ func TestResourceFetchCreateReuseAndOperationLogMySQL(t *testing.T) {
 	require.Equal(t, uint64(1), first.ExpectedCredentialRevision)
 	require.Equal(t, "main@example.com", first.Recipient)
 	require.Equal(t, domain.ResourceFetchJobQueued, first.Status)
+	require.Equal(t, domain.ResourceFetchJobFetch, first.Kind)
+
+	history := resourceFetchTestJob(now, "request-history-conflict")
+	history.Kind = domain.ResourceFetchJobHistory
+	history.SinceAt = nil
+	history.UntilAt = nil
+	_, err = repo.CreateOrReuseResourceFetch(ctx, &history, resourceFetchTestOperationLog(history.RequestID))
+	require.ErrorIs(t, err, domain.ErrResourceFetchJobConflict)
 
 	second := resourceFetchTestJob(now.Add(time.Second), "req-resource-fetch-second")
 	reused, err = repo.CreateOrReuseResourceFetch(ctx, &second, resourceFetchTestOperationLog(second.RequestID))
@@ -494,6 +502,38 @@ func TestResourceFetchUseCaseProcessesOutsideTransactionAndIngestsMessagesMySQL(
 	}
 }
 
+func TestResourceFetchUseCaseUsesDurableStateForProjectHistoryScanMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchFetchResource(t, db)
+	resourceRepo := newResourceFetchTestRepo(db)
+	queue := &resourceFetchQueueStub{}
+	transport := &resourceFetchTransportStub{}
+	credentials := coreapp.NewMicrosoftCredentialService(coreinfra.NewAdminResourceRepo(db))
+	history := mailmatchapp.NewProjectHistoryScanUseCase(nil, emptyProjectHistoryMatchRepo{}, nil, transport)
+	history.SetMicrosoftCredentialPort(credentials)
+	resourceUseCase := mailmatchapp.NewResourceFetchUseCase(
+		resourceRepo, queue, transport, nil, governanceinfra.NewSystemLogRepo(db),
+	)
+	resourceUseCase.SetProjectHistoryScan(history)
+
+	result, err := resourceUseCase.Submit(context.Background(), mailmatchapp.ResourceFetchSubmitCommand{
+		Kind: domain.ResourceFetchJobHistory, ResourceID: 100, OperatorUserID: 1,
+		IdempotencyKey: "resource-history-usecase-idempotency",
+		RequestID:      "req-resource-history-usecase", Path: "/v1/admin/resources/:resourceId/projects/scan",
+	})
+	require.NoError(t, err)
+	_, err = resourceUseCase.DispatchPending(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, queue.resourceTasks, 1)
+	require.NoError(t, resourceUseCase.Process(context.Background(), queue.resourceTasks[0]))
+
+	stored, err := resourceRepo.FindResourceFetchJob(context.Background(), result.Job.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.ResourceFetchJobHistory, stored.Kind)
+	require.Equal(t, domain.ResourceFetchJobSucceeded, stored.Status)
+	require.False(t, transport.calledInsideTransaction)
+}
+
 func TestResourceFetchUseCaseRejectsStaleCredentialResultsBeforeMessageWriteMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)
@@ -558,6 +598,7 @@ func resourceFetchTestJob(now time.Time, requestID string) domain.ResourceFetchJ
 	sinceAt := now.Add(-time.Hour)
 	untilAt := now
 	return domain.ResourceFetchJob{
+		Kind:           domain.ResourceFetchJobFetch,
 		ResourceID:     100,
 		OperatorUserID: 1,
 		Status:         domain.ResourceFetchJobQueued,
@@ -568,6 +609,32 @@ func resourceFetchTestJob(now time.Time, requestID string) domain.ResourceFetchJ
 		Path:           "/v1/admin/resources/:resourceId/messages/fetch",
 		IdempotencyKey: "idem-" + requestID,
 	}
+}
+
+type emptyProjectHistoryMatchRepo struct{}
+
+func (emptyProjectHistoryMatchRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (emptyProjectHistoryMatchRepo) ListHistoricalProjectScopes(context.Context) ([]mailmatchapp.HistoricalProjectScope, error) {
+	return nil, nil
+}
+
+func (emptyProjectHistoryMatchRepo) ListHistoricalProjectScopesForUpdate(context.Context) ([]mailmatchapp.HistoricalProjectScope, error) {
+	return nil, nil
+}
+
+func (emptyProjectHistoryMatchRepo) FindHistoricalProjectScope(context.Context, uint) (*mailmatchapp.HistoricalProjectScope, error) {
+	return nil, nil
+}
+
+func (emptyProjectHistoryMatchRepo) FindHistoricalProjectScopeForUpdate(context.Context, uint) (*mailmatchapp.HistoricalProjectScope, error) {
+	return nil, nil
+}
+
+func (emptyProjectHistoryMatchRepo) ClearLegacyMicrosoftProjectHistory(context.Context, uint, uint) error {
+	return nil
 }
 
 func newResourceFetchTestRepo(db *gorm.DB) *ResourceFetchRepo {

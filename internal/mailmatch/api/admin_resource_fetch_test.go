@@ -98,6 +98,22 @@ func TestAdminResourceFetchRouteReturnsOpenAPITaskShapeWithoutSecrets(t *testing
 	}
 }
 
+func TestAdminResourceProjectScanReusesDurableFetchTaskState(t *testing.T) {
+	router, repo, checker := newAdminResourceFetchTestRouter(true)
+	response := performAdminResourceHistoryRequest(router)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, "core:resource", checker.resource)
+	require.Equal(t, "operate", checker.action)
+	require.NotNil(t, repo.operationLog)
+	require.Equal(t, "mailmatch.admin_resource.history_scan", repo.operationLog.OperationType)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	task := body["task"].(map[string]any)
+	require.Equal(t, "history", task["kind"])
+	require.Equal(t, "fetch:42", task["taskId"])
+}
+
 func newAdminResourceFetchTestRouter(allowed bool) (*gin.Engine, *adminResourceFetchRepoStub, *adminResourceFetchPermissionChecker) {
 	repo := &adminResourceFetchRepoStub{}
 	queue := &adminResourceFetchQueueStub{}
@@ -138,6 +154,18 @@ func performAdminResourceFetchRequestWithKey(router *gin.Engine, authenticated b
 	if idempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	return response
+}
+
+func performAdminResourceHistoryRequest(router *gin.Engine) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/resources/100/projects/scan", nil)
+	req.Header.Set("X-Request-ID", "test-history-request")
+	req.Header.Set("Idempotency-Key", "resource-history-idempotency")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	req.Header.Set(middleware.CSRFHeaderName, "csrf")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, req)
 	return response
@@ -200,6 +228,10 @@ func (*adminResourceFetchRepoStub) AssertResourceFetchFence(context.Context, uin
 }
 
 func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, string, uint, uint64, string, int, int, int, time.Time, *governancedomain.SystemLog) error {
+	return nil
+}
+
+func (*adminResourceFetchRepoStub) CompleteResourceFetchTask(context.Context, uint, string, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 

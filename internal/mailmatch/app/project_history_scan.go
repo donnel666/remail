@@ -171,6 +171,15 @@ func (uc *ProjectHistoryScanUseCase) Process(ctx context.Context, task ProjectHi
 }
 
 func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error {
+	err := uc.scanValidatedMicrosoftHistory(ctx, task, 0)
+	failure := (*MailFetchFailure)(nil)
+	if errors.As(err, &failure) && failure != nil && !failure.Retryable {
+		return nil
+	}
+	return err
+}
+
+func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.Context, task ValidatedMicrosoftHistoryScanTask, expectedCredentialRevision uint64) error {
 	if uc == nil || uc.matches == nil || uc.credentials == nil || uc.transport == nil || task.ResourceID == 0 {
 		return domain.ErrInvalidRequest
 	}
@@ -183,6 +192,9 @@ func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx contex
 	}
 	if resource == nil || strings.EqualFold(resource.Status, "deleted") {
 		return nil
+	}
+	if expectedCredentialRevision > 0 && resource.CredentialRevision != expectedCredentialRevision {
+		return coreapp.ErrMicrosoftCredentialChanged
 	}
 	switch strings.ToLower(strings.TrimSpace(resource.Status)) {
 	case "normal":
@@ -217,14 +229,12 @@ func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx contex
 		fetchErr = domain.ErrMailServiceUnavailable
 	}
 	refreshToken := ""
-	retryable := true
 	if fetched != nil {
 		refreshToken = strings.TrimSpace(fetched.RefreshToken)
 	}
 	if fetchErr != nil {
 		var failure *MailFetchFailure
 		if errors.As(fetchErr, &failure) {
-			retryable = failure.Retryable
 			refreshToken = strings.TrimSpace(failure.RefreshToken)
 		}
 	}
@@ -264,7 +274,7 @@ func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx contex
 	if err != nil {
 		return err
 	}
-	if fetchErr != nil && retryable {
+	if fetchErr != nil {
 		return fetchErr
 	}
 	return nil

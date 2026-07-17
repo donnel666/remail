@@ -217,9 +217,14 @@ func (p *adminHandlerPermissionChecker) Check(_ context.Context, _ uint, _ iamdo
 	return p.allowed[key], nil
 }
 
-type adminHandlerBulkRepo struct{}
+type adminHandlerBulkRepo struct {
+	action *coreapp.AdminResourceBulkAction
+}
 
-func (adminHandlerBulkRepo) CreateWithLog(_ context.Context, command *coreapp.AdminResourceBulkCommand, _ *governancedomain.OperationLog) (bool, error) {
+func (r adminHandlerBulkRepo) CreateWithLog(_ context.Context, command *coreapp.AdminResourceBulkCommand, _ *governancedomain.OperationLog) (bool, error) {
+	if r.action != nil {
+		*r.action = command.Action
+	}
 	command.ID = 700
 	if command.Selection.Mode == coreapp.AdminResourceBulkIDs {
 		command.MatchedCount = len(command.Selection.ResourceIDs)
@@ -372,6 +377,7 @@ func TestAdminMicrosoftWriteHandlersRequireIdempotencyKey(t *testing.T) {
 		{name: "unpublish bulk", method: http.MethodPost, path: "/v1/admin/resources/unpublish", call: handler.PostAdminMicrosoftResourcesUnpublish},
 		{name: "delete bulk", method: http.MethodPost, path: "/v1/admin/resources/delete", call: handler.PostAdminMicrosoftResourcesDelete},
 		{name: "validation bulk", method: http.MethodPost, path: "/v1/admin/resources/validations", call: handler.PostAdminMicrosoftResourceValidations},
+		{name: "maintenance bulk", method: http.MethodPost, path: "/v1/admin/resources/maintenance", call: handler.PostAdminMicrosoftResourcesMaintenance},
 	}
 	for _, tt := range tests {
 		for _, key := range []string{"", strings.Repeat("x", 129)} {
@@ -852,6 +858,39 @@ func TestAdminMicrosoftBulkHandlersKeepSyncIDsAndAsyncFilterContracts(t *testing
 	require.NotNil(t, filterPayload["task"])
 }
 
+func TestAdminMicrosoftMaintenanceHandlerSubmitsOneDurableBulkCommand(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var action coreapp.AdminResourceBulkAction
+	bulk := coreapp.NewAdminResourceBulkService(
+		adminHandlerBulkRepo{action: &action},
+		adminHandlerBulkQueue{},
+		&coreapp.AdminResourceCommandService{},
+	)
+	handler := NewCoreHandler(&CoreModule{AdminBulk: bulk})
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/admin/resources/maintenance", strings.NewReader(`{
+		"action":"history",
+		"selection":{"mode":"ids","resourceIds":[42,43]}
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Idempotency-Key", "maintenance-bulk-key")
+	c.Set("request_id", "maintenance-bulk-request")
+	middleware.SetCurrentUser(c, 9, iamdomain.RoleAdmin, "admin@test.local", "session")
+
+	handler.PostAdminMicrosoftResourcesMaintenance(c)
+
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, coreapp.AdminResourceBulkHistory, action)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.Equal(t, "bulk:700", payload["taskId"])
+	require.Equal(t, "maintenance-bulk-request", payload["requestId"])
+	require.Equal(t, float64(2), payload["accepted"])
+	task := payload["task"].(map[string]any)
+	require.Equal(t, "bulk_history", task["kind"])
+}
+
 func TestAdminMicrosoftAdminRoutesEnforceCSRFAheadOfCasbin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	checker := &adminHandlerPermissionChecker{allowed: map[string]bool{}}
@@ -895,6 +934,7 @@ func TestAdminMicrosoftCoreRouteSecurityMatrix(t *testing.T) {
 		{name: "C01 import", method: http.MethodPost, path: "/v1/admin/resources/imports", resource: "core:resource", action: "write", csrfNeeded: true},
 		{name: "Q04 import status", method: http.MethodGet, path: "/v1/admin/resources/imports/1", resource: "core:resource", action: "read"},
 		{name: "C14 validate matching", method: http.MethodPost, path: "/v1/admin/resources/validations", resource: "core:resource", action: "operate", csrfNeeded: true},
+		{name: "C14b maintain matching", method: http.MethodPost, path: "/v1/admin/resources/maintenance", resource: "core:resource", action: "operate", csrfNeeded: true},
 		{name: "C15 disable ids", method: http.MethodPost, path: "/v1/admin/resources/disable", resource: "core:resource", action: "operate", csrfNeeded: true},
 		{name: "C16 publish batch", method: http.MethodPost, path: "/v1/admin/resources/publish", resource: "core:resource", action: "operate", csrfNeeded: true},
 		{name: "C17 unpublish batch", method: http.MethodPost, path: "/v1/admin/resources/unpublish", resource: "core:resource", action: "operate", csrfNeeded: true},

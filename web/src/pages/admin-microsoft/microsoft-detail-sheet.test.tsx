@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   messages: vi.fn(),
   mobile: false,
   refreshToken: vi.fn(),
+  scanProjects: vi.fn(),
   tasks: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -188,6 +189,7 @@ vi.mock("@/lib/admin-microsoft-api", () => ({
   listAdminMicrosoftMessages: mocks.messages,
   listAdminMicrosoftTasks: mocks.tasks,
   refreshAdminMicrosoftToken: mocks.refreshToken,
+  scanAdminMicrosoftProjects: mocks.scanProjects,
   validateAdminMicrosoftResource: mocks.validate,
 }));
 
@@ -278,7 +280,7 @@ function renderSheet(resource: AdminMicrosoftResourceDetail, onRefresh = vi.fn()
       onReplaceCredentials={vi.fn()}
       onToggleDisabled={vi.fn()}
       onTogglePublish={vi.fn()}
-      onValidate={vi.fn()}
+      onMaintain={vi.fn()}
     />
   );
 }
@@ -295,6 +297,7 @@ describe("admin Microsoft detail sheet runtime", () => {
     mocks.bindingMessage.mockResolvedValue({});
     mocks.validate.mockResolvedValue({});
     mocks.refreshToken.mockResolvedValue({});
+    mocks.scanProjects.mockResolvedValue({});
     mocks.createAlias.mockResolvedValue({});
     mocks.fetchMail.mockResolvedValue({});
     mocks.allocationPage.mockReturnValue({
@@ -500,7 +503,7 @@ describe("admin Microsoft detail sheet runtime", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps all four manual task actions connected and refreshes after acceptance", async () => {
+  it("keeps all five manual task actions connected and refreshes after acceptance", async () => {
     const onRefresh = vi.fn().mockResolvedValue(undefined);
     renderSheet(detail(42), onRefresh);
     fireEvent.click(screen.getByRole("tab", { name: "Task details" }));
@@ -510,6 +513,7 @@ describe("admin Microsoft detail sheet runtime", () => {
       ["Validate", mocks.validate],
       ["Refresh RT", mocks.refreshToken],
       ["Create explicit alias", mocks.createAlias],
+      ["Scan projects", mocks.scanProjects],
       ["Mail fetch", mocks.fetchMail],
     ] as const;
     for (const [index, [label, action]] of actions.entries()) {
@@ -612,7 +616,7 @@ describe("admin Microsoft detail sheet runtime", () => {
         onReplaceCredentials={vi.fn()}
         onToggleDisabled={vi.fn()}
         onTogglePublish={vi.fn()}
-        onValidate={vi.fn()}
+        onMaintain={vi.fn()}
       />
     );
 
@@ -638,7 +642,7 @@ describe("admin Microsoft detail sheet runtime", () => {
         onReplaceCredentials={vi.fn()}
         onToggleDisabled={vi.fn()}
         onTogglePublish={vi.fn()}
-        onValidate={vi.fn()}
+        onMaintain={vi.fn()}
       />
     );
     expect(screen.getByTestId("side-sheet")).toHaveAttribute("data-width", "100%");

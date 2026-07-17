@@ -45,9 +45,9 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 		Limit:   20,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(5), total)
-	require.Equal(t, int64(2), succeeded)
-	require.Len(t, items, 5)
+	require.Equal(t, int64(6), total)
+	require.Equal(t, int64(3), succeeded)
+	require.Len(t, items, 6)
 
 	byID := make(map[string]governanceapp.AdminTaskView, len(items))
 	for i := range items {
@@ -58,9 +58,11 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 	require.Contains(t, byID, "alias_schedule:6001")
 	require.Contains(t, byID, "token:6401")
 	require.Contains(t, byID, "fetch:6501")
+	require.Contains(t, byID, "fetch:6502")
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias:6301"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias_schedule:6001"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusCanceled, byID["fetch:6501"].Status)
+	require.Equal(t, governanceapp.AdminTaskKindHistory, byID["fetch:6502"].Kind)
 	require.NotNil(t, byID["import:6201"].Progress)
 	require.Equal(t, int64(3), byID["import:6201"].Progress.Total)
 	require.Equal(t, []governanceapp.AdminTaskReasonCount{
@@ -101,6 +103,7 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAliasSchedule, ID: 6001}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: 6401}, kind: governanceapp.AdminTaskKindToken, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6501}, kind: governanceapp.AdminTaskKindFetch, bizType: governanceapp.AdminTaskBizMicrosoftResource},
+		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6502}, kind: governanceapp.AdminTaskKindHistory, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 	} {
 		task, err := repo.FindByRef(context.Background(), testCase.ref)
 		require.NoError(t, err, testCase.ref.String())
@@ -124,6 +127,11 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		{Reason: "active_allocation", Count: 2},
 		{Reason: "other", Count: 1},
 	}, task.Progress.ReasonCounts)
+
+	historyTask, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceBulk, ID: 6602})
+	require.NoError(t, err)
+	require.Equal(t, governanceapp.AdminTaskKindBulkHistory, historyTask.Kind)
+	require.Equal(t, governanceapp.AdminTaskBizMicrosoftResourceBulk, historyTask.BizType)
 
 	_, err = repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: "validation", ID: 6101})
 	require.ErrorIs(t, err, governanceapp.ErrInvalidAdminTaskQuery)
@@ -195,12 +203,16 @@ INSERT INTO microsoft_token_refresh_jobs(
 INSERT INTO mailmatch_resource_fetch_jobs(
     id, resource_id, operator_user_id, expected_credential_revision, recipient,
     status, attempts, max_attempts, fetched_count, stored_count, matched_count,
-    claim_token, dispatch_token, created_at, updated_at
+    since_at, until_at, claim_token, dispatch_token, created_at, updated_at
 ) VALUES (
     6501, 6001, 5001, 4, 'task-view@outlook.com',
     'canceled', 1, 3, 5, 4, 2,
-    'never-return-fetch-claim', 'never-return-fetch-dispatch', ?, ?
-)`, base.Add(6*time.Minute), base.Add(6*time.Minute)).Error)
+    ?, ?, 'never-return-fetch-claim', 'never-return-fetch-dispatch', ?, ?
+), (
+    6502, 6001, 5001, 4, 'task-view@outlook.com',
+    'succeeded', 1, 3, 0, 0, 0,
+    NULL, NULL, '', '', ?, ?
+)`, base.Add(-24*time.Hour), base, base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute+time.Second), base.Add(6*time.Minute+time.Second)).Error)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO admin_resource_bulk_commands(
@@ -213,5 +225,13 @@ INSERT INTO admin_resource_bulk_commands(
     REPEAT('a', 64), 6001, 6001, 'running',
     10, 8, 5, 2, JSON_OBJECT('active_allocation', 2, 'password=never-return', 1),
     1, 3, 'never-return-bulk-claim', 'never-return-bulk-dispatch', ?, ?
-)`, base.Add(7*time.Minute), base.Add(7*time.Minute)).Error)
+), (
+    6602, 5001, 'history', 'ids', JSON_OBJECT('mode', 'ids', 'resourceIds', JSON_ARRAY(6001)),
+    REPEAT('b', 64), 6001, 0, 'queued',
+    1, 0, 0, 0, JSON_OBJECT(),
+    0, 3, '', '', ?, ?
+)`,
+		base.Add(7*time.Minute), base.Add(7*time.Minute),
+		base.Add(8*time.Minute), base.Add(8*time.Minute),
+	).Error)
 }

@@ -11,6 +11,7 @@ import type {
   AdminMicrosoftImportResponse,
   AdminMicrosoftListFilter,
   AdminMicrosoftListResponse,
+  AdminMicrosoftMaintenanceAction,
   AdminMicrosoftMessageDetail,
   AdminMicrosoftMessageCursor,
   AdminMicrosoftMessageListResponse,
@@ -405,6 +406,16 @@ export async function fetchAdminMicrosoftMail(
   );
 }
 
+export async function scanAdminMicrosoftProjects(
+  resourceId: number
+): Promise<AdminMicrosoftTaskAcceptedResponse> {
+  return unwrap(
+    await client.POST("/v1/admin/resources/{resourceId}/projects/scan", {
+      params: { header: commandHeaders(), path: { resourceId } },
+    })
+  );
+}
+
 export async function listAdminMicrosoftAliases(
   resourceId: number,
   kind: "explicit" | "other",
@@ -580,6 +591,32 @@ export function validateAdminMicrosoftResourcesByFilter(
   filter: AdminMicrosoftListFilter
 ) {
   return validateAdminMicrosoftResources(filterSelection(filter));
+}
+
+export function maintainAdminMicrosoftResourcesByIds(
+  action: AdminMicrosoftMaintenanceAction,
+  resourceIds: number[]
+) {
+  return maintainAdminMicrosoftResources(action, idsSelection(resourceIds));
+}
+
+export function maintainAdminMicrosoftResourcesByFilter(
+  action: AdminMicrosoftMaintenanceAction,
+  filter: AdminMicrosoftListFilter
+) {
+  return maintainAdminMicrosoftResources(action, filterSelection(filter));
+}
+
+async function maintainAdminMicrosoftResources(
+  action: AdminMicrosoftMaintenanceAction,
+  selection: AdminMicrosoftResourceSelection
+): Promise<AdminMicrosoftTaskAcceptedResponse> {
+  return unwrap(
+    await client.POST("/v1/admin/resources/maintenance", {
+      body: { action, selection },
+      params: { header: commandHeaders() },
+    })
+  );
 }
 
 async function validateAdminMicrosoftResources(

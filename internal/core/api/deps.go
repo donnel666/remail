@@ -83,6 +83,12 @@ func (m *CoreModule) SetMicrosoftHistoryScanTrigger(trigger coreapp.MicrosoftHis
 	}
 }
 
+func (m *CoreModule) SetAdminResourceMaintenancePort(port coreapp.AdminResourceMaintenancePort) {
+	if m != nil && m.AdminBulk != nil {
+		m.AdminBulk.SetMaintenancePort(port)
+	}
+}
+
 func (m *CoreModule) SetMicrosoftValidationBindingCommitPort(port coreapp.MicrosoftValidationBindingCommitPort) {
 	if m != nil && m.validationRepo != nil {
 		m.validationRepo.SetMicrosoftValidationBindingCommitPort(port)

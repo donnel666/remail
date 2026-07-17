@@ -52,6 +52,8 @@ func TestAdminMicrosoftOpenAPISecurityContractMatrix(t *testing.T) {
 		{id: "API-AMR-C16", method: "post", path: "/v1/admin/resources/publish", mutation: true},
 		{id: "API-AMR-C17", method: "post", path: "/v1/admin/resources/unpublish", mutation: true},
 		{id: "API-AMR-C18", method: "post", path: "/v1/admin/resources/delete", mutation: true},
+		{id: "API-AMR-C19", method: "post", path: "/v1/admin/resources/{resourceId}/projects/scan", mutation: true},
+		{id: "API-AMR-C20", method: "post", path: "/v1/admin/resources/maintenance", mutation: true},
 	}
 
 	for _, expected := range operations {

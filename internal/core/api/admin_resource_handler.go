@@ -289,6 +289,11 @@ type adminMicrosoftBulkCommandRequest struct {
 	Selection adminMicrosoftBulkSelectionRequest `json:"selection" binding:"required"`
 }
 
+type adminMicrosoftMaintenanceRequest struct {
+	Action    string                             `json:"action" binding:"required,oneof=validate alias history token"`
+	Selection adminMicrosoftBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
 type adminMicrosoftBulkResultResponse struct {
 	Requested           int                       `json:"requested"`
 	Affected            int                       `json:"affected"`
@@ -640,6 +645,22 @@ func (h *CoreHandler) PostAdminMicrosoftResourceValidations(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, ResourceValidationsResponse{Requested: result.Requested, Queued: result.Queued})
+}
+
+func (h *CoreHandler) PostAdminMicrosoftResourcesMaintenance(c *gin.Context) {
+	if !requireAdminIdempotencyKey(c) {
+		return
+	}
+	var request adminMicrosoftMaintenanceRequest
+	if err := bindAdminResourceJSON(c, &request); err != nil {
+		writeAdminInvalidBody(c, err)
+		return
+	}
+	selection, ok := toAdminBulkSelection(c, request.Selection)
+	if !ok {
+		return
+	}
+	h.submitAdminResourceBulkSelection(c, coreapp.AdminResourceBulkAction(request.Action), selection)
 }
 
 func (h *CoreHandler) applyAdminResourceState(c *gin.Context, command coreapp.AdminMicrosoftStateCommand) {

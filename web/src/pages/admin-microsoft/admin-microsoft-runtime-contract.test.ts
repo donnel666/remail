@@ -17,6 +17,14 @@ const modalSource = readFileSync(
   new URL("./microsoft-modals.tsx", import.meta.url),
   "utf8"
 );
+const maintenanceSource = readFileSync(
+  new URL("./microsoft-maintenance-modal.tsx", import.meta.url),
+  "utf8"
+);
+const bulkMaintenanceSource = readFileSync(
+  new URL("./microsoft-bulk-maintenance-modal.tsx", import.meta.url),
+  "utf8"
+);
 const typeSource = readFileSync(
   new URL("./admin-microsoft-types.ts", import.meta.url),
   "utf8"
@@ -39,7 +47,7 @@ describe("admin Microsoft runtime UI contract", () => {
 
   it("uses the real API adapter and generated OpenAPI types without mock imports", () => {
     const removedMockModule = ["admin", "microsoft", "mock"].join("-");
-    for (const source of [pageSource, detailSource, modalSource]) {
+    for (const source of [pageSource, detailSource, modalSource, maintenanceSource, bulkMaintenanceSource]) {
       expect(source).toContain('from "@/lib/admin-microsoft-api"');
       expect(source).not.toContain(removedMockModule);
     }
@@ -60,7 +68,8 @@ describe("admin Microsoft runtime UI contract", () => {
     expectContainsAll(pageSource, [
       't("Import")',
       't("Refresh")',
-      't("Check")',
+      't("Maintenance")',
+      't("Maintain all")',
       't("Put on sale")',
       't("Convert to private")',
       't("Delete")',
@@ -108,6 +117,7 @@ describe("admin Microsoft runtime UI contract", () => {
       "refreshAdminMicrosoftToken",
       "createAdminMicrosoftExplicitAlias",
       "fetchAdminMicrosoftMail",
+      "scanAdminMicrosoftProjects",
       "listAdminMicrosoftTasks",
       "listAdminMicrosoftMessages",
       "getAdminMicrosoftMessage",
@@ -120,6 +130,28 @@ describe("admin Microsoft runtime UI contract", () => {
       'title={t("Replace Microsoft credentials")}',
       "Credentials are accepted as write-only input. Passwords, client IDs and tokens are never returned by this page.",
       "Write-only. Leave blank to keep the current values; filling password replaces the whole credential set and re-queues validation.",
+    ]);
+    expectContainsAll(maintenanceSource, [
+      'title={t("Microsoft resource maintenance")}',
+      'label: "Validate resource"',
+      'label: "Create alias"',
+      'label: "Scan projects"',
+      'label: "Update RT"',
+    ]);
+    expectContainsAll(bulkMaintenanceSource, [
+      "maintainAdminMicrosoftResourcesByIds",
+      "maintainAdminMicrosoftResourcesByFilter",
+      'key: "validate"',
+      'key: "alias"',
+      'key: "history"',
+      'key: "token"',
+    ]);
+    expectContainsAll(pageSource, [
+      "setBulkMaintenanceTarget",
+      'mode: "ids"',
+      'mode: "filter"',
+      'checkLabelKey: "Maintenance"',
+      "<MicrosoftBulkMaintenanceModal",
     ]);
   });
 });

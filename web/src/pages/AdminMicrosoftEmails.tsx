@@ -49,9 +49,6 @@ import {
   setAdminMicrosoftResourcesForSaleByFilter,
   setAdminMicrosoftResourcesForSaleByIds,
   unpublishAdminMicrosoftResource,
-  validateAdminMicrosoftResource,
-  validateAdminMicrosoftResourcesByFilter,
-  validateAdminMicrosoftResourcesByIds,
   type AdminMicrosoftBulkCommandResponse,
 } from "@/lib/admin-microsoft-api";
 
@@ -77,6 +74,11 @@ import {
   ReplaceCredentialsModal,
 } from "./admin-microsoft/microsoft-modals";
 import { MicrosoftDetailSheet } from "./admin-microsoft/microsoft-detail-sheet";
+import {
+  MicrosoftBulkMaintenanceModal,
+  type MicrosoftBulkMaintenanceTarget,
+} from "./admin-microsoft/microsoft-bulk-maintenance-modal";
+import { MicrosoftMaintenanceModal } from "./admin-microsoft/microsoft-maintenance-modal";
 import type {
   AdminMicrosoftFacets,
   AdminMicrosoftListFilter,
@@ -131,6 +133,10 @@ export default function AdminMicrosoftEmails() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminMicrosoftResourceItem | null>(null);
+  const [maintenanceTarget, setMaintenanceTarget] =
+    useState<AdminMicrosoftResourceItem | null>(null);
+  const [bulkMaintenanceTarget, setBulkMaintenanceTarget] =
+    useState<MicrosoftBulkMaintenanceTarget | null>(null);
   const [credentialsTarget, setCredentialsTarget] =
     useState<AdminMicrosoftResourceItem | null>(null);
   const [detail, setDetail] = useState<AdminMicrosoftResourceDetail | null>(null);
@@ -142,7 +148,7 @@ export default function AdminMicrosoftEmails() {
     id: number;
   } | null>(null);
   const [bulkBusy, setBulkBusy] = useState<
-    "check" | "disable" | "delete" | "publish" | "private" | null
+    "disable" | "delete" | "publish" | "private" | null
   >(null);
 
   const [debouncedSearchKeyword, flushSearchKeyword] =
@@ -383,7 +389,7 @@ export default function AdminMicrosoftEmails() {
   const runRowOperation = useCallback(
     async (
       record: AdminMicrosoftResourceItem,
-      action: "check" | "delete" | "publish" | "recover" | "toggle",
+      action: "delete" | "publish" | "recover" | "toggle",
       operation: () => Promise<unknown>,
       successKey: string
     ) => {
@@ -399,17 +405,6 @@ export default function AdminMicrosoftEmails() {
       }
     },
     [detail?.id, refreshAfterMutation, t]
-  );
-
-  const handleValidate = useCallback(
-    (record: AdminMicrosoftResourceItem) =>
-      runRowOperation(
-        record,
-        "check",
-        () => validateAdminMicrosoftResource(record.id),
-        "Resource validation submitted."
-      ),
-    [runRowOperation]
   );
 
   const handleToggleDisabled = useCallback(
@@ -494,20 +489,14 @@ export default function AdminMicrosoftEmails() {
     [detail, refreshAfterMutation, t]
   );
 
-  const validateSelected = useCallback(async () => {
+  const openSelectedMaintenance = useCallback(() => {
     if (selectedKeys.length === 0) return;
-    setBulkBusy("check");
-    try {
-      const response = await validateAdminMicrosoftResourcesByIds(selectedKeys);
-      Toast.success(t("Resource validations submitted.", { count: response.queued }));
-      setSelectedKeys([]);
-      await refreshAfterMutation();
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
-    } finally {
-      setBulkBusy(null);
-    }
-  }, [refreshAfterMutation, selectedKeys, t]);
+    setBulkMaintenanceTarget({
+      count: selectedKeys.length,
+      mode: "ids",
+      resourceIds: [...selectedKeys],
+    });
+  }, [selectedKeys]);
 
   const confirmDisableSelected = useCallback(() => {
     if (selectedKeys.length === 0) return;
@@ -561,31 +550,17 @@ export default function AdminMicrosoftEmails() {
     });
   }, [refreshAfterMutation, selectedKeys, showBulkOutcome, t]);
 
-  const confirmValidateAll = useCallback(() => {
+  const openAllMaintenance = useCallback(() => {
     if (total === 0) {
       Toast.info(t("No resources to check."));
       return;
     }
-    Modal.confirm({
-      cancelText: t("Cancel"),
-      content: t("Confirm validate all matching Microsoft resources", { count: total }),
-      okText: t("Check"),
-      onOk: async () => {
-        setBulkBusy("check");
-        try {
-          await validateAdminMicrosoftResourcesByFilter(listFilter);
-          Toast.success(t("Resource validation submitted."));
-          setSelectedKeys([]);
-          await refreshAfterMutation();
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
-        } finally {
-          setBulkBusy(null);
-        }
-      },
-      title: t("Confirm check all"),
+    setBulkMaintenanceTarget({
+      count: total,
+      filter: { ...listFilter },
+      mode: "filter",
     });
-  }, [listFilter, refreshAfterMutation, t, total]);
+  }, [listFilter, t, total]);
 
   const confirmDeleteAll = useCallback(() => {
     if (total === 0) {
@@ -686,8 +661,7 @@ export default function AdminMicrosoftEmails() {
   );
 
   useSelectionNotification({
-    checkLabelKey: "Check",
-    checkLoading: bulkBusy === "check",
+    checkLabelKey: "Maintenance",
     deleteLabelKey: "Delete",
     deleteLoading: bulkBusy === "delete",
     extraActions: [
@@ -706,7 +680,7 @@ export default function AdminMicrosoftEmails() {
         type: "tertiary",
       },
     ],
-    onCheck: () => void validateSelected(),
+    onCheck: openSelectedMaintenance,
     onClear: () => setSelectedKeys([]),
     onDelete: confirmDeleteSelected,
     onSell: confirmDisableSelected,
@@ -763,13 +737,12 @@ export default function AdminMicrosoftEmails() {
             {t("Edit")}
           </Button>
           <Button
-            disabled={Boolean(rowBusy && busyAction !== "check")}
-            loading={busyAction === "check"}
-            onClick={() => void handleValidate(record)}
+            disabled={Boolean(busyAction)}
+            onClick={() => setMaintenanceTarget(record)}
             size="small"
             type="tertiary"
           >
-            {t("Check")}
+            {t("Maintenance")}
           </Button>
           <Button
             disabled={Boolean(rowBusy && busyAction !== "toggle")}
@@ -806,10 +779,10 @@ export default function AdminMicrosoftEmails() {
       handleRecover,
       handleToggleDisabled,
       handleTogglePublish,
-      handleValidate,
       openDetail,
       rowBusy,
       setEditTarget,
+      setMaintenanceTarget,
       t,
     ]
   );
@@ -1012,15 +985,14 @@ export default function AdminMicrosoftEmails() {
         >
           {t("Refresh")}
         </Button>
-        <Tooltip content={t("Check all")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
+        <Tooltip content={t("Maintain all")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
           <Button
             className="flex-1 md:flex-initial"
-            loading={bulkBusy === "check"}
-            onClick={confirmValidateAll}
+            onClick={openAllMaintenance}
             size="small"
             type="tertiary"
           >
-            {t("Check")}
+            {t("Maintenance")}
           </Button>
         </Tooltip>
         <Tooltip content={t("Put all on sale")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
@@ -1327,6 +1299,27 @@ export default function AdminMicrosoftEmails() {
         target={credentialsTarget}
       />
 
+      <MicrosoftMaintenanceModal
+        onCancel={() => setMaintenanceTarget(null)}
+        onCompleted={async () => {
+          await refreshAfterMutation(
+            maintenanceTarget && detail?.id === maintenanceTarget.id
+              ? maintenanceTarget.id
+              : undefined
+          );
+        }}
+        target={maintenanceTarget}
+      />
+
+      <MicrosoftBulkMaintenanceModal
+        onCancel={() => setBulkMaintenanceTarget(null)}
+        onCompleted={async () => {
+          setSelectedKeys([]);
+          await refreshAfterMutation();
+        }}
+        target={bulkMaintenanceTarget}
+      />
+
       <MicrosoftDetailSheet
         busy={detailBusy}
         detail={detail}
@@ -1394,12 +1387,8 @@ export default function AdminMicrosoftEmails() {
               : "Microsoft resource disabled."
           );
         }}
-        onValidate={() => {
-          if (!detail) return;
-          void runDetailOperation(
-            () => validateAdminMicrosoftResource(detail.id),
-            "Resource validation submitted."
-          );
+        onMaintain={() => {
+          if (detail) setMaintenanceTarget(detail);
         }}
       />
     </div>

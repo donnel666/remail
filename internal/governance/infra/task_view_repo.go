@@ -228,7 +228,10 @@ SELECT
     job.resource_id AS resource_scope_id,
     'microsoft_resource' AS biz_type,
     job.resource_id AS biz_id,
-    'fetch' AS kind,
+	CASE
+		WHEN job.since_at IS NULL AND job.until_at IS NULL THEN 'history'
+		ELSE 'fetch'
+	END AS kind,
     job.status AS status,
     job.attempts AS attempts,
     job.max_attempts AS max_attempts,
@@ -310,6 +313,9 @@ SELECT
     command.id AS biz_id,
     CASE command.action
         WHEN 'validate' THEN 'bulk_validation'
+		WHEN 'alias' THEN 'bulk_alias'
+		WHEN 'history' THEN 'bulk_history'
+		WHEN 'token' THEN 'bulk_token'
         WHEN 'publish' THEN 'bulk_publish'
         WHEN 'unpublish' THEN 'bulk_unpublish'
         ELSE 'bulk_delete'
