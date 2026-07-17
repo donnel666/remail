@@ -1053,6 +1053,9 @@ func matchAndExtract(message FetchedMessage, scope OrderScope) (bool, string, st
 		if !matchRequiredRule(MailRuleSender, enabled, message, scope) {
 			return false, "", "Message did not match sender project mail rules."
 		}
+		if code := extractByBodyRules(message.Body, enabled[MailRuleBody]); code != "" {
+			return true, code, ""
+		}
 		return true, extractVerificationCode(message.Body), ""
 	}
 	for _, ruleType := range []MailRuleType{MailRuleSender, MailRuleSubject} {

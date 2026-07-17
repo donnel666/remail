@@ -161,6 +161,30 @@ func TestLooseModeUsesGenericNumericExtraction(t *testing.T) {
 	require.Empty(t, diagnostic)
 }
 
+func TestLooseModePrefersBodyRuleExtraction(t *testing.T) {
+	message := FetchedMessage{
+		Recipient: "user@example.com",
+		Sender:    "sender@example.net",
+		Body:      "您的验证码是 1GO-6KT；备用数字 87654321",
+	}
+	scope := OrderScope{
+		Recipient:     "user@example.com",
+		RecipientKind: "exact",
+		LooseMatch:    true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			{Type: MailRuleBody, Pattern: `(?:^|[^A-Za-z0-9])([A-Za-z0-9]{3}-[A-Za-z0-9]{3})(?:$|[^A-Za-z0-9])`, Enabled: true},
+		},
+	}
+
+	matched, code, diagnostic := matchAndExtractAnyRecipient(message, scope)
+
+	require.True(t, matched)
+	require.Equal(t, "1GO-6KT", code)
+	require.Empty(t, diagnostic)
+}
+
 func TestLooseModeRequiresSenderRule(t *testing.T) {
 	message := FetchedMessage{Recipient: "user@example.com", Sender: "sender@example.net"}
 	scope := OrderScope{
