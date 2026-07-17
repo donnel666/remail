@@ -955,6 +955,27 @@ func applyCardFilter(query *gorm.DB, filter billingapp.CardListFilter) *gorm.DB 
 	return query
 }
 
+// ListConsumerBalances returns consumer balances for the given users without
+// creating wallet rows. Users without a wallet are omitted (caller defaults to
+// zero).
+func (r *BillingRepo) ListConsumerBalances(ctx context.Context, userIDs []uint) (map[uint]string, error) {
+	if len(userIDs) == 0 {
+		return map[uint]string{}, nil
+	}
+	var models []WalletModel
+	if err := r.db.WithContext(ctx).
+		Select("user_id", "consumer_balance").
+		Where("user_id IN ?", userIDs).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list consumer balances: %w", err)
+	}
+	balances := make(map[uint]string, len(models))
+	for _, m := range models {
+		balances[m.UserID] = normalizeMoneyString(m.ConsumerBalance)
+	}
+	return balances, nil
+}
+
 func walletModelToDomain(model WalletModel) domain.Wallet {
 	return domain.Wallet{
 		UserID:            model.UserID,

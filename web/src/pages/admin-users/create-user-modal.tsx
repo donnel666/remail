@@ -5,12 +5,12 @@ import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  USER_GROUPS,
-  createMockAdminUser,
-  updateMockAdminUser,
+  createAdminUser,
+  updateAdminUser,
   type AdminUser,
   type AdminUserRole,
-} from "./admin-users-mock";
+} from "./admin-users-api";
+import { useUserGroups } from "./use-user-groups";
 import { roleLabel } from "./user-meta";
 
 const ROLES: AdminUserRole[] = ["user", "supplier", "admin", "super_admin"];
@@ -30,11 +30,12 @@ export function CreateUserModal({
   onCreated,
 }: CreateUserModalProps) {
   const { t } = useTranslation();
+  const { groups } = useUserGroups();
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<AdminUserRole>("user");
-  const [userGroupId, setUserGroupId] = useState<number>(USER_GROUPS[0].id);
+  const [userGroupId, setUserGroupId] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -43,8 +44,11 @@ export function CreateUserModal({
     setNickname("");
     setPassword("");
     setRole("user");
-    setUserGroupId(USER_GROUPS[0].id);
   }, [open]);
+
+  useEffect(() => {
+    if (open) setUserGroupId(groups[0]?.id ?? 0);
+  }, [open, groups]);
 
   const submit = async () => {
     if (role === "super_admin" && !canAssignSuperAdmin) return;
@@ -63,7 +67,7 @@ export function CreateUserModal({
     }
     setSaving(true);
     try {
-      const user = await createMockAdminUser({
+      const user = await createAdminUser({
         email: normalizedEmail,
         nickname: nickname.trim() || undefined,
         password,
@@ -165,7 +169,7 @@ export function CreateUserModal({
               style={{ width: "100%" }}
               value={userGroupId}
             >
-              {USER_GROUPS.map((group) => (
+              {groups.map((group) => (
                 <Select.Option key={group.id} value={group.id}>
                   {group.name}
                 </Select.Option>
@@ -190,11 +194,12 @@ export function EditUserModal({
   onSaved: (user: AdminUser) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  const { groups } = useUserGroups();
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<AdminUserRole>("user");
-  const [userGroupId, setUserGroupId] = useState(USER_GROUPS[0].id);
+  const [userGroupId, setUserGroupId] = useState(0);
   const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -223,7 +228,7 @@ export function EditUserModal({
     }
     setSaving(true);
     try {
-      const updated = await updateMockAdminUser(user.id, {
+      const updated = await updateAdminUser(user.id, {
         email: normalizedEmail,
         nickname: nickname.trim(),
         password: password || undefined,
@@ -330,7 +335,7 @@ export function EditUserModal({
               style={{ width: "100%" }}
               value={userGroupId}
             >
-              {USER_GROUPS.map((group) => (
+              {groups.map((group) => (
                 <Select.Option key={group.id} value={group.id}>
                   {group.name}
                 </Select.Option>

@@ -14,6 +14,7 @@ import {
   updateMockFinanceCardKey,
   type FinanceCardKey,
 } from "./admin-finance-mock";
+import { formatMoney } from "./finance-meta";
 
 interface CreateCardKeyModalProps {
   open: boolean;
@@ -68,7 +69,7 @@ export function CreateCardKeyModal({
     setSaving(true);
     try {
       const result = await createMockFinanceCardKeys({
-        amount: amountValue.toFixed(2),
+        amount: amountValue.toFixed(6),
         count: cardKeys.length ? undefined : countValue,
         maxRedemptions: maxRedemptionsValue,
         expireAt: expireAt ? expireAt.toISOString() : null,
@@ -111,7 +112,7 @@ export function CreateCardKeyModal({
             <InputNumber
               min={0.01}
               onChange={setAmount}
-              precision={2}
+              precision={6}
               prefix="¥"
               style={{ width: "100%" }}
               value={amount}
@@ -237,7 +238,7 @@ export function EditCardKeyModal({
           </div>
           <div className="mt-1">
             <span className="text-[var(--semi-color-text-2)]">{t("Amount")}</span>
-            <span className="ml-2 font-mono-data">¥{card?.amount}</span>
+            <span className="ml-2 font-mono-data">¥{formatMoney(card?.amount)}</span>
           </div>
         </div>
         <label className="block">

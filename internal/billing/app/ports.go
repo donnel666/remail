@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 type WalletRepository interface {
 	GetOrCreateWalletSummary(ctx context.Context, userID uint) (*domain.WalletSummary, error)
+	ListConsumerBalances(ctx context.Context, userIDs []uint) (map[uint]string, error)
 	GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error)
 	TransferReferralRewards(ctx context.Context, req TransferReferralRewardsCommand) (*TransferReferralRewardsResult, error)
 	ListTransactions(ctx context.Context, filter TransactionListFilter, afterID uint, limit int) ([]domain.Transaction, *uint, error)
@@ -26,6 +28,16 @@ type WalletRepository interface {
 	CountCards(ctx context.Context, filter CardListFilter) (int64, error)
 	CreateCards(ctx context.Context, req CreateCardsCommand) ([]domain.CardKey, error)
 	UpdateCard(ctx context.Context, req UpdateCardCommand) (*domain.CardKey, error)
+}
+
+// UserSelectionResolver resolves a selection-based batch (mode "ids" or
+// "filter") into the concrete user IDs an admin may adjust. It lives in the
+// billing package but is satisfied structurally by the IAM package at wiring
+// time so the two bounded contexts stay decoupled.
+type UserSelectionResolver interface {
+	// ResolveAdjustableUserIDs returns non-super-admin user IDs targeted by the
+	// selection (capped at 1000). mode is "ids" or "filter".
+	ResolveAdjustableUserIDs(ctx context.Context, mode string, userIDs []uint, search string, role string, enabled *bool, userGroupID uint, createdFrom *time.Time, createdTo *time.Time) ([]uint, error)
 }
 
 type TransactionListFilter struct {
@@ -169,6 +181,15 @@ func (uc *WalletUseCase) GetWallet(ctx context.Context, userID uint) (*domain.Wa
 	return uc.repo.GetOrCreateWalletSummary(ctx, userID)
 }
 
+// ListConsumerBalances returns consumer balances keyed by user id, used to
+// populate the admin user list balance column. Missing wallets are omitted.
+func (uc *WalletUseCase) ListConsumerBalances(ctx context.Context, userIDs []uint) (map[uint]string, error) {
+	if len(userIDs) == 0 {
+		return map[uint]string{}, nil
+	}
+	return uc.repo.ListConsumerBalances(ctx, userIDs)
+}
+
 func (uc *WalletUseCase) GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error) {
 	if userID == 0 {
 		return nil, domain.ErrInvalidFilter
@@ -277,6 +298,50 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 		Now:                uc.now(),
 		OperationLog:       req.OperationLog,
 	})
+}
+
+// BulkAdjustConsumer applies a signed amount to each user's consumer balance:
+// positive credits, negative debits (abs value). The amount is parsed once; a
+// zero amount is rejected. Each user gets a unique idempotency key derived from
+// the requestID so a retried bulk request dedupes per user. A per-user
+// insufficient-balance failure is counted as skipped without aborting the
+// batch; any other error is treated as unexpected and returned.
+func (uc *WalletUseCase) BulkAdjustConsumer(ctx context.Context, userIDs []uint, amount string, reason string, idempotencyKey string, requestID string, operationLog *governancedomain.OperationLog) (affected int, skipped int, err error) {
+	parsed, err := domain.ParseMoney(amount)
+	if err != nil {
+		return 0, 0, err
+	}
+	credit := parsed.IsPositive()
+	if !credit && !parsed.IsNegative() {
+		return 0, 0, domain.ErrInvalidAmount
+	}
+	absAmount := domain.MoneyString(parsed.Abs())
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	requestID = strings.TrimSpace(requestID)
+	for _, userID := range userIDs {
+		req := AdjustConsumerBalanceRequest{
+			UserID:         userID,
+			Amount:         absAmount,
+			Reason:         reason,
+			IdempotencyKey: fingerprint("wallet.bulk.adjust", idempotencyKey, userID),
+			RequestID:      requestID,
+			OperationLog:   operationLog,
+		}
+		if credit {
+			_, err = uc.CreditConsumer(ctx, req)
+		} else {
+			_, err = uc.DebitConsumer(ctx, req)
+		}
+		if err != nil {
+			if errors.Is(err, domain.ErrInsufficientBalance) {
+				skipped++
+				continue
+			}
+			return affected, skipped, err
+		}
+		affected++
+	}
+	return affected, skipped, nil
 }
 
 func normalizeConsumerAdjustmentAmount(value string, transactionType domain.TransactionType) (string, error) {

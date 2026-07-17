@@ -32,7 +32,7 @@ function formatMoney(value: string | number | null | undefined) {
   const parsed = Number(value ?? 0);
   if (!Number.isFinite(parsed)) return "0.00";
   return parsed.toLocaleString(undefined, {
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 6,
     minimumFractionDigits: 2,
   });
 }

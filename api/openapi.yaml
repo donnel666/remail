@@ -572,6 +572,30 @@ paths:
           schema:
             type: string
             maxLength: 120
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [user, supplier, admin, super_admin]
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: userGroupId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Paginated user list
@@ -601,6 +625,256 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: postAdminUser
+      summary: Create a user (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
+                additionalProperties: false
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/enable:
+    post:
+      operationId: postAdminUsersEnable
+      summary: Enable selected users
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserBulkCommand"
+      responses:
+        "200":
+          description: User bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/disable:
+    post:
+      operationId: postAdminUsersDisable
+      summary: Disable selected users
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserBulkCommand"
+      responses:
+        "200":
+          description: User bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/delete:
+    post:
+      operationId: postAdminUsersDelete
+      summary: Delete selected users
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserBulkCommand"
+      responses:
+        "200":
+          description: User bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/sessions/revoke:
+    post:
+      operationId: postAdminUsersRevokeSessions
+      summary: Revoke sessions for selected users
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserBulkCommand"
+      responses:
+        "200":
+          description: User bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/admin/users/{userId}:
     patch:
@@ -666,6 +940,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteAdminUser
+      summary: Delete a user (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: User deleted
+        "400":
+          description: Invalid user ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/admin/users/{userId}/sessions/revoke:
     post:
@@ -705,6 +1020,285 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/invitations:
+    get:
+      operationId: getAdminUserInvitations
+      summary: Get a user's inviter and invitees (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User invitation overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserInvitationsResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/groups:
+    get:
+      operationId: getAdminUserGroups
+      summary: List user groups (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: User group list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserGroupListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/apikeys:
+    get:
+      operationId: getAdminUserApiKeys
+      summary: List a user's API keys (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: API key list. The plain key is returned for account API key management.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyListResponse"
+        "400":
+          description: Invalid path or query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postAdminUserApiKey
+      summary: Create an API key for a user (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyCreateRequest"
+      responses:
+        "201":
+          description: API key created. The plain key is returned for account API key management.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyResponse"
+        "400":
+          description: Invalid request body or path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/apikeys/{keyId}:
+    patch:
+      operationId: patchAdminUserApiKey
+      summary: Update a user's API key (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyPatchRequest"
+      responses:
+        "200":
+          description: API key updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyResponse"
+        "400":
+          description: Invalid request body or path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteAdminUserApiKey
+      summary: Delete a user's API key (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: API key deleted
+        "400":
+          description: Invalid path parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: API key not found
           content:
             application/json:
               schema:
@@ -4467,6 +5061,193 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/wallets/balances:
+    get:
+      operationId: getAdminWalletBalances
+      summary: Batch read consumer balances for users (admin only)
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userIds
+          in: query
+          description: Repeated or comma-separated user IDs for exact batch lookup.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+              minimum: 1
+      responses:
+        "200":
+          description: Consumer balances for the requested users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminWalletBalanceList"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/adjust:
+    post:
+      operationId: postAdminWalletBulkAdjust
+      summary: Adjust wallet balance for selected users
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminBulkAdjustWalletRequest"
+      responses:
+        "200":
+          description: Wallet bulk result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid adjustment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/{userId}:
+    get:
+      operationId: getAdminWallet
+      summary: Get a user's wallet (admin only)
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/{userId}/transactions:
+    get:
+      operationId: getAdminWalletTransactions
+      summary: List a user's wallet transactions (admin only)
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: afterId
+          in: query
+          schema:
+            type: integer
+            description: Last transaction id from the previous page.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Wallet transaction list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/wallets/{userId}/credit:
     post:
       operationId: postAdminWalletCredit
@@ -6253,6 +7034,46 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/resources/validations:
+    post:
+      operationId: postAdminMicrosoftResourceValidations
+      summary: Validate selected or all matching Microsoft resources
+      description: |
+        Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Both ids and filter selections are queued as ephemeral Redis/Asynq cursors. Filter mode is expanded in bounded pages; the client must not enumerate all matching IDs.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
+      responses:
+        "202":
+          description: Ephemeral Redis validation batch accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceValidationsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /v1/admin/resources/maintenance:
@@ -8181,6 +9002,26 @@ components:
           format: date-time
       additionalProperties: false
 
+    AdminWalletBalanceList:
+      type: object
+      required:
+        - balances
+      properties:
+        balances:
+          type: array
+          items:
+            type: object
+            required:
+              - userId
+              - consumerBalance
+            properties:
+              userId:
+                type: integer
+              consumerBalance:
+                type: string
+            additionalProperties: false
+      additionalProperties: false
+
     WalletReferralResponse:
       type: object
       required:
@@ -8714,6 +9555,17 @@ components:
           type: boolean
       additionalProperties: false
 
+    AdminUserGroupListResponse:
+      type: object
+      required:
+        - groups
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserGroupResponse"
+      additionalProperties: false
+
     AdminUpdateUserRequest:
       type: object
       properties:
@@ -8728,6 +9580,44 @@ components:
             - super_admin
         userGroupId:
           type: integer
+        email:
+          type: string
+          format: email
+        nickname:
+          type: string
+          maxLength: 100
+        password:
+          type: string
+          minLength: 6
+      additionalProperties: false
+
+    AdminCreateUserRequest:
+      type: object
+      required:
+        - email
+        - password
+        - role
+        - userGroupId
+      properties:
+        email:
+          type: string
+          format: email
+        nickname:
+          type: string
+          maxLength: 100
+        password:
+          type: string
+          minLength: 6
+        role:
+          type: string
+          enum:
+            - user
+            - supplier
+            - admin
+            - super_admin
+        userGroupId:
+          type: integer
+          minimum: 1
       additionalProperties: false
 
     PermissionCatalogResponse:
@@ -8831,6 +9721,95 @@ components:
           type: integer
         limit:
           type: integer
+        facets:
+          $ref: "#/components/schemas/AdminUserFacets"
+      additionalProperties: false
+
+    AdminUserFacets:
+      type: object
+      required:
+        - role
+        - status
+        - group
+      properties:
+        role:
+          type: object
+          additionalProperties:
+            type: integer
+        status:
+          type: object
+          required:
+            - all
+            - enabled
+            - disabled
+          properties:
+            all:
+              type: integer
+            enabled:
+              type: integer
+            disabled:
+              type: integer
+          additionalProperties: false
+        group:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - code
+              - name
+              - count
+            properties:
+              id:
+                type: integer
+              code:
+                type: string
+              name:
+                type: string
+              count:
+                type: integer
+            additionalProperties: false
+      additionalProperties: false
+
+    AdminUserInvitationMember:
+      type: object
+      required:
+        - id
+        - email
+        - nickname
+        - role
+        - enabled
+        - joinedAt
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        nickname:
+          type: string
+        role:
+          type: string
+        enabled:
+          type: boolean
+        joinedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminUserInvitationsResponse:
+      type: object
+      required:
+        - inviter
+        - invitees
+      properties:
+        inviter:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminUserInvitationMember"
+        invitees:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserInvitationMember"
       additionalProperties: false
 
     AdminCreateInviteRequest:
@@ -10916,6 +11895,79 @@ components:
         queued:
           type: integer
           minimum: 0
+      additionalProperties: false
+
+    AdminUserBulkFilter:
+      type: object
+      properties:
+        search:
+          type: string
+        role:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        enabled:
+          type: boolean
+        userGroupId:
+          type: integer
+          minimum: 1
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminUserBulkSelection:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [ids, filter]
+        userIds:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        filter:
+          $ref: "#/components/schemas/AdminUserBulkFilter"
+      additionalProperties: false
+
+    AdminUserBulkCommand:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminUserBulkSelection"
+      additionalProperties: false
+
+    AdminUserBulkResponse:
+      type: object
+      required: [requested, affected, skipped]
+      properties:
+        requested:
+          type: integer
+          minimum: 0
+        affected:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    AdminBulkAdjustWalletRequest:
+      type: object
+      required: [selection, amount, reason]
+      properties:
+        selection:
+          $ref: "#/components/schemas/AdminUserBulkSelection"
+        amount:
+          type: string
+          description: Signed decimal amount; positive credits, negative debits.
+        reason:
+          type: string
       additionalProperties: false
 
     AdminDomainItem:

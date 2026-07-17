@@ -17,20 +17,22 @@ type AdminUseCase struct {
 	sessions    SessionStore
 	invites     InviteRepository
 	permissions PermissionRepository
+	hasher      Hasher
 	logs        governanceapp.OperationLogPort
 }
 
 // NewAdminUseCase creates a new AdminUseCase.
-func NewAdminUseCase(repo UserRepository, sessions SessionStore, invites InviteRepository, permissions PermissionRepository, logs governanceapp.OperationLogPort) *AdminUseCase {
-	return &AdminUseCase{repo: repo, sessions: sessions, invites: invites, permissions: permissions, logs: logs}
+func NewAdminUseCase(repo UserRepository, sessions SessionStore, invites InviteRepository, permissions PermissionRepository, hasher Hasher, logs governanceapp.OperationLogPort) *AdminUseCase {
+	return &AdminUseCase{repo: repo, sessions: sessions, invites: invites, permissions: permissions, hasher: hasher, logs: logs}
 }
 
 // UserListResult contains paginated user results.
 type UserListResult struct {
-	Users  []domain.User `json:"users"`
-	Total  int64         `json:"total"`
-	Offset int           `json:"offset"`
-	Limit  int           `json:"limit"`
+	Users  []domain.User      `json:"users"`
+	Total  int64              `json:"total"`
+	Offset int                `json:"offset"`
+	Limit  int                `json:"limit"`
+	Facets *domain.UserFacets `json:"facets,omitempty"`
 }
 
 type InviteListResult struct {
@@ -115,12 +117,28 @@ func (uc *AdminUseCase) ListUsers(ctx context.Context, filter domain.UserListFil
 		return nil, fmt.Errorf("admin list users: %w", err)
 	}
 
-	return &UserListResult{
+	result := &UserListResult{
 		Users:  users,
 		Total:  total,
 		Offset: offset,
 		Limit:  limit,
-	}, nil
+	}
+
+	// Facets power the role tabs and status/group filter counts on the browse
+	// list. Skip them for `ids` batch lookups (owner-search selection).
+	if len(filter.IDs) == 0 {
+		groups, err := uc.repo.ListUserGroups(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("admin list users facet groups: %w", err)
+		}
+		facets, err := uc.repo.FacetsByFilter(ctx, filter, groups)
+		if err != nil {
+			return nil, fmt.Errorf("admin list users facets: %w", err)
+		}
+		result.Facets = facets
+	}
+
+	return result, nil
 }
 
 func uniqueUserIDs(ids []uint) []uint {
@@ -301,13 +319,85 @@ func (uc *AdminUseCase) UpdateInvite(ctx context.Context, operatorUserID uint, r
 
 // UpdateUserRequest contains the fields that can be updated by an admin.
 type UpdateUserRequest struct {
+	Email       *string      `json:"email,omitempty"`
+	Nickname    *string      `json:"nickname,omitempty"`
+	Password    *string      `json:"password,omitempty"`
 	Enabled     *bool        `json:"enabled,omitempty"`
 	Role        *domain.Role `json:"role,omitempty"`
 	UserGroupID *uint        `json:"userGroupId,omitempty"`
 }
 
-// UpdateUser updates a user's access role and entitlement group.
-// If the user is disabled, increments tokenVersion and clears sessions (INV-I3).
+// CreateUserRequest contains the fields for an admin-created user.
+type CreateUserRequest struct {
+	Email       string
+	Nickname    string
+	Password    string
+	Role        domain.Role
+	UserGroupID uint
+}
+
+// InvitationMember is a safe view of an inviter/invitee.
+type InvitationMember struct {
+	User domain.User
+}
+
+// InvitationOverview is the inviter + invitees of a user.
+type InvitationOverview struct {
+	Inviter  *domain.User
+	Invitees []domain.User
+}
+
+// CreateUser creates a managed user with an admin-set password (no email
+// verification). Only iam:permission/sensitive holders may create super_admins;
+// the handler passes allowSensitive.
+func (uc *AdminUseCase) CreateUser(ctx context.Context, operatorUserID uint, requestID, path string, req CreateUserRequest, allowSensitive bool) (*domain.User, error) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if !req.Role.IsValid() {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, domain.ErrInvalidRole
+	}
+	if req.Role == domain.RoleSuperAdmin && !allowSensitive {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, domain.ErrPermissionDenied
+	}
+	group, err := uc.repo.FindUserGroupByID(ctx, req.UserGroupID)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, fmt.Errorf("admin create find user group: %w", err)
+	}
+	if group == nil || !group.Enabled {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, domain.ErrInvalidUserGroup
+	}
+	hash, err := uc.hasher.Hash(req.Password)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, fmt.Errorf("admin create hash password: %w", err)
+	}
+	nickname := strings.TrimSpace(req.Nickname)
+	if nickname == "" {
+		nickname = email
+	}
+	user := &domain.User{
+		Email:        email,
+		PasswordHash: hash,
+		Nickname:     nickname,
+		Enabled:      true,
+		Role:         req.Role,
+		UserGroupID:  req.UserGroupID,
+		TokenVersion: 1,
+	}
+	if err := uc.repo.Create(ctx, user); err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", 0, "failure", "User create failed."))
+		return nil, err
+	}
+	_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.create", user.ID, "success", "User created."))
+	return user, nil
+}
+
+// UpdateUser updates a user's profile, access role and entitlement group.
+// If the user is disabled or the password changes, increments tokenVersion and
+// clears sessions (INV-I3).
 func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint, req *UpdateUserRequest, allowSensitive bool) (*domain.User, error) {
 	user, err := uc.repo.FindByID(ctx, targetUserID)
 	if err != nil {
@@ -323,21 +413,43 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		return nil, domain.ErrPermissionDenied
 	}
 
-	var enabledUpdate *bool
-	var roleUpdate *domain.Role
-	var userGroupUpdate *uint
-	tokenBump := false
+	var (
+		emailUpdate     *string
+		nicknameUpdate  *string
+		passwordUpdate  *string
+		enabledUpdate   *bool
+		roleUpdate      *domain.Role
+		userGroupUpdate *uint
+		tokenBump       = false
+	)
 
-	if req.Enabled != nil {
-		if user.Enabled != *req.Enabled {
-			enabled := *req.Enabled
-			enabledUpdate = &enabled
-			if !*req.Enabled {
-				tokenBump = true // Disabling user invalidates sessions
-			}
+	if req.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*req.Email))
+		if email != user.Email {
+			emailUpdate = &email
 		}
 	}
-
+	if req.Nickname != nil {
+		nickname := strings.TrimSpace(*req.Nickname)
+		if nickname != user.Nickname {
+			nicknameUpdate = &nickname
+		}
+	}
+	if req.Password != nil {
+		hash, err := uc.hasher.Hash(*req.Password)
+		if err != nil {
+			return nil, fmt.Errorf("admin update hash password: %w", err)
+		}
+		passwordUpdate = &hash
+		tokenBump = true
+	}
+	if req.Enabled != nil && user.Enabled != *req.Enabled {
+		enabled := *req.Enabled
+		enabledUpdate = &enabled
+		if !enabled {
+			tokenBump = true
+		}
+	}
 	if req.Role != nil {
 		role := *req.Role
 		if !role.IsValid() {
@@ -348,7 +460,6 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 			roleUpdate = &role
 		}
 	}
-
 	if req.UserGroupID != nil {
 		group, err := uc.repo.FindUserGroupByID(ctx, *req.UserGroupID)
 		if err != nil {
@@ -365,16 +476,19 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		}
 	}
 
-	if enabledUpdate == nil && roleUpdate == nil && userGroupUpdate == nil {
+	if emailUpdate == nil && nicknameUpdate == nil && passwordUpdate == nil && enabledUpdate == nil && roleUpdate == nil && userGroupUpdate == nil {
 		if err := uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings unchanged.")); err != nil {
 			return nil, fmt.Errorf("admin update unchanged log: %w", err)
 		}
 		return user, nil
 	}
 
-	updated, err := uc.repo.UpdateNonSuperAdminAccessWithOperationLog(
+	updated, err := uc.repo.UpdateNonSuperAdminProfileWithOperationLog(
 		ctx,
 		targetUserID,
+		emailUpdate,
+		nicknameUpdate,
+		passwordUpdate,
 		enabledUpdate,
 		roleUpdate,
 		userGroupUpdate,
@@ -391,6 +505,182 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 	}
 
 	return updated, nil
+}
+
+// DeleteUser hard-deletes a non-super-admin user and clears their sessions.
+func (uc *AdminUseCase) DeleteUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint) error {
+	if err := uc.repo.DeleteNonSuperAdminWithOperationLog(
+		ctx,
+		targetUserID,
+		adminOperationLog(operatorUserID, requestID, path, "iam.user.delete", targetUserID, "success", "User deleted."),
+	); err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.delete", targetUserID, "failure", "User delete failed."))
+		return fmt.Errorf("admin delete user: %w", err)
+	}
+	_ = uc.sessions.DeleteByUserID(ctx, targetUserID)
+	return nil
+}
+
+// UserBulkSelection selects the targets of a bulk admin user action, either by
+// explicit ids or by a browse-list filter.
+type UserBulkSelection struct {
+	Mode    string
+	UserIDs []uint
+	Filter  domain.UserListFilter
+}
+
+// BulkResult reports the outcome of a bulk admin user action.
+type BulkResult struct {
+	Requested int
+	Affected  int
+	Skipped   int
+}
+
+// resolveBulkTargets returns the non-super-admin target ids and the requested
+// count. For ids mode requested is the raw id count; for filter mode it is the
+// number of resolved targets. Empty ids mode is a no-op (never falls through to
+// a match-all filter).
+func (uc *AdminUseCase) resolveBulkTargets(ctx context.Context, sel UserBulkSelection) ([]uint, int, error) {
+	if sel.Mode == "ids" {
+		if len(sel.UserIDs) == 0 {
+			return nil, 0, nil
+		}
+		resolved, err := uc.repo.ResolveBulkUserIDs(ctx, sel.UserIDs, domain.UserListFilter{})
+		if err != nil {
+			return nil, 0, err
+		}
+		return resolved, len(sel.UserIDs), nil
+	}
+	resolved, err := uc.repo.ResolveBulkUserIDs(ctx, nil, sel.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	return resolved, len(resolved), nil
+}
+
+func (uc *AdminUseCase) clearSessions(ctx context.Context, ids []uint) {
+	for _, id := range ids {
+		_ = uc.sessions.DeleteByUserID(ctx, id)
+	}
+}
+
+func bulkResult(requested, affected int) *BulkResult {
+	return &BulkResult{Requested: requested, Affected: affected, Skipped: requested - affected}
+}
+
+// BulkSetEnabled enables or disables a batch of non-super-admin users. On
+// disable it bumps tokenVersion and clears the resolved users' sessions.
+func (uc *AdminUseCase) BulkSetEnabled(ctx context.Context, operatorUserID uint, requestID, path string, sel UserBulkSelection, enabled bool) (*BulkResult, error) {
+	opType := "iam.user.bulk.enable"
+	summary := "Users enabled."
+	if !enabled {
+		opType = "iam.user.bulk.disable"
+		summary = "Users disabled."
+	}
+	ids, requested, err := uc.resolveBulkTargets(ctx, sel)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, opType, 0, "failure", "User bulk action failed."))
+		return nil, fmt.Errorf("admin bulk set enabled: %w", err)
+	}
+	affected, err := uc.repo.BatchSetEnabledNonSuperAdmin(ctx, ids, enabled)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, opType, 0, "failure", "User bulk action failed."))
+		return nil, fmt.Errorf("admin bulk set enabled: %w", err)
+	}
+	if !enabled {
+		uc.clearSessions(ctx, ids)
+	}
+	_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, opType, 0, "success", summary))
+	return bulkResult(requested, int(affected)), nil
+}
+
+// BulkDeleteUsers hard-deletes a batch of non-super-admin users and clears the
+// resolved users' sessions.
+func (uc *AdminUseCase) BulkDeleteUsers(ctx context.Context, operatorUserID uint, requestID, path string, sel UserBulkSelection) (*BulkResult, error) {
+	ids, requested, err := uc.resolveBulkTargets(ctx, sel)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.delete", 0, "failure", "User bulk delete failed."))
+		return nil, fmt.Errorf("admin bulk delete users: %w", err)
+	}
+	affected, err := uc.repo.BatchDeleteNonSuperAdmin(ctx, ids)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.delete", 0, "failure", "User bulk delete failed."))
+		return nil, fmt.Errorf("admin bulk delete users: %w", err)
+	}
+	uc.clearSessions(ctx, ids)
+	_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.delete", 0, "success", "Users deleted."))
+	return bulkResult(requested, int(affected)), nil
+}
+
+// BulkRevokeSessions bumps tokenVersion for a batch of non-super-admin users and
+// clears the resolved users' sessions.
+func (uc *AdminUseCase) BulkRevokeSessions(ctx context.Context, operatorUserID uint, requestID, path string, sel UserBulkSelection) (*BulkResult, error) {
+	ids, requested, err := uc.resolveBulkTargets(ctx, sel)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.sessions.revoke", 0, "failure", "User bulk sessions revoke failed."))
+		return nil, fmt.Errorf("admin bulk revoke sessions: %w", err)
+	}
+	affected, err := uc.repo.BatchBumpTokenVersionNonSuperAdmin(ctx, ids)
+	if err != nil {
+		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.sessions.revoke", 0, "failure", "User bulk sessions revoke failed."))
+		return nil, fmt.Errorf("admin bulk revoke sessions: %w", err)
+	}
+	uc.clearSessions(ctx, ids)
+	_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.bulk.sessions.revoke", 0, "success", "User sessions revoked."))
+	return bulkResult(requested, int(affected)), nil
+}
+
+// Invitations returns a user's referral inviter and direct invitees.
+func (uc *AdminUseCase) Invitations(ctx context.Context, targetUserID uint) (*InvitationOverview, error) {
+	user, err := uc.repo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("admin invitations find user: %w", err)
+	}
+	if user == nil {
+		return nil, domain.ErrUserNotFound
+	}
+
+	overview := &InvitationOverview{Invitees: []domain.User{}}
+
+	inviterID, err := uc.repo.FindInviterID(ctx, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("admin invitations inviter: %w", err)
+	}
+	if inviterID != nil {
+		inviters, err := uc.repo.FindByIDs(ctx, []uint{*inviterID})
+		if err != nil {
+			return nil, fmt.Errorf("admin invitations load inviter: %w", err)
+		}
+		if len(inviters) > 0 {
+			overview.Inviter = &inviters[0]
+		}
+	}
+
+	inviteeIDs, err := uc.repo.ListInviteeIDs(ctx, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("admin invitations invitees: %w", err)
+	}
+	if len(inviteeIDs) > 0 {
+		invitees, err := uc.repo.FindByIDs(ctx, inviteeIDs)
+		if err != nil {
+			return nil, fmt.Errorf("admin invitations load invitees: %w", err)
+		}
+		// FindByIDs does not preserve order; re-sort newest first by id desc as a
+		// stable proxy for join order.
+		byID := make(map[uint]domain.User, len(invitees))
+		for _, u := range invitees {
+			byID[u.ID] = u
+		}
+		ordered := make([]domain.User, 0, len(inviteeIDs))
+		for _, id := range inviteeIDs {
+			if u, ok := byID[id]; ok {
+				ordered = append(ordered, u)
+			}
+		}
+		overview.Invitees = ordered
+	}
+
+	return overview, nil
 }
 
 // ForceLogout increments the user's tokenVersion and clears all sessions.

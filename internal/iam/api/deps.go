@@ -39,6 +39,7 @@ type IAMModule struct {
 	CaptchaStore               app.CaptchaStore
 	EmailCodeStore             app.EmailCodeStore
 	AdminResourceOwners        coreapp.OwnerQueryPort
+	AdminUserSelectionResolver *AdminUserSelectionResolver
 }
 
 // NewIAMModule wires up all IAM dependencies.
@@ -68,7 +69,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
-		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, operationLogRepo),
+		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, hasher, operationLogRepo),
 		InviteUseCase:              app.NewInviteUseCase(userRepo),
 		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(supplierApplicationRepo, userRepo),
 		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
@@ -80,5 +81,6 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,
 		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
+		AdminUserSelectionResolver: NewAdminUserSelectionResolver(userRepo),
 	}, nil
 }

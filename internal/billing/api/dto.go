@@ -86,6 +86,42 @@ type AdminAdjustWalletRequest struct {
 	Reason string `json:"reason" binding:"required"`
 }
 
+type AdminBulkAdjustWalletFilterRequest struct {
+	Search      string     `json:"search"`
+	Role        string     `json:"role" binding:"omitempty,oneof=user supplier admin super_admin"`
+	Enabled     *bool      `json:"enabled"`
+	UserGroupID uint       `json:"userGroupId"`
+	CreatedFrom *time.Time `json:"createdFrom"`
+	CreatedTo   *time.Time `json:"createdTo"`
+}
+
+type AdminBulkAdjustWalletSelectionRequest struct {
+	Mode    string                              `json:"mode" binding:"required,oneof=ids filter"`
+	UserIDs []uint                              `json:"userIds" binding:"omitempty,dive,gt=0"`
+	Filter  *AdminBulkAdjustWalletFilterRequest `json:"filter"`
+}
+
+type AdminBulkAdjustWalletRequest struct {
+	Selection AdminBulkAdjustWalletSelectionRequest `json:"selection" binding:"required"`
+	Amount    string                                `json:"amount" binding:"required"`
+	Reason    string                                `json:"reason" binding:"required"`
+}
+
+type AdminWalletBulkResponse struct {
+	Requested int `json:"requested"`
+	Affected  int `json:"affected"`
+	Skipped   int `json:"skipped"`
+}
+
+type AdminWalletBalanceResponse struct {
+	UserID          uint   `json:"userId"`
+	ConsumerBalance string `json:"consumerBalance"`
+}
+
+type AdminWalletBalanceListResponse struct {
+	Balances []AdminWalletBalanceResponse `json:"balances"`
+}
+
 type CardKeyResponse struct {
 	CardKey         string     `json:"cardKey"`
 	Amount          string     `json:"amount"`

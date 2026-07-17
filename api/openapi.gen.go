@@ -241,6 +241,30 @@ func (e AdminCreateProjectRequestAccessType) Valid() bool {
 	}
 }
 
+// Defines values for AdminCreateUserRequestRole.
+const (
+	AdminCreateUserRequestRoleAdmin      AdminCreateUserRequestRole = "admin"
+	AdminCreateUserRequestRoleSuperAdmin AdminCreateUserRequestRole = "super_admin"
+	AdminCreateUserRequestRoleSupplier   AdminCreateUserRequestRole = "supplier"
+	AdminCreateUserRequestRoleUser       AdminCreateUserRequestRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminCreateUserRequestRole enum.
+func (e AdminCreateUserRequestRole) Valid() bool {
+	switch e {
+	case AdminCreateUserRequestRoleAdmin:
+		return true
+	case AdminCreateUserRequestRoleSuperAdmin:
+		return true
+	case AdminCreateUserRequestRoleSupplier:
+		return true
+	case AdminCreateUserRequestRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminDomainBulkFilterPurpose.
 const (
 	AdminDomainBulkFilterPurposeBinding AdminDomainBulkFilterPurpose = "binding"
@@ -889,6 +913,48 @@ func (e AdminUpdateUserRequestRole) Valid() bool {
 	case AdminUpdateUserRequestRoleSupplier:
 		return true
 	case AdminUpdateUserRequestRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserBulkFilterRole.
+const (
+	AdminUserBulkFilterRoleAdmin      AdminUserBulkFilterRole = "admin"
+	AdminUserBulkFilterRoleSuperAdmin AdminUserBulkFilterRole = "super_admin"
+	AdminUserBulkFilterRoleSupplier   AdminUserBulkFilterRole = "supplier"
+	AdminUserBulkFilterRoleUser       AdminUserBulkFilterRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserBulkFilterRole enum.
+func (e AdminUserBulkFilterRole) Valid() bool {
+	switch e {
+	case AdminUserBulkFilterRoleAdmin:
+		return true
+	case AdminUserBulkFilterRoleSuperAdmin:
+		return true
+	case AdminUserBulkFilterRoleSupplier:
+		return true
+	case AdminUserBulkFilterRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserBulkSelectionMode.
+const (
+	AdminUserBulkSelectionModeFilter AdminUserBulkSelectionMode = "filter"
+	AdminUserBulkSelectionModeIds    AdminUserBulkSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserBulkSelectionMode enum.
+func (e AdminUserBulkSelectionMode) Valid() bool {
+	switch e {
+	case AdminUserBulkSelectionModeFilter:
+		return true
+	case AdminUserBulkSelectionModeIds:
 		return true
 	default:
 		return false
@@ -1929,13 +1995,13 @@ func (e ResourceBulkSelectionMode) Valid() bool {
 
 // Defines values for ResourceBulkSelection0Mode.
 const (
-	Ids ResourceBulkSelection0Mode = "ids"
+	ResourceBulkSelection0ModeIds ResourceBulkSelection0Mode = "ids"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkSelection0Mode enum.
 func (e ResourceBulkSelection0Mode) Valid() bool {
 	switch e {
-	case Ids:
+	case ResourceBulkSelection0ModeIds:
 		return true
 	default:
 		return false
@@ -2118,22 +2184,22 @@ func (e UpdateProxyRequestStatus) Valid() bool {
 
 // Defines values for UserResponseRole.
 const (
-	Admin      UserResponseRole = "admin"
-	SuperAdmin UserResponseRole = "super_admin"
-	Supplier   UserResponseRole = "supplier"
-	User       UserResponseRole = "user"
+	UserResponseRoleAdmin      UserResponseRole = "admin"
+	UserResponseRoleSuperAdmin UserResponseRole = "super_admin"
+	UserResponseRoleSupplier   UserResponseRole = "supplier"
+	UserResponseRoleUser       UserResponseRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the UserResponseRole enum.
 func (e UserResponseRole) Valid() bool {
 	switch e {
-	case Admin:
+	case UserResponseRoleAdmin:
 		return true
-	case SuperAdmin:
+	case UserResponseRoleSuperAdmin:
 		return true
-	case Supplier:
+	case UserResponseRoleSupplier:
 		return true
-	case User:
+	case UserResponseRoleUser:
 		return true
 	default:
 		return false
@@ -2542,6 +2608,30 @@ func (e GetAdminTasksParamsBizType) Valid() bool {
 	case GetAdminTasksParamsBizTypeDomainResource:
 		return true
 	case GetAdminTasksParamsBizTypeMicrosoftResource:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminUsersParamsRole.
+const (
+	GetAdminUsersParamsRoleAdmin      GetAdminUsersParamsRole = "admin"
+	GetAdminUsersParamsRoleSuperAdmin GetAdminUsersParamsRole = "super_admin"
+	GetAdminUsersParamsRoleSupplier   GetAdminUsersParamsRole = "supplier"
+	GetAdminUsersParamsRoleUser       GetAdminUsersParamsRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminUsersParamsRole enum.
+func (e GetAdminUsersParamsRole) Valid() bool {
+	switch e {
+	case GetAdminUsersParamsRoleAdmin:
+		return true
+	case GetAdminUsersParamsRoleSuperAdmin:
+		return true
+	case GetAdminUsersParamsRoleSupplier:
+		return true
+	case GetAdminUsersParamsRoleUser:
 		return true
 	default:
 		return false
@@ -3051,6 +3141,14 @@ type AdminBindingSummary struct {
 // AdminBindingSummaryStatus defines model for AdminBindingSummary.Status.
 type AdminBindingSummaryStatus string
 
+// AdminBulkAdjustWalletRequest defines model for AdminBulkAdjustWalletRequest.
+type AdminBulkAdjustWalletRequest struct {
+	// Amount Signed decimal amount; positive credits, negative debits.
+	Amount    string                 `json:"amount"`
+	Reason    string                 `json:"reason"`
+	Selection AdminUserBulkSelection `json:"selection"`
+}
+
 // AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
 type AdminCreateInviteRequest struct {
 	Code     string     `json:"code"`
@@ -3078,6 +3176,18 @@ type AdminCreateProjectRequest struct {
 
 // AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
 type AdminCreateProjectRequestAccessType string
+
+// AdminCreateUserRequest defines model for AdminCreateUserRequest.
+type AdminCreateUserRequest struct {
+	Email       openapi_types.Email        `json:"email"`
+	Nickname    *string                    `json:"nickname,omitempty"`
+	Password    string                     `json:"password"`
+	Role        AdminCreateUserRequestRole `json:"role"`
+	UserGroupId int                        `json:"userGroupId"`
+}
+
+// AdminCreateUserRequestRole defines model for AdminCreateUserRequest.Role.
+type AdminCreateUserRequestRole string
 
 // AdminDomainBulkCommandRequest defines model for AdminDomainBulkCommandRequest.
 type AdminDomainBulkCommandRequest struct {
@@ -3812,7 +3922,10 @@ type AdminUpdateUserPermissionsRequest struct {
 
 // AdminUpdateUserRequest defines model for AdminUpdateUserRequest.
 type AdminUpdateUserRequest struct {
+	Email       *openapi_types.Email        `json:"email,omitempty"`
 	Enabled     *bool                       `json:"enabled,omitempty"`
+	Nickname    *string                     `json:"nickname,omitempty"`
+	Password    *string                     `json:"password,omitempty"`
 	Role        *AdminUpdateUserRequestRole `json:"role,omitempty"`
 	UserGroupId *int                        `json:"userGroupId,omitempty"`
 }
@@ -3820,12 +3933,93 @@ type AdminUpdateUserRequest struct {
 // AdminUpdateUserRequestRole defines model for AdminUpdateUserRequest.Role.
 type AdminUpdateUserRequestRole string
 
+// AdminUserBulkCommand defines model for AdminUserBulkCommand.
+type AdminUserBulkCommand struct {
+	Selection AdminUserBulkSelection `json:"selection"`
+}
+
+// AdminUserBulkFilter defines model for AdminUserBulkFilter.
+type AdminUserBulkFilter struct {
+	CreatedFrom *time.Time               `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time               `json:"createdTo,omitempty"`
+	Enabled     *bool                    `json:"enabled,omitempty"`
+	Role        *AdminUserBulkFilterRole `json:"role,omitempty"`
+	Search      *string                  `json:"search,omitempty"`
+	UserGroupId *int                     `json:"userGroupId,omitempty"`
+}
+
+// AdminUserBulkFilterRole defines model for AdminUserBulkFilter.Role.
+type AdminUserBulkFilterRole string
+
+// AdminUserBulkResponse defines model for AdminUserBulkResponse.
+type AdminUserBulkResponse struct {
+	Affected  int `json:"affected"`
+	Requested int `json:"requested"`
+	Skipped   int `json:"skipped"`
+}
+
+// AdminUserBulkSelection defines model for AdminUserBulkSelection.
+type AdminUserBulkSelection struct {
+	Filter  *AdminUserBulkFilter       `json:"filter,omitempty"`
+	Mode    AdminUserBulkSelectionMode `json:"mode"`
+	UserIds *[]int                     `json:"userIds,omitempty"`
+}
+
+// AdminUserBulkSelectionMode defines model for AdminUserBulkSelection.Mode.
+type AdminUserBulkSelectionMode string
+
+// AdminUserFacets defines model for AdminUserFacets.
+type AdminUserFacets struct {
+	Group []struct {
+		Code  string `json:"code"`
+		Count int    `json:"count"`
+		Id    int    `json:"id"`
+		Name  string `json:"name"`
+	} `json:"group"`
+	Role   map[string]int `json:"role"`
+	Status struct {
+		All      int `json:"all"`
+		Disabled int `json:"disabled"`
+		Enabled  int `json:"enabled"`
+	} `json:"status"`
+}
+
+// AdminUserGroupListResponse defines model for AdminUserGroupListResponse.
+type AdminUserGroupListResponse struct {
+	Groups []UserGroupResponse `json:"groups"`
+}
+
+// AdminUserInvitationMember defines model for AdminUserInvitationMember.
+type AdminUserInvitationMember struct {
+	Email    string    `json:"email"`
+	Enabled  bool      `json:"enabled"`
+	Id       int       `json:"id"`
+	JoinedAt time.Time `json:"joinedAt"`
+	Nickname string    `json:"nickname"`
+	Role     string    `json:"role"`
+}
+
+// AdminUserInvitationsResponse defines model for AdminUserInvitationsResponse.
+type AdminUserInvitationsResponse struct {
+	Invitees []AdminUserInvitationMember `json:"invitees"`
+	Inviter  *AdminUserInvitationMember  `json:"inviter"`
+}
+
 // AdminUserListResponse defines model for AdminUserListResponse.
 type AdminUserListResponse struct {
-	Limit  int            `json:"limit"`
-	Offset int            `json:"offset"`
-	Total  int            `json:"total"`
-	Users  []UserResponse `json:"users"`
+	Facets *AdminUserFacets `json:"facets,omitempty"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+	Total  int              `json:"total"`
+	Users  []UserResponse   `json:"users"`
+}
+
+// AdminWalletBalanceList defines model for AdminWalletBalanceList.
+type AdminWalletBalanceList struct {
+	Balances []struct {
+		ConsumerBalance string `json:"consumerBalance"`
+		UserId          int    `json:"userId"`
+	} `json:"balances"`
 }
 
 // AllocationItem defines model for AllocationItem.
@@ -6091,6 +6285,15 @@ type PostAdminMicrosoftResourcesUnpublishParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminMicrosoftResourceValidationsParams defines parameters for PostAdminMicrosoftResourceValidations.
+type PostAdminMicrosoftResourceValidationsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // DeleteAdminMicrosoftResourceParams defines parameters for DeleteAdminMicrosoftResource.
 type DeleteAdminMicrosoftResourceParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
@@ -6291,11 +6494,79 @@ type GetAdminUsersParams struct {
 	Ids *[]int `form:"ids,omitempty" json:"ids,omitempty"`
 
 	// Search Unified fuzzy search across user email, nickname, and ID.
-	Search *string `form:"search,omitempty" json:"search,omitempty"`
+	Search      *string                  `form:"search,omitempty" json:"search,omitempty"`
+	Role        *GetAdminUsersParamsRole `form:"role,omitempty" json:"role,omitempty"`
+	Enabled     *bool                    `form:"enabled,omitempty" json:"enabled,omitempty"`
+	UserGroupId *int                     `form:"userGroupId,omitempty" json:"userGroupId,omitempty"`
+	CreatedFrom *time.Time               `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time               `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// GetAdminUsersParamsRole defines parameters for GetAdminUsers.
+type GetAdminUsersParamsRole string
+
+// PostAdminUserParams defines parameters for PostAdminUser.
+type PostAdminUserParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminUsersDeleteParams defines parameters for PostAdminUsersDelete.
+type PostAdminUsersDeleteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminUsersDisableParams defines parameters for PostAdminUsersDisable.
+type PostAdminUsersDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminUsersEnableParams defines parameters for PostAdminUsersEnable.
+type PostAdminUsersEnableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminUsersRevokeSessionsParams defines parameters for PostAdminUsersRevokeSessions.
+type PostAdminUsersRevokeSessionsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminUserParams defines parameters for DeleteAdminUser.
+type DeleteAdminUserParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminUserParams defines parameters for PatchAdminUser.
 type PatchAdminUserParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminUserApiKeysParams defines parameters for GetAdminUserApiKeys.
+type GetAdminUserApiKeysParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminUserApiKeyParams defines parameters for PostAdminUserApiKey.
+type PostAdminUserApiKeyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminUserApiKeyParams defines parameters for DeleteAdminUserApiKey.
+type DeleteAdminUserApiKeyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchAdminUserApiKeyParams defines parameters for PatchAdminUserApiKey.
+type PatchAdminUserApiKeyParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -6310,6 +6581,18 @@ type PutAdminUserPermissionsParams struct {
 type PostAdminRevokeSessionsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminWalletBulkAdjustParams defines parameters for PostAdminWalletBulkAdjust.
+type PostAdminWalletBulkAdjustParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminWalletBalancesParams defines parameters for GetAdminWalletBalances.
+type GetAdminWalletBalancesParams struct {
+	// UserIds Repeated or comma-separated user IDs for exact batch lookup.
+	UserIds *[]int `form:"userIds,omitempty" json:"userIds,omitempty"`
 }
 
 // PostAdminWalletCreditParams defines parameters for PostAdminWalletCredit.
@@ -6328,6 +6611,13 @@ type PostAdminWalletDebitParams struct {
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminWalletTransactionsParams defines parameters for GetAdminWalletTransactions.
+type GetAdminWalletTransactionsParams struct {
+	Search  *string `form:"search,omitempty" json:"search,omitempty"`
+	AfterId *int    `form:"afterId,omitempty" json:"afterId,omitempty"`
+	Limit   *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetApiKeysParams defines parameters for GetApiKeys.
@@ -6785,6 +7075,9 @@ type PostAdminMicrosoftResourcesPublishJSONRequestBody = AdminMicrosoftBulkComma
 // PostAdminMicrosoftResourcesUnpublishJSONRequestBody defines body for PostAdminMicrosoftResourcesUnpublish for application/json ContentType.
 type PostAdminMicrosoftResourcesUnpublishJSONRequestBody = AdminMicrosoftBulkCommandRequest
 
+// PostAdminMicrosoftResourceValidationsJSONRequestBody defines body for PostAdminMicrosoftResourceValidations for application/json ContentType.
+type PostAdminMicrosoftResourceValidationsJSONRequestBody = AdminMicrosoftBulkCommandRequest
+
 // PatchAdminMicrosoftResourceJSONRequestBody defines body for PatchAdminMicrosoftResource for application/json ContentType.
 type PatchAdminMicrosoftResourceJSONRequestBody = AdminMicrosoftUpdateRequest
 
@@ -6797,11 +7090,35 @@ type PostAdminServerJSONRequestBody = CreateMailServerRequest
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
 
+// PostAdminUserJSONRequestBody defines body for PostAdminUser for application/json ContentType.
+type PostAdminUserJSONRequestBody = AdminCreateUserRequest
+
+// PostAdminUsersDeleteJSONRequestBody defines body for PostAdminUsersDelete for application/json ContentType.
+type PostAdminUsersDeleteJSONRequestBody = AdminUserBulkCommand
+
+// PostAdminUsersDisableJSONRequestBody defines body for PostAdminUsersDisable for application/json ContentType.
+type PostAdminUsersDisableJSONRequestBody = AdminUserBulkCommand
+
+// PostAdminUsersEnableJSONRequestBody defines body for PostAdminUsersEnable for application/json ContentType.
+type PostAdminUsersEnableJSONRequestBody = AdminUserBulkCommand
+
+// PostAdminUsersRevokeSessionsJSONRequestBody defines body for PostAdminUsersRevokeSessions for application/json ContentType.
+type PostAdminUsersRevokeSessionsJSONRequestBody = AdminUserBulkCommand
+
 // PatchAdminUserJSONRequestBody defines body for PatchAdminUser for application/json ContentType.
 type PatchAdminUserJSONRequestBody = AdminUpdateUserRequest
 
+// PostAdminUserApiKeyJSONRequestBody defines body for PostAdminUserApiKey for application/json ContentType.
+type PostAdminUserApiKeyJSONRequestBody = APIKeyCreateRequest
+
+// PatchAdminUserApiKeyJSONRequestBody defines body for PatchAdminUserApiKey for application/json ContentType.
+type PatchAdminUserApiKeyJSONRequestBody = APIKeyPatchRequest
+
 // PutAdminUserPermissionsJSONRequestBody defines body for PutAdminUserPermissions for application/json ContentType.
 type PutAdminUserPermissionsJSONRequestBody = AdminUpdateUserPermissionsRequest
+
+// PostAdminWalletBulkAdjustJSONRequestBody defines body for PostAdminWalletBulkAdjust for application/json ContentType.
+type PostAdminWalletBulkAdjustJSONRequestBody = AdminBulkAdjustWalletRequest
 
 // PostAdminWalletCreditJSONRequestBody defines body for PostAdminWalletCredit for application/json ContentType.
 type PostAdminWalletCreditJSONRequestBody = AdminAdjustWalletRequest
@@ -7717,6 +8034,9 @@ type ServerInterface interface {
 	// Convert selected Microsoft resources to private supply
 	// (POST /v1/admin/resources/unpublish)
 	PostAdminMicrosoftResourcesUnpublish(c *gin.Context, params PostAdminMicrosoftResourcesUnpublishParams)
+	// Validate selected or all matching Microsoft resources
+	// (POST /v1/admin/resources/validations)
+	PostAdminMicrosoftResourceValidations(c *gin.Context, params PostAdminMicrosoftResourceValidationsParams)
 	// Logically delete one Microsoft resource
 	// (DELETE /v1/admin/resources/{resourceId})
 	DeleteAdminMicrosoftResource(c *gin.Context, resourceId int, params DeleteAdminMicrosoftResourceParams)
@@ -7786,9 +8106,45 @@ type ServerInterface interface {
 	// List all users (admin only)
 	// (GET /v1/admin/users)
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
+	// Create a user (admin only)
+	// (POST /v1/admin/users)
+	PostAdminUser(c *gin.Context, params PostAdminUserParams)
+	// Delete selected users
+	// (POST /v1/admin/users/delete)
+	PostAdminUsersDelete(c *gin.Context, params PostAdminUsersDeleteParams)
+	// Disable selected users
+	// (POST /v1/admin/users/disable)
+	PostAdminUsersDisable(c *gin.Context, params PostAdminUsersDisableParams)
+	// Enable selected users
+	// (POST /v1/admin/users/enable)
+	PostAdminUsersEnable(c *gin.Context, params PostAdminUsersEnableParams)
+	// List user groups (admin only)
+	// (GET /v1/admin/users/groups)
+	GetAdminUserGroups(c *gin.Context)
+	// Revoke sessions for selected users
+	// (POST /v1/admin/users/sessions/revoke)
+	PostAdminUsersRevokeSessions(c *gin.Context, params PostAdminUsersRevokeSessionsParams)
+	// Delete a user (admin only)
+	// (DELETE /v1/admin/users/{userId})
+	DeleteAdminUser(c *gin.Context, userId int, params DeleteAdminUserParams)
 	// Update a user (enable/disable, change role)
 	// (PATCH /v1/admin/users/{userId})
 	PatchAdminUser(c *gin.Context, userId int, params PatchAdminUserParams)
+	// List a user's API keys (admin only)
+	// (GET /v1/admin/users/{userId}/apikeys)
+	GetAdminUserApiKeys(c *gin.Context, userId int, params GetAdminUserApiKeysParams)
+	// Create an API key for a user (admin only)
+	// (POST /v1/admin/users/{userId}/apikeys)
+	PostAdminUserApiKey(c *gin.Context, userId int, params PostAdminUserApiKeyParams)
+	// Delete a user's API key (admin only)
+	// (DELETE /v1/admin/users/{userId}/apikeys/{keyId})
+	DeleteAdminUserApiKey(c *gin.Context, userId int, keyId int, params DeleteAdminUserApiKeyParams)
+	// Update a user's API key (admin only)
+	// (PATCH /v1/admin/users/{userId}/apikeys/{keyId})
+	PatchAdminUserApiKey(c *gin.Context, userId int, keyId int, params PatchAdminUserApiKeyParams)
+	// Get a user's inviter and invitees (admin only)
+	// (GET /v1/admin/users/{userId}/invitations)
+	GetAdminUserInvitations(c *gin.Context, userId int)
 	// Get a user's permission overrides
 	// (GET /v1/admin/users/{userId}/permissions)
 	GetAdminUserPermissions(c *gin.Context, userId int)
@@ -7798,12 +8154,24 @@ type ServerInterface interface {
 	// Force logout a user (revoke all sessions)
 	// (POST /v1/admin/users/{userId}/sessions/revoke)
 	PostAdminRevokeSessions(c *gin.Context, userId int, params PostAdminRevokeSessionsParams)
+	// Adjust wallet balance for selected users
+	// (POST /v1/admin/wallets/adjust)
+	PostAdminWalletBulkAdjust(c *gin.Context, params PostAdminWalletBulkAdjustParams)
+	// Batch read consumer balances for users (admin only)
+	// (GET /v1/admin/wallets/balances)
+	GetAdminWalletBalances(c *gin.Context, params GetAdminWalletBalancesParams)
+	// Get a user's wallet (admin only)
+	// (GET /v1/admin/wallets/{userId})
+	GetAdminWallet(c *gin.Context, userId int)
 	// Credit consumer balance manually
 	// (POST /v1/admin/wallets/{userId}/credit)
 	PostAdminWalletCredit(c *gin.Context, userId int, params PostAdminWalletCreditParams)
 	// Debit consumer balance manually
 	// (POST /v1/admin/wallets/{userId}/debit)
 	PostAdminWalletDebit(c *gin.Context, userId int, params PostAdminWalletDebitParams)
+	// List a user's wallet transactions (admin only)
+	// (GET /v1/admin/wallets/{userId}/transactions)
+	GetAdminWalletTransactions(c *gin.Context, userId int, params GetAdminWalletTransactionsParams)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
@@ -12443,6 +12811,73 @@ func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourcesUnpublish(c *gin.C
 	siw.Handler.PostAdminMicrosoftResourcesUnpublish(c, params)
 }
 
+// PostAdminMicrosoftResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminMicrosoftResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminMicrosoftResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminMicrosoftResourceValidations(c, params)
+}
+
 // DeleteAdminMicrosoftResource operation middleware
 func (siw *ServerInterfaceWrapper) DeleteAdminMicrosoftResource(c *gin.Context) {
 
@@ -13934,6 +14369,46 @@ func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "role" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "role", c.Request.URL.Query(), &params.Role, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter role: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "enabled" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "enabled", c.Request.URL.Query(), &params.Enabled, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter enabled: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "userGroupId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "userGroupId", c.Request.URL.Query(), &params.UserGroupId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userGroupId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -13942,6 +14417,300 @@ func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminUsers(c, params)
+}
+
+// PostAdminUser operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUser(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUserParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUser(c, params)
+}
+
+// PostAdminUsersDelete operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUsersDelete(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUsersDeleteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUsersDelete(c, params)
+}
+
+// PostAdminUsersDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUsersDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUsersDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUsersDisable(c, params)
+}
+
+// PostAdminUsersEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUsersEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUsersEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUsersEnable(c, params)
+}
+
+// GetAdminUserGroups operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserGroups(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserGroups(c)
+}
+
+// PostAdminUsersRevokeSessions operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUsersRevokeSessions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUsersRevokeSessionsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUsersRevokeSessions(c, params)
+}
+
+// DeleteAdminUser operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminUser(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminUserParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminUser(c, userId, params)
 }
 
 // PatchAdminUser operation middleware
@@ -13996,6 +14765,259 @@ func (siw *ServerInterfaceWrapper) PatchAdminUser(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminUser(c, userId, params)
+}
+
+// GetAdminUserApiKeys operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserApiKeys(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminUserApiKeysParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserApiKeys(c, userId, params)
+}
+
+// PostAdminUserApiKey operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUserApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUserApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUserApiKey(c, userId, params)
+}
+
+// DeleteAdminUserApiKey operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminUserApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminUserApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminUserApiKey(c, userId, keyId, params)
+}
+
+// PatchAdminUserApiKey operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminUserApiKey(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", c.Param("keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter keyId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminUserApiKeyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminUserApiKey(c, userId, keyId, params)
+}
+
+// GetAdminUserInvitations operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminUserInvitations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminUserInvitations(c, userId)
 }
 
 // GetAdminUserPermissions operation middleware
@@ -14131,6 +15153,107 @@ func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminRevokeSessions(c, userId, params)
+}
+
+// PostAdminWalletBulkAdjust operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminWalletBulkAdjust(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminWalletBulkAdjustParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminWalletBulkAdjust(c, params)
+}
+
+// GetAdminWalletBalances operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminWalletBalances(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminWalletBalancesParams
+
+	// ------------- Optional query parameter "userIds" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "userIds", c.Request.URL.Query(), &params.UserIds, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userIds: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminWalletBalances(c, params)
+}
+
+// GetAdminWallet operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminWallet(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminWallet(c, userId)
 }
 
 // PostAdminWalletCredit operation middleware
@@ -14283,6 +15406,60 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletDebit(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminWalletDebit(c, userId, params)
+}
+
+// GetAdminWalletTransactions operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminWalletTransactions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminWalletTransactionsParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminWalletTransactions(c, userId, params)
 }
 
 // GetApiKeys operation middleware
@@ -16621,6 +17798,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/resources/maintenance", wrapper.PostAdminMicrosoftResourcesMaintenance)
 	router.POST(options.BaseURL+"/v1/admin/resources/publish", wrapper.PostAdminMicrosoftResourcesPublish)
 	router.POST(options.BaseURL+"/v1/admin/resources/unpublish", wrapper.PostAdminMicrosoftResourcesUnpublish)
+	router.POST(options.BaseURL+"/v1/admin/resources/validations", wrapper.PostAdminMicrosoftResourceValidations)
 	router.DELETE(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.DeleteAdminMicrosoftResource)
 	router.GET(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.GetAdminMicrosoftResource)
 	router.PATCH(options.BaseURL+"/v1/admin/resources/:resourceId", wrapper.PatchAdminMicrosoftResource)
@@ -16644,12 +17822,28 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
 	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
+	router.POST(options.BaseURL+"/v1/admin/users", wrapper.PostAdminUser)
+	router.POST(options.BaseURL+"/v1/admin/users/delete", wrapper.PostAdminUsersDelete)
+	router.POST(options.BaseURL+"/v1/admin/users/disable", wrapper.PostAdminUsersDisable)
+	router.POST(options.BaseURL+"/v1/admin/users/enable", wrapper.PostAdminUsersEnable)
+	router.GET(options.BaseURL+"/v1/admin/users/groups", wrapper.GetAdminUserGroups)
+	router.POST(options.BaseURL+"/v1/admin/users/sessions/revoke", wrapper.PostAdminUsersRevokeSessions)
+	router.DELETE(options.BaseURL+"/v1/admin/users/:userId", wrapper.DeleteAdminUser)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
+	router.GET(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.GetAdminUserApiKeys)
+	router.POST(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.PostAdminUserApiKey)
+	router.DELETE(options.BaseURL+"/v1/admin/users/:userId/apikeys/:keyId", wrapper.DeleteAdminUserApiKey)
+	router.PATCH(options.BaseURL+"/v1/admin/users/:userId/apikeys/:keyId", wrapper.PatchAdminUserApiKey)
+	router.GET(options.BaseURL+"/v1/admin/users/:userId/invitations", wrapper.GetAdminUserInvitations)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
 	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
+	router.POST(options.BaseURL+"/v1/admin/wallets/adjust", wrapper.PostAdminWalletBulkAdjust)
+	router.GET(options.BaseURL+"/v1/admin/wallets/balances", wrapper.GetAdminWalletBalances)
+	router.GET(options.BaseURL+"/v1/admin/wallets/:userId", wrapper.GetAdminWallet)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
+	router.GET(options.BaseURL+"/v1/admin/wallets/:userId/transactions", wrapper.GetAdminWalletTransactions)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/usage", wrapper.GetApiKeyUsage)

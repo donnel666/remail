@@ -92,7 +92,7 @@ function FinanceAdjustModal({
         value > 0
           ? await creditMockFinanceUserWallet(
               userId,
-              value.toFixed(2),
+              value.toFixed(6),
               reason.trim()
             )
           : await debitMockFinanceUserWallet(
@@ -139,7 +139,7 @@ function FinanceAdjustModal({
           </span>
           <InputNumber
             onChange={setAmount}
-            precision={2}
+            precision={6}
             prefix="¥"
             step={1}
             style={{ width: "100%" }}
@@ -216,7 +216,7 @@ function FinanceWithdrawModal({
     try {
       const result = await withdrawMockFinanceUserWallet(
         user.userId,
-        value.toFixed(2),
+        value.toFixed(6),
         note.trim()
       );
       Toast.success(t("Withdrawal submitted."));
@@ -258,7 +258,7 @@ function FinanceWithdrawModal({
             max={available}
             min={0.01}
             onChange={setAmount}
-            precision={2}
+            precision={6}
             prefix="¥"
             step={1}
             style={{ width: "100%" }}
@@ -278,7 +278,7 @@ function FinanceWithdrawModal({
             ))}
             <Button
               disabled={available <= 0}
-              onClick={() => setAmount(Number(available.toFixed(2)))}
+              onClick={() => setAmount(Number(available.toFixed(6)))}
               size="small"
               type="tertiary"
             >

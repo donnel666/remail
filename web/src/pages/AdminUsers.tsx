@@ -60,21 +60,24 @@ import {
   type UserDetailTab,
 } from "./admin-users/user-detail-sheet";
 import {
-  USER_GROUPS,
-  deleteMockAdminUser,
-  deleteMockAdminUsers,
-  listMockAdminUsers,
-  revokeMockAdminUserSessions,
-  revokeMockAdminUsersSessions,
-  setMockAdminUsersEnabled,
-  updateMockAdminUser,
+  deleteAdminUser,
+  deleteAdminUsersByFilter,
+  deleteAdminUsersByIds,
+  listAdminUsers,
+  revokeAdminUserSessions,
+  revokeAdminUsersSessionsByFilter,
+  revokeAdminUsersSessionsByIds,
+  setAdminUsersEnabledByFilter,
+  setAdminUsersEnabledByIds,
+  updateAdminUser,
   type AdminUser,
   type AdminUserFacets,
   type AdminUserListFilter,
   type AdminUserRole,
   type AdminUserRoleFilter,
   type AdminUserStatusFilter,
-} from "./admin-users/admin-users-mock";
+} from "./admin-users/admin-users-api";
+import { useUserGroups } from "./admin-users/use-user-groups";
 import {
   avatarColor,
   formatDate,
@@ -98,6 +101,7 @@ export default function AdminUsers() {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const isMobile = useIsMobile();
+  const { groups } = useUserGroups();
   const capabilities = useMemo(
     () => getAdminUserCapabilities(currentUser?.permissions ?? []),
     [currentUser?.permissions]
@@ -121,6 +125,8 @@ export default function AdminUsers() {
   const [balanceTarget, setBalanceTarget] = useState<AdminUser | null>(null);
   const [bulkBalanceOpen, setBulkBalanceOpen] = useState(false);
   const [bulkBalanceTargetIDs, setBulkBalanceTargetIDs] = useState<number[]>([]);
+  const [bulkBalanceFilter, setBulkBalanceFilter] =
+    useState<AdminUserListFilter | null>(null);
   const [detailState, setDetailState] = useState<DetailState | null>(null);
   const [operatingUserID, setOperatingUserID] = useState<number | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([]);
@@ -152,7 +158,7 @@ export default function AdminUsers() {
 
   const loadUserBlock = useCallback(
     async (offset: number, limit: number) => {
-      const response = await listMockAdminUsers(listFilter, offset, limit);
+      const response = await listAdminUsers(listFilter, offset, limit);
       return {
         items: response.users,
         meta: response.facets,
@@ -198,13 +204,13 @@ export default function AdminUsers() {
 
   const groupStats = useMemo(() => {
     if (facets) return facets.group;
-    return USER_GROUPS.map((group) => ({
+    return groups.map((group) => ({
       id: group.id,
       code: group.code,
       name: group.name,
       count: 0,
     }));
-  }, [facets]);
+  }, [facets, groups]);
   const groupTotal = useMemo(
     () =>
       facets
@@ -292,7 +298,7 @@ export default function AdminUsers() {
       }
       setOperatingUserID(record.id);
       try {
-        const updated = await updateMockAdminUser(record.id, {
+        const updated = await updateAdminUser(record.id, {
           enabled: !record.enabled,
         });
         await handleUserChanged(updated);
@@ -318,7 +324,7 @@ export default function AdminUsers() {
         okText: t("Exit"),
         onOk: async () => {
           try {
-            await revokeMockAdminUserSessions(record.id);
+            await revokeAdminUserSessions(record.id);
             Toast.success(t("All sessions revoked."));
           } catch (error) {
             Toast.error(getIamErrorMessage(t, error, "Operation failed."));
@@ -343,7 +349,7 @@ export default function AdminUsers() {
         okText: t("Delete"),
         onOk: async () => {
           try {
-            await deleteMockAdminUser(record.id);
+            await deleteAdminUser(record.id);
             Toast.success(t("User deleted."));
             setDetailState((previous) =>
               previous && previous.user.id === record.id ? null : previous
@@ -396,13 +402,13 @@ export default function AdminUsers() {
           try {
             const result =
               action === "enable" || action === "disable"
-                ? await setMockAdminUsersEnabled(
+                ? await setAdminUsersEnabledByIds(
                     selectedUserIDs,
                     action === "enable"
                   )
                 : action === "logout"
-                  ? await revokeMockAdminUsersSessions(selectedUserIDs)
-                  : await deleteMockAdminUsers(selectedUserIDs);
+                  ? await revokeAdminUsersSessionsByIds(selectedUserIDs)
+                  : await deleteAdminUsersByIds(selectedUserIDs);
 
             if (action === "delete") {
               updateLoadedItems((items) =>
@@ -464,32 +470,23 @@ export default function AdminUsers() {
       Toast.warning(t("No users selected."));
       return;
     }
+    setBulkBalanceFilter(null);
     setBulkBalanceTargetIDs(selectedUserIDs);
     setBulkAction("balance");
     setBulkBalanceOpen(true);
   }, [capabilities.canAdjustBalance, selectedUserIDs, t]);
 
-  const fetchAllFilteredUserIDs = useCallback(async () => {
-    const response = await listMockAdminUsers(listFilter, 0, Math.max(total, 1));
-    return response.users.map((user) => user.id);
-  }, [listFilter, total]);
-
-  const openBulkBalanceAll = useCallback(async () => {
+  const openBulkBalanceAll = useCallback(() => {
     if (!capabilities.canAdjustBalance) return;
     if (total === 0) {
       Toast.warning(t("No users match the current filters."));
       return;
     }
+    setBulkBalanceTargetIDs([]);
+    setBulkBalanceFilter(listFilter);
     setBulkAction("balance");
-    try {
-      const ids = await fetchAllFilteredUserIDs();
-      setBulkBalanceTargetIDs(ids);
-      setBulkBalanceOpen(true);
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Users load failed."));
-      setBulkAction(null);
-    }
-  }, [capabilities.canAdjustBalance, fetchAllFilteredUserIDs, t, total]);
+    setBulkBalanceOpen(true);
+  }, [capabilities.canAdjustBalance, listFilter, t, total]);
 
   const confirmBulkActionAll = useCallback(
     (action: "disable" | "logout" | "delete") => {
@@ -519,37 +516,12 @@ export default function AdminUsers() {
         onOk: async () => {
           setBulkAction(action);
           try {
-            const ids = await fetchAllFilteredUserIDs();
             const result =
               action === "disable"
-                ? await setMockAdminUsersEnabled(ids, false)
+                ? await setAdminUsersEnabledByFilter(listFilter, false)
                 : action === "logout"
-                  ? await revokeMockAdminUsersSessions(ids)
-                  : await deleteMockAdminUsers(ids);
-
-            if (action === "delete") {
-              updateLoadedItems((items) =>
-                items.filter((item) => !ids.includes(item.id))
-              );
-              setDetailState((previous) =>
-                previous && ids.includes(previous.user.id) ? null : previous
-              );
-            } else {
-              updateLoadedItems((items) =>
-                items.map((item) =>
-                  ids.includes(item.id) && item.role !== "super_admin"
-                    ? { ...item, enabled: false }
-                    : item
-                )
-              );
-              setDetailState((previous) =>
-                previous &&
-                ids.includes(previous.user.id) &&
-                previous.user.role !== "super_admin"
-                  ? { ...previous, user: { ...previous.user, enabled: false } }
-                  : previous
-              );
-            }
+                  ? await revokeAdminUsersSessionsByFilter(listFilter)
+                  : await deleteAdminUsersByFilter(listFilter);
 
             setSelectedRowKeys([]);
             await refresh();
@@ -569,14 +541,7 @@ export default function AdminUsers() {
         title: t("Batch user action", { action: label }),
       });
     },
-    [
-      capabilities.canOperateUsers,
-      fetchAllFilteredUserIDs,
-      refresh,
-      t,
-      total,
-      updateLoadedItems,
-    ]
+    [capabilities.canOperateUsers, listFilter, refresh, t, total]
   );
 
   const selectionExtraActions = useMemo(
@@ -1180,41 +1145,8 @@ export default function AdminUsers() {
       />
       <WalletAdjustModal
         balance="-"
-        onBulkDone={async (signedAmount) => {
-          updateLoadedItems((items) =>
-            items.map((item) => {
-              if (
-                !bulkBalanceTargetIDs.includes(item.id) ||
-                item.role === "super_admin"
-              ) {
-                return item;
-              }
-              const nextBalance = Number(item.consumerBalance) + signedAmount;
-              return nextBalance < 0
-                ? item
-                : { ...item, consumerBalance: nextBalance.toFixed(2) };
-            })
-          );
-          setDetailState((previous) => {
-            if (
-              !previous ||
-              !bulkBalanceTargetIDs.includes(previous.user.id) ||
-              previous.user.role === "super_admin"
-            ) {
-              return previous;
-            }
-            const nextBalance =
-              Number(previous.user.consumerBalance) + signedAmount;
-            return nextBalance < 0
-              ? previous
-              : {
-                  ...previous,
-                  user: {
-                    ...previous.user,
-                    consumerBalance: nextBalance.toFixed(2),
-                  },
-                };
-          });
+        filter={bulkBalanceFilter ?? undefined}
+        onBulkDone={async () => {
           setSelectedRowKeys([]);
           await refresh();
         }}

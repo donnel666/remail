@@ -65,8 +65,35 @@ type User struct {
 }
 
 type UserListFilter struct {
-	IDs    []uint
-	Search string
+	IDs         []uint
+	Search      string
+	Role        *Role
+	Enabled     *bool
+	UserGroupID *uint
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
+// UserFacets holds admin-list aggregate counts. Each dimension is counted with
+// its own filter omitted, so selecting a role tab still shows the other tabs'
+// counts.
+type UserFacets struct {
+	Role   map[string]int64
+	Status StatusFacet
+	Group  []GroupFacet
+}
+
+type StatusFacet struct {
+	All      int64
+	Enabled  int64
+	Disabled int64
+}
+
+type GroupFacet struct {
+	ID    uint
+	Code  string
+	Name  string
+	Count int64
 }
 
 // IsActivationNeeded returns true when no users exist.

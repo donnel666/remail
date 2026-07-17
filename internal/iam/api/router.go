@@ -90,8 +90,17 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	admin.Use(middleware.CSRFRequired())
 	{
 		admin.GET("/users", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUsers)
+		admin.POST("/users", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "write"), h.PostAdminUser)
 		admin.PATCH("/users/:userId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "write"), h.PatchAdminUser)
+		admin.DELETE("/users/:userId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.DeleteAdminUser)
+		admin.GET("/users/:userId/invitations", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUserInvitations)
 		admin.POST("/users/:userId/sessions/revoke", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminRevokeSessions)
+		// Selection-based bulk actions. Static /users/<verb> paths coexist with the
+		// /users/:userId param routes above (gin supports static+param siblings).
+		admin.POST("/users/enable", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminUsersEnable)
+		admin.POST("/users/disable", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminUsersDisable)
+		admin.POST("/users/delete", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminUsersDelete)
+		admin.POST("/users/sessions/revoke", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminUsersRevokeSessions)
 		admin.GET("/users/groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "read"), h.GetAdminUserGroups)
 		admin.POST("/users/groups", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PostAdminUserGroup)
 		admin.PATCH("/users/groups/:groupId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user_group", "write"), h.PatchAdminUserGroup)

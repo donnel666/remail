@@ -9,6 +9,7 @@
 | 2026-07-08 | V1.2 | Codex | 按产品设计纠正 API Key 展示边界：当前用户凭证管理列表可返回明文；补充 API Key 额度、不限 RPM 和软删除语义。 |
 | 2026-07-09 | V1.3 | Codex | 补充公开 API 入口策略：API Key 调用统一收敛到 `/v1/open/**`，文档分组只作为展示标签，不绑定 URI。 |
 | 2026-07-09 | V1.4 | Codex | 按接口命名清洁度要求规范 OpenAPI URI：API Key 当前信息使用 `/v1/open/apikey/profile`，公开资源导入/检测使用 `/v1/open/resources/imports`、`/v1/open/resources/validations`；只调整 URI 命名，不改变 `/v1/open/**` 鉴权和展示分组策略。 |
+| 2026-07-17 | V1.5 | Codex | 补充管理员按用户管理 API Key 的后台接口：`GET/POST /v1/admin/users/{userId}/apikeys` 与 `PATCH/DELETE /v1/admin/users/{userId}/apikeys/{keyId}`，供用户管理页 API Key 页签使用，复用现有凭证用例并按 `iam:user/operate` 授权；不改变 `/v1/open/**` 鉴权与展示分组策略。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -119,6 +120,10 @@ API Key 限制补充设计：
 | `GET` | `/v1/admin/apikeys` | 管理员查询 API Key。 |
 | `GET` | `/v1/admin/apikeys/{keyId}` | 授权详情，返回明文。 |
 | `PATCH` | `/v1/admin/apikeys/{keyId}` | 调整启停、限流、并发、过期时间。 |
+| `GET` | `/v1/admin/users/{userId}/apikeys` | 管理员查看指定用户的 API Key 列表（用户管理页 API Key 页签），权限 `iam:user/operate`。 |
+| `POST` | `/v1/admin/users/{userId}/apikeys` | 管理员为指定用户创建 API Key；缺省 `Idempotency-Key` 时服务端合成。 |
+| `PATCH` | `/v1/admin/users/{userId}/apikeys/{keyId}` | 管理员调整指定用户某 API Key 的启停、限流、并发、额度、过期时间。 |
+| `DELETE` | `/v1/admin/users/{userId}/apikeys/{keyId}` | 管理员软删除指定用户的 API Key。 |
 | `GET` | `/v1/admin/tokens` | 服务凭证查询。 |
 | `GET` | `/v1/admin/tokens/{tokenId}` | 授权详情，返回明文。 |
 | `PATCH` | `/v1/admin/tokens/{tokenId}` | 禁用。 |

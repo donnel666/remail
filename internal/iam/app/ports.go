@@ -56,6 +56,44 @@ type UserRepository interface {
 	// fields, atomically refuses a row whose current role is super_admin, and
 	// writes the operation log in the same transaction.
 	UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
+
+	// UpdateNonSuperAdminProfileWithOperationLog updates profile and access
+	// fields (email, nickname, password, enabled, role, group) atomically,
+	// refuses a super_admin row, and writes the operation log in one transaction.
+	UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
+
+	// DeleteNonSuperAdminWithOperationLog hard-deletes a user, refusing a
+	// super_admin row, and writes the operation log in the same transaction.
+	DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error
+
+	// ResolveBulkUserIDs returns non-super-admin user IDs for a bulk selection,
+	// capped at 1000. When ids is non-empty it selects those rows; otherwise it
+	// applies the list filter.
+	ResolveBulkUserIDs(ctx context.Context, ids []uint, filter domain.UserListFilter) ([]uint, error)
+
+	// BatchSetEnabledNonSuperAdmin flips enabled for the given non-super-admin
+	// rows whose value differs (bumping token_version on disable) and returns the
+	// number of rows changed.
+	BatchSetEnabledNonSuperAdmin(ctx context.Context, ids []uint, enabled bool) (int64, error)
+
+	// BatchBumpTokenVersionNonSuperAdmin increments token_version for the given
+	// non-super-admin rows and returns the number of rows changed.
+	BatchBumpTokenVersionNonSuperAdmin(ctx context.Context, ids []uint) (int64, error)
+
+	// BatchDeleteNonSuperAdmin hard-deletes the given non-super-admin rows and
+	// returns the number of rows deleted.
+	BatchDeleteNonSuperAdmin(ctx context.Context, ids []uint) (int64, error)
+
+	// FacetsByFilter returns admin-list aggregate counts per role/status/group.
+	FacetsByFilter(ctx context.Context, filter domain.UserListFilter, groups []domain.UserGroup) (*domain.UserFacets, error)
+
+	// FindInviterID returns the referral owner of the invite the user registered
+	// with, or nil when the user was not referred.
+	FindInviterID(ctx context.Context, userID uint) (*uint, error)
+
+	// ListInviteeIDs returns ids of users registered through the user's referral
+	// invite, newest first.
+	ListInviteeIDs(ctx context.Context, ownerUserID uint) ([]uint, error)
 }
 
 // InviteRepository defines administrator invite persistence.

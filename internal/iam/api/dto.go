@@ -60,9 +60,21 @@ type PasswordResetRequest struct {
 
 // AdminUpdateUserRequest is the request body for PATCH /v1/admin/users/:userId.
 type AdminUpdateUserRequest struct {
+	Email       *string `json:"email,omitempty" binding:"omitempty,email"`
+	Nickname    *string `json:"nickname,omitempty" binding:"omitempty,max=100"`
+	Password    *string `json:"password,omitempty" binding:"omitempty,min=6"`
 	Enabled     *bool   `json:"enabled,omitempty"`
 	Role        *string `json:"role,omitempty"`
 	UserGroupID *uint   `json:"userGroupId,omitempty"`
+}
+
+// AdminCreateUserRequest is the request body for POST /v1/admin/users.
+type AdminCreateUserRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	Nickname    string `json:"nickname" binding:"omitempty,max=100"`
+	Password    string `json:"password" binding:"required,min=6"`
+	Role        string `json:"role" binding:"required"`
+	UserGroupID uint   `json:"userGroupId" binding:"required"`
 }
 
 type PermissionPolicyRequest struct {
@@ -94,6 +106,36 @@ type SupplierApplicationRequest struct {
 
 type AdminRejectSupplierApplicationRequest struct {
 	ReviewReason string `json:"reviewReason" binding:"required,max=500"`
+}
+
+// AdminUserBulkFilterRequest mirrors the browse-list filter for selection-based
+// bulk user actions.
+type AdminUserBulkFilterRequest struct {
+	Search      string     `json:"search"`
+	Role        string     `json:"role" binding:"omitempty,oneof=user supplier admin super_admin"`
+	Enabled     *bool      `json:"enabled"`
+	UserGroupID uint       `json:"userGroupId"`
+	CreatedFrom *time.Time `json:"createdFrom"`
+	CreatedTo   *time.Time `json:"createdTo"`
+}
+
+// AdminUserBulkSelectionRequest selects bulk targets by ids or by filter.
+type AdminUserBulkSelectionRequest struct {
+	Mode    string                      `json:"mode" binding:"required,oneof=ids filter"`
+	UserIDs []uint                      `json:"userIds" binding:"omitempty,dive,gt=0"`
+	Filter  *AdminUserBulkFilterRequest `json:"filter"`
+}
+
+// AdminUserBulkCommandRequest is the body for the selection-based bulk user endpoints.
+type AdminUserBulkCommandRequest struct {
+	Selection AdminUserBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
+// AdminUserBulkResponse reports how many rows a bulk action requested, changed, and skipped.
+type AdminUserBulkResponse struct {
+	Requested int `json:"requested"`
+	Affected  int `json:"affected"`
+	Skipped   int `json:"skipped"`
 }
 
 // --- Response DTOs ---
@@ -143,10 +185,48 @@ type CaptchaResponse struct {
 
 // AdminUserListResponse is the response for GET /v1/admin/users.
 type AdminUserListResponse struct {
-	Users  []UserResponse `json:"users"`
-	Total  int64          `json:"total"`
-	Offset int            `json:"offset"`
-	Limit  int            `json:"limit"`
+	Users  []UserResponse           `json:"users"`
+	Total  int64                    `json:"total"`
+	Offset int                      `json:"offset"`
+	Limit  int                      `json:"limit"`
+	Facets *AdminUserFacetsResponse `json:"facets,omitempty"`
+}
+
+// AdminUserFacetsResponse holds the browse-list aggregate counts.
+type AdminUserFacetsResponse struct {
+	Role   map[string]int64      `json:"role"`
+	Status AdminUserStatusFacet  `json:"status"`
+	Group  []AdminUserGroupFacet `json:"group"`
+}
+
+type AdminUserStatusFacet struct {
+	All      int64 `json:"all"`
+	Enabled  int64 `json:"enabled"`
+	Disabled int64 `json:"disabled"`
+}
+
+type AdminUserGroupFacet struct {
+	ID    uint   `json:"id"`
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+// AdminUserInvitationMember is a safe inviter/invitee view.
+type AdminUserInvitationMember struct {
+	ID       uint      `json:"id"`
+	Email    string    `json:"email"`
+	Nickname string    `json:"nickname"`
+	Role     string    `json:"role"`
+	Enabled  bool      `json:"enabled"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
+// AdminUserInvitationsResponse is the response for GET
+// /v1/admin/users/:userId/invitations.
+type AdminUserInvitationsResponse struct {
+	Inviter  *AdminUserInvitationMember  `json:"inviter"`
+	Invitees []AdminUserInvitationMember `json:"invitees"`
 }
 
 type AdminUserGroupListResponse struct {
@@ -252,6 +332,36 @@ func toUserGroupResponse(group domain.UserGroup) UserGroupResponse {
 		Name:        group.Name,
 		Description: group.Description,
 		Enabled:     group.Enabled,
+	}
+}
+
+func toAdminUserFacetsResponse(facets *domain.UserFacets) *AdminUserFacetsResponse {
+	if facets == nil {
+		return nil
+	}
+	groups := make([]AdminUserGroupFacet, len(facets.Group))
+	for i, g := range facets.Group {
+		groups[i] = AdminUserGroupFacet{ID: g.ID, Code: g.Code, Name: g.Name, Count: g.Count}
+	}
+	return &AdminUserFacetsResponse{
+		Role: facets.Role,
+		Status: AdminUserStatusFacet{
+			All:      facets.Status.All,
+			Enabled:  facets.Status.Enabled,
+			Disabled: facets.Status.Disabled,
+		},
+		Group: groups,
+	}
+}
+
+func toAdminUserInvitationMember(user domain.User) AdminUserInvitationMember {
+	return AdminUserInvitationMember{
+		ID:       user.ID,
+		Email:    user.Email,
+		Nickname: user.Nickname,
+		Role:     user.Role.String(),
+		Enabled:  user.Enabled,
+		JoinedAt: user.CreatedAt,
 	}
 }
 

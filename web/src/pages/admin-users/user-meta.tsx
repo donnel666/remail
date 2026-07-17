@@ -4,7 +4,7 @@ import type { TFunction } from "i18next";
 import type {
   AdminTransactionType,
   AdminUserRole,
-} from "./admin-users-mock";
+} from "./admin-users-api";
 
 type TagColor =
   | "grey"
@@ -69,14 +69,7 @@ export function renderTransactionTypeTag(
   );
 }
 
-export function formatMoney(value: string | number | null | undefined) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+export { formatMoney } from "./format-money";
 
 export function formatDateTime(value?: string | null) {
   if (!value) return "-";

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/donnel666/remail/api/middleware"
@@ -407,12 +408,12 @@ func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.AdminUseCase.ListUsers(
-		c.Request.Context(),
-		domain.UserListFilter{IDs: ids, Search: c.Query("search")},
-		offset,
-		limit,
-	)
+	filter := domain.UserListFilter{IDs: ids, Search: c.Query("search")}
+	if !applyAdminUserQueryFilters(c, &filter) {
+		return
+	}
+
+	result, err := h.module.AdminUseCase.ListUsers(c.Request.Context(), filter, offset, limit)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -428,7 +429,58 @@ func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
 		Total:  result.Total,
 		Offset: result.Offset,
 		Limit:  result.Limit,
+		Facets: toAdminUserFacetsResponse(result.Facets),
 	})
+}
+
+// applyAdminUserQueryFilters parses the optional role/enabled/userGroupId/
+// createdFrom/createdTo query params. Writes a 400 and returns false on any
+// malformed value.
+func applyAdminUserQueryFilters(c *gin.Context, filter *domain.UserListFilter) bool {
+	invalid := func() bool {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false
+	}
+	if raw := strings.TrimSpace(c.Query("role")); raw != "" {
+		role := domain.Role(raw)
+		if !role.IsValid() {
+			return invalid()
+		}
+		filter.Role = &role
+	}
+	if raw := strings.TrimSpace(c.Query("enabled")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return invalid()
+		}
+		filter.Enabled = &enabled
+	}
+	if raw := strings.TrimSpace(c.Query("userGroupId")); raw != "" {
+		groupID, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || groupID == 0 {
+			return invalid()
+		}
+		id := uint(groupID)
+		filter.UserGroupID = &id
+	}
+	if raw := strings.TrimSpace(c.Query("createdFrom")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return invalid()
+		}
+		filter.CreatedFrom = &parsed
+	}
+	if raw := strings.TrimSpace(c.Query("createdTo")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return invalid()
+		}
+		filter.CreatedTo = &parsed
+	}
+	return true
 }
 
 func (h *IAMHandler) GetAdminPermissions(c *gin.Context) {
@@ -723,7 +775,14 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 		role = &parsedRole
 	}
 
-	updateReq := &app.UpdateUserRequest{Enabled: req.Enabled, Role: role, UserGroupID: req.UserGroupID}
+	updateReq := &app.UpdateUserRequest{
+		Email:       req.Email,
+		Nickname:    req.Nickname,
+		Password:    req.Password,
+		Enabled:     req.Enabled,
+		Role:        role,
+		UserGroupID: req.UserGroupID,
+	}
 
 	operatorID, _ := middleware.GetCurrentUserID(c)
 	allowSensitive, ok := h.currentUserHasPermission(c, "iam:permission", "sensitive")
@@ -737,6 +796,74 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(user)})
+}
+
+// POST /v1/admin/users
+func (h *IAMHandler) PostAdminUser(c *gin.Context) {
+	var req AdminCreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	allowSensitive, ok := h.currentUserHasPermission(c, "iam:permission", "sensitive")
+	if !ok {
+		return
+	}
+	user, err := h.module.AdminUseCase.CreateUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), app.CreateUserRequest{
+		Email:       req.Email,
+		Nickname:    req.Nickname,
+		Password:    req.Password,
+		Role:        domain.Role(strings.TrimSpace(req.Role)),
+		UserGroupID: req.UserGroupID,
+	}, allowSensitive)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"user": toUserResponse(user)})
+}
+
+// DELETE /v1/admin/users/:userId
+func (h *IAMHandler) DeleteAdminUser(c *gin.Context) {
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	if err := h.module.AdminUseCase.DeleteUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), targetUserID); err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// GET /v1/admin/users/:userId/invitations
+func (h *IAMHandler) GetAdminUserInvitations(c *gin.Context) {
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	overview, err := h.module.AdminUseCase.Invitations(c.Request.Context(), targetUserID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	resp := AdminUserInvitationsResponse{Invitees: make([]AdminUserInvitationMember, 0, len(overview.Invitees))}
+	if overview.Inviter != nil {
+		member := toAdminUserInvitationMember(*overview.Inviter)
+		resp.Inviter = &member
+	}
+	for _, invitee := range overview.Invitees {
+		resp.Invitees = append(resp.Invitees, toAdminUserInvitationMember(invitee))
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // POST /v1/admin/users/:userId/sessions/revoke
@@ -758,6 +885,123 @@ func (h *IAMHandler) PostAdminRevokeSessions(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// --- Admin bulk user actions (selection-based) ---
+
+// POST /v1/admin/users/enable
+func (h *IAMHandler) PostAdminUsersEnable(c *gin.Context) {
+	sel, ok := h.bindAdminUserBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkSetEnabled(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel, true)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminUserBulkResponse(result))
+}
+
+// POST /v1/admin/users/disable
+func (h *IAMHandler) PostAdminUsersDisable(c *gin.Context) {
+	sel, ok := h.bindAdminUserBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkSetEnabled(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel, false)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminUserBulkResponse(result))
+}
+
+// POST /v1/admin/users/delete
+func (h *IAMHandler) PostAdminUsersDelete(c *gin.Context) {
+	sel, ok := h.bindAdminUserBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkDeleteUsers(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminUserBulkResponse(result))
+}
+
+// POST /v1/admin/users/sessions/revoke
+func (h *IAMHandler) PostAdminUsersRevokeSessions(c *gin.Context) {
+	sel, ok := h.bindAdminUserBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkRevokeSessions(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminUserBulkResponse(result))
+}
+
+// bindAdminUserBulkSelection binds the bulk command body and converts it to an
+// app selection. Writes a 400 and returns false on a malformed body or role.
+// The optional Idempotency-Key header is tolerated (declared in the spec) but
+// not enforced here.
+func (h *IAMHandler) bindAdminUserBulkSelection(c *gin.Context) (app.UserBulkSelection, bool) {
+	var req AdminUserBulkCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return app.UserBulkSelection{}, false
+	}
+	sel := app.UserBulkSelection{Mode: req.Selection.Mode}
+	if req.Selection.Mode == "ids" {
+		sel.UserIDs = req.Selection.UserIDs
+		return sel, true
+	}
+	filter := domain.UserListFilter{}
+	f := req.Selection.Filter
+	if f == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return app.UserBulkSelection{}, false
+	}
+	if raw := strings.TrimSpace(f.Role); raw != "" {
+		role := domain.Role(raw)
+		if !role.IsValid() {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message":   "Invalid request body.",
+				"requestId": middleware.GetRequestID(c),
+			})
+			return app.UserBulkSelection{}, false
+		}
+		filter.Role = &role
+	}
+	filter.Search = strings.TrimSpace(f.Search)
+	filter.Enabled = f.Enabled
+	if f.UserGroupID != 0 {
+		groupID := f.UserGroupID
+		filter.UserGroupID = &groupID
+	}
+	filter.CreatedFrom = f.CreatedFrom
+	filter.CreatedTo = f.CreatedTo
+	sel.Filter = filter
+	return sel, true
+}
+
+func toAdminUserBulkResponse(result *app.BulkResult) AdminUserBulkResponse {
+	return AdminUserBulkResponse{Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped}
 }
 
 // --- Helpers ---

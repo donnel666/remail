@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	"github.com/donnel666/remail/internal/openapi/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
 )
 
@@ -145,29 +147,9 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req KeyPatchRequest
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	req, ok := decodeKeyPatchRequest(c)
+	if !ok {
 		return
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	if _, exists := raw["expireAt"]; exists {
-		req.ExpireSet = true
-	}
-	if _, exists := raw["rateLimitPerMinute"]; exists {
-		req.RateLimitSet = true
-	}
-	if _, exists := raw["quotaLimit"]; exists {
-		req.QuotaSet = true
 	}
 	item, err := h.mod.UseCase.UpdateAPIKey(c.Request.Context(), openapiapp.UpdateAPIKeyRequest{
 		UserID:             userID,
@@ -187,6 +169,145 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, apiKeyResponse(*item, true))
+}
+
+// decodeKeyPatchRequest reads the PATCH body and records which optional fields
+// were present so callers can distinguish "clear" from "leave unchanged".
+func decodeKeyPatchRequest(c *gin.Context) (KeyPatchRequest, bool) {
+	var req KeyPatchRequest
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return req, false
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return req, false
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return req, false
+	}
+	if _, exists := raw["expireAt"]; exists {
+		req.ExpireSet = true
+	}
+	if _, exists := raw["rateLimitPerMinute"]; exists {
+		req.RateLimitSet = true
+	}
+	if _, exists := raw["quotaLimit"]; exists {
+		req.QuotaSet = true
+	}
+	return req, true
+}
+
+// --- Admin per-user API keys (iam:user:operate) ---
+
+// GET /v1/admin/users/:userId/apikeys
+func (h *Handler) GetAdminUserAPIKeys(c *gin.Context) {
+	userID, ok := parseUintParam(c, "userId")
+	if !ok {
+		return
+	}
+	offset, limit, ok := parseOffsetLimit(c)
+	if !ok {
+		return
+	}
+	items, total, err := h.mod.UseCase.ListAPIKeys(c.Request.Context(), userID, offset, limit)
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	resp := KeyListResponse{Items: make([]KeyResponse, len(items)), Total: total, Offset: offset, Limit: limit}
+	for i := range items {
+		resp.Items[i] = apiKeyResponse(items[i], true)
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// POST /v1/admin/users/:userId/apikeys
+func (h *Handler) PostAdminUserAPIKey(c *gin.Context) {
+	userID, ok := parseUintParam(c, "userId")
+	if !ok {
+		return
+	}
+	var req KeyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	// Admin-initiated creation is not client-retried, so synthesize an
+	// idempotency key when the caller omits the header.
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if idempotencyKey == "" {
+		idempotencyKey = platform.NewUUIDV4CompactUpper()
+	}
+	item, err := h.mod.UseCase.CreateAPIKey(c.Request.Context(), openapiapp.CreateAPIKeyRequest{
+		UserID:             userID,
+		Name:               req.Name,
+		ExpireAt:           req.ExpireAt,
+		RateLimitPerMinute: req.RateLimitPerMinute,
+		ConcurrencyLimit:   req.ConcurrencyLimit,
+		QuotaLimit:         req.QuotaLimit,
+		IdempotencyKey:     idempotencyKey,
+		RequestID:          middleware.GetRequestID(c),
+	})
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, apiKeyResponse(*item, true))
+}
+
+// PATCH /v1/admin/users/:userId/apikeys/:keyId
+func (h *Handler) PatchAdminUserAPIKey(c *gin.Context) {
+	userID, ok := parseUintParam(c, "userId")
+	if !ok {
+		return
+	}
+	keyID, ok := parseUintParam(c, "keyId")
+	if !ok {
+		return
+	}
+	req, ok := decodeKeyPatchRequest(c)
+	if !ok {
+		return
+	}
+	item, err := h.mod.UseCase.UpdateAPIKey(c.Request.Context(), openapiapp.UpdateAPIKeyRequest{
+		UserID:             userID,
+		KeyID:              keyID,
+		Name:               req.Name,
+		Enabled:            req.Enabled,
+		ExpireAt:           req.ExpireAt,
+		ExpireSet:          req.ExpireSet || req.ExpireAt != nil,
+		RateLimitPerMinute: req.RateLimitPerMinute,
+		RateLimitSet:       req.RateLimitSet,
+		ConcurrencyLimit:   req.ConcurrencyLimit,
+		QuotaLimit:         req.QuotaLimit,
+		QuotaSet:           req.QuotaSet,
+	})
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apiKeyResponse(*item, true))
+}
+
+// DELETE /v1/admin/users/:userId/apikeys/:keyId
+func (h *Handler) DeleteAdminUserAPIKey(c *gin.Context) {
+	userID, ok := parseUintParam(c, "userId")
+	if !ok {
+		return
+	}
+	keyID, ok := parseUintParam(c, "keyId")
+	if !ok {
+		return
+	}
+	if err := h.mod.UseCase.DeleteAPIKey(c.Request.Context(), userID, keyID); err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func currentUserID(c *gin.Context) (uint, bool) {

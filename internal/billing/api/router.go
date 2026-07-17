@@ -26,6 +26,10 @@ func RegisterBillingRoutes(rg *gin.RouterGroup, mod *BillingModule, fetcher midd
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())
 	{
+		admin.GET("/wallets/balances", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.GetAdminWalletBalances)
+		admin.POST("/wallets/adjust", middleware.PermissionRequired(checker, "billing:wallet", "operate"), h.PostAdminWalletBulkAdjust)
+		admin.GET("/wallets/:userId", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.GetAdminWallet)
+		admin.GET("/wallets/:userId/transactions", middleware.PermissionRequired(checker, "billing:wallet", "read"), h.GetAdminWalletTransactions)
 		admin.POST("/wallets/:userId/credit", middleware.PermissionRequired(checker, "billing:wallet", "operate"), h.PostAdminWalletCredit)
 		admin.POST("/wallets/:userId/debit", middleware.PermissionRequired(checker, "billing:wallet", "operate"), h.PostAdminWalletDebit)
 		admin.GET("/cards", middleware.PermissionRequired(checker, "billing:card", "read"), h.GetAdminCards)

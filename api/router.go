@@ -148,6 +148,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB)
+		billingMod.SetUserSelectionResolver(iamMod.AdminUserSelectionResolver)
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// OpenAPI credentials and order service tokens.
@@ -157,7 +158,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				slog.Error("failed to flush OpenAPI runtime state during shutdown", "error", err)
 			}
 		})
-		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher)
+		openapiapi.RegisterRoutes(v1, openapiMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase)

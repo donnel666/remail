@@ -263,6 +263,148 @@ func (h *BillingHandler) postAdminWalletAdjustment(c *gin.Context, credit bool) 
 	})
 }
 
+// POST /v1/admin/wallets/adjust
+func (h *BillingHandler) PostAdminWalletBulkAdjust(c *gin.Context) {
+	operatorUserID, ok := requireCurrentUserID(c)
+	if !ok {
+		return
+	}
+	if h.module.UserSelectionResolver == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	var req AdminBulkAdjustWalletRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeInvalidBody(c, err)
+		return
+	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if idempotencyKey == "" {
+		writeBillingError(c, domain.ErrIdempotencyRequired)
+		return
+	}
+	ctx := c.Request.Context()
+	var (
+		resolvedIDs []uint
+		err         error
+	)
+	switch req.Selection.Mode {
+	case "ids":
+		resolvedIDs, err = h.module.UserSelectionResolver.ResolveAdjustableUserIDs(ctx, "ids", req.Selection.UserIDs, "", "", nil, 0, nil, nil)
+	default: // "filter" — binding guarantees mode is ids|filter
+		f := req.Selection.Filter
+		if f == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		resolvedIDs, err = h.module.UserSelectionResolver.ResolveAdjustableUserIDs(ctx, "filter", nil, f.Search, f.Role, f.Enabled, f.UserGroupID, f.CreatedFrom, f.CreatedTo)
+	}
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	requested := len(resolvedIDs)
+	if req.Selection.Mode == "ids" {
+		requested = len(req.Selection.UserIDs)
+	}
+	affected, _, err := h.module.WalletUseCase.BulkAdjustConsumer(ctx, resolvedIDs, req.Amount, req.Reason, idempotencyKey, middleware.GetRequestID(c), nil)
+	if err != nil {
+		_ = h.writeOperationLog(c, operatorUserID, "billing.wallet.bulk.adjust", "bulk", "failure", "Bulk wallet adjustment failed.")
+		writeBillingError(c, err)
+		return
+	}
+	_ = h.writeOperationLog(c, operatorUserID, "billing.wallet.bulk.adjust", "bulk", "success", "Bulk wallet adjusted.")
+	c.JSON(http.StatusOK, AdminWalletBulkResponse{
+		Requested: requested,
+		Affected:  affected,
+		Skipped:   requested - affected,
+	})
+}
+
+// GET /v1/admin/wallets/:userId
+func (h *BillingHandler) GetAdminWallet(c *gin.Context) {
+	userID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	summary, err := h.module.WalletUseCase.GetWallet(c.Request.Context(), userID)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, walletResponse(*summary))
+}
+
+// GET /v1/admin/wallets/:userId/transactions
+func (h *BillingHandler) GetAdminWalletTransactions(c *gin.Context) {
+	userID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	_, limit, ok := parsePagination(c)
+	if !ok {
+		return
+	}
+	var afterID uint
+	if raw := strings.TrimSpace(c.Query("afterId")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || parsed == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		afterID = uint(parsed)
+	}
+	result, err := h.module.WalletUseCase.ListTransactions(c.Request.Context(), billingapp.TransactionListFilter{
+		UserID: userID,
+		Search: c.Query("search"),
+	}, afterID, limit)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	items := make([]TransactionItemResponse, len(result.Items))
+	for i := range result.Items {
+		items[i] = transactionResponse(result.Items[i])
+	}
+	c.JSON(http.StatusOK, TransactionListResponse{
+		Items:       items,
+		NextAfterID: result.NextAfterID,
+		HasNext:     result.HasNext,
+		Limit:       result.Limit,
+	})
+}
+
+// GET /v1/admin/wallets/balances?userIds=1,2,3
+func (h *BillingHandler) GetAdminWalletBalances(c *gin.Context) {
+	ids, ok := parseUintQueryList(c, "userIds")
+	if !ok {
+		return
+	}
+	if len(ids) > 1000 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	balances, err := h.module.WalletUseCase.ListConsumerBalances(c.Request.Context(), ids)
+	if err != nil {
+		writeBillingError(c, err)
+		return
+	}
+	items := make([]AdminWalletBalanceResponse, 0, len(ids))
+	seen := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		balance := balances[id]
+		if balance == "" {
+			balance = "0.00"
+		}
+		items = append(items, AdminWalletBalanceResponse{UserID: id, ConsumerBalance: balance})
+	}
+	c.JSON(http.StatusOK, AdminWalletBalanceListResponse{Balances: items})
+}
+
 func (h *BillingHandler) GetAdminCards(c *gin.Context) {
 	offset, limit, ok := parsePagination(c)
 	if !ok {
@@ -432,6 +574,29 @@ func parseUserIDParam(c *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(parsed), true
+}
+
+func parseUintQueryList(c *gin.Context, name string) ([]uint, bool) {
+	values := c.QueryArray(name)
+	if len(values) == 0 {
+		return nil, true
+	}
+	var result []uint
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			value, err := strconv.ParseUint(part, 10, 64)
+			if err != nil || value == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+				return nil, false
+			}
+			result = append(result, uint(value))
+		}
+	}
+	return result, true
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {

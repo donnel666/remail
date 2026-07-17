@@ -43,34 +43,37 @@ import {
   type AdminUserCapabilities,
 } from "./admin-user-access";
 import {
-  PERMISSION_CATALOG,
-  USER_GROUPS,
-  adjustMockAdminUsersWallet,
-  creditMockAdminUserWallet,
-  createMockAdminUserApiKey,
-  debitMockAdminUserWallet,
-  deleteMockAdminUser,
-  deleteMockAdminUserApiKey,
-  getMockAdminUserInvitations,
-  getMockAdminUserPermissions,
-  getMockAdminUserWallet,
-  listMockAdminUserApiKeys,
-  listMockAdminUserTransactions,
-  putMockAdminUserPermissions,
-  revokeMockAdminUserSessions,
+  adjustAdminUsersWalletByFilter,
+  adjustAdminUsersWalletByIds,
+  creditAdminUserWallet,
+  createAdminUserApiKey,
+  debitAdminUserWallet,
+  deleteAdminUser,
+  deleteAdminUserApiKey,
+  getAdminUserInvitations,
+  getAdminUserPermissions,
+  getAdminUserWallet,
+  getPermissionCatalog,
+  listAdminUserApiKeys,
+  listAdminUserTransactions,
+  putAdminUserPermissions,
+  revokeAdminUserSessions,
   roleBaselinePermissions,
-  updateMockAdminUser,
-  updateMockAdminUserApiKey,
+  updateAdminUser,
+  updateAdminUserApiKey,
   type AdminApiKey,
   type AdminTransaction,
   type AdminUser,
   type AdminUserInvitationMember,
   type AdminUserInvitationOverview,
+  type AdminUserListFilter,
   type AdminUserRole,
   type AdminWallet,
+  type PermissionCatalogItem,
   type PermissionEffect,
   type PermissionPolicy,
-} from "./admin-users-mock";
+} from "./admin-users-api";
+import { useUserGroups } from "./use-user-groups";
 import {
   avatarColor,
   formatDateTime,
@@ -227,6 +230,7 @@ function ProfileTab({
   onSaved: (user: AdminUser) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  const { groups } = useUserGroups();
   const [nickname, setNickname] = useState(user.nickname);
   const [role, setRole] = useState<AdminUserRole>(user.role);
   const [userGroupId, setUserGroupId] = useState<number>(user.userGroup.id);
@@ -255,7 +259,7 @@ function ProfileTab({
       };
     }
     setWalletLoading(true);
-    void getMockAdminUserWallet(user.id)
+    void getAdminUserWallet(user.id)
       .then((wallet) => {
         if (cancelled) return;
         setWalletSummary(wallet);
@@ -284,7 +288,7 @@ function ProfileTab({
     if (role === "super_admin" && !canAssignSuperAdmin) return;
     setSaving(true);
     try {
-      const updated = await updateMockAdminUser(user.id, {
+      const updated = await updateAdminUser(user.id, {
         nickname,
         role,
         userGroupId,
@@ -406,7 +410,7 @@ function ProfileTab({
               style={{ width: "100%" }}
               value={userGroupId}
             >
-              {USER_GROUPS.map((group) => (
+              {groups.map((group) => (
                 <Select.Option key={group.id} value={group.id}>
                   {group.name}
                 </Select.Option>
@@ -462,7 +466,7 @@ function InvitationsTab({ userId }: { userId: number }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setOverview(await getMockAdminUserInvitations(userId));
+      setOverview(await getAdminUserInvitations(userId));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Operation failed."));
     } finally {
@@ -598,6 +602,7 @@ export function WalletAdjustModal({
   open,
   userId,
   userIds,
+  filter,
   balance,
   onClose,
   onDone,
@@ -606,6 +611,7 @@ export function WalletAdjustModal({
   open: boolean;
   userId?: number;
   userIds?: number[];
+  filter?: AdminUserListFilter;
   balance: string;
   onClose: () => void;
   onDone?: (wallet: AdminWallet) => void | Promise<void>;
@@ -635,12 +641,10 @@ export function WalletAdjustModal({
     }
     setSaving(true);
     try {
-      if (userIds?.length) {
-        const result = await adjustMockAdminUsersWallet(
-          userIds,
-          value,
-          reason.trim()
-        );
+      if (filter || userIds?.length) {
+        const result = filter
+          ? await adjustAdminUsersWalletByFilter(filter, value, reason.trim())
+          : await adjustAdminUsersWalletByIds(userIds ?? [], value, reason.trim());
         await onBulkDone?.(value);
         Toast.success(
           t("Users bulk operation completed.", {
@@ -654,10 +658,10 @@ export function WalletAdjustModal({
       if (!userId) return;
       const result =
         value > 0
-          ? await creditMockAdminUserWallet(userId, value.toFixed(2), reason.trim())
-          : await debitMockAdminUserWallet(
+          ? await creditAdminUserWallet(userId, value.toFixed(6), reason.trim())
+          : await debitAdminUserWallet(
               userId,
-              Math.abs(value).toFixed(2),
+              Math.abs(value).toFixed(6),
               reason.trim()
             );
       await onDone?.(result.wallet);
@@ -699,7 +703,7 @@ export function WalletAdjustModal({
           </span>
           <InputNumber
             onChange={setAmount}
-            precision={2}
+            precision={6}
             prefix="¥"
             step={1}
             style={{ width: "100%" }}
@@ -762,8 +766,8 @@ function WalletTab({
     setLoading(true);
     try {
       const [walletResult, txResult] = await Promise.all([
-        getMockAdminUserWallet(userId),
-        listMockAdminUserTransactions(userId, undefined, 500),
+        getAdminUserWallet(userId),
+        listAdminUserTransactions(userId, undefined, 500),
       ]);
       setWallet(walletResult);
       setTransactions(txResult.items);
@@ -782,7 +786,7 @@ function WalletTab({
   const onAdjusted = async (updated: AdminWallet) => {
     setWallet(updated);
     try {
-      const txResult = await listMockAdminUserTransactions(
+      const txResult = await listAdminUserTransactions(
         userId,
         undefined,
         500
@@ -1015,7 +1019,7 @@ function ApiKeysTab({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setApiKeys(await listMockAdminUserApiKeys(userId));
+      setApiKeys(await listAdminUserApiKeys(userId));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Failed to load API keys."));
     } finally {
@@ -1056,7 +1060,7 @@ function ApiKeysTab({
     setSaving(true);
     try {
       if (editing) {
-        const updated = await updateMockAdminUserApiKey(userId, editing.id, {
+        const updated = await updateAdminUserApiKey(userId, editing.id, {
           name: name.trim(),
           expireAt: toExpireAt(expiresAt),
           quotaLimit: quota,
@@ -1067,7 +1071,7 @@ function ApiKeysTab({
         );
         Toast.success(t("API key updated."));
       } else {
-        const created = await createMockAdminUserApiKey(userId, {
+        const created = await createAdminUserApiKey(userId, {
           name: name.trim(),
           expireAt: toExpireAt(expiresAt),
           quotaLimit: quota,
@@ -1088,7 +1092,7 @@ function ApiKeysTab({
     if (!canManage) return;
     setOperatingId(record.id);
     try {
-      const updated = await updateMockAdminUserApiKey(userId, record.id, {
+      const updated = await updateAdminUserApiKey(userId, record.id, {
         enabled: !record.enabled,
       });
       setApiKeys((items) =>
@@ -1112,7 +1116,7 @@ function ApiKeysTab({
       onOk: async () => {
         setOperatingId(record.id);
         try {
-          await deleteMockAdminUserApiKey(userId, record.id);
+          await deleteAdminUserApiKey(userId, record.id);
           setApiKeys((items) => items.filter((item) => item.id !== record.id));
           Toast.success(t("API key deleted."));
         } catch (error) {
@@ -1379,6 +1383,7 @@ function PermissionsTab({
 }) {
   const { t } = useTranslation();
   const [overrides, setOverrides] = useState<Map<string, PermissionEffect>>(new Map());
+  const [catalog, setCatalog] = useState<PermissionCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -1390,7 +1395,11 @@ function PermissionsTab({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const policies = await getMockAdminUserPermissions(user.id);
+      const [catalogResult, policies] = await Promise.all([
+        getPermissionCatalog(),
+        getAdminUserPermissions(user.id),
+      ]);
+      setCatalog(catalogResult);
       const map = new Map<string, PermissionEffect>();
       for (const policy of policies) {
         map.set(`${policy.resource}:${policy.action}`, policy.effect);
@@ -1439,7 +1448,7 @@ function PermissionsTab({
           };
         }
       );
-      await putMockAdminUserPermissions(user.id, policies);
+      await putAdminUserPermissions(user.id, policies);
       Toast.success(t("Permissions saved."));
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Permissions save failed."));
@@ -1457,7 +1466,7 @@ function PermissionsTab({
   }
 
   const overrideCount = overrides.size;
-  const permissionKeys = PERMISSION_CATALOG.flatMap((item) =>
+  const permissionKeys = catalog.flatMap((item) =>
     item.actions.map((action) => `${item.resource}:${action}`)
   );
   const allowedCount = permissionKeys.filter(effectiveAllowed).length;
@@ -1487,7 +1496,7 @@ function PermissionsTab({
       </div>
 
       <div className="space-y-3">
-        {PERMISSION_CATALOG.map((item) => (
+        {catalog.map((item) => (
           <div
             className="rounded-xl border border-[var(--semi-color-border)] p-3"
             key={item.resource}
@@ -1623,7 +1632,7 @@ export function UserDetailSheet({
     }
     setManagementAction("status");
     try {
-      const updated = await updateMockAdminUser(current.id, {
+      const updated = await updateAdminUser(current.id, {
         enabled: !current.enabled,
       });
       await handleSaved(updated);
@@ -1650,7 +1659,7 @@ export function UserDetailSheet({
       onOk: async () => {
         setManagementAction("logout");
         try {
-          await revokeMockAdminUserSessions(current.id);
+          await revokeAdminUserSessions(current.id);
           Toast.success(t("All sessions revoked."));
         } catch (error) {
           Toast.error(getIamErrorMessage(t, error, "Operation failed."));
@@ -1678,7 +1687,7 @@ export function UserDetailSheet({
       onOk: async () => {
         setManagementAction("delete");
         try {
-          await deleteMockAdminUser(current.id);
+          await deleteAdminUser(current.id);
           Toast.success(t("User deleted."));
           await onDeleted?.(current.id);
           onClose();

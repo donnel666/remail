@@ -8,6 +8,7 @@
 | 2026-07-07 | V1.1 | Codex | 补充用户邀请返佣结算规则；作为充值入账后的 Billing 事实，不改变钱包额度桶策略。 |
 | 2026-07-09 | V1.2 | Codex | 补充银行流水式 signed delta 模型：流水金额允许正数、负数和零，余额变动由流水金额直接表达。 |
 | 2026-07-10 | V1.3 | Codex | 钱包、流水、累计消费和返佣事实统一为六位小数账本精度，兼容分以下商品价格。 |
+| 2026-07-17 | V1.4 | Codex | 补充管理员用户管理所需后台钱包接口：`GET /v1/admin/wallets/balances` 批量余额、`GET /v1/admin/wallets/{userId}` 与 `/transactions` 只读，以及 `POST /v1/admin/wallets/adjust` 按 `selection`(ids/filter) 批量调账；批量调账经 IAM `UserSelectionResolver` 跨 BC 解析用户、恒排除 `super_admin`、要求 `Idempotency-Key`，复用既有 signed-delta 与六位小数账本，不改变钱包额度桶策略。 |
 
 > 支撑域。BC-BILLING 只保证资金事实正确，不理解订单为什么扣款、退款或结算。
 
@@ -175,8 +176,12 @@ stateDiagram-v2
 
 | 方法 | URI | 说明 |
 |------|-----|------|
+| `GET` | `/v1/admin/wallets/balances` | 按 `userIds` 批量读取消费余额（用户管理列表余额列，不创建钱包行）。 |
+| `GET` | `/v1/admin/wallets/{userId}` | 读取指定用户钱包概要（余额桶、累计消费、订单数）。 |
+| `GET` | `/v1/admin/wallets/{userId}/transactions` | 读取指定用户流水（游标分页）。 |
 | `POST` | `/v1/admin/wallets/{userId}/credit` | 人工加款，必须有业务原因。 |
 | `POST` | `/v1/admin/wallets/{userId}/debit` | 人工扣款，必须有业务原因。 |
+| `POST` | `/v1/admin/wallets/adjust` | 按 `selection`(ids/filter) 批量调账（签名金额，正加负扣）；跨 BC 经 IAM 解析可调整用户（恒排除 `super_admin`），必须携带 `Idempotency-Key`，返回 `{requested,affected,skipped}`。 |
 | `POST` | `/v1/admin/withdrawals/{withdrawalNo}/approve` | 审核通过。 |
 | `POST` | `/v1/admin/withdrawals/{withdrawalNo}/reject` | 审核拒绝，必须有业务原因。 |
 | `POST` | `/v1/admin/withdrawals/{withdrawalNo}/transfer/confirm` | 确认已转账。 |

@@ -12,7 +12,7 @@ export function formatCompactNumber(value: number) {
 
 export function formatMoneyExact(value: number) {
   if (!Number.isFinite(value)) return "￥0";
-  return "￥" + value.toFixed(3).replace(/\.?0+$/, "");
+  return "￥" + value.toFixed(6).replace(/\.?0+$/, "");
 }
 
 export function formatMoney(value: number) {

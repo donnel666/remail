@@ -9,8 +9,9 @@ import (
 )
 
 type BillingModule struct {
-	WalletUseCase *billingapp.WalletUseCase
-	OperationLogs governanceapp.OperationLogPort
+	WalletUseCase         *billingapp.WalletUseCase
+	OperationLogs         governanceapp.OperationLogPort
+	UserSelectionResolver billingapp.UserSelectionResolver
 }
 
 func NewBillingModule(db *gorm.DB) *BillingModule {
@@ -20,4 +21,11 @@ func NewBillingModule(db *gorm.DB) *BillingModule {
 		WalletUseCase: billingapp.NewWalletUseCase(repo),
 		OperationLogs: operationLogs,
 	}
+}
+
+// SetUserSelectionResolver wires the cross-context resolver used by bulk
+// wallet adjustment. It is set after construction because the concrete
+// implementation lives in the IAM package.
+func (m *BillingModule) SetUserSelectionResolver(r billingapp.UserSelectionResolver) {
+	m.UserSelectionResolver = r
 }

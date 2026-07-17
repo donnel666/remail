@@ -390,18 +390,52 @@ func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User
 }
 
 func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	updates := make(map[string]any, 4)
+	if enabled != nil {
+		updates["enabled"] = *enabled
+	}
+	if role != nil {
+		updates["role"] = role.String()
+	}
+	if userGroupID != nil {
+		updates["user_group_id"] = *userGroupID
+	}
+	return r.updateNonSuperAdmin(ctx, userID, updates, incrementTokenVersion, log)
+}
+
+// UpdateNonSuperAdminProfileWithOperationLog updates profile and access fields
+// (email, nickname, password, enabled, role, group) atomically, refuses a
+// super_admin row, and writes the operation log in the same transaction.
+func (r *UserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	updates := make(map[string]any, 6)
+	if email != nil {
+		updates["email"] = *email
+	}
+	if nickname != nil {
+		updates["nickname"] = *nickname
+	}
+	if passwordHash != nil {
+		updates["password_hash"] = *passwordHash
+	}
+	if enabled != nil {
+		updates["enabled"] = *enabled
+	}
+	if role != nil {
+		updates["role"] = role.String()
+	}
+	if userGroupID != nil {
+		updates["user_group_id"] = *userGroupID
+	}
+	updated, err := r.updateNonSuperAdmin(ctx, userID, updates, incrementTokenVersion, log)
+	if err != nil && isIAMDuplicateKeyError(err) {
+		return nil, domain.ErrEmailAlreadyExists
+	}
+	return updated, err
+}
+
+func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates map[string]any, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	var updated *domain.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updates := make(map[string]any, 4)
-		if enabled != nil {
-			updates["enabled"] = *enabled
-		}
-		if role != nil {
-			updates["role"] = role.String()
-		}
-		if userGroupID != nil {
-			updates["user_group_id"] = *userGroupID
-		}
 		if incrementTokenVersion {
 			updates["token_version"] = gorm.Expr("token_version + 1")
 		}
@@ -413,7 +447,7 @@ func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context
 			Where("id = ? AND role <> ?", userID, domain.RoleSuperAdmin.String()).
 			Updates(updates)
 		if result.Error != nil {
-			return fmt.Errorf("update non-super-admin access with log: %w", result.Error)
+			return fmt.Errorf("update non-super-admin with log: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
 			var current UserModel
@@ -444,9 +478,203 @@ func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context
 	return updated, nil
 }
 
+// DeleteNonSuperAdminWithOperationLog hard-deletes a user, refusing a
+// super_admin row, and writes the operation log in the same transaction.
+// ponytail: leaves other BCs' historical rows (orders/wallet/resources) keyed
+// by owner id; add cascade cleanup if orphan rows ever need pruning.
+func (r *UserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current UserModel
+		if err := tx.Select("id", "role").First(&current, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrUserNotFound
+			}
+			return fmt.Errorf("inspect user before delete: %w", err)
+		}
+		if domain.Role(current.Role) == domain.RoleSuperAdmin {
+			return domain.ErrPermissionDenied
+		}
+		if err := tx.Delete(&UserModel{}, userID).Error; err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+			return fmt.Errorf("create operation log: %w", err)
+		}
+		return nil
+	})
+}
+
+// ResolveBulkUserIDs returns the non-super-admin user IDs targeted by a bulk
+// selection, newest first and capped at 1000. When ids is non-empty it selects
+// exactly those rows; otherwise it applies the admin list filter. super_admin
+// rows are always excluded.
+// bulkUserChunkSize bounds the id count per batch statement so an uncapped
+// filter selection can't exceed MySQL's prepared-statement placeholder limit.
+const bulkUserChunkSize = 5000
+
+// batchInChunks runs fn over ids in bounded chunks and sums the rows affected.
+func batchInChunks(ids []uint, fn func(chunk []uint) (int64, error)) (int64, error) {
+	var total int64
+	for start := 0; start < len(ids); start += bulkUserChunkSize {
+		end := start + bulkUserChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		affected, err := fn(ids[start:end])
+		if err != nil {
+			return total, err
+		}
+		total += affected
+	}
+	return total, nil
+}
+
+// ResolveBulkUserIDs returns the non-super-admin user ids targeted by a bulk
+// selection. Uncapped: filter selections operate on every matching user; the
+// follow-up mutation is chunked by batchInChunks.
+func (r *UserRepo) ResolveBulkUserIDs(ctx context.Context, ids []uint, filter domain.UserListFilter) ([]uint, error) {
+	q := r.dbFor(ctx).Model(&UserModel{}).Where("role <> ?", domain.RoleSuperAdmin.String())
+	if len(ids) > 0 {
+		q = q.Where("id IN ?", ids)
+	} else {
+		q = applyUserListFilter(q, filter)
+	}
+	var out []uint
+	if err := q.Pluck("id", &out).Error; err != nil {
+		return nil, fmt.Errorf("resolve bulk user ids: %w", err)
+	}
+	return out, nil
+}
+
+// BatchSetEnabledNonSuperAdmin flips enabled for the given non-super-admin rows
+// whose current enabled differs, bumping token_version when disabling so live
+// sessions are rejected (INV-I3). Returns the number of rows changed.
+func (r *UserRepo) BatchSetEnabledNonSuperAdmin(ctx context.Context, ids []uint, enabled bool) (int64, error) {
+	return batchInChunks(ids, func(chunk []uint) (int64, error) {
+		updates := map[string]any{"enabled": enabled}
+		if !enabled {
+			updates["token_version"] = gorm.Expr("token_version + 1")
+		}
+		result := r.dbFor(ctx).Model(&UserModel{}).
+			Where("id IN ? AND role <> ? AND enabled <> ?", chunk, domain.RoleSuperAdmin.String(), enabled).
+			Updates(updates)
+		if result.Error != nil {
+			return 0, fmt.Errorf("batch set enabled non-super-admin: %w", result.Error)
+		}
+		return result.RowsAffected, nil
+	})
+}
+
+// BatchBumpTokenVersionNonSuperAdmin increments token_version for the given
+// non-super-admin rows, invalidating their live sessions. Returns rows changed.
+func (r *UserRepo) BatchBumpTokenVersionNonSuperAdmin(ctx context.Context, ids []uint) (int64, error) {
+	return batchInChunks(ids, func(chunk []uint) (int64, error) {
+		result := r.dbFor(ctx).Model(&UserModel{}).
+			Where("id IN ? AND role <> ?", chunk, domain.RoleSuperAdmin.String()).
+			Update("token_version", gorm.Expr("token_version + 1"))
+		if result.Error != nil {
+			return 0, fmt.Errorf("batch bump token version non-super-admin: %w", result.Error)
+		}
+		return result.RowsAffected, nil
+	})
+}
+
+// BatchDeleteNonSuperAdmin hard-deletes the given non-super-admin rows and
+// returns the number deleted.
+func (r *UserRepo) BatchDeleteNonSuperAdmin(ctx context.Context, ids []uint) (int64, error) {
+	return batchInChunks(ids, func(chunk []uint) (int64, error) {
+		result := r.dbFor(ctx).
+			Where("id IN ? AND role <> ?", chunk, domain.RoleSuperAdmin.String()).
+			Delete(&UserModel{})
+		if result.Error != nil {
+			return 0, fmt.Errorf("batch delete non-super-admin: %w", result.Error)
+		}
+		return result.RowsAffected, nil
+	})
+}
+
+// FacetsByFilter returns admin-list aggregate counts. Each dimension is counted
+// with its own filter omitted so the tab/filter counts stay visible when that
+// dimension is active.
+func (r *UserRepo) FacetsByFilter(ctx context.Context, filter domain.UserListFilter, groups []domain.UserGroup) (*domain.UserFacets, error) {
+	roleFilter := filter
+	roleFilter.Role = nil
+	roleRows := []struct {
+		Role  string
+		Count int64
+	}{}
+	if err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), roleFilter).
+		Select("role, COUNT(*) AS count").Group("role").Scan(&roleRows).Error; err != nil {
+		return nil, fmt.Errorf("facet roles: %w", err)
+	}
+	role := map[string]int64{}
+	var roleAll int64
+	for _, row := range roleRows {
+		role[row.Role] = row.Count
+		roleAll += row.Count
+	}
+	role["all"] = roleAll
+
+	statusFilter := filter
+	statusFilter.Enabled = nil
+	statusRows := []struct {
+		Enabled bool
+		Count   int64
+	}{}
+	if err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), statusFilter).
+		Select("enabled, COUNT(*) AS count").Group("enabled").Scan(&statusRows).Error; err != nil {
+		return nil, fmt.Errorf("facet status: %w", err)
+	}
+	status := domain.StatusFacet{}
+	for _, row := range statusRows {
+		if row.Enabled {
+			status.Enabled = row.Count
+		} else {
+			status.Disabled = row.Count
+		}
+	}
+	status.All = status.Enabled + status.Disabled
+
+	groupFilter := filter
+	groupFilter.UserGroupID = nil
+	groupRows := []struct {
+		UserGroupID uint
+		Count       int64
+	}{}
+	if err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), groupFilter).
+		Select("user_group_id, COUNT(*) AS count").Group("user_group_id").Scan(&groupRows).Error; err != nil {
+		return nil, fmt.Errorf("facet groups: %w", err)
+	}
+	groupCounts := make(map[uint]int64, len(groupRows))
+	for _, row := range groupRows {
+		groupCounts[row.UserGroupID] = row.Count
+	}
+	groupFacets := make([]domain.GroupFacet, len(groups))
+	for i, g := range groups {
+		groupFacets[i] = domain.GroupFacet{ID: g.ID, Code: g.Code, Name: g.Name, Count: groupCounts[g.ID]}
+	}
+
+	return &domain.UserFacets{Role: role, Status: status, Group: groupFacets}, nil
+}
+
 func applyUserListFilter(q *gorm.DB, filter domain.UserListFilter) *gorm.DB {
 	if len(filter.IDs) > 0 {
 		q = q.Where("id IN ?", filter.IDs)
+	}
+	if filter.Role != nil {
+		q = q.Where("role = ?", filter.Role.String())
+	}
+	if filter.Enabled != nil {
+		q = q.Where("enabled = ?", *filter.Enabled)
+	}
+	if filter.UserGroupID != nil {
+		q = q.Where("user_group_id = ?", *filter.UserGroupID)
+	}
+	if filter.CreatedFrom != nil {
+		q = q.Where("created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		q = q.Where("created_at <= ?", *filter.CreatedTo)
 	}
 	search := strings.TrimSpace(filter.Search)
 	if search == "" {
@@ -538,6 +766,43 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 		users[i] = *m.toDomain()
 	}
 	return users, nil
+}
+
+// FindInviterID returns the referral owner of the invite the user registered
+// with, or nil when the user was not referred (e.g. admin invite / activation).
+func (r *UserRepo) FindInviterID(ctx context.Context, userID uint) (*uint, error) {
+	var row struct {
+		ReferralOwnerUserID *uint
+	}
+	err := r.db.WithContext(ctx).
+		Table("invite_uses AS iu").
+		Select("i.referral_owner_user_id AS referral_owner_user_id").
+		Joins("JOIN invites i ON i.code = iu.invite_code").
+		Where("iu.user_id = ?", userID).
+		Order("iu.used_at ASC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("find inviter id: %w", err)
+	}
+	return row.ReferralOwnerUserID, nil
+}
+
+// ListInviteeIDs returns the ids of users who registered through the given
+// user's referral invite, newest first.
+func (r *UserRepo) ListInviteeIDs(ctx context.Context, ownerUserID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).
+		Table("invite_uses AS iu").
+		Select("iu.user_id").
+		Joins("JOIN invites i ON i.code = iu.invite_code").
+		Where("i.referral_owner_user_id = ?", ownerUserID).
+		Order("iu.used_at DESC").
+		Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("list invitee ids: %w", err)
+	}
+	return ids, nil
 }
 
 func (r *UserRepo) ListUserGroups(ctx context.Context) ([]domain.UserGroup, error) {

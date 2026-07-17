@@ -64,7 +64,7 @@ function formatCurrency(value: string | number | null | undefined) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "-";
   return `￥${numeric.toLocaleString("zh-CN", {
-    maximumFractionDigits: 3,
+    maximumFractionDigits: 6,
     minimumFractionDigits: 2,
   })}`;
 }

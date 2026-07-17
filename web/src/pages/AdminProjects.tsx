@@ -256,7 +256,7 @@ function moneyToDraft(value?: string) {
 function moneyForDisplay(value?: string) {
   const parsed = Number(value ?? 0);
   if (!Number.isFinite(parsed)) return value ?? "0";
-  return parsed.toFixed(3).replace(/\.?0+$/, "");
+  return parsed.toFixed(6).replace(/\.?0+$/, "");
 }
 
 function updateProduct(

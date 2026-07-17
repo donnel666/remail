@@ -1,4 +1,4 @@
-import type { AdminUserRole } from "./admin-users-mock";
+import type { AdminUserRole } from "./admin-users-api";
 
 export interface AdminUserCapabilities {
   canAdjustBalance: boolean;

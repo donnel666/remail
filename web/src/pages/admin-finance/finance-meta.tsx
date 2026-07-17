@@ -25,7 +25,7 @@ export function formatMoney(value: string | number | null | undefined) {
   if (!Number.isFinite(parsed)) return "0.00";
   return parsed.toLocaleString(undefined, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 6,
   });
 }
 
