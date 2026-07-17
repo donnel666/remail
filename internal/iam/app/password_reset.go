@@ -27,6 +27,18 @@ func (uc *PasswordResetUseCase) Request(ctx context.Context, email, captchaID, c
 	}
 
 	normalized := normalizeEmail(email)
+
+	// Acquire the resend cooldown before the user lookup so a registered and an
+	// unknown email throttle identically and existence cannot be probed by
+	// comparing responses to a repeated request.
+	started, retryAfter, err := uc.codeStore.StartCooldown(ctx, emailCodeKey(normalized), emailCodeResendGap)
+	if err != nil {
+		return fmt.Errorf("password reset cooldown: %w", err)
+	}
+	if !started {
+		return &domain.EmailCodeThrottledError{RetryAfterSeconds: retryAfter}
+	}
+
 	user, err := uc.repo.FindByEmail(ctx, normalized)
 	if err != nil {
 		return fmt.Errorf("password reset find user: %w", err)
@@ -34,7 +46,7 @@ func (uc *PasswordResetUseCase) Request(ctx context.Context, email, captchaID, c
 	if user == nil || !user.Enabled {
 		return nil
 	}
-	return uc.emailCode.Send(ctx, normalized)
+	return uc.emailCode.deliver(ctx, normalized)
 }
 
 func (uc *PasswordResetUseCase) Reset(ctx context.Context, email, code, newPassword string) error {

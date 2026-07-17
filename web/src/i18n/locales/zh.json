@@ -154,6 +154,7 @@
   "Activation failed.": "激活失败。",
   "Failed to load activation status.": "无法加载激活状态。",
   "Failed to send verification code.": "验证码发送失败。",
+  "Please wait before requesting another verification code.": "请求过于频繁，请稍后再获取验证码。",
   "Password reset failed.": "密码重置失败。",
   "Password change failed.": "密码修改失败。",
   "Authentication is required.": "请先登录。",

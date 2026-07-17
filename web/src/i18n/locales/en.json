@@ -154,6 +154,7 @@
   "Activation failed.": "Activation failed.",
   "Failed to load activation status.": "Failed to load activation status.",
   "Failed to send verification code.": "Failed to send verification code.",
+  "Please wait before requesting another verification code.": "Please wait before requesting another verification code.",
   "Password reset failed.": "Password reset failed.",
   "Password change failed.": "Password change failed.",
   "Authentication is required.": "Authentication is required.",

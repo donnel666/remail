@@ -1133,6 +1133,17 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Captcha is incorrect or expired.",
 			"requestId": rid,
 		})
+	case errors.Is(err, domain.ErrEmailCodeThrottled):
+		retryAfter := app.EmailCodeResendGapSeconds
+		var throttled *domain.EmailCodeThrottledError
+		if errors.As(err, &throttled) && throttled.RetryAfterSeconds > 0 {
+			retryAfter = throttled.RetryAfterSeconds
+		}
+		c.Header("Retry-After", strconv.Itoa(retryAfter))
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":   "Please wait before requesting another verification code.",
+			"requestId": rid,
+		})
 	case errors.Is(err, domain.ErrAuthenticationRequired):
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message":   "Authentication is required.",

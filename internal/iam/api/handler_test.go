@@ -878,11 +878,29 @@ func (permissionMapChecker) Reload(context.Context) error { return nil }
 type mockEmailCodeStore struct {
 	mu        sync.Mutex
 	codes     map[string]string
+	cooldowns map[string]bool
 	deleteErr error
 }
 
 func newMockEmailCodeStore() *mockEmailCodeStore {
-	return &mockEmailCodeStore{codes: make(map[string]string)}
+	return &mockEmailCodeStore{codes: make(map[string]string), cooldowns: make(map[string]bool)}
+}
+
+func (s *mockEmailCodeStore) StartCooldown(_ context.Context, key string, seconds int) (bool, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cooldowns[key] {
+		return false, seconds, nil
+	}
+	s.cooldowns[key] = true
+	return true, 0, nil
+}
+
+func (s *mockEmailCodeStore) ClearCooldown(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.cooldowns, key)
+	return nil
 }
 
 func (s *mockEmailCodeStore) CreateIfAbsent(_ context.Context, key, code string, _ int) (string, bool, error) {
@@ -1134,6 +1152,41 @@ func TestPostEmailCode_ReturnsNoContent(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.Empty(t, w.Body.String())
+}
+
+func TestPostEmailCode_ThrottlesResendWithRetryAfter(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	send := func() *httptest.ResponseRecorder {
+		captchaID := seedCaptcha(t, h, "1234")
+		body := `{"email":"user@test.com","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusNoContent, send().Code)
+
+	second := send()
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
+	require.Equal(t, fmt.Sprintf("%d", app.EmailCodeResendGapSeconds), second.Header().Get("Retry-After"))
+}
+
+// A repeated password-reset request must throttle the same way for an unknown
+// email as for a registered one, so the response cannot be used to probe whether
+// an account exists.
+func TestPasswordResetRequestThrottlesUnknownEmailIdentically(t *testing.T) {
+	h := newTestHandler()
+
+	cap1 := seedCaptcha(t, h, "1234")
+	require.NoError(t, h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap1, "1234"))
+
+	cap2 := seedCaptcha(t, h, "1234")
+	err := h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap2, "1234")
+	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
 }
 
 // --- Registration Tests ---

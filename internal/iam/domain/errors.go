@@ -18,6 +18,7 @@ var (
 	ErrInvalidRole                         = errors.New("invalid role")
 	ErrInvalidUserGroup                    = errors.New("invalid user group")
 	ErrVerificationCodeIncorrect           = errors.New("verification code is incorrect or expired")
+	ErrEmailCodeThrottled                  = errors.New("verification code was requested too recently")
 	ErrInviteAlreadyExists                 = errors.New("invite already exists")
 	ErrInviteNotFound                      = errors.New("invite not found")
 	ErrInviteInvalid                       = errors.New("invite is invalid or expired")
@@ -27,3 +28,19 @@ var (
 	ErrInvalidSupplierApplication          = errors.New("invalid supplier application")
 	ErrInvalidSupplierApplicationStatus    = errors.New("invalid supplier application status")
 )
+
+// EmailCodeThrottledError reports that a verification-code request hit the
+// resend cooldown. RetryAfterSeconds is the remaining cooldown, surfaced to
+// clients via the Retry-After header. It matches ErrEmailCodeThrottled under
+// errors.Is, so existing sentinel checks keep working.
+type EmailCodeThrottledError struct {
+	RetryAfterSeconds int
+}
+
+func (e *EmailCodeThrottledError) Error() string {
+	return ErrEmailCodeThrottled.Error()
+}
+
+func (e *EmailCodeThrottledError) Is(target error) bool {
+	return target == ErrEmailCodeThrottled
+}

@@ -2,8 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Loader2, MailCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { CaptchaField } from "@/components/auth/CaptchaField";
-import { useCaptcha } from "@/hooks/use-captcha";
+import { SendCodeField } from "@/components/auth/SendCodeField";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { requestPasswordReset, resetPassword } from "@/lib/iam-api";
@@ -11,52 +10,13 @@ import { requestPasswordReset, resetPassword } from "@/lib/iam-api";
 export default function PasswordReset() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const captcha = useCaptcha();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [requestingCode, setRequestingCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const handleRequestCode = async () => {
-    if (!email.trim()) {
-      setError(t("Please enter your email."));
-      return;
-    }
-    if (!captcha.captcha?.captchaId) {
-      setError(t("Captcha is not ready."));
-      return;
-    }
-    if (!captchaAnswer.trim()) {
-      setError(t("Please enter captcha."));
-      return;
-    }
-
-    setRequestingCode(true);
-    setError("");
-    setNotice("");
-
-    try {
-      await requestPasswordReset({
-        email: email.trim(),
-        captchaId: captcha.captcha.captchaId,
-        captchaAnswer: captchaAnswer.trim(),
-      });
-      setNotice(t("Verification code sent."));
-      setCaptchaAnswer("");
-      void captcha.refresh();
-    } catch (nextError) {
-      setError(getIamErrorMessage(t, nextError, "Failed to send verification code."));
-      setCaptchaAnswer("");
-      void captcha.refresh();
-    } finally {
-      setRequestingCode(false);
-    }
-  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -115,33 +75,15 @@ export default function PasswordReset() {
             autoComplete="email"
             required
           />
-          <CaptchaField
-            captcha={captcha.captcha}
-            loading={captcha.loading}
-            value={captchaAnswer}
-            disabled={submitting || requestingCode}
-            onChange={setCaptchaAnswer}
-            onRefresh={() => void captcha.refresh()}
+          <SendCodeField
+            email={email}
+            code={code}
+            onCodeChange={setCode}
+            send={requestPasswordReset}
+            disabled={submitting}
+            onNotice={setNotice}
+            onError={setError}
           />
-          <div className="grid grid-cols-[1fr_112px] gap-2">
-            <input
-              type="text"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder={t("Verification code")}
-              className="input-antd min-w-0 w-full"
-              autoComplete="one-time-code"
-              required
-            />
-            <button
-              type="button"
-              onClick={() => void handleRequestCode()}
-              disabled={submitting || requestingCode || captcha.loading}
-              className="h-9 w-28 rounded-lg border border-[var(--divider)] px-3 text-sm font-medium text-[var(--ink-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {requestingCode ? <Loader2 className="size-4 animate-spin" /> : t("Send code")}
-            </button>
-          </div>
           <input
             type="password"
             value={newPassword}

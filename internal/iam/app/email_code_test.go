@@ -6,17 +6,36 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/donnel666/remail/internal/iam/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/stretchr/testify/require"
 )
 
 type emailCodeStoreStub struct {
-	mu    sync.Mutex
-	codes map[string]string
+	mu        sync.Mutex
+	codes     map[string]string
+	cooldowns map[string]bool
 }
 
 func newEmailCodeStoreStub() *emailCodeStoreStub {
-	return &emailCodeStoreStub{codes: make(map[string]string)}
+	return &emailCodeStoreStub{codes: make(map[string]string), cooldowns: make(map[string]bool)}
+}
+
+func (s *emailCodeStoreStub) StartCooldown(_ context.Context, key string, seconds int) (bool, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cooldowns[key] {
+		return false, seconds, nil
+	}
+	s.cooldowns[key] = true
+	return true, 0, nil
+}
+
+func (s *emailCodeStoreStub) ClearCooldown(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.cooldowns, key)
+	return nil
 }
 
 func (s *emailCodeStoreStub) CreateIfAbsent(_ context.Context, key, code string, _ int) (string, bool, error) {
@@ -61,15 +80,42 @@ func (s *mailDeliveryStub) callCount() int {
 	return s.calls
 }
 
-func TestEmailCodeUseCaseSendDoesNotResendExistingCode(t *testing.T) {
+func TestEmailCodeUseCaseSendThrottlesWithinCooldown(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender, nil)
 
 	require.NoError(t, uc.Send(context.Background(), "User@Test.COM"))
-	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
 
+	// A second send during the cooldown is rejected, not silently dropped, and
+	// carries the remaining cooldown for the Retry-After header.
+	err := uc.Send(context.Background(), "user@test.com")
+	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
+	var throttled *domain.EmailCodeThrottledError
+	require.True(t, errors.As(err, &throttled))
+	require.Equal(t, emailCodeResendGap, throttled.RetryAfterSeconds)
 	require.Equal(t, 1, sender.callCount())
+}
+
+func TestEmailCodeUseCaseResendsSameCodeAfterCooldown(t *testing.T) {
+	store := newEmailCodeStoreStub()
+	sender := &mailDeliveryStub{}
+	uc := NewEmailCodeUseCase(store, sender, nil)
+
+	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
+	first, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+
+	// Simulate cooldown expiry (the stub ignores TTLs).
+	delete(store.cooldowns, emailCodeKey("user@test.com"))
+
+	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
+	require.Equal(t, 2, sender.callCount())
+
+	second, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, err)
+	require.Equal(t, first, second) // the still-valid code is re-delivered
 }
 
 func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
@@ -84,4 +130,7 @@ func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 	code, getErr := store.Get(context.Background(), emailCodeKey("user@test.com"))
 	require.NoError(t, getErr)
 	require.Empty(t, code)
+
+	// The cooldown is released so the user can retry immediately after a failure.
+	require.False(t, store.cooldowns[emailCodeKey("user@test.com")])
 }

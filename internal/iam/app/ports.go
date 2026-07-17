@@ -159,6 +159,15 @@ type CaptchaStore interface {
 
 // EmailCodeStore defines storage for email verification codes.
 type EmailCodeStore interface {
+	// StartCooldown records a send for the key and reports whether a new
+	// cooldown window was started. When started is false the send is still
+	// within the previous window and retryAfter is the remaining seconds.
+	StartCooldown(ctx context.Context, key string, seconds int) (started bool, retryAfter int, err error)
+
+	// ClearCooldown releases the resend cooldown for the key so the next send
+	// can proceed immediately (used to roll back after a delivery failure).
+	ClearCooldown(ctx context.Context, key string) error
+
 	// CreateIfAbsent stores a code with TTL and returns the existing code when
 	// the same email is requested again before expiration.
 	CreateIfAbsent(ctx context.Context, key, code string, ttlSeconds int) (storedCode string, reused bool, err error)
