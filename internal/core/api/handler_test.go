@@ -1942,7 +1942,7 @@ func TestCoreHandler_ImportSuccess(t *testing.T) {
 	mod, resourceRepo, _, _, importQueue, _, _ := setupCoreTestModuleWithImportMocks()
 	h := NewCoreHandler(mod)
 
-	body, contentType := multipartImportBody(t, "resources.txt", "user@example.com----pass123\nuser2@test.com----pass456----aux@example.net")
+	body, contentType := multipartImportBody(t, "resources.txt", "user@outlook.com----pass123\nuser2@hotmail.com----pass456----aux@example.net")
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)
@@ -2043,13 +2043,13 @@ func TestCoreHandler_ImportDuplicateDefaultSkips(t *testing.T) {
 		context.Background(),
 		&coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1},
 		&coredomain.MicrosoftResource{
-			EmailAddress: "duplicate@example.com",
+			EmailAddress: "duplicate@outlook.com",
 			Password:     "secret",
 			Status:       coredomain.MicrosoftStatusPending,
 		},
 	))
 
-	body, contentType := multipartImportBody(t, "resources.txt", "duplicate@example.com----pass123\nnew@example.com----pass456")
+	body, contentType := multipartImportBody(t, "resources.txt", "duplicate@outlook.com----pass123\nnew@outlook.com----pass456")
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/v1/resources/imports", body)

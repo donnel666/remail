@@ -313,6 +313,9 @@ function getImportPreprocessFailureMessage(
       firstLine: failure.firstLine,
     });
   }
+  if (failure.category === "non_microsoft_domain") {
+    return t("Import non-microsoft line", { line: failure.line });
+  }
   if (failure.line === 0) {
     return t("No valid import entries.");
   }

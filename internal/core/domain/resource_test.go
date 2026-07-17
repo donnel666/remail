@@ -444,3 +444,33 @@ func contains(s, substr string) bool {
 func testTime() time.Time {
 	return time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 }
+
+func TestIsMicrosoftEmailDomain(t *testing.T) {
+	cases := map[string]bool{
+		"a@outlook.com":        true,
+		"a@hotmail.com":        true,
+		"a@outlook.fr":         true, // country variant in list
+		"a@outlook.com.br":     true,
+		"a@outlook.co.th":      true,
+		"A@OutLook.CoM":        true, // case-insensitive
+		"a@outlook.com.":       true, // trailing dot
+		"a@outlook.co.uk":      false, // real MS variant, but not in the 32-list
+		"a@hotmail.co.uk":      false, // excluded: only hotmail.com
+		"a@live.com":           false, // excluded per policy
+		"a@msn.com":            false, // excluded per policy
+		"a@passport.com":       false,
+		"a@icloud.com":         false,
+		"a@gmail.com":          false,
+		"a@alumni.sysu.edu.cn": false,
+		"a@outlookx.com":       false, // outlook must be a whole first label
+		"a@notoutlook.com":     false,
+		"a@outlook":            false, // no TLD
+		"noatsign":             false,
+		"a@":                   false,
+	}
+	for email, want := range cases {
+		if got := IsMicrosoftEmailDomain(email); got != want {
+			t.Errorf("IsMicrosoftEmailDomain(%q) = %v, want %v", email, got, want)
+		}
+	}
+}

@@ -85,6 +85,11 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 		exceedsMicrosoftImportLength(password, microsoftImportPasswordMaxLength) {
 		return nil, importLineError(lineNumber, parts)
 	}
+	// Whitelist: only Microsoft consumer mailboxes belong in a Microsoft import.
+	// The binding address below is a recovery mailbox and may be any provider.
+	if !domain.IsMicrosoftEmailDomain(email) {
+		return nil, nonMicrosoftDomainError(lineNumber, email)
+	}
 
 	clientID := ""
 	refreshToken := ""
@@ -149,5 +154,14 @@ func importLineError(lineNumber int, parts []string) *domain.ImportLineError {
 		Email:       email,
 		Category:    "invalid_format",
 		SafeMessage: "Invalid import format.",
+	}
+}
+
+func nonMicrosoftDomainError(lineNumber int, email string) *domain.ImportLineError {
+	return &domain.ImportLineError{
+		Line:        lineNumber,
+		Email:       email,
+		Category:    "non_microsoft_domain",
+		SafeMessage: "Email domain is not a Microsoft mailbox.",
 	}
 }

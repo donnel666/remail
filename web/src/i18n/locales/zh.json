@@ -336,6 +336,7 @@
   "Import skipped errors": "{{count}} 行存在错误，已跳过。",
   "Import invalid line": "第 {{line}} 行格式不正确。",
   "Import duplicate line": "第 {{line}} 行邮箱重复，首次出现在第 {{firstLine}} 行。",
+  "Import non-microsoft line": "第 {{line}} 行不是微软邮箱（仅允许 outlook.* 与 hotmail.com 域名）。",
   "No valid import entries.": "没有可导入的有效行。",
   "Invalid longLived value.": "长短效选择无效。",
   "Invalid errorStrategy value.": "错误处理策略无效。",

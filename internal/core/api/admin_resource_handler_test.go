@@ -591,7 +591,7 @@ func TestAdminMicrosoftJSONCommandsEnforceBodyAndSelectionBounds(t *testing.T) {
 		response := perform(
 			http.MethodPatch,
 			"/v1/admin/resources/42",
-			`{"version":1,"emailAddress":"safe@example.com","status":"normal"}`,
+			`{"version":1,"emailAddress":"safe@outlook.com","status":"normal"}`,
 			gin.Params{{Key: "resourceId", Value: "42"}},
 			handler.PatchAdminMicrosoftResource,
 		)

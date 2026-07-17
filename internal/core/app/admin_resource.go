@@ -889,7 +889,7 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 	}
 	var normalizedEmail *string
 	if command.EmailAddress != nil {
-		value, err := normalizeAdminMicrosoftEmail(*command.EmailAddress)
+		value, err := normalizeAdminMicrosoftEmail(*command.EmailAddress, true)
 		if err != nil {
 			return nil, err
 		}
@@ -897,7 +897,7 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 		command.EmailAddress = normalizedEmail
 	}
 	if command.BindingAddressSet && command.BindingAddress != nil {
-		value, err := normalizeAdminMicrosoftEmail(*command.BindingAddress)
+		value, err := normalizeAdminMicrosoftEmail(*command.BindingAddress, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1525,7 +1525,7 @@ func (s *AdminResourceCommandService) validateOwner(ctx context.Context, ownerID
 	return owner, nil
 }
 
-func normalizeAdminMicrosoftEmail(value string) (string, error) {
+func normalizeAdminMicrosoftEmail(value string, requireMicrosoft bool) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" || len(value) > 255 {
 		return "", domain.ErrInvalidResourceCommand
@@ -1536,6 +1536,11 @@ func normalizeAdminMicrosoftEmail(value string) (string, error) {
 	}
 	parts := strings.SplitN(value, "@", 2)
 	if parts[0] == "" || parts[1] == "" {
+		return "", domain.ErrInvalidResourceCommand
+	}
+	// The primary account must be a Microsoft mailbox; a recovery/binding
+	// address may live on any provider, so the whitelist is caller-controlled.
+	if requireMicrosoft && !domain.IsMicrosoftEmailDomain(value) {
 		return "", domain.ErrInvalidResourceCommand
 	}
 	return value, nil

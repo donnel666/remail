@@ -629,6 +629,60 @@ func TLD(value string) string {
 	return "." + parts[len(parts)-1]
 }
 
+// microsoftEmailWhitelist is the closed set of Microsoft consumer mailbox domains
+// accepted for import (operator-supplied, 32 entries: outlook.com, hotmail.com and
+// 30 outlook country variants). It is an EXACT allow-list, not an outlook.* prefix:
+// real Microsoft variants absent here (outlook.co.uk, outlook.ca, live.com, msn.com)
+// are rejected, as is every non-Microsoft provider (icloud.com, gmail.com, *.edu.cn).
+var microsoftEmailWhitelist = map[string]struct{}{
+	"outlook.com":    {},
+	"hotmail.com":    {},
+	"outlook.sa":     {},
+	"outlook.com.ar": {},
+	"outlook.com.au": {},
+	"outlook.at":     {},
+	"outlook.be":     {},
+	"outlook.com.br": {},
+	"outlook.cl":     {},
+	"outlook.cz":     {},
+	"outlook.fr":     {},
+	"outlook.de":     {},
+	"outlook.com.gr": {},
+	"outlook.co.il":  {},
+	"outlook.in":     {},
+	"outlook.co.id":  {},
+	"outlook.ie":     {},
+	"outlook.it":     {},
+	"outlook.hu":     {},
+	"outlook.jp":     {},
+	"outlook.kr":     {},
+	"outlook.lv":     {},
+	"outlook.my":     {},
+	"outlook.co.nz":  {},
+	"outlook.ph":     {},
+	"outlook.pt":     {},
+	"outlook.sg":     {},
+	"outlook.sk":     {},
+	"outlook.es":     {},
+	"outlook.co.th":  {},
+	"outlook.com.tr": {},
+	"outlook.com.vn": {},
+}
+
+// IsMicrosoftEmailDomain reports whether email's domain is a whitelisted Microsoft
+// consumer mailbox accepted for import. It gates Microsoft account imports at the
+// trust boundary and is deliberately NOT applied to recovery/binding addresses,
+// which legitimately live on any provider.
+func IsMicrosoftEmailDomain(email string) bool {
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(email[at+1:])), ".")
+	_, ok := microsoftEmailWhitelist[host]
+	return ok
+}
+
 func normalizeDomainInput(value string) string {
 	canonical := strings.ToLower(strings.TrimSpace(value))
 	canonical = strings.TrimSuffix(canonical, ".")

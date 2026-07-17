@@ -336,6 +336,7 @@
   "Import skipped errors": "{{count}} import row(s) had errors and were skipped.",
   "Import invalid line": "Line {{line}} has an invalid format.",
   "Import duplicate line": "Line {{line}} duplicates an email first seen on line {{firstLine}}.",
+  "Import non-microsoft line": "Line {{line}} is not a Microsoft mailbox (only outlook.* and hotmail.com domains are allowed).",
   "No valid import entries.": "No valid import entries.",
   "Invalid longLived value.": "Invalid long-lived value.",
   "Invalid errorStrategy value.": "Invalid error strategy value.",
