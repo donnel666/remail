@@ -134,7 +134,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
-		allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod)
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,
 			mailMod.BindingQuery,

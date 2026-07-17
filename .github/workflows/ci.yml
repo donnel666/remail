@@ -273,10 +273,6 @@ jobs:
             "SELECT was_attempted, uncertain_since, negative_confirmations, last_negative_confirmation_at FROM microsoft_alias_attempts LIMIT 1;"
           mysql -h 127.0.0.1 -u remail -premail remail -e \
             "SELECT owner_user_id FROM explicit_aliases LIMIT 1;"
-          mysql -h 127.0.0.1 -u remail -premail remail -e \
-            "SELECT claim_token, dispatch_token, dispatched_at FROM resource_validation_jobs LIMIT 1;"
-          mysql -h 127.0.0.1 -u remail -premail remail -e \
-            "SELECT owner_user_id FROM explicit_aliases LIMIT 1;"
 
       - name: Shutdown server
         if: always()
