@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { AdminDashboardData } from "./admin-dashboard-mock";
+import type { AdminDashboardData } from "@/lib/admin-dashboard-api";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
 

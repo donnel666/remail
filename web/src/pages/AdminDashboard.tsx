@@ -14,13 +14,14 @@ import {
 } from "@/pages/resources/date-range-filter";
 
 import {
+  getAdminDashboardData,
+  type AdminDashboardData,
+} from "@/lib/admin-dashboard-api";
+
+import {
   AdminDashboardAnalysisPanel,
   type AdminAnalysisView,
 } from "./admin-dashboard/admin-analysis-panel";
-import {
-  getAdminDashboardData,
-  type AdminDashboardData,
-} from "./admin-dashboard/admin-dashboard-mock";
 import { AdminDashboardHeader } from "./admin-dashboard/admin-dashboard-header";
 import { AdminRankingPanel } from "./admin-dashboard/admin-ranking-panel";
 import { AdminDashboardSummaryCards } from "./admin-dashboard/admin-summary-cards";
@@ -49,8 +50,8 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const result = await getAdminDashboardData({
-        from: createdFromISOString(createdAtRange),
-        to: createdToISOString(createdAtRange),
+        createdFrom: createdFromISOString(createdAtRange),
+        createdTo: createdToISOString(createdAtRange),
       });
       if (requestID !== requestSequence.current) return;
       setData(result);

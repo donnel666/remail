@@ -13,6 +13,8 @@ import (
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
 )
 
 var dashboardMySQLTestServer = testmysql.New("remail_dashboard_test")
@@ -35,13 +37,17 @@ func newDashboardMySQLTestDB(t *testing.T) *gorm.DB {
 // at the default 'pending_payment' so the debit/allocation/delivery CHECKs need
 // no extra columns; the dashboard counts orders regardless of status.
 func seedDashboardOrder(t *testing.T, db *gorm.DB, id, userID, projectID, productID uint, mode string, pay string, receiveStarted, createdAt time.Time) {
+	seedTypedOrder(t, db, id, userID, projectID, productID, "microsoft", mode, pay, receiveStarted, createdAt)
+}
+
+func seedTypedOrder(t *testing.T, db *gorm.DB, id, userID, projectID, productID uint, productType, mode string, pay string, receiveStarted, createdAt time.Time) {
 	t.Helper()
 	fp := strings.Repeat("a", 64)
 	require.NoError(t, db.Exec(`
 INSERT INTO orders (id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
     pay_amount, debit_tx_id, client_channel, idempotency_key, request_fingerprint, receive_started_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, 'microsoft', ?, ?, 1, 'console', ?, ?, ?, ?, ?)`,
-		id, "ORD-"+strconv.Itoa(int(id)), userID, projectID, productID, mode, pay,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'console', ?, ?, ?, ?, ?)`,
+		id, "ORD-"+strconv.Itoa(int(id)), userID, projectID, productID, productType, mode, pay,
 		"idem-"+strconv.Itoa(int(id)), fp, receiveStarted.UTC(), createdAt.UTC(), createdAt.UTC(),
 	).Error)
 }
@@ -203,4 +209,127 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	require.NoError(t, err)
 	require.Equal(t, 1, standing4.Count)
 	require.Equal(t, 3, standing4.Rank)
+}
+
+// TestAdminViewRepoMySQL drives the platform-wide admin aggregates against real
+// MySQL: the microsoft/domain product-type split, user new/active counts, the
+// inventory snapshot WHERE clauses and the global project code ranking.
+func TestAdminViewRepoMySQL(t *testing.T) {
+	db := newDashboardMySQLTestDB(t)
+	ctx := context.Background()
+
+	ref := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
+	receiveStart := ref.Add(-30 * time.Second)
+	beforeRange := ref.Add(-30 * 24 * time.Hour)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role, created_at, last_login_at) VALUES
+    (1, 'base@test.local', 'h', 'Base', TRUE, 'user', ?, NULL),
+    (2, 'buyer@test.local', 'h', 'Buyer', TRUE, 'user', ?, ?),
+    (3, 'fresh@test.local', 'h', 'Fresh', TRUE, 'user', ?, NULL)`,
+		beforeRange, ref, ref, ref).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
+VALUES (10, 'Microsoft', 'trade', '', 'listed', 'public', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight)
+VALUES (20, 10, 'microsoft', 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, 1, 0, 0)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (1, 'microsoft', 2)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(id, transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id)
+VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order', 'ORD')`).Error)
+
+	// orders: 1 microsoft code, 2 domain code, 1 microsoft purchase (all charged).
+	seedTypedOrder(t, db, 1, 2, 10, 20, "microsoft", "code", "12.00", receiveStart, ref)
+	seedTypedOrder(t, db, 2, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
+	seedTypedOrder(t, db, 3, 2, 10, 20, "microsoft", "purchase", "8.00", ref, ref)
+	seedTypedOrder(t, db, 4, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
+	seedDashboardReceipt(t, db, 1, 101, ref)
+	seedDashboardReceipt(t, db, 2, 102, ref)
+	seedDashboardReceipt(t, db, 4, 103, ref)
+
+	// Microsoft inventory: normal+for_sale+graph (available), normal not-for-sale
+	// (total only), deleted (excluded from total).
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES (2,'microsoft',2),(3,'microsoft',2),(4,'microsoft',2)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, graph_available) VALUES
+    (2, 'a@x.test', 'p', 'normal', TRUE, TRUE),
+    (3, 'b@x.test', 'p', 'normal', FALSE, TRUE),
+    (4, 'c@x.test', 'p', 'deleted', TRUE, TRUE)`).Error)
+
+	repo := NewAdminViewRepo(db)
+	from := ref.Add(-6 * time.Hour)
+	to := ref.Add(6 * time.Hour)
+	const dayFmt = "%Y-%m-%d"
+
+	orderRows, err := repo.OrderTrend(ctx, dayFmt, from, to)
+	require.NoError(t, err)
+	require.Equal(t, 4, sumCountBuckets(orderRows))
+
+	codeOrders, err := repo.CodeOrderTrend(ctx, dayFmt, from, to)
+	require.NoError(t, err)
+	ms, domain := 0, 0
+	for _, r := range codeOrders {
+		if r.ProductType == "domain" {
+			domain += r.Count
+		} else {
+			ms += r.Count
+		}
+	}
+	require.Equal(t, 1, ms)     // order 1
+	require.Equal(t, 2, domain) // orders 2 and 4 (purchase order 3 excluded)
+
+	receipts, err := repo.CodeReceiptTrend(ctx, dayFmt, from, to)
+	require.NoError(t, err)
+	msR, domainR := 0, 0
+	for _, r := range receipts {
+		require.Equal(t, 30, r.AvgSeconds)
+		if r.ProductType == "domain" {
+			domainR += r.Received
+		} else {
+			msR += r.Received
+		}
+	}
+	require.Equal(t, 1, msR)
+	require.Equal(t, 2, domainR)
+
+	newUsers, err := repo.NewUserTrend(ctx, dayFmt, from, to)
+	require.NoError(t, err)
+	require.Equal(t, 2, sumCountBuckets(newUsers)) // users 2 and 3
+
+	activeUsers, err := repo.ActiveUserTrend(ctx, dayFmt, from, to)
+	require.NoError(t, err)
+	require.Equal(t, 1, sumCountBuckets(activeUsers)) // only user 2 has a last_login in range
+
+	base, err := repo.UsersCreatedBefore(ctx, from)
+	require.NoError(t, err)
+	require.Equal(t, 1, base) // user 1
+
+	snap, err := repo.InventorySnapshot(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, snap.MicrosoftTotal)     // res 2 and 3 (4 deleted)
+	require.Equal(t, 1, snap.MicrosoftAvailable) // res 2 only
+	require.Equal(t, 0, snap.DomainTotal)        // no generated mailboxes seeded
+	require.Equal(t, 0, snap.DomainAvailable)
+
+	ranking, err := repo.ProjectCodeRanking(ctx, from, to, 10)
+	require.NoError(t, err)
+	require.Len(t, ranking, 1)
+	require.Equal(t, "Microsoft", ranking[0].Name)
+	require.Equal(t, 3, ranking[0].Count) // 3 code receipts across the project
+}
+
+func sumCountBuckets(rows []dashboardapp.CountBucket) int {
+	total := 0
+	for _, r := range rows {
+		total += r.Count
+	}
+	return total
 }

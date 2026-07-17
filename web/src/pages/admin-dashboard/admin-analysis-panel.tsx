@@ -6,7 +6,7 @@ import { semiDesignDark, semiDesignLight } from "@visactor/vchart-semi-theme";
 import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { AdminDashboardData } from "./admin-dashboard-mock";
+import type { AdminDashboardData } from "@/lib/admin-dashboard-api";
 
 export type AdminAnalysisView =
   | "codes"

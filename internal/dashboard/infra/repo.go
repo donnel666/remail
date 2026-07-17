@@ -80,7 +80,7 @@ func (r *ViewRepo) ReceiptBuckets(ctx context.Context, userID uint, sqlFormat st
 	// success rate the panels compute (receivedCodes/codeOrders) is then always
 	// well-defined and <= 100%. Latency still uses the receipt timestamp.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(o.created_at, '%s') AS bucket, COUNT(*) AS received, COALESCE(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0) AS avg_seconds",
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, COUNT(*) AS received, COALESCE(GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0),0) AS avg_seconds",
 		sqlFormat,
 	)
 	var rows []struct {
@@ -185,7 +185,7 @@ func (r *ViewRepo) RangeAvgReceiptSeconds(ctx context.Context, userID uint, from
 	if err := r.db.WithContext(ctx).
 		Table("mailmatch_order_delivery_heads AS h").
 		Joins("JOIN orders AS o ON o.id = h.order_id").
-		Select("ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at)))").
+		Select("GREATEST(ROUND(AVG(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at))),0)").
 		Where("o.user_id = ? AND o.service_mode = 'code' AND o.created_at >= ? AND o.created_at <= ?", userID, from.UTC(), to.UTC()).
 		Scan(&avg).Error; err != nil {
 		return 0, err
