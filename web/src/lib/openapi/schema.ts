@@ -3025,10 +3025,20 @@ export interface components {
         NonNegativeLedgerAmount: string;
         /** @description External payment-channel amount limited to 2 decimal places. */
         PaymentAmount: string;
+        /** @description Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list. */
+        OrderOwnerSummary: {
+            userId: number;
+            email?: string;
+            nickname?: string;
+            groupName?: string;
+            role?: string;
+            enabled: boolean;
+        };
         OrderResponse: {
             id: number;
             orderNo: string;
             userId: number;
+            owner?: components["schemas"]["OrderOwnerSummary"];
             projectId: number;
             /** @description Display name of the ordered project; omitted when the project no longer exists. */
             projectName?: string;

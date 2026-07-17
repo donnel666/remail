@@ -5009,6 +5009,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # --- Dashboard ---
+  /v1/dashboard:
+    get:
+      operationId: getDashboard
+      summary: Current user's console data dashboard
+      description: |
+        Aggregated analytics for the signed-in user's console overview — orders,
+        code receipts, spend, project spend series, project code-receipt ranking,
+        and today/all-time cross-user code-receipt leaderboards — over the
+        selected date range. Available to any authenticated user; scoped to the
+        caller. Buckets are hourly when the range is a single day, else daily.
+      tags:
+        - Dashboard
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Console dashboard aggregates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Billing Wallet ---
   /v1/wallet:
     get:
@@ -9208,6 +9254,25 @@ components:
       description: External payment-channel amount limited to 2 decimal places.
       pattern: '^[0-9]+(\.[0-9]{1,2})?$'
 
+    OrderOwnerSummary:
+      type: object
+      description: Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
+      required:
+        - userId
+        - enabled
+      properties:
+        userId:
+          type: integer
+        email:
+          type: string
+        nickname:
+          type: string
+        groupName:
+          type: string
+        role:
+          type: string
+        enabled:
+          type: boolean
     OrderResponse:
       type: object
       required:
@@ -9235,6 +9300,8 @@ components:
           type: string
         userId:
           type: integer
+        owner:
+          $ref: '#/components/schemas/OrderOwnerSummary'
         projectId:
           type: integer
         projectName:

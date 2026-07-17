@@ -1,9 +1,11 @@
 import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import { generateIdempotencyKey } from "./idempotency";
 import { notifyWalletUpdated } from "./wallet-events";
 
 export type CreateOrderRequest = components["schemas"]["CreateOrderRequest"];
 export type OrderResponse = components["schemas"]["OrderResponse"];
+export type OrderOwnerSummary = components["schemas"]["OrderOwnerSummary"];
 export type OrderListResponse = components["schemas"]["OrderListResponse"];
 export type OrderListFacets = components["schemas"]["OrderListFacets"];
 export type OrderStatus = OrderResponse["status"];
@@ -43,6 +45,7 @@ export interface OrderListFilter {
   domain?: string;
   limit?: number;
   offset?: number;
+  scope?: "mine" | "all";
   search?: string;
   serviceMode?: OrderServiceMode;
   status?: OrderStatus;
@@ -53,7 +56,7 @@ export async function listOrders(filter: OrderListFilter) {
     await client.GET("/v1/orders", {
       params: {
         query: {
-          scope: "mine",
+          scope: filter.scope ?? "mine",
           afterId: filter.afterId,
           offset: filter.offset,
           limit: filter.limit ?? 100,
@@ -73,6 +76,24 @@ export async function getOrder(orderNo: string) {
   return unwrap<OrderResponse>(
     await client.GET("/v1/orders/{orderNo}", {
       params: { path: { orderNo } },
+    })
+  );
+}
+
+export async function adminRefundOrder(orderNo: string, reason?: string) {
+  // The refund credits the buyer's wallet, not the admin operator's, so this
+  // deliberately does not emit notifyWalletUpdated (that refreshes the current
+  // user's own balance).
+  return unwrap<OrderResponse>(
+    await client.POST("/v1/admin/orders/{orderNo}/refund", {
+      body: { reason: reason ?? "" },
+      params: {
+        path: { orderNo },
+        header: {
+          ...csrfHeader(),
+          "Idempotency-Key": generateIdempotencyKey(),
+        },
+      },
     })
   );
 }

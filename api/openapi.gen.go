@@ -5223,6 +5223,16 @@ type OrderMailResponse struct {
 	Items []MailContentResponse `json:"items"`
 }
 
+// OrderOwnerSummary Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
+type OrderOwnerSummary struct {
+	Email     *string `json:"email,omitempty"`
+	Enabled   bool    `json:"enabled"`
+	GroupName *string `json:"groupName,omitempty"`
+	Nickname  *string `json:"nickname,omitempty"`
+	Role      *string `json:"role,omitempty"`
+	UserId    int     `json:"userId"`
+}
+
 // OrderResponse defines model for OrderResponse.
 type OrderResponse struct {
 	ActivatedAt    *time.Time                   `json:"activatedAt,omitempty"`
@@ -5243,6 +5253,9 @@ type OrderResponse struct {
 	// LastMailReceivedAt Provider receive time of the delivered message.
 	LastMailReceivedAt *time.Time `json:"lastMailReceivedAt,omitempty"`
 	OrderNo            string     `json:"orderNo"`
+
+	// Owner Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
+	Owner *OrderOwnerSummary `json:"owner,omitempty"`
 
 	// PayAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	PayAmount   NonNegativeLedgerAmount  `json:"payAmount"`

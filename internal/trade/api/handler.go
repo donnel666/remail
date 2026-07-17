@@ -475,6 +475,17 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 	if value := strings.TrimSpace(result.ProjectLogoURL); value != "" {
 		projectLogoURL = &value
 	}
+	var owner *OrderOwnerResponse
+	if result.Owner != nil {
+		owner = &OrderOwnerResponse{
+			UserID:    result.Owner.ID,
+			Email:     result.Owner.Email,
+			Nickname:  result.Owner.Nickname,
+			GroupName: result.Owner.GroupName,
+			Role:      result.Owner.Role,
+			Enabled:   result.Owner.Enabled,
+		}
+	}
 	if order.AllocationType != nil {
 		allocationType = string(*order.AllocationType)
 	}
@@ -488,6 +499,7 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		ID:                   order.ID,
 		OrderNo:              order.OrderNo,
 		UserID:               order.UserID,
+		Owner:                owner,
 		ProjectID:            order.ProjectID,
 		ProjectName:          result.ProjectName,
 		ProjectLogoURL:       projectLogoURL,

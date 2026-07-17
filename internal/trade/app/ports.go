@@ -138,6 +138,24 @@ type ProjectDisplayPort interface {
 	ProjectDisplays(ctx context.Context, projectIDs []uint) (map[uint]ProjectDisplay, error)
 }
 
+// OrderOwnerSummary is the IAM-owned safe summary of an order's buyer, used to
+// enrich the administrator site-wide order list. It carries no authentication
+// or permission-policy facts.
+type OrderOwnerSummary struct {
+	ID        uint
+	Email     string
+	Nickname  string
+	GroupName string
+	Role      string
+	Enabled   bool
+}
+
+// OwnerLookupPort is published by IAM; enrichment is batched over the buyer IDs
+// of one page of orders and only runs for the administrator site-wide scope.
+type OwnerLookupPort interface {
+	GetByIDs(ctx context.Context, ids []uint) (map[uint]OrderOwnerSummary, error)
+}
+
 type Repository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error)
@@ -325,6 +343,8 @@ type CheckoutResult struct {
 	HasDelivery        bool
 	VerificationCode   string
 	LastMailReceivedAt *time.Time
+	// Owner is populated only for the administrator site-wide order list.
+	Owner *OrderOwnerSummary
 }
 
 type MatchCodeResultRequest struct {
@@ -359,6 +379,7 @@ type UseCase struct {
 	deliveries                 OrderDeliveryPort
 	systemLogs                 SystemLogPort
 	projectDisplays            ProjectDisplayPort
+	owners                     OwnerLookupPort
 	historicalOrders           HistoricalOrderRepository
 	historicalAllocations      HistoricalMicrosoftAllocationPort
 	now                        func() time.Time
@@ -389,6 +410,10 @@ func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
 
 func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
 	uc.systemLogs = systemLogs
+}
+
+func (uc *UseCase) SetOwnerLookupPort(owners OwnerLookupPort) {
+	uc.owners = owners
 }
 
 func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches []HistoricalMicrosoftUsage) error {
@@ -692,7 +717,45 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 	if err := uc.attachProjectDisplays(ctx, results); err != nil {
 		return nil, err
 	}
+	if err := uc.attachOwners(ctx, filter, results); err != nil {
+		return nil, err
+	}
 	return list, nil
+}
+
+// attachOwners enriches each row with its buyer summary. It only runs for the
+// administrator site-wide scope; the buyer's own order list never needs it.
+func (uc *UseCase) attachOwners(ctx context.Context, filter OrderListFilter, results []CheckoutResult) error {
+	if uc.owners == nil || !filter.IsAdmin || filter.Scope != "all" || len(results) == 0 {
+		return nil
+	}
+	seen := make(map[uint]struct{}, len(results))
+	userIDs := make([]uint, 0, len(results))
+	for i := range results {
+		id := results[i].Order.UserID
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		userIDs = append(userIDs, id)
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+	owners, err := uc.owners.GetByIDs(ctx, userIDs)
+	if err != nil {
+		return err
+	}
+	for i := range results {
+		if owner, ok := owners[results[i].Order.UserID]; ok {
+			ownerCopy := owner
+			results[i].Owner = &ownerCopy
+		}
+	}
+	return nil
 }
 
 func (uc *UseCase) attachProjectDisplays(ctx context.Context, results []CheckoutResult) error {

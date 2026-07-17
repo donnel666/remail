@@ -84,6 +84,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         requiredPermission: permissionKey("iam:user", "read"),
       },
       {
+        path: "/admin/orders",
+        labelKey: "Order Management",
+        icon: ClipboardList,
+        requiredPermission: permissionKey("trade:order", "read"),
+      },
+      {
         path: "/admin/tickets",
         labelKey: "Ticket Management",
         icon: Headphones,
