@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -44,11 +46,18 @@ type AllocateCommand struct {
 }
 
 type UseCase struct {
-	repo                      Repository
-	queue                     CandidateRefreshQueue
-	adminAllocationEnrichment AdminAllocationEnrichmentPort
-	inventoryStatsCache       *platform.TTLCache[string, InventoryStats]
-	productInventoryCache     *platform.TTLCache[string, ProjectProductInventoryTotals]
+	repo                       Repository
+	queue                      CandidateRefreshQueue
+	adminAllocationEnrichment  AdminAllocationEnrichmentPort
+	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
+	inventoryStatsCache        *platform.TTLCache[string, InventoryStats]
+	productInventoryCache      *platform.TTLCache[string, ProjectProductInventoryTotals]
+}
+
+func (uc *UseCase) SetHistoricalMicrosoftAliasPort(port HistoricalMicrosoftAliasPort) {
+	if uc != nil {
+		uc.historicalMicrosoftAliases = port
+	}
 }
 
 func (uc *UseCase) SetAdminAllocationEnrichmentPort(port AdminAllocationEnrichmentPort) {
@@ -137,6 +146,120 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 		return nil, domain.ErrInsufficientInventory
 	}
 	return result, nil
+}
+
+func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*domain.UnifiedAllocation, error) {
+	cmd.Email = strings.ToLower(strings.TrimSpace(cmd.Email))
+	cmd.CreatedAt = cmd.CreatedAt.UTC()
+	cmd.ReleasedAt = cmd.ReleasedAt.UTC()
+	if uc == nil || uc.repo == nil || cmd.ProjectID == 0 || cmd.ProductID == 0 ||
+		cmd.ResourceID == 0 || cmd.Email == "" || !domain.IsValidMicrosoftMailbox(cmd.Mailbox) ||
+		cmd.CreatedAt.IsZero() || cmd.ReleasedAt.IsZero() || cmd.ReleasedAt.Before(cmd.CreatedAt) ||
+		(cmd.Mailbox == domain.MicrosoftMailboxAlias && (cmd.AliasOwnerID == 0 || uc.historicalMicrosoftAliases == nil)) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	var result *domain.UnifiedAllocation
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		var explicitAliasID, dotAliasID, plusAliasID *uint
+		mailboxID := cmd.ResourceID
+		switch cmd.Mailbox {
+		case domain.MicrosoftMailboxMain:
+		case domain.MicrosoftMailboxAlias:
+			if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, cmd.AliasOwnerID, []string{cmd.Email}); err != nil {
+				return err
+			}
+			alias, err := uc.repo.FindExplicitAlias(txCtx, cmd.ResourceID, cmd.Email)
+			if err != nil {
+				return err
+			}
+			if alias == nil || alias.ID == 0 {
+				return domain.ErrInvalidAllocationRequest
+			}
+			explicitAliasID = &alias.ID
+			mailboxID = alias.ID
+		case domain.MicrosoftMailboxDot:
+			alias, err := uc.repo.FindOrCreateDotAlias(txCtx, cmd.ResourceID, cmd.Email)
+			if err != nil {
+				return err
+			}
+			if alias == nil || alias.ID == 0 {
+				return domain.ErrInvalidAllocationRequest
+			}
+			dotAliasID = &alias.ID
+			mailboxID = alias.ID
+		case domain.MicrosoftMailboxPlus:
+			alias, err := uc.repo.FindOrCreatePlusAlias(txCtx, cmd.ResourceID, cmd.Email)
+			if err != nil {
+				return err
+			}
+			if alias == nil || alias.ID == 0 {
+				return domain.ErrInvalidAllocationRequest
+			}
+			plusAliasID = &alias.ID
+			mailboxID = alias.ID
+		}
+		orderNo := historicalMicrosoftAllocationOrderNo(cmd, mailboxID)
+		existing, err := uc.repo.FindExistingAllocation(txCtx, orderNo)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if !sameHistoricalMicrosoftAllocation(*existing, orderNo, cmd) {
+				return domain.ErrAllocationConflict
+			}
+			result = existing
+			return nil
+		}
+		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, domain.AllocationTypeMicrosoft); err != nil {
+			if errors.Is(err, domain.ErrAllocationConflict) {
+				existing, findErr := uc.repo.FindExistingAllocation(txCtx, orderNo)
+				if findErr != nil {
+					return findErr
+				}
+				if existing != nil && sameHistoricalMicrosoftAllocation(*existing, orderNo, cmd) {
+					result = existing
+					return nil
+				}
+			}
+			return err
+		}
+		releasedAt := cmd.ReleasedAt
+		allocation := &domain.MicrosoftAllocation{
+			OrderNo: orderNo, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID,
+			ResourceID: cmd.ResourceID, SupplyScope: domain.SupplyScopePublic,
+			Mailbox: cmd.Mailbox, ExplicitAliasID: explicitAliasID, DotAliasID: dotAliasID, PlusAliasID: plusAliasID,
+			Email: cmd.Email, Status: domain.AllocationStatusReleased,
+			CreatedAt: cmd.CreatedAt, ReleasedAt: &releasedAt,
+		}
+		if err := uc.repo.CreateMicrosoftAllocation(txCtx, allocation); err != nil {
+			return err
+		}
+		unified := domain.UnifiedAllocation{
+			Type: domain.AllocationTypeMicrosoft, ID: allocation.ID, OrderNo: allocation.OrderNo,
+			ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
+			SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
+			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+		}
+		result = &unified
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func historicalMicrosoftAllocationOrderNo(cmd HistoricalMicrosoftAllocationCommand, mailboxID uint) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s:%d", cmd.ResourceID, cmd.ProjectID, cmd.Mailbox, mailboxID)))
+	return "HIST-" + hex.EncodeToString(sum[:20])
+}
+
+func sameHistoricalMicrosoftAllocation(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalMicrosoftAllocationCommand) bool {
+	emailMatches := cmd.Mailbox == domain.MicrosoftMailboxMain || strings.EqualFold(existing.Email, cmd.Email)
+	return existing.Type == domain.AllocationTypeMicrosoft && existing.OrderNo == orderNo &&
+		existing.ProjectID == cmd.ProjectID && existing.ProductID == cmd.ProductID && existing.ResourceID == cmd.ResourceID &&
+		existing.Mailbox == string(cmd.Mailbox) && emailMatches &&
+		existing.Status == domain.AllocationStatusReleased
 }
 
 func (uc *UseCase) ReleaseByOrder(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error) {
@@ -516,7 +639,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 	if bucket == nil {
 		limit = globalCandidateWindow
 	}
-	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
+	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
 		return nil, false, err
 	}
@@ -545,7 +668,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		return nil, domain.ErrAllocationConflict
 	}
 
-	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
+	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, cmd.EmailSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -556,14 +679,20 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 
 	switch mailbox {
 	case domain.MicrosoftMailboxMain:
-		result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
-		if err == nil {
-			return result, nil
-		}
-		if err != domain.ErrAllocationConflict {
+		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxMain, candidate.ResourceID)
+		if err != nil {
 			return nil, err
 		}
-		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, candidate.ResourceID)
+		if !matched {
+			result, err := uc.createMicrosoftAllocation(ctx, cmd.OrderNo, cmd.SupplyScope, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
+			if err == nil {
+				return result, nil
+			}
+			if err != domain.ErrAllocationConflict {
+				return nil, err
+			}
+		}
+		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, config.ProjectID, candidate.ResourceID)
 		if aliasErr != nil {
 			return nil, aliasErr
 		}

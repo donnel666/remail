@@ -1609,6 +1609,22 @@ func (t *validationAliasTrigger) EnsureForValidatedMicrosoftResource(_ context.C
 	return t.err
 }
 
+type validationHistoryTrigger struct {
+	tasks []struct {
+		resourceID uint
+		requestID  string
+	}
+	err error
+}
+
+func (t *validationHistoryTrigger) ScheduleValidatedMicrosoftHistory(_ context.Context, resourceID uint, requestID string) error {
+	t.tasks = append(t.tasks, struct {
+		resourceID uint
+		requestID  string
+	}{resourceID: resourceID, requestID: requestID})
+	return t.err
+}
+
 func (v mockResourceValidator) ValidateMicrosoft(_ context.Context, _ coreapp.MicrosoftValidationRequest) (coreapp.MicrosoftValidationResult, error) {
 	if v.msErr != nil {
 		return v.msResult, v.msErr
@@ -2225,10 +2241,12 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	resourceRepo := newMockResourceRepo()
 	validationRepo := newMockValidationRepo(resourceRepo)
 	trigger := &validationAliasTrigger{}
+	historyTrigger := &validationHistoryTrigger{}
 	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
 		msResult: coreapp.MicrosoftValidationResult{Valid: true, ClientID: "rotated-client", RefreshToken: "rotated-rt", GraphAvailable: true},
 	})
 	uc.SetMicrosoftAliasScheduleTrigger(trigger)
+	uc.SetMicrosoftHistoryScanTrigger(historyTrigger)
 
 	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
 	resource := &coredomain.MicrosoftResource{EmailAddress: "success@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1}
@@ -2238,6 +2256,28 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, "rotated-rt", resourceRepo.microsoft[root.ID].RefreshToken)
 	require.Equal(t, []uint{root.ID}, trigger.resourceIDs)
+	require.Len(t, historyTrigger.tasks, 1)
+	require.Equal(t, root.ID, historyTrigger.tasks[0].resourceID)
+	require.Equal(t, task.RequestID, historyTrigger.tasks[0].requestID)
+}
+
+func TestResourceValidationUseCase_HistoryTaskFailureKeepsMicrosoftValidating(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	historyTrigger := &validationHistoryTrigger{err: errors.New("redis unavailable")}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{Valid: true, ClientID: "rotated-client", RefreshToken: "rotated-rt", GraphAvailable: true},
+	})
+	uc.SetMicrosoftHistoryScanTrigger(historyTrigger)
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	resource := &coredomain.MicrosoftResource{EmailAddress: "history-retry@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
+	task := mockValidationTask(validationRepo, root.ID)
+
+	require.ErrorIs(t, uc.Process(context.Background(), task), coreapp.ErrValidationTemporaryUnavailable)
+	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
+	require.Len(t, historyTrigger.tasks, 1)
 }
 
 func TestResourceValidationUseCase_TemporaryFailureStaysValidatingUntilRedisRetryEnds(t *testing.T) {

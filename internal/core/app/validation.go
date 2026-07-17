@@ -64,6 +64,13 @@ type MicrosoftAliasScheduleTriggerPort interface {
 	EnsureForValidatedMicrosoftResource(ctx context.Context, resourceID uint) error
 }
 
+// MicrosoftHistoryScanTriggerPort is implemented by MailMatch. It is called
+// after Core commits a successful Microsoft validation so mailbox history can
+// be scanned independently from the validation worker.
+type MicrosoftHistoryScanTriggerPort interface {
+	ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string) error
+}
+
 type MicrosoftValidationRequest struct {
 	ResourceID   uint
 	OwnerUserID  uint
@@ -182,16 +189,23 @@ type ResourceBatchValidationResult struct {
 }
 
 type ResourceValidationUseCase struct {
-	resources    EmailResourceRepository
-	validations  ResourceValidationRepository
-	queue        ResourceValidationQueue
-	validator    ResourceValidationPort
-	aliasTrigger MicrosoftAliasScheduleTriggerPort
+	resources      EmailResourceRepository
+	validations    ResourceValidationRepository
+	queue          ResourceValidationQueue
+	validator      ResourceValidationPort
+	aliasTrigger   MicrosoftAliasScheduleTriggerPort
+	historyTrigger MicrosoftHistoryScanTriggerPort
 }
 
 func (uc *ResourceValidationUseCase) SetMicrosoftAliasScheduleTrigger(trigger MicrosoftAliasScheduleTriggerPort) {
 	if uc != nil {
 		uc.aliasTrigger = trigger
+	}
+}
+
+func (uc *ResourceValidationUseCase) SetMicrosoftHistoryScanTrigger(trigger MicrosoftHistoryScanTriggerPort) {
+	if uc != nil {
+		uc.historyTrigger = trigger
 	}
 }
 
@@ -507,6 +521,22 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 		}
 		return ErrValidationTemporaryUnavailable
 	}
+	if result.Valid && uc.historyTrigger != nil {
+		// The task carries only resource identity, so enqueue it before committing
+		// the healthy resource state. Its worker rechecks status and credentials;
+		// this closes the otherwise permanent "normal but no history task" gap.
+		triggerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		triggerErr := uc.historyTrigger.ScheduleValidatedMicrosoftHistory(triggerCtx, task.ResourceID, task.RequestID)
+		cancel()
+		if triggerErr != nil {
+			slog.Warn(
+				"microsoft history scan task could not be created before validation commit",
+				"resource_id", task.ResourceID,
+				"request_id", task.RequestID,
+			)
+			return ErrValidationTemporaryUnavailable
+		}
+	}
 	err = uc.validations.ApplyMicrosoftResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
 	if errors.Is(err, ErrValidationResultStale) {
 		return nil
@@ -517,18 +547,17 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	if !result.Valid {
 		return nil
 	}
-	if uc.aliasTrigger == nil {
-		return nil
-	}
 	// Alias scheduling is its own durable concern. A transient failure here
 	// must not turn an already-committed validation success back into a retry;
 	// the daily alias scan remains the recovery path.
-	if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, task.ResourceID); triggerErr != nil {
-		slog.Warn(
-			"microsoft alias schedule trigger deferred after validation",
-			"resource_id", task.ResourceID,
-			"request_id", task.RequestID,
-		)
+	if uc.aliasTrigger != nil {
+		if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, task.ResourceID); triggerErr != nil {
+			slog.Warn(
+				"microsoft alias schedule trigger deferred after validation",
+				"resource_id", task.ResourceID,
+				"request_id", task.RequestID,
+			)
+		}
 	}
 	return nil
 }

@@ -47,6 +47,11 @@ type ProjectHistoryScanTask struct {
 	DispatchToken string `json:"dispatchToken"`
 }
 
+type ValidatedMicrosoftHistoryScanTask struct {
+	ResourceID uint   `json:"resourceId"`
+	RequestID  string `json:"requestId,omitempty"`
+}
+
 type ProjectHistoryScanRepository interface {
 	CreatePlanner(ctx context.Context, projectID uint, requestID string) error
 	EnsureMissingPlanners(ctx context.Context, limit int) (int, error)
@@ -62,13 +67,20 @@ type ProjectHistoryScanRepository interface {
 
 type ProjectHistoryMatchRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
+	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
+	ListHistoricalProjectScopesForUpdate(ctx context.Context) ([]HistoricalProjectScope, error)
 	FindHistoricalProjectScope(ctx context.Context, projectID uint) (*HistoricalProjectScope, error)
 	FindHistoricalProjectScopeForUpdate(ctx context.Context, projectID uint) (*HistoricalProjectScope, error)
-	UpsertMicrosoftProjectMatches(ctx context.Context, matches []HistoricalProjectMatch) error
+	ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error
+}
+
+type HistoricalMicrosoftUsagePort interface {
+	ImportHistoricalMicrosoftUsage(ctx context.Context, matches []HistoricalProjectMatch) error
 }
 
 type ProjectHistoryScanQueue interface {
 	EnqueueProjectHistoryScan(ctx context.Context, task ProjectHistoryScanTask) error
+	EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error
 	EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -78,6 +90,7 @@ type ProjectHistoryScanUseCase struct {
 	queue       ProjectHistoryScanQueue
 	transport   MailTransportFetchPort
 	credentials coreapp.MicrosoftCredentialPort
+	history     HistoricalMicrosoftUsagePort
 	now         func() time.Time
 }
 
@@ -94,6 +107,12 @@ func (uc *ProjectHistoryScanUseCase) SetMicrosoftCredentialPort(credentials core
 	}
 }
 
+func (uc *ProjectHistoryScanUseCase) SetHistoricalMicrosoftUsagePort(history HistoricalMicrosoftUsagePort) {
+	if uc != nil {
+		uc.history = history
+	}
+}
+
 func (uc *ProjectHistoryScanUseCase) Schedule(ctx context.Context, projectID uint, requestID string) error {
 	if uc == nil || uc.jobs == nil || projectID == 0 {
 		return domain.ErrInvalidRequest
@@ -103,6 +122,16 @@ func (uc *ProjectHistoryScanUseCase) Schedule(ctx context.Context, projectID uin
 	}
 	uc.ScheduleDispatcher(ctx, 0)
 	return nil
+}
+
+func (uc *ProjectHistoryScanUseCase) ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string) error {
+	if uc == nil || uc.queue == nil || resourceID == 0 {
+		return domain.ErrInvalidRequest
+	}
+	return uc.queue.EnqueueValidatedMicrosoftHistoryScan(ctx, ValidatedMicrosoftHistoryScanTask{
+		ResourceID: resourceID,
+		RequestID:  strings.TrimSpace(requestID),
+	})
 }
 
 func (uc *ProjectHistoryScanUseCase) DispatchPending(ctx context.Context, limit int) error {
@@ -139,6 +168,106 @@ func (uc *ProjectHistoryScanUseCase) Process(ctx context.Context, task ProjectHi
 		return uc.processPlanner(ctx, *job)
 	}
 	return uc.processShard(ctx, *job)
+}
+
+func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error {
+	if uc == nil || uc.matches == nil || uc.credentials == nil || uc.transport == nil || task.ResourceID == 0 {
+		return domain.ErrInvalidRequest
+	}
+	resource, err := uc.credentials.LockMicrosoftCredentialScope(ctx, task.ResourceID)
+	if errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if resource == nil || strings.EqualFold(resource.Status, "deleted") {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(resource.Status)) {
+	case "normal":
+	case "pending", "validating":
+		return domain.ErrInvalidRequest
+	default:
+		return nil
+	}
+	if strings.TrimSpace(resource.EmailAddress) == "" || strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
+		return domain.ErrInvalidRequest
+	}
+	scopes, err := uc.matches.ListHistoricalProjectScopes(ctx)
+	if err != nil || len(scopes) == 0 {
+		return err
+	}
+	accumulator := historicalMatchesAccumulator{
+		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
+		scopes: scopes, scannedAt: uc.now(),
+	}
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, projectHistoryMailboxTimeout)
+	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
+		Scope: OrderScope{
+			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceTypeMicrosoft,
+			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
+			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
+		},
+		RequestID: strings.TrimSpace(task.RequestID), FullHistory: true,
+		OnMessages: accumulator.add, OnReset: accumulator.reset,
+	})
+	cancelFetch()
+	if fetched == nil && fetchErr == nil {
+		fetchErr = domain.ErrMailServiceUnavailable
+	}
+	refreshToken := ""
+	retryable := true
+	if fetched != nil {
+		refreshToken = strings.TrimSpace(fetched.RefreshToken)
+	}
+	if fetchErr != nil {
+		var failure *MailFetchFailure
+		if errors.As(fetchErr, &failure) {
+			retryable = failure.Retryable
+			refreshToken = strings.TrimSpace(failure.RefreshToken)
+		}
+	}
+	err = uc.matches.WithTx(ctx, func(txCtx context.Context) error {
+		if fetchErr == nil {
+			lockedScopes, err := uc.matches.ListHistoricalProjectScopesForUpdate(txCtx)
+			if err != nil {
+				return err
+			}
+			if !sameHistoricalProjectScopes(scopes, lockedScopes) {
+				return errProjectHistoryScopeChanged
+			}
+		}
+		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
+			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+			RefreshToken: refreshToken, Now: uc.now(),
+		}); err != nil {
+			return err
+		}
+		if fetchErr != nil {
+			return nil
+		}
+		matches := accumulator.results()
+		if len(matches) > 0 {
+			if uc.history == nil {
+				return domain.ErrInvalidRequest
+			}
+			if err := uc.history.ImportHistoricalMicrosoftUsage(txCtx, matches); err != nil {
+				return err
+			}
+		}
+		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0)
+	})
+	if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if fetchErr != nil && retryable {
+		return fetchErr
+	}
+	return nil
 }
 
 func (uc *ProjectHistoryScanUseCase) processPlanner(ctx context.Context, job ProjectHistoryScanJob) error {
@@ -197,7 +326,10 @@ func (uc *ProjectHistoryScanUseCase) processShard(ctx context.Context, job Proje
 	if scope == nil {
 		return uc.complete(ctx, job)
 	}
-	accumulator := historicalMatchAccumulator{resourceID: resource.ResourceID, emailAddress: resource.EmailAddress, scope: *scope, scannedAt: uc.now()}
+	accumulator := historicalMatchesAccumulator{
+		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
+		scopes: []HistoricalProjectScope{*scope}, scannedAt: uc.now(),
+	}
 	if uc.transport == nil {
 		return uc.retry(ctx, job, resource.ResourceID, true, "Microsoft mail service is temporarily unavailable.")
 	}
@@ -241,12 +373,19 @@ func (uc *ProjectHistoryScanUseCase) processShard(ctx context.Context, job Proje
 		}); err != nil {
 			return err
 		}
-		if accumulator.match != nil {
-			if err := uc.matches.UpsertMicrosoftProjectMatches(txCtx, []HistoricalProjectMatch{*accumulator.match}); err != nil {
+		matches := accumulator.results()
+		if len(matches) > 0 {
+			if uc.history == nil {
+				return domain.ErrInvalidRequest
+			}
+			if err := uc.history.ImportHistoricalMicrosoftUsage(txCtx, matches); err != nil {
 				return err
 			}
 		}
-		return uc.jobs.Advance(txCtx, job.ID, job.ClaimToken, resource.ResourceID, accumulator.match != nil, false, "")
+		if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, job.ProjectID); err != nil {
+			return err
+		}
+		return uc.jobs.Advance(txCtx, job.ID, job.ClaimToken, resource.ResourceID, len(matches) > 0, false, "")
 	})
 	if err != nil {
 		if errors.Is(err, errProjectHistoryScopeChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) {
@@ -335,38 +474,57 @@ func (uc *ProjectHistoryScanUseCase) ScheduleDispatcher(ctx context.Context, del
 	}
 }
 
-type historicalMatchAccumulator struct {
+type historicalMatchesAccumulator struct {
 	resourceID   uint
 	emailAddress string
-	scope        HistoricalProjectScope
+	scopes       []HistoricalProjectScope
 	scannedAt    time.Time
-	match        *HistoricalProjectMatch
+	matches      []HistoricalProjectMatch
+	index        map[historicalMatchKey]int
 }
 
-func (a *historicalMatchAccumulator) reset() {
-	a.match = nil
+type historicalMatchKey struct {
+	projectID uint
+	mailbox   HistoricalMailboxType
+	email     string
 }
 
-func (a *historicalMatchAccumulator) add(messages []FetchedMessage) {
+func (a *historicalMatchesAccumulator) reset() {
+	a.matches = nil
+	a.index = nil
+}
+
+func (a *historicalMatchesAccumulator) add(messages []FetchedMessage) {
 	pageMatches := historicalProjectMatches(HistoricalProjectMatchRequest{
 		ResourceID: a.resourceID, EmailAddress: a.emailAddress,
 		Messages: historicalMessagesFromFetched(messages), ScannedAt: a.scannedAt,
-	}, []HistoricalProjectScope{a.scope}, a.scannedAt)
+	}, a.scopes, a.scannedAt)
 	if len(pageMatches) == 0 {
 		return
 	}
-	page := pageMatches[0]
-	if a.match == nil {
-		a.match = &page
-		return
+	if a.index == nil {
+		a.index = make(map[historicalMatchKey]int, len(pageMatches))
 	}
-	a.match.EvidenceCount += page.EvidenceCount
-	if page.FirstMatchedAt.Before(a.match.FirstMatchedAt) {
-		a.match.FirstMatchedAt = page.FirstMatchedAt
+	for _, page := range pageMatches {
+		key := historicalMatchKey{projectID: page.ProjectID, mailbox: page.MailboxType, email: page.MailboxEmail}
+		matchIndex, ok := a.index[key]
+		if !ok {
+			a.index[key] = len(a.matches)
+			a.matches = append(a.matches, page)
+			continue
+		}
+		a.matches[matchIndex].EvidenceCount += page.EvidenceCount
+		if page.FirstMatchedAt.Before(a.matches[matchIndex].FirstMatchedAt) {
+			a.matches[matchIndex].FirstMatchedAt = page.FirstMatchedAt
+		}
+		if page.LastMatchedAt.After(a.matches[matchIndex].LastMatchedAt) {
+			a.matches[matchIndex].LastMatchedAt = page.LastMatchedAt
+		}
 	}
-	if page.LastMatchedAt.After(a.match.LastMatchedAt) {
-		a.match.LastMatchedAt = page.LastMatchedAt
-	}
+}
+
+func (a *historicalMatchesAccumulator) results() []HistoricalProjectMatch {
+	return append([]HistoricalProjectMatch(nil), a.matches...)
 }
 
 func historicalMessagesFromFetched(messages []FetchedMessage) []HistoricalProjectMessage {
@@ -383,11 +541,25 @@ func historicalMessagesFromFetched(messages []FetchedMessage) []HistoricalProjec
 }
 
 func sameHistoricalProjectScope(left, right *HistoricalProjectScope) bool {
-	if left == nil || right == nil || left.ProjectID != right.ProjectID || left.LooseMatch != right.LooseMatch || len(left.Rules) != len(right.Rules) {
+	if left == nil || right == nil || left.ProjectID != right.ProjectID || left.ProductID != right.ProductID ||
+		left.CodeWindowMinutes != right.CodeWindowMinutes || left.ActivationWindowMinutes != right.ActivationWindowMinutes ||
+		left.WarrantyMinutes != right.WarrantyMinutes || left.LooseMatch != right.LooseMatch || len(left.Rules) != len(right.Rules) {
 		return false
 	}
 	for i := range left.Rules {
 		if left.Rules[i] != right.Rules[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameHistoricalProjectScopes(left, right []HistoricalProjectScope) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !sameHistoricalProjectScope(&left[i], &right[i]) {
 			return false
 		}
 	}

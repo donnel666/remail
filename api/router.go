@@ -134,6 +134,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
 		allocMod := allocapi.NewModule(p.DB, p.Asynq)
+		allocMod.UseCase.SetHistoricalMicrosoftAliasPort(mailMod.MicrosoftAliases)
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,
 			mailMod.BindingQuery,
@@ -168,8 +169,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
+		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
 		mailMod.SetInboundConsumer(mailmatchapi.NewInboundConsumerAdapter(mailmatchMod.UseCase))
-		mailMod.SetHistoricalProjectMatcher(mailmatchapi.NewHistoricalProjectMatcherAdapter(mailmatchMod.UseCase))
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)

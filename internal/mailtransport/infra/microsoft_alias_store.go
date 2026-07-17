@@ -1479,6 +1479,24 @@ func normalizeAliasRows(values []string) []string {
 	return result
 }
 
+func normalizeExistingAliasRows(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		local, domain, ok := strings.Cut(value, "@")
+		if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func loadMicrosoftAliasUsage(db *gorm.DB, resourceID uint, yearStart, yearEnd, weekStart, weekEnd time.Time) (mailapp.MicrosoftAliasUsage, error) {
 	var usage mailapp.MicrosoftAliasUsage
 	err := db.Raw(`
@@ -1544,11 +1562,15 @@ func minAliasQuota(left, right int) int {
 // The created_at timestamp is set to a historical value so it never counts
 // toward the weekly quota window.
 func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error {
-	aliases = normalizeAliasRows(aliases)
+	aliases = normalizeExistingAliasRows(aliases)
 	if len(aliases) == 0 {
 		return nil
 	}
 	historicalTime := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	db := s.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
 	for _, alias := range aliases {
 		record := MicrosoftExplicitAliasModel{
 			ResourceID:  resourceID,
@@ -1558,7 +1580,7 @@ func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resou
 			CreatedAt:   historicalTime,
 			UpdatedAt:   historicalTime,
 		}
-		if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "resource_id"}, {Name: "email"}},
 			DoNothing: true,
 		}).Create(&record).Error; err != nil {

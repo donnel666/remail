@@ -3,30 +3,17 @@ package infra
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/app"
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type microsoftResourceProjectMatchModel struct {
-	ResourceID     uint      `gorm:"primaryKey;column:resource_id"`
-	ProjectID      uint      `gorm:"primaryKey;column:project_id"`
-	FirstMatchedAt time.Time `gorm:"column:first_matched_at"`
-	LastMatchedAt  time.Time `gorm:"column:last_matched_at"`
-	EvidenceCount  int       `gorm:"column:evidence_count"`
-	LastScannedAt  time.Time `gorm:"column:last_scanned_at"`
-	CreatedAt      time.Time `gorm:"column:created_at"`
-	UpdatedAt      time.Time `gorm:"column:updated_at"`
-}
-
-func (microsoftResourceProjectMatchModel) TableName() string {
-	return "microsoft_resource_project_matches"
-}
-
 func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.HistoricalProjectScope, error) {
 	return r.listHistoricalProjectScopes(ctx, 0, false)
+}
+
+func (r *Repo) ListHistoricalProjectScopesForUpdate(ctx context.Context) ([]app.HistoricalProjectScope, error) {
+	return r.listHistoricalProjectScopes(ctx, 0, true)
 }
 
 func (r *Repo) FindHistoricalProjectScope(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
@@ -47,23 +34,23 @@ func (r *Repo) FindHistoricalProjectScopeForUpdate(ctx context.Context, projectI
 
 func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, lock bool) ([]app.HistoricalProjectScope, error) {
 	var rows []struct {
-		ProjectID  uint   `gorm:"column:project_id"`
-		LooseMatch bool   `gorm:"column:loose_match"`
-		RuleType   string `gorm:"column:rule_type"`
-		Pattern    string
-		Enabled    bool
+		ProjectID               uint   `gorm:"column:project_id"`
+		ProductID               uint   `gorm:"column:product_id"`
+		CodeWindowMinutes       int    `gorm:"column:code_window_minutes"`
+		ActivationWindowMinutes int    `gorm:"column:activation_window_minutes"`
+		WarrantyMinutes         int    `gorm:"column:warranty_minutes"`
+		LooseMatch              bool   `gorm:"column:loose_match"`
+		RuleType                string `gorm:"column:rule_type"`
+		Pattern                 string
+		Enabled                 bool
 	}
 	query := r.dbFor(ctx).
 		Table("projects AS p").
-		Select("p.id AS project_id, p.loose_match, pmr.rule_type, pmr.pattern, pmr.enabled").
+		Select("p.id AS project_id, pp.id AS product_id, pp.code_window_minutes, pp.activation_window_minutes, pp.warranty_minutes, p.loose_match, pmr.rule_type, pmr.pattern, pmr.enabled").
+		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = 'microsoft'
+			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = 'microsoft')`).
 		Joins("JOIN project_mail_rules AS pmr ON pmr.project_id = p.id AND pmr.enabled = 1").
-		Where("p.status IN ?", []string{"listed", "delisted"}).
-		Where(`EXISTS (
-			SELECT 1
-			FROM project_products pp
-			WHERE pp.project_id = p.id
-			  AND pp.type = 'microsoft'
-		)`)
+		Where("p.status IN ?", []string{"listed", "delisted"})
 	if projectID > 0 {
 		query = query.Where("p.id = ?", projectID)
 	}
@@ -83,8 +70,9 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, 
 			index = len(scopes)
 			indexByProject[row.ProjectID] = index
 			scopes = append(scopes, app.HistoricalProjectScope{
-				ProjectID:  row.ProjectID,
-				LooseMatch: row.LooseMatch,
+				ProjectID: row.ProjectID, ProductID: row.ProductID,
+				CodeWindowMinutes: row.CodeWindowMinutes, ActivationWindowMinutes: row.ActivationWindowMinutes,
+				WarrantyMinutes: row.WarrantyMinutes, LooseMatch: row.LooseMatch,
 			})
 		}
 		scopes[index].Rules = append(scopes[index].Rules, app.MailRule{
@@ -96,32 +84,18 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, 
 	return scopes, nil
 }
 
-func (r *Repo) UpsertMicrosoftProjectMatches(ctx context.Context, matches []app.HistoricalProjectMatch) error {
-	if len(matches) == 0 {
-		return nil
+func (r *Repo) ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error {
+	if r == nil || resourceID == 0 {
+		return fmt.Errorf("clear legacy microsoft project history: invalid resource")
 	}
-	models := make([]microsoftResourceProjectMatchModel, len(matches))
-	for i := range matches {
-		models[i] = microsoftResourceProjectMatchModel{
-			ResourceID:     matches[i].ResourceID,
-			ProjectID:      matches[i].ProjectID,
-			FirstMatchedAt: matches[i].FirstMatchedAt.UTC(),
-			LastMatchedAt:  matches[i].LastMatchedAt.UTC(),
-			EvidenceCount:  matches[i].EvidenceCount,
-			LastScannedAt:  matches[i].ScannedAt.UTC(),
-		}
+	deleteSQL := "DELETE FROM microsoft_resource_project_matches WHERE resource_id = ?"
+	args := []any{resourceID}
+	if projectID > 0 {
+		deleteSQL += " AND project_id = ?"
+		args = append(args, projectID)
 	}
-	err := r.dbFor(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "resource_id"}, {Name: "project_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"first_matched_at": gorm.Expr("LEAST(first_matched_at, VALUES(first_matched_at))"),
-			"last_matched_at":  gorm.Expr("GREATEST(last_matched_at, VALUES(last_matched_at))"),
-			"evidence_count":   gorm.Expr("GREATEST(evidence_count, VALUES(evidence_count))"),
-			"last_scanned_at":  gorm.Expr("GREATEST(last_scanned_at, VALUES(last_scanned_at))"),
-		}),
-	}).CreateInBatches(models, 100).Error
-	if err != nil {
-		return fmt.Errorf("upsert microsoft resource project matches: %w", err)
+	if err := r.dbFor(ctx).Exec(deleteSQL, args...).Error; err != nil {
+		return fmt.Errorf("delete migrated microsoft project history: %w", err)
 	}
 	return nil
 }

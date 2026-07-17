@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -102,6 +103,87 @@ func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
 		return tx.WithContext(ctx)
 	}
 	return r.db.WithContext(ctx)
+}
+
+func (r *Repo) FindHistoricalOrderOwner(ctx context.Context) (uint, error) {
+	var owner struct {
+		ID uint `gorm:"column:id"`
+	}
+	if err := r.dbFor(ctx).Raw(`
+SELECT id
+FROM users
+WHERE role = 'super_admin'
+ORDER BY id ASC
+LIMIT 1
+FOR SHARE`).Scan(&owner).Error; err != nil {
+		return 0, fmt.Errorf("find historical order owner: %w", err)
+	}
+	if owner.ID == 0 {
+		return 0, fmt.Errorf("find historical order owner: unavailable")
+	}
+	return owner.ID, nil
+}
+
+func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHistoricalOrderCommand) error {
+	orderNo := strings.TrimSpace(cmd.OrderNo)
+	deliveryEmail := strings.ToLower(strings.TrimSpace(cmd.DeliveryEmail))
+	if orderNo == "" || cmd.UserID == 0 || cmd.ProjectID == 0 || cmd.ProjectProductID == 0 ||
+		cmd.DebitTxID == 0 || cmd.MicrosoftAllocationID == 0 || deliveryEmail == "" ||
+		cmd.CreatedAt.IsZero() || cmd.ExpiredAt.IsZero() || !cmd.ExpiredAt.Before(cmd.Now) {
+		return domain.ErrInvalidOrderRequest
+	}
+	allocationType := string(domain.AllocationTypeMicrosoft)
+	debitTxID := cmd.DebitTxID
+	allocationID := cmd.MicrosoftAllocationID
+	createdAt := cmd.CreatedAt.UTC()
+	expiredAt := cmd.ExpiredAt.UTC()
+	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo)))
+	model := OrderModel{
+		OrderNo: orderNo, UserID: cmd.UserID, ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
+		ProductType: string(domain.ProductTypeMicrosoft), ServiceMode: string(domain.ServiceModePurchase),
+		SupplyPolicy: string(domain.SupplyPolicyPublicOnly), Status: string(domain.OrderStatusCompleted),
+		FailureCode: "", PayAmount: "0", RefundAmount: "0",
+		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
+		WarrantyMinutes: cmd.WarrantyMinutes, DebitTxID: &debitTxID,
+		AllocationType: &allocationType, MicrosoftAllocID: &allocationID,
+		DeliveryEmail: deliveryEmail, ReceiveStartedAt: &createdAt, ReceiveUntil: &expiredAt,
+		ActivatedAt: &createdAt, AfterSaleUntil: &expiredAt,
+		ClientChannel: string(domain.ClientChannelConsole), IdempotencyKey: "history:" + orderNo,
+		RequestFingerprint: requestFingerprint, ServiceCleanupStatus: "succeeded",
+		CreatedAt: createdAt, UpdatedAt: cmd.Now.UTC(), Version: 1,
+	}
+	tx := r.dbFor(ctx)
+	if err := tx.Create(&model).Error; err != nil {
+		if !isDuplicateKeyError(err) {
+			return fmt.Errorf("create historical order: %w", err)
+		}
+		var existing OrderModel
+		if findErr := tx.Where("order_no = ?", orderNo).First(&existing).Error; findErr != nil {
+			return fmt.Errorf("find historical order after conflict: %w", findErr)
+		}
+		if !sameHistoricalOrderModel(existing, model) {
+			return domain.ErrIdempotencyConflict
+		}
+		return nil
+	}
+	return r.appendEvent(
+		ctx,
+		tx,
+		orderNo,
+		"order.history_imported",
+		nil,
+		ptrStatus(domain.OrderStatusCompleted),
+		domain.OperatorTypeSystem,
+		"Historical Microsoft mailbox usage identified.",
+	)
+}
+
+func sameHistoricalOrderModel(left, right OrderModel) bool {
+	return left.OrderNo == right.OrderNo && left.UserID == right.UserID && left.ProjectID == right.ProjectID &&
+		left.ProjectProductID == right.ProjectProductID && left.ProductType == right.ProductType &&
+		left.ServiceMode == right.ServiceMode && left.Status == right.Status && left.DeliveryEmail == right.DeliveryEmail &&
+		left.DebitTxID != nil && right.DebitTxID != nil && *left.DebitTxID == *right.DebitTxID &&
+		left.MicrosoftAllocID != nil && right.MicrosoftAllocID != nil && *left.MicrosoftAllocID == *right.MicrosoftAllocID
 }
 
 func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.CreatePendingOrderCommand) (*domain.Order, bool, error) {

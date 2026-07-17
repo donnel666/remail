@@ -26,6 +26,7 @@
 | 2026-07-16 | V1.19 | Codex | 定稿资源验证、辅助邮箱恢复和显式别名边界：资源成功只由权威 RT 与收件决定；辅助邮箱恢复嵌入 validation/alias 两个任务，掩码直接写 `bindingAddress`，找回密码邮件仅按相同规范化掩码串行。完整契约见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
 | 2026-07-16 | V1.20 | Codex | 补充登录授权验证码的恢复能力：登录 flow 与 password-recovery flow 都先按规则推算辅助邮箱；推算成功按完整邮箱精确收码，推算失败才按掩码和实际 recipient 反推，并共用相同掩码租约。 |
 | 2026-07-16 | V1.21 | Codex | 定稿 Core Redis-only 验证调度：`pending` 是待分配，`validating` 是已有临时 Redis task；Microsoft/Domain 批量 cursor、单资源执行和 retry 不落 MySQL，完成立即清理。 |
+| 2026-07-17 | V1.22 | Codex | 将 Microsoft 验证收件探测与旧项目全量识别解耦：验证每文件夹最多读取一封，成功提交后由独立 MailMatch Asynq 任务全量流式扫描，并复用别名、订单和 Allocation 事实补齐历史使用。 |
 
 > 适用范围：Microsoft 邮箱导入、上传验证、RT 续期、Graph 邮件拉取、辅助邮箱绑定，以及管理员触发的 RT 刷新、资源级 Fetch 和显式别名 schedule 加速后的远端执行。
 >
@@ -159,15 +160,15 @@ Microsoft ACL 是 Go 进程内模块，通过 Port/Adapter 暴露方法。
 
 用途：验证 Microsoft 资源本体是否可用。该流程在 Core 的异步 `ResourceValidation` worker 中调用，HTTP 请求不得同步等待 Microsoft 网络调用。
 
-验证分三步：
+验证与历史识别分为三个阶段，其中第三阶段是独立异步任务：
 
 | 步骤 | 当前要求 | 是否影响资源健康 |
 |------|----------|------------------|
 | 1. RT 获取/刷新 | 有 `clientId + refreshToken` 时先用 RT 换 Graph AT；没有可用 RT 时沿用 `rt` 页面流获取 RT。辅助邮箱只在页面授权需要时成为必要步骤，已有 RT 路径中的观察/恢复属于 best-effort。 | 是。最终未获得权威可用 RT 时按错误分类返回；已经成功的 RT 与收件结果不能被后续辅助邮箱失败覆盖。 |
-| 2. 收全部邮件 | 优先用 RT 换 Graph AT 调 Microsoft Graph，分页读取 `Inbox` 和 `JunkEmail`；Graph 不可用时用同一 RT 换 IMAP token 回退 Outlook IMAP。 | 是。Graph 或 IMAP 任一路径读取接口返回正常，即资源验证可成功。 |
-| 3. 项目匹配与关系插入 | 将第二步全量结构化邮件交给 BC-MAILMATCH，使用当前 `listed/delisted` Microsoft 项目规则匹配并幂等写入 `microsoft_resource_project_matches`。 | 否。该步骤是业务增强，不参与资源本体是否正常的判断。 |
+| 2. 轻量收件探测 | 优先用 RT 换 Graph AT，对 `Inbox` 和 `JunkEmail` 各读取至多一封；Graph 不可用时用同一 RT 换 IMAP token 回退 Outlook IMAP，并完成两个文件夹探测。 | 是。Graph 或 IMAP 任一路径读取接口返回正常，即资源验证可成功。 |
+| 3. 全量历史识别任务 | Core 在健康结果最终提交前先幂等投递 MailMatch 任务；投递失败保持 `validating` 由现有验证任务重试，worker 只在资源已经 `normal` 后重新读取已提交凭据。任务流式全量扫描 Inbox/Junk，按地址规则识别具体 main/dot/plus/explicit alias，再把识别结果交给 BC-TRADE。BC-TRADE 复用 BC-BILLING 与 BC-ALLOC 现有 Port，先创建或复用别名，再补一笔超级管理员 0 元已过保历史订单。 | 否。该独立任务不参与资源本体是否正常的判断。 |
 
-第三步现已接入验证流程：Graph/IMAP 完成 Inbox 与 JunkEmail 全量扫描后，MailMatch 对每个项目只记录一次资源关系，并累计最早/最晚证据时间。重复验证使用 `(resource_id, project_id)` 主键幂等更新；第三步失败只写安全诊断，不得把 Microsoft 资源置为 `abnormal`。BC-ALLOC 在候选查询和行锁重校验时排除同项目历史匹配资源，避免把已用于旧项目的邮箱再次分配给该项目。
+第三阶段与验证 worker 解耦。历史订单号由 BC-ALLOC 按 `resourceId + projectId + mailboxType + mailboxId` 确定性生成；BC-TRADE 使用既有 Billing 零元扣款、Allocation 和 Order repository 在同一事务内编排，重复验证不会重复创建订单、0 元钱包流水、Allocation 或事件。Allocation 创建后立即为 `released`，订单固定为 `purchase/completed` 且 `afterSaleUntil` 已过期，因此不会参与收件、退款、结算或占用活动库存。BC-ALLOC 按具体主邮箱或别名 ID 查询所有历史 Allocation，只阻止同一邮箱实体再次进入同一项目，不误伤同一主资源下的其他别名；BC-MAILMATCH 仅保存识别和旧兼容事实，不跨域写上述三类事实。
 
 收件策略：
 
@@ -332,6 +333,7 @@ Microsoft 页面流和 Graph 请求是外部网络调用，不能放进数据库
 | 分配验证执行 | dispatcher 只领取 `pending`，同一短事务置 `validating` 后投递单资源 Redis task。总 `validating` 数不得超过自适应执行窗口，防止百万资源形成无界 Redis backlog。 |
 | 执行 Microsoft ACL | 事务外执行，带 requestId 和超时。 |
 | 成功保存凭据 | 短事务保存 clientId/RT、更新资源状态、写事件。 |
+| 验证后历史识别 | 健康结果最终提交前先幂等投递独立 `validated_microsoft_history_scan`，投递失败沿用 validation retry；任务只在资源已为 `normal` 后使用 `background_project_history` 队列全量流式扫描。rotated RT 与规则快照按 credential revision/rule snapshot fencing 校验，识别结果经 BC-TRADE 调用现有 BC-BILLING/BC-ALLOC Port，在同一短事务内提交别名、0 元历史订单和 released Allocation。 |
 | 失败记录诊断 | 短事务写安全诊断和 SystemLog。 |
 | rotated RT | 拉取或刷新成功后必须在短事务内保存新 RT。 |
 | 管理员 RT 刷新/资源 Fetch | HTTP 只创建或复用 durable task；worker 在事务外调用 ACL，随后以 tx-bound `MicrosoftCredentialPort` 让 Core 保存 RT/revision/诊断，并与各自任务完成事实保持同一短事务。 |

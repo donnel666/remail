@@ -80,7 +80,6 @@ type ResourceValidationAdapter struct {
 	fetcher                    microsoftMailFetcher
 	dns                        *mailinfra.DomainDNSValidator
 	bindings                   microsoftValidationBindingStore
-	history                    mailapp.HistoricalProjectMatcher
 	probePasswordRecovery      func(context.Context, string, string, string) (msacl.PasswordRecoveryProbeResult, error)
 	evaluateBindingEligibility func(context.Context, msacl.PasswordRecoveryProbeResult) msacl.BindingRecoveryEligibility
 }
@@ -209,13 +208,6 @@ func unavailableMicrosoftTokenRefreshResult() mailapp.MicrosoftTokenRefreshProto
 		Category:    "request",
 		SafeMessage: "Microsoft mail service is temporarily unavailable.",
 	}
-}
-
-func (a *ResourceValidationAdapter) SetHistoricalProjectMatcher(matcher mailapp.HistoricalProjectMatcher) {
-	if a == nil {
-		return
-	}
-	a.history = matcher
 }
 
 func NewResourceValidationAdapter(proxies *proxyapp.ProxyUseCase, bindings *mailinfra.MicrosoftBindingRepo) *ResourceValidationAdapter {
@@ -393,14 +385,6 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			last.ReleaseRecoveryLease = msacl.RecoveryLeaseReleaser(ctx)
 		}
 		if rawResult.Valid {
-			if err := a.matchHistoricalProjects(ctx, req, rawResult); err != nil {
-				slog.Warn(
-					"microsoft validation history matching failed",
-					"resource_id", req.ResourceID,
-					"request_id", req.RequestID,
-					"error", err,
-				)
-			}
 			_ = a.reportProxySuccess(ctx, proxyID)
 			return last, nil
 		}
@@ -426,58 +410,6 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 		last.BindingObservation = nil
 	}
 	return last, nil
-}
-
-func (a *ResourceValidationAdapter) matchHistoricalProjects(ctx context.Context, req coreapp.MicrosoftValidationRequest, result mailinfra.MicrosoftOAuthResult) error {
-	if a == nil || a.history == nil || result.MailFetch == nil || len(result.MailFetch.Messages) == 0 {
-		return nil
-	}
-	messages := make([]mailapp.HistoricalProjectMessage, 0, len(result.MailFetch.Messages))
-	for _, item := range result.MailFetch.Messages {
-		messages = append(messages, mailapp.HistoricalProjectMessage{
-			Recipients:        historicalRecipients(item.To),
-			Sender:            strings.TrimSpace(item.From),
-			Subject:           strings.TrimSpace(item.Subject),
-			Body:              strings.TrimSpace(item.Body),
-			BodyPreview:       strings.TrimSpace(item.Preview),
-			MessageIDHeader:   strings.TrimSpace(item.InternetMessageID),
-			ProviderMessageID: strings.TrimSpace(item.ID),
-			Protocol:          strings.TrimSpace(item.Protocol),
-			Folder:            strings.TrimSpace(item.FolderLabel),
-			ReceivedAt:        item.ReceivedAt.UTC(),
-		})
-	}
-	return a.history.MatchMicrosoftHistory(ctx, mailapp.HistoricalProjectMatchRequest{
-		ResourceID:   req.ResourceID,
-		EmailAddress: strings.ToLower(strings.TrimSpace(req.EmailAddress)),
-		Messages:     messages,
-		ScannedAt:    time.Now().UTC(),
-	})
-}
-
-func historicalRecipients(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	addresses, err := stdmail.ParseAddressList(value)
-	if err == nil {
-		result := make([]string, 0, len(addresses))
-		for _, address := range addresses {
-			if normalized := strings.ToLower(strings.TrimSpace(address.Address)); normalized != "" {
-				result = append(result, normalized)
-			}
-		}
-		return result
-	}
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if normalized := strings.ToLower(strings.TrimSpace(part)); normalized != "" {
-			result = append(result, normalized)
-		}
-	}
-	return result
 }
 
 func (a *ResourceValidationAdapter) ValidateDomain(ctx context.Context, req coreapp.DomainValidationRequest) (coreapp.DomainValidationResult, error) {
@@ -729,6 +661,7 @@ func (a *ResourceValidationAdapter) fetchMicrosoftValidation(
 		RefreshToken: result.RefreshToken,
 		AccessToken:  result.AccessToken,
 		ProxyURL:     proxyURL,
+		MaxMessages:  1,
 	})
 	result.MailFetch = &fetchResult
 	if strings.TrimSpace(fetchResult.RefreshToken) != "" {

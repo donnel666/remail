@@ -57,12 +57,30 @@ func (*projectHistoryJobsStub) MarkDispatchFailed(context.Context, uint, string,
 }
 
 type projectHistoryMatchesStub struct {
-	scope   *HistoricalProjectScope
-	matches []HistoricalProjectMatch
+	scope        *HistoricalProjectScope
+	scopes       []HistoricalProjectScope
+	lockedScopes []HistoricalProjectScope
+	cleared      uint
+	clearProject uint
 }
 
 func (*projectHistoryMatchesStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
+}
+func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context) ([]HistoricalProjectScope, error) {
+	if s.scopes != nil {
+		return s.scopes, nil
+	}
+	if s.scope == nil {
+		return nil, nil
+	}
+	return []HistoricalProjectScope{*s.scope}, nil
+}
+func (s *projectHistoryMatchesStub) ListHistoricalProjectScopesForUpdate(context.Context) ([]HistoricalProjectScope, error) {
+	if s.lockedScopes != nil {
+		return s.lockedScopes, nil
+	}
+	return s.ListHistoricalProjectScopes(context.Background())
 }
 func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, uint) (*HistoricalProjectScope, error) {
 	return s.scope, nil
@@ -70,14 +88,31 @@ func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, 
 func (s *projectHistoryMatchesStub) FindHistoricalProjectScopeForUpdate(context.Context, uint) (*HistoricalProjectScope, error) {
 	return s.scope, nil
 }
-func (s *projectHistoryMatchesStub) UpsertMicrosoftProjectMatches(_ context.Context, matches []HistoricalProjectMatch) error {
-	s.matches = append(s.matches, matches...)
+func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint) error {
+	s.cleared = resourceID
+	s.clearProject = projectID
 	return nil
 }
 
-type projectHistoryQueueStub struct{ dispatches int }
+type projectHistoryUsageStub struct {
+	matches []HistoricalProjectMatch
+}
+
+func (s *projectHistoryUsageStub) ImportHistoricalMicrosoftUsage(_ context.Context, matches []HistoricalProjectMatch) error {
+	s.matches = append([]HistoricalProjectMatch(nil), matches...)
+	return nil
+}
+
+type projectHistoryQueueStub struct {
+	dispatches int
+	validated  []ValidatedMicrosoftHistoryScanTask
+}
 
 func (*projectHistoryQueueStub) EnqueueProjectHistoryScan(context.Context, ProjectHistoryScanTask) error {
+	return nil
+}
+func (q *projectHistoryQueueStub) EnqueueValidatedMicrosoftHistoryScan(_ context.Context, task ValidatedMicrosoftHistoryScanTask) error {
+	q.validated = append(q.validated, task)
 	return nil
 }
 func (q *projectHistoryQueueStub) EnqueueProjectHistoryDispatcher(context.Context, time.Duration) error {
@@ -92,8 +127,13 @@ type projectHistoryCredentialsStub struct {
 	rotationErr error
 }
 
-func (*projectHistoryCredentialsStub) LockMicrosoftCredentialScope(context.Context, uint) (*coreapp.MicrosoftCredentialScope, error) {
-	return nil, nil
+func (s *projectHistoryCredentialsStub) LockMicrosoftCredentialScope(_ context.Context, resourceID uint) (*coreapp.MicrosoftCredentialScope, error) {
+	for _, resource := range s.resources {
+		if resource.ResourceID == resourceID {
+			return resource, nil
+		}
+	}
+	return nil, coreapp.ErrMicrosoftCredentialNotFound
 }
 func (s *projectHistoryCredentialsStub) MaxMicrosoftResourceID(context.Context) (uint, error) {
 	return s.maxID, nil
@@ -121,21 +161,89 @@ type projectHistoryTransportStub struct {
 	request FetchMessagesRequest
 	result  *FetchMessagesResult
 	err     error
+	pages   [][]FetchedMessage
 }
 
 func (s *projectHistoryTransportStub) FetchMicrosoftMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
 	s.request = request
 	if request.OnMessages != nil && s.err == nil {
-		request.OnMessages([]FetchedMessage{{
-			EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-			Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
-		}})
-		request.OnMessages([]FetchedMessage{{
-			EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Junk",
-			Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
-		}})
+		pages := s.pages
+		if pages == nil {
+			pages = [][]FetchedMessage{{{
+				EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
+				Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
+			}}, {{
+				EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Junk",
+				Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
+			}}}
+		}
+		for _, page := range pages {
+			request.OnMessages(page)
+		}
 	}
 	return s.result, s.err
+}
+
+func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
+	queue := &projectHistoryQueueStub{}
+	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
+
+	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
+	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
+}
+
+func TestValidatedMicrosoftHistoryScanMatchesMainAndAliasRecipientsAcrossProjects(t *testing.T) {
+	now := time.Now().UTC()
+	matches := &projectHistoryMatchesStub{scopes: []HistoricalProjectScope{
+		projectHistoryScopeFor(7, "exact", `main@service\.test`),
+		projectHistoryScopeFor(8, "plus", `plus@service\.test`),
+		projectHistoryScopeFor(9, "dot", `dot@service\.test`),
+		projectHistoryScopeFor(10, "exact", `alias@service\.test`),
+	}}
+	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{{
+		ResourceID: 10, Status: "normal", EmailAddress: "firstname@example.com",
+		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}}}
+	transport := &projectHistoryTransportStub{
+		result: &FetchMessagesResult{RefreshToken: "rotated"},
+		pages: [][]FetchedMessage{{
+			{Recipients: []string{"firstname@example.com", "coworker@another-domain.test"}, Sender: "main@service.test", ReceivedAt: now},
+			{Recipients: []string{"firstname+used@example.com"}, Sender: "plus@service.test", ReceivedAt: now.Add(time.Minute)},
+			{Recipients: []string{"first.name@example.com"}, Sender: "dot@service.test", ReceivedAt: now.Add(2 * time.Minute)},
+			{Recipients: []string{"custom-alias@example.com"}, Sender: "alias@service.test", ReceivedAt: now.Add(3 * time.Minute)},
+		}},
+	}
+	history := &projectHistoryUsageStub{}
+	uc := NewProjectHistoryScanUseCase(nil, matches, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(credentials)
+	uc.SetHistoricalMicrosoftUsagePort(history)
+
+	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{
+		ResourceID: 10, RequestID: "request-1",
+	}))
+	require.True(t, transport.request.FullHistory)
+	require.Equal(t, "request-1", transport.request.RequestID)
+	require.Len(t, history.matches, 4)
+	want := []struct {
+		projectID   uint
+		mailboxType HistoricalMailboxType
+		email       string
+	}{
+		{7, HistoricalMailboxMain, "firstname@example.com"},
+		{8, HistoricalMailboxPlus, "firstname+used@example.com"},
+		{9, HistoricalMailboxDot, "first.name@example.com"},
+		{10, HistoricalMailboxAlias, "custom-alias@example.com"},
+	}
+	for i, expected := range want {
+		require.Equal(t, expected.projectID, history.matches[i].ProjectID)
+		require.Equal(t, uint(10), history.matches[i].ResourceID)
+		require.Equal(t, expected.mailboxType, history.matches[i].MailboxType)
+		require.Equal(t, expected.email, history.matches[i].MailboxEmail)
+		require.Equal(t, 1, history.matches[i].EvidenceCount)
+	}
+	require.Equal(t, uint(10), matches.cleared)
+	require.Zero(t, matches.clearProject)
+	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
 }
 
 func TestProjectHistoryPlannerCreatesFourDurableShards(t *testing.T) {
@@ -163,14 +271,18 @@ func TestProjectHistoryShardStreamsInboxAndJunkThenAdvances(t *testing.T) {
 		ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
 	}}}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}}
+	history := &projectHistoryUsageStub{}
 	uc := NewProjectHistoryScanUseCase(jobs, matches, queue, transport)
 	uc.SetMicrosoftCredentialPort(credentials)
+	uc.SetHistoricalMicrosoftUsagePort(history)
 
 	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
 	require.True(t, transport.request.FullHistory)
 	require.NotNil(t, transport.request.OnMessages)
-	require.Len(t, matches.matches, 1)
-	require.Equal(t, 2, matches.matches[0].EvidenceCount)
+	require.Len(t, history.matches, 1)
+	require.Equal(t, 2, history.matches[0].EvidenceCount)
+	require.Equal(t, uint(10), matches.cleared)
+	require.Equal(t, uint(7), matches.clearProject)
 	require.Equal(t, uint(10), jobs.advanced)
 	require.True(t, jobs.matched)
 	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
@@ -231,7 +343,6 @@ func TestProjectHistoryCredentialChangeRetriesWithoutAdvancingCheckpoint(t *test
 
 	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
 	require.Zero(t, jobs.advanced)
-	require.Empty(t, matches.matches)
 	require.Equal(t, 1, jobs.failures)
 	require.Zero(t, jobs.failed)
 	require.True(t, jobs.retry)
@@ -239,10 +350,20 @@ func TestProjectHistoryCredentialChangeRetriesWithoutAdvancingCheckpoint(t *test
 
 func projectHistoryScope() *HistoricalProjectScope {
 	return &HistoricalProjectScope{
-		ProjectID: 7, LooseMatch: true,
+		ProjectID: 7, ProductID: 20, LooseMatch: true,
 		Rules: []MailRule{
 			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
 			{Type: MailRuleSender, Pattern: `noreply@github\.com`, Enabled: true},
+		},
+	}
+}
+
+func projectHistoryScopeFor(projectID uint, recipientKind, senderPattern string) HistoricalProjectScope {
+	return HistoricalProjectScope{
+		ProjectID: projectID, ProductID: projectID + 100, LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: recipientKind, Enabled: true},
+			{Type: MailRuleSender, Pattern: senderPattern, Enabled: true},
 		},
 	}
 }

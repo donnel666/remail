@@ -239,9 +239,25 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		return nil, mapAllocationError(err)
 	}
 	return &tradeapp.AllocationResult{
+		OrderNo:     result.OrderNo,
 		Type:        domain.AllocationType(result.Type),
 		ID:          result.ID,
 		Email:       result.Email,
+		SupplyScope: tradeSupplyScope(result.SupplyScope),
+	}, nil
+}
+
+func (a allocationAdapter) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd tradeapp.HistoricalMicrosoftAllocationCommand) (*tradeapp.AllocationResult, error) {
+	result, err := a.alloc.ImportHistoricalMicrosoftAllocation(ctx, allocapp.HistoricalMicrosoftAllocationCommand{
+		AliasOwnerID: cmd.AliasOwnerID, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, ResourceID: cmd.ResourceID,
+		Mailbox: allocdomain.MicrosoftMailbox(cmd.Mailbox), Email: cmd.Email,
+		CreatedAt: cmd.CreatedAt, ReleasedAt: cmd.ReleasedAt,
+	})
+	if err != nil {
+		return nil, mapAllocationError(err)
+	}
+	return &tradeapp.AllocationResult{
+		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID, Email: result.Email,
 		SupplyScope: tradeSupplyScope(result.SupplyScope),
 	}, nil
 }

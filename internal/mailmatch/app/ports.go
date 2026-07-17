@@ -153,8 +153,6 @@ type Repository interface {
 	UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error
 	UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error
 	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
-	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
-	UpsertMicrosoftProjectMatches(ctx context.Context, matches []HistoricalProjectMatch) error
 }
 
 type FetchQueue interface {

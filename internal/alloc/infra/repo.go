@@ -219,18 +219,6 @@ func (m DomainAllocationModel) unified() domain.UnifiedAllocation {
 	}
 }
 
-type ExplicitAliasModel struct {
-	ID          uint      `gorm:"primaryKey;autoIncrement"`
-	ResourceID  uint      `gorm:"column:resource_id"`
-	OwnerUserID uint      `gorm:"not null;column:owner_user_id"`
-	Email       string    `gorm:"type:varchar(255);not null"`
-	Status      string    `gorm:"type:varchar(32);not null"`
-	CreatedAt   time.Time `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime;column:updated_at"`
-}
-
-func (ExplicitAliasModel) TableName() string { return "explicit_aliases" }
-
 type DotAliasModel struct {
 	ID         uint      `gorm:"primaryKey;autoIncrement"`
 	ResourceID uint      `gorm:"column:resource_id"`
@@ -438,16 +426,44 @@ LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 	}, nil
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
 	args := []any{projectID}
 	where := []string{
 		"ms.status = 'normal'",
 		`NOT EXISTS (
-			SELECT 1
-			FROM microsoft_resource_project_matches mrpm
-			WHERE mrpm.resource_id = ms.id
-			  AND mrpm.project_id = ?
+			SELECT 1 FROM microsoft_resource_project_matches legacy_match
+			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
 		)`,
+	}
+	if mailbox == domain.MicrosoftMailboxMain {
+		where = append(where, `(
+			NOT EXISTS (
+				SELECT 1
+				FROM microsoft_allocations history_main
+				WHERE history_main.resource_id = ms.id
+				  AND history_main.project_id = ?
+				  AND history_main.mailbox = 'main'
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM explicit_aliases ea
+				WHERE ea.resource_id = ms.id
+				  AND ea.status = 'normal'
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations history_alias
+					WHERE history_alias.explicit_alias_id = ea.id
+					  AND history_alias.project_id = ?
+					  AND history_alias.mailbox = 'alias'
+				  )
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations ma
+					WHERE ma.active_kind = 2
+					  AND ma.active_project_id = 0
+					  AND ma.active_entity_id = ea.id
+				  )
+			)
+		)`)
+		args = append(args, projectID, projectID)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "ms.email_domain = ?")
@@ -546,17 +562,45 @@ FOR UPDATE`, resourceID, string(allocationType)).Scan(&row).Error; err != nil {
 	return row.ID != 0, nil
 }
 
-func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
+func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
 	args := []any{resourceID, projectID}
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
 		`NOT EXISTS (
-			SELECT 1
-			FROM microsoft_resource_project_matches mrpm
-			WHERE mrpm.resource_id = ms.id
-			  AND mrpm.project_id = ?
+			SELECT 1 FROM microsoft_resource_project_matches legacy_match
+			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
 		)`,
+	}
+	if mailbox == domain.MicrosoftMailboxMain {
+		where = append(where, `(
+			NOT EXISTS (
+				SELECT 1
+				FROM microsoft_allocations history_main
+				WHERE history_main.resource_id = ms.id
+				  AND history_main.project_id = ?
+				  AND history_main.mailbox = 'main'
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM explicit_aliases ea
+				WHERE ea.resource_id = ms.id
+				  AND ea.status = 'normal'
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations history_alias
+					WHERE history_alias.explicit_alias_id = ea.id
+					  AND history_alias.project_id = ?
+					  AND history_alias.mailbox = 'alias'
+				  )
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations ma
+					WHERE ma.active_kind = 2
+					  AND ma.active_project_id = 0
+					  AND ma.active_entity_id = ea.id
+				  )
+			)
+		)`)
+		args = append(args, projectID, projectID)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
 		where = append(where, "ms.email_domain = ?")
@@ -694,7 +738,29 @@ FOR UPDATE`, query.table)
 	return nil
 }
 
-func (r *Repo) FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*allocapp.AliasCandidate, error) {
+func (r *Repo) IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error) {
+	if projectID == 0 || mailboxID == 0 || !domain.IsValidMicrosoftMailbox(mailbox) {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	var count int64
+	query := r.dbFor(ctx).Table("microsoft_allocations").Where("project_id = ? AND mailbox = ?", projectID, string(mailbox))
+	switch mailbox {
+	case domain.MicrosoftMailboxMain:
+		query = query.Where("resource_id = ?", mailboxID)
+	case domain.MicrosoftMailboxAlias:
+		query = query.Where("explicit_alias_id = ?", mailboxID)
+	case domain.MicrosoftMailboxDot:
+		query = query.Where("dot_alias_id = ?", mailboxID)
+	case domain.MicrosoftMailboxPlus:
+		query = query.Where("plus_alias_id = ?", mailboxID)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check microsoft mailbox project history: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
 	var candidate allocapp.AliasCandidate
 	err := r.dbFor(ctx).Raw(`
 SELECT ea.id AS id, ea.email AS email
@@ -703,13 +769,20 @@ WHERE ea.resource_id = ?
   AND ea.status = 'normal'
   AND NOT EXISTS (
       SELECT 1
+	  FROM microsoft_allocations history_alias
+	  WHERE history_alias.explicit_alias_id = ea.id
+	    AND history_alias.project_id = ?
+	    AND history_alias.mailbox = 'alias'
+  )
+  AND NOT EXISTS (
+      SELECT 1
       FROM microsoft_allocations ma
       WHERE ma.active_kind = 2
         AND ma.active_project_id = 0
         AND ma.active_entity_id = ea.id
-  )
+	  )
 ORDER BY ea.id ASC
-LIMIT 1`, resourceID).Scan(&candidate).Error
+LIMIT 1`, resourceID, projectID).Scan(&candidate).Error
 	if err != nil {
 		return nil, fmt.Errorf("find reusable explicit alias: %w", err)
 	}
@@ -743,6 +816,22 @@ func (r *Repo) FindReusablePlusAlias(ctx context.Context, projectID uint, resour
 	return r.findReusableProjectAlias(ctx, "plus_aliases", "plus", projectID, resourceID)
 }
 
+func (r *Repo) FindExplicitAlias(ctx context.Context, resourceID uint, email string) (*allocapp.AliasCandidate, error) {
+	var found allocapp.AliasCandidate
+	if err := r.dbFor(ctx).Raw(`
+SELECT id, email
+FROM explicit_aliases
+WHERE resource_id = ? AND email = ?
+LIMIT 1
+FOR UPDATE`, resourceID, strings.ToLower(strings.TrimSpace(email))).Scan(&found).Error; err != nil {
+		return nil, fmt.Errorf("find explicit alias: %w", err)
+	}
+	if found.ID == 0 {
+		return nil, nil
+	}
+	return &found, nil
+}
+
 func (r *Repo) findReusableProjectAlias(ctx context.Context, table, mailbox string, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
 	activeKind := 3
 	if mailbox == "plus" {
@@ -756,6 +845,16 @@ WHERE a.resource_id = ?
   AND a.status = 'normal'
   AND NOT EXISTS (
       SELECT 1
+	  FROM microsoft_allocations history_alias
+	  WHERE history_alias.project_id = ?
+	    AND history_alias.mailbox = ?
+	    AND (
+	        (? = 'dot' AND history_alias.dot_alias_id = a.id)
+	        OR (? = 'plus' AND history_alias.plus_alias_id = a.id)
+	    )
+  )
+  AND NOT EXISTS (
+      SELECT 1
       FROM microsoft_allocations ma
       WHERE ma.active_kind = ?
         AND ma.active_project_id = ?
@@ -763,7 +862,7 @@ WHERE a.resource_id = ?
   )
 ORDER BY a.id ASC
 LIMIT 1`, table)
-	if err := r.dbFor(ctx).Raw(query, resourceID, activeKind, projectID).Scan(&candidate).Error; err != nil {
+	if err := r.dbFor(ctx).Raw(query, resourceID, projectID, mailbox, mailbox, mailbox, activeKind, projectID).Scan(&candidate).Error; err != nil {
 		return nil, fmt.Errorf("find reusable %s alias: %w", mailbox, err)
 	}
 	if candidate.ID == 0 {

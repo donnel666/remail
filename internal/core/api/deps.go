@@ -77,6 +77,12 @@ func (m *CoreModule) SetMicrosoftAliasScheduleTrigger(trigger coreapp.MicrosoftA
 	}
 }
 
+func (m *CoreModule) SetMicrosoftHistoryScanTrigger(trigger coreapp.MicrosoftHistoryScanTriggerPort) {
+	if m != nil && m.ValidationUseCase != nil {
+		m.ValidationUseCase.SetMicrosoftHistoryScanTrigger(trigger)
+	}
+}
+
 func (m *CoreModule) SetMicrosoftValidationBindingCommitPort(port coreapp.MicrosoftValidationBindingCommitPort) {
 	if m != nil && m.validationRepo != nil {
 		m.validationRepo.SetMicrosoftValidationBindingCommitPort(port)

@@ -160,13 +160,6 @@ func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsume
 	m.InboundUseCase.SetConsumer(consumer)
 }
 
-func (m *MailTransportModule) SetHistoricalProjectMatcher(matcher mailapp.HistoricalProjectMatcher) {
-	if m == nil || m.ValidationAdapter == nil {
-		return
-	}
-	m.ValidationAdapter.SetHistoricalProjectMatcher(matcher)
-}
-
 func (m *MailTransportModule) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
 	if m == nil || m.tokenRefreshRepo == nil {
 		return

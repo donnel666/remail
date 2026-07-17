@@ -181,7 +181,7 @@ func TestAdminGuardWaitsForAllocationRootThenSeesActiveAllocationMySQL(t *testin
 	lockedRoot, err := repo.LockResourceRoot(allocationCtx, 1000, domain.AllocationTypeMicrosoft)
 	require.NoError(t, err)
 	require.True(t, lockedRoot)
-	lockedCandidate, err := repo.LockMicrosoftCandidate(allocationCtx, 1000, 10, 2, domain.SupplyScopePublic, "")
+	lockedCandidate, err := repo.LockMicrosoftCandidate(allocationCtx, 1000, 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, "")
 	require.NoError(t, err)
 	require.NotNil(t, lockedCandidate)
 
@@ -297,6 +297,39 @@ INSERT INTO microsoft_resource_project_matches(
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint(1001), result.ResourceID)
+}
+
+func TestMicrosoftAllocationSkipsOnlyHistoricalMailboxEntityMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
+    (1000, 4, 'used-alias@example.com', 'normal'),
+    (1000, 4, 'free-alias@example.com', 'normal')`).Error)
+	var usedAliasID uint
+	require.NoError(t, db.Table("explicit_aliases").Select("id").Where("email = ?", "used-alias@example.com").Scan(&usedAliasID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type) VALUES
+    ('history-main', 'microsoft'),
+    ('history-alias', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox,
+    explicit_alias_id, email, status, released_at
+) VALUES
+    ('history-main', 10, 20, 1000, 'public', 'main', NULL, 'ms1000@example.com', 'released', UTC_TIMESTAMP()),
+    ('history-alias', 10, 20, 1000, 'public', 'alias', ?, 'used-alias@example.com', 'released', UTC_TIMESTAMP())`, usedAliasID).Error)
+
+	result, err := allocapp.NewUseCase(NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-mailbox-history-exclusion",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "free-alias@example.com", result.Email)
+	require.Equal(t, "alias", result.Mailbox)
 }
 
 func TestDomainAllocationConcurrentMySQL(t *testing.T) {

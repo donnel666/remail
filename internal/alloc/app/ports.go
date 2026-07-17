@@ -59,6 +59,21 @@ type DailyUsageReservation struct {
 	Limit          int
 }
 
+type HistoricalMicrosoftAllocationCommand struct {
+	AliasOwnerID uint
+	ProjectID    uint
+	ProductID    uint
+	ResourceID   uint
+	Mailbox      domain.MicrosoftMailbox
+	Email        string
+	CreatedAt    time.Time
+	ReleasedAt   time.Time
+}
+
+type HistoricalMicrosoftAliasPort interface {
+	BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error
+}
+
 type InventoryStats struct {
 	ProjectID                  uint
 	Microsoft                  MicrosoftInventoryStats
@@ -245,16 +260,18 @@ type Repository interface {
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
 
-	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
 	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
-	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*MicrosoftCandidate, error)
+	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*MicrosoftCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
-	FindReusableExplicitAlias(ctx context.Context, resourceID uint) (*AliasCandidate, error)
+	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
+	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusablePlusAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
+	FindExplicitAlias(ctx context.Context, resourceID uint, email string) (*AliasCandidate, error)
 	FindOrCreateDotAlias(ctx context.Context, resourceID uint, email string) (*AliasCandidate, error)
 	FindOrCreatePlusAlias(ctx context.Context, resourceID uint, email string) (*AliasCandidate, error)
 

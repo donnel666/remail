@@ -44,6 +44,7 @@
 | 2026-07-16 | V1.37 | Codex | 定稿 Microsoft 验证与别名边界：资源健康只由权威 RT 与收件决定，辅助邮箱恢复失败不能推翻验证成功；验证成功后幂等创建或唤醒独立 alias schedule。完整流程见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
 | 2026-07-16 | V1.38 | Codex | 补充密码登录授权 RT 的验证码路径：登录 proof 同样必须先识别辅助邮箱；规则可推算时按完整邮箱精确收码，推算失败时才按掩码和实际 recipient 反推，两条发码路径共用恢复租约。 |
 | 2026-07-16 | V1.39 | Codex | 定稿 Redis-only 资源验证调度：Microsoft/Domain 的 `pending` 表示待分配，`validating` 表示已有临时 Redis/Asynq 任务；批量 selection、分页游标、单资源执行和重试都只存在 Redis。MySQL 不保存 validation job/batch/history，dispatcher 按自适应执行窗口领取，任务完成立即清理；启动时把遗留 `validating` 重置为 `pending`。 |
+| 2026-07-17 | V1.40 | Codex | 将 Microsoft 旧项目识别从验证 worker 的同步全量拉取拆为独立 MailMatch 异步任务：验证只轻量探测 Inbox/Junk；扫描按确定性规则识别主邮箱/点号/加号/显式别名，复用既有订单与分配框架补齐超级管理员 0 元已过保历史订单。 |
 
 > 核心域。BC-CORE 是邮箱资源和项目规则的所有者。分配记录、订单、邮件事实、钱包余额不在本上下文内。
 
@@ -182,8 +183,9 @@ Microsoft 协议交互细节不在 Core 领域模型中表达。登录页面、R
 | Microsoft 导入后自动验证 | 导入 worker 创建或恢复 Microsoft 资源时已经写 `status=pending`，事务提交后只唤醒统一 dispatcher；不创建第二份 validation batch，不在导入事务内执行 Microsoft 外部验证。 |
 | dispatcher 领取 | dispatcher 只挑选 `pending` 资源，并在同一短事务把它们置为 `validating` 后投递单资源 Redis task。总 `validating` 分配数不得超过当前自适应执行窗口；重复 dispatcher 不能让 Redis backlog 无界增长。 |
 | worker 执行 | 根据资源类型调用 BC-MAILTRANSPORT 的 Microsoft ACL 或 DNS 验证 Port；外部网络调用不得进入数据库事务。 |
-| Microsoft 成功条件 | MailTransport 完成 RT 获取/刷新，并通过 Graph 或 IMAP 任一路径正常读取收件箱和垃圾箱后，即可判定 Microsoft 资源本体正常。密码登录授权若触发辅助邮箱验证码，必须先按规则推算完整地址：推算成功则精确收码，推算失败才按掩码反推实际 recipient。辅助邮箱观察、恢复、绑定和持久化失败，以及后续项目邮件匹配失败，均不能推翻已经成立的 RT 与收件成功证据。完整流程见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
+| Microsoft 成功条件 | MailTransport 完成 RT 获取/刷新，并通过 Graph 或 IMAP 任一路径轻量读取收件箱和垃圾箱后，即可判定 Microsoft 资源本体正常；验证阶段每个文件夹最多读取一封，不承担历史全量扫描。密码登录授权若触发辅助邮箱验证码，必须先按规则推算完整地址：推算成功则精确收码，推算失败才按掩码反推实际 recipient。辅助邮箱观察、恢复、绑定和持久化失败，以及后续项目邮件匹配失败，均不能推翻已经成立的 RT 与收件成功证据。完整流程见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
 | 成功回写 | 短事务把 Microsoft/Domain 资源状态置为 `normal`，清空安全错误；Microsoft 如返回 rotated RT，必须同步保存；Microsoft 如通过 Graph 收件则 `graphAvailable=true`，如通过 IMAP 回退收件则 `graphAvailable=false`。 |
+| 旧项目识别 | Microsoft 健康结果最终提交前，Core 先幂等投递独立 `validated_microsoft_history_scan` 任务；投递失败则保持 `validating` 交给现有验证重试，避免出现 `normal` 但永久漏任务。任务 worker 仅在资源已为 `normal` 后使用已提交凭据流式全量读取 Inbox/Junk：地址等于主邮箱为 `main`，同域去点后相同为 `dot`，同域且 `+` 前缀相同为 `plus`，其余实际收件地址为显式 `alias`。MailMatch 只提交识别结果；BC-TRADE 复用既有 BC-BILLING 零元扣款和 BC-ALLOC alias/guard/allocation Port，先创建或复用对应别名，再为确定性的 `super_admin` 创建一笔 0 元、`completed`、已过保且 Allocation 已 `released` 的幂等历史订单。任务执行失败不回滚已经提交的资源健康。 |
 | 失败回写 | 只有无法获得权威可用 RT，或使用最终 RT 发生确定性收件失败，才允许把资源置为 `abnormal`。辅助邮箱本身的掩码、外部域名、恢复超时、验证码错误或写入失败不是独立资源异常证据。写 `lastSafeError` 和 SystemLog 时必须记录真正的 RT/账号/收件失败原因；不得把资源自动置为 `disabled`，禁用只能由管理员命令触发。 |
 | 临时失败 | Microsoft/代理/DNS 服务临时不可用、请求超时或验证 Port 不可用时，Asynq 在同一临时 task 内重试，资源保持 `validating`。最终重试耗尽时必须先把资源恢复为 `pending`，handler 返回成功让该 Redis task 立即删除；不得写 `abnormal`，也不得进入 archived。 |
 | 投递失败 | `pending -> validating` 后如果 Redis enqueue 失败，立即按 resource type、status 和 credential revision fence 回滚为 `pending`。 |
@@ -217,7 +219,7 @@ email----password----clientID----refreshToken----辅助邮箱
 
 `email/password/clientID/refreshToken` 属于 Core 的 `MicrosoftResource` 资源本体字段。`辅助邮箱` 是后续 BC-MAILTRANSPORT 创建或复用辅助邮箱绑定记录的输入，不新增到 Core 资源表，不进入 Core 资源状态机，也不得出现在资源列表、资源详情、普通日志或导出中。辅助邮箱是否已分配、已发码、已验证或失败，仍由 MailTransport 的辅助邮箱绑定实体和状态机表达。
 
-P1-I3 验证执行必须把上述输入边界落实为代码边界：Core 解析导入 TXT 后，通过 `MicrosoftBindingInputRecorder` Port 把 `ownerUserId/email/bindingAddress` 交给 BC-MAILTRANSPORT；Core 不持久化辅助邮箱状态，也不解释 Microsoft 页面绑定细节。Redis validation worker 只把资源本体凭据交给 MailTransport ACL，并接收结构化验证结果回写资源状态。Microsoft ACL 的第三步把全量历史邮件交给 BC-MAILMATCH，后者按当前项目规则维护 `microsoft_resource_project_matches`；该关系不属于 Core 资源状态机，匹配失败不得改变资源健康。
+P1-I3 验证执行必须把上述输入边界落实为代码边界：Core 解析导入 TXT 后，通过 `MicrosoftBindingInputRecorder` Port 把 `ownerUserId/email/bindingAddress` 交给 BC-MAILTRANSPORT；Core 不持久化辅助邮箱状态，也不解释 Microsoft 页面绑定细节。Redis validation worker 只把资源本体凭据交给 MailTransport ACL，并接收结构化验证结果回写资源状态。健康结果最终提交前，Core 先幂等创建 BC-MAILMATCH 独立资源历史扫描任务；投递失败沿用现有 validation retry，任务提前运行时必须等待资源进入 `normal`。该任务全量流式读取邮件并把识别结果交给 BC-TRADE，后者通过既有 BC-BILLING/BC-ALLOC Port 补齐 alias/order/allocation 事实。MailMatch 不跨域直写订单、钱包或 Allocation；任务不占用验证 worker，也不属于 Core 资源状态机，识别执行失败不得改变已经提交的资源健康。
 
 #### P1-I2 补充设计：资源导入 artifact
 

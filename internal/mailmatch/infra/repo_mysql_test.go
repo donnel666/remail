@@ -193,7 +193,7 @@ func TestListOrderMessagesOnlyReturnsPersistedOwnershipMySQL(t *testing.T) {
 	require.Equal(t, "Owned code 123456", detail.RawBody)
 }
 
-func TestHistoricalProjectMatchesAreIdempotentMySQL(t *testing.T) {
+func TestHistoricalProjectScopeLockAndLegacyClearMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchOrder(t, db, "OR_HISTORY_MATCH")
 	require.NoError(t, db.Exec(`
@@ -209,26 +209,23 @@ VALUES
 
 	first := time.Now().UTC().Add(-24 * time.Hour)
 	last := time.Now().UTC()
-	match := app.HistoricalProjectMatch{
-		ResourceID:     100,
-		ProjectID:      10,
-		FirstMatchedAt: first,
-		LastMatchedAt:  last,
-		EvidenceCount:  3,
-		ScannedAt:      last,
-	}
-	require.NoError(t, repo.UpsertMicrosoftProjectMatches(context.Background(), []app.HistoricalProjectMatch{match}))
-	match.FirstMatchedAt = first.Add(time.Hour)
-	match.LastMatchedAt = last.Add(time.Hour)
-	match.EvidenceCount = 2
-	match.ScannedAt = last.Add(time.Hour)
-	require.NoError(t, repo.UpsertMicrosoftProjectMatches(context.Background(), []app.HistoricalProjectMatch{match}))
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resource_project_matches(
+    resource_id, project_id, first_matched_at, last_matched_at, evidence_count, last_scanned_at
+) VALUES (100, 10, ?, ?, 1, ?)`, first, last, last).Error)
+	require.NoError(t, repo.WithTx(context.Background(), func(txCtx context.Context) error {
+		lockedScopes, err := repo.ListHistoricalProjectScopesForUpdate(txCtx)
+		require.NoError(t, err)
+		require.Equal(t, scopes, lockedScopes)
+		return repo.ClearLegacyMicrosoftProjectHistory(txCtx, 100, 10)
+	}))
 
-	var stored microsoftResourceProjectMatchModel
-	require.NoError(t, db.First(&stored, "resource_id = ? AND project_id = ?", 100, 10).Error)
-	require.Equal(t, 3, stored.EvidenceCount)
-	require.WithinDuration(t, first, stored.FirstMatchedAt, time.Millisecond)
-	require.WithinDuration(t, last.Add(time.Hour), stored.LastMatchedAt, time.Millisecond)
+	var legacyCount int64
+	require.NoError(t, db.Table("microsoft_resource_project_matches").Where("resource_id = ? AND project_id = ?", 100, 10).Count(&legacyCount).Error)
+	require.Zero(t, legacyCount)
+	var historicalOrders int64
+	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
+	require.Zero(t, historicalOrders, "MailMatch must not write Trade-owned order facts directly")
 }
 
 func TestResourceFetchStateAndActiveJobConstraintsMySQL(t *testing.T) {
@@ -282,8 +279,9 @@ func seedMailmatchOrder(t *testing.T, db *gorm.DB, orderNo string) uint {
 	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user')`).Error)
+	    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+	    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+	    (3, 'history-owner@test.local', 'hash', 'history-owner', TRUE, 'super_admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'MailMatch Project', 'mailmatch', 'listed', 'public', TRUE)`).Error)

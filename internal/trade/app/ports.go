@@ -66,6 +66,7 @@ type AllocationCommand struct {
 }
 
 type AllocationResult struct {
+	OrderNo     string
 	Type        domain.AllocationType
 	ID          uint
 	Email       string
@@ -75,6 +76,21 @@ type AllocationResult struct {
 type AllocationPort interface {
 	Allocate(ctx context.Context, cmd AllocationCommand) (*AllocationResult, error)
 	ReleaseByOrder(ctx context.Context, orderNo string) error
+}
+
+type HistoricalMicrosoftAllocationCommand struct {
+	AliasOwnerID uint
+	ProjectID    uint
+	ProductID    uint
+	ResourceID   uint
+	Mailbox      string
+	Email        string
+	CreatedAt    time.Time
+	ReleasedAt   time.Time
+}
+
+type HistoricalMicrosoftAllocationPort interface {
+	ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*AllocationResult, error)
 }
 
 type OrderToken struct {
@@ -150,6 +166,11 @@ type Repository interface {
 	ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]string, error)
 }
 
+type HistoricalOrderRepository interface {
+	FindHistoricalOrderOwner(ctx context.Context) (uint, error)
+	CreateHistoricalOrder(ctx context.Context, cmd CreateHistoricalOrderCommand) error
+}
+
 type CreatePendingOrderCommand struct {
 	OrderNo                 string
 	UserID                  uint
@@ -192,6 +213,36 @@ type MarkFailedCommand struct {
 	FailureCode  domain.OrderFailureCode
 	Reason       string
 	Now          time.Time
+}
+
+type CreateHistoricalOrderCommand struct {
+	OrderNo                 string
+	UserID                  uint
+	ProjectID               uint
+	ProjectProductID        uint
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	DebitTxID               uint
+	MicrosoftAllocationID   uint
+	DeliveryEmail           string
+	CreatedAt               time.Time
+	ExpiredAt               time.Time
+	Now                     time.Time
+}
+
+type HistoricalMicrosoftUsage struct {
+	ResourceID              uint
+	ProjectID               uint
+	ProductID               uint
+	Mailbox                 string
+	Email                   string
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	FirstMatchedAt          time.Time
+	LastMatchedAt           time.Time
+	EvidenceCount           int
 }
 
 type RefundOrderCommand struct {
@@ -308,12 +359,14 @@ type UseCase struct {
 	deliveries                 OrderDeliveryPort
 	systemLogs                 SystemLogPort
 	projectDisplays            ProjectDisplayPort
+	historicalOrders           HistoricalOrderRepository
+	historicalAllocations      HistoricalMicrosoftAllocationPort
 	now                        func() time.Time
 	deliveryNotificationCursor atomic.Uint64
 }
 
 func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, allocation AllocationPort, tokens OrderTokenPort) *UseCase {
-	return &UseCase{
+	uc := &UseCase{
 		repo:       repo,
 		ordering:   ordering,
 		wallet:     wallet,
@@ -321,6 +374,9 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 		tokens:     tokens,
 		now:        func() time.Time { return time.Now().UTC() },
 	}
+	uc.historicalOrders, _ = repo.(HistoricalOrderRepository)
+	uc.historicalAllocations, _ = allocation.(HistoricalMicrosoftAllocationPort)
+	return uc
 }
 
 func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
@@ -333,6 +389,101 @@ func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
 
 func (uc *UseCase) SetSystemLogPort(systemLogs SystemLogPort) {
 	uc.systemLogs = systemLogs
+}
+
+func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches []HistoricalMicrosoftUsage) error {
+	if len(matches) == 0 {
+		return nil
+	}
+	if uc == nil || uc.repo == nil || uc.wallet == nil || uc.historicalOrders == nil || uc.historicalAllocations == nil {
+		return domain.ErrInvalidOrderRequest
+	}
+	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		ownerID, err := uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
+		if err != nil {
+			return err
+		}
+		now := uc.now()
+		expiryCutoff := now.Add(-time.Second).Truncate(time.Second)
+		for _, match := range matches {
+			match.Mailbox = strings.ToLower(strings.TrimSpace(match.Mailbox))
+			match.Email = strings.ToLower(strings.TrimSpace(match.Email))
+			if match.ResourceID == 0 || match.ProjectID == 0 || match.ProductID == 0 || match.Email == "" ||
+				match.EvidenceCount <= 0 || !validHistoricalMicrosoftMailbox(match.Mailbox) {
+				return domain.ErrInvalidOrderRequest
+			}
+			createdAt := match.FirstMatchedAt.UTC()
+			if createdAt.IsZero() || !createdAt.Before(now) {
+				createdAt = expiryCutoff
+			}
+			expiredAt := match.LastMatchedAt.UTC()
+			if expiredAt.IsZero() || expiredAt.After(expiryCutoff) {
+				expiredAt = expiryCutoff
+			}
+			if createdAt.After(expiredAt) {
+				createdAt = expiredAt
+			}
+			allocation, err := uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, HistoricalMicrosoftAllocationCommand{
+				AliasOwnerID: ownerID, ProjectID: match.ProjectID, ProductID: match.ProductID,
+				ResourceID: match.ResourceID, Mailbox: match.Mailbox, Email: match.Email,
+				CreatedAt: createdAt, ReleasedAt: expiredAt,
+			})
+			if err != nil {
+				return err
+			}
+			if allocation == nil || strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
+				return domain.ErrInvalidOrderRequest
+			}
+			orderNo := strings.TrimSpace(allocation.OrderNo)
+			existing, err := uc.repo.FindOrder(txCtx, orderNo)
+			if err == nil {
+				if !sameHistoricalMicrosoftOrder(*existing, ownerID, allocation.ID, match) {
+					return domain.ErrIdempotencyConflict
+				}
+				continue
+			}
+			if !errors.Is(err, domain.ErrOrderNotFound) {
+				return err
+			}
+			debit, err := uc.wallet.DebitConsumer(txCtx, WalletCommand{
+				UserID: ownerID, Amount: "0", Reason: "order:" + orderNo,
+				IdempotencyKey: "history:" + orderNo + ":debit",
+			})
+			if err != nil {
+				return err
+			}
+			if debit == nil || debit.ID == 0 {
+				return domain.ErrInvalidOrderRequest
+			}
+			if err := uc.historicalOrders.CreateHistoricalOrder(txCtx, CreateHistoricalOrderCommand{
+				OrderNo: orderNo, UserID: ownerID, ProjectID: match.ProjectID, ProjectProductID: match.ProductID,
+				CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
+				WarrantyMinutes: match.WarrantyMinutes, DebitTxID: debit.ID,
+				MicrosoftAllocationID: allocation.ID, DeliveryEmail: match.Email,
+				CreatedAt: createdAt, ExpiredAt: expiredAt, Now: now,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func validHistoricalMicrosoftMailbox(mailbox string) bool {
+	switch mailbox {
+	case "main", "alias", "dot", "plus":
+		return true
+	default:
+		return false
+	}
+}
+
+func sameHistoricalMicrosoftOrder(order domain.Order, ownerID uint, allocationID uint, match HistoricalMicrosoftUsage) bool {
+	emailMatches := match.Mailbox == "main" || order.DeliveryEmail == strings.ToLower(strings.TrimSpace(match.Email))
+	return order.UserID == ownerID && order.ProjectID == match.ProjectID && order.ProjectProductID == match.ProductID &&
+		order.ProductType == domain.ProductTypeMicrosoft && order.ServiceMode == domain.ServiceModePurchase &&
+		order.Status == domain.OrderStatusCompleted && emailMatches &&
+		order.MicrosoftAllocID != nil && *order.MicrosoftAllocID == allocationID
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*CheckoutResult, error) {

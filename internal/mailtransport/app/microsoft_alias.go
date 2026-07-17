@@ -189,6 +189,13 @@ type MicrosoftAliasService struct {
 	lastEnsureAt time.Time
 }
 
+func (s *MicrosoftAliasService) BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error {
+	if s == nil || s.store == nil {
+		return errors.New("microsoft alias store is unavailable")
+	}
+	return s.store.BackfillExistingAliases(ctx, resourceID, ownerUserID, aliases)
+}
+
 func NewMicrosoftAliasService(store MicrosoftAliasScheduleStore, queue MicrosoftAliasQueue, creator MicrosoftAliasCreator) *MicrosoftAliasService {
 	return &MicrosoftAliasService{
 		store:   store,

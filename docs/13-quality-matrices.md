@@ -135,7 +135,7 @@
 | Alloc | 一个订单只能一个分配、main/alias/mailbox allocated 唯一、释放条件更新。 |
 | Billing | 钱包行锁、流水不可变、余额非负、卡密兑换并发唯一、提现冻结不重复。 |
 | Trade | orderNo 唯一、幂等键唯一、分配外键二选一、状态条件更新。 |
-| MailMatch | 同资源 Message-ID 去重、唯一订单归属、历史项目关系幂等、收件人/状态/时间索引。 |
+| MailMatch | 同资源 Message-ID 去重、唯一订单归属、历史使用订单幂等、收件人/状态/时间索引。 |
 | Proxy | 代理池和 URL 唯一、binding key + ip 有效绑定唯一、expireAt/status 索引、错误计数条件更新。 |
 | OpenAPI | API Key/OrderToken 前缀索引、幂等键唯一、并发占用释放可恢复。 |
 | Governance | 日志索引、任务状态 claim 索引、配置 key 唯一。 |
@@ -344,7 +344,7 @@ API/SDK：
 - [ ] 多项目规则同时命中时 `matched_order_id` 为空，任一 Pickup 均不可读取该消息，诊断可查。
 - [ ] 同幂等键重放保持相同业务结果；不同请求指纹返回 409。
 - [ ] API Key 创建、列表、详情均允许 owner 查看明文；普通日志不得出现 Key、Token、RT、密码或正文。
-- [ ] Microsoft 验证完成全量 Inbox/Junk 扫描；旧项目关系按 `(resource_id, project_id)` 幂等写入，匹配失败不改变资源健康，后续分配排除同项目资源。
+- [ ] Microsoft 验证只完成 Inbox/Junk 轻量可读性探测；健康结果最终提交前必须先幂等创建独立历史识别任务，投递失败保持 `validating` 由现有 validation retry 恢复，worker 仅在资源 `normal` 后全量流式扫描。MailMatch 仅提交识别结果，Trade 通过既有 Billing/Alloc Port 先创建/复用具体点号、加号、显式别名，再为超级管理员幂等创建 0 元、已过保、Allocation 已 released 的历史订单；不得由 MailMatch repository 跨域直写订单、钱包或 Allocation。任务执行失败不改变已经提交的资源健康，后续分配只排除同项目下相同邮箱实体。
 - [ ] Microsoft 显式别名 dispatcher 无条件持续运行，为全部 `status=normal` 的公开和私有资源创建；`forSale` 切换不得暂停 schedule、取消 attempt 或阻止远端请求，非 `normal` 状态仍须在领取和远端调用前被拦截；按 Asia/Shanghai 自然周最多 2 个、自然年最多 10 个，运行中与结果不确定的候选预占额度，确认失败后释放，次年自动恢复。
 - [ ] 每条 `explicit_aliases.owner_user_id` 必须是成功事务中按 `users.id ASC` 确定并共享锁定的第一个 `role=super_admin`；不得继承主资源供应商 owner，不得为空，也不得降级给普通 admin。历史记录迁移和重复 alias 再确认都必须收敛到该 owner；系统没有 `super_admin` 时成功落库整体回滚。
 - [ ] 交易走同步请求路径即时成交；接码拉取额外获得 32-worker 专用实时池，长任务占满共享池时也保证有 worker 可用。
@@ -369,7 +369,7 @@ API/SDK：
 - [ ] cleanup partial_failure 无需人工即可被生命周期扫描恢复。
 - [ ] NotifyMatchedCode 首次失败后由 delivery head 补偿推进。
 - [ ] Fetch 仍按 email_resource_id 单飞；Redis/worker 重启后 durable job 可重派。
-- [ ] 重复验证不会重复创建旧项目关系；历史项目资源在候选查询与行锁重校验两处均被排除。
+- [ ] 重复验证不会重复创建 0 元历史订单、钱包流水或 Allocation；已用于目标项目的具体 main/alias/dot/plus 在候选查询与行锁重校验两处均被排除，兄弟别名仍可使用。
 - [ ] 显式别名远端响应丢失、落库失败或 worker 过期后只对账并重试同一候选；旧 fencing token 不得覆盖新 worker，周/年额度不得超限。
 
 管理员 Microsoft 专项已经补充的并发与事务证据如下；这些证据只关闭对应路径，不能替代上面订单、钱包等全局清单：

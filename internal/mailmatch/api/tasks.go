@@ -138,6 +138,37 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		return nil
 	})
 
+	mux.HandleFunc(mailmatchinfra.TypeValidatedMicrosoftHistoryScan, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.ProjectHistory == nil {
+			return nil
+		}
+		var payload mailmatchapp.ValidatedMicrosoftHistoryScanTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return fmt.Errorf("decode validated microsoft history scan task: %w: %w", err, asynq.SkipRetry)
+		}
+		if payload.ResourceID == 0 {
+			return fmt.Errorf("decode validated microsoft history scan task: resource identity is missing: %w", asynq.SkipRetry)
+		}
+		release, admitted := acquireProjectHistoryCapacity(module)
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				return nil
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		if err := module.ProjectHistory.ProcessValidatedMicrosoftHistory(ctx, payload); err != nil {
+			slog.Warn(
+				"validated microsoft history scan task failed",
+				"resource_id", payload.ResourceID,
+				"request_id", payload.RequestID,
+				"error", err,
+			)
+			return err
+		}
+		return nil
+	})
+
 	mux.HandleFunc(mailmatchinfra.TypeProjectHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.ProjectHistory == nil {
 			return nil

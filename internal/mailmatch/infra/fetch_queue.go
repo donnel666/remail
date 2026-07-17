@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/app"
@@ -13,11 +14,12 @@ import (
 )
 
 const (
-	TypeMailmatchFetch           = "mailmatch:fetch"
-	TypeMailmatchResourceFetch   = "mailmatch:resource_fetch"
-	TypeMailmatchFetchDispatcher = "mailmatch:fetch_dispatcher"
-	TypeProjectHistoryScan       = "mailmatch:project_history_scan"
-	TypeProjectHistoryDispatcher = "mailmatch:project_history_dispatcher"
+	TypeMailmatchFetch                = "mailmatch:fetch"
+	TypeMailmatchResourceFetch        = "mailmatch:resource_fetch"
+	TypeMailmatchFetchDispatcher      = "mailmatch:fetch_dispatcher"
+	TypeProjectHistoryScan            = "mailmatch:project_history_scan"
+	TypeValidatedMicrosoftHistoryScan = "mailmatch:validated_microsoft_history_scan"
+	TypeProjectHistoryDispatcher      = "mailmatch:project_history_dispatcher"
 
 	mailmatchQueueName            = platform.QueueMailfetch
 	mailmatchFetchTaskMaxRetry    = 0
@@ -109,6 +111,35 @@ func (q *FetchQueue) EnqueueProjectHistoryScan(ctx context.Context, task app.Pro
 	}
 	if err != nil {
 		return fmt.Errorf("enqueue project history scan task: %w", err)
+	}
+	return nil
+}
+
+func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, task app.ValidatedMicrosoftHistoryScanTask) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("validated microsoft history scan queue is unavailable")
+	}
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal validated microsoft history scan task: %w", err)
+	}
+	taskID := fmt.Sprintf("validated-microsoft-history:%d", task.ResourceID)
+	if requestID := strings.TrimSpace(task.RequestID); requestID != "" {
+		taskID += ":" + requestID
+	}
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynq.NewTask(TypeValidatedMicrosoftHistoryScan, payload),
+		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.TaskID(taskID),
+		asynq.MaxRetry(projectHistoryTaskMaxRetry),
+		asynq.Timeout(projectHistoryTaskTimeout),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue validated microsoft history scan task: %w", err)
 	}
 	return nil
 }

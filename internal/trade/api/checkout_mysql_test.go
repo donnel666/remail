@@ -23,6 +23,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
+	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
@@ -166,6 +167,76 @@ func TestCheckoutZeroPricedPublicPurchaseMySQL(t *testing.T) {
 		Where("id = ?", *result.Order.DebitTxID).
 		Scan(&debitAmount).Error)
 	require.Equal(t, "0.000000", debitAmount)
+}
+
+func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFactsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	first := time.Now().UTC().Add(-24 * time.Hour)
+	last := time.Now().UTC()
+	matches := []tradeapp.HistoricalMicrosoftUsage{
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 3},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "dot", Email: "ms.1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "plus", Email: "ms1000+used@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "legacy-alias@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+	}
+	uc := newTradeUseCase(db)
+	for range 2 {
+		require.NoError(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), matches))
+	}
+	require.NoError(t, db.Table("microsoft_resources").Where("id = ?", 1000).Updates(map[string]any{
+		"email_address": "corrected@example.com",
+		"email_domain":  "example.com",
+	}).Error)
+	matches[0].Email = "corrected@example.com"
+	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), matches))
+
+	var historicalOrders int64
+	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
+	require.Equal(t, int64(4), historicalOrders)
+	var historicalRows []struct {
+		UserID         uint       `gorm:"column:user_id"`
+		Status         string     `gorm:"column:status"`
+		ServiceMode    string     `gorm:"column:service_mode"`
+		PayAmount      string     `gorm:"column:pay_amount"`
+		AfterSaleUntil *time.Time `gorm:"column:after_sale_until"`
+	}
+	require.NoError(t, db.Table("orders").
+		Select("user_id, status, service_mode, pay_amount, after_sale_until").
+		Where("order_no LIKE 'HIST-%'").Find(&historicalRows).Error)
+	for _, row := range historicalRows {
+		require.Equal(t, uint(3), row.UserID)
+		require.Equal(t, "completed", row.Status)
+		require.Equal(t, "purchase", row.ServiceMode)
+		require.Equal(t, "0.000000", row.PayAmount)
+		require.NotNil(t, row.AfterSaleUntil)
+		require.True(t, row.AfterSaleUntil.Before(time.Now().UTC()))
+	}
+	var historicalAllocations int64
+	require.NoError(t, db.Table("microsoft_allocations").Where("order_no LIKE 'HIST-%' AND status = 'released'").Count(&historicalAllocations).Error)
+	require.Equal(t, int64(4), historicalAllocations)
+	for _, table := range []string{"explicit_aliases", "dot_aliases", "plus_aliases"} {
+		var count int64
+		require.NoError(t, db.Table(table).Where("resource_id = ?", 1000).Count(&count).Error)
+		require.Equal(t, int64(1), count, table)
+	}
+	var debitCount int64
+	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = 'debit' AND amount = 0", 3).Count(&debitCount).Error)
+	require.Equal(t, int64(4), debitCount)
+	var tokenCount int64
+	require.NoError(t, db.Table("order_tokens").Where("order_no LIKE 'HIST-%'").Count(&tokenCount).Error)
+	require.Zero(t, tokenCount)
+
+	rollbackMatches := []tradeapp.HistoricalMicrosoftUsage{
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "rolled-back@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "corrected@example.com", FirstMatchedAt: first, LastMatchedAt: last},
+	}
+	require.Error(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), rollbackMatches))
+	var rolledBackAliases int64
+	require.NoError(t, db.Table("explicit_aliases").Where("resource_id = ? AND email = ?", 1000, "rolled-back@example.com").Count(&rolledBackAliases).Error)
+	require.Zero(t, rolledBackAliases)
 }
 
 func TestCheckoutPurchaseOrderContinuesAfterProductDelistedMySQL(t *testing.T) {
@@ -1313,11 +1384,13 @@ func (allowTradePermissionChecker) Check(context.Context, uint, iamdomain.Role, 
 }
 
 func newTradeModule(db *gorm.DB) *Module {
+	allocation := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	allocation.SetHistoricalMicrosoftAliasPort(mailinfra.NewMicrosoftAliasStore(db))
 	return NewModule(
 		db,
 		coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db)),
 		billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db)),
-		allocapp.NewUseCase(allocinfra.NewRepo(db)),
+		allocation,
 		openapiapp.NewUseCase(openapiinfra.NewRepo(db)),
 	)
 }

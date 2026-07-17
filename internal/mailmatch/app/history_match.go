@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"strings"
 	"time"
 
@@ -9,9 +8,13 @@ import (
 )
 
 type HistoricalProjectScope struct {
-	ProjectID  uint
-	LooseMatch bool
-	Rules      []MailRule
+	ProjectID               uint
+	ProductID               uint
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	LooseMatch              bool
+	Rules                   []MailRule
 }
 
 type HistoricalProjectMessage struct {
@@ -34,80 +37,107 @@ type HistoricalProjectMatchRequest struct {
 	ScannedAt    time.Time
 }
 
-type HistoricalProjectMatch struct {
-	ResourceID     uint
-	ProjectID      uint
-	FirstMatchedAt time.Time
-	LastMatchedAt  time.Time
-	EvidenceCount  int
-	ScannedAt      time.Time
-}
+type HistoricalMailboxType string
 
-func (uc *UseCase) MatchMicrosoftHistory(ctx context.Context, req HistoricalProjectMatchRequest) error {
-	if req.ResourceID == 0 || normalizeEmail(req.EmailAddress) == "" {
-		return domain.ErrInvalidRequest
-	}
-	if len(req.Messages) == 0 {
-		return nil
-	}
-	scopes, err := uc.repo.ListHistoricalProjectScopes(ctx)
-	if err != nil {
-		return err
-	}
-	if len(scopes) == 0 {
-		return nil
-	}
-	scannedAt := req.ScannedAt.UTC()
-	if scannedAt.IsZero() {
-		scannedAt = uc.now()
-	}
-	matches := historicalProjectMatches(req, scopes, scannedAt)
-	if len(matches) == 0 {
-		return nil
-	}
-	return uc.repo.UpsertMicrosoftProjectMatches(ctx, matches)
+const (
+	HistoricalMailboxMain  HistoricalMailboxType = "main"
+	HistoricalMailboxAlias HistoricalMailboxType = "alias"
+	HistoricalMailboxDot   HistoricalMailboxType = "dot"
+	HistoricalMailboxPlus  HistoricalMailboxType = "plus"
+)
+
+type HistoricalProjectMatch struct {
+	ResourceID              uint
+	MailboxType             HistoricalMailboxType
+	MailboxEmail            string
+	ProjectID               uint
+	ProductID               uint
+	CodeWindowMinutes       int
+	ActivationWindowMinutes int
+	WarrantyMinutes         int
+	FirstMatchedAt          time.Time
+	LastMatchedAt           time.Time
+	EvidenceCount           int
+	ScannedAt               time.Time
 }
 
 func historicalProjectMatches(req HistoricalProjectMatchRequest, scopes []HistoricalProjectScope, scannedAt time.Time) []HistoricalProjectMatch {
 	matches := make([]HistoricalProjectMatch, 0)
+	index := make(map[struct {
+		projectID uint
+		mailbox   HistoricalMailboxType
+		email     string
+	}]int)
 	for _, scope := range scopes {
-		var match *HistoricalProjectMatch
 		for _, item := range req.Messages {
-			if !historicalMessageMatchesProject(item, req.EmailAddress, scope) {
-				continue
-			}
-			receivedAt := item.ReceivedAt.UTC()
-			if receivedAt.IsZero() {
-				receivedAt = scannedAt
-			}
-			if match == nil {
-				match = &HistoricalProjectMatch{
-					ResourceID:     req.ResourceID,
-					ProjectID:      scope.ProjectID,
-					FirstMatchedAt: receivedAt,
-					LastMatchedAt:  receivedAt,
-					ScannedAt:      scannedAt,
+			for _, recipient := range historicalRecipientCandidates(req.EmailAddress, item.Recipients) {
+				if !historicalRecipientMatchesProject(item, req.EmailAddress, recipient, scope) {
+					continue
+				}
+				receivedAt := item.ReceivedAt.UTC()
+				if receivedAt.IsZero() {
+					receivedAt = scannedAt
+				}
+				mailboxType := historicalMailboxType(req.EmailAddress, recipient)
+				key := struct {
+					projectID uint
+					mailbox   HistoricalMailboxType
+					email     string
+				}{projectID: scope.ProjectID, mailbox: mailboxType, email: recipient}
+				matchIndex, ok := index[key]
+				if !ok {
+					index[key] = len(matches)
+					matches = append(matches, HistoricalProjectMatch{
+						ResourceID: req.ResourceID, MailboxType: mailboxType, MailboxEmail: recipient,
+						ProjectID: scope.ProjectID, ProductID: scope.ProductID,
+						CodeWindowMinutes: scope.CodeWindowMinutes, ActivationWindowMinutes: scope.ActivationWindowMinutes,
+						WarrantyMinutes: scope.WarrantyMinutes,
+						FirstMatchedAt:  receivedAt, LastMatchedAt: receivedAt,
+						ScannedAt: scannedAt,
+					})
+					matchIndex = len(matches) - 1
+				}
+				matches[matchIndex].EvidenceCount++
+				if receivedAt.Before(matches[matchIndex].FirstMatchedAt) {
+					matches[matchIndex].FirstMatchedAt = receivedAt
+				}
+				if receivedAt.After(matches[matchIndex].LastMatchedAt) {
+					matches[matchIndex].LastMatchedAt = receivedAt
 				}
 			}
-			match.EvidenceCount++
-			if receivedAt.Before(match.FirstMatchedAt) {
-				match.FirstMatchedAt = receivedAt
-			}
-			if receivedAt.After(match.LastMatchedAt) {
-				match.LastMatchedAt = receivedAt
-			}
-		}
-		if match != nil {
-			matches = append(matches, *match)
 		}
 	}
 	return matches
 }
 
 func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail string, scope HistoricalProjectScope) bool {
+	for _, recipient := range historicalRecipientCandidates(mainEmail, message.Recipients) {
+		if historicalRecipientMatchesProject(message, mainEmail, recipient, scope) {
+			return true
+		}
+	}
+	return false
+}
+
+func historicalRecipientCandidates(mainEmail string, recipients []string) []string {
+	candidates := normalizeRecipientCandidates(recipients)
+	if len(candidates) <= 1 {
+		return candidates
+	}
+	filtered := candidates[:0]
+	for _, recipient := range candidates {
+		if historicalMailboxType(mainEmail, recipient) != HistoricalMailboxAlias {
+			filtered = append(filtered, recipient)
+		}
+	}
+	return filtered
+}
+
+func historicalRecipientMatchesProject(message HistoricalProjectMessage, mainEmail, recipient string, scope HistoricalProjectScope) bool {
 	fetched := FetchedMessage{
 		ResourceType:      domain.ResourceTypeMicrosoft,
-		Recipients:        normalizeRecipientCandidates(message.Recipients),
+		Recipient:         recipient,
+		Recipients:        []string{recipient},
 		Sender:            strings.TrimSpace(message.Sender),
 		Subject:           strings.TrimSpace(message.Subject),
 		Body:              strings.TrimSpace(message.Body),
@@ -118,32 +148,37 @@ func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail
 		Folder:            strings.TrimSpace(message.Folder),
 		ReceivedAt:        message.ReceivedAt.UTC(),
 	}
-	for _, recipient := range fetched.Recipients {
-		fetched.Recipient = recipient
-		orderScope := OrderScope{
-			ProjectID:     scope.ProjectID,
-			LooseMatch:    scope.LooseMatch,
-			Rules:         scope.Rules,
-			Recipient:     recipient,
-			RecipientKind: historicalRecipientKind(mainEmail, recipient),
-		}
-		enabled := enabledRules(orderScope.Rules)
-		if !matchRequiredRule(MailRuleRecipient, enabled, fetched, orderScope) {
-			continue
-		}
-		if orderScope.LooseMatch {
-			if matchRequiredRule(MailRuleSender, enabled, fetched, orderScope) {
-				return true
-			}
-			continue
-		}
-		if matchRequiredRule(MailRuleSender, enabled, fetched, orderScope) &&
-			matchRequiredRule(MailRuleSubject, enabled, fetched, orderScope) &&
-			matchRequiredRule(MailRuleBody, enabled, fetched, orderScope) {
-			return true
-		}
+	orderScope := OrderScope{
+		ProjectID:     scope.ProjectID,
+		LooseMatch:    scope.LooseMatch,
+		Rules:         scope.Rules,
+		Recipient:     recipient,
+		RecipientKind: historicalRecipientKind(mainEmail, recipient),
 	}
-	return false
+	enabled := enabledRules(orderScope.Rules)
+	if !matchRequiredRule(MailRuleRecipient, enabled, fetched, orderScope) {
+		return false
+	}
+	if orderScope.LooseMatch {
+		return matchRequiredRule(MailRuleSender, enabled, fetched, orderScope)
+	}
+	return matchRequiredRule(MailRuleSender, enabled, fetched, orderScope) &&
+		matchRequiredRule(MailRuleSubject, enabled, fetched, orderScope) &&
+		matchRequiredRule(MailRuleBody, enabled, fetched, orderScope)
+}
+
+func historicalMailboxType(mainEmail, recipient string) HistoricalMailboxType {
+	if normalizeEmail(mainEmail) == normalizeEmail(recipient) {
+		return HistoricalMailboxMain
+	}
+	switch historicalRecipientKind(mainEmail, recipient) {
+	case "dot":
+		return HistoricalMailboxDot
+	case "plus":
+		return HistoricalMailboxPlus
+	default:
+		return HistoricalMailboxAlias
+	}
 }
 
 func historicalRecipientKind(mainEmail string, recipient string) string {

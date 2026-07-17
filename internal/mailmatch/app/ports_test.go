@@ -301,6 +301,12 @@ func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
 	}
 
 	require.True(t, historicalMessageMatchesProject(message, "main@example.com", scope))
+	require.Equal(t, []string{"main@example.com"}, historicalRecipientCandidates("main@example.com", []string{
+		"main@example.com", "coworker@another-domain.test",
+	}))
+	require.Equal(t, []string{"custom-alias@example.com"}, historicalRecipientCandidates("main@example.com", []string{
+		"custom-alias@example.com",
+	}))
 	require.Equal(t, "plus", historicalRecipientKind("main@example.com", "main+github@example.com"))
 	require.Equal(t, "dot", historicalRecipientKind("firstname@example.com", "first.name@example.com"))
 }
