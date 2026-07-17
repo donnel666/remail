@@ -194,7 +194,9 @@ func safeMicrosoftTokenRefreshProtocolResult(raw mailinfra.MicrosoftOAuthResult)
 		result.SafeMessage = "Microsoft account is locked."
 	case "rate_limited":
 		result.SafeMessage = "Microsoft mail service is rate limited."
-	case "auth_timeout", "request":
+	case "auth_timeout":
+		result.SafeMessage = "Microsoft authorization timed out."
+	case "request":
 		result.SafeMessage = "Microsoft mail service is temporarily unavailable."
 	default:
 		result.Category = "request"

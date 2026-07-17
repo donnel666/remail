@@ -175,7 +175,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			"resource_id", payload.ResourceID,
 			"request_id", payload.RequestID,
 		)
-		if err := module.ValidationUseCase.Process(ctx, payload); err != nil {
+		if err := module.ValidationUseCase.Process(ctx, payload, isFinalAttempt(ctx)); err != nil {
 			slog.Warn(
 				"resource validation task failed",
 				"resource_id", payload.ResourceID,

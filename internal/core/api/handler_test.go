@@ -2252,7 +2252,7 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	resource := &coredomain.MicrosoftResource{EmailAddress: "success@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1}
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
 	task := mockValidationTask(validationRepo, root.ID)
-	require.NoError(t, uc.Process(context.Background(), task))
+	require.NoError(t, uc.Process(context.Background(), task, false))
 	require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, "rotated-rt", resourceRepo.microsoft[root.ID].RefreshToken)
 	require.Equal(t, []uint{root.ID}, trigger.resourceIDs)
@@ -2275,7 +2275,7 @@ func TestResourceValidationUseCase_HistoryTaskFailureKeepsMicrosoftValidating(t 
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
 	task := mockValidationTask(validationRepo, root.ID)
 
-	require.ErrorIs(t, uc.Process(context.Background(), task), coreapp.ErrValidationTemporaryUnavailable)
+	require.ErrorIs(t, uc.Process(context.Background(), task, false), coreapp.ErrValidationTemporaryUnavailable)
 	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
 	require.Len(t, historyTrigger.tasks, 1)
 }
@@ -2290,7 +2290,7 @@ func TestResourceValidationUseCase_TemporaryFailureStaysValidatingUntilRedisRetr
 		EmailAddress: "retry@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1,
 	}))
 	task := mockValidationTask(validationRepo, root.ID)
-	require.ErrorIs(t, uc.Process(context.Background(), task), coreapp.ErrValidationTemporaryUnavailable)
+	require.ErrorIs(t, uc.Process(context.Background(), task, false), coreapp.ErrValidationTemporaryUnavailable)
 	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
 	require.NoError(t, uc.ReleaseDispatch(context.Background(), task))
 	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
@@ -2318,7 +2318,7 @@ func TestResourceValidationUseCase_ReleasesRecoveryLeaseOnValidatorError(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	require.ErrorIs(t, uc.Process(ctx, task), coreapp.ErrValidationTemporaryUnavailable)
+	require.ErrorIs(t, uc.Process(ctx, task, false), coreapp.ErrValidationTemporaryUnavailable)
 	require.True(t, released)
 	require.True(t, releaseContextActive, "lease cleanup must survive worker cancellation")
 }
@@ -2334,9 +2334,35 @@ func TestResourceValidationUseCase_ProcessDomainFailureWritesDiagnostic(t *testi
 	require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, &coredomain.MailDomainResource{
 		Domain: "example.com", MailServerID: 1, Purpose: coredomain.PurposeNotSale, Status: coredomain.DomainStatusPending,
 	}))
-	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, root.ID)))
+	require.NoError(t, uc.Process(context.Background(), mockValidationTask(validationRepo, root.ID), false))
 	require.Equal(t, coredomain.DomainStatusAbnormal, resourceRepo.domains[root.ID].Status)
 	require.Equal(t, "Domain MX record is not configured correctly.", resourceRepo.domains[root.ID].LastSafeError)
+}
+
+func TestResourceValidationUseCase_FinalAttemptCommitsAbnormalInsteadOfLooping(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
+		msResult: coreapp.MicrosoftValidationResult{Valid: false, Category: "auth_timeout", SafeMessage: "Microsoft authorization timed out."},
+	})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
+		EmailAddress: "auth-timeout@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1,
+	}))
+	task := mockValidationTask(validationRepo, root.ID)
+
+	// Non-final attempts defer and keep the resource validating (looping is expected mid-retry).
+	require.ErrorIs(t, uc.Process(context.Background(), task, false), coreapp.ErrValidationTemporaryUnavailable)
+	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
+	require.Empty(t, validationRepo.appliedMicrosoftResults)
+
+	// Final attempt must commit the failure to abnormal + last_safe_error instead
+	// of releasing back to pending, so the resource stops looping forever.
+	require.NoError(t, uc.Process(context.Background(), task, true))
+	require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
+	require.Equal(t, "Microsoft authorization timed out.", resourceRepo.microsoft[root.ID].LastSafeError)
+	require.Len(t, validationRepo.appliedMicrosoftResults, 1)
 }
 
 func TestResourceValidationUseCase_CreateRejectsDisabledResource(t *testing.T) {

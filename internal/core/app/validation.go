@@ -388,23 +388,23 @@ func (uc *ResourceValidationUseCase) ReleaseBatch(ctx context.Context, task Reso
 	return leases.ReleaseResourceValidationBatch(ctx, task)
 }
 
-func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceValidationTask) error {
+func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
 	if uc == nil || uc.resources == nil || uc.validations == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || !domain.IsValidResourceType(task.ResourceType) {
 		return domain.ErrInvalidResourceCommand
 	}
 	var processErr error
 	switch task.ResourceType {
 	case domain.ResourceTypeMicrosoft:
-		processErr = uc.processMicrosoft(ctx, task)
+		processErr = uc.processMicrosoft(ctx, task, finalAttempt)
 	case domain.ResourceTypeDomain:
-		processErr = uc.processDomain(ctx, task)
+		processErr = uc.processDomain(ctx, task, finalAttempt)
 	default:
 		processErr = domain.ErrInvalidResourceType
 	}
 	if processErr == nil || errors.Is(processErr, ErrValidationResultStale) || errors.Is(processErr, domain.ErrInvalidResourceStatus) || errors.Is(processErr, domain.ErrResourceNotFound) {
 		return nil
 	}
-	if platform.BackgroundTaskHasRetryHeadroom(ctx) {
+	if !finalAttempt {
 		return processErr
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -477,7 +477,7 @@ func (uc *ResourceValidationUseCase) ScheduleDispatcher(ctx context.Context, del
 	_ = uc.queue.EnqueueResourceValidationDispatcher(ctx, max(delay, resourceValidationDispatchDelay))
 }
 
-func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task ResourceValidationTask) error {
+func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
 	ms, err := uc.resources.FindMicrosoftByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
@@ -513,13 +513,19 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 		}
 	}
 	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		if err := uc.validations.SaveMicrosoftProgress(ctx, task, result); err != nil {
-			if errors.Is(err, ErrValidationResultStale) {
-				return nil
+		if !finalAttempt {
+			if err := uc.validations.SaveMicrosoftProgress(ctx, task, result); err != nil {
+				if errors.Is(err, ErrValidationResultStale) {
+					return nil
+				}
+				return err
 			}
-			return err
+			return ErrValidationTemporaryUnavailable
 		}
-		return ErrValidationTemporaryUnavailable
+		// Retry budget exhausted. Do not defer again: fall through to
+		// ApplyMicrosoftResult below so the resource commits to abnormal with a
+		// last_safe_error instead of looping pending→validating forever. The
+		// admin re-validates to move it back to pending.
 	}
 	if result.Valid && uc.historyTrigger != nil {
 		// The task carries only resource identity, so enqueue it before committing
@@ -578,7 +584,7 @@ func releaseMicrosoftValidationRecoveryLease(ctx context.Context, task ResourceV
 	}
 }
 
-func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task ResourceValidationTask) error {
+func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
 	dr, err := uc.resources.FindDomainByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
@@ -608,7 +614,7 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task Res
 			result.SafeMessage = "Domain DNS validation failed."
 		}
 	}
-	if isRetryableValidationCategory(result.Category) && !result.Valid {
+	if isRetryableValidationCategory(result.Category) && !result.Valid && !finalAttempt {
 		return ErrValidationTemporaryUnavailable
 	}
 	return uc.validations.ApplyDomainResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
