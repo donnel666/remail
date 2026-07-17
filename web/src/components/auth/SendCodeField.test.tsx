@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SendCodeField } from "./SendCodeField";
@@ -100,5 +100,36 @@ describe("SendCodeField", () => {
     expect(value).toBeGreaterThanOrEqual(44);
     expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
     expect(onError).toHaveBeenCalled();
+  });
+
+  // Reproduces the reported flow: send → 60s countdown → wait it out → re-solve
+  // captcha → send again. The countdown must restart on the second success.
+  it("restarts the countdown on a second successful send", async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn<Send>().mockResolvedValue(undefined);
+      renderField(send);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button"));
+      });
+      expect(countdown()).toBe(60);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(countdown()).toBeNull(); // back to "Send code"
+
+      // The finally block cleared the captcha; the user re-solves it.
+      fireEvent.change(screen.getByLabelText("captcha"), { target: { value: "1234" } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button"));
+      });
+      expect(countdown()).toBe(60);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

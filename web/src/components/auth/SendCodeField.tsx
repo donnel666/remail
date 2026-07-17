@@ -54,6 +54,11 @@ export function SendCodeField({
   }, [cooldown]);
 
   const handleRequestCode = async () => {
+    // Clear any prior notice/error up front, so a failed resend never leaves the
+    // previous send's stale "sent" success message on screen.
+    onNotice("");
+    onError("");
+
     if (!email.trim()) {
       onError(t("Please enter your email."));
       return;
@@ -68,8 +73,6 @@ export function SendCodeField({
     }
 
     setRequesting(true);
-    onError("");
-    onNotice("");
 
     try {
       await send({
