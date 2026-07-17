@@ -528,6 +528,74 @@ export interface paths {
         patch: operations["patchAdminInvite"];
         trace?: never;
     };
+    "/v1/admin/invites/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch create invites */
+        post: operations["postAdminInvitesBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/invites/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable invites in bulk */
+        post: operations["postAdminInvitesEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/invites/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable invites in bulk */
+        post: operations["postAdminInvitesDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/invites/{code}/uses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List invite redemptions */
+        get: operations["getAdminInviteUses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/suppliers/applications": {
         parameters: {
             query?: never;
@@ -1656,6 +1724,142 @@ export interface paths {
         head?: never;
         /** Enable or disable a card key */
         patch: operations["patchAdminCard"];
+        trace?: never;
+    };
+    "/v1/admin/cards/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable card keys in bulk */
+        post: operations["postAdminCardsEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/cards/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable card keys in bulk */
+        post: operations["postAdminCardsDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/cards/{cardKey}/redemptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List card redemptions */
+        get: operations["getAdminCardRedemptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List transactions */
+        get: operations["getAdminTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/transactions/{id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reverse a transaction */
+        post: operations["postAdminTransactionReverse"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/wallets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List wallets */
+        get: operations["getAdminWallets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/wallets/{userId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw from supplier wallet */
+        post: operations["postAdminWalletWithdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/finance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Finance summary */
+        get: operations["getAdminFinanceSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/proxies": {
@@ -3059,6 +3263,88 @@ export interface components {
             amount: components["schemas"]["NonNegativeLedgerAmount"];
             reason: string;
         };
+        AdminTransactionItem: {
+            id: number;
+            transactionNo: string;
+            userId: number;
+            /** @enum {string} */
+            transactionType: "recharge" | "debit" | "refund" | "freeze" | "credit" | "withdrawal" | "manual_adjustment" | "card_redeem" | "transfer";
+            /** @enum {string} */
+            balanceBucket: "consumer" | "supplier_available" | "supplier_frozen";
+            /** @enum {string} */
+            direction: "in" | "out";
+            amount: components["schemas"]["LedgerAmount"];
+            balanceBefore: components["schemas"]["NonNegativeLedgerAmount"];
+            balanceAfter: components["schemas"]["NonNegativeLedgerAmount"];
+            bizType: string;
+            bizId: string;
+            /** Format: date-time */
+            createdAt: string;
+            userEmail: string;
+            userNickname: string;
+            userRole: string;
+            userGroupName: string;
+            reversed: boolean;
+            reversedByNo?: string | null;
+            reversalOfNo?: string | null;
+        };
+        AdminTransactionListResponse: {
+            items: components["schemas"]["AdminTransactionItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        AdminReverseTransactionResponse: {
+            original: components["schemas"]["AdminTransactionItem"];
+            reversal: components["schemas"]["AdminTransactionItem"];
+        };
+        AdminWalletItem: {
+            userId: number;
+            userEmail: string;
+            userNickname: string;
+            userRole: string;
+            userGroupName: string;
+            consumerBalance: components["schemas"]["NonNegativeLedgerAmount"];
+            supplierAvailable: components["schemas"]["NonNegativeLedgerAmount"];
+            supplierFrozen: components["schemas"]["NonNegativeLedgerAmount"];
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        AdminWalletListResponse: {
+            items: components["schemas"]["AdminWalletItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        AdminWithdrawWalletRequest: {
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
+            note?: string;
+        };
+        FinanceTrendPoint: {
+            label: string;
+            recharge: number;
+            spend: number;
+            withdraw: number;
+            refund: number;
+            platformRevenue: number;
+            accountRevenue: number;
+        };
+        FinanceHotItem: {
+            name: string;
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
+            count: number;
+        };
+        FinanceSummaryResponse: {
+            rechargeAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            spendAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            withdrawAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            refundAmount: components["schemas"]["NonNegativeLedgerAmount"];
+            platformRevenue: components["schemas"]["NonNegativeLedgerAmount"];
+            accountRevenue: components["schemas"]["NonNegativeLedgerAmount"];
+            trend: components["schemas"]["FinanceTrendPoint"][];
+            hotProjects: components["schemas"]["FinanceHotItem"][];
+            hotProducts: components["schemas"]["FinanceHotItem"][];
+        };
         CardKey: {
             cardKey: string;
             amount: components["schemas"]["NonNegativeLedgerAmount"];
@@ -3073,12 +3359,70 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            ownerUserId?: number | null;
+            ownerEmail?: string | null;
+            ownerNickname?: string | null;
+            ownerRole?: string | null;
+            ownerGroupId?: number | null;
+            ownerGroupName?: string | null;
         };
         CardKeyListResponse: {
             items: components["schemas"]["CardKey"][];
             total: number;
             offset: number;
             limit: number;
+            facets: components["schemas"]["CardKeyFacets"];
+        };
+        CardKeyFacets: {
+            role: {
+                all: number;
+                user: number;
+                supplier: number;
+                admin: number;
+                super_admin: number;
+            };
+            group: {
+                id: number;
+                name: string;
+                count: number;
+            }[];
+            status: {
+                all: number;
+                enabled: number;
+                disabled: number;
+            };
+        };
+        CardBulkFilter: {
+            search?: string;
+            /** @enum {string} */
+            status?: "enabled" | "disabled";
+            /** @enum {string} */
+            ownerRole?: "user" | "supplier" | "admin" | "super_admin";
+            ownerGroupId?: number;
+        };
+        CardBulkSelection: {
+            /** @enum {string} */
+            mode: "ids" | "filter";
+            cardKeys?: string[];
+            filter?: components["schemas"]["CardBulkFilter"];
+        };
+        AdminCardBulkRequest: {
+            selection: components["schemas"]["CardBulkSelection"];
+        };
+        CardRedemptionResponse: {
+            id: number;
+            cardKey: string;
+            userId: number;
+            userEmail: string;
+            userNickname: string;
+            userRole: string;
+            userGroupName: string;
+            amount: components["schemas"]["NonNegativeLedgerAmount"];
+            /** Format: date-time */
+            redeemedAt: string;
+        };
+        AdminCardRedemptionsResponse: {
+            redemptions: components["schemas"]["CardRedemptionResponse"][];
         };
         CreateCardsRequest: {
             amount: components["schemas"]["NonNegativeLedgerAmount"];
@@ -3097,6 +3441,7 @@ export interface components {
             status?: "enabled" | "disabled";
             /** Format: date-time */
             expireAt?: string | null;
+            maxRedemptions?: number;
         };
         ActivationResponse: {
             /** @description Whether the system requires first-time activation */
@@ -3261,20 +3606,26 @@ export interface components {
             invitees: components["schemas"]["AdminUserInvitationMember"][];
         };
         AdminCreateInviteRequest: {
-            code: string;
+            /** @description Invite code. When omitted or empty the server generates a unique code. */
+            code?: string;
             enabled?: boolean;
             maxUse: number;
             /** Format: date-time */
-            expireAt?: string;
+            expireAt?: string | null;
         };
         AdminUpdateInviteRequest: {
             enabled?: boolean;
             maxUse?: number;
-            /** Format: date-time */
-            expireAt?: string;
+            /**
+             * Format: date-time
+             * @description Set to null to clear the expiry; omit to leave unchanged.
+             */
+            expireAt?: string | null;
         };
         InviteResponse: {
             code: string;
+            /** @enum {string} */
+            kind: "admin" | "referral";
             enabled: boolean;
             maxUse: number;
             used: number;
@@ -3284,6 +3635,12 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            ownerUserId?: number | null;
+            ownerEmail?: string | null;
+            ownerNickname?: string | null;
+            ownerRole?: string | null;
+            ownerGroupId?: number | null;
+            ownerGroupName?: string | null;
         };
         CurrentInviteResponse: {
             inviteCode: string;
@@ -3293,6 +3650,75 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
+            facets: components["schemas"]["InviteFacets"];
+        };
+        InviteFacets: {
+            role: {
+                all: number;
+                user: number;
+                supplier: number;
+                admin: number;
+                super_admin: number;
+            };
+            group: {
+                id: number;
+                name: string;
+                count: number;
+            }[];
+            enabled: {
+                all: number;
+                enabled: number;
+                disabled: number;
+            };
+        };
+        AdminBatchCreateInviteRequest: {
+            count: number;
+            maxUse: number;
+            enabled?: boolean;
+            /** Format: date-time */
+            expireAt?: string | null;
+            prefix?: string;
+        };
+        AdminBatchCreateInviteResponse: {
+            items: components["schemas"]["InviteResponse"][];
+            created: number;
+        };
+        InviteBulkFilter: {
+            search?: string;
+            /** @enum {string} */
+            kind?: "admin" | "referral" | "all";
+            /** @enum {string} */
+            ownerRole?: "user" | "supplier" | "admin" | "super_admin";
+            ownerGroupId?: number;
+            enabled?: boolean;
+        };
+        InviteBulkSelection: {
+            /** @enum {string} */
+            mode: "ids" | "filter";
+            codes?: string[];
+            filter?: components["schemas"]["InviteBulkFilter"];
+        };
+        AdminInviteBulkRequest: {
+            selection: components["schemas"]["InviteBulkSelection"];
+        };
+        InviteUseResponse: {
+            id: number;
+            inviteCode: string;
+            userId: number;
+            userEmail: string;
+            userNickname: string;
+            userRole: string;
+            userGroupName: string;
+            /** Format: date-time */
+            usedAt: string;
+        };
+        AdminInviteUsesResponse: {
+            uses: components["schemas"]["InviteUseResponse"][];
+        };
+        AdminBulkResponse: {
+            requested: number;
+            affected: number;
+            skipped: number;
         };
         SupplierApplicationRequest: {
             reason: string;
@@ -6620,6 +7046,11 @@ export interface operations {
     getAdminInvites: {
         parameters: {
             query?: {
+                search?: string;
+                kind?: "admin" | "referral" | "all";
+                ownerRole?: "user" | "supplier" | "admin" | "super_admin";
+                ownerGroupId?: number;
+                enabled?: boolean;
                 offset?: number;
                 limit?: number;
             };
@@ -6808,6 +7239,217 @@ export interface operations {
             };
             /** @description Invite is invalid or expired */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminInvitesBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminBatchCreateInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Invites created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBatchCreateInviteResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminInvitesEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminInviteBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Invites enabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBulkResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminInvitesDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminInviteBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Invites disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBulkResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminInviteUses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invite uses */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminInviteUsesResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11221,6 +11863,8 @@ export interface operations {
             query?: {
                 search?: string;
                 status?: "enabled" | "disabled";
+                ownerRole?: "user" | "supplier" | "admin" | "super_admin";
+                ownerGroupId?: number;
                 offset?: number;
                 limit?: number;
             };
@@ -11398,6 +12042,476 @@ export interface operations {
             };
             /** @description Invalid card status */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminCardsEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCardBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Card keys enabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBulkResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminCardsDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCardBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Card keys disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBulkResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminCardRedemptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cardKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Card redemptions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCardRedemptionsResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminTransactions: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+                search?: string;
+                type?: "recharge" | "debit" | "refund" | "freeze" | "credit" | "withdrawal" | "manual_adjustment" | "card_redeem" | "transfer";
+                direction?: "in" | "out";
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Transaction list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTransactionListResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminTransactionReverse: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Transaction reversed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminReverseTransactionResponse"];
+                };
+            };
+            /** @description Invalid request or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Transaction not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency conflict or already reversed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Transaction cannot be reversed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminWallets: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Wallet list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminWalletListResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminWalletWithdraw: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409. */
+                "Idempotency-Key": components["parameters"]["AdminCommandIdempotencyKey"];
+            };
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminWithdrawWalletRequest"];
+            };
+        };
+        responses: {
+            /** @description Wallet withdrawn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalletAdjustmentResponse"];
+                };
+            };
+            /** @description Invalid request or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid withdrawal or insufficient balance */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminFinanceSummary: {
+        parameters: {
+            query?: {
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Finance summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinanceSummaryResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

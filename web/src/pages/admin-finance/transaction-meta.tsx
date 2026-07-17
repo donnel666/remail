@@ -2,7 +2,7 @@ import { Avatar } from "@douyinfe/semi-ui";
 import type { TFunction } from "i18next";
 
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
-import type { FinanceUserRole } from "./admin-finance-mock";
+import type { FinanceUserRole } from "./admin-finance-api";
 
 // Transaction-scoped identity helpers. Intentionally a private copy (not shared
 // with invites / card keys) so the ledger user cell can diverge independently.

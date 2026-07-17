@@ -94,12 +94,21 @@ type UserRepository interface {
 	// ListInviteeIDs returns ids of users registered through the user's referral
 	// invite, newest first.
 	ListInviteeIDs(ctx context.Context, ownerUserID uint) ([]uint, error)
+
+	// LookupUserSummaries batch-loads compact user+group read models keyed by id,
+	// used to enrich invite owners and redemption history without N+1 queries.
+	LookupUserSummaries(ctx context.Context, ids []uint) (map[uint]domain.UserSummary, error)
 }
 
 // InviteRepository defines administrator invite persistence.
 type InviteRepository interface {
-	ListInvites(ctx context.Context, offset, limit int) ([]domain.Invite, error)
-	CountInvites(ctx context.Context) (int64, error)
+	ListInvitesByFilter(ctx context.Context, filter domain.InviteListFilter, offset, limit int) ([]domain.Invite, error)
+	CountInvitesByFilter(ctx context.Context, filter domain.InviteListFilter) (int64, error)
+	InviteFacetsByFilter(ctx context.Context, kind domain.InviteKind) (*domain.InviteFacets, error)
+	ResolveInviteCodesByFilter(ctx context.Context, filter domain.InviteListFilter) ([]string, error)
+	BatchSetInviteEnabled(ctx context.Context, codes []string, enabled bool) (int64, error)
+	ListInviteUses(ctx context.Context, code string, limit int) ([]domain.InviteUse, error)
+	CreateInvitesBatch(ctx context.Context, invites []*domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error
 	CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error
 	UpdateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, log *governancedomain.OperationLog) error
 	FindInviteByCode(ctx context.Context, code string) (*domain.Invite, error)

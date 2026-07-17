@@ -1440,6 +1440,28 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [admin, referral, all]
+        - name: ownerRole
+          in: query
+          schema:
+            type: string
+            enum: [user, supplier, admin, super_admin]
+        - name: ownerGroupId
+          in: query
+          schema:
+            type: integer
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
         - name: offset
           in: query
           schema:
@@ -1594,6 +1616,172 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Invite is invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites/batch:
+    post:
+      operationId: postAdminInvitesBatch
+      summary: Batch create invites
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminBatchCreateInviteRequest"
+      responses:
+        "201":
+          description: Invites created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBatchCreateInviteResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites/enable:
+    post:
+      operationId: postAdminInvitesEnable
+      summary: Enable invites in bulk
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminInviteBulkRequest"
+      responses:
+        "200":
+          description: Invites enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites/disable:
+    post:
+      operationId: postAdminInvitesDisable
+      summary: Disable invites in bulk
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminInviteBulkRequest"
+      responses:
+        "200":
+          description: Invites disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/invites/{code}/uses:
+    get:
+      operationId: getAdminInviteUses
+      summary: List invite redemptions
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite uses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminInviteUsesResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -5386,6 +5574,15 @@ paths:
           schema:
             type: string
             enum: [enabled, disabled]
+        - name: ownerRole
+          in: query
+          schema:
+            type: string
+            enum: [user, supplier, admin, super_admin]
+        - name: ownerGroupId
+          in: query
+          schema:
+            type: integer
         - name: offset
           in: query
           schema:
@@ -5524,6 +5721,413 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Invalid card status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/cards/enable:
+    post:
+      operationId: postAdminCardsEnable
+      summary: Enable card keys in bulk
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCardBulkRequest"
+      responses:
+        "200":
+          description: Card keys enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/cards/disable:
+    post:
+      operationId: postAdminCardsDisable
+      summary: Disable card keys in bulk
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCardBulkRequest"
+      responses:
+        "200":
+          description: Card keys disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBulkResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/cards/{cardKey}/redemptions:
+    get:
+      operationId: getAdminCardRedemptions
+      summary: List card redemptions
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: cardKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Card redemptions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCardRedemptionsResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/transactions:
+    get:
+      operationId: getAdminTransactions
+      summary: List transactions
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [in, out]
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTransactionListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/transactions/{id}/reverse:
+    post:
+      operationId: postAdminTransactionReverse
+      summary: Reverse a transaction
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Transaction reversed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReverseTransactionResponse"
+        "400":
+          description: Invalid request or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency conflict or already reversed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Transaction cannot be reversed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets:
+    get:
+      operationId: getAdminWallets
+      summary: List wallets
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Wallet list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminWalletListResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/wallets/{userId}/withdraw:
+    post:
+      operationId: postAdminWalletWithdraw
+      summary: Withdraw from supplier wallet
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminCommandIdempotencyKey"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminWithdrawWalletRequest"
+      responses:
+        "200":
+          description: Wallet withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletAdjustmentResponse"
+        "400":
+          description: Invalid request or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid withdrawal or insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/finance/summary:
+    get:
+      operationId: getAdminFinanceSummary
+      summary: Finance summary
+      tags:
+        - Billing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Finance summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceSummaryResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
           content:
             application/json:
               schema:
@@ -6321,12 +6925,12 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
       responses:
-        "200":
-          description: Domain bulk result
+        "202":
+          description: Domain bulk state batch accepted for asynchronous execution
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminDomainBulkResponse"
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6335,6 +6939,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /v1/admin/domains/publish:
     post:
@@ -6353,12 +6959,12 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
       responses:
-        "200":
-          description: Domain bulk result
+        "202":
+          description: Domain bulk state batch accepted for asynchronous execution
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminDomainBulkResponse"
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6367,6 +6973,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /v1/admin/domains/unpublish:
     post:
@@ -6385,12 +6993,12 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
       responses:
-        "200":
-          description: Domain bulk result
+        "202":
+          description: Domain bulk state batch accepted for asynchronous execution
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminDomainBulkResponse"
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6399,6 +7007,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /v1/admin/domains/delete:
     post:
@@ -6417,12 +7027,12 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
       responses:
-        "200":
-          description: Domain bulk result
+        "202":
+          description: Domain bulk state batch accepted for asynchronous execution
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminDomainBulkResponse"
+                $ref: "#/components/schemas/AdminDomainValidationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6431,6 +7041,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /v1/admin/domains/{domainId}:
     get:
@@ -9226,6 +9838,253 @@ components:
           maxLength: 128
       additionalProperties: false
 
+    AdminTransactionItem:
+      type: object
+      required:
+        - id
+        - transactionNo
+        - userId
+        - transactionType
+        - balanceBucket
+        - direction
+        - amount
+        - balanceBefore
+        - balanceAfter
+        - bizType
+        - bizId
+        - createdAt
+        - userEmail
+        - userNickname
+        - userRole
+        - userGroupName
+        - reversed
+      properties:
+        id:
+          type: integer
+        transactionNo:
+          type: string
+        userId:
+          type: integer
+        transactionType:
+          type: string
+          enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
+        balanceBucket:
+          type: string
+          enum: [consumer, supplier_available, supplier_frozen]
+        direction:
+          type: string
+          enum: [in, out]
+        amount:
+          $ref: "#/components/schemas/LedgerAmount"
+        balanceBefore:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        balanceAfter:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        bizType:
+          type: string
+        bizId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        userEmail:
+          type: string
+        userNickname:
+          type: string
+        userRole:
+          type: string
+        userGroupName:
+          type: string
+        reversed:
+          type: boolean
+        reversedByNo:
+          type: string
+          nullable: true
+        reversalOfNo:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    AdminTransactionListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminTransactionItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    AdminReverseTransactionResponse:
+      type: object
+      required:
+        - original
+        - reversal
+      properties:
+        original:
+          $ref: "#/components/schemas/AdminTransactionItem"
+        reversal:
+          $ref: "#/components/schemas/AdminTransactionItem"
+      additionalProperties: false
+
+    AdminWalletItem:
+      type: object
+      required:
+        - userId
+        - userEmail
+        - userNickname
+        - userRole
+        - userGroupName
+        - consumerBalance
+        - supplierAvailable
+        - supplierFrozen
+        - updatedAt
+      properties:
+        userId:
+          type: integer
+        userEmail:
+          type: string
+        userNickname:
+          type: string
+        userRole:
+          type: string
+        userGroupName:
+          type: string
+        consumerBalance:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        supplierAvailable:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        supplierFrozen:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    AdminWalletListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminWalletItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+      additionalProperties: false
+
+    AdminWithdrawWalletRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        note:
+          type: string
+          maxLength: 200
+      additionalProperties: false
+
+    FinanceTrendPoint:
+      type: object
+      required:
+        - label
+        - recharge
+        - spend
+        - withdraw
+        - refund
+        - platformRevenue
+        - accountRevenue
+      properties:
+        label:
+          type: string
+        recharge:
+          type: number
+        spend:
+          type: number
+        withdraw:
+          type: number
+        refund:
+          type: number
+        platformRevenue:
+          type: number
+        accountRevenue:
+          type: number
+      additionalProperties: false
+
+    FinanceHotItem:
+      type: object
+      required:
+        - name
+        - amount
+        - count
+      properties:
+        name:
+          type: string
+        amount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        count:
+          type: integer
+      additionalProperties: false
+
+    FinanceSummaryResponse:
+      type: object
+      required:
+        - rechargeAmount
+        - spendAmount
+        - withdrawAmount
+        - refundAmount
+        - platformRevenue
+        - accountRevenue
+        - trend
+        - hotProjects
+        - hotProducts
+      properties:
+        rechargeAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        spendAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        withdrawAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        refundAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        platformRevenue:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        accountRevenue:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinanceTrendPoint"
+        hotProjects:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinanceHotItem"
+        hotProducts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinanceHotItem"
+      additionalProperties: false
+
     CardKey:
       type: object
       required:
@@ -9262,6 +10121,24 @@ components:
         updatedAt:
           type: string
           format: date-time
+        ownerUserId:
+          type: integer
+          nullable: true
+        ownerEmail:
+          type: string
+          nullable: true
+        ownerNickname:
+          type: string
+          nullable: true
+        ownerRole:
+          type: string
+          nullable: true
+        ownerGroupId:
+          type: integer
+          nullable: true
+        ownerGroupName:
+          type: string
+          nullable: true
       additionalProperties: false
 
     CardKeyListResponse:
@@ -9271,6 +10148,7 @@ components:
         - total
         - offset
         - limit
+        - facets
       properties:
         items:
           type: array
@@ -9282,6 +10160,152 @@ components:
           type: integer
         limit:
           type: integer
+        facets:
+          $ref: "#/components/schemas/CardKeyFacets"
+      additionalProperties: false
+
+    CardKeyFacets:
+      type: object
+      required:
+        - role
+        - group
+        - status
+      properties:
+        role:
+          type: object
+          required:
+            - all
+            - user
+            - supplier
+            - admin
+            - super_admin
+          properties:
+            all:
+              type: integer
+            user:
+              type: integer
+            supplier:
+              type: integer
+            admin:
+              type: integer
+            super_admin:
+              type: integer
+          additionalProperties: false
+        group:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - count
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              count:
+                type: integer
+            additionalProperties: false
+        status:
+          type: object
+          required:
+            - all
+            - enabled
+            - disabled
+          properties:
+            all:
+              type: integer
+            enabled:
+              type: integer
+            disabled:
+              type: integer
+          additionalProperties: false
+      additionalProperties: false
+
+    CardBulkFilter:
+      type: object
+      properties:
+        search:
+          type: string
+        status:
+          type: string
+          enum: [enabled, disabled]
+        ownerRole:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        ownerGroupId:
+          type: integer
+      additionalProperties: false
+
+    CardBulkSelection:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum: [ids, filter]
+        cardKeys:
+          type: array
+          items:
+            type: string
+        filter:
+          $ref: "#/components/schemas/CardBulkFilter"
+      additionalProperties: false
+
+    AdminCardBulkRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/CardBulkSelection"
+      additionalProperties: false
+
+    CardRedemptionResponse:
+      type: object
+      required:
+        - id
+        - cardKey
+        - userId
+        - userEmail
+        - userNickname
+        - userRole
+        - userGroupName
+        - amount
+        - redeemedAt
+      properties:
+        id:
+          type: integer
+        cardKey:
+          type: string
+        userId:
+          type: integer
+        userEmail:
+          type: string
+        userNickname:
+          type: string
+        userRole:
+          type: string
+        userGroupName:
+          type: string
+        amount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        redeemedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminCardRedemptionsResponse:
+      type: object
+      required:
+        - redemptions
+      properties:
+        redemptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardRedemptionResponse"
       additionalProperties: false
 
     CreateCardsRequest:
@@ -9332,6 +10356,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        maxRedemptions:
+          type: integer
+          minimum: 1
       additionalProperties: false
 
     # --- IAM Schemas ---
@@ -9815,12 +10842,12 @@ components:
     AdminCreateInviteRequest:
       type: object
       required:
-        - code
         - maxUse
       properties:
         code:
           type: string
           maxLength: 64
+          description: Invite code. When omitted or empty the server generates a unique code.
         enabled:
           type: boolean
         maxUse:
@@ -9829,6 +10856,7 @@ components:
         expireAt:
           type: string
           format: date-time
+          nullable: true
       additionalProperties: false
 
     AdminUpdateInviteRequest:
@@ -9842,12 +10870,15 @@ components:
         expireAt:
           type: string
           format: date-time
+          nullable: true
+          description: Set to null to clear the expiry; omit to leave unchanged.
       additionalProperties: false
 
     InviteResponse:
       type: object
       required:
         - code
+        - kind
         - enabled
         - maxUse
         - used
@@ -9856,6 +10887,9 @@ components:
       properties:
         code:
           type: string
+        kind:
+          type: string
+          enum: [admin, referral]
         enabled:
           type: boolean
         maxUse:
@@ -9872,6 +10906,24 @@ components:
         updatedAt:
           type: string
           format: date-time
+        ownerUserId:
+          type: integer
+          nullable: true
+        ownerEmail:
+          type: string
+          nullable: true
+        ownerNickname:
+          type: string
+          nullable: true
+        ownerRole:
+          type: string
+          nullable: true
+        ownerGroupId:
+          type: integer
+          nullable: true
+        ownerGroupName:
+          type: string
+          nullable: true
       additionalProperties: false
 
     CurrentInviteResponse:
@@ -9890,6 +10942,7 @@ components:
         - total
         - offset
         - limit
+        - facets
       properties:
         invites:
           type: array
@@ -9900,6 +10953,203 @@ components:
         offset:
           type: integer
         limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/InviteFacets"
+      additionalProperties: false
+
+    InviteFacets:
+      type: object
+      required:
+        - role
+        - group
+        - enabled
+      properties:
+        role:
+          type: object
+          required:
+            - all
+            - user
+            - supplier
+            - admin
+            - super_admin
+          properties:
+            all:
+              type: integer
+            user:
+              type: integer
+            supplier:
+              type: integer
+            admin:
+              type: integer
+            super_admin:
+              type: integer
+          additionalProperties: false
+        group:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - count
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              count:
+                type: integer
+            additionalProperties: false
+        enabled:
+          type: object
+          required:
+            - all
+            - enabled
+            - disabled
+          properties:
+            all:
+              type: integer
+            enabled:
+              type: integer
+            disabled:
+              type: integer
+          additionalProperties: false
+      additionalProperties: false
+
+    AdminBatchCreateInviteRequest:
+      type: object
+      required:
+        - count
+        - maxUse
+      properties:
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        maxUse:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        expireAt:
+          type: string
+          format: date-time
+          nullable: true
+        prefix:
+          type: string
+      additionalProperties: false
+
+    AdminBatchCreateInviteResponse:
+      type: object
+      required:
+        - items
+        - created
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteResponse"
+        created:
+          type: integer
+      additionalProperties: false
+
+    InviteBulkFilter:
+      type: object
+      properties:
+        search:
+          type: string
+        kind:
+          type: string
+          enum: [admin, referral, all]
+        ownerRole:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        ownerGroupId:
+          type: integer
+        enabled:
+          type: boolean
+      additionalProperties: false
+
+    InviteBulkSelection:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum: [ids, filter]
+        codes:
+          type: array
+          items:
+            type: string
+        filter:
+          $ref: "#/components/schemas/InviteBulkFilter"
+      additionalProperties: false
+
+    AdminInviteBulkRequest:
+      type: object
+      required:
+        - selection
+      properties:
+        selection:
+          $ref: "#/components/schemas/InviteBulkSelection"
+      additionalProperties: false
+
+    InviteUseResponse:
+      type: object
+      required:
+        - id
+        - inviteCode
+        - userId
+        - userEmail
+        - userNickname
+        - userRole
+        - userGroupName
+        - usedAt
+      properties:
+        id:
+          type: integer
+        inviteCode:
+          type: string
+        userId:
+          type: integer
+        userEmail:
+          type: string
+        userNickname:
+          type: string
+        userRole:
+          type: string
+        userGroupName:
+          type: string
+        usedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminInviteUsesResponse:
+      type: object
+      required:
+        - uses
+      properties:
+        uses:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteUseResponse"
+      additionalProperties: false
+
+    AdminBulkResponse:
+      type: object
+      required:
+        - requested
+        - affected
+        - skipped
+      properties:
+        requested:
+          type: integer
+        affected:
+          type: integer
+        skipped:
           type: integer
       additionalProperties: false
 

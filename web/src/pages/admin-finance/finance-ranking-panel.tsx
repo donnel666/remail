@@ -2,7 +2,7 @@ import { Card } from "@douyinfe/semi-ui";
 import { Package, ShoppingBag } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { FinanceHotItem } from "./admin-finance-mock";
+import type { FinanceHotItem } from "./admin-finance-api";
 import { formatMoney } from "./finance-meta";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;

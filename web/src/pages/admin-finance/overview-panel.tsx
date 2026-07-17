@@ -25,9 +25,9 @@ import {
   type FinanceAnalysisView,
 } from "./finance-analysis-panel";
 import {
-  getMockFinanceSummary,
+  getFinanceSummary,
   type FinanceSummary,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { FinanceDashboardHeader } from "./finance-dashboard-header";
 import { FinanceRankingPanel } from "./finance-ranking-panel";
 import { FinanceSummaryCards } from "./finance-summary-cards";
@@ -55,7 +55,7 @@ export function OverviewPanel({ tabsArea }: { tabsArea: ReactNode }) {
     const requestID = ++requestSequence.current;
     setLoading(true);
     try {
-      const summaryResult = await getMockFinanceSummary({
+      const summaryResult = await getFinanceSummary({
         createdFrom: createdFromISOString(createdAtRange),
         createdTo: createdToISOString(createdAtRange),
       });

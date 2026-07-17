@@ -35,11 +35,25 @@ type UserListResult struct {
 	Facets *domain.UserFacets `json:"facets,omitempty"`
 }
 
+// InviteListItem is an invite paired with its resolved owner (nil when the
+// invite has no owner or the owner row is gone).
+type InviteListItem struct {
+	Invite domain.Invite
+	Owner  *domain.UserSummary
+}
+
 type InviteListResult struct {
-	Invites []domain.Invite `json:"invites"`
-	Total   int64           `json:"total"`
-	Offset  int             `json:"offset"`
-	Limit   int             `json:"limit"`
+	Items  []InviteListItem     `json:"items"`
+	Total  int64                `json:"total"`
+	Offset int                  `json:"offset"`
+	Limit  int                  `json:"limit"`
+	Facets *domain.InviteFacets `json:"facets,omitempty"`
+}
+
+// InviteUseItem is a redemption fact paired with the redeeming user's summary.
+type InviteUseItem struct {
+	Use  domain.InviteUse
+	User *domain.UserSummary
 }
 
 type CreateInviteRequest struct {
@@ -49,10 +63,30 @@ type CreateInviteRequest struct {
 	ExpireAt *time.Time
 }
 
-type UpdateInviteRequest struct {
-	Enabled  *bool
-	MaxUse   *int
+// BatchCreateInviteRequest asks for count admin invites sharing maxUse/expiry,
+// each with a generated unique code (optionally prefixed).
+type BatchCreateInviteRequest struct {
+	Count    int
+	MaxUse   int
+	Enabled  bool
 	ExpireAt *time.Time
+	Prefix   string
+}
+
+// InviteBulkSelection selects the targets of a bulk invite action, either by
+// explicit codes or by a browse-list filter.
+type InviteBulkSelection struct {
+	Mode   string
+	Codes  []string
+	Filter domain.InviteListFilter
+}
+
+type UpdateInviteRequest struct {
+	Enabled *bool
+	MaxUse  *int
+	// ExpireAt is tri-state: nil = leave unchanged, non-nil pointing at nil =
+	// clear, non-nil pointing at a value = set.
+	ExpireAt **time.Time
 }
 
 type CreateUserGroupRequest struct {
@@ -248,29 +282,202 @@ func (uc *AdminUseCase) SaveUserPermissions(ctx context.Context, operatorUserID 
 	return nil
 }
 
-func (uc *AdminUseCase) ListInvites(ctx context.Context, offset, limit int) (*InviteListResult, error) {
-	if limit <= 0 || limit > 100 {
+func (uc *AdminUseCase) ListInvites(ctx context.Context, filter domain.InviteListFilter, offset, limit int) (*InviteListResult, error) {
+	if limit <= 0 {
 		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	total, err := uc.invites.CountInvites(ctx)
+	filter.Search = clampSearch(filter.Search)
+
+	total, err := uc.invites.CountInvitesByFilter(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("admin list invites count: %w", err)
 	}
-	invites, err := uc.invites.ListInvites(ctx, offset, limit)
+	invites, err := uc.invites.ListInvitesByFilter(ctx, filter, offset, limit)
 	if err != nil {
 		return nil, fmt.Errorf("admin list invites: %w", err)
 	}
-	return &InviteListResult{Invites: invites, Total: total, Offset: offset, Limit: limit}, nil
+	owners, err := uc.lookupOwners(ctx, inviteOwnerIDs(invites))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]InviteListItem, len(invites))
+	for i := range invites {
+		item := InviteListItem{Invite: invites[i]}
+		if invites[i].CreatedByUserID != nil {
+			if owner, ok := owners[*invites[i].CreatedByUserID]; ok {
+				o := owner
+				item.Owner = &o
+			}
+		}
+		items[i] = item
+	}
+	facets, err := uc.invites.InviteFacetsByFilter(ctx, filter.Kind)
+	if err != nil {
+		return nil, fmt.Errorf("admin list invites facets: %w", err)
+	}
+	return &InviteListResult{Items: items, Total: total, Offset: offset, Limit: limit, Facets: facets}, nil
+}
+
+// BatchCreateInvites creates count admin invites with generated unique codes.
+func (uc *AdminUseCase) BatchCreateInvites(ctx context.Context, operatorUserID uint, requestID, path string, req BatchCreateInviteRequest) ([]domain.Invite, error) {
+	if req.Count < 1 || req.Count > 100 || req.MaxUse < 1 || (req.ExpireAt != nil && req.ExpireAt.Before(time.Now())) {
+		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.batch_create", "batch", "failure", "Invite batch create failed."))
+		return nil, domain.ErrInviteInvalid
+	}
+	codes, err := generateInviteCodes(req.Prefix, req.Count)
+	if err != nil {
+		return nil, err
+	}
+	invites := make([]*domain.Invite, len(codes))
+	for i, code := range codes {
+		invites[i] = &domain.Invite{
+			Code:     code,
+			Kind:     domain.InviteKindAdmin,
+			Enabled:  req.Enabled,
+			MaxUse:   req.MaxUse,
+			ExpireAt: req.ExpireAt,
+		}
+	}
+	log := inviteOperationLog(operatorUserID, requestID, path, "iam.invite.batch_create", fmt.Sprintf("batch:%d", req.Count), "success", "Invites batch created.")
+	if err := uc.invites.CreateInvitesBatch(ctx, invites, operatorUserID, log); err != nil {
+		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.batch_create", "batch", "failure", "Invite batch create failed."))
+		return nil, err
+	}
+	out := make([]domain.Invite, len(invites))
+	for i := range invites {
+		out[i] = *invites[i]
+	}
+	return out, nil
+}
+
+// BulkSetInviteEnabled enables or disables the selected invites. It is
+// idempotent: rows already in the target state are counted as skipped.
+func (uc *AdminUseCase) BulkSetInviteEnabled(ctx context.Context, operatorUserID uint, requestID, path string, sel InviteBulkSelection, enabled bool) (*BulkResult, error) {
+	opType := "iam.invite.bulk.enable"
+	summary := "Invites enabled."
+	if !enabled {
+		opType = "iam.invite.bulk.disable"
+		summary = "Invites disabled."
+	}
+	codes, requested, err := uc.resolveInviteBulkTargets(ctx, sel)
+	if err != nil {
+		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, opType, "bulk", "failure", "Invite bulk action failed."))
+		return nil, fmt.Errorf("admin bulk set invite enabled: %w", err)
+	}
+	affected, err := uc.invites.BatchSetInviteEnabled(ctx, codes, enabled)
+	if err != nil {
+		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, opType, "bulk", "failure", "Invite bulk action failed."))
+		return nil, fmt.Errorf("admin bulk set invite enabled: %w", err)
+	}
+	_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, opType, "bulk", "success", summary))
+	return bulkResult(requested, int(affected)), nil
+}
+
+// resolveInviteBulkTargets returns the target codes and the requested count. In
+// ids mode requested is the raw code count; in filter mode it is the number of
+// resolved codes. Empty ids mode is a no-op (never a match-all).
+func (uc *AdminUseCase) resolveInviteBulkTargets(ctx context.Context, sel InviteBulkSelection) ([]string, int, error) {
+	if sel.Mode == "ids" {
+		return sel.Codes, len(sel.Codes), nil
+	}
+	codes, err := uc.invites.ResolveInviteCodesByFilter(ctx, sel.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	return codes, len(codes), nil
+}
+
+// ListInviteUses returns one invite's redemption history, newest first, with the
+// redeeming users resolved. Capped at inviteUseHistoryLimit.
+func (uc *AdminUseCase) ListInviteUses(ctx context.Context, code string) ([]InviteUseItem, error) {
+	code = strings.TrimSpace(code)
+	invite, err := uc.invites.FindInviteByCode(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("admin invite uses find: %w", err)
+	}
+	if invite == nil {
+		return nil, domain.ErrInviteNotFound
+	}
+	uses, err := uc.invites.ListInviteUses(ctx, code, inviteUseHistoryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("admin invite uses: %w", err)
+	}
+	ids := make([]uint, 0, len(uses))
+	for i := range uses {
+		ids = append(ids, uses[i].UserID)
+	}
+	users, err := uc.lookupOwners(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]InviteUseItem, len(uses))
+	for i := range uses {
+		item := InviteUseItem{Use: uses[i]}
+		if u, ok := users[uses[i].UserID]; ok {
+			s := u
+			item.User = &s
+		}
+		items[i] = item
+	}
+	return items, nil
+}
+
+const inviteUseHistoryLimit = 500
+
+func (uc *AdminUseCase) lookupOwners(ctx context.Context, ids []uint) (map[uint]domain.UserSummary, error) {
+	if len(ids) == 0 {
+		return map[uint]domain.UserSummary{}, nil
+	}
+	owners, err := uc.repo.LookupUserSummaries(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("admin resolve invite owners: %w", err)
+	}
+	return owners, nil
+}
+
+func inviteOwnerIDs(invites []domain.Invite) []uint {
+	seen := make(map[uint]struct{}, len(invites))
+	ids := make([]uint, 0, len(invites))
+	for i := range invites {
+		id := invites[i].CreatedByUserID
+		if id == nil || *id == 0 {
+			continue
+		}
+		if _, ok := seen[*id]; ok {
+			continue
+		}
+		seen[*id] = struct{}{}
+		ids = append(ids, *id)
+	}
+	return ids
+}
+
+func clampSearch(search string) string {
+	search = strings.TrimSpace(search)
+	if len([]rune(search)) > 120 {
+		search = string([]rune(search)[:120])
+	}
+	return search
 }
 
 func (uc *AdminUseCase) CreateInvite(ctx context.Context, operatorUserID uint, requestID, path string, req CreateInviteRequest) (*domain.Invite, error) {
 	code := strings.TrimSpace(req.Code)
-	if code == "" || req.MaxUse <= 0 || (req.ExpireAt != nil && req.ExpireAt.Before(time.Now())) {
+	if req.MaxUse <= 0 || (req.ExpireAt != nil && req.ExpireAt.Before(time.Now())) {
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.create", code, "failure", "Invite create failed."))
 		return nil, domain.ErrInviteInvalid
+	}
+	if code == "" {
+		codes, err := generateInviteCodes("", 1)
+		if err != nil {
+			return nil, err
+		}
+		code = codes[0]
 	}
 	invite := &domain.Invite{
 		Code:     code,
@@ -293,7 +500,7 @@ func (uc *AdminUseCase) UpdateInvite(ctx context.Context, operatorUserID uint, r
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "failure", "Invite update failed."))
 		return nil, fmt.Errorf("admin find invite: %w", err)
 	}
-	if invite == nil || invite.Kind != domain.InviteKindAdmin {
+	if invite == nil {
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "failure", "Invite update failed."))
 		return nil, domain.ErrInviteNotFound
 	}
@@ -307,8 +514,10 @@ func (uc *AdminUseCase) UpdateInvite(ctx context.Context, operatorUserID uint, r
 		}
 		invite.MaxUse = *req.MaxUse
 	}
+	// expireAt tri-state (standard PATCH): only touch the field when the caller
+	// provided it, so a toggle that omits expireAt can't wipe an existing expiry.
 	if req.ExpireAt != nil {
-		invite.ExpireAt = req.ExpireAt
+		invite.ExpireAt = *req.ExpireAt
 	}
 	if err := uc.invites.UpdateInviteWithOperationLog(ctx, invite, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "success", "Invite updated.")); err != nil {
 		_ = uc.logs.Create(ctx, inviteOperationLog(operatorUserID, requestID, path, "iam.invite.update", code, "failure", "Invite update failed."))

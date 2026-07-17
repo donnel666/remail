@@ -29,19 +29,18 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { useSelectionNotification } from "../resources/use-selection-notification";
 import {
-  FINANCE_USER_GROUP_NAMES,
   FINANCE_USER_ROLES,
-  listMockFinanceCardKeys,
-  setMockFinanceCardKeyStatus,
-  setMockFinanceCardKeysStatus,
-  setMockFinanceCardKeysStatusByFilter,
+  listFinanceCardKeys,
+  setFinanceCardKeyStatus,
+  setFinanceCardKeysStatus,
+  setFinanceCardKeysStatusByFilter,
   type FinanceCardKey,
   type FinanceCardKeyFacets,
   type FinanceCardKeyStatus,
   type FinanceCardKeyStatusFilter,
   type FinanceOwnerRoleFilter,
   type FinanceUserRole,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { CardKeyDetailSheet } from "./card-key-detail-sheet";
 import { CardKeyAccountCell } from "./card-key-meta";
 import {
@@ -76,7 +75,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
   const [roleFilter, setRoleFilter] =
     useState<FinanceOwnerRoleFilter>("all");
-  const [groupFilter, setGroupFilter] = useState<string>("all");
+  const [groupFilter, setGroupFilter] = useState<number | "all">("all");
   const [statusFilter, setStatusFilter] =
     useState<FinanceCardKeyStatusFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
@@ -92,7 +91,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
   >(null);
   const [facets, setFacets] = useState<FinanceCardKeyFacets>({
     role: { all: 0, user: 0, supplier: 0, admin: 0, super_admin: 0 },
-    group: { all: 0 },
+    group: [],
     status: { all: 0, enabled: 0, disabled: 0 },
   });
 
@@ -100,7 +99,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
     () => ({
       search: debouncedSearch.trim() || undefined,
       ownerRole: roleFilter === "all" ? undefined : roleFilter,
-      ownerGroupName: groupFilter === "all" ? undefined : groupFilter,
+      ownerGroupId: groupFilter === "all" ? undefined : groupFilter,
       status: statusFilter === "all" ? undefined : statusFilter,
     }),
     [debouncedSearch, groupFilter, roleFilter, statusFilter]
@@ -108,7 +107,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
 
   const loadBlock = useCallback(
     async (offset: number, limit: number) => {
-      const result = await listMockFinanceCardKeys(listFilter, offset, limit);
+      const result = await listFinanceCardKeys(listFilter, offset, limit);
       return {
         items: result.items,
         meta: result.facets,
@@ -141,7 +140,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
     if (!canWrite || !selectedRowKeys.length) return;
     setBulkBusy(status === "enabled" ? "enable-sel" : "disable-sel");
     try {
-      const result = await setMockFinanceCardKeysStatus(
+      const result = await setFinanceCardKeysStatus(
         selectedRowKeys.map(String),
         status
       );
@@ -178,7 +177,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
       onOk: async () => {
         setBulkBusy(status === "enabled" ? "enable-all" : "disable-all");
         try {
-          const result = await setMockFinanceCardKeysStatusByFilter(
+          const result = await setFinanceCardKeysStatusByFilter(
             listFilter,
             status
           );
@@ -207,7 +206,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
     try {
       const nextStatus: FinanceCardKeyStatus =
         record.status === "enabled" ? "disabled" : "enabled";
-      const updated = await setMockFinanceCardKeyStatus(record.key, nextStatus);
+      const updated = await setFinanceCardKeyStatus(record.key, nextStatus);
       updateLoadedItems((items) =>
         items.map((item) => (item.key === updated.key ? updated : item))
       );
@@ -446,7 +445,7 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
               <div className="mb-2 space-y-1">
                 <StatisticFilterOption
                   active={groupFilter === "all"}
-                  count={facets.group.all ?? 0}
+                  count={facets.role.all}
                   label={t("All")}
                   onSelect={() => {
                     setGroupFilter("all");
@@ -454,17 +453,17 @@ export function CardKeysPanel({ tabsArea }: { tabsArea: ReactNode }) {
                   }}
                   value="all"
                 />
-                {FINANCE_USER_GROUP_NAMES.map((group) => (
+                {facets.group.map((group) => (
                   <StatisticFilterOption
-                    active={groupFilter === group}
-                    count={facets.group[group] ?? 0}
-                    key={group}
-                    label={group}
+                    active={groupFilter === group.id}
+                    count={group.count}
+                    key={group.id}
+                    label={group.name}
                     onSelect={() => {
-                      setGroupFilter(group);
+                      setGroupFilter(group.id);
                       setActivePage(1);
                     }}
-                    value={group}
+                    value={String(group.id)}
                   />
                 ))}
               </div>

@@ -410,7 +410,11 @@ func (h *BillingHandler) GetAdminCards(c *gin.Context) {
 	if !ok {
 		return
 	}
-	filter := billingapp.CardListFilter{Search: c.Query("search")}
+	filter := billingapp.AdminCardFilter{
+		Search:       c.Query("search"),
+		OwnerRole:    strings.TrimSpace(c.Query("ownerRole")),
+		OwnerGroupID: parseUintQuery(c, "ownerGroupId"),
+	}
 	if rawStatus := strings.TrimSpace(c.Query("status")); rawStatus != "" {
 		status, valid := domain.NormalizeCardStatus(rawStatus)
 		if !valid {
@@ -419,20 +423,22 @@ func (h *BillingHandler) GetAdminCards(c *gin.Context) {
 		}
 		filter.Status = status
 	}
-	result, err := h.module.WalletUseCase.ListCards(c.Request.Context(), filter, offset, limit)
+	result, err := h.module.WalletUseCase.ListAdminCards(c.Request.Context(), filter, offset, limit)
 	if err != nil {
 		writeBillingError(c, err)
 		return
 	}
 	items := make([]CardKeyResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = cardResponse(result.Items[i])
+		items[i] = adminCardResponse(result.Items[i])
 	}
+	facets := cardFacetsResponse(result.Facets)
 	c.JSON(http.StatusOK, CardKeyListResponse{
 		Items:  items,
-		Total:  result.Total,
+		Total:  int64(result.Total),
 		Offset: result.Offset,
 		Limit:  result.Limit,
+		Facets: &facets,
 	})
 }
 
@@ -492,11 +498,12 @@ func (h *BillingHandler) PatchAdminCard(c *gin.Context) {
 		status = &normalized
 	}
 	card, err := h.module.WalletUseCase.UpdateCard(c.Request.Context(), billingapp.UpdateCardRequest{
-		CardKey:      cardKey,
-		Status:       status,
-		ExpireAt:     req.ExpireAt,
-		ExpireAtSet:  req.ExpireAt != nil,
-		OperationLog: h.operationLog(c, operatorUserID, "billing.card.update", safeCardResourceID(cardKey), "success", "Card key updated."),
+		CardKey:        cardKey,
+		Status:         status,
+		ExpireAt:       req.ExpireAt.Value,
+		ExpireAtSet:    req.ExpireAt.Set,
+		MaxRedemptions: req.MaxRedemptions,
+		OperationLog:   h.operationLog(c, operatorUserID, "billing.card.update", safeCardResourceID(cardKey), "success", "Card key updated."),
 	})
 	if err != nil {
 		_ = h.writeOperationLog(c, operatorUserID, "billing.card.update", safeCardResourceID(cardKey), "failure", "Card key update failed.")
@@ -704,6 +711,12 @@ func writeBillingError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "No referral rewards available.", "requestId": requestID})
 	case errors.Is(err, domain.ErrReferralRewardStateConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Current reward status does not allow this operation.", "requestId": requestID})
+	case errors.Is(err, domain.ErrTransactionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"message": "Transaction not found.", "requestId": requestID})
+	case errors.Is(err, domain.ErrTransactionAlreadyReversed):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Transaction already reversed.", "requestId": requestID})
+	case errors.Is(err, domain.ErrTransactionNotReversible):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Transaction cannot be reversed.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})
 	}

@@ -96,6 +96,18 @@ type GroupFacet struct {
 	Count int64
 }
 
+// UserSummary is a compact, safe read model of a user joined to its group,
+// used to enrich cross-cutting admin views (invite owners, wallet balances).
+// Never carries password/session/token facts.
+type UserSummary struct {
+	ID        uint
+	Email     string
+	Nickname  string
+	Role      string
+	GroupID   uint
+	GroupName string
+}
+
 // IsActivationNeeded returns true when no users exist.
 // This is the gate for the first-activation flow (INV-I8).
 func IsActivationNeeded(userCount int64) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -606,16 +607,73 @@ func (h *IAMHandler) GetAdminInvites(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.module.AdminUseCase.ListInvites(c.Request.Context(), offset, limit)
+	filter, ok := parseInviteListFilter(c)
+	if !ok {
+		return
+	}
+	result, err := h.module.AdminUseCase.ListInvites(c.Request.Context(), filter, offset, limit)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	invites := make([]InviteResponse, len(result.Invites))
-	for i := range result.Invites {
-		invites[i] = toInviteResponse(&result.Invites[i])
+	invites := make([]InviteResponse, len(result.Items))
+	for i := range result.Items {
+		invites[i] = toInviteListItemResponse(result.Items[i])
 	}
-	c.JSON(http.StatusOK, InviteListResponse{Invites: invites, Total: result.Total, Offset: result.Offset, Limit: result.Limit})
+	c.JSON(http.StatusOK, InviteListResponse{
+		Invites: invites,
+		Total:   result.Total,
+		Offset:  result.Offset,
+		Limit:   result.Limit,
+		Facets:  toInviteFacetsResponse(result.Facets),
+	})
+}
+
+// parseInviteListFilter parses the invite browse-list query params. kind
+// defaults to admin (preserving existing callers); kind=all clears the filter.
+// Writes a 400 and returns false on any malformed value.
+func parseInviteListFilter(c *gin.Context) (domain.InviteListFilter, bool) {
+	invalid := func() bool {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid query parameters.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return false
+	}
+	filter := domain.InviteListFilter{Search: c.Query("search"), Kind: domain.InviteKindAdmin}
+	switch kind := strings.TrimSpace(c.DefaultQuery("kind", "admin")); kind {
+	case "admin":
+		filter.Kind = domain.InviteKindAdmin
+	case "referral":
+		filter.Kind = domain.InviteKindReferral
+	case "all":
+		filter.Kind = ""
+	default:
+		return domain.InviteListFilter{}, invalid()
+	}
+	if raw := strings.TrimSpace(c.Query("ownerRole")); raw != "" {
+		role := domain.Role(raw)
+		if !role.IsValid() {
+			return domain.InviteListFilter{}, invalid()
+		}
+		filter.OwnerRole = &role
+	}
+	if raw := strings.TrimSpace(c.Query("ownerGroupId")); raw != "" {
+		groupID, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || groupID == 0 {
+			return domain.InviteListFilter{}, invalid()
+		}
+		id := uint(groupID)
+		filter.OwnerGroupID = &id
+	}
+	if raw := strings.TrimSpace(c.Query("enabled")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return domain.InviteListFilter{}, invalid()
+		}
+		filter.Enabled = &enabled
+	}
+	return filter, true
 }
 
 func (h *IAMHandler) PostAdminInvite(c *gin.Context) {
@@ -658,16 +716,176 @@ func (h *IAMHandler) PatchAdminInvite(c *gin.Context) {
 		return
 	}
 	operatorID, _ := middleware.GetCurrentUserID(c)
+	expireAt, ok := parseOptionalExpireAt(c, req.ExpireAt)
+	if !ok {
+		return
+	}
 	invite, err := h.module.AdminUseCase.UpdateInvite(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), code, app.UpdateInviteRequest{
 		Enabled:  req.Enabled,
 		MaxUse:   req.MaxUse,
-		ExpireAt: req.ExpireAt,
+		ExpireAt: expireAt,
 	})
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"invite": toInviteResponse(invite)})
+}
+
+// parseOptionalExpireAt decodes a PATCH expireAt into the tri-state carrier:
+// absent (no bytes) -> nil (leave unchanged); null -> non-nil *(*time.Time)=nil
+// (clear); a value -> the parsed time (set). Writes 400 and returns false on a
+// malformed value.
+func parseOptionalExpireAt(c *gin.Context, raw json.RawMessage) (**time.Time, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	var t *time.Time
+	if err := json.Unmarshal(raw, &t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return nil, false
+	}
+	return &t, true
+}
+
+// POST /v1/admin/invites/batch
+func (h *IAMHandler) PostAdminInvitesBatch(c *gin.Context) {
+	var req AdminBatchCreateInviteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	invites, err := h.module.AdminUseCase.BatchCreateInvites(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), app.BatchCreateInviteRequest{
+		Count:    req.Count,
+		MaxUse:   req.MaxUse,
+		Enabled:  enabled,
+		ExpireAt: req.ExpireAt,
+		Prefix:   req.Prefix,
+	})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	items := make([]InviteResponse, len(invites))
+	for i := range invites {
+		items[i] = toInviteResponse(&invites[i])
+	}
+	c.JSON(http.StatusCreated, AdminBatchCreateInviteResponse{Items: items, Created: len(items)})
+}
+
+// POST /v1/admin/invites/enable
+func (h *IAMHandler) PostAdminInvitesEnable(c *gin.Context) {
+	sel, ok := h.bindInviteBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkSetInviteEnabled(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel, true)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminBulkResponse(result))
+}
+
+// POST /v1/admin/invites/disable
+func (h *IAMHandler) PostAdminInvitesDisable(c *gin.Context) {
+	sel, ok := h.bindInviteBulkSelection(c)
+	if !ok {
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	result, err := h.module.AdminUseCase.BulkSetInviteEnabled(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), sel, false)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminBulkResponse(result))
+}
+
+// GET /v1/admin/invites/:code/uses
+func (h *IAMHandler) GetAdminInviteUses(c *gin.Context) {
+	items, err := h.module.AdminUseCase.ListInviteUses(c.Request.Context(), c.Param("code"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	uses := make([]InviteUseResponse, len(items))
+	for i := range items {
+		uses[i] = toInviteUseResponse(items[i])
+	}
+	c.JSON(http.StatusOK, InviteUsesResponse{Uses: uses})
+}
+
+// bindInviteBulkSelection binds the bulk command body and converts it to an app
+// selection. Writes a 400 and returns false on a malformed body/role/kind. In
+// filter mode kind defaults to admin (kind=all clears it), mirroring the list.
+func (h *IAMHandler) bindInviteBulkSelection(c *gin.Context) (app.InviteBulkSelection, bool) {
+	var req InviteBulkCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"fields":    validationErrors(err),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return app.InviteBulkSelection{}, false
+	}
+	badBody := func() (app.InviteBulkSelection, bool) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message":   "Invalid request body.",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return app.InviteBulkSelection{}, false
+	}
+	sel := app.InviteBulkSelection{Mode: req.Selection.Mode}
+	if req.Selection.Mode == "ids" {
+		sel.Codes = req.Selection.Codes
+		return sel, true
+	}
+	f := req.Selection.Filter
+	if f == nil {
+		return badBody()
+	}
+	filter := domain.InviteListFilter{Search: strings.TrimSpace(f.Search), Kind: domain.InviteKindAdmin, Enabled: f.Enabled}
+	switch f.Kind {
+	case "", "admin":
+		filter.Kind = domain.InviteKindAdmin
+	case "referral":
+		filter.Kind = domain.InviteKindReferral
+	case "all":
+		filter.Kind = ""
+	default:
+		return badBody()
+	}
+	if raw := strings.TrimSpace(f.OwnerRole); raw != "" {
+		role := domain.Role(raw)
+		if !role.IsValid() {
+			return badBody()
+		}
+		filter.OwnerRole = &role
+	}
+	if f.OwnerGroupID != 0 {
+		groupID := f.OwnerGroupID
+		filter.OwnerGroupID = &groupID
+	}
+	sel.Filter = filter
+	return sel, true
+}
+
+func toAdminBulkResponse(result *app.BulkResult) AdminBulkResponse {
+	return AdminBulkResponse{Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped}
 }
 
 func (h *IAMHandler) GetAdminSupplierApplications(c *gin.Context) {

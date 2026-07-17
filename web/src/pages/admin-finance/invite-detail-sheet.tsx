@@ -12,10 +12,10 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  listMockFinanceInviteUses,
+  listFinanceInviteUses,
   type FinanceInvite,
   type FinanceInviteUse,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import {
   DRAWER_PANEL_HEIGHT,
   DRAWER_TABLE_SCROLL_Y,
@@ -60,7 +60,7 @@ export function InviteDetailSheet({
     }
     let cancelled = false;
     setLoading(true);
-    void listMockFinanceInviteUses(invite.code)
+    void listFinanceInviteUses(invite.code)
       .then((items) => {
         if (!cancelled) setUses(items);
       })

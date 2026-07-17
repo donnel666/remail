@@ -2,7 +2,7 @@ import { Avatar } from "@douyinfe/semi-ui";
 import type { TFunction } from "i18next";
 
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
-import type { FinanceUserRole } from "./admin-finance-mock";
+import type { FinanceUserRole } from "./admin-finance-api";
 
 // Card-key-scoped identity helpers. Intentionally a private copy (not shared
 // with invites) so the card key owner cell can diverge independently later.

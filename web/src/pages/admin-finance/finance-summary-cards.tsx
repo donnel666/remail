@@ -10,7 +10,7 @@ import { Avatar, Card, Skeleton } from "@douyinfe/semi-ui";
 import { CircleDollarSign, Wallet } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { FinanceSummary } from "./admin-finance-mock";
+import type { FinanceSummary } from "./admin-finance-api";
 import { formatMoney } from "./finance-meta";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";

@@ -37,12 +37,12 @@ import {
   type DateRangeValue,
 } from "../resources/date-range-filter";
 import {
-  listMockFinanceTransactions,
-  reverseMockFinanceTransaction,
+  listFinanceTransactions,
+  reverseFinanceTransaction,
   type FinanceTransaction,
   type FinanceTransactionDirection,
   type FinanceTransactionType,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import {
   formatDateTime,
   formatMoney,
@@ -126,7 +126,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
 
   const loadBlock = useCallback(
     async (offset: number, limit: number) => {
-      const result = await listMockFinanceTransactions(
+      const result = await listFinanceTransactions(
         listFilter,
         offset,
         limit
@@ -161,7 +161,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
       onOk: async () => {
         setReverseBusyId(record.id);
         try {
-          await reverseMockFinanceTransaction(record.id);
+          await reverseFinanceTransaction(record.id);
           Toast.success(t("Transaction reversed."));
           setDetailTarget(null);
           void refresh();

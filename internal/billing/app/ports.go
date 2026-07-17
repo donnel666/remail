@@ -28,6 +28,43 @@ type WalletRepository interface {
 	CountCards(ctx context.Context, filter CardListFilter) (int64, error)
 	CreateCards(ctx context.Context, req CreateCardsCommand) ([]domain.CardKey, error)
 	UpdateCard(ctx context.Context, req UpdateCardCommand) (*domain.CardKey, error)
+	ListAllCards(ctx context.Context, filter CardListFilter) ([]domain.CardKey, error)
+	SetCardsStatus(ctx context.Context, cardKeys []string, status domain.CardKeyStatus) (affected int, err error)
+	ListCardRedemptions(ctx context.Context, cardKey string, limit int) ([]domain.CardRedemption, string, error)
+	ListAdminTransactions(ctx context.Context, filter AdminTransactionFilter, offset, limit int) ([]AdminTransaction, int64, error)
+	GetAdminTransaction(ctx context.Context, id uint) (*AdminTransaction, error)
+	ReverseTransaction(ctx context.Context, req ReverseTransactionCommand) (*ReverseTransactionResult, error)
+	WithdrawSupplier(ctx context.Context, req WithdrawSupplierCommand) (*AdjustBalanceResult, error)
+	GetWalletsByUserIDs(ctx context.Context, userIDs []uint) (map[uint]domain.Wallet, error)
+	FinanceLedgerBuckets(ctx context.Context, granularity string, from, to time.Time) ([]LedgerBucketRow, error)
+	HotOrderItems(ctx context.Context, dimension string, from, to time.Time, limit int) ([]HotItem, error)
+}
+
+// UserDirectory resolves IAM user identity for finance read models. Injected
+// from IAM in the composition root (mirrors SetUserSelectionResolver).
+type UserDirectory interface {
+	LookupUsers(ctx context.Context, ids []uint) (map[uint]UserDirectoryEntry, error)
+	ListUsers(ctx context.Context, q UserDirectoryQuery) (UserDirectoryPage, error)
+}
+
+type UserDirectoryEntry struct {
+	UserID    uint
+	Email     string
+	Nickname  string
+	Role      string
+	GroupName string
+	GroupID   uint
+}
+
+type UserDirectoryQuery struct {
+	Search string
+	Offset int
+	Limit  int
+}
+
+type UserDirectoryPage struct {
+	Entries []UserDirectoryEntry
+	Total   int
 }
 
 // UserSelectionResolver resolves a selection-based batch (mode "ids" or
@@ -147,18 +184,20 @@ type CreateCardsCommand struct {
 }
 
 type UpdateCardRequest struct {
-	CardKey      string
-	Status       *domain.CardKeyStatus
-	ExpireAt     *time.Time
-	ExpireAtSet  bool
-	OperationLog *governancedomain.OperationLog
+	CardKey        string
+	Status         *domain.CardKeyStatus
+	ExpireAt       *time.Time
+	ExpireAtSet    bool
+	MaxRedemptions *int
+	OperationLog   *governancedomain.OperationLog
 }
 
 type UpdateCardCommand = UpdateCardRequest
 
 type WalletUseCase struct {
-	repo WalletRepository
-	now  func() time.Time
+	repo  WalletRepository
+	users UserDirectory
+	now   func() time.Time
 }
 
 const (
@@ -433,6 +472,9 @@ func (uc *WalletUseCase) UpdateCard(ctx context.Context, req UpdateCardRequest) 
 	}
 	if req.Status != nil && !domain.IsValidCardStatus(*req.Status) {
 		return nil, domain.ErrInvalidCardStatus
+	}
+	if req.MaxRedemptions != nil && *req.MaxRedemptions < 1 {
+		return nil, domain.ErrInvalidCardKey
 	}
 	return uc.repo.UpdateCard(ctx, req)
 }

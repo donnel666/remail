@@ -48,6 +48,7 @@ type WalletTransactionModel struct {
 	BalanceAfter    string    `gorm:"type:decimal(18,6);not null;column:balance_after"`
 	BizType         string    `gorm:"type:varchar(32);not null;column:biz_type"`
 	BizID           string    `gorm:"type:varchar(128);not null;column:biz_id"`
+	ReversalOfNo    *string   `gorm:"type:varchar(64);column:reversal_of_no"`
 	IdempotencyKey  string    `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
 	RequestID       string    `gorm:"type:varchar(64);not null;default:'';column:request_id"`
 	CreatedAt       time.Time `gorm:"not null;autoCreateTime;column:created_at"`
@@ -437,6 +438,9 @@ func (r *BillingRepo) UpdateCard(ctx context.Context, req billingapp.UpdateCardC
 	if req.ExpireAtSet {
 		updates["expire_at"] = req.ExpireAt
 	}
+	if req.MaxRedemptions != nil {
+		updates["max_redemptions"] = *req.MaxRedemptions
+	}
 	if len(updates) == 0 {
 		var model CardKeyModel
 		if err := r.db.WithContext(ctx).First(&model, "card_key = ?", req.CardKey).Error; err != nil {
@@ -450,12 +454,17 @@ func (r *BillingRepo) UpdateCard(ctx context.Context, req billingapp.UpdateCardC
 	}
 	var model CardKeyModel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.WithContext(ctx).Model(&CardKeyModel{}).Where("card_key = ?", req.CardKey).Updates(updates)
-		if result.Error != nil {
-			return fmt.Errorf("update card key: %w", result.Error)
+		if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "card_key = ?", req.CardKey).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrCardNotFound
+			}
+			return fmt.Errorf("lock card key: %w", err)
 		}
-		if result.RowsAffected == 0 {
-			return domain.ErrCardNotFound
+		if req.MaxRedemptions != nil && *req.MaxRedemptions < model.RedeemedCount {
+			return domain.ErrInvalidCardKey
+		}
+		if err := tx.WithContext(ctx).Model(&CardKeyModel{}).Where("card_key = ?", req.CardKey).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update card key: %w", err)
 		}
 		if err := tx.WithContext(ctx).First(&model, "card_key = ?", req.CardKey).Error; err != nil {
 			return fmt.Errorf("reload card key: %w", err)
@@ -1000,6 +1009,7 @@ func transactionModelToDomain(model WalletTransactionModel) domain.Transaction {
 		BalanceAfter:    normalizeMoneyString(model.BalanceAfter),
 		BizType:         model.BizType,
 		BizID:           model.BizID,
+		ReversalOfNo:    model.ReversalOfNo,
 		IdempotencyKey:  model.IdempotencyKey,
 		RequestID:       model.RequestID,
 		CreatedAt:       model.CreatedAt,

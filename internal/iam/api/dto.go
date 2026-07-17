@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
+	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 )
 
@@ -88,16 +90,19 @@ type AdminUpdateUserPermissionsRequest struct {
 }
 
 type AdminCreateInviteRequest struct {
-	Code     string     `json:"code" binding:"required,max=64"`
+	Code     string     `json:"code" binding:"omitempty,max=64"`
 	Enabled  *bool      `json:"enabled,omitempty"`
 	MaxUse   int        `json:"maxUse" binding:"required,min=1"`
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 }
 
 type AdminUpdateInviteRequest struct {
-	Enabled  *bool      `json:"enabled,omitempty"`
-	MaxUse   *int       `json:"maxUse,omitempty" binding:"omitempty,min=1"`
-	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
+	MaxUse  *int  `json:"maxUse,omitempty" binding:"omitempty,min=1"`
+	// ExpireAt is tri-state: key absent = leave unchanged, null = clear, value =
+	// set. RawMessage preserves the absent-vs-null distinction that *time.Time
+	// loses.
+	ExpireAt json.RawMessage `json:"expireAt,omitempty"`
 }
 
 type SupplierApplicationRequest struct {
@@ -266,20 +271,115 @@ type PermissionPolicyResponse struct {
 }
 
 type InviteResponse struct {
-	Code      string     `json:"code"`
-	Enabled   bool       `json:"enabled"`
-	MaxUse    int        `json:"maxUse"`
-	Used      int        `json:"used"`
-	ExpireAt  *time.Time `json:"expireAt,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	Code           string     `json:"code"`
+	Kind           string     `json:"kind"`
+	Enabled        bool       `json:"enabled"`
+	MaxUse         int        `json:"maxUse"`
+	Used           int        `json:"used"`
+	ExpireAt       *time.Time `json:"expireAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	OwnerUserID    *uint      `json:"ownerUserId"`
+	OwnerEmail     *string    `json:"ownerEmail"`
+	OwnerNickname  *string    `json:"ownerNickname"`
+	OwnerRole      *string    `json:"ownerRole"`
+	OwnerGroupID   *uint      `json:"ownerGroupId"`
+	OwnerGroupName *string    `json:"ownerGroupName"`
 }
 
 type InviteListResponse struct {
-	Invites []InviteResponse `json:"invites"`
-	Total   int64            `json:"total"`
-	Offset  int              `json:"offset"`
-	Limit   int              `json:"limit"`
+	Invites []InviteResponse     `json:"invites"`
+	Total   int64                `json:"total"`
+	Offset  int                  `json:"offset"`
+	Limit   int                  `json:"limit"`
+	Facets  InviteFacetsResponse `json:"facets"`
+}
+
+// InviteFacetsResponse holds the invite browse-list aggregate counts.
+type InviteFacetsResponse struct {
+	Role    InviteRoleFacetResponse    `json:"role"`
+	Group   []InviteGroupFacetResponse `json:"group"`
+	Enabled InviteEnabledFacetResponse `json:"enabled"`
+}
+
+type InviteRoleFacetResponse struct {
+	All        int64 `json:"all"`
+	User       int64 `json:"user"`
+	Supplier   int64 `json:"supplier"`
+	Admin      int64 `json:"admin"`
+	SuperAdmin int64 `json:"super_admin"`
+}
+
+type InviteEnabledFacetResponse struct {
+	All      int64 `json:"all"`
+	Enabled  int64 `json:"enabled"`
+	Disabled int64 `json:"disabled"`
+}
+
+type InviteGroupFacetResponse struct {
+	ID    uint   `json:"id"`
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+// AdminBatchCreateInviteRequest is the body for POST /v1/admin/invites/batch.
+type AdminBatchCreateInviteRequest struct {
+	Count    int        `json:"count" binding:"required,min=1,max=100"`
+	MaxUse   int        `json:"maxUse" binding:"required,min=1"`
+	Enabled  *bool      `json:"enabled,omitempty"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	Prefix   string     `json:"prefix" binding:"omitempty,max=32"`
+}
+
+// AdminBatchCreateInviteResponse is the 201 body for POST /v1/admin/invites/batch.
+type AdminBatchCreateInviteResponse struct {
+	Items   []InviteResponse `json:"items"`
+	Created int              `json:"created"`
+}
+
+// InviteBulkFilterRequest mirrors the browse-list filter for selection-based
+// bulk invite actions.
+type InviteBulkFilterRequest struct {
+	Search       string `json:"search"`
+	Kind         string `json:"kind" binding:"omitempty,oneof=admin referral all"`
+	OwnerRole    string `json:"ownerRole" binding:"omitempty,oneof=user supplier admin super_admin"`
+	OwnerGroupID uint   `json:"ownerGroupId"`
+	Enabled      *bool  `json:"enabled"`
+}
+
+// InviteBulkSelectionRequest selects bulk targets by codes or by filter.
+type InviteBulkSelectionRequest struct {
+	Mode   string                   `json:"mode" binding:"required,oneof=ids filter"`
+	Codes  []string                 `json:"codes" binding:"omitempty,dive,required,max=64"`
+	Filter *InviteBulkFilterRequest `json:"filter"`
+}
+
+// InviteBulkCommandRequest is the body for the selection-based bulk invite endpoints.
+type InviteBulkCommandRequest struct {
+	Selection InviteBulkSelectionRequest `json:"selection" binding:"required"`
+}
+
+// AdminBulkResponse reports how many rows a bulk action requested, changed, and skipped.
+type AdminBulkResponse struct {
+	Requested int `json:"requested"`
+	Affected  int `json:"affected"`
+	Skipped   int `json:"skipped"`
+}
+
+// InviteUseResponse is one invite redemption with the redeeming user resolved.
+type InviteUseResponse struct {
+	ID            uint64    `json:"id"`
+	InviteCode    string    `json:"inviteCode"`
+	UserID        uint      `json:"userId"`
+	UserEmail     *string   `json:"userEmail"`
+	UserNickname  *string   `json:"userNickname"`
+	UserRole      *string   `json:"userRole"`
+	UserGroupName *string   `json:"userGroupName"`
+	UsedAt        time.Time `json:"usedAt"`
+}
+
+type InviteUsesResponse struct {
+	Uses []InviteUseResponse `json:"uses"`
 }
 
 type SupplierApplicationResponse struct {
@@ -384,6 +484,7 @@ func toPermissionPolicyResponse(policies []domain.PermissionPolicy) UserPermissi
 func toInviteResponse(invite *domain.Invite) InviteResponse {
 	return InviteResponse{
 		Code:      invite.Code,
+		Kind:      string(invite.Kind),
 		Enabled:   invite.Enabled,
 		MaxUse:    invite.MaxUse,
 		Used:      invite.Used,
@@ -391,6 +492,77 @@ func toInviteResponse(invite *domain.Invite) InviteResponse {
 		CreatedAt: invite.CreatedAt,
 		UpdatedAt: invite.UpdatedAt,
 	}
+}
+
+func toInviteListItemResponse(item app.InviteListItem) InviteResponse {
+	resp := toInviteResponse(&item.Invite)
+	if item.Owner != nil {
+		applyOwnerFields(&resp, *item.Owner)
+	}
+	return resp
+}
+
+// applyOwnerFields copies the resolved owner summary into an invite response.
+func applyOwnerFields(resp *InviteResponse, owner domain.UserSummary) {
+	id := owner.ID
+	resp.OwnerUserID = &id
+	email := owner.Email
+	resp.OwnerEmail = &email
+	nickname := owner.Nickname
+	resp.OwnerNickname = &nickname
+	role := owner.Role
+	resp.OwnerRole = &role
+	if owner.GroupID != 0 {
+		groupID := owner.GroupID
+		resp.OwnerGroupID = &groupID
+		groupName := owner.GroupName
+		resp.OwnerGroupName = &groupName
+	}
+}
+
+func toInviteFacetsResponse(facets *domain.InviteFacets) InviteFacetsResponse {
+	if facets == nil {
+		return InviteFacetsResponse{Group: []InviteGroupFacetResponse{}}
+	}
+	groups := make([]InviteGroupFacetResponse, len(facets.Group))
+	for i, g := range facets.Group {
+		groups[i] = InviteGroupFacetResponse{ID: g.ID, Name: g.Name, Count: g.Count}
+	}
+	return InviteFacetsResponse{
+		Role: InviteRoleFacetResponse{
+			All:        facets.Role.All,
+			User:       facets.Role.User,
+			Supplier:   facets.Role.Supplier,
+			Admin:      facets.Role.Admin,
+			SuperAdmin: facets.Role.SuperAdmin,
+		},
+		Group: groups,
+		Enabled: InviteEnabledFacetResponse{
+			All:      facets.Enabled.All,
+			Enabled:  facets.Enabled.Enabled,
+			Disabled: facets.Enabled.Disabled,
+		},
+	}
+}
+
+func toInviteUseResponse(item app.InviteUseItem) InviteUseResponse {
+	resp := InviteUseResponse{
+		ID:         item.Use.ID,
+		InviteCode: item.Use.InviteCode,
+		UserID:     item.Use.UserID,
+		UsedAt:     item.Use.UsedAt,
+	}
+	if item.User != nil {
+		email := item.User.Email
+		resp.UserEmail = &email
+		nickname := item.User.Nickname
+		resp.UserNickname = &nickname
+		role := item.User.Role
+		resp.UserRole = &role
+		groupName := item.User.GroupName
+		resp.UserGroupName = &groupName
+	}
+	return resp
 }
 
 func toSupplierApplicationResponse(application *domain.SupplierApplication) SupplierApplicationResponse {

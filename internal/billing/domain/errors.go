@@ -21,4 +21,7 @@ var (
 	ErrInvalidFilter               = errors.New("billing: invalid filter")
 	ErrNoReferralRewards           = errors.New("billing: no referral rewards available")
 	ErrReferralRewardStateConflict = errors.New("billing: referral reward state conflict")
+	ErrTransactionNotFound         = errors.New("billing: transaction not found")
+	ErrTransactionAlreadyReversed  = errors.New("billing: transaction already reversed")
+	ErrTransactionNotReversible    = errors.New("billing: transaction is not reversible")
 )

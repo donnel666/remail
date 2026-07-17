@@ -10,10 +10,10 @@ import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  createMockFinanceCardKeys,
-  updateMockFinanceCardKey,
+  createFinanceCardKeys,
+  updateFinanceCardKey,
   type FinanceCardKey,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { formatMoney } from "./finance-meta";
 
 interface CreateCardKeyModalProps {
@@ -68,7 +68,7 @@ export function CreateCardKeyModal({
 
     setSaving(true);
     try {
-      const result = await createMockFinanceCardKeys({
+      const result = await createFinanceCardKeys({
         amount: amountValue.toFixed(6),
         count: cardKeys.length ? undefined : countValue,
         maxRedemptions: maxRedemptionsValue,
@@ -204,7 +204,7 @@ export function EditCardKeyModal({
     }
     setSaving(true);
     try {
-      const updated = await updateMockFinanceCardKey(card.key, {
+      const updated = await updateFinanceCardKey(card.key, {
         maxRedemptions: parsedMaxRedemptions,
         expireAt: expireAt ? expireAt.toISOString() : null,
       });

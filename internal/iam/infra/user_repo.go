@@ -768,6 +768,82 @@ func (r *UserRepo) FindByIDs(ctx context.Context, ids []uint) ([]domain.User, er
 	return users, nil
 }
 
+// userSummaryRow is the flat projection of the users⋈user_groups join backing
+// both summary lookups.
+type userSummaryRow struct {
+	ID        uint
+	Email     string
+	Nickname  string
+	Role      string
+	GroupID   uint
+	GroupName string
+}
+
+func (row userSummaryRow) toDomain() domain.UserSummary {
+	return domain.UserSummary{
+		ID:        row.ID,
+		Email:     row.Email,
+		Nickname:  row.Nickname,
+		Role:      row.Role,
+		GroupID:   row.GroupID,
+		GroupName: row.GroupName,
+	}
+}
+
+const userSummarySelect = "u.id AS id, u.email AS email, u.nickname AS nickname, u.role AS role, u.user_group_id AS group_id, g.name AS group_name"
+
+// LookupUserSummaries batch-loads compact user summaries keyed by id in a single
+// join query. Missing ids are simply absent from the map.
+func (r *UserRepo) LookupUserSummaries(ctx context.Context, ids []uint) (map[uint]domain.UserSummary, error) {
+	if len(ids) == 0 {
+		return map[uint]domain.UserSummary{}, nil
+	}
+	var rows []userSummaryRow
+	if err := r.dbFor(ctx).Table("users AS u").
+		Joins("LEFT JOIN user_groups g ON g.id = u.user_group_id").
+		Select(userSummarySelect).
+		Where("u.id IN ?", ids).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup user summaries: %w", err)
+	}
+	out := make(map[uint]domain.UserSummary, len(rows))
+	for _, row := range rows {
+		out[row.ID] = row.toDomain()
+	}
+	return out, nil
+}
+
+// ListUserSummaries returns a paginated slice of user summaries ordered by id,
+// searchable over email/nickname/id, plus the total match count.
+func (r *UserRepo) ListUserSummaries(ctx context.Context, search string, offset, limit int) ([]domain.UserSummary, int, error) {
+	where := func(q *gorm.DB) *gorm.DB {
+		if s := strings.TrimSpace(search); s != "" {
+			like := "%" + escapeLike(s) + "%"
+			q = q.Where("u.email LIKE ? OR u.nickname LIKE ? OR CAST(u.id AS CHAR) LIKE ?", like, like, like)
+		}
+		return q
+	}
+	var total int64
+	if err := where(r.dbFor(ctx).Table("users AS u")).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count user summaries: %w", err)
+	}
+	var rows []userSummaryRow
+	if err := where(r.dbFor(ctx).Table("users AS u")).
+		Joins("LEFT JOIN user_groups g ON g.id = u.user_group_id").
+		Select(userSummarySelect).
+		Order("u.id ASC").
+		Offset(offset).
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list user summaries: %w", err)
+	}
+	summaries := make([]domain.UserSummary, len(rows))
+	for i, row := range rows {
+		summaries[i] = row.toDomain()
+	}
+	return summaries, int(total), nil
+}
+
 // FindInviterID returns the referral owner of the invite the user registered
 // with, or nil when the user was not referred (e.g. admin invite / activation).
 func (r *UserRepo) FindInviterID(ctx context.Context, userID uint) (*uint, error) {
@@ -873,14 +949,46 @@ func (r *UserRepo) loadUserGroupModel(ctx context.Context, group *domain.UserGro
 	return nil
 }
 
-func (r *UserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain.Invite, error) {
+// inviteFilterQuery builds an invites query LEFT JOINed to the owner (users)
+// row so the filter can match/search on owner fields. The join is LEFT so
+// owner-less invites still appear (with no owner enrichment).
+func (r *UserRepo) inviteFilterQuery(ctx context.Context, filter domain.InviteListFilter) *gorm.DB {
+	q := r.db.WithContext(ctx).Table("invites AS i").
+		Joins("LEFT JOIN users u ON u.id = i.created_by_user_id")
+	if filter.Kind != "" {
+		q = q.Where("i.invite_kind = ?", string(filter.Kind))
+	}
+	if filter.OwnerRole != nil {
+		q = q.Where("u.role = ?", filter.OwnerRole.String())
+	}
+	if filter.OwnerGroupID != nil {
+		q = q.Where("u.user_group_id = ?", *filter.OwnerGroupID)
+	}
+	if filter.Enabled != nil {
+		q = q.Where("i.enabled = ?", *filter.Enabled)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := "%" + escapeLike(search) + "%"
+		q = q.Where("i.code LIKE ? OR u.email LIKE ? OR u.nickname LIKE ? OR CAST(u.id AS CHAR) LIKE ?", like, like, like, like)
+	}
+	return q
+}
+
+// escapeLike neutralizes MySQL LIKE wildcards in user-supplied search text so a
+// literal % or _ does not act as a wildcard (default backslash escape char).
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+func (r *UserRepo) ListInvitesByFilter(ctx context.Context, filter domain.InviteListFilter, offset, limit int) ([]domain.Invite, error) {
 	var models []InviteModel
-	if err := r.db.WithContext(ctx).
-		Where("invite_kind = ?", domain.InviteKindAdmin).
-		Order("created_at DESC").
+	if err := r.inviteFilterQuery(ctx, filter).
+		Select("i.*").
+		Order("i.created_at DESC").
 		Offset(offset).
 		Limit(limit).
-		Find(&models).Error; err != nil {
+		Scan(&models).Error; err != nil {
 		return nil, fmt.Errorf("list invites: %w", err)
 	}
 	invites := make([]domain.Invite, len(models))
@@ -890,15 +998,177 @@ func (r *UserRepo) ListInvites(ctx context.Context, offset, limit int) ([]domain
 	return invites, nil
 }
 
-func (r *UserRepo) CountInvites(ctx context.Context) (int64, error) {
+func (r *UserRepo) CountInvitesByFilter(ctx context.Context, filter domain.InviteListFilter) (int64, error) {
 	var count int64
-	if err := r.db.WithContext(ctx).
-		Model(&InviteModel{}).
-		Where("invite_kind = ?", domain.InviteKindAdmin).
-		Count(&count).Error; err != nil {
+	if err := r.inviteFilterQuery(ctx, filter).Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("count invites: %w", err)
 	}
 	return count, nil
+}
+
+// InviteFacetsByFilter aggregates over all invites matching only kind (an empty
+// kind spans every kind), so the browse-list filter chips show stable totals.
+func (r *UserRepo) InviteFacetsByFilter(ctx context.Context, kind domain.InviteKind) (*domain.InviteFacets, error) {
+	base := func() *gorm.DB {
+		q := r.db.WithContext(ctx).Table("invites AS i").
+			Joins("LEFT JOIN users u ON u.id = i.created_by_user_id")
+		if kind != "" {
+			q = q.Where("i.invite_kind = ?", string(kind))
+		}
+		return q
+	}
+
+	roleRows := []struct {
+		Role  *string
+		Count int64
+	}{}
+	if err := base().Select("u.role AS role, COUNT(*) AS count").Group("u.role").Scan(&roleRows).Error; err != nil {
+		return nil, fmt.Errorf("facet invite roles: %w", err)
+	}
+	role := domain.InviteRoleFacet{}
+	for _, row := range roleRows {
+		role.All += row.Count
+		if row.Role == nil {
+			continue
+		}
+		switch domain.Role(*row.Role) {
+		case domain.RoleUser:
+			role.User = row.Count
+		case domain.RoleSupplier:
+			role.Supplier = row.Count
+		case domain.RoleAdmin:
+			role.Admin = row.Count
+		case domain.RoleSuperAdmin:
+			role.SuperAdmin = row.Count
+		}
+	}
+
+	enabledRows := []struct {
+		Enabled bool
+		Count   int64
+	}{}
+	if err := base().Select("i.enabled AS enabled, COUNT(*) AS count").Group("i.enabled").Scan(&enabledRows).Error; err != nil {
+		return nil, fmt.Errorf("facet invite enabled: %w", err)
+	}
+	enabled := domain.InviteEnabledFacet{}
+	for _, row := range enabledRows {
+		if row.Enabled {
+			enabled.Enabled = row.Count
+		} else {
+			enabled.Disabled = row.Count
+		}
+	}
+	enabled.All = enabled.Enabled + enabled.Disabled
+
+	groupRows := []struct {
+		UserGroupID uint
+		Name        string
+		Count       int64
+	}{}
+	if err := base().
+		Joins("LEFT JOIN user_groups g ON g.id = u.user_group_id").
+		Select("u.user_group_id AS user_group_id, g.name AS name, COUNT(*) AS count").
+		Where("u.user_group_id IS NOT NULL").
+		Group("u.user_group_id, g.name").
+		Scan(&groupRows).Error; err != nil {
+		return nil, fmt.Errorf("facet invite groups: %w", err)
+	}
+	groups := make([]domain.GroupFacet, len(groupRows))
+	for i, row := range groupRows {
+		groups[i] = domain.GroupFacet{ID: row.UserGroupID, Name: row.Name, Count: row.Count}
+	}
+
+	return &domain.InviteFacets{Role: role, Group: groups, Enabled: enabled}, nil
+}
+
+// ResolveInviteCodesByFilter returns the codes of invites matching the filter,
+// used by bulk enable/disable filter mode.
+func (r *UserRepo) ResolveInviteCodesByFilter(ctx context.Context, filter domain.InviteListFilter) ([]string, error) {
+	var codes []string
+	if err := r.inviteFilterQuery(ctx, filter).Pluck("i.code", &codes).Error; err != nil {
+		return nil, fmt.Errorf("resolve invite codes: %w", err)
+	}
+	return codes, nil
+}
+
+// BatchSetInviteEnabled flips enabled for the given codes whose value differs,
+// returning the number of rows actually changed (idempotent skipped counting).
+// ponytail: single IN clause; admin invite counts are low. Chunk if a filter
+// selection can ever exceed MySQL's placeholder limit.
+func (r *UserRepo) BatchSetInviteEnabled(ctx context.Context, codes []string, enabled bool) (int64, error) {
+	if len(codes) == 0 {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).Model(&InviteModel{}).
+		Where("code IN ? AND enabled <> ?", codes, enabled).
+		Update("enabled", enabled)
+	if result.Error != nil {
+		return 0, fmt.Errorf("batch set invite enabled: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func (r *UserRepo) ListInviteUses(ctx context.Context, code string, limit int) ([]domain.InviteUse, error) {
+	var models []InviteUseModel
+	if err := r.db.WithContext(ctx).
+		Where("invite_code = ?", code).
+		Order("used_at DESC, id DESC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list invite uses: %w", err)
+	}
+	uses := make([]domain.InviteUse, len(models))
+	for i, m := range models {
+		uses[i] = domain.InviteUse{ID: m.ID, InviteCode: m.InviteCode, UserID: m.UserID, UsedAt: m.UsedAt}
+	}
+	return uses, nil
+}
+
+// inviteInsertRow builds the column map for an admin invite insert. A map
+// insert is used (not a struct) because GORM substitutes the column's
+// default:true for any zero-value bool, which would silently flip an explicit
+// Enabled=false to true (gorm callbacks/create.go).
+func inviteInsertRow(invite *domain.Invite, createdByUserID uint, now time.Time) map[string]any {
+	return map[string]any{
+		"code":               invite.Code,
+		"invite_kind":        string(domain.InviteKindAdmin),
+		"enabled":            invite.Enabled,
+		"max_use":            invite.MaxUse,
+		"used":               invite.Used,
+		"expire_at":          invite.ExpireAt,
+		"created_by_user_id": createdByUserID,
+		"created_at":         now,
+		"updated_at":         now,
+	}
+}
+
+func (r *UserRepo) CreateInvitesBatch(ctx context.Context, invites []*domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error {
+	if len(invites) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		rows := make([]map[string]any, len(invites))
+		for i := range invites {
+			rows[i] = inviteInsertRow(invites[i], createdByUserID, now)
+		}
+		if err := tx.Model(&InviteModel{}).Create(rows).Error; err != nil {
+			if isIAMDuplicateKeyError(err) {
+				return domain.ErrInviteAlreadyExists
+			}
+			return fmt.Errorf("create invites batch: %w", err)
+		}
+		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+			return fmt.Errorf("create invite batch operation log: %w", err)
+		}
+		for i := range invites {
+			invites[i].Kind = domain.InviteKindAdmin
+			invites[i].CreatedByUserID = &createdByUserID
+			invites[i].CreatedAt = now
+			invites[i].UpdatedAt = now
+		}
+		return nil
+	})
 }
 
 func (r *UserRepo) FindInviteByCode(ctx context.Context, code string) (*domain.Invite, error) {
@@ -929,11 +1199,9 @@ func (r *UserRepo) FindReferralInviteByOwner(ctx context.Context, userID uint) (
 
 func (r *UserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		model := inviteFromDomain(invite)
-		model.Kind = string(domain.InviteKindAdmin)
-		model.CreatedByUserID = &createdByUserID
-		if err := tx.Create(model).Error; err != nil {
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
+		now := time.Now()
+		if err := tx.Model(&InviteModel{}).Create(inviteInsertRow(invite, createdByUserID, now)).Error; err != nil {
+			if isIAMDuplicateKeyError(err) {
 				return domain.ErrInviteAlreadyExists
 			}
 			return fmt.Errorf("create invite: %w", err)
@@ -941,8 +1209,10 @@ func (r *UserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *dom
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
 			return fmt.Errorf("create invite operation log: %w", err)
 		}
-		invite.CreatedAt = model.CreatedAt
-		invite.UpdatedAt = model.UpdatedAt
+		invite.Kind = domain.InviteKindAdmin
+		invite.CreatedByUserID = &createdByUserID
+		invite.CreatedAt = now
+		invite.UpdatedAt = now
 		return nil
 	})
 }
@@ -951,7 +1221,7 @@ func (r *UserRepo) UpdateInviteWithOperationLog(ctx context.Context, invite *dom
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := inviteFromDomain(invite)
 		if err := tx.Model(&InviteModel{}).
-			Where("code = ? AND invite_kind = ?", invite.Code, domain.InviteKindAdmin).
+			Where("code = ?", invite.Code).
 			Select("enabled", "max_use", "expire_at").
 			Updates(model).Error; err != nil {
 			return fmt.Errorf("update invite: %w", err)

@@ -569,12 +569,61 @@ func (r *mockUserRepo) FindByIDs(_ context.Context, ids []uint) ([]domain.User, 
 	return result, nil
 }
 
-func (r *mockUserRepo) ListInvites(_ context.Context, offset, limit int) ([]domain.Invite, error) {
+func (r *mockUserRepo) LookupUserSummaries(_ context.Context, ids []uint) (map[uint]domain.UserSummary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[uint]domain.UserSummary, len(ids))
+	for _, id := range ids {
+		u, ok := r.users[id]
+		if !ok {
+			continue
+		}
+		groupName := ""
+		if g, ok := r.userGroups[u.UserGroupID]; ok {
+			groupName = g.Name
+		}
+		out[id] = domain.UserSummary{ID: u.ID, Email: u.Email, Nickname: u.Nickname, Role: u.Role.String(), GroupID: u.UserGroupID, GroupName: groupName}
+	}
+	return out, nil
+}
+
+func (r *mockUserRepo) matchInviteLocked(invite *domain.Invite, f domain.InviteListFilter) bool {
+	if f.Kind != "" && invite.Kind != f.Kind {
+		return false
+	}
+	if f.Enabled != nil && invite.Enabled != *f.Enabled {
+		return false
+	}
+	var owner *domain.User
+	if invite.CreatedByUserID != nil {
+		owner = r.users[*invite.CreatedByUserID]
+	}
+	if f.OwnerRole != nil && (owner == nil || owner.Role != *f.OwnerRole) {
+		return false
+	}
+	if f.OwnerGroupID != nil && (owner == nil || owner.UserGroupID != *f.OwnerGroupID) {
+		return false
+	}
+	if s := strings.TrimSpace(f.Search); s != "" {
+		if strings.Contains(invite.Code, s) {
+			return true
+		}
+		if owner == nil {
+			return false
+		}
+		return strings.Contains(owner.Email, s) || strings.Contains(owner.Nickname, s) || strings.Contains(fmt.Sprintf("%d", owner.ID), s)
+	}
+	return true
+}
+
+func (r *mockUserRepo) ListInvitesByFilter(_ context.Context, filter domain.InviteListFilter, offset, limit int) ([]domain.Invite, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []domain.Invite
 	for _, invite := range r.invites {
-		result = append(result, *invite)
+		if r.matchInviteLocked(invite, filter) {
+			result = append(result, *invite)
+		}
 	}
 	if offset >= len(result) {
 		return nil, nil
@@ -586,10 +635,112 @@ func (r *mockUserRepo) ListInvites(_ context.Context, offset, limit int) ([]doma
 	return result[offset:end], nil
 }
 
-func (r *mockUserRepo) CountInvites(_ context.Context) (int64, error) {
+func (r *mockUserRepo) CountInvitesByFilter(_ context.Context, filter domain.InviteListFilter) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return int64(len(r.invites)), nil
+	var count int64
+	for _, invite := range r.invites {
+		if r.matchInviteLocked(invite, filter) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *mockUserRepo) InviteFacetsByFilter(_ context.Context, kind domain.InviteKind) (*domain.InviteFacets, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	facets := &domain.InviteFacets{}
+	groups := map[uint]*domain.GroupFacet{}
+	for _, invite := range r.invites {
+		if kind != "" && invite.Kind != kind {
+			continue
+		}
+		facets.Role.All++
+		if invite.Enabled {
+			facets.Enabled.Enabled++
+		} else {
+			facets.Enabled.Disabled++
+		}
+		if invite.CreatedByUserID == nil {
+			continue
+		}
+		owner := r.users[*invite.CreatedByUserID]
+		if owner == nil {
+			continue
+		}
+		switch owner.Role {
+		case domain.RoleUser:
+			facets.Role.User++
+		case domain.RoleSupplier:
+			facets.Role.Supplier++
+		case domain.RoleAdmin:
+			facets.Role.Admin++
+		case domain.RoleSuperAdmin:
+			facets.Role.SuperAdmin++
+		}
+		if g, ok := groups[owner.UserGroupID]; ok {
+			g.Count++
+		} else {
+			name := ""
+			if grp, ok := r.userGroups[owner.UserGroupID]; ok {
+				name = grp.Name
+			}
+			groups[owner.UserGroupID] = &domain.GroupFacet{ID: owner.UserGroupID, Name: name, Count: 1}
+		}
+	}
+	facets.Enabled.All = facets.Enabled.Enabled + facets.Enabled.Disabled
+	for _, g := range groups {
+		facets.Group = append(facets.Group, *g)
+	}
+	return facets, nil
+}
+
+func (r *mockUserRepo) ResolveInviteCodesByFilter(_ context.Context, filter domain.InviteListFilter) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var codes []string
+	for _, invite := range r.invites {
+		if r.matchInviteLocked(invite, filter) {
+			codes = append(codes, invite.Code)
+		}
+	}
+	return codes, nil
+}
+
+func (r *mockUserRepo) BatchSetInviteEnabled(_ context.Context, codes []string, enabled bool) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var affected int64
+	for _, code := range codes {
+		if invite, ok := r.invites[code]; ok && invite.Enabled != enabled {
+			invite.Enabled = enabled
+			affected++
+		}
+	}
+	return affected, nil
+}
+
+func (r *mockUserRepo) ListInviteUses(_ context.Context, _ string, _ int) ([]domain.InviteUse, error) {
+	return nil, nil
+}
+
+func (r *mockUserRepo) CreateInvitesBatch(ctx context.Context, invites []*domain.Invite, createdByUserID uint, log *governancedomain.OperationLog) error {
+	r.mu.Lock()
+	for _, invite := range invites {
+		if _, exists := r.invites[invite.Code]; exists {
+			r.mu.Unlock()
+			return domain.ErrInviteAlreadyExists
+		}
+	}
+	for _, invite := range invites {
+		cp := *invite
+		cp.Kind = domain.InviteKindAdmin
+		cp.CreatedByUserID = &createdByUserID
+		r.invites[invite.Code] = &cp
+	}
+	r.mu.Unlock()
+	return r.operationLogs.Create(ctx, log)
 }
 
 func (r *mockUserRepo) CreateInviteWithOperationLog(ctx context.Context, invite *domain.Invite, _ uint, log *governancedomain.OperationLog) error {
@@ -2090,6 +2241,47 @@ func TestPostAdminInviteWritesSuccessAndDuplicateFailureLogs(t *testing.T) {
 	require.Equal(t, "failure", log.Result)
 	require.Equal(t, "Invite create failed.", log.SafeSummary)
 	require.Equal(t, "req-invite-duplicate", log.RequestID)
+}
+
+// Regression: toggling enabled sends {"enabled":...} with no expireAt key and
+// must not wipe an existing expiry. null clears; a value sets.
+func TestPatchAdminInviteExpireAtTriState(t *testing.T) {
+	future := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	harness := func() (*IAMHandler, *gin.Engine) {
+		h := newTestHandler()
+		r := setupTestRouterWithHandler(h)
+		seedAdminSession(t, h, "admin-session")
+		testRepo(h).invites["INV-EXP"] = &domain.Invite{Code: "INV-EXP", Kind: domain.InviteKindAdmin, Enabled: true, MaxUse: 5, ExpireAt: &future}
+		return h, r
+	}
+	patch := func(r *gin.Engine, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PATCH", "/v1/admin/invites/INV-EXP", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		addAuthenticatedRequest(req, "admin-session")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	h, r := harness()
+	w := patch(r, `{"enabled":false}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got := testRepo(h).invites["INV-EXP"]
+	require.False(t, got.Enabled)
+	require.NotNil(t, got.ExpireAt, "toggling enabled must not wipe the expiry")
+	require.WithinDuration(t, future, *got.ExpireAt, time.Second)
+
+	h, r = harness()
+	w = patch(r, `{"expireAt":null}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Nil(t, testRepo(h).invites["INV-EXP"].ExpireAt, "explicit null clears the expiry")
+
+	next := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
+	h, r = harness()
+	w = patch(r, fmt.Sprintf(`{"expireAt":%q}`, next.Format(time.RFC3339)))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotNil(t, testRepo(h).invites["INV-EXP"].ExpireAt)
+	require.WithinDuration(t, next, *testRepo(h).invites["INV-EXP"].ExpireAt, time.Second)
 }
 
 func TestChangePassword_Unauthenticated(t *testing.T) {

@@ -12,10 +12,10 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  listMockFinanceCardKeyRedemptions,
+  listFinanceCardKeyRedemptions,
   type FinanceCardKey,
   type FinanceCardKeyRedemption,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { CardKeyAccountCell } from "./card-key-meta";
 import {
   DRAWER_PANEL_HEIGHT,
@@ -61,7 +61,7 @@ export function CardKeyDetailSheet({
     }
     let cancelled = false;
     setLoading(true);
-    void listMockFinanceCardKeyRedemptions(card.key)
+    void listFinanceCardKeyRedemptions(card.key)
       .then((items) => {
         if (!cancelled) setRedemptions(items);
       })

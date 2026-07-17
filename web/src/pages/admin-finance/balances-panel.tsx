@@ -18,13 +18,13 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { useSelectionNotification } from "../resources/use-selection-notification";
 import {
-  adjustMockFinanceUsersWallet,
-  creditMockFinanceUserWallet,
-  debitMockFinanceUserWallet,
-  listMockFinanceUserBalances,
-  withdrawMockFinanceUserWallet,
+  adjustFinanceUsersWallet,
+  creditFinanceUserWallet,
+  debitFinanceUserWallet,
+  listFinanceUserBalances,
+  withdrawFinanceUserWallet,
   type FinanceUserBalance,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { formatDateTime, formatMoney } from "./finance-meta";
 import { emptyNode } from "./finance-shared";
 import { BalanceAccountCell } from "./balance-meta";
@@ -72,7 +72,7 @@ function FinanceAdjustModal({
     setSaving(true);
     try {
       if (userIds?.length) {
-        const result = await adjustMockFinanceUsersWallet(
+        const result = await adjustFinanceUsersWallet(
           userIds,
           value,
           reason.trim()
@@ -90,14 +90,14 @@ function FinanceAdjustModal({
       if (!userId) return;
       const result =
         value > 0
-          ? await creditMockFinanceUserWallet(
+          ? await creditFinanceUserWallet(
               userId,
               value.toFixed(6),
               reason.trim()
             )
-          : await debitMockFinanceUserWallet(
+          : await debitFinanceUserWallet(
               userId,
-              Math.abs(value).toFixed(2),
+              Math.abs(value).toFixed(6),
               reason.trim()
             );
       Toast.success(
@@ -214,7 +214,7 @@ function FinanceWithdrawModal({
     }
     setSaving(true);
     try {
-      const result = await withdrawMockFinanceUserWallet(
+      const result = await withdrawFinanceUserWallet(
         user.userId,
         value.toFixed(6),
         note.trim()
@@ -333,7 +333,7 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
 
   const loadBlock = useCallback(
     async (offset: number, limit: number) => {
-      const result = await listMockFinanceUserBalances(
+      const result = await listFinanceUserBalances(
         listFilter,
         offset,
         limit
@@ -568,7 +568,15 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         onDone={(wallet) => {
           updateLoadedItems((items) =>
             items.map((item) =>
-              item.userId === wallet.userId ? wallet : item
+              item.userId === wallet.userId
+                ? {
+                    ...item,
+                    consumerBalance: wallet.consumerBalance,
+                    supplierAvailable: wallet.supplierAvailable,
+                    supplierFrozen: wallet.supplierFrozen,
+                    updatedAt: wallet.updatedAt,
+                  }
+                : item
             )
           );
         }}
@@ -590,7 +598,15 @@ export function BalancesPanel({ tabsArea }: { tabsArea: ReactNode }) {
         onDone={(wallet) => {
           updateLoadedItems((items) =>
             items.map((item) =>
-              item.userId === wallet.userId ? wallet : item
+              item.userId === wallet.userId
+                ? {
+                    ...item,
+                    consumerBalance: wallet.consumerBalance,
+                    supplierAvailable: wallet.supplierAvailable,
+                    supplierFrozen: wallet.supplierFrozen,
+                    updatedAt: wallet.updatedAt,
+                  }
+                : item
             )
           );
         }}

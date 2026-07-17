@@ -35,6 +35,9 @@ type IAMModule struct {
 	PermissionChecker          app.PermissionChecker
 	Hasher                     *infra.Hasher
 	UserRepo                   UserFinder
+	// Users is the concrete repo, exposed for cross-context wiring that needs
+	// the batch user-summary lookups (e.g. billing's wallet directory).
+	Users                      *infra.UserRepo
 	SessionStore               app.SessionStore
 	CaptchaStore               app.CaptchaStore
 	EmailCodeStore             app.EmailCodeStore
@@ -77,6 +80,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		PermissionChecker:          permissionService,
 		Hasher:                     hasher,
 		UserRepo:                   userRepo,
+		Users:                      userRepo,
 		SessionStore:               sessionStore,
 		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,

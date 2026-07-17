@@ -29,18 +29,17 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { useSelectionNotification } from "../resources/use-selection-notification";
 import {
-  FINANCE_USER_GROUP_NAMES,
   FINANCE_USER_ROLES,
-  listMockFinanceInvites,
-  setMockFinanceInviteEnabled,
-  setMockFinanceInvitesEnabled,
-  setMockFinanceInvitesEnabledByFilter,
+  listFinanceInvites,
+  setFinanceInviteEnabled,
+  setFinanceInvitesEnabled,
+  setFinanceInvitesEnabledByFilter,
   type FinanceEnabledFilter,
   type FinanceInvite,
   type FinanceInviteFacets,
   type FinanceOwnerRoleFilter,
   type FinanceUserRole,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 import { InviteDetailSheet } from "./invite-detail-sheet";
 import { InviteAccountCell } from "./invite-meta";
 import {
@@ -71,7 +70,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
   const [debouncedSearch, flushSearch] = useDebouncedValue(searchKeyword);
   const [roleFilter, setRoleFilter] =
     useState<FinanceOwnerRoleFilter>("all");
-  const [groupFilter, setGroupFilter] = useState<string>("all");
+  const [groupFilter, setGroupFilter] = useState<number | "all">("all");
   const [enabledFilter, setEnabledFilter] =
     useState<FinanceEnabledFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
@@ -87,7 +86,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
   >(null);
   const [facets, setFacets] = useState<FinanceInviteFacets>({
     role: { all: 0, user: 0, supplier: 0, admin: 0, super_admin: 0 },
-    group: { all: 0 },
+    group: [],
     enabled: { all: 0, enabled: 0, disabled: 0 },
   });
 
@@ -95,7 +94,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
     () => ({
       search: debouncedSearch.trim() || undefined,
       ownerRole: roleFilter === "all" ? undefined : roleFilter,
-      ownerGroupName: groupFilter === "all" ? undefined : groupFilter,
+      ownerGroupId: groupFilter === "all" ? undefined : groupFilter,
       enabled:
         enabledFilter === "all" ? undefined : enabledFilter === "enabled",
     }),
@@ -104,7 +103,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
 
   const loadBlock = useCallback(
     async (offset: number, limit: number) => {
-      const result = await listMockFinanceInvites(listFilter, offset, limit);
+      const result = await listFinanceInvites(listFilter, offset, limit);
       return {
         items: result.items,
         meta: result.facets,
@@ -137,7 +136,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
     if (!canWrite || !selectedRowKeys.length) return;
     setBulkBusy(enabled ? "enable-sel" : "disable-sel");
     try {
-      const result = await setMockFinanceInvitesEnabled(
+      const result = await setFinanceInvitesEnabled(
         selectedRowKeys.map(String),
         enabled
       );
@@ -174,7 +173,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
       onOk: async () => {
         setBulkBusy(enabled ? "enable-all" : "disable-all");
         try {
-          const result = await setMockFinanceInvitesEnabledByFilter(
+          const result = await setFinanceInvitesEnabledByFilter(
             listFilter,
             enabled
           );
@@ -200,7 +199,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
     if (!canWrite) return;
     setRowBusyCode(record.code);
     try {
-      const updated = await setMockFinanceInviteEnabled(
+      const updated = await setFinanceInviteEnabled(
         record.code,
         !record.enabled
       );
@@ -432,7 +431,7 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
               <div className="mb-2 space-y-1">
                 <StatisticFilterOption
                   active={groupFilter === "all"}
-                  count={facets.group.all ?? 0}
+                  count={facets.role.all}
                   label={t("All")}
                   onSelect={() => {
                     setGroupFilter("all");
@@ -440,17 +439,17 @@ export function InvitesPanel({ tabsArea }: { tabsArea: ReactNode }) {
                   }}
                   value="all"
                 />
-                {FINANCE_USER_GROUP_NAMES.map((group) => (
+                {facets.group.map((group) => (
                   <StatisticFilterOption
-                    active={groupFilter === group}
-                    count={facets.group[group] ?? 0}
-                    key={group}
-                    label={group}
+                    active={groupFilter === group.id}
+                    count={group.count}
+                    key={group.id}
+                    label={group.name}
                     onSelect={() => {
-                      setGroupFilter(group);
+                      setGroupFilter(group.id);
                       setActivePage(1);
                     }}
-                    value={group}
+                    value={String(group.id)}
                   />
                 ))}
               </div>

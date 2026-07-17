@@ -87,6 +87,7 @@ type Transaction struct {
 	BalanceAfter    string
 	BizType         string
 	BizID           string
+	ReversalOfNo    *string
 	IdempotencyKey  string
 	RequestID       string
 	CreatedAt       time.Time
@@ -175,6 +176,36 @@ func NormalizeCardStatus(status string) (CardKeyStatus, bool) {
 		return CardKeyStatusEnabled, true
 	case CardKeyStatusDisabled:
 		return CardKeyStatusDisabled, true
+	default:
+		return "", false
+	}
+}
+
+// OppositeDirection returns the compensating direction for a ledger reversal.
+func OppositeDirection(direction TransactionDirection) TransactionDirection {
+	if direction == TransactionDirectionOut {
+		return TransactionDirectionIn
+	}
+	return TransactionDirectionOut
+}
+
+func NormalizeTransactionType(value string) (TransactionType, bool) {
+	switch TransactionType(strings.ToLower(strings.TrimSpace(value))) {
+	case TransactionTypeRecharge, TransactionTypeDebit, TransactionTypeRefund, TransactionTypeFreeze,
+		TransactionTypeCredit, TransactionTypeWithdrawal, TransactionTypeManualAdjustment,
+		TransactionTypeCardRedeem, TransactionTypeTransfer:
+		return TransactionType(strings.ToLower(strings.TrimSpace(value))), true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeTransactionDirection(value string) (TransactionDirection, bool) {
+	switch TransactionDirection(strings.ToLower(strings.TrimSpace(value))) {
+	case TransactionDirectionIn:
+		return TransactionDirectionIn, true
+	case TransactionDirectionOut:
+		return TransactionDirectionOut, true
 	default:
 		return "", false
 	}

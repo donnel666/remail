@@ -6,7 +6,7 @@ import { semiDesignDark, semiDesignLight } from "@visactor/vchart-semi-theme";
 import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { FinanceSummary } from "./admin-finance-mock";
+import type { FinanceSummary } from "./admin-finance-api";
 import { formatMoney } from "./finance-meta";
 
 export type FinanceAnalysisView = "cashflow" | "structure";

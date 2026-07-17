@@ -12,6 +12,7 @@ type BillingModule struct {
 	WalletUseCase         *billingapp.WalletUseCase
 	OperationLogs         governanceapp.OperationLogPort
 	UserSelectionResolver billingapp.UserSelectionResolver
+	UserDirectory         billingapp.UserDirectory
 }
 
 func NewBillingModule(db *gorm.DB) *BillingModule {
@@ -28,4 +29,12 @@ func NewBillingModule(db *gorm.DB) *BillingModule {
 // implementation lives in the IAM package.
 func (m *BillingModule) SetUserSelectionResolver(r billingapp.UserSelectionResolver) {
 	m.UserSelectionResolver = r
+}
+
+// SetUserDirectory wires the IAM-backed identity source used to enrich finance
+// read models (cards, transactions, wallets) and drive the balances list. Set
+// after construction because the concrete implementation lives in IAM.
+func (m *BillingModule) SetUserDirectory(d billingapp.UserDirectory) {
+	m.UserDirectory = d
+	m.WalletUseCase.SetUserDirectory(d)
 }

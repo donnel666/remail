@@ -895,6 +895,84 @@ func (e AdminTaskStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminTransactionItemBalanceBucket.
+const (
+	AdminTransactionItemBalanceBucketConsumer          AdminTransactionItemBalanceBucket = "consumer"
+	AdminTransactionItemBalanceBucketSupplierAvailable AdminTransactionItemBalanceBucket = "supplier_available"
+	AdminTransactionItemBalanceBucketSupplierFrozen    AdminTransactionItemBalanceBucket = "supplier_frozen"
+)
+
+// Valid indicates whether the value is a known member of the AdminTransactionItemBalanceBucket enum.
+func (e AdminTransactionItemBalanceBucket) Valid() bool {
+	switch e {
+	case AdminTransactionItemBalanceBucketConsumer:
+		return true
+	case AdminTransactionItemBalanceBucketSupplierAvailable:
+		return true
+	case AdminTransactionItemBalanceBucketSupplierFrozen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminTransactionItemDirection.
+const (
+	AdminTransactionItemDirectionIn  AdminTransactionItemDirection = "in"
+	AdminTransactionItemDirectionOut AdminTransactionItemDirection = "out"
+)
+
+// Valid indicates whether the value is a known member of the AdminTransactionItemDirection enum.
+func (e AdminTransactionItemDirection) Valid() bool {
+	switch e {
+	case AdminTransactionItemDirectionIn:
+		return true
+	case AdminTransactionItemDirectionOut:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminTransactionItemTransactionType.
+const (
+	AdminTransactionItemTransactionTypeCardRedeem       AdminTransactionItemTransactionType = "card_redeem"
+	AdminTransactionItemTransactionTypeCredit           AdminTransactionItemTransactionType = "credit"
+	AdminTransactionItemTransactionTypeDebit            AdminTransactionItemTransactionType = "debit"
+	AdminTransactionItemTransactionTypeFreeze           AdminTransactionItemTransactionType = "freeze"
+	AdminTransactionItemTransactionTypeManualAdjustment AdminTransactionItemTransactionType = "manual_adjustment"
+	AdminTransactionItemTransactionTypeRecharge         AdminTransactionItemTransactionType = "recharge"
+	AdminTransactionItemTransactionTypeRefund           AdminTransactionItemTransactionType = "refund"
+	AdminTransactionItemTransactionTypeTransfer         AdminTransactionItemTransactionType = "transfer"
+	AdminTransactionItemTransactionTypeWithdrawal       AdminTransactionItemTransactionType = "withdrawal"
+)
+
+// Valid indicates whether the value is a known member of the AdminTransactionItemTransactionType enum.
+func (e AdminTransactionItemTransactionType) Valid() bool {
+	switch e {
+	case AdminTransactionItemTransactionTypeCardRedeem:
+		return true
+	case AdminTransactionItemTransactionTypeCredit:
+		return true
+	case AdminTransactionItemTransactionTypeDebit:
+		return true
+	case AdminTransactionItemTransactionTypeFreeze:
+		return true
+	case AdminTransactionItemTransactionTypeManualAdjustment:
+		return true
+	case AdminTransactionItemTransactionTypeRecharge:
+		return true
+	case AdminTransactionItemTransactionTypeRefund:
+		return true
+	case AdminTransactionItemTransactionTypeTransfer:
+		return true
+	case AdminTransactionItemTransactionTypeWithdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminUpdateUserRequestRole.
 const (
 	AdminUpdateUserRequestRoleAdmin      AdminUpdateUserRequestRole = "admin"
@@ -1036,6 +1114,66 @@ func (e AllocationItemType) Valid() bool {
 	case AllocationItemTypeDomain:
 		return true
 	case AllocationItemTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CardBulkFilterOwnerRole.
+const (
+	CardBulkFilterOwnerRoleAdmin      CardBulkFilterOwnerRole = "admin"
+	CardBulkFilterOwnerRoleSuperAdmin CardBulkFilterOwnerRole = "super_admin"
+	CardBulkFilterOwnerRoleSupplier   CardBulkFilterOwnerRole = "supplier"
+	CardBulkFilterOwnerRoleUser       CardBulkFilterOwnerRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the CardBulkFilterOwnerRole enum.
+func (e CardBulkFilterOwnerRole) Valid() bool {
+	switch e {
+	case CardBulkFilterOwnerRoleAdmin:
+		return true
+	case CardBulkFilterOwnerRoleSuperAdmin:
+		return true
+	case CardBulkFilterOwnerRoleSupplier:
+		return true
+	case CardBulkFilterOwnerRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CardBulkFilterStatus.
+const (
+	CardBulkFilterStatusDisabled CardBulkFilterStatus = "disabled"
+	CardBulkFilterStatusEnabled  CardBulkFilterStatus = "enabled"
+)
+
+// Valid indicates whether the value is a known member of the CardBulkFilterStatus enum.
+func (e CardBulkFilterStatus) Valid() bool {
+	switch e {
+	case CardBulkFilterStatusDisabled:
+		return true
+	case CardBulkFilterStatusEnabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CardBulkSelectionMode.
+const (
+	CardBulkSelectionModeFilter CardBulkSelectionMode = "filter"
+	CardBulkSelectionModeIds    CardBulkSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the CardBulkSelectionMode enum.
+func (e CardBulkSelectionMode) Valid() bool {
+	switch e {
+	case CardBulkSelectionModeFilter:
+		return true
+	case CardBulkSelectionModeIds:
 		return true
 	default:
 		return false
@@ -1246,6 +1384,87 @@ func (e ImportStatusResponseStatus) Valid() bool {
 	case ImportStatusResponseStatusImported:
 		return true
 	case ImportStatusResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InviteBulkFilterKind.
+const (
+	InviteBulkFilterKindAdmin    InviteBulkFilterKind = "admin"
+	InviteBulkFilterKindAll      InviteBulkFilterKind = "all"
+	InviteBulkFilterKindReferral InviteBulkFilterKind = "referral"
+)
+
+// Valid indicates whether the value is a known member of the InviteBulkFilterKind enum.
+func (e InviteBulkFilterKind) Valid() bool {
+	switch e {
+	case InviteBulkFilterKindAdmin:
+		return true
+	case InviteBulkFilterKindAll:
+		return true
+	case InviteBulkFilterKindReferral:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InviteBulkFilterOwnerRole.
+const (
+	InviteBulkFilterOwnerRoleAdmin      InviteBulkFilterOwnerRole = "admin"
+	InviteBulkFilterOwnerRoleSuperAdmin InviteBulkFilterOwnerRole = "super_admin"
+	InviteBulkFilterOwnerRoleSupplier   InviteBulkFilterOwnerRole = "supplier"
+	InviteBulkFilterOwnerRoleUser       InviteBulkFilterOwnerRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the InviteBulkFilterOwnerRole enum.
+func (e InviteBulkFilterOwnerRole) Valid() bool {
+	switch e {
+	case InviteBulkFilterOwnerRoleAdmin:
+		return true
+	case InviteBulkFilterOwnerRoleSuperAdmin:
+		return true
+	case InviteBulkFilterOwnerRoleSupplier:
+		return true
+	case InviteBulkFilterOwnerRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InviteBulkSelectionMode.
+const (
+	InviteBulkSelectionModeFilter InviteBulkSelectionMode = "filter"
+	InviteBulkSelectionModeIds    InviteBulkSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the InviteBulkSelectionMode enum.
+func (e InviteBulkSelectionMode) Valid() bool {
+	switch e {
+	case InviteBulkSelectionModeFilter:
+		return true
+	case InviteBulkSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InviteResponseKind.
+const (
+	InviteResponseKindAdmin    InviteResponseKind = "admin"
+	InviteResponseKindReferral InviteResponseKind = "referral"
+)
+
+// Valid indicates whether the value is a known member of the InviteResponseKind enum.
+func (e InviteResponseKind) Valid() bool {
+	switch e {
+	case InviteResponseKindAdmin:
+		return true
+	case InviteResponseKindReferral:
 		return true
 	default:
 		return false
@@ -2070,19 +2289,19 @@ func (e SupplierApplicationResponseStatus) Valid() bool {
 
 // Defines values for TransactionItemBalanceBucket.
 const (
-	Consumer          TransactionItemBalanceBucket = "consumer"
-	SupplierAvailable TransactionItemBalanceBucket = "supplier_available"
-	SupplierFrozen    TransactionItemBalanceBucket = "supplier_frozen"
+	TransactionItemBalanceBucketConsumer          TransactionItemBalanceBucket = "consumer"
+	TransactionItemBalanceBucketSupplierAvailable TransactionItemBalanceBucket = "supplier_available"
+	TransactionItemBalanceBucketSupplierFrozen    TransactionItemBalanceBucket = "supplier_frozen"
 )
 
 // Valid indicates whether the value is a known member of the TransactionItemBalanceBucket enum.
 func (e TransactionItemBalanceBucket) Valid() bool {
 	switch e {
-	case Consumer:
+	case TransactionItemBalanceBucketConsumer:
 		return true
-	case SupplierAvailable:
+	case TransactionItemBalanceBucketSupplierAvailable:
 		return true
-	case SupplierFrozen:
+	case TransactionItemBalanceBucketSupplierFrozen:
 		return true
 	default:
 		return false
@@ -2091,16 +2310,16 @@ func (e TransactionItemBalanceBucket) Valid() bool {
 
 // Defines values for TransactionItemDirection.
 const (
-	In  TransactionItemDirection = "in"
-	Out TransactionItemDirection = "out"
+	TransactionItemDirectionIn  TransactionItemDirection = "in"
+	TransactionItemDirectionOut TransactionItemDirection = "out"
 )
 
 // Valid indicates whether the value is a known member of the TransactionItemDirection enum.
 func (e TransactionItemDirection) Valid() bool {
 	switch e {
-	case In:
+	case TransactionItemDirectionIn:
 		return true
-	case Out:
+	case TransactionItemDirectionOut:
 		return true
 	default:
 		return false
@@ -2109,37 +2328,37 @@ func (e TransactionItemDirection) Valid() bool {
 
 // Defines values for TransactionItemTransactionType.
 const (
-	CardRedeem       TransactionItemTransactionType = "card_redeem"
-	Credit           TransactionItemTransactionType = "credit"
-	Debit            TransactionItemTransactionType = "debit"
-	Freeze           TransactionItemTransactionType = "freeze"
-	ManualAdjustment TransactionItemTransactionType = "manual_adjustment"
-	Recharge         TransactionItemTransactionType = "recharge"
-	Refund           TransactionItemTransactionType = "refund"
-	Transfer         TransactionItemTransactionType = "transfer"
-	Withdrawal       TransactionItemTransactionType = "withdrawal"
+	TransactionItemTransactionTypeCardRedeem       TransactionItemTransactionType = "card_redeem"
+	TransactionItemTransactionTypeCredit           TransactionItemTransactionType = "credit"
+	TransactionItemTransactionTypeDebit            TransactionItemTransactionType = "debit"
+	TransactionItemTransactionTypeFreeze           TransactionItemTransactionType = "freeze"
+	TransactionItemTransactionTypeManualAdjustment TransactionItemTransactionType = "manual_adjustment"
+	TransactionItemTransactionTypeRecharge         TransactionItemTransactionType = "recharge"
+	TransactionItemTransactionTypeRefund           TransactionItemTransactionType = "refund"
+	TransactionItemTransactionTypeTransfer         TransactionItemTransactionType = "transfer"
+	TransactionItemTransactionTypeWithdrawal       TransactionItemTransactionType = "withdrawal"
 )
 
 // Valid indicates whether the value is a known member of the TransactionItemTransactionType enum.
 func (e TransactionItemTransactionType) Valid() bool {
 	switch e {
-	case CardRedeem:
+	case TransactionItemTransactionTypeCardRedeem:
 		return true
-	case Credit:
+	case TransactionItemTransactionTypeCredit:
 		return true
-	case Debit:
+	case TransactionItemTransactionTypeDebit:
 		return true
-	case Freeze:
+	case TransactionItemTransactionTypeFreeze:
 		return true
-	case ManualAdjustment:
+	case TransactionItemTransactionTypeManualAdjustment:
 		return true
-	case Recharge:
+	case TransactionItemTransactionTypeRecharge:
 		return true
-	case Refund:
+	case TransactionItemTransactionTypeRefund:
 		return true
-	case Transfer:
+	case TransactionItemTransactionTypeTransfer:
 		return true
-	case Withdrawal:
+	case TransactionItemTransactionTypeWithdrawal:
 		return true
 	default:
 		return false
@@ -2305,6 +2524,30 @@ func (e GetAdminCardsParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminCardsParamsOwnerRole.
+const (
+	GetAdminCardsParamsOwnerRoleAdmin      GetAdminCardsParamsOwnerRole = "admin"
+	GetAdminCardsParamsOwnerRoleSuperAdmin GetAdminCardsParamsOwnerRole = "super_admin"
+	GetAdminCardsParamsOwnerRoleSupplier   GetAdminCardsParamsOwnerRole = "supplier"
+	GetAdminCardsParamsOwnerRoleUser       GetAdminCardsParamsOwnerRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminCardsParamsOwnerRole enum.
+func (e GetAdminCardsParamsOwnerRole) Valid() bool {
+	switch e {
+	case GetAdminCardsParamsOwnerRoleAdmin:
+		return true
+	case GetAdminCardsParamsOwnerRoleSuperAdmin:
+		return true
+	case GetAdminCardsParamsOwnerRoleSupplier:
+		return true
+	case GetAdminCardsParamsOwnerRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminDomainsParamsPurpose.
 const (
 	GetAdminDomainsParamsPurposeBinding GetAdminDomainsParamsPurpose = "binding"
@@ -2350,6 +2593,51 @@ func (e GetAdminDomainsParamsStatus) Valid() bool {
 	case GetAdminDomainsParamsStatusPending:
 		return true
 	case GetAdminDomainsParamsStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminInvitesParamsKind.
+const (
+	GetAdminInvitesParamsKindAdmin    GetAdminInvitesParamsKind = "admin"
+	GetAdminInvitesParamsKindAll      GetAdminInvitesParamsKind = "all"
+	GetAdminInvitesParamsKindReferral GetAdminInvitesParamsKind = "referral"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminInvitesParamsKind enum.
+func (e GetAdminInvitesParamsKind) Valid() bool {
+	switch e {
+	case GetAdminInvitesParamsKindAdmin:
+		return true
+	case GetAdminInvitesParamsKindAll:
+		return true
+	case GetAdminInvitesParamsKindReferral:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminInvitesParamsOwnerRole.
+const (
+	GetAdminInvitesParamsOwnerRoleAdmin      GetAdminInvitesParamsOwnerRole = "admin"
+	GetAdminInvitesParamsOwnerRoleSuperAdmin GetAdminInvitesParamsOwnerRole = "super_admin"
+	GetAdminInvitesParamsOwnerRoleSupplier   GetAdminInvitesParamsOwnerRole = "supplier"
+	GetAdminInvitesParamsOwnerRoleUser       GetAdminInvitesParamsOwnerRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminInvitesParamsOwnerRole enum.
+func (e GetAdminInvitesParamsOwnerRole) Valid() bool {
+	switch e {
+	case GetAdminInvitesParamsOwnerRoleAdmin:
+		return true
+	case GetAdminInvitesParamsOwnerRoleSuperAdmin:
+		return true
+	case GetAdminInvitesParamsOwnerRoleSupplier:
+		return true
+	case GetAdminInvitesParamsOwnerRoleUser:
 		return true
 	default:
 		return false
@@ -2481,16 +2769,16 @@ func (e GetAdminProxyBindingsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsPool.
 const (
-	Resource GetAdminProxyStatsParamsPool = "resource"
-	System   GetAdminProxyStatsParamsPool = "system"
+	GetAdminProxyStatsParamsPoolResource GetAdminProxyStatsParamsPool = "resource"
+	GetAdminProxyStatsParamsPoolSystem   GetAdminProxyStatsParamsPool = "system"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsPool enum.
 func (e GetAdminProxyStatsParamsPool) Valid() bool {
 	switch e {
-	case Resource:
+	case GetAdminProxyStatsParamsPoolResource:
 		return true
-	case System:
+	case GetAdminProxyStatsParamsPoolSystem:
 		return true
 	default:
 		return false
@@ -2520,25 +2808,25 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
 		return true
 	default:
 		return false
@@ -2608,6 +2896,63 @@ func (e GetAdminTasksParamsBizType) Valid() bool {
 	case GetAdminTasksParamsBizTypeDomainResource:
 		return true
 	case GetAdminTasksParamsBizTypeMicrosoftResource:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminTransactionsParamsType.
+const (
+	CardRedeem       GetAdminTransactionsParamsType = "card_redeem"
+	Credit           GetAdminTransactionsParamsType = "credit"
+	Debit            GetAdminTransactionsParamsType = "debit"
+	Freeze           GetAdminTransactionsParamsType = "freeze"
+	ManualAdjustment GetAdminTransactionsParamsType = "manual_adjustment"
+	Recharge         GetAdminTransactionsParamsType = "recharge"
+	Refund           GetAdminTransactionsParamsType = "refund"
+	Transfer         GetAdminTransactionsParamsType = "transfer"
+	Withdrawal       GetAdminTransactionsParamsType = "withdrawal"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTransactionsParamsType enum.
+func (e GetAdminTransactionsParamsType) Valid() bool {
+	switch e {
+	case CardRedeem:
+		return true
+	case Credit:
+		return true
+	case Debit:
+		return true
+	case Freeze:
+		return true
+	case ManualAdjustment:
+		return true
+	case Recharge:
+		return true
+	case Refund:
+		return true
+	case Transfer:
+		return true
+	case Withdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminTransactionsParamsDirection.
+const (
+	In  GetAdminTransactionsParamsDirection = "in"
+	Out GetAdminTransactionsParamsDirection = "out"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminTransactionsParamsDirection enum.
+func (e GetAdminTransactionsParamsDirection) Valid() bool {
+	switch e {
+	case In:
+		return true
+	case Out:
 		return true
 	default:
 		return false
@@ -3112,6 +3457,21 @@ type AdminAuxiliaryMessageSummary struct {
 // AdminAuxiliaryMessageSummaryStatus defines model for AdminAuxiliaryMessageSummary.Status.
 type AdminAuxiliaryMessageSummaryStatus string
 
+// AdminBatchCreateInviteRequest defines model for AdminBatchCreateInviteRequest.
+type AdminBatchCreateInviteRequest struct {
+	Count    int        `json:"count"`
+	Enabled  *bool      `json:"enabled,omitempty"`
+	ExpireAt *time.Time `json:"expireAt,omitempty"`
+	MaxUse   int        `json:"maxUse"`
+	Prefix   *string    `json:"prefix,omitempty"`
+}
+
+// AdminBatchCreateInviteResponse defines model for AdminBatchCreateInviteResponse.
+type AdminBatchCreateInviteResponse struct {
+	Created int              `json:"created"`
+	Items   []InviteResponse `json:"items"`
+}
+
 // AdminBindingMessageListResponse defines model for AdminBindingMessageListResponse.
 type AdminBindingMessageListResponse struct {
 	Binding *AdminBindingSummary           `json:"binding"`
@@ -3149,9 +3509,27 @@ type AdminBulkAdjustWalletRequest struct {
 	Selection AdminUserBulkSelection `json:"selection"`
 }
 
+// AdminBulkResponse defines model for AdminBulkResponse.
+type AdminBulkResponse struct {
+	Affected  int `json:"affected"`
+	Requested int `json:"requested"`
+	Skipped   int `json:"skipped"`
+}
+
+// AdminCardBulkRequest defines model for AdminCardBulkRequest.
+type AdminCardBulkRequest struct {
+	Selection CardBulkSelection `json:"selection"`
+}
+
+// AdminCardRedemptionsResponse defines model for AdminCardRedemptionsResponse.
+type AdminCardRedemptionsResponse struct {
+	Redemptions []CardRedemptionResponse `json:"redemptions"`
+}
+
 // AdminCreateInviteRequest defines model for AdminCreateInviteRequest.
 type AdminCreateInviteRequest struct {
-	Code     string     `json:"code"`
+	// Code Invite code. When omitted or empty the server generates a unique code.
+	Code     *string    `json:"code,omitempty"`
 	Enabled  *bool      `json:"enabled,omitempty"`
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	MaxUse   int        `json:"maxUse"`
@@ -3317,6 +3695,16 @@ type AdminDomainListResponse struct {
 // AdminDomainValidationResponse defines model for AdminDomainValidationResponse.
 type AdminDomainValidationResponse struct {
 	Queued int `json:"queued"`
+}
+
+// AdminInviteBulkRequest defines model for AdminInviteBulkRequest.
+type AdminInviteBulkRequest struct {
+	Selection InviteBulkSelection `json:"selection"`
+}
+
+// AdminInviteUsesResponse defines model for AdminInviteUsesResponse.
+type AdminInviteUsesResponse struct {
+	Uses []InviteUseResponse `json:"uses"`
 }
 
 // AdminMailServerItem defines model for AdminMailServerItem.
@@ -3831,6 +4219,12 @@ type AdminRejectSupplierApplicationRequest struct {
 	ReviewReason string `json:"reviewReason"`
 }
 
+// AdminReverseTransactionResponse defines model for AdminReverseTransactionResponse.
+type AdminReverseTransactionResponse struct {
+	Original AdminTransactionItem `json:"original"`
+	Reversal AdminTransactionItem `json:"reversal"`
+}
+
 // AdminTaskAcceptedResponse defines model for AdminTaskAcceptedResponse.
 type AdminTaskAcceptedResponse struct {
 	// Accepted Safely displayable accepted count. A filter batch may report zero until expansion.
@@ -3908,9 +4302,56 @@ type AdminTaskView struct {
 	UpdatedAt          time.Time          `json:"updatedAt"`
 }
 
+// AdminTransactionItem defines model for AdminTransactionItem.
+type AdminTransactionItem struct {
+	// Amount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
+	Amount LedgerAmount `json:"amount"`
+
+	// BalanceAfter Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BalanceAfter NonNegativeLedgerAmount `json:"balanceAfter"`
+
+	// BalanceBefore Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	BalanceBefore   NonNegativeLedgerAmount             `json:"balanceBefore"`
+	BalanceBucket   AdminTransactionItemBalanceBucket   `json:"balanceBucket"`
+	BizId           string                              `json:"bizId"`
+	BizType         string                              `json:"bizType"`
+	CreatedAt       time.Time                           `json:"createdAt"`
+	Direction       AdminTransactionItemDirection       `json:"direction"`
+	Id              int                                 `json:"id"`
+	ReversalOfNo    *string                             `json:"reversalOfNo,omitempty"`
+	Reversed        bool                                `json:"reversed"`
+	ReversedByNo    *string                             `json:"reversedByNo,omitempty"`
+	TransactionNo   string                              `json:"transactionNo"`
+	TransactionType AdminTransactionItemTransactionType `json:"transactionType"`
+	UserEmail       string                              `json:"userEmail"`
+	UserGroupName   string                              `json:"userGroupName"`
+	UserId          int                                 `json:"userId"`
+	UserNickname    string                              `json:"userNickname"`
+	UserRole        string                              `json:"userRole"`
+}
+
+// AdminTransactionItemBalanceBucket defines model for AdminTransactionItem.BalanceBucket.
+type AdminTransactionItemBalanceBucket string
+
+// AdminTransactionItemDirection defines model for AdminTransactionItem.Direction.
+type AdminTransactionItemDirection string
+
+// AdminTransactionItemTransactionType defines model for AdminTransactionItem.TransactionType.
+type AdminTransactionItemTransactionType string
+
+// AdminTransactionListResponse defines model for AdminTransactionListResponse.
+type AdminTransactionListResponse struct {
+	Items  []AdminTransactionItem `json:"items"`
+	Limit  int                    `json:"limit"`
+	Offset int                    `json:"offset"`
+	Total  int                    `json:"total"`
+}
+
 // AdminUpdateInviteRequest defines model for AdminUpdateInviteRequest.
 type AdminUpdateInviteRequest struct {
-	Enabled  *bool      `json:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// ExpireAt Set to null to clear the expiry; omit to leave unchanged.
 	ExpireAt *time.Time `json:"expireAt,omitempty"`
 	MaxUse   *int       `json:"maxUse,omitempty"`
 }
@@ -4022,6 +4463,39 @@ type AdminWalletBalanceList struct {
 	} `json:"balances"`
 }
 
+// AdminWalletItem defines model for AdminWalletItem.
+type AdminWalletItem struct {
+	// ConsumerBalance Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	ConsumerBalance NonNegativeLedgerAmount `json:"consumerBalance"`
+
+	// SupplierAvailable Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	SupplierAvailable NonNegativeLedgerAmount `json:"supplierAvailable"`
+
+	// SupplierFrozen Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	SupplierFrozen NonNegativeLedgerAmount `json:"supplierFrozen"`
+	UpdatedAt      *time.Time              `json:"updatedAt"`
+	UserEmail      string                  `json:"userEmail"`
+	UserGroupName  string                  `json:"userGroupName"`
+	UserId         int                     `json:"userId"`
+	UserNickname   string                  `json:"userNickname"`
+	UserRole       string                  `json:"userRole"`
+}
+
+// AdminWalletListResponse defines model for AdminWalletListResponse.
+type AdminWalletListResponse struct {
+	Items  []AdminWalletItem `json:"items"`
+	Limit  int               `json:"limit"`
+	Offset int               `json:"offset"`
+	Total  int               `json:"total"`
+}
+
+// AdminWithdrawWalletRequest defines model for AdminWithdrawWalletRequest.
+type AdminWithdrawWalletRequest struct {
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount NonNegativeLedgerAmount `json:"amount"`
+	Note   *string                 `json:"note,omitempty"`
+}
+
 // AllocationItem defines model for AllocationItem.
 type AllocationItem struct {
 	CreatedAt   time.Time                 `json:"createdAt"`
@@ -4059,6 +4533,30 @@ type CaptchaResponse struct {
 	Image string `json:"image"`
 }
 
+// CardBulkFilter defines model for CardBulkFilter.
+type CardBulkFilter struct {
+	OwnerGroupId *int                     `json:"ownerGroupId,omitempty"`
+	OwnerRole    *CardBulkFilterOwnerRole `json:"ownerRole,omitempty"`
+	Search       *string                  `json:"search,omitempty"`
+	Status       *CardBulkFilterStatus    `json:"status,omitempty"`
+}
+
+// CardBulkFilterOwnerRole defines model for CardBulkFilter.OwnerRole.
+type CardBulkFilterOwnerRole string
+
+// CardBulkFilterStatus defines model for CardBulkFilter.Status.
+type CardBulkFilterStatus string
+
+// CardBulkSelection defines model for CardBulkSelection.
+type CardBulkSelection struct {
+	CardKeys *[]string             `json:"cardKeys,omitempty"`
+	Filter   *CardBulkFilter       `json:"filter,omitempty"`
+	Mode     CardBulkSelectionMode `json:"mode"`
+}
+
+// CardBulkSelectionMode defines model for CardBulkSelection.Mode.
+type CardBulkSelectionMode string
+
 // CardKey defines model for CardKey.
 type CardKey struct {
 	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
@@ -4068,6 +4566,12 @@ type CardKey struct {
 	CreatedByUserId *int                    `json:"createdByUserId,omitempty"`
 	ExpireAt        *time.Time              `json:"expireAt"`
 	MaxRedemptions  int                     `json:"maxRedemptions"`
+	OwnerEmail      *string                 `json:"ownerEmail,omitempty"`
+	OwnerGroupId    *int                    `json:"ownerGroupId,omitempty"`
+	OwnerGroupName  *string                 `json:"ownerGroupName,omitempty"`
+	OwnerNickname   *string                 `json:"ownerNickname,omitempty"`
+	OwnerRole       *string                 `json:"ownerRole,omitempty"`
+	OwnerUserId     *int                    `json:"ownerUserId,omitempty"`
 	RedeemedCount   int                     `json:"redeemedCount"`
 	Status          CardKeyStatus           `json:"status"`
 	UpdatedAt       time.Time               `json:"updatedAt"`
@@ -4076,12 +4580,48 @@ type CardKey struct {
 // CardKeyStatus defines model for CardKey.Status.
 type CardKeyStatus string
 
+// CardKeyFacets defines model for CardKeyFacets.
+type CardKeyFacets struct {
+	Group []struct {
+		Count int    `json:"count"`
+		Id    int    `json:"id"`
+		Name  string `json:"name"`
+	} `json:"group"`
+	Role struct {
+		Admin      int `json:"admin"`
+		All        int `json:"all"`
+		SuperAdmin int `json:"super_admin"`
+		Supplier   int `json:"supplier"`
+		User       int `json:"user"`
+	} `json:"role"`
+	Status struct {
+		All      int `json:"all"`
+		Disabled int `json:"disabled"`
+		Enabled  int `json:"enabled"`
+	} `json:"status"`
+}
+
 // CardKeyListResponse defines model for CardKeyListResponse.
 type CardKeyListResponse struct {
-	Items  []CardKey `json:"items"`
-	Limit  int       `json:"limit"`
-	Offset int       `json:"offset"`
-	Total  int       `json:"total"`
+	Facets CardKeyFacets `json:"facets"`
+	Items  []CardKey     `json:"items"`
+	Limit  int           `json:"limit"`
+	Offset int           `json:"offset"`
+	Total  int           `json:"total"`
+}
+
+// CardRedemptionResponse defines model for CardRedemptionResponse.
+type CardRedemptionResponse struct {
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount        NonNegativeLedgerAmount `json:"amount"`
+	CardKey       string                  `json:"cardKey"`
+	Id            int                     `json:"id"`
+	RedeemedAt    time.Time               `json:"redeemedAt"`
+	UserEmail     string                  `json:"userEmail"`
+	UserGroupName string                  `json:"userGroupName"`
+	UserId        int                     `json:"userId"`
+	UserNickname  string                  `json:"userNickname"`
+	UserRole      string                  `json:"userRole"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -4359,6 +4899,49 @@ type FetchStateResponse struct {
 	NextFetchAllowedAt *time.Time `json:"nextFetchAllowedAt,omitempty"`
 }
 
+// FinanceHotItem defines model for FinanceHotItem.
+type FinanceHotItem struct {
+	// Amount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	Amount NonNegativeLedgerAmount `json:"amount"`
+	Count  int                     `json:"count"`
+	Name   string                  `json:"name"`
+}
+
+// FinanceSummaryResponse defines model for FinanceSummaryResponse.
+type FinanceSummaryResponse struct {
+	// AccountRevenue Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	AccountRevenue NonNegativeLedgerAmount `json:"accountRevenue"`
+	HotProducts    []FinanceHotItem        `json:"hotProducts"`
+	HotProjects    []FinanceHotItem        `json:"hotProjects"`
+
+	// PlatformRevenue Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	PlatformRevenue NonNegativeLedgerAmount `json:"platformRevenue"`
+
+	// RechargeAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RechargeAmount NonNegativeLedgerAmount `json:"rechargeAmount"`
+
+	// RefundAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	RefundAmount NonNegativeLedgerAmount `json:"refundAmount"`
+
+	// SpendAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	SpendAmount NonNegativeLedgerAmount `json:"spendAmount"`
+	Trend       []FinanceTrendPoint     `json:"trend"`
+
+	// WithdrawAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	WithdrawAmount NonNegativeLedgerAmount `json:"withdrawAmount"`
+}
+
+// FinanceTrendPoint defines model for FinanceTrendPoint.
+type FinanceTrendPoint struct {
+	AccountRevenue  float32 `json:"accountRevenue"`
+	Label           string  `json:"label"`
+	PlatformRevenue float32 `json:"platformRevenue"`
+	Recharge        float32 `json:"recharge"`
+	Refund          float32 `json:"refund"`
+	Spend           float32 `json:"spend"`
+	Withdraw        float32 `json:"withdraw"`
+}
+
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
 	UserId int `json:"userId"`
@@ -4407,8 +4990,55 @@ type ImportStatusResponse struct {
 // ImportStatusResponseStatus defines model for ImportStatusResponse.Status.
 type ImportStatusResponseStatus string
 
+// InviteBulkFilter defines model for InviteBulkFilter.
+type InviteBulkFilter struct {
+	Enabled      *bool                      `json:"enabled,omitempty"`
+	Kind         *InviteBulkFilterKind      `json:"kind,omitempty"`
+	OwnerGroupId *int                       `json:"ownerGroupId,omitempty"`
+	OwnerRole    *InviteBulkFilterOwnerRole `json:"ownerRole,omitempty"`
+	Search       *string                    `json:"search,omitempty"`
+}
+
+// InviteBulkFilterKind defines model for InviteBulkFilter.Kind.
+type InviteBulkFilterKind string
+
+// InviteBulkFilterOwnerRole defines model for InviteBulkFilter.OwnerRole.
+type InviteBulkFilterOwnerRole string
+
+// InviteBulkSelection defines model for InviteBulkSelection.
+type InviteBulkSelection struct {
+	Codes  *[]string               `json:"codes,omitempty"`
+	Filter *InviteBulkFilter       `json:"filter,omitempty"`
+	Mode   InviteBulkSelectionMode `json:"mode"`
+}
+
+// InviteBulkSelectionMode defines model for InviteBulkSelection.Mode.
+type InviteBulkSelectionMode string
+
+// InviteFacets defines model for InviteFacets.
+type InviteFacets struct {
+	Enabled struct {
+		All      int `json:"all"`
+		Disabled int `json:"disabled"`
+		Enabled  int `json:"enabled"`
+	} `json:"enabled"`
+	Group []struct {
+		Count int    `json:"count"`
+		Id    int    `json:"id"`
+		Name  string `json:"name"`
+	} `json:"group"`
+	Role struct {
+		Admin      int `json:"admin"`
+		All        int `json:"all"`
+		SuperAdmin int `json:"super_admin"`
+		Supplier   int `json:"supplier"`
+		User       int `json:"user"`
+	} `json:"role"`
+}
+
 // InviteListResponse defines model for InviteListResponse.
 type InviteListResponse struct {
+	Facets  InviteFacets     `json:"facets"`
 	Invites []InviteResponse `json:"invites"`
 	Limit   int              `json:"limit"`
 	Offset  int              `json:"offset"`
@@ -4417,13 +5047,35 @@ type InviteListResponse struct {
 
 // InviteResponse defines model for InviteResponse.
 type InviteResponse struct {
-	Code      string     `json:"code"`
-	CreatedAt time.Time  `json:"createdAt"`
-	Enabled   bool       `json:"enabled"`
-	ExpireAt  *time.Time `json:"expireAt,omitempty"`
-	MaxUse    int        `json:"maxUse"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	Used      int        `json:"used"`
+	Code           string             `json:"code"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	Enabled        bool               `json:"enabled"`
+	ExpireAt       *time.Time         `json:"expireAt,omitempty"`
+	Kind           InviteResponseKind `json:"kind"`
+	MaxUse         int                `json:"maxUse"`
+	OwnerEmail     *string            `json:"ownerEmail,omitempty"`
+	OwnerGroupId   *int               `json:"ownerGroupId,omitempty"`
+	OwnerGroupName *string            `json:"ownerGroupName,omitempty"`
+	OwnerNickname  *string            `json:"ownerNickname,omitempty"`
+	OwnerRole      *string            `json:"ownerRole,omitempty"`
+	OwnerUserId    *int               `json:"ownerUserId,omitempty"`
+	UpdatedAt      time.Time          `json:"updatedAt"`
+	Used           int                `json:"used"`
+}
+
+// InviteResponseKind defines model for InviteResponse.Kind.
+type InviteResponseKind string
+
+// InviteUseResponse defines model for InviteUseResponse.
+type InviteUseResponse struct {
+	Id            int       `json:"id"`
+	InviteCode    string    `json:"inviteCode"`
+	UsedAt        time.Time `json:"usedAt"`
+	UserEmail     string    `json:"userEmail"`
+	UserGroupName string    `json:"userGroupName"`
+	UserId        int       `json:"userId"`
+	UserNickname  string    `json:"userNickname"`
+	UserRole      string    `json:"userRole"`
 }
 
 // LedgerAmount Signed internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the absolute value must fit DECIMAL(18,6).
@@ -5470,8 +6122,9 @@ type TransactionListResponse struct {
 
 // UpdateCardRequest defines model for UpdateCardRequest.
 type UpdateCardRequest struct {
-	ExpireAt *time.Time               `json:"expireAt,omitempty"`
-	Status   *UpdateCardRequestStatus `json:"status,omitempty"`
+	ExpireAt       *time.Time               `json:"expireAt,omitempty"`
+	MaxRedemptions *int                     `json:"maxRedemptions,omitempty"`
+	Status         *UpdateCardRequestStatus `json:"status,omitempty"`
 }
 
 // UpdateCardRequestStatus defines model for UpdateCardRequest.Status.
@@ -5677,14 +6330,19 @@ type GetAdminBindingMessageParams struct {
 
 // GetAdminCardsParams defines parameters for GetAdminCards.
 type GetAdminCardsParams struct {
-	Search *string                    `form:"search,omitempty" json:"search,omitempty"`
-	Status *GetAdminCardsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	Offset *int                       `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+	Search       *string                       `form:"search,omitempty" json:"search,omitempty"`
+	Status       *GetAdminCardsParamsStatus    `form:"status,omitempty" json:"status,omitempty"`
+	OwnerRole    *GetAdminCardsParamsOwnerRole `form:"ownerRole,omitempty" json:"ownerRole,omitempty"`
+	OwnerGroupId *int                          `form:"ownerGroupId,omitempty" json:"ownerGroupId,omitempty"`
+	Offset       *int                          `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit        *int                          `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetAdminCardsParamsStatus defines parameters for GetAdminCards.
 type GetAdminCardsParamsStatus string
+
+// GetAdminCardsParamsOwnerRole defines parameters for GetAdminCards.
+type GetAdminCardsParamsOwnerRole string
 
 // PostAdminCardsParams defines parameters for PostAdminCards.
 type PostAdminCardsParams struct {
@@ -5693,6 +6351,18 @@ type PostAdminCardsParams struct {
 
 	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminCardsDisableParams defines parameters for PostAdminCardsDisable.
+type PostAdminCardsDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminCardsEnableParams defines parameters for PostAdminCardsEnable.
+type PostAdminCardsEnableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PatchAdminCardParams defines parameters for PatchAdminCard.
@@ -5897,14 +6567,49 @@ type PostAdminDomainValidateParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// GetAdminFinanceSummaryParams defines parameters for GetAdminFinanceSummary.
+type GetAdminFinanceSummaryParams struct {
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
 // GetAdminInvitesParams defines parameters for GetAdminInvites.
 type GetAdminInvitesParams struct {
-	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+	Search       *string                         `form:"search,omitempty" json:"search,omitempty"`
+	Kind         *GetAdminInvitesParamsKind      `form:"kind,omitempty" json:"kind,omitempty"`
+	OwnerRole    *GetAdminInvitesParamsOwnerRole `form:"ownerRole,omitempty" json:"ownerRole,omitempty"`
+	OwnerGroupId *int                            `form:"ownerGroupId,omitempty" json:"ownerGroupId,omitempty"`
+	Enabled      *bool                           `form:"enabled,omitempty" json:"enabled,omitempty"`
+	Offset       *int                            `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit        *int                            `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetAdminInvitesParamsKind defines parameters for GetAdminInvites.
+type GetAdminInvitesParamsKind string
+
+// GetAdminInvitesParamsOwnerRole defines parameters for GetAdminInvites.
+type GetAdminInvitesParamsOwnerRole string
 
 // PostAdminInviteParams defines parameters for PostAdminInvite.
 type PostAdminInviteParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminInvitesBatchParams defines parameters for PostAdminInvitesBatch.
+type PostAdminInvitesBatchParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminInvitesDisableParams defines parameters for PostAdminInvitesDisable.
+type PostAdminInvitesDisableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminInvitesEnableParams defines parameters for PostAdminInvitesEnable.
+type PostAdminInvitesEnableParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
@@ -6485,6 +7190,32 @@ type GetAdminTasksParams struct {
 // GetAdminTasksParamsBizType defines parameters for GetAdminTasks.
 type GetAdminTasksParamsBizType string
 
+// GetAdminTransactionsParams defines parameters for GetAdminTransactions.
+type GetAdminTransactionsParams struct {
+	Offset      *int                                 `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit       *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
+	Search      *string                              `form:"search,omitempty" json:"search,omitempty"`
+	Type        *GetAdminTransactionsParamsType      `form:"type,omitempty" json:"type,omitempty"`
+	Direction   *GetAdminTransactionsParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
+	CreatedFrom *time.Time                           `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                           `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
+// GetAdminTransactionsParamsType defines parameters for GetAdminTransactions.
+type GetAdminTransactionsParamsType string
+
+// GetAdminTransactionsParamsDirection defines parameters for GetAdminTransactions.
+type GetAdminTransactionsParamsDirection string
+
+// PostAdminTransactionReverseParams defines parameters for PostAdminTransactionReverse.
+type PostAdminTransactionReverseParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
 // GetAdminUsersParams defines parameters for GetAdminUsers.
 type GetAdminUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -6583,6 +7314,13 @@ type PostAdminRevokeSessionsParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminWalletsParams defines parameters for GetAdminWallets.
+type GetAdminWalletsParams struct {
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+}
+
 // PostAdminWalletBulkAdjustParams defines parameters for PostAdminWalletBulkAdjust.
 type PostAdminWalletBulkAdjustParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -6618,6 +7356,15 @@ type GetAdminWalletTransactionsParams struct {
 	Search  *string `form:"search,omitempty" json:"search,omitempty"`
 	AfterId *int    `form:"afterId,omitempty" json:"afterId,omitempty"`
 	Limit   *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminWalletWithdrawParams defines parameters for PostAdminWalletWithdraw.
+type PostAdminWalletWithdrawParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Required for administrator commands that create durable facts. Reusing the key with a different normalized request returns 409.
+	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
 // GetApiKeysParams defines parameters for GetApiKeys.
@@ -6964,6 +7711,12 @@ type PostActivationJSONRequestBody = ActivationRequest
 // PostAdminCardsJSONRequestBody defines body for PostAdminCards for application/json ContentType.
 type PostAdminCardsJSONRequestBody = CreateCardsRequest
 
+// PostAdminCardsDisableJSONRequestBody defines body for PostAdminCardsDisable for application/json ContentType.
+type PostAdminCardsDisableJSONRequestBody = AdminCardBulkRequest
+
+// PostAdminCardsEnableJSONRequestBody defines body for PostAdminCardsEnable for application/json ContentType.
+type PostAdminCardsEnableJSONRequestBody = AdminCardBulkRequest
+
 // PatchAdminCardJSONRequestBody defines body for PatchAdminCard for application/json ContentType.
 type PatchAdminCardJSONRequestBody = UpdateCardRequest
 
@@ -6993,6 +7746,15 @@ type PostAdminDomainDnsStatusJSONRequestBody = AdminDomainDnsStatusRequest
 
 // PostAdminInviteJSONRequestBody defines body for PostAdminInvite for application/json ContentType.
 type PostAdminInviteJSONRequestBody = AdminCreateInviteRequest
+
+// PostAdminInvitesBatchJSONRequestBody defines body for PostAdminInvitesBatch for application/json ContentType.
+type PostAdminInvitesBatchJSONRequestBody = AdminBatchCreateInviteRequest
+
+// PostAdminInvitesDisableJSONRequestBody defines body for PostAdminInvitesDisable for application/json ContentType.
+type PostAdminInvitesDisableJSONRequestBody = AdminInviteBulkRequest
+
+// PostAdminInvitesEnableJSONRequestBody defines body for PostAdminInvitesEnable for application/json ContentType.
+type PostAdminInvitesEnableJSONRequestBody = AdminInviteBulkRequest
 
 // PatchAdminInviteJSONRequestBody defines body for PatchAdminInvite for application/json ContentType.
 type PatchAdminInviteJSONRequestBody = AdminUpdateInviteRequest
@@ -7125,6 +7887,9 @@ type PostAdminWalletCreditJSONRequestBody = AdminAdjustWalletRequest
 
 // PostAdminWalletDebitJSONRequestBody defines body for PostAdminWalletDebit for application/json ContentType.
 type PostAdminWalletDebitJSONRequestBody = AdminAdjustWalletRequest
+
+// PostAdminWalletWithdrawJSONRequestBody defines body for PostAdminWalletWithdraw for application/json ContentType.
+type PostAdminWalletWithdrawJSONRequestBody = AdminWithdrawWalletRequest
 
 // PostApiKeyJSONRequestBody defines body for PostApiKey for application/json ContentType.
 type PostApiKeyJSONRequestBody = APIKeyCreateRequest
@@ -7833,9 +8598,18 @@ type ServerInterface interface {
 	// Create card keys
 	// (POST /v1/admin/cards)
 	PostAdminCards(c *gin.Context, params PostAdminCardsParams)
+	// Disable card keys in bulk
+	// (POST /v1/admin/cards/disable)
+	PostAdminCardsDisable(c *gin.Context, params PostAdminCardsDisableParams)
+	// Enable card keys in bulk
+	// (POST /v1/admin/cards/enable)
+	PostAdminCardsEnable(c *gin.Context, params PostAdminCardsEnableParams)
 	// Enable or disable a card key
 	// (PATCH /v1/admin/cards/{cardKey})
 	PatchAdminCard(c *gin.Context, cardKey string, params PatchAdminCardParams)
+	// List card redemptions
+	// (GET /v1/admin/cards/{cardKey}/redemptions)
+	GetAdminCardRedemptions(c *gin.Context, cardKey string)
 	// Disable one generated domain mailbox
 	// (POST /v1/admin/domain-mailboxes/{mailboxId}/disable)
 	PostAdminDomainMailboxDisable(c *gin.Context, mailboxId int, params PostAdminDomainMailboxDisableParams)
@@ -7893,15 +8667,30 @@ type ServerInterface interface {
 	// Queue validation for one domain resource
 	// (POST /v1/admin/domains/{domainId}/validate)
 	PostAdminDomainValidate(c *gin.Context, domainId AdminDomainId, params PostAdminDomainValidateParams)
+	// Finance summary
+	// (GET /v1/admin/finance/summary)
+	GetAdminFinanceSummary(c *gin.Context, params GetAdminFinanceSummaryParams)
 	// List invites
 	// (GET /v1/admin/invites)
 	GetAdminInvites(c *gin.Context, params GetAdminInvitesParams)
 	// Create invite
 	// (POST /v1/admin/invites)
 	PostAdminInvite(c *gin.Context, params PostAdminInviteParams)
+	// Batch create invites
+	// (POST /v1/admin/invites/batch)
+	PostAdminInvitesBatch(c *gin.Context, params PostAdminInvitesBatchParams)
+	// Disable invites in bulk
+	// (POST /v1/admin/invites/disable)
+	PostAdminInvitesDisable(c *gin.Context, params PostAdminInvitesDisableParams)
+	// Enable invites in bulk
+	// (POST /v1/admin/invites/enable)
+	PostAdminInvitesEnable(c *gin.Context, params PostAdminInvitesEnableParams)
 	// Update invite
 	// (PATCH /v1/admin/invites/{code})
 	PatchAdminInvite(c *gin.Context, code string, params PatchAdminInviteParams)
+	// List invite redemptions
+	// (GET /v1/admin/invites/{code}/uses)
+	GetAdminInviteUses(c *gin.Context, code string)
 	// List primary-mailbox message summaries for a resource
 	// (GET /v1/admin/messages)
 	GetAdminMessages(c *gin.Context, params GetAdminMessagesParams)
@@ -8103,6 +8892,12 @@ type ServerInterface interface {
 	// Get one normalized administrator task
 	// (GET /v1/admin/tasks/{taskId})
 	GetAdminTask(c *gin.Context, taskId string)
+	// List transactions
+	// (GET /v1/admin/transactions)
+	GetAdminTransactions(c *gin.Context, params GetAdminTransactionsParams)
+	// Reverse a transaction
+	// (POST /v1/admin/transactions/{id}/reverse)
+	PostAdminTransactionReverse(c *gin.Context, id int, params PostAdminTransactionReverseParams)
 	// List all users (admin only)
 	// (GET /v1/admin/users)
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
@@ -8154,6 +8949,9 @@ type ServerInterface interface {
 	// Force logout a user (revoke all sessions)
 	// (POST /v1/admin/users/{userId}/sessions/revoke)
 	PostAdminRevokeSessions(c *gin.Context, userId int, params PostAdminRevokeSessionsParams)
+	// List wallets
+	// (GET /v1/admin/wallets)
+	GetAdminWallets(c *gin.Context, params GetAdminWalletsParams)
 	// Adjust wallet balance for selected users
 	// (POST /v1/admin/wallets/adjust)
 	PostAdminWalletBulkAdjust(c *gin.Context, params PostAdminWalletBulkAdjustParams)
@@ -8172,6 +8970,9 @@ type ServerInterface interface {
 	// List a user's wallet transactions (admin only)
 	// (GET /v1/admin/wallets/{userId}/transactions)
 	GetAdminWalletTransactions(c *gin.Context, userId int, params GetAdminWalletTransactionsParams)
+	// Withdraw from supplier wallet
+	// (POST /v1/admin/wallets/{userId}/withdraw)
+	PostAdminWalletWithdraw(c *gin.Context, userId int, params PostAdminWalletWithdrawParams)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
@@ -8656,6 +9457,22 @@ func (siw *ServerInterfaceWrapper) GetAdminCards(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "ownerRole" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerRole", c.Request.URL.Query(), &params.OwnerRole, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerRole: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerGroupId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerGroupId", c.Request.URL.Query(), &params.OwnerGroupId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerGroupId: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Optional query parameter "offset" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -8749,6 +9566,96 @@ func (siw *ServerInterfaceWrapper) PostAdminCards(c *gin.Context) {
 	siw.Handler.PostAdminCards(c, params)
 }
 
+// PostAdminCardsDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminCardsDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminCardsDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminCardsDisable(c, params)
+}
+
+// PostAdminCardsEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminCardsEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminCardsEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminCardsEnable(c, params)
+}
+
 // PatchAdminCard operation middleware
 func (siw *ServerInterfaceWrapper) PatchAdminCard(c *gin.Context) {
 
@@ -8801,6 +9708,33 @@ func (siw *ServerInterfaceWrapper) PatchAdminCard(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminCard(c, cardKey, params)
+}
+
+// GetAdminCardRedemptions operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminCardRedemptions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cardKey" -------------
+	var cardKey string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cardKey", c.Param("cardKey"), &cardKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cardKey: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminCardRedemptions(c, cardKey)
 }
 
 // PostAdminDomainMailboxDisable operation middleware
@@ -10211,6 +11145,43 @@ func (siw *ServerInterfaceWrapper) PostAdminDomainValidate(c *gin.Context) {
 	siw.Handler.PostAdminDomainValidate(c, domainId, params)
 }
 
+// GetAdminFinanceSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminFinanceSummary(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminFinanceSummaryParams
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminFinanceSummary(c, params)
+}
+
 // GetAdminInvites operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminInvites(c *gin.Context) {
 
@@ -10221,6 +11192,46 @@ func (siw *ServerInterfaceWrapper) GetAdminInvites(c *gin.Context) {
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAdminInvitesParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", c.Request.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter kind: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerRole" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerRole", c.Request.URL.Query(), &params.OwnerRole, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerRole: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerGroupId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerGroupId", c.Request.URL.Query(), &params.OwnerGroupId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerGroupId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "enabled" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "enabled", c.Request.URL.Query(), &params.Enabled, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter enabled: %w", err), http.StatusBadRequest)
+		return
+	}
 
 	// ------------- Optional query parameter "offset" -------------
 
@@ -10293,6 +11304,141 @@ func (siw *ServerInterfaceWrapper) PostAdminInvite(c *gin.Context) {
 	siw.Handler.PostAdminInvite(c, params)
 }
 
+// PostAdminInvitesBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminInvitesBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminInvitesBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminInvitesBatch(c, params)
+}
+
+// PostAdminInvitesDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminInvitesDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminInvitesDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminInvitesDisable(c, params)
+}
+
+// PostAdminInvitesEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminInvitesEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminInvitesEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminInvitesEnable(c, params)
+}
+
 // PatchAdminInvite operation middleware
 func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 
@@ -10345,6 +11491,33 @@ func (siw *ServerInterfaceWrapper) PatchAdminInvite(c *gin.Context) {
 	}
 
 	siw.Handler.PatchAdminInvite(c, code, params)
+}
+
+// GetAdminInviteUses operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminInviteUses(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "code" -------------
+	var code string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "code", c.Param("code"), &code, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminInviteUses(c, code)
 }
 
 // GetAdminMessages operation middleware
@@ -14326,6 +15499,159 @@ func (siw *ServerInterfaceWrapper) GetAdminTask(c *gin.Context) {
 	siw.Handler.GetAdminTask(c, taskId)
 }
 
+// GetAdminTransactions operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminTransactions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminTransactionsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter type: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "direction" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "direction", c.Request.URL.Query(), &params.Direction, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter direction: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminTransactions(c, params)
+}
+
+// PostAdminTransactionReverse operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTransactionReverse(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTransactionReverseParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTransactionReverse(c, id, params)
+}
+
 // GetAdminUsers operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 
@@ -15155,6 +16481,51 @@ func (siw *ServerInterfaceWrapper) PostAdminRevokeSessions(c *gin.Context) {
 	siw.Handler.PostAdminRevokeSessions(c, userId, params)
 }
 
+// GetAdminWallets operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminWallets(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminWalletsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminWallets(c, params)
+}
+
 // PostAdminWalletBulkAdjust operation middleware
 func (siw *ServerInterfaceWrapper) PostAdminWalletBulkAdjust(c *gin.Context) {
 
@@ -15460,6 +16831,82 @@ func (siw *ServerInterfaceWrapper) GetAdminWalletTransactions(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminWalletTransactions(c, userId, params)
+}
+
+// PostAdminWalletWithdraw operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminWalletWithdraw(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminWalletWithdrawParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey AdminCommandIdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminWalletWithdraw(c, userId, params)
 }
 
 // GetApiKeys operation middleware
@@ -17731,7 +19178,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/bindings/messages/:messageId", wrapper.GetAdminBindingMessage)
 	router.GET(options.BaseURL+"/v1/admin/cards", wrapper.GetAdminCards)
 	router.POST(options.BaseURL+"/v1/admin/cards", wrapper.PostAdminCards)
+	router.POST(options.BaseURL+"/v1/admin/cards/disable", wrapper.PostAdminCardsDisable)
+	router.POST(options.BaseURL+"/v1/admin/cards/enable", wrapper.PostAdminCardsEnable)
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
+	router.GET(options.BaseURL+"/v1/admin/cards/:cardKey/redemptions", wrapper.GetAdminCardRedemptions)
 	router.POST(options.BaseURL+"/v1/admin/domain-mailboxes/:mailboxId/disable", wrapper.PostAdminDomainMailboxDisable)
 	router.GET(options.BaseURL+"/v1/admin/domains", wrapper.GetAdminDomains)
 	router.POST(options.BaseURL+"/v1/admin/domains", wrapper.PostAdminDomain)
@@ -17751,9 +19201,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/recover", wrapper.PostAdminDomainRecover)
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/unpublish", wrapper.PostAdminDomainUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/domains/:domainId/validate", wrapper.PostAdminDomainValidate)
+	router.GET(options.BaseURL+"/v1/admin/finance/summary", wrapper.GetAdminFinanceSummary)
 	router.GET(options.BaseURL+"/v1/admin/invites", wrapper.GetAdminInvites)
 	router.POST(options.BaseURL+"/v1/admin/invites", wrapper.PostAdminInvite)
+	router.POST(options.BaseURL+"/v1/admin/invites/batch", wrapper.PostAdminInvitesBatch)
+	router.POST(options.BaseURL+"/v1/admin/invites/disable", wrapper.PostAdminInvitesDisable)
+	router.POST(options.BaseURL+"/v1/admin/invites/enable", wrapper.PostAdminInvitesEnable)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
+	router.GET(options.BaseURL+"/v1/admin/invites/:code/uses", wrapper.GetAdminInviteUses)
 	router.GET(options.BaseURL+"/v1/admin/messages", wrapper.GetAdminMessages)
 	router.GET(options.BaseURL+"/v1/admin/messages/:messageId", wrapper.GetAdminMessage)
 	router.POST(options.BaseURL+"/v1/admin/orders/timeouts/scan", wrapper.PostAdminOrderTimeoutScan)
@@ -17821,6 +19276,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)
 	router.GET(options.BaseURL+"/v1/admin/tasks", wrapper.GetAdminTasks)
 	router.GET(options.BaseURL+"/v1/admin/tasks/:taskId", wrapper.GetAdminTask)
+	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
+	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
 	router.POST(options.BaseURL+"/v1/admin/users", wrapper.PostAdminUser)
 	router.POST(options.BaseURL+"/v1/admin/users/delete", wrapper.PostAdminUsersDelete)
@@ -17838,12 +19295,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.GetAdminUserPermissions)
 	router.PUT(options.BaseURL+"/v1/admin/users/:userId/permissions", wrapper.PutAdminUserPermissions)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/sessions/revoke", wrapper.PostAdminRevokeSessions)
+	router.GET(options.BaseURL+"/v1/admin/wallets", wrapper.GetAdminWallets)
 	router.POST(options.BaseURL+"/v1/admin/wallets/adjust", wrapper.PostAdminWalletBulkAdjust)
 	router.GET(options.BaseURL+"/v1/admin/wallets/balances", wrapper.GetAdminWalletBalances)
 	router.GET(options.BaseURL+"/v1/admin/wallets/:userId", wrapper.GetAdminWallet)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/credit", wrapper.PostAdminWalletCredit)
 	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/debit", wrapper.PostAdminWalletDebit)
 	router.GET(options.BaseURL+"/v1/admin/wallets/:userId/transactions", wrapper.GetAdminWalletTransactions)
+	router.POST(options.BaseURL+"/v1/admin/wallets/:userId/withdraw", wrapper.PostAdminWalletWithdraw)
 	router.GET(options.BaseURL+"/v1/apikeys", wrapper.GetApiKeys)
 	router.POST(options.BaseURL+"/v1/apikeys", wrapper.PostApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/usage", wrapper.GetApiKeyUsage)

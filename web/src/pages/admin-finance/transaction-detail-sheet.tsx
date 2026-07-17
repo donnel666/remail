@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import type { FinanceTransaction } from "./admin-finance-mock";
+import type { FinanceTransaction } from "./admin-finance-api";
 import {
   formatDateTime,
   formatMoney,

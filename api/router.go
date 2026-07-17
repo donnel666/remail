@@ -149,6 +149,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB)
 		billingMod.SetUserSelectionResolver(iamMod.AdminUserSelectionResolver)
+		billingMod.SetUserDirectory(financeUserDirectory{users: iamMod.Users})
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// OpenAPI credentials and order service tokens.

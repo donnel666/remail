@@ -11,11 +11,11 @@ import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
-  batchCreateMockFinanceInvites,
-  createMockFinanceInvite,
-  updateMockFinanceInvite,
+  batchCreateFinanceInvites,
+  createFinanceInvite,
+  updateFinanceInvite,
   type FinanceInvite,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 
 interface CreateInviteModalProps {
   open: boolean;
@@ -65,7 +65,7 @@ export function CreateInviteModal({
     try {
       const expireAtValue = expireAt ? expireAt.toISOString() : null;
       if (parsedCount === 1) {
-        await createMockFinanceInvite({
+        await createFinanceInvite({
           code: code.trim() || undefined,
           maxUse: parsedMaxUse,
           enabled,
@@ -74,7 +74,7 @@ export function CreateInviteModal({
         Toast.success(t("Invite code created."));
         onCreated(1);
       } else {
-        const result = await batchCreateMockFinanceInvites({
+        const result = await batchCreateFinanceInvites({
           count: parsedCount,
           maxUse: parsedMaxUse,
           enabled,
@@ -204,7 +204,7 @@ export function EditInviteModal({
     }
     setSaving(true);
     try {
-      const updated = await updateMockFinanceInvite(invite.code, {
+      const updated = await updateFinanceInvite(invite.code, {
         maxUse: parsedMaxUse,
         expireAt: expireAt ? expireAt.toISOString() : null,
       });

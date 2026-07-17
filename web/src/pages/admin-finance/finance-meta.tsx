@@ -6,7 +6,7 @@ import type {
   FinanceCardKeyStatus,
   FinanceTransactionDirection,
   FinanceTransactionType,
-} from "./admin-finance-mock";
+} from "./admin-finance-api";
 
 const TRANSACTION_TYPE_LABEL: Record<FinanceTransactionType, string> = {
   recharge: "recharge",
