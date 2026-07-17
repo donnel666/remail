@@ -946,6 +946,7 @@
   "Confirm disable selected": "确认禁用选中域名",
   "Confirm disable selected domains content": "将禁用选中的 {{count}} 个域名。",
   "Domains bulk operation completed.": "批量操作完成，已处理 {{count}} 个域名。",
+  "Domains bulk operation submitted.": "批量操作已提交后台处理。",
   "Domain converted to private.": "域名已设为私有。",
   "Domain published for public sale.": "域名已设为出售。",
   "No domains selected.": "未选择域名。",

@@ -135,6 +135,42 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		return nil
 	})
+	mux.HandleFunc(coreinfra.TypeAdminDomainBulk, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.AdminDomainCommands == nil {
+			return nil
+		}
+		var payload coreapp.AdminDomainBulkTask
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			slog.Warn("discard malformed admin domain bulk task", "error", err)
+			return nil
+		}
+		if payload.BatchID == "" || payload.OperatorUserID == 0 {
+			slog.Warn("discard admin domain bulk task without identity")
+			cleanupAdminDomainBulk(ctx, module, payload)
+			return nil
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupAdminDomainBulk(ctx, module, payload)
+				return nil
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		if err := module.AdminDomainCommands.ProcessBulkStateBatch(ctx, payload); err != nil {
+			slog.Warn("admin domain bulk task failed", "batch_id", payload.BatchID, "error", err)
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupAdminDomainBulk(ctx, module, payload)
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 	mux.HandleFunc(coreinfra.TypeResourceValidation, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
@@ -260,6 +296,17 @@ func cleanupResourceValidationBatch(ctx context.Context, module *CoreModule, tas
 	defer cancel()
 	if err := module.ValidationUseCase.ReleaseBatch(cleanupCtx, task); err != nil {
 		slog.Warn("release resource validation batch lease failed", "batch_id", task.BatchID, "error", err)
+	}
+}
+
+func cleanupAdminDomainBulk(ctx context.Context, module *CoreModule, task coreapp.AdminDomainBulkTask) {
+	if module == nil || module.AdminDomainCommands == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+	defer cancel()
+	if err := module.AdminDomainCommands.ReleaseBulkBatch(cleanupCtx, task); err != nil {
+		slog.Warn("release admin domain bulk lease failed", "batch_id", task.BatchID, "error", err)
 	}
 }
 

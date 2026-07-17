@@ -122,6 +122,7 @@ func NewCoreModule(db *gorm.DB, redisClient redis.UniversalClient, files governa
 		validationUseCase,
 		governanceinfra.NewOperationLogRepo(db),
 	)
+	adminDomainCommands.SetBulkQueue(coreinfra.NewAdminDomainBulkQueue(asynqClient, redisClient))
 	adminBulk := coreapp.NewAdminResourceBulkService(
 		coreinfra.NewAdminResourceBulkRepo(db),
 		coreinfra.NewAdminResourceBulkQueue(asynqClient),

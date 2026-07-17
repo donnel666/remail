@@ -335,6 +335,8 @@ type AdminDomainCommandRepository interface {
 	CreateAdminDomain(ctx context.Context, root *domain.EmailResource, resource *domain.MailDomainResource) error
 	SaveAdminDomain(ctx context.Context, root *domain.EmailResource, resource *domain.MailDomainResource, expectedVersion uint64, previousOwnerID uint) error
 	ListAdminDomainIDs(ctx context.Context, filter AdminDomainListFilter, limit int) ([]uint, error)
+	MaxAdminDomainID(ctx context.Context, filter AdminDomainListFilter) (uint, error)
+	ListAdminDomainBulkPageIDs(ctx context.Context, filter AdminDomainListFilter, afterID, throughID uint, limit int) ([]uint, error)
 }
 
 type AdminDomainCommandService struct {
@@ -343,6 +345,7 @@ type AdminDomainCommandService struct {
 	servers     MailServerRepository
 	allocations ResourceAllocationGuardPort
 	validation  *ResourceValidationUseCase
+	bulkQueue   AdminDomainBulkQueue
 	logs        governanceapp.OperationLogPort
 }
 
@@ -356,6 +359,12 @@ func (s *AdminDomainCommandService) SetPorts(owners OwnerQueryPort, allocations 
 	}
 	s.owners = owners
 	s.allocations = allocations
+}
+
+func (s *AdminDomainCommandService) SetBulkQueue(queue AdminDomainBulkQueue) {
+	if s != nil {
+		s.bulkQueue = queue
+	}
 }
 
 func (s *AdminDomainCommandService) Create(ctx context.Context, command AdminDomainCreateCommand) (*AdminDomainMutationResult, error) {
@@ -751,64 +760,13 @@ func (s *AdminDomainCommandService) ApplyBulk(ctx context.Context, action string
 				result.Affected++
 				continue
 			}
-			beforePurpose, beforeStatus := resource.Purpose, resource.Status
-			switch action {
-			case "disable":
-				err = resource.DisableAdmin()
-			case "publish":
-				if resource.Purpose == domain.PurposeSale {
-					result.Skipped++
-					continue
-				}
-				if resource.Purpose != domain.PurposeNotSale {
-					result.Skipped++
-					continue
-				}
-				_, ownerErr := s.validateOwner(txCtx, root.OwnerUserID, domain.PurposeSale)
-				if ownerErr != nil {
-					if errors.Is(ownerErr, domain.ErrInvalidResourceOwner) {
-						result.Skipped++
-						continue
-					}
-					return ownerErr
-				}
-				err = resource.SetPurposeAdmin(domain.PurposeSale)
-			case "unpublish":
-				if resource.Purpose == domain.PurposeNotSale {
-					result.Skipped++
-					continue
-				}
-				if resource.Purpose != domain.PurposeSale {
-					result.Skipped++
-					continue
-				}
-				err = resource.SetPurposeAdmin(domain.PurposeNotSale)
-			case "delete":
-				if s.allocations == nil {
-					return domain.ErrResourceDependency
-				}
-				if guardErr := s.allocations.AssertNoActiveAllocations(txCtx, []uint{root.ID}); guardErr != nil {
-					if errors.Is(guardErr, domain.ErrResourceHasAllocation) {
-						result.Skipped++
-						continue
-					}
-					return guardErr
-				}
-				err = resource.DeleteAdmin()
+			changed, _, applyErr := s.applyDomainBulkRow(txCtx, action, root, resource)
+			if applyErr != nil {
+				return applyErr
 			}
-			if err != nil {
-				if errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, domain.ErrInvalidResourceStatus) || errors.Is(err, domain.ErrInvalidPurpose) {
-					result.Skipped++
-					continue
-				}
-				return err
-			}
-			if beforePurpose == resource.Purpose && beforeStatus == resource.Status {
+			if !changed {
 				result.Skipped++
 				continue
-			}
-			if err := s.repo.SaveAdminDomain(txCtx, root, resource, root.Version, root.OwnerUserID); err != nil {
-				return err
 			}
 			result.Affected++
 		}
@@ -825,6 +783,68 @@ func (s *AdminDomainCommandService) ApplyBulk(ctx context.Context, action string
 		s.validation.ScheduleDispatcher(ctx, 0)
 	}
 	return result, err
+}
+
+// applyDomainBulkRow applies one disable/publish/unpublish/delete transition to a
+// locked domain resource. It reports whether the row changed, a non-empty skip
+// reason for expected no-ops and conflicts, or an infrastructure error that must
+// abort the batch. It is shared by the synchronous ApplyBulk path and the durable
+// asynchronous ProcessBulkStateBatch worker so both enforce identical policy.
+func (s *AdminDomainCommandService) applyDomainBulkRow(ctx context.Context, action string, root *domain.EmailResource, resource *domain.MailDomainResource) (bool, string, error) {
+	beforePurpose, beforeStatus := resource.Purpose, resource.Status
+	var err error
+	switch action {
+	case "disable":
+		err = resource.DisableAdmin()
+	case "publish":
+		if resource.Purpose != domain.PurposeNotSale {
+			return false, "invalid_purpose", nil
+		}
+		if _, ownerErr := s.validateOwner(ctx, root.OwnerUserID, domain.PurposeSale); ownerErr != nil {
+			if errors.Is(ownerErr, domain.ErrInvalidResourceOwner) {
+				return false, "owner_ineligible", nil
+			}
+			return false, "", ownerErr
+		}
+		err = resource.SetPurposeAdmin(domain.PurposeSale)
+	case "unpublish":
+		if resource.Purpose != domain.PurposeSale {
+			return false, "invalid_purpose", nil
+		}
+		err = resource.SetPurposeAdmin(domain.PurposeNotSale)
+	case "delete":
+		if s.allocations == nil {
+			return false, "", domain.ErrResourceDependency
+		}
+		if guardErr := s.allocations.AssertNoActiveAllocations(ctx, []uint{root.ID}); guardErr != nil {
+			if errors.Is(guardErr, domain.ErrResourceHasAllocation) {
+				return false, "active_allocation", nil
+			}
+			return false, "", guardErr
+		}
+		err = resource.DeleteAdmin()
+	default:
+		return false, "", domain.ErrInvalidResourceCommand
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrResourceNotFound):
+			return false, "not_found", nil
+		case errors.Is(err, domain.ErrInvalidResourceStatus):
+			return false, "invalid_state", nil
+		case errors.Is(err, domain.ErrInvalidPurpose):
+			return false, "invalid_purpose", nil
+		default:
+			return false, "", err
+		}
+	}
+	if beforePurpose == resource.Purpose && beforeStatus == resource.Status {
+		return false, "already_target", nil
+	}
+	if err := s.repo.SaveAdminDomain(ctx, root, resource, root.Version, root.OwnerUserID); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 func (s *AdminDomainCommandService) normalizeBulkSelection(ctx context.Context, selection AdminDomainBulkSelection) (AdminDomainBulkSelection, any, error) {

@@ -585,10 +585,8 @@ export default function AdminDomainEmails() {
         if (!canOperateDomains) return;
         setBulkBusy("delete");
         try {
-          const response = await deleteAdminDomainsByIds(selectedActiveIds);
-          Toast.success(
-            t("Domains bulk operation completed.", { count: response.affected })
-          );
+          await deleteAdminDomainsByIds(selectedActiveIds);
+          Toast.success(t("Domains bulk operation submitted."));
           setSelectedKeys([]);
           await refresh();
         } catch (error) {
@@ -609,13 +607,8 @@ export default function AdminDomainEmails() {
       }
       setBulkBusy(purpose === "sale" ? "sale" : "private");
       try {
-        const response = await setAdminDomainsPurposeByIds(
-          selectedActiveIds,
-          purpose
-        );
-        Toast.success(
-          t("Domains bulk operation completed.", { count: response.affected })
-        );
+        await setAdminDomainsPurposeByIds(selectedActiveIds, purpose);
+        Toast.success(t("Domains bulk operation submitted."));
         setSelectedKeys([]);
         await refresh();
       } catch (error) {
@@ -662,10 +655,8 @@ export default function AdminDomainEmails() {
         if (!canOperateDomains) return;
         setBulkBusy("delete");
         try {
-          const response = await deleteAdminDomainsByFilter(listFilter);
-          Toast.success(
-            t("Domains bulk operation completed.", { count: response.affected })
-          );
+          await deleteAdminDomainsByFilter(listFilter);
+          Toast.success(t("Domains bulk operation submitted."));
           setSelectedKeys([]);
           setActivePage(1);
           await refresh();
@@ -702,13 +693,8 @@ export default function AdminDomainEmails() {
           if (!canOperateDomains) return;
           setBulkBusy(isPublic ? "sale" : "private");
           try {
-            const response = await setAdminDomainsPurposeByFilter(
-              listFilter,
-              purpose
-            );
-            Toast.success(
-              t("Domains bulk operation completed.", { count: response.affected })
-            );
+            await setAdminDomainsPurposeByFilter(listFilter, purpose);
+            Toast.success(t("Domains bulk operation submitted."));
             setSelectedKeys([]);
             await refresh();
           } catch (error) {

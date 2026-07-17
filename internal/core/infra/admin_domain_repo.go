@@ -174,6 +174,34 @@ func (r *AdminResourceRepo) ListAdminDomainIDs(ctx context.Context, filter corea
 	return ids, nil
 }
 
+// MaxAdminDomainID captures the highest matching domain id, used as an async
+// bulk batch's frozen high-water mark so rows inserted mid-batch are excluded.
+func (r *AdminResourceRepo) MaxAdminDomainID(ctx context.Context, filter coreapp.AdminDomainListFilter) (uint, error) {
+	var maxID uint
+	if err := r.adminDomainFilterQuery(ctx, filter, false, false, false).
+		Select("COALESCE(MAX(er.id), 0)").
+		Row().Scan(&maxID); err != nil {
+		return 0, fmt.Errorf("capture admin domain bulk high-water mark: %w", err)
+	}
+	return maxID, nil
+}
+
+// ListAdminDomainBulkPageIDs returns up to limit matching domain ids on the
+// (afterID, throughID] cursor window, ascending, for one async batch page.
+func (r *AdminResourceRepo) ListAdminDomainBulkPageIDs(ctx context.Context, filter coreapp.AdminDomainListFilter, afterID, throughID uint, limit int) ([]uint, error) {
+	query := r.adminDomainFilterQuery(ctx, filter, false, false, false).
+		Select("er.id").
+		Where("er.id > ?", afterID)
+	if throughID > 0 {
+		query = query.Where("er.id <= ?", throughID)
+	}
+	var ids []uint
+	if err := query.Order("er.id ASC").Limit(limit).Scan(&ids).Error; err != nil {
+		return nil, fmt.Errorf("list admin domain bulk page ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *AdminResourceRepo) adminDomainFilterQuery(ctx context.Context, filter coreapp.AdminDomainListFilter, ignoreStatus, ignorePurpose, ignoreTLD bool) *gorm.DB {
 	query := r.dbFor(ctx).
 		Table("email_resources AS er").

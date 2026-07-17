@@ -121,6 +121,14 @@ func (*adminDomainCommandRepoStub) ListAdminDomainIDs(context.Context, AdminDoma
 	return nil, nil
 }
 
+func (*adminDomainCommandRepoStub) MaxAdminDomainID(context.Context, AdminDomainListFilter) (uint, error) {
+	return 0, nil
+}
+
+func (*adminDomainCommandRepoStub) ListAdminDomainBulkPageIDs(context.Context, AdminDomainListFilter, uint, uint, int) ([]uint, error) {
+	return nil, nil
+}
+
 type adminDomainLogStub struct{}
 
 func (*adminDomainLogStub) Create(context.Context, *governancedomain.OperationLog) error { return nil }

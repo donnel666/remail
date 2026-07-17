@@ -355,19 +355,19 @@ func (h *CoreHandler) PostAdminDomainValidations(c *gin.Context) {
 }
 
 func (h *CoreHandler) PostAdminDomainsDisable(c *gin.Context) {
-	h.applyAdminDomainBulk(c, "disable", false)
+	h.applyAdminDomainBulk(c, "disable")
 }
 
 func (h *CoreHandler) PostAdminDomainsPublish(c *gin.Context) {
-	h.applyAdminDomainBulk(c, "publish", false)
+	h.applyAdminDomainBulk(c, "publish")
 }
 
 func (h *CoreHandler) PostAdminDomainsUnpublish(c *gin.Context) {
-	h.applyAdminDomainBulk(c, "unpublish", false)
+	h.applyAdminDomainBulk(c, "unpublish")
 }
 
 func (h *CoreHandler) PostAdminDomainsDelete(c *gin.Context) {
-	h.applyAdminDomainBulk(c, "delete", false)
+	h.applyAdminDomainBulk(c, "delete")
 }
 
 func (h *CoreHandler) applyAdminDomainStatus(c *gin.Context, command coreapp.AdminDomainStatusCommand, returnDomain bool) {
@@ -416,7 +416,7 @@ func (h *CoreHandler) applyAdminDomainMutation(c *gin.Context, command coreapp.A
 	c.Status(http.StatusNoContent)
 }
 
-func (h *CoreHandler) applyAdminDomainBulk(c *gin.Context, action string, validation bool) {
+func (h *CoreHandler) applyAdminDomainBulk(c *gin.Context, action string) {
 	if h.module == nil || h.module.AdminDomainCommands == nil {
 		writeAdminResourceError(c, domain.ErrResourceDependency)
 		return
@@ -433,15 +433,25 @@ func (h *CoreHandler) applyAdminDomainBulk(c *gin.Context, action string, valida
 	if !ok {
 		return
 	}
+	// Publish/unpublish/delete may span a large domain table, so they run through
+	// the durable Redis-leased batch worker page by page. Disable stays a bounded
+	// synchronous command.
+	if action != "disable" {
+		result, err := h.module.AdminDomainCommands.SubmitBulkState(
+			c.Request.Context(), action, selection, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
+		)
+		if err != nil {
+			writeAdminResourceError(c, err)
+			return
+		}
+		c.JSON(http.StatusAccepted, adminDomainValidationResponse{Queued: result.Requested})
+		return
+	}
 	result, err := h.module.AdminDomainCommands.ApplyBulk(
 		c.Request.Context(), action, selection, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
 	)
 	if err != nil {
 		writeAdminResourceError(c, err)
-		return
-	}
-	if validation {
-		c.JSON(http.StatusAccepted, adminDomainValidationResponse{Queued: result.Affected})
 		return
 	}
 	c.JSON(http.StatusOK, adminDomainBulkResponse{Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped})

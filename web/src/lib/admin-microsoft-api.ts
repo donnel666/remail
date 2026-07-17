@@ -83,13 +83,6 @@ function filterSelection(
   return { mode: "filter", filter: bulkFilter };
 }
 
-function requireSynchronousBulkResult(
-  response: AdminMicrosoftBulkCommandResponse
-): AdminMicrosoftBulkResponse {
-  if ("affected" in response) return response;
-  throw new Error("The server returned an asynchronous result for an ids-only command.");
-}
-
 export async function listAdminMicrosoftResources(
   filter: AdminMicrosoftListFilter = {},
   offset = 0,
@@ -641,18 +634,11 @@ export async function disableAdminMicrosoftResourcesByIds(
   );
 }
 
-export async function setAdminMicrosoftResourcesForSaleByIds(
+export function setAdminMicrosoftResourcesForSaleByIds(
   resourceIds: number[],
   forSale: boolean
-): Promise<AdminMicrosoftBulkResponse> {
-  const options = {
-    body: { selection: idsSelection(resourceIds) },
-    params: { header: commandHeaders() },
-  };
-  const response: AdminMicrosoftBulkCommandResponse = forSale
-    ? await unwrap(await client.POST("/v1/admin/resources/publish", options))
-    : await unwrap(await client.POST("/v1/admin/resources/unpublish", options));
-  return requireSynchronousBulkResult(response);
+) {
+  return setAdminMicrosoftResourcesForSale(idsSelection(resourceIds), forSale);
 }
 
 export function setAdminMicrosoftResourcesForSaleByFilter(
@@ -680,24 +666,22 @@ async function setAdminMicrosoftResourcesForSale(
   };
 }
 
-export async function deleteAdminMicrosoftResourcesByIds(
-  resourceIds: number[]
-): Promise<AdminMicrosoftBulkResponse> {
-  const response = await unwrap<AdminMicrosoftBulkCommandResponse>(
-    await client.POST("/v1/admin/resources/delete", {
-      body: { selection: idsSelection(resourceIds) },
-      params: { header: commandHeaders() },
-    })
-  );
-  return requireSynchronousBulkResult(response);
+export function deleteAdminMicrosoftResourcesByIds(resourceIds: number[]) {
+  return deleteAdminMicrosoftResources(idsSelection(resourceIds));
 }
 
-export async function deleteAdminMicrosoftResourcesByFilter(
+export function deleteAdminMicrosoftResourcesByFilter(
   filter: AdminMicrosoftListFilter
+) {
+  return deleteAdminMicrosoftResources(filterSelection(filter));
+}
+
+async function deleteAdminMicrosoftResources(
+  selection: AdminMicrosoftResourceSelection
 ): Promise<AdminMicrosoftBulkCommandResponse> {
   const response = await unwrap<AdminMicrosoftBulkCommandResponse>(
     await client.POST("/v1/admin/resources/delete", {
-      body: { selection: filterSelection(filter) },
+      body: { selection },
       params: { header: commandHeaders() },
     })
   );

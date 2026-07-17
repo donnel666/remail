@@ -134,7 +134,7 @@ func (q *ResourceValidationQueue) RefreshResourceValidationBatch(ctx context.Con
 	if q == nil || q.redis == nil || strings.TrimSpace(task.BatchID) == "" || strings.TrimSpace(task.ClaimToken) == "" {
 		return false, nil
 	}
-	result, err := refreshResourceValidationBatchLease.Run(
+	result, err := batchLeaseRefreshScript.Run(
 		ctx,
 		q.redis,
 		[]string{resourceValidationBatchLeaseKey(task.BatchID)},
@@ -151,7 +151,7 @@ func (q *ResourceValidationQueue) ReleaseResourceValidationBatch(ctx context.Con
 	if q == nil || q.redis == nil || strings.TrimSpace(task.BatchID) == "" || strings.TrimSpace(task.ClaimToken) == "" {
 		return nil
 	}
-	if err := releaseResourceValidationBatchLease.Run(
+	if err := batchLeaseReleaseScript.Run(
 		ctx,
 		q.redis,
 		[]string{resourceValidationBatchLeaseKey(task.BatchID)},
@@ -178,7 +178,11 @@ func resourceValidationBatchTaskID(task coreapp.ResourceValidationBatchTask) str
 	return fmt.Sprintf("resource-validation-batch:%x:%s:%d", digest, task.ClaimToken, task.AfterID)
 }
 
-var refreshResourceValidationBatchLease = redis.NewScript(`
+// batchLeaseRefreshScript and batchLeaseReleaseScript are generic Redis
+// compare-and-act lease primitives shared by every core batch cursor
+// (resource validation, admin domain bulk): refresh extends the lease only if
+// the caller still owns the claim token; release deletes it only if owned.
+var batchLeaseRefreshScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
     return 0
 end
@@ -186,7 +190,7 @@ redis.call('PEXPIRE', KEYS[1], ARGV[2])
 return 1
 `)
 
-var releaseResourceValidationBatchLease = redis.NewScript(`
+var batchLeaseReleaseScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
     return 0
 end

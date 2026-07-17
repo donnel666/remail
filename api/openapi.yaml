@@ -6925,12 +6925,12 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminDomainBulkCommandRequest"
       responses:
-        "202":
-          description: Domain bulk state batch accepted for asynchronous execution
+        "200":
+          description: Domain bulk result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AdminDomainValidationResponse"
+                $ref: "#/components/schemas/AdminDomainBulkResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6939,8 +6939,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
 
   /v1/admin/domains/publish:
     post:
@@ -7771,7 +7769,7 @@ paths:
     post:
       operationId: postAdminMicrosoftResourcesPublish
       summary: Publish selected Microsoft resources for sale
-      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Owner eligibility is revalidated by the server.
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Owner eligibility is revalidated by the server.
       tags:
         - Admin
       security:
@@ -7786,14 +7784,8 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
       responses:
-        "200":
-          description: Synchronous ids-mode result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
         "202":
-          description: Durable filter-mode batch accepted
+          description: Durable batch accepted
           content:
             application/json:
               schema:
@@ -7816,7 +7808,7 @@ paths:
     post:
       operationId: postAdminMicrosoftResourcesUnpublish
       summary: Convert selected Microsoft resources to private supply
-      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Existing orders and allocations are not released or changed.
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Existing orders and allocations are not released or changed.
       tags:
         - Admin
       security:
@@ -7831,14 +7823,8 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
       responses:
-        "200":
-          description: Synchronous ids-mode result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
         "202":
-          description: Durable filter-mode batch accepted
+          description: Durable batch accepted
           content:
             application/json:
               schema:
@@ -7861,7 +7847,7 @@ paths:
     post:
       operationId: postAdminMicrosoftResourcesDelete
       summary: Logically delete selected Microsoft resources
-      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
+      description: Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
       tags:
         - Admin
       security:
@@ -7876,14 +7862,8 @@ paths:
             schema:
               $ref: "#/components/schemas/AdminMicrosoftBulkCommandRequest"
       responses:
-        "200":
-          description: Synchronous ids-mode result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminMicrosoftBulkResult"
         "202":
-          description: Durable filter-mode batch accepted
+          description: Durable batch accepted
           content:
             application/json:
               schema:

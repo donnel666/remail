@@ -810,7 +810,7 @@ func TestAdminMicrosoftValidateAcceptedResponsePublishesRedisAcceptance(t *testi
 	}
 }
 
-func TestAdminMicrosoftBulkHandlersKeepSyncIDsAndAsyncFilterContracts(t *testing.T) {
+func TestAdminMicrosoftBulkHandlersSubmitDurableCommandsForIDsAndFilter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	now := time.Now().UTC()
 	repo := &adminHandlerCommandRepo{
@@ -831,11 +831,17 @@ func TestAdminMicrosoftBulkHandlersKeepSyncIDsAndAsyncFilterContracts(t *testing
         "selection": {"mode":"ids","resourceIds":[42]}
     }`))
 	idsContext.Request.Header.Set("Content-Type", "application/json")
-	idsContext.Request.Header.Set("Idempotency-Key", "sync-ids-key")
+	idsContext.Request.Header.Set("Idempotency-Key", "async-ids-key")
+	idsContext.Set("request_id", "durable-ids-request")
 	middleware.SetCurrentUser(idsContext, 9, iamdomain.RoleAdmin, "admin@test.local", "session")
 	handler.PostAdminMicrosoftResourcesPublish(idsContext)
-	require.Equal(t, http.StatusOK, idsResponse.Code, idsResponse.Body.String())
-	require.Contains(t, idsResponse.Body.String(), `"affected":1`)
+	require.Equal(t, http.StatusAccepted, idsResponse.Code, idsResponse.Body.String())
+	var idsPayload map[string]any
+	require.NoError(t, json.Unmarshal(idsResponse.Body.Bytes(), &idsPayload))
+	require.Equal(t, "bulk:700", idsPayload["taskId"])
+	require.Equal(t, "queued", idsPayload["status"])
+	require.Equal(t, float64(1), idsPayload["accepted"], "explicit IDs have an exact bounded count")
+	require.NotNil(t, idsPayload["task"])
 
 	filterResponse := httptest.NewRecorder()
 	filterContext, _ := gin.CreateTestContext(filterResponse)

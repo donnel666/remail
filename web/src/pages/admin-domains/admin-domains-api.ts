@@ -432,20 +432,20 @@ export async function disableAdminDomainsByIds(
 
 export async function deleteAdminDomainsByIds(
   ids: number[]
-): Promise<AdminDomainBulkResponse> {
+): Promise<AdminDomainValidationResponse> {
   return domainBulkByIds("/v1/admin/domains/delete", ids);
 }
 
 export async function deleteAdminDomainsByFilter(
   filter: AdminDomainListFilter
-): Promise<AdminDomainBulkResponse> {
+): Promise<AdminDomainValidationResponse> {
   return domainBulkByFilter("/v1/admin/domains/delete", filter);
 }
 
 export async function setAdminDomainsPurposeByIds(
   ids: number[],
   purpose: "not_sale" | "sale"
-): Promise<AdminDomainBulkResponse> {
+): Promise<AdminDomainValidationResponse> {
   return domainBulkByIds(
     purpose === "sale"
       ? "/v1/admin/domains/publish"
@@ -457,7 +457,7 @@ export async function setAdminDomainsPurposeByIds(
 export async function setAdminDomainsPurposeByFilter(
   filter: AdminDomainListFilter,
   purpose: "not_sale" | "sale"
-): Promise<AdminDomainBulkResponse> {
+): Promise<AdminDomainValidationResponse> {
   return domainBulkByFilter(
     purpose === "sale"
       ? "/v1/admin/domains/publish"

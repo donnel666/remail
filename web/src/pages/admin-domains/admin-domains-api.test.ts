@@ -365,7 +365,7 @@ describe("admin domain API adapter", () => {
 
   it("sends all-matching purpose changes as one filter command", async () => {
     apiMocks.POST.mockResolvedValueOnce({
-      data: { requested: 4, affected: 3, skipped: 1 },
+      data: { queued: 0 },
     });
 
     await expect(
@@ -373,7 +373,7 @@ describe("admin domain API adapter", () => {
         { search: "example", status: "normal", tld: "com" },
         "sale"
       )
-    ).resolves.toMatchObject({ affected: 3 });
+    ).resolves.toMatchObject({ queued: 0 });
 
     expect(apiMocks.POST).toHaveBeenCalledWith("/v1/admin/domains/publish", {
       body: {

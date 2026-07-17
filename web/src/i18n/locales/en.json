@@ -946,6 +946,7 @@
   "Confirm disable selected": "Confirm disable selected",
   "Confirm disable selected domains content": "Disable {{count}} selected domains.",
   "Domains bulk operation completed.": "Bulk operation completed for {{count}} domains.",
+  "Domains bulk operation submitted.": "Bulk operation submitted for background processing.",
   "Domain converted to private.": "Domain converted to private.",
   "Domain published for public sale.": "Domain published for public sale.",
   "No domains selected.": "No domains selected.",

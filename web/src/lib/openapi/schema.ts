@@ -2482,7 +2482,7 @@ export interface paths {
         put?: never;
         /**
          * Publish selected Microsoft resources for sale
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Owner eligibility is revalidated by the server.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Owner eligibility is revalidated by the server.
          */
         post: operations["postAdminMicrosoftResourcesPublish"];
         delete?: never;
@@ -2502,7 +2502,7 @@ export interface paths {
         put?: never;
         /**
          * Convert selected Microsoft resources to private supply
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Existing orders and allocations are not released or changed.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Existing orders and allocations are not released or changed.
          */
         post: operations["postAdminMicrosoftResourcesUnpublish"];
         delete?: never;
@@ -2522,7 +2522,7 @@ export interface paths {
         put?: never;
         /**
          * Logically delete selected Microsoft resources
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids are processed synchronously and return 200; a filter snapshot is persisted as a durable batch and returns 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. Explicit ids and filter snapshots are both persisted as a durable batch and return 202. Each candidate is rechecked for an active Allocation before logical deletion; historical orders, allocations, messages, and logs are retained.
          */
         post: operations["postAdminMicrosoftResourcesDelete"];
         delete?: never;
@@ -13384,19 +13384,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Domain bulk result */
-            200: {
+            /** @description Domain bulk state batch accepted for asynchronous execution */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminDomainBulkResponse"];
+                    "application/json": components["schemas"]["AdminDomainValidationResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     postAdminDomainsUnpublish: {
@@ -13417,19 +13418,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Domain bulk result */
-            200: {
+            /** @description Domain bulk state batch accepted for asynchronous execution */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminDomainBulkResponse"];
+                    "application/json": components["schemas"]["AdminDomainValidationResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     postAdminDomainsDelete: {
@@ -13450,19 +13452,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Domain bulk result */
-            200: {
+            /** @description Domain bulk state batch accepted for asynchronous execution */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminDomainBulkResponse"];
+                    "application/json": components["schemas"]["AdminDomainValidationResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     getAdminDomain: {
@@ -14161,16 +14164,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Synchronous ids-mode result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
-                };
-            };
-            /** @description Durable filter-mode batch accepted */
+            /** @description Durable batch accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -14206,16 +14200,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Synchronous ids-mode result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
-                };
-            };
-            /** @description Durable filter-mode batch accepted */
+            /** @description Durable batch accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -14251,16 +14236,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Synchronous ids-mode result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
-                };
-            };
-            /** @description Durable filter-mode batch accepted */
+            /** @description Durable batch accepted */
             202: {
                 headers: {
                     [name: string]: unknown;

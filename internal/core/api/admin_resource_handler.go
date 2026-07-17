@@ -613,15 +613,15 @@ func (h *CoreHandler) PostAdminMicrosoftResourcesDisable(c *gin.Context) {
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourcesPublish(c *gin.Context) {
-	h.applyAdminResourceStateBulk(c, coreapp.AdminMicrosoftPublish, coreapp.AdminResourceBulkPublish)
+	h.submitAdminResourceStateBulk(c, coreapp.AdminResourceBulkPublish)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourcesUnpublish(c *gin.Context) {
-	h.applyAdminResourceStateBulk(c, coreapp.AdminMicrosoftUnpublish, coreapp.AdminResourceBulkUnpublish)
+	h.submitAdminResourceStateBulk(c, coreapp.AdminResourceBulkUnpublish)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourcesDelete(c *gin.Context) {
-	h.applyAdminResourceStateBulk(c, coreapp.AdminMicrosoftDelete, coreapp.AdminResourceBulkDelete)
+	h.submitAdminResourceStateBulk(c, coreapp.AdminResourceBulkDelete)
 }
 
 func (h *CoreHandler) PostAdminMicrosoftResourceValidations(c *gin.Context) {
@@ -716,7 +716,11 @@ func (h *CoreHandler) applyAdminResourceStateBatch(c *gin.Context, command corea
 	})
 }
 
-func (h *CoreHandler) applyAdminResourceStateBulk(c *gin.Context, stateCommand coreapp.AdminMicrosoftStateCommand, bulkAction coreapp.AdminResourceBulkAction) {
+// submitAdminResourceStateBulk accepts a Microsoft publish/unpublish/delete
+// batch (explicit IDs or filter) into the durable AdminResourceBulkService, the
+// same asynchronous worker that already runs bulk maintenance. Large Microsoft
+// tables no longer block the request thread; the client polls the returned task.
+func (h *CoreHandler) submitAdminResourceStateBulk(c *gin.Context, bulkAction coreapp.AdminResourceBulkAction) {
 	if !validAdminIdempotencyKey(c.GetHeader("Idempotency-Key")) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
 		return
@@ -728,24 +732,6 @@ func (h *CoreHandler) applyAdminResourceStateBulk(c *gin.Context, stateCommand c
 	}
 	selection, ok := toAdminBulkSelection(c, request.Selection)
 	if !ok {
-		return
-	}
-	if selection.Mode == coreapp.AdminResourceBulkIDs {
-		result, err := h.module.AdminCommands.ApplyStateBatch(
-			c.Request.Context(), stateCommand, selection.ResourceIDs, mustCurrentAdminUserID(c), c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath(),
-		)
-		if err != nil {
-			writeAdminResourceError(c, err)
-			return
-		}
-		reasons := make([]adminTaskReasonResponse, len(result.ReasonCounts))
-		for i := range result.ReasonCounts {
-			reasons[i] = adminTaskReasonResponse{Reason: result.ReasonCounts[i].Reason, Count: result.ReasonCounts[i].Count}
-		}
-		c.JSON(http.StatusOK, adminMicrosoftBulkResultResponse{
-			Requested: result.Requested, Affected: result.Affected, Skipped: result.Skipped,
-			AffectedResourceIDs: result.AffectedResourceIDs, SkippedResourceIDs: result.SkippedResourceIDs, ReasonCounts: reasons,
-		})
 		return
 	}
 	h.submitAdminResourceBulkSelection(c, bulkAction, selection)
