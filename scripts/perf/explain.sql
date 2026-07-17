@@ -16,12 +16,13 @@ WHERE ms.alloc_bucket = MOD(@resource_id, 64)
   AND ms.status = 'normal'
   AND u.enabled = TRUE
   AND u.role IN ('supplier', 'admin', 'super_admin')
-  AND NOT EXISTS (
-      SELECT 1
-      FROM microsoft_resource_project_matches mrpm
-      WHERE mrpm.resource_id = ms.id
-        AND mrpm.project_id = 900000001
-  )
+	  AND NOT EXISTS (
+	      SELECT 1
+	      FROM microsoft_allocations history_main
+	      WHERE history_main.resource_id = ms.id
+	        AND history_main.project_id = 900000001
+	        AND history_main.mailbox = 'main'
+	  )
 ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC
 LIMIT 8;
 

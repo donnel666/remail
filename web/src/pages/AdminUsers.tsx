@@ -183,6 +183,7 @@ export default function AdminUsers() {
     updateLoadedItems,
   } = useBlockPagedList<AdminUser, AdminUserFacets>({
     activePage,
+    blockSize: 100,
     filterKey: listFilterKey,
     loadBlock: loadUserBlock,
     onError: (error) => {
