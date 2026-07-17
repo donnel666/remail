@@ -1831,7 +1831,9 @@ body[theme-mode="dark"] .semi-always-light,
 .workbench-project-list,
 .workbench-product-list {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none; /* keep vertical scroll, hide the bar (Firefox) */
 }
 
 .workbench-project-list {
@@ -2107,8 +2109,18 @@ body[theme-mode="dark"] .semi-always-light,
 
 .workbench-order-panel-scroll {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none; /* keep vertical scroll, hide the bar (Firefox) */
   padding: 12px;
+}
+
+/* Hide the scrollbar on all three workbench columns while keeping wheel/touch
+   vertical scrolling. Horizontal overflow is clipped above. */
+.workbench-project-list::-webkit-scrollbar,
+.workbench-product-list::-webkit-scrollbar,
+.workbench-order-panel-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .workbench-order-panel {
