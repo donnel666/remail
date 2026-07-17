@@ -14,13 +14,14 @@ import {
 } from "@/pages/resources/date-range-filter";
 
 import {
+  getDashboardData,
+  type DashboardData,
+} from "@/lib/dashboard-api";
+
+import {
   DashboardAnalysisPanel,
   type AnalysisView,
 } from "./console-dashboard/analysis-panel";
-import {
-  getDashboardData,
-  type DashboardData,
-} from "./console-dashboard/dashboard-mock";
 import { DashboardHeader } from "./console-dashboard/dashboard-header";
 import { RankingPanel } from "./console-dashboard/ranking-panel";
 import { DashboardSummaryCards } from "./console-dashboard/summary-cards";
@@ -48,9 +49,8 @@ export default function ConsoleOverview() {
     setLoading(true);
     try {
       const result = await getDashboardData({
-        from: createdFromISOString(createdAtRange),
-        to: createdToISOString(createdAtRange),
-        username: displayName,
+        createdFrom: createdFromISOString(createdAtRange),
+        createdTo: createdToISOString(createdAtRange),
       });
       if (requestID !== requestSequence.current) return;
       setData(result);
@@ -61,7 +61,7 @@ export default function ConsoleOverview() {
     } finally {
       if (requestID === requestSequence.current) setLoading(false);
     }
-  }, [createdAtRange, displayName, t]);
+  }, [createdAtRange, t]);
 
   useEffect(() => {
     void load();

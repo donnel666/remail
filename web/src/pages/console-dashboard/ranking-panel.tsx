@@ -2,7 +2,7 @@ import { Card } from "@douyinfe/semi-ui";
 import { History, Trophy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { DashboardRankItem } from "./dashboard-mock";
+import type { DashboardRankItem } from "@/lib/dashboard-api";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 

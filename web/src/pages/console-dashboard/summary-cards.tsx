@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { DashboardData } from "./dashboard-mock";
+import type { DashboardData } from "@/lib/dashboard-api";
 
 type MetricTone = "blue" | "cyan" | "green" | "orange" | "pink" | "purple";
 

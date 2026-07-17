@@ -6,7 +6,7 @@ import { semiDesignDark, semiDesignLight } from "@visactor/vchart-semi-theme";
 import { PieChart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { DashboardData } from "./dashboard-mock";
+import type { DashboardData } from "@/lib/dashboard-api";
 
 export type AnalysisView =
   | "codes"
