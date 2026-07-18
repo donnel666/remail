@@ -182,27 +182,19 @@ func historicalMailboxType(mainEmail, recipient string) HistoricalMailboxType {
 }
 
 func historicalRecipientKind(mainEmail string, recipient string) string {
-	mainLocal, mainDomain, ok := splitEmail(mainEmail)
+	_, mainPlus, mainDots, ok := domain.RecipientAliasForms(mainEmail)
 	if !ok {
 		return "exact"
 	}
-	local, recipientDomain, ok := splitEmail(recipient)
-	if !ok || recipientDomain != mainDomain {
+	value, valuePlus, valueDots, ok := domain.RecipientAliasForms(recipient)
+	if !ok || valueDots != mainDots {
 		return "exact"
 	}
-	if plus := strings.IndexByte(local, '+'); plus > 0 && local[:plus] == mainLocal {
+	if value != valuePlus {
 		return "plus"
 	}
-	if local != mainLocal && strings.ReplaceAll(local, ".", "") == strings.ReplaceAll(mainLocal, ".", "") {
+	if valuePlus != mainPlus {
 		return "dot"
 	}
 	return "exact"
-}
-
-func splitEmail(value string) (string, string, bool) {
-	parts := strings.Split(normalizeEmail(value), "@")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }

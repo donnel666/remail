@@ -193,6 +193,56 @@ func TestListOrderMessagesOnlyReturnsPersistedOwnershipMySQL(t *testing.T) {
 	require.Equal(t, "Owned code 123456", detail.RawBody)
 }
 
+func TestListMatchingScopesByRecipientNormalizesMicrosoftAliasesMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_NORMALIZED_RECIPIENT")
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_resources
+SET email_address = 'firstname@example.com'
+WHERE id = 100`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
+    (10, 'sender', 'sender@example\\.net', TRUE),
+    (10, 'recipient', 'exact', TRUE),
+    (10, 'recipient', 'dot', TRUE),
+    (10, 'recipient', 'plus', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_NORMALIZED_RECIPIENT', 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', 'OR_NORMALIZED_RECIPIENT', 'TX_NORMALIZED_RECIPIENT')`).Error)
+	var debitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = ?", "TX_NORMALIZED_RECIPIENT").Scan(&debitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_NORMALIZED_RECIPIENT', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox, email
+) VALUES ('OR_NORMALIZED_RECIPIENT', 10, 20, 100, 'public', 'main', 'firstname@example.com')`).Error)
+	var allocationID uint
+	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_NORMALIZED_RECIPIENT").Scan(&allocationID).Error)
+	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
+		"status":             "active",
+		"debit_tx_id":        debitID,
+		"allocation_type":    "microsoft",
+		"microsoft_alloc_id": allocationID,
+		"delivery_email":     "firstname@example.com",
+		"receive_started_at": now.Add(-time.Minute),
+		"receive_until":      now.Add(10 * time.Minute),
+	}).Error)
+
+	repo := NewRepo(db, nil)
+	for _, recipient := range []string{"firstname+tag@example.com", "first.name@example.com"} {
+		scopes, err := repo.ListMatchingScopesByRecipient(context.Background(), domain.ResourceTypeMicrosoft, 100, recipient, now)
+		require.NoError(t, err)
+		require.Len(t, scopes, 1, recipient)
+		require.Equal(t, orderID, scopes[0].OrderID)
+		require.Equal(t, "firstname@example.com", scopes[0].Recipient)
+	}
+}
+
 func TestHistoricalProjectScopeLockAndLegacyClearMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchOrder(t, db, "OR_HISTORY_MATCH")

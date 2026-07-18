@@ -1087,6 +1087,9 @@ func matchRequiredRule(ruleType MailRuleType, enabled map[MailRuleType][]string,
 }
 
 func matchAnyPattern(ruleType MailRuleType, patterns []string, message FetchedMessage, scope OrderScope) bool {
+	if ruleType == MailRuleRecipient {
+		return matchRecipientPatterns(patterns, message, scope)
+	}
 	for _, pattern := range patterns {
 		if matchPattern(ruleType, pattern, message, scope) {
 			return true
@@ -1102,17 +1105,7 @@ func matchPattern(ruleType MailRuleType, pattern string, message FetchedMessage,
 	}
 	switch ruleType {
 	case MailRuleRecipient:
-		recipient := normalizeEmail(message.Recipient)
-		switch strings.ToLower(pattern) {
-		case "exact":
-			return recipient != "" && recipient == normalizeEmail(scope.Recipient) && recipientKind(scope) == "exact"
-		case "dot":
-			return recipient != "" && recipient == normalizeEmail(scope.Recipient) && recipientKind(scope) == "dot"
-		case "plus":
-			return recipient != "" && recipient == normalizeEmail(scope.Recipient) && recipientKind(scope) == "plus"
-		default:
-			return false
-		}
+		return matchRecipientPatterns([]string{pattern}, message, scope)
 	case MailRuleSender:
 		return regexMatch(pattern, message.Sender)
 	case MailRuleSubject:
@@ -1122,6 +1115,36 @@ func matchPattern(ruleType MailRuleType, pattern string, message FetchedMessage,
 	default:
 		return false
 	}
+}
+
+func matchRecipientPatterns(patterns []string, message FetchedMessage, scope OrderScope) bool {
+	allowed := make(map[string]bool, len(patterns))
+	for _, pattern := range patterns {
+		switch pattern = strings.ToLower(strings.TrimSpace(pattern)); pattern {
+		case "exact", "dot", "plus":
+			allowed[pattern] = true
+		}
+	}
+	recipient, recipientPlus, recipientDots, ok := domain.RecipientAliasForms(message.Recipient)
+	if !ok {
+		return false
+	}
+	target, targetPlus, targetDots, ok := domain.RecipientAliasForms(scope.Recipient)
+	if !ok {
+		return false
+	}
+	if recipient == target {
+		return allowed[recipientKind(scope)]
+	}
+	if recipientDots != targetDots {
+		return false
+	}
+	requiresPlus := recipient != recipientPlus
+	requiresDot := recipientPlus != targetPlus
+	if !requiresPlus && !requiresDot {
+		return false
+	}
+	return (!requiresPlus || allowed["plus"]) && (!requiresDot || allowed["dot"])
 }
 
 func recipientKind(scope OrderScope) string {

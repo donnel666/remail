@@ -292,7 +292,14 @@ JOIN orders o ON o.microsoft_alloc_id = ma.id AND o.allocation_type = 'microsoft
 JOIN projects p ON p.id = o.project_id
 JOIN microsoft_resources mr ON mr.id = ma.resource_id
 WHERE ma.resource_id = ?
-  AND ma.email = ?
+  AND (
+    ma.email = ?
+    OR (
+      ma.mailbox = 'main'
+      AND SUBSTRING_INDEX(ma.email, '@', -1) = ?
+      AND REPLACE(SUBSTRING_INDEX(ma.email, '@', 1), '.', '') = ?
+    )
+  )
   AND ma.status = 'allocated'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
@@ -539,7 +546,31 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 	var err error
 	switch resourceType {
 	case domain.ResourceTypeMicrosoft:
-		err = r.dbFor(ctx).Raw(microsoftMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
+		_, _, canonical, ok := domain.RecipientAliasForms(recipient)
+		if !ok {
+			return nil, nil
+		}
+		canonicalLocal, canonicalHost, _ := strings.Cut(canonical, "@")
+		err = r.dbFor(ctx).Raw(
+			microsoftMatchingScopesSQL,
+			emailResourceID,
+			recipient,
+			canonicalHost,
+			canonicalLocal,
+			receivedAt,
+			receivedAt,
+		).Scan(&rows).Error
+		if err == nil {
+			exact := make([]orderScopeRow, 0, len(rows))
+			for _, row := range rows {
+				if strings.EqualFold(strings.TrimSpace(row.Recipient), recipient) {
+					exact = append(exact, row)
+				}
+			}
+			if len(exact) > 0 {
+				rows = exact
+			}
+		}
 	case domain.ResourceTypeDomain:
 		err = r.dbFor(ctx).Raw(domainMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	default:

@@ -70,6 +70,43 @@ func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
 	require.Empty(t, diagnostic)
 }
 
+func TestRecipientRulesNormalizePlusAndDotAliases(t *testing.T) {
+	tests := []struct {
+		name      string
+		recipient string
+		target    string
+		patterns  []string
+		wantMatch bool
+	}{
+		{name: "plus", recipient: "firstname+tag@example.com", target: "firstname@example.com", patterns: []string{"plus"}, wantMatch: true},
+		{name: "dot", recipient: "first.name@example.com", target: "firstname@example.com", patterns: []string{"dot"}, wantMatch: true},
+		{name: "combined", recipient: "first.name+tag@example.com", target: "firstname@example.com", patterns: []string{"plus", "dot"}, wantMatch: true},
+		{name: "combined requires both", recipient: "first.name+tag@example.com", target: "firstname@example.com", patterns: []string{"plus"}, wantMatch: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rules := []MailRule{{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true}}
+			for _, pattern := range test.patterns {
+				rules = append(rules, MailRule{Type: MailRuleRecipient, Pattern: pattern, Enabled: true})
+			}
+			matched, code, _ := matchAndExtract(FetchedMessage{
+				Recipient: test.recipient,
+				Sender:    "sender@example.net",
+				Body:      "Code: 654321",
+			}, OrderScope{
+				Recipient:     test.target,
+				RecipientKind: "exact",
+				LooseMatch:    true,
+				Rules:         rules,
+			})
+			require.Equal(t, test.wantMatch, matched)
+			if test.wantMatch {
+				require.Equal(t, "654321", code)
+			}
+		})
+	}
+}
+
 func TestRecipientBuiltInStrategyMustMatchAllocationKind(t *testing.T) {
 	message := FetchedMessage{
 		Recipient: "name.tag@example.com",
