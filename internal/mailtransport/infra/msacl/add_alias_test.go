@@ -72,6 +72,25 @@ func TestExplicitAliasPresentRequiresManagePageAndExactAddress(t *testing.T) {
 	))
 }
 
+func TestExtractAllExplicitAliasesFromManagePageUsesMicrosoftWhitelist(t *testing.T) {
+	page := `<div>
+		first&#64;outlook.com
+		second@outlook.com.ar
+		third@outlook.sa
+		fourth\u0040hotmail.com
+		recovery@gmail.com
+		legacy@live.com
+		excluded@outlook.co.uk
+	</div>`
+
+	assert.Equal(t, []string{
+		"first@outlook.com",
+		"second@outlook.com.ar",
+		"third@outlook.sa",
+		"fourth@hotmail.com",
+	}, extractAllExplicitAliasesFromManagePage(page, "https://account.live.com/names/manage"))
+}
+
 func TestIsKMSIPageRejectsOrdinaryLoginContinuation(t *testing.T) {
 	assert.True(t, isKMSIPage(`{"sPageId":"i5245"} Stay signed in?`))
 	assert.True(t, isKMSIPage(`<h1>保持登录状态?</h1>`))

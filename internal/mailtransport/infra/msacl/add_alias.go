@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 )
 
 const (
@@ -1023,22 +1025,24 @@ func isExplicitAliasManageURL(rawURL string) bool {
 	return strings.EqualFold(strings.TrimRight(parsed.Path, "/"), "/names/manage")
 }
 
-// extractAllExplicitAliasesFromManagePage extracts all @outlook.com, @hotmail.com,
-// @live.com, and @msn.com addresses from a normalized names/manage page. It is
-// the "list all existing aliases" counterpart of explicitAliasPresentOnManagePage.
+// extractAllExplicitAliasesFromManagePage extracts only approved Microsoft
+// consumer aliases from a normalized names/manage page. Recovery addresses may
+// appear on the same page and must not become sellable explicit aliases.
 func extractAllExplicitAliasesFromManagePage(page, rawURL string) []string {
 	if !isExplicitAliasManageURL(rawURL) {
 		return nil
 	}
 	normalizedPage := strings.ToLower(html.UnescapeString(page))
-	normalizedPage = strings.ReplaceAll(normalizedPage, `@`, "@")
+	normalizedPage = strings.ReplaceAll(normalizedPage, `\u0040`, "@")
 	normalizedPage = strings.ReplaceAll(normalizedPage, `\x40`, "@")
-	// Match email-like patterns on the common Microsoft consumer domains.
-	aliasRE := regexp.MustCompile(`[a-z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@(?:outlook|hotmail|live|msn)\.(?:com|co\.uk|de|fr|it|es|jp|ca|au|cn|in|br)`)
+	aliasRE := regexp.MustCompile(`[a-z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?`)
 	all := aliasRE.FindAllString(normalizedPage, -1)
 	seen := make(map[string]struct{}, len(all))
 	deduped := make([]string, 0, len(all))
 	for _, a := range all {
+		if !coredomain.IsMicrosoftEmailDomain(a) {
+			continue
+		}
 		if _, ok := seen[a]; !ok {
 			seen[a] = struct{}{}
 			deduped = append(deduped, a)

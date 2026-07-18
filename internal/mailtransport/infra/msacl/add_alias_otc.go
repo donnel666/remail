@@ -273,9 +273,9 @@ func firstEmailProofDisplay(proofs []ProofData) string {
 // SyncAndAddExplicitAliasesResult contains the outcome of a single "login →
 // list existing → add new aliases" session.
 type SyncAndAddExplicitAliasesResult struct {
-	// ExistingAliases lists all @outlook.com/@hotmail/… aliases found on the
-	// account.live.com/names/manage page. The caller should backfill these
-	// into the local DB (explicit_aliases) for reconciliation.
+	// ExistingAliases lists approved Microsoft aliases found on the
+	// account.live.com/names/manage page. The caller should backfill these into
+	// the local DB (explicit_aliases) for reconciliation.
 	ExistingAliases []string
 	// AddResults contains one entry per attempted candidate.
 	AddResults []ExplicitAliasResult

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
@@ -1494,6 +1495,9 @@ func normalizeExistingAliasRows(values []string) []string {
 		value = strings.ToLower(strings.TrimSpace(value))
 		local, domain, ok := strings.Cut(value, "@")
 		if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+			continue
+		}
+		if !coredomain.IsMicrosoftEmailDomain(value) {
 			continue
 		}
 		if _, ok := seen[value]; ok {
