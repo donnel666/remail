@@ -1511,6 +1511,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Platform data dashboard (admin only)
+         * @description Platform-wide analytics for the administrator overview — finance
+         *     (recharge/spend/refund/withdraw/platform revenue, reusing the finance
+         *     summary), orders, user growth, Microsoft vs domain code-receipt metrics,
+         *     mailbox inventory, and project code-receipt / inventory-alert rankings —
+         *     over the selected date range. Requires `billing:wallet/read`. Buckets are
+         *     hourly when the range is a single day, else daily. Inventory totals are a
+         *     point-in-time snapshot flat-lined across the trend (no historical
+         *     snapshot store).
+         */
+        get: operations["getAdminDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet": {
         parameters: {
             query?: never;
@@ -3607,6 +3634,68 @@ export interface components {
             count: number;
             rank: number;
             isCurrentUser?: boolean;
+        };
+        /** @description Platform-wide analytics for the administrator overview. */
+        AdminDashboardResponse: {
+            stats: components["schemas"]["AdminDashboardStats"];
+            trend: components["schemas"]["AdminDashboardTrendPoint"][];
+            projectCodeRanking: components["schemas"]["AdminDashboardRankItem"][];
+            projectInventoryRanking: components["schemas"]["AdminDashboardInventoryRankItem"][];
+        };
+        AdminDashboardStats: {
+            rechargeAmount: number;
+            spendAmount: number;
+            refundAmount: number;
+            withdrawAmount: number;
+            platformRevenue: number;
+            totalOrders: number;
+            successfulCodeReceipts: number;
+            totalUsers: number;
+            activeUsers: number;
+            newUsers: number;
+            microsoftTotalEmails: number;
+            microsoftAvailableEmails: number;
+            microsoftCodeReceipts: number;
+            microsoftCodeSuccessRate: number;
+            microsoftAverageCodeReceiptSeconds: number;
+            domainTotalMailboxes: number;
+            domainAvailableMailboxes: number;
+            domainCodeReceipts: number;
+            domainCodeSuccessRate: number;
+            domainAverageCodeReceiptSeconds: number;
+        };
+        AdminDashboardTrendPoint: {
+            label: string;
+            rechargeAmount: number;
+            spendAmount: number;
+            refundAmount: number;
+            withdrawAmount: number;
+            platformRevenue: number;
+            orders: number;
+            successfulCodeReceipts: number;
+            totalUsers: number;
+            activeUsers: number;
+            newUsers: number;
+            microsoftTotalEmails: number;
+            microsoftAvailableEmails: number;
+            microsoftReceivedCodes: number;
+            microsoftCodeSuccessRate: number;
+            microsoftAverageCodeReceiptSeconds: number;
+            domainTotalMailboxes: number;
+            domainAvailableMailboxes: number;
+            domainReceivedCodes: number;
+            domainCodeSuccessRate: number;
+            domainAverageCodeReceiptSeconds: number;
+        };
+        AdminDashboardRankItem: {
+            name: string;
+            count: number;
+            rank: number;
+        };
+        AdminDashboardInventoryRankItem: {
+            name: string;
+            available: number;
+            rank: number;
         };
         CardKey: {
             cardKey: string;
@@ -11624,6 +11713,56 @@ export interface operations {
             };
             /** @description Authentication required */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAdminDashboard: {
+        parameters: {
+            query?: {
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform dashboard aggregates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDashboardResponse"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

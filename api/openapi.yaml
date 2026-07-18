@@ -5055,6 +5055,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/dashboard:
+    get:
+      operationId: getAdminDashboard
+      summary: Platform data dashboard (admin only)
+      description: |
+        Platform-wide analytics for the administrator overview — finance
+        (recharge/spend/refund/withdraw/platform revenue, reusing the finance
+        summary), orders, user growth, Microsoft vs domain code-receipt metrics,
+        mailbox inventory, and project code-receipt / inventory-alert rankings —
+        over the selected date range. Requires `billing:wallet/read`. Buckets are
+        hourly when the range is a single day, else daily. Inventory totals are a
+        point-in-time snapshot flat-lined across the trend (no historical
+        snapshot store).
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: createdFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Platform dashboard aggregates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboardResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # --- Billing Wallet ---
   /v1/wallet:
     get:
@@ -10653,6 +10707,196 @@ components:
           type: integer
         isCurrentUser:
           type: boolean
+      additionalProperties: false
+
+    AdminDashboardResponse:
+      type: object
+      description: Platform-wide analytics for the administrator overview.
+      required:
+        - stats
+        - trend
+        - projectCodeRanking
+        - projectInventoryRanking
+      properties:
+        stats:
+          $ref: "#/components/schemas/AdminDashboardStats"
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDashboardTrendPoint"
+        projectCodeRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDashboardRankItem"
+        projectInventoryRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDashboardInventoryRankItem"
+      additionalProperties: false
+
+    AdminDashboardStats:
+      type: object
+      required:
+        - rechargeAmount
+        - spendAmount
+        - refundAmount
+        - withdrawAmount
+        - platformRevenue
+        - totalOrders
+        - successfulCodeReceipts
+        - totalUsers
+        - activeUsers
+        - newUsers
+        - microsoftTotalEmails
+        - microsoftAvailableEmails
+        - microsoftCodeReceipts
+        - microsoftCodeSuccessRate
+        - microsoftAverageCodeReceiptSeconds
+        - domainTotalMailboxes
+        - domainAvailableMailboxes
+        - domainCodeReceipts
+        - domainCodeSuccessRate
+        - domainAverageCodeReceiptSeconds
+      properties:
+        rechargeAmount:
+          type: number
+        spendAmount:
+          type: number
+        refundAmount:
+          type: number
+        withdrawAmount:
+          type: number
+        platformRevenue:
+          type: number
+        totalOrders:
+          type: integer
+        successfulCodeReceipts:
+          type: integer
+        totalUsers:
+          type: integer
+        activeUsers:
+          type: integer
+        newUsers:
+          type: integer
+        microsoftTotalEmails:
+          type: integer
+        microsoftAvailableEmails:
+          type: integer
+        microsoftCodeReceipts:
+          type: integer
+        microsoftCodeSuccessRate:
+          type: number
+        microsoftAverageCodeReceiptSeconds:
+          type: integer
+        domainTotalMailboxes:
+          type: integer
+        domainAvailableMailboxes:
+          type: integer
+        domainCodeReceipts:
+          type: integer
+        domainCodeSuccessRate:
+          type: number
+        domainAverageCodeReceiptSeconds:
+          type: integer
+      additionalProperties: false
+
+    AdminDashboardTrendPoint:
+      type: object
+      required:
+        - label
+        - rechargeAmount
+        - spendAmount
+        - refundAmount
+        - withdrawAmount
+        - platformRevenue
+        - orders
+        - successfulCodeReceipts
+        - totalUsers
+        - activeUsers
+        - newUsers
+        - microsoftTotalEmails
+        - microsoftAvailableEmails
+        - microsoftReceivedCodes
+        - microsoftCodeSuccessRate
+        - microsoftAverageCodeReceiptSeconds
+        - domainTotalMailboxes
+        - domainAvailableMailboxes
+        - domainReceivedCodes
+        - domainCodeSuccessRate
+        - domainAverageCodeReceiptSeconds
+      properties:
+        label:
+          type: string
+        rechargeAmount:
+          type: number
+        spendAmount:
+          type: number
+        refundAmount:
+          type: number
+        withdrawAmount:
+          type: number
+        platformRevenue:
+          type: number
+        orders:
+          type: integer
+        successfulCodeReceipts:
+          type: integer
+        totalUsers:
+          type: integer
+        activeUsers:
+          type: integer
+        newUsers:
+          type: integer
+        microsoftTotalEmails:
+          type: integer
+        microsoftAvailableEmails:
+          type: integer
+        microsoftReceivedCodes:
+          type: integer
+        microsoftCodeSuccessRate:
+          type: number
+        microsoftAverageCodeReceiptSeconds:
+          type: integer
+        domainTotalMailboxes:
+          type: integer
+        domainAvailableMailboxes:
+          type: integer
+        domainReceivedCodes:
+          type: integer
+        domainCodeSuccessRate:
+          type: number
+        domainAverageCodeReceiptSeconds:
+          type: integer
+      additionalProperties: false
+
+    AdminDashboardRankItem:
+      type: object
+      required:
+        - name
+        - count
+        - rank
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+        rank:
+          type: integer
+      additionalProperties: false
+
+    AdminDashboardInventoryRankItem:
+      type: object
+      required:
+        - name
+        - available
+        - rank
+      properties:
+        name:
+          type: string
+        available:
+          type: integer
+        rank:
+          type: integer
       additionalProperties: false
 
     CardKey:

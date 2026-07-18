@@ -3810,6 +3810,77 @@ type AdminCreateUserRequest struct {
 // AdminCreateUserRequestRole defines model for AdminCreateUserRequest.Role.
 type AdminCreateUserRequestRole string
 
+// AdminDashboardInventoryRankItem defines model for AdminDashboardInventoryRankItem.
+type AdminDashboardInventoryRankItem struct {
+	Available int    `json:"available"`
+	Name      string `json:"name"`
+	Rank      int    `json:"rank"`
+}
+
+// AdminDashboardRankItem defines model for AdminDashboardRankItem.
+type AdminDashboardRankItem struct {
+	Count int    `json:"count"`
+	Name  string `json:"name"`
+	Rank  int    `json:"rank"`
+}
+
+// AdminDashboardResponse Platform-wide analytics for the administrator overview.
+type AdminDashboardResponse struct {
+	ProjectCodeRanking      []AdminDashboardRankItem          `json:"projectCodeRanking"`
+	ProjectInventoryRanking []AdminDashboardInventoryRankItem `json:"projectInventoryRanking"`
+	Stats                   AdminDashboardStats               `json:"stats"`
+	Trend                   []AdminDashboardTrendPoint        `json:"trend"`
+}
+
+// AdminDashboardStats defines model for AdminDashboardStats.
+type AdminDashboardStats struct {
+	ActiveUsers                        int     `json:"activeUsers"`
+	DomainAvailableMailboxes           int     `json:"domainAvailableMailboxes"`
+	DomainAverageCodeReceiptSeconds    int     `json:"domainAverageCodeReceiptSeconds"`
+	DomainCodeReceipts                 int     `json:"domainCodeReceipts"`
+	DomainCodeSuccessRate              float32 `json:"domainCodeSuccessRate"`
+	DomainTotalMailboxes               int     `json:"domainTotalMailboxes"`
+	MicrosoftAvailableEmails           int     `json:"microsoftAvailableEmails"`
+	MicrosoftAverageCodeReceiptSeconds int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftCodeReceipts              int     `json:"microsoftCodeReceipts"`
+	MicrosoftCodeSuccessRate           float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftTotalEmails               int     `json:"microsoftTotalEmails"`
+	NewUsers                           int     `json:"newUsers"`
+	PlatformRevenue                    float32 `json:"platformRevenue"`
+	RechargeAmount                     float32 `json:"rechargeAmount"`
+	RefundAmount                       float32 `json:"refundAmount"`
+	SpendAmount                        float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts             int     `json:"successfulCodeReceipts"`
+	TotalOrders                        int     `json:"totalOrders"`
+	TotalUsers                         int     `json:"totalUsers"`
+	WithdrawAmount                     float32 `json:"withdrawAmount"`
+}
+
+// AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
+type AdminDashboardTrendPoint struct {
+	ActiveUsers                        int     `json:"activeUsers"`
+	DomainAvailableMailboxes           int     `json:"domainAvailableMailboxes"`
+	DomainAverageCodeReceiptSeconds    int     `json:"domainAverageCodeReceiptSeconds"`
+	DomainCodeSuccessRate              float32 `json:"domainCodeSuccessRate"`
+	DomainReceivedCodes                int     `json:"domainReceivedCodes"`
+	DomainTotalMailboxes               int     `json:"domainTotalMailboxes"`
+	Label                              string  `json:"label"`
+	MicrosoftAvailableEmails           int     `json:"microsoftAvailableEmails"`
+	MicrosoftAverageCodeReceiptSeconds int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftCodeSuccessRate           float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftReceivedCodes             int     `json:"microsoftReceivedCodes"`
+	MicrosoftTotalEmails               int     `json:"microsoftTotalEmails"`
+	NewUsers                           int     `json:"newUsers"`
+	Orders                             int     `json:"orders"`
+	PlatformRevenue                    float32 `json:"platformRevenue"`
+	RechargeAmount                     float32 `json:"rechargeAmount"`
+	RefundAmount                       float32 `json:"refundAmount"`
+	SpendAmount                        float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts             int     `json:"successfulCodeReceipts"`
+	TotalUsers                         int     `json:"totalUsers"`
+	WithdrawAmount                     float32 `json:"withdrawAmount"`
+}
+
 // AdminDomainBulkCommandRequest defines model for AdminDomainBulkCommandRequest.
 type AdminDomainBulkCommandRequest struct {
 	Selection AdminDomainBulkSelection `json:"selection"`
@@ -6822,6 +6893,12 @@ type PatchAdminCardParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminDashboardParams defines parameters for GetAdminDashboard.
+type GetAdminDashboardParams struct {
+	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+}
+
 // PostAdminDomainMailboxDisableParams defines parameters for PostAdminDomainMailboxDisable.
 type PostAdminDomainMailboxDisableParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -9171,6 +9248,9 @@ type ServerInterface interface {
 	// List card redemptions
 	// (GET /v1/admin/cards/{cardKey}/redemptions)
 	GetAdminCardRedemptions(c *gin.Context, cardKey string)
+	// Platform data dashboard (admin only)
+	// (GET /v1/admin/dashboard)
+	GetAdminDashboard(c *gin.Context, params GetAdminDashboardParams)
 	// Disable one generated domain mailbox
 	// (POST /v1/admin/domain-mailboxes/{mailboxId}/disable)
 	PostAdminDomainMailboxDisable(c *gin.Context, mailboxId int, params PostAdminDomainMailboxDisableParams)
@@ -10335,6 +10415,43 @@ func (siw *ServerInterfaceWrapper) GetAdminCardRedemptions(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminCardRedemptions(c, cardKey)
+}
+
+// GetAdminDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDashboard(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDashboardParams
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDashboard(c, params)
 }
 
 // PostAdminDomainMailboxDisable operation middleware
@@ -20497,6 +20614,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/cards/enable", wrapper.PostAdminCardsEnable)
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
 	router.GET(options.BaseURL+"/v1/admin/cards/:cardKey/redemptions", wrapper.GetAdminCardRedemptions)
+	router.GET(options.BaseURL+"/v1/admin/dashboard", wrapper.GetAdminDashboard)
 	router.POST(options.BaseURL+"/v1/admin/domain-mailboxes/:mailboxId/disable", wrapper.PostAdminDomainMailboxDisable)
 	router.GET(options.BaseURL+"/v1/admin/domains", wrapper.GetAdminDomains)
 	router.POST(options.BaseURL+"/v1/admin/domains", wrapper.PostAdminDomain)
