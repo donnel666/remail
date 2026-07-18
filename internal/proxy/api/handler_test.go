@@ -24,16 +24,11 @@ type fakeProxyRepo struct {
 	deleteFilter  proxyapp.ProxyListFilter
 	disableFilter proxyapp.ProxyListFilter
 	listIDFilter  proxyapp.ProxyListFilter
-	listIDAfter   uint
-	listIDLimit   int
 	listItems     []domain.Proxy
 	deletedByIDs  []uint
 	created       []domain.Proxy
 	findProxy     *domain.Proxy
-	listIDs       []uint
 	count         int64
-	nextJobID     uint
-	checkJobs     []proxyapp.ProxyCheckJob
 	pendingChecks []uint
 }
 
@@ -45,14 +40,6 @@ func (r *fakeProxyRepo) Create(_ context.Context, proxy *domain.Proxy) error {
 
 func (r *fakeProxyRepo) CreateWithLog(ctx context.Context, proxy *domain.Proxy, _ *governancedomain.OperationLog) error {
 	return r.Create(ctx, proxy)
-}
-
-func (r *fakeProxyRepo) CreateWithLogAndCheckJob(ctx context.Context, proxy *domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckTask) (*proxyapp.ProxyCheckJob, error) {
-	if err := r.CreateWithLog(ctx, proxy, log); err != nil {
-		return nil, err
-	}
-	task.ProxyID = proxy.ID
-	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{}), nil
 }
 
 func (r *fakeProxyRepo) CreateBatchWithLog(_ context.Context, proxies []*domain.Proxy, _ *governancedomain.OperationLog) ([]domain.Proxy, int, error) {
@@ -67,16 +54,6 @@ func (r *fakeProxyRepo) CreateBatchWithLog(_ context.Context, proxies []*domain.
 		r.pendingChecks = append(r.pendingChecks, proxy.ID)
 	}
 	return created, 0, nil
-}
-
-func (r *fakeProxyRepo) CreateBatchWithLogAndCheckJob(ctx context.Context, proxies []*domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckBatchJobRequest) ([]domain.Proxy, int, *proxyapp.ProxyCheckJob, error) {
-	created, duplicated, err := r.CreateBatchWithLog(ctx, proxies, log)
-	if err != nil || len(created) == 0 {
-		return created, duplicated, nil, err
-	}
-	task.Mode = proxyapp.ProxyCheckBatchModeIDs
-	task.ProxyIDs = proxyIDsFromDomain(created)
-	return created, duplicated, r.createCheckJob(proxyapp.ProxyCheckJobBatch, proxyapp.ProxyCheckTask{}, task), nil
 }
 
 func (r *fakeProxyRepo) FindByID(_ context.Context, id uint) (*domain.Proxy, error) {
@@ -113,13 +90,6 @@ func (r *fakeProxyRepo) Stats(_ context.Context, _ proxyapp.ProxyListFilter) (*p
 	return &proxyapp.ProxyStats{}, nil
 }
 
-func (r *fakeProxyRepo) ListIDs(_ context.Context, filter proxyapp.ProxyListFilter, afterID uint, limit int) ([]uint, error) {
-	r.listIDFilter = filter
-	r.listIDAfter = afterID
-	r.listIDLimit = limit
-	return r.listIDs, nil
-}
-
 func (r *fakeProxyRepo) ListBindings(_ context.Context, filter proxyapp.ProxyBindingListFilter, _, _ int) ([]domain.Binding, error) {
 	r.bindingFilter = filter
 	return r.bindings, nil
@@ -137,12 +107,9 @@ func (r *fakeProxyRepo) UpdateWithLog(ctx context.Context, proxy *domain.Proxy, 
 	return r.Update(ctx, proxy)
 }
 
-func (r *fakeProxyRepo) UpdateWithLogAndCheckJob(ctx context.Context, proxy *domain.Proxy, log *governancedomain.OperationLog, task proxyapp.ProxyCheckTask) (*proxyapp.ProxyCheckJob, error) {
-	if err := r.UpdateWithLog(ctx, proxy, log); err != nil {
-		return nil, err
-	}
-	task.ProxyID = proxy.ID
-	return r.createCheckJob(proxyapp.ProxyCheckJobSingle, task, proxyapp.ProxyCheckBatchJobRequest{}), nil
+func (r *fakeProxyRepo) UpdateWithLogAndBumpCheckGeneration(ctx context.Context, proxy *domain.Proxy, log *governancedomain.OperationLog) error {
+	proxy.CheckGeneration++
+	return r.UpdateWithLog(ctx, proxy, log)
 }
 
 func (r *fakeProxyRepo) DeleteBatch(_ context.Context, ids []uint) ([]uint, error) {
@@ -168,24 +135,40 @@ func (r *fakeProxyRepo) DisableByFilterWithLog(_ context.Context, filter proxyap
 	return r.count, nil
 }
 
-func (r *fakeProxyRepo) MarkCheckingBatchWithLog(_ context.Context, ids []uint, _ *governancedomain.OperationLog) (int, int, error) {
+func (r *fakeProxyRepo) MarkPendingBatchWithLog(_ context.Context, ids []uint, _ *governancedomain.OperationLog) (int, int, error) {
 	r.pendingChecks = append(r.pendingChecks, ids...)
 	return len(ids), len(ids), nil
 }
 
-func (r *fakeProxyRepo) MarkCheckingByFilterWithLog(_ context.Context, filter proxyapp.ProxyListFilter, _ *governancedomain.OperationLog) (int64, int64, error) {
+func (r *fakeProxyRepo) MarkPendingByFilterWithLog(_ context.Context, filter proxyapp.ProxyListFilter, _ *governancedomain.OperationLog) (int64, int64, error) {
 	r.listIDFilter = filter
 	for id := uint(1); id <= uint(r.count); id++ {
 		r.pendingChecks = append(r.pendingChecks, id)
-	}
-	if filter.Status == domain.ProxyStatusChecking {
-		return r.count, 0, nil
 	}
 	return r.count, r.count, nil
 }
 
 func (r *fakeProxyRepo) MarkExpiredBefore(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
+}
+func (r *fakeProxyRepo) ListPendingProxyChecks(_ context.Context, limit int) ([]proxyapp.ProxyCheckTask, error) {
+	if limit <= 0 {
+		limit = len(r.pendingChecks)
+	}
+	tasks := make([]proxyapp.ProxyCheckTask, 0, limit)
+	for _, id := range r.pendingChecks {
+		tasks = append(tasks, proxyapp.ProxyCheckTask{ProxyID: id, CheckGeneration: 1})
+		if len(tasks) == limit {
+			break
+		}
+	}
+	return tasks, nil
+}
+func (r *fakeProxyRepo) ActivateProxyCheck(_ context.Context, id uint, generation uint64) (bool, error) {
+	return id != 0 && generation != 0, nil
+}
+func (r *fakeProxyRepo) ReleaseProxyCheckInfrastructureFailure(context.Context, uint, uint64, string) (bool, error) {
+	return false, nil
 }
 
 func (r *fakeProxyRepo) UpdateCheckResult(_ context.Context, id uint, _ domain.CheckResult, success bool) (*domain.Proxy, error) {
@@ -206,94 +189,8 @@ func (r *fakeProxyRepo) UpdateCheckResult(_ context.Context, id uint, _ domain.C
 	}, nil
 }
 
-func (r *fakeProxyRepo) UpdateCheckResultWithLog(ctx context.Context, id uint, result domain.CheckResult, success bool, _ *governancedomain.OperationLog) (*domain.Proxy, error) {
+func (r *fakeProxyRepo) UpdateCheckResultForGenerationWithLog(ctx context.Context, id uint, _ uint64, result domain.CheckResult, success bool, _ *governancedomain.OperationLog) (*domain.Proxy, error) {
 	return r.UpdateCheckResult(ctx, id, result, success)
-}
-
-func (r *fakeProxyRepo) CreateCheckBatchJobWithLog(_ context.Context, task proxyapp.ProxyCheckBatchJobRequest, _ *governancedomain.OperationLog) (*proxyapp.ProxyCheckJob, error) {
-	return r.createCheckJob(proxyapp.ProxyCheckJobBatch, proxyapp.ProxyCheckTask{}, task), nil
-}
-
-func (r *fakeProxyRepo) CreatePendingProxyCheckJobs(_ context.Context, limit int) (int, error) {
-	created := 0
-	for _, proxyID := range r.pendingChecks {
-		if created == limit || r.hasActiveSingleCheckJob(proxyID) {
-			continue
-		}
-		r.createCheckJob(proxyapp.ProxyCheckJobSingle, proxyapp.ProxyCheckTask{ProxyID: proxyID}, proxyapp.ProxyCheckBatchJobRequest{})
-		created++
-	}
-	return created, nil
-}
-
-func (r *fakeProxyRepo) ClaimDispatchableProxyCheckJobs(_ context.Context, limit int, staleBefore time.Time) ([]proxyapp.ProxyCheckJob, error) {
-	if limit <= 0 {
-		limit = len(r.checkJobs)
-	}
-	jobs := make([]proxyapp.ProxyCheckJob, 0, len(r.checkJobs))
-	for i := range r.checkJobs {
-		eligible := r.checkJobs[i].Status == proxyapp.ProxyCheckJobPending
-		if !eligible && r.checkJobs[i].UpdatedAt.Before(staleBefore) {
-			eligible = r.checkJobs[i].Status == proxyapp.ProxyCheckJobQueued || r.checkJobs[i].Status == proxyapp.ProxyCheckJobRunning
-		}
-		if !eligible {
-			continue
-		}
-		r.checkJobs[i].Status = proxyapp.ProxyCheckJobQueued
-		r.checkJobs[i].LastSafeError = ""
-		r.checkJobs[i].UpdatedAt = time.Now().UTC()
-		jobs = append(jobs, r.checkJobs[i])
-		if len(jobs) == limit {
-			break
-		}
-	}
-	return jobs, nil
-}
-
-func (r *fakeProxyRepo) ListProxyCheckJobItemIDs(_ context.Context, jobID uint, afterProxyID uint, limit int) ([]uint, error) {
-	if limit <= 0 {
-		limit = 1000
-	}
-	for _, job := range r.checkJobs {
-		if job.ID != jobID {
-			continue
-		}
-		ids := make([]uint, 0, limit)
-		for _, proxyID := range job.ProxyIDs {
-			if proxyID <= afterProxyID {
-				continue
-			}
-			ids = append(ids, proxyID)
-			if len(ids) == limit {
-				break
-			}
-		}
-		return ids, nil
-	}
-	return nil, nil
-}
-
-func (r *fakeProxyRepo) MarkProxyCheckJobQueued(_ context.Context, jobID uint) (bool, error) {
-	return r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobQueued, "", proxyapp.ProxyCheckJobPending), nil
-}
-
-func (r *fakeProxyRepo) MarkProxyCheckJobDispatchFailed(_ context.Context, jobID uint, safeError string) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobPending, safeError, proxyapp.ProxyCheckJobQueued)
-	return nil
-}
-
-func (r *fakeProxyRepo) MarkProxyCheckJobRunning(_ context.Context, jobID uint) (bool, error) {
-	return r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobRunning, "", proxyapp.ProxyCheckJobQueued), nil
-}
-
-func (r *fakeProxyRepo) MarkProxyCheckJobSucceeded(_ context.Context, jobID uint) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobSucceeded, "", proxyapp.ProxyCheckJobRunning)
-	return nil
-}
-
-func (r *fakeProxyRepo) MarkProxyCheckJobFailed(_ context.Context, jobID uint, safeError string) error {
-	r.updateCheckJobStatus(jobID, proxyapp.ProxyCheckJobFailed, safeError, proxyapp.ProxyCheckJobQueued, proxyapp.ProxyCheckJobRunning)
-	return nil
 }
 
 func (r *fakeProxyRepo) AcquireResourceProxy(_ context.Context, _ string, _ domain.ProxyIPVersion, _ time.Time, _ time.Duration) (*domain.Proxy, error) {
@@ -312,87 +209,6 @@ func (r *fakeProxyRepo) ReportFailure(_ context.Context, _ uint, _ string, _ boo
 	return nil, nil
 }
 
-func (r *fakeProxyRepo) ReportFailureAndCreateCheckJob(_ context.Context, _ uint, _ string, _ bool, _ proxyapp.ProxyCheckTask) (*domain.Proxy, *proxyapp.ProxyCheckJob, error) {
-	return &domain.Proxy{Status: domain.ProxyStatusNormal}, nil, nil
-}
-
-func (r *fakeProxyRepo) createCheckJob(kind proxyapp.ProxyCheckJobKind, task proxyapp.ProxyCheckTask, batchTask proxyapp.ProxyCheckBatchJobRequest) *proxyapp.ProxyCheckJob {
-	if r.nextJobID == 0 {
-		r.nextJobID = 1
-	}
-	job := proxyapp.ProxyCheckJob{
-		ID:             r.nextJobID,
-		Kind:           kind,
-		Mode:           batchTask.Mode,
-		Status:         proxyapp.ProxyCheckJobPending,
-		ProxyID:        task.ProxyID,
-		ProxyIDs:       batchTask.ProxyIDs,
-		Filter:         batchTask.Filter,
-		OperatorUserID: task.OperatorUserID,
-		RequestID:      task.RequestID,
-		Path:           task.Path,
-		UpdatedAt:      time.Now().UTC(),
-	}
-	if kind == proxyapp.ProxyCheckJobBatch {
-		if job.Mode == "" {
-			if len(batchTask.ProxyIDs) > 0 {
-				job.Mode = proxyapp.ProxyCheckBatchModeIDs
-			} else {
-				job.Mode = proxyapp.ProxyCheckBatchModeFilter
-			}
-		}
-		job.OperatorUserID = batchTask.OperatorUserID
-		job.RequestID = batchTask.RequestID
-		job.Path = batchTask.Path
-	}
-	r.nextJobID++
-	r.checkJobs = append(r.checkJobs, job)
-	return &r.checkJobs[len(r.checkJobs)-1]
-}
-
-func (r *fakeProxyRepo) updateCheckJobStatus(jobID uint, status proxyapp.ProxyCheckJobStatus, safeError string, expectedStatuses ...proxyapp.ProxyCheckJobStatus) bool {
-	for i := range r.checkJobs {
-		if r.checkJobs[i].ID == jobID {
-			if len(expectedStatuses) > 0 {
-				matched := false
-				for _, expected := range expectedStatuses {
-					if r.checkJobs[i].Status == expected {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					return false
-				}
-			}
-			r.checkJobs[i].Status = status
-			r.checkJobs[i].LastSafeError = safeError
-			return true
-		}
-	}
-	return false
-}
-
-func (r *fakeProxyRepo) hasActiveSingleCheckJob(proxyID uint) bool {
-	for i := range r.checkJobs {
-		if r.checkJobs[i].Kind == proxyapp.ProxyCheckJobSingle && r.checkJobs[i].ProxyID == proxyID &&
-			(r.checkJobs[i].Status == proxyapp.ProxyCheckJobPending || r.checkJobs[i].Status == proxyapp.ProxyCheckJobQueued || r.checkJobs[i].Status == proxyapp.ProxyCheckJobRunning) {
-			return true
-		}
-	}
-	return false
-}
-
-func proxyIDsFromDomain(items []domain.Proxy) []uint {
-	ids := make([]uint, 0, len(items))
-	for _, item := range items {
-		if item.ID != 0 {
-			ids = append(ids, item.ID)
-		}
-	}
-	return ids
-}
-
 type fakeProxyChecker struct{}
 
 func (fakeProxyChecker) Check(_ context.Context, _ string) (domain.CheckResult, error) {
@@ -401,18 +217,12 @@ func (fakeProxyChecker) Check(_ context.Context, _ string) (domain.CheckResult, 
 
 type fakeProxyCheckQueue struct {
 	tasks      []proxyapp.ProxyCheckTask
-	batchTasks []proxyapp.ProxyCheckBatchTask
 	dispatches []time.Duration
 }
 
-func (q *fakeProxyCheckQueue) EnqueueProxyCheck(_ context.Context, task proxyapp.ProxyCheckTask) error {
+func (q *fakeProxyCheckQueue) EnqueueProxyCheck(_ context.Context, task proxyapp.ProxyCheckTask) (bool, error) {
 	q.tasks = append(q.tasks, task)
-	return nil
-}
-
-func (q *fakeProxyCheckQueue) EnqueueProxyCheckBatch(_ context.Context, task proxyapp.ProxyCheckBatchTask) error {
-	q.batchTasks = append(q.batchTasks, task)
-	return nil
+	return true, nil
 }
 
 func (q *fakeProxyCheckQueue) EnqueueProxyCheckDispatcher(_ context.Context, delay time.Duration) error {
@@ -600,10 +410,8 @@ func TestPostProxyImportsContract(t *testing.T) {
 	require.Equal(t, 2, response.Created)
 	require.Len(t, response.Items, 2)
 	require.Empty(t, queue.tasks)
-	require.Empty(t, queue.batchTasks)
 	require.Len(t, queue.dispatches, 1)
 	require.Len(t, repo.pendingChecks, 2)
-	require.Empty(t, repo.checkJobs)
 }
 
 func TestPostProxyCheckBatchByFilterContract(t *testing.T) {
@@ -621,20 +429,16 @@ func TestPostProxyCheckBatchByFilterContract(t *testing.T) {
 	handler.PostProxyCheckBatch(c)
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Zero(t, repo.listIDAfter)
-	require.Zero(t, repo.listIDLimit)
 	require.Equal(t, domain.ProxyPoolResource, repo.listIDFilter.Pool)
 	require.Equal(t, "US", repo.listIDFilter.Country)
 	require.Equal(t, domain.ProxyStatusChecking, repo.listIDFilter.Status)
-	require.Empty(t, queue.batchTasks)
 	require.Len(t, queue.dispatches, 1)
 	require.Len(t, repo.pendingChecks, 2)
-	require.Empty(t, repo.checkJobs)
 
 	var response CheckProxiesResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, 2, response.Requested)
-	require.Zero(t, response.Queued)
+	require.Equal(t, 2, response.Queued)
 	require.Empty(t, response.Items)
 }
 
@@ -654,10 +458,8 @@ func TestPostProxyCheckBatchByIDsContract(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, w.Code)
 	require.Empty(t, queue.tasks)
-	require.Empty(t, queue.batchTasks)
 	require.Len(t, queue.dispatches, 1)
 	require.Equal(t, []uint{7, 8}, repo.pendingChecks)
-	require.Empty(t, repo.checkJobs)
 
 	var response CheckProxiesResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
@@ -681,8 +483,8 @@ func TestPostProxyCheckQueuesContract(t *testing.T) {
 	handler.PostProxyCheck(c)
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Len(t, queue.tasks, 1)
-	require.Equal(t, uint(7), queue.tasks[0].ProxyID)
+	require.Empty(t, queue.tasks)
+	require.Len(t, queue.dispatches, 1)
 }
 
 func TestPostProxyCheckIgnoresExpireAtAndQueues(t *testing.T) {
@@ -710,6 +512,6 @@ func TestPostProxyCheckIgnoresExpireAtAndQueues(t *testing.T) {
 	handler.PostProxyCheck(c)
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Len(t, queue.tasks, 1)
-	require.Equal(t, uint(8), queue.tasks[0].ProxyID)
+	require.Empty(t, queue.tasks)
+	require.Len(t, queue.dispatches, 1)
 }

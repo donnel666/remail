@@ -30,50 +30,56 @@ func NewMicrosoftTokenRefreshQueue(client *asynq.Client) *MicrosoftTokenRefreshQ
 	return &MicrosoftTokenRefreshQueue{client: client}
 }
 
-func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Context, task mailapp.MicrosoftTokenRefreshTask) error {
+func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Context, task mailapp.MicrosoftTokenRefreshTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("microsoft token refresh queue is unavailable")
+		return false, fmt.Errorf("microsoft token refresh queue is unavailable")
 	}
-	if task.JobID == 0 || task.ResourceID == 0 || task.DispatchToken == "" {
-		return fmt.Errorf("microsoft token refresh task identity is missing")
+	if task.ResourceID == 0 || task.Generation == 0 || task.ExpectedCredentialRevision == 0 {
+		return false, fmt.Errorf("microsoft token refresh task identity is missing")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return fmt.Errorf("marshal microsoft token refresh task: %w", err)
+		return false, fmt.Errorf("marshal microsoft token refresh task: %w", err)
 	}
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeMicrosoftTokenRefresh, payload),
 		asynq.Queue(MicrosoftTokenRefreshQueueName),
-		asynq.TaskID(fmt.Sprintf("%s:%d:%s", TypeMicrosoftTokenRefresh, task.JobID, task.DispatchToken)),
+		asynq.Unique(microsoftTokenRefreshTaskTimeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.Timeout(microsoftTokenRefreshTaskTimeout),
+		asynq.Retention(0),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
-			return nil
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
 		}
-		return fmt.Errorf("enqueue microsoft token refresh task: %w", err)
+		return false, fmt.Errorf("enqueue microsoft token refresh task: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("microsoft token refresh queue is unavailable")
 	}
+	uniqueTTL := microsoftTokenRefreshDispatcherTimeout
+	if delay > 0 {
+		uniqueTTL += delay
+	}
 	options := []asynq.Option{
-		asynq.Queue("default"),
-		asynq.Unique(microsoftTokenRefreshDispatcherTimeout),
+		asynq.Queue(platform.QueueDefault),
+		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(microsoftTokenRefreshDispatcherTimeout),
+		asynq.Retention(0),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(TypeMicrosoftTokenRefreshDispatcher, nil), options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue microsoft token refresh dispatcher: %w", err)

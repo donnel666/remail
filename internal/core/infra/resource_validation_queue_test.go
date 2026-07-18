@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -12,6 +13,45 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
+
+func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}
+	asynqClient := asynq.NewClient(redisOptions)
+	t.Cleanup(func() { require.NoError(t, asynqClient.Close()) })
+	queue := NewResourceValidationQueue(asynqClient, nil)
+	inspector := asynq.NewInspector(redisOptions)
+	t.Cleanup(func() { require.NoError(t, inspector.Close()) })
+	task := coreapp.ResourceValidationTask{
+		ResourceID: 42, ResourceType: "domain", OwnerUserID: 7, ValidationGeneration: 1,
+	}
+
+	accepted, err := queue.EnqueueResourceValidation(context.Background(), task)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	accepted, err = queue.EnqueueResourceValidation(context.Background(), task)
+	require.NoError(t, err)
+	require.False(t, accepted)
+	task.ValidationGeneration++
+	accepted, err = queue.EnqueueResourceValidation(context.Background(), task)
+	require.NoError(t, err)
+	require.True(t, accepted, "a new validation generation must not be deduplicated behind the old task")
+
+	scheduled, err := inspector.ListScheduledTasks(ResourceValidationQueueName)
+	require.NoError(t, err)
+	require.Len(t, scheduled, 2)
+	for _, taskInfo := range scheduled {
+		require.Equal(t, platform.BackgroundTaskMaxRetry, taskInfo.MaxRetry)
+	}
+	uniqueKeys := 0
+	for _, key := range server.Keys() {
+		if strings.Contains(key, ":unique:") {
+			uniqueKeys++
+			require.Positive(t, server.TTL(key))
+		}
+	}
+	require.Equal(t, 2, uniqueKeys)
+}
 
 func TestResourceValidationBatchQueueUsesFencedLiveLease(t *testing.T) {
 	server := miniredis.RunT(t)

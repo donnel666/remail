@@ -88,19 +88,11 @@ func (r *retentionRepoStub) DeleteMailmatchMessagesBefore(_ context.Context, bef
 	return 0, nil
 }
 
-func (r *retentionRepoStub) DeleteFetchJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
-	return 0, nil
-}
-
 func (r *retentionRepoStub) DeleteAllocationDailyUsagesBefore(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }
 
 func (r *retentionRepoStub) DeleteResourceValidationJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
-	return 0, nil
-}
-
-func (r *retentionRepoStub) DeleteProxyCheckJobsTerminalBefore(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }
 

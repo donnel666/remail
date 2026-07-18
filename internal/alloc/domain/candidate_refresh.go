@@ -5,30 +5,28 @@ import "time"
 type CandidateRefreshStatus string
 
 const (
-	CandidateRefreshPending   CandidateRefreshStatus = "pending"
-	CandidateRefreshQueued    CandidateRefreshStatus = "queued"
-	CandidateRefreshRunning   CandidateRefreshStatus = "running"
-	CandidateRefreshSucceeded CandidateRefreshStatus = "succeeded"
-	CandidateRefreshFailed    CandidateRefreshStatus = "failed"
+	CandidateRefreshPending    CandidateRefreshStatus = "pending"
+	CandidateRefreshProcessing CandidateRefreshStatus = "processing"
+	CandidateRefreshNormal     CandidateRefreshStatus = "normal"
+	CandidateRefreshAbnormal   CandidateRefreshStatus = "abnormal"
 )
 
-type CandidateRefreshJob struct {
-	ID             uint
+type CandidateRefresh struct {
 	ProjectID      uint
+	Generation     uint64
 	OperatorUserID uint
 	Status         CandidateRefreshStatus
 	Affected       int
-	Attempts       int
-	MaxAttempts    int
+	Failures       int
 	LastSafeError  string
 	RequestID      string
 	Path           string
+	RequestedAt    *time.Time
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
-	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
 
 func IsTerminalCandidateRefreshStatus(status CandidateRefreshStatus) bool {
-	return status == CandidateRefreshSucceeded || status == CandidateRefreshFailed
+	return status == CandidateRefreshNormal || status == CandidateRefreshAbnormal
 }

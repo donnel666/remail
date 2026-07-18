@@ -114,8 +114,8 @@ func (p *adminCommandAllocationGuard) AssertNoActiveAllocations(ctx context.Cont
 
 type adminCommandValidationQueue struct{}
 
-func (adminCommandValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
-	return nil
+func (adminCommandValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
 }
 
 func (adminCommandValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {

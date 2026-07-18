@@ -21,6 +21,8 @@ func TestOutboundMailModelRoundTripKeepsMessageBody(t *testing.T) {
 		HTMLBody:       "<p>html body</p>",
 	}, now)
 	mail.ID = 10
+	mail.SendGeneration = 4
+	mail.Retries = 2
 	mail.MarkSent(sentAt)
 
 	model := outboundMailModel(mail)
@@ -36,6 +38,7 @@ func TestOutboundMailModelRoundTripKeepsMessageBody(t *testing.T) {
 	assert.Equal(t, mail.TextBody, roundTrip.TextBody)
 	assert.Equal(t, mail.HTMLBody, roundTrip.HTMLBody)
 	assert.Equal(t, mail.Status, roundTrip.Status)
+	assert.Equal(t, mail.SendGeneration, roundTrip.SendGeneration)
 	assert.Equal(t, mail.Retries, roundTrip.Retries)
 	assert.NotNil(t, roundTrip.SentAt)
 	assert.True(t, sentAt.Equal(*roundTrip.SentAt))

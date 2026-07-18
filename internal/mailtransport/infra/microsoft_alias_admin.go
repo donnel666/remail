@@ -137,6 +137,7 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 			update := tx.Model(&MicrosoftAliasScheduleModel{}).
 				Where("resource_id = ? AND status = ? AND claim_token = ?", resourceID, "pending", schedule.ClaimToken).
 				Updates(map[string]any{
+					"generation":  gorm.Expr("generation + 1"),
 					"next_run_at": now,
 					"updated_at":  now,
 				})

@@ -34,12 +34,11 @@ type ResourceImportModel struct {
 	Path               string     `gorm:"type:varchar(255);not null;default:''"`
 	IdempotencyKey     string     `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
 	RequestFingerprint string     `gorm:"type:char(64);not null;default:'';column:request_fingerprint"`
-	DispatchStatus     string     `gorm:"type:varchar(32);not null;default:'legacy';column:dispatch_status"`
+	DispatchStatus     string     `gorm:"type:varchar(32);not null;default:'pending';column:dispatch_status"`
+	Generation         uint64     `gorm:"not null;default:1"`
 	Attempts           int        `gorm:"not null;default:0"`
 	MaxAttempts        int        `gorm:"not null;default:3;column:max_attempts"`
 	ClaimToken         string     `gorm:"type:char(36);not null;default:'';column:claim_token"`
-	DispatchToken      string     `gorm:"type:char(36);not null;default:'';column:dispatch_token"`
-	DispatchedAt       *time.Time `gorm:"column:dispatched_at"`
 	StartedAt          *time.Time `gorm:"column:started_at"`
 	FinishedAt         *time.Time `gorm:"column:finished_at"`
 	CreatedAt          time.Time  `gorm:"not null;autoCreateTime"`
@@ -66,7 +65,7 @@ func (ResourceImportItemModel) TableName() string { return "resource_import_item
 func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel {
 	dispatchStatus := item.DispatchStatus
 	if dispatchStatus == "" {
-		dispatchStatus = "queued"
+		dispatchStatus = "pending"
 	}
 	maxAttempts := item.MaxAttempts
 	if maxAttempts <= 0 {
@@ -75,6 +74,10 @@ func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel 
 	errorStrategy, ok := domain.NormalizeImportErrorStrategy(string(item.ErrorStrategy))
 	if !ok {
 		errorStrategy = domain.ImportErrorStrategySkip
+	}
+	generation := item.Generation
+	if generation == 0 {
+		generation = 1
 	}
 	return &ResourceImportModel{
 		ID:               item.ID,
@@ -87,6 +90,7 @@ func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel 
 		Status:           string(item.Status),
 		DispatchStatus:   dispatchStatus,
 		MaxAttempts:      maxAttempts,
+		Generation:       generation,
 		ImportedCount:    item.ImportedCount,
 		LastSafeError:    item.LastSafeError,
 		RequestID:        item.RequestID,
@@ -116,9 +120,8 @@ func (m *ResourceImportModel) toDomain() *domain.ResourceImport {
 		DispatchStatus:   m.DispatchStatus,
 		Attempts:         m.Attempts,
 		MaxAttempts:      m.MaxAttempts,
+		Generation:       m.Generation,
 		ClaimToken:       m.ClaimToken,
-		DispatchToken:    m.DispatchToken,
-		DispatchedAt:     m.DispatchedAt,
 		LastSafeError:    m.LastSafeError,
 		RequestID:        m.RequestID,
 		StartedAt:        m.StartedAt,
@@ -211,96 +214,55 @@ func (r *ResourceImportRepo) ListAdminImportProcessedLines(ctx context.Context, 
 	return result, nil
 }
 
-func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, limit int, _ time.Time, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 100 {
 		limit = 100
 	}
-	now := time.Now().UTC()
-	var claimed []coreapp.AdminResourceImportDispatchItem
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&ResourceImportModel{}).
-			Where("status = ? AND dispatch_status = ? AND updated_at < ?", string(domain.ResourceImportProcessing), "legacy", runningStaleBefore).
-			Updates(map[string]any{
-				"status":          string(domain.ResourceImportFailed),
-				"dispatch_status": "failed",
-				"claim_token":     "",
-				"dispatch_token":  "",
-				"dispatched_at":   nil,
-				"last_safe_error": "Legacy import metadata is incomplete. Please submit the import again.",
-				"finished_at":     now,
-				"updated_at":      now,
-			}).Error; err != nil {
-			return fmt.Errorf("expire legacy resource imports: %w", err)
+	var models []ResourceImportModel
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND dispatch_status = ?", string(domain.ResourceImportProcessing), "pending").
+		Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list pending administrator resource imports: %w", err)
+	}
+	items := make([]coreapp.AdminResourceImportDispatchItem, len(models))
+	for i := range models {
+		items[i] = coreapp.AdminResourceImportDispatchItem{
+			ImportID: models[i].ID, OwnerUserID: models[i].OwnerUserID,
+			LongLived: models[i].LongLived, ErrorStrategy: domain.ImportErrorStrategy(models[i].ErrorStrategy),
+			RequestID: models[i].RequestID, Generation: models[i].Generation,
 		}
-		if err := tx.Model(&ResourceImportModel{}).
-			Where("status = ? AND dispatch_status = ? AND started_at < ? AND attempts >= max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
-			Updates(map[string]any{
-				"status":          string(domain.ResourceImportFailed),
-				"dispatch_status": "failed",
-				"claim_token":     "",
-				"dispatch_token":  "",
-				"last_safe_error": "Import processing retry limit was reached.",
-				"finished_at":     now,
-				"updated_at":      now,
-			}).Error; err != nil {
-			return fmt.Errorf("expire stale administrator imports: %w", err)
-		}
-		if err := tx.Model(&ResourceImportModel{}).
-			Where("status = ? AND dispatch_status = ? AND started_at < ? AND attempts < max_attempts", string(domain.ResourceImportProcessing), "running", runningStaleBefore).
-			Updates(map[string]any{
-				"dispatch_status": "queued",
-				"claim_token":     "",
-				"dispatch_token":  "",
-				"dispatched_at":   nil,
-				"updated_at":      now,
-			}).Error; err != nil {
-			return fmt.Errorf("recover stale administrator imports: %w", err)
-		}
-
-		var models []ResourceImportModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? AND dispatch_status = ? AND attempts < max_attempts AND (dispatch_token = '' OR dispatched_at IS NULL OR dispatched_at < ?)", string(domain.ResourceImportProcessing), "queued", queuedDispatchStaleBefore).
-			Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
-			return fmt.Errorf("lock queued administrator resource imports: %w", err)
-		}
-		claimed = make([]coreapp.AdminResourceImportDispatchItem, 0, len(models))
-		for i := range models {
-			token := platform.NewUUIDV7String()
-			update := tx.Model(&ResourceImportModel{}).
-				Where("id = ? AND status = ? AND dispatch_status = ?", models[i].ID, string(domain.ResourceImportProcessing), "queued").
-				Updates(map[string]any{"dispatch_token": token, "dispatched_at": now, "updated_at": now})
-			if update.Error != nil {
-				return fmt.Errorf("claim administrator resource import dispatch: %w", update.Error)
-			}
-			if update.RowsAffected != 1 {
-				continue
-			}
-			claimed = append(claimed, coreapp.AdminResourceImportDispatchItem{
-				ImportID: models[i].ID, OwnerUserID: models[i].OwnerUserID,
-				LongLived: models[i].LongLived, ErrorStrategy: domain.ImportErrorStrategy(models[i].ErrorStrategy),
-				RequestID:     models[i].RequestID,
-				DispatchToken: token,
-			})
-		}
-		return nil
-	})
-	return claimed, err
+	}
+	return items, nil
 }
 
-func (r *ResourceImportRepo) MarkAdminImportRunning(ctx context.Context, importID uint, dispatchToken string) (string, bool, error) {
-	if importID == 0 || dispatchToken == "" {
+func (r *ResourceImportRepo) MarkAdminImportDispatched(ctx context.Context, importID uint, generation uint64) (bool, error) {
+	if importID == 0 || generation == 0 {
+		return false, domain.ErrResourceImportInvalidClaim
+	}
+	now := time.Now().UTC()
+	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
+		Where("id = ? AND status = ? AND dispatch_status = ? AND generation = ?", importID, string(domain.ResourceImportProcessing), "pending", generation).
+		Updates(map[string]any{"dispatch_status": "queued", "last_safe_error": "", "updated_at": now})
+	if result.Error != nil {
+		return false, fmt.Errorf("activate administrator resource import dispatch: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *ResourceImportRepo) MarkAdminImportRunning(ctx context.Context, importID uint, generation uint64) (string, bool, error) {
+	if importID == 0 || generation == 0 {
 		return "", false, domain.ErrResourceImportInvalidClaim
 	}
 	now := time.Now().UTC()
 	claimToken := platform.NewUUIDV7String()
 	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
-		Where("id = ? AND status = ? AND dispatch_status = ? AND dispatch_token = ? AND attempts < max_attempts", importID, string(domain.ResourceImportProcessing), "queued", dispatchToken).
+		Where("id = ? AND status = ? AND dispatch_status IN ? AND generation = ?", importID, string(domain.ResourceImportProcessing), []string{"pending", "queued"}, generation).
 		Updates(map[string]any{
-			"dispatch_status": "running", "attempts": gorm.Expr("attempts + 1"),
-			"claim_token": claimToken, "dispatch_token": "", "started_at": now, "updated_at": now,
+			"dispatch_status": "running", "claim_token": claimToken,
+			"started_at": now, "updated_at": now,
 		})
 	if result.Error != nil {
 		return "", false, fmt.Errorf("mark administrator resource import running: %w", result.Error)
@@ -308,48 +270,22 @@ func (r *ResourceImportRepo) MarkAdminImportRunning(ctx context.Context, importI
 	return claimToken, result.RowsAffected == 1, nil
 }
 
-func (r *ResourceImportRepo) MarkAdminImportDispatchFailed(ctx context.Context, importID uint, dispatchToken, safeError string) error {
+func (r *ResourceImportRepo) MarkAdminImportPending(ctx context.Context, importID uint, generation uint64, safeError string) error {
+	if importID == 0 || generation == 0 {
+		return domain.ErrResourceImportInvalidClaim
+	}
 	now := time.Now().UTC()
 	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
-		Where("id = ? AND status = ? AND dispatch_status = ? AND dispatch_token = ?", importID, string(domain.ResourceImportProcessing), "queued", dispatchToken).
-		Updates(map[string]any{"dispatch_token": "", "dispatched_at": nil, "last_safe_error": safeError, "updated_at": now})
+		Where("id = ? AND status = ? AND dispatch_status IN ? AND generation = ?", importID, string(domain.ResourceImportProcessing), []string{"queued", "running"}, generation).
+		Updates(map[string]any{
+			"dispatch_status": "pending", "generation": gorm.Expr("generation + 1"),
+			"claim_token":     "",
+			"last_safe_error": safeError, "updated_at": now,
+		})
 	if result.Error != nil {
-		return fmt.Errorf("release administrator resource import dispatch: %w", result.Error)
+		return fmt.Errorf("return administrator resource import to pending: %w", result.Error)
 	}
 	return nil
-}
-
-func (r *ResourceImportRepo) MarkAdminImportRetryableFailure(ctx context.Context, importID uint, claimToken, safeError string) (bool, error) {
-	if importID == 0 || claimToken == "" {
-		return false, domain.ErrResourceImportInvalidClaim
-	}
-	now := time.Now().UTC()
-	exhausted := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var model ResourceImportModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
-			First(&model).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrResourceImportInvalidClaim
-			}
-			return fmt.Errorf("lock failed administrator resource import: %w", err)
-		}
-		exhausted = model.Attempts >= model.MaxAttempts
-		updates := map[string]any{
-			"claim_token": "", "dispatch_token": "", "dispatched_at": nil,
-			"last_safe_error": safeError, "updated_at": now,
-		}
-		if exhausted {
-			updates["status"] = string(domain.ResourceImportFailed)
-			updates["dispatch_status"] = "failed"
-			updates["finished_at"] = now
-		} else {
-			updates["dispatch_status"] = "queued"
-		}
-		return tx.Model(&ResourceImportModel{}).Where("id = ? AND claim_token = ?", importID, claimToken).Updates(updates).Error
-	})
-	return exhausted, err
 }
 
 func (r *ResourceImportRepo) MarkAdminImportFailed(ctx context.Context, importID uint, claimToken, failureObjectKey, safeError string) error {
@@ -357,20 +293,31 @@ func (r *ResourceImportRepo) MarkAdminImportFailed(ctx context.Context, importID
 		return domain.ErrResourceImportInvalidClaim
 	}
 	now := time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&ResourceImportModel{}).
-		Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
-		Updates(map[string]any{
-			"status": string(domain.ResourceImportFailed), "dispatch_status": "failed",
-			"claim_token": "", "dispatch_token": "", "failure_object_key": failureObjectKey,
-			"last_safe_error": safeError, "finished_at": now, "updated_at": now,
-		})
-	if result.Error != nil {
-		return fmt.Errorf("mark administrator resource import failed: %w", result.Error)
-	}
-	if result.RowsAffected != 1 {
-		return domain.ErrResourceImportInvalidClaim
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model ResourceImportModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND dispatch_status = ? AND claim_token = ?", importID, string(domain.ResourceImportProcessing), "running", claimToken).
+			First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceImportInvalidClaim
+			}
+			return fmt.Errorf("lock administrator resource import business failure: %w", err)
+		}
+		nextAttempts := model.Attempts + 1
+		updates := map[string]any{
+			"dispatch_status": "pending", "generation": model.Generation + 1,
+			"attempts": nextAttempts, "claim_token": "", "failure_object_key": failureObjectKey,
+			"last_safe_error": safeError, "updated_at": now,
+		}
+		if nextAttempts >= model.MaxAttempts {
+			updates["status"] = string(domain.ResourceImportFailed)
+			updates["dispatch_status"] = "failed"
+			updates["finished_at"] = now
+		}
+		return tx.Model(&ResourceImportModel{}).
+			Where("id = ? AND claim_token = ?", importID, claimToken).
+			Updates(updates).Error
+	})
 }
 
 func (r *ResourceImportRepo) CreateAdminWithLog(
@@ -406,7 +353,7 @@ func (r *ResourceImportRepo) CreateAdminWithLog(
 			SourceObjectKey: item.SourceObjectKey, Status: string(item.Status),
 			RequestID: metadata.RequestID, Path: metadata.Path,
 			IdempotencyKey: metadata.IdempotencyKey, RequestFingerprint: metadata.RequestFingerprint,
-			DispatchStatus: "queued", MaxAttempts: 3,
+			DispatchStatus: "pending", Generation: 1, MaxAttempts: 3,
 		}
 		if err := tx.Create(model).Error; err != nil {
 			if isDuplicateKeyError(err) {
@@ -457,7 +404,7 @@ func (r *ResourceImportRepo) MarkFailed(ctx context.Context, id uint, failureObj
 			"status":             string(domain.ResourceImportFailed),
 			"failure_object_key": failureObjectKey,
 			"last_safe_error":    safeError,
-			"dispatch_status":    gorm.Expr("CASE WHEN dispatch_status = 'legacy' THEN 'legacy' ELSE 'failed' END"),
+			"dispatch_status":    "failed",
 			"finished_at":        now,
 			"updated_at":         now,
 		}).Error
@@ -617,13 +564,12 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(
 			"skipped_count":      counts.Skipped,
 			"failure_object_key": failureObjectKey,
 			"last_safe_error":    safeSummary,
-			"dispatch_status":    gorm.Expr("CASE WHEN dispatch_status = 'legacy' THEN 'legacy' ELSE 'succeeded' END"),
+			"dispatch_status":    "succeeded",
 			"finished_at":        now,
 			"updated_at":         now,
 		}
 		if claimToken != "" {
 			updates["claim_token"] = ""
-			updates["dispatch_token"] = ""
 		}
 		if err := tx.Model(&ResourceImportModel{}).
 			Where("id = ? AND status = ?", id, string(domain.ResourceImportProcessing)).

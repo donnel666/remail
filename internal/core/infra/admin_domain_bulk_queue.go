@@ -81,7 +81,7 @@ func (q *AdminDomainBulkQueue) EnqueueAdminDomainBulk(ctx context.Context, task 
 		ctx,
 		asynq.NewTask(TypeAdminDomainBulk, payload),
 		asynq.Queue(platform.QueueResource),
-		asynq.TaskID(adminDomainBulkTaskID(task)),
+		asynq.Unique(adminDomainBulkTaskTimeout),
 		asynq.MaxRetry(adminDomainBulkTaskMaxRetry),
 		asynq.Timeout(adminDomainBulkTaskTimeout),
 		asynq.Retention(0),
@@ -90,7 +90,7 @@ func (q *AdminDomainBulkQueue) EnqueueAdminDomainBulk(ctx context.Context, task 
 		// A task with this exact (claim, cursor) already exists: the page is
 		// already queued, so the batch remains accepted and owned. A fresh initial
 		// claim token is unique, so this only occurs on a page re-enqueue.
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return false, nil
 		}
 		if initial {
@@ -138,11 +138,6 @@ func (q *AdminDomainBulkQueue) releaseInitial(ctx context.Context, task coreapp.
 func adminDomainBulkLeaseKey(batchID string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(batchID)))
 	return fmt.Sprintf("remail:core:admin-domain-bulk:%x", digest)
-}
-
-func adminDomainBulkTaskID(task coreapp.AdminDomainBulkTask) string {
-	digest := sha256.Sum256([]byte(strings.TrimSpace(task.BatchID)))
-	return fmt.Sprintf("admin-domain-bulk:%x:%s:%d", digest, task.ClaimToken, task.AfterID)
 }
 
 var _ coreapp.AdminDomainBulkQueue = (*AdminDomainBulkQueue)(nil)

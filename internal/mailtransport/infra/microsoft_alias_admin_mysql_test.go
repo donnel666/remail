@@ -158,6 +158,9 @@ func TestMicrosoftAliasAdminUncertainWorkerResultStaysUncertainInTaskViewsMySQL(
 	)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+	queued, err := store.MarkQueued(context.Background(), tasks[0], dispatchAt)
+	require.NoError(t, err)
+	require.True(t, queued, "the business schedule activates only after the queue accepts the task")
 	require.NoError(t, service.Process(context.Background(), tasks[0]))
 
 	var schedule MicrosoftAliasScheduleModel

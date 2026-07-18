@@ -205,6 +205,30 @@ func TestDomainResource_DNSStatusCannotEnableDisabledOrDeleted(t *testing.T) {
 	}
 }
 
+func TestValidationRetryStartsNewGenerationAndClearsBusinessFailures(t *testing.T) {
+	microsoft := &MicrosoftResource{
+		Status: MicrosoftStatusValidating, ValidationGeneration: 7, ValidationFailures: 2, LastSafeError: "old",
+	}
+	changed, err := microsoft.QueueValidationAdmin()
+	if err != nil || !changed {
+		t.Fatalf("Microsoft QueueValidationAdmin() = %v, %v", changed, err)
+	}
+	if microsoft.Status != MicrosoftStatusPending || microsoft.ValidationGeneration != 8 || microsoft.ValidationFailures != 0 || microsoft.LastSafeError != "" {
+		t.Fatalf("Microsoft retry state = %#v", microsoft)
+	}
+
+	domainResource := &MailDomainResource{
+		Status: DomainStatusValidating, ValidationGeneration: 4, ValidationFailures: 2, LastSafeError: "old",
+	}
+	changed, err = domainResource.QueueValidationAdmin()
+	if err != nil || !changed {
+		t.Fatalf("Domain QueueValidationAdmin() = %v, %v", changed, err)
+	}
+	if domainResource.Status != DomainStatusPending || domainResource.ValidationGeneration != 5 || domainResource.ValidationFailures != 0 || domainResource.LastSafeError != "" {
+		t.Fatalf("Domain retry state = %#v", domainResource)
+	}
+}
+
 func TestDomainResource_MarkDeleted(t *testing.T) {
 	allocatedAt := testTime()
 	r := &MailDomainResource{
@@ -452,8 +476,8 @@ func TestIsMicrosoftEmailDomain(t *testing.T) {
 		"a@outlook.fr":         true, // country variant in list
 		"a@outlook.com.br":     true,
 		"a@outlook.co.th":      true,
-		"A@OutLook.CoM":        true, // case-insensitive
-		"a@outlook.com.":       true, // trailing dot
+		"A@OutLook.CoM":        true,  // case-insensitive
+		"a@outlook.com.":       true,  // trailing dot
 		"a@outlook.co.uk":      false, // real MS variant, but not in the 32-list
 		"a@hotmail.co.uk":      false, // excluded: only hotmail.com
 		"a@live.com":           false, // excluded per policy

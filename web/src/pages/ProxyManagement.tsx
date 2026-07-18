@@ -68,7 +68,7 @@ const { Text } = Typography;
 
 type SystemProxyFilter = "all" | "yes" | "no";
 type IPv6Filter = "all" | "yes" | "no";
-type StatusFilter = "all" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
+type StatusFilter = "all" | "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
 type ProxyPool = "resource" | "system";
 type ProxyImportMode = "paste" | "file";
 
@@ -85,6 +85,7 @@ function renderProxyStatus(status: string, t: (key: string) => string, reason?: 
     string,
     { color: "green" | "grey" | "orange" | "red"; label: string }
   > = {
+    pending: { color: "orange", label: t("Pending check") },
     checking: { color: "orange", label: t("Checking") },
     normal: { color: "green", label: t("Normal") },
     abnormal: { color: "red", label: t("Abnormal") },
@@ -184,7 +185,7 @@ function proxyMatchesListFilter(proxy: ProxyItem, filter: ProxyListFilter) {
 const emptyStats = {
   ipv6: { all: 0, no: 0, yes: 0 },
   systemProxy: { all: 0, no: 0, yes: 0 },
-  status: { all: 0, abnormal: 0, checking: 0, disabled: 0, expired: 0, normal: 0 },
+  status: { all: 0, abnormal: 0, pending: 0, checking: 0, disabled: 0, expired: 0, normal: 0 },
 };
 
 function countOf(
@@ -213,6 +214,7 @@ function proxyStatsFromResponse(stats?: ProxyStatsResponse | null) {
     status: {
       all: total,
       abnormal: countOf(stats.statuses, "abnormal"),
+      pending: countOf(stats.statuses, "pending"),
       checking: countOf(stats.statuses, "checking"),
       disabled: countOf(stats.statuses, "disabled"),
       expired: countOf(stats.statuses, "expired"),
@@ -704,6 +706,7 @@ export default function ProxyManagement() {
     [currentProxyStats]
   );
   const disableCandidateCount =
+    currentStats.status.pending +
     currentStats.status.checking +
     currentStats.status.normal +
     currentStats.status.abnormal +
@@ -1429,6 +1432,17 @@ export default function ProxyManagement() {
                     setSelectedKeys([]);
                   }}
                   value="all"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "pending"}
+                  count={stats.status.pending}
+                  label={t("Pending check")}
+                  onSelect={(value) => {
+                    setStatusFilter(value);
+                    setActivePage(1);
+                    setSelectedKeys([]);
+                  }}
+                  value="pending"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "checking"}

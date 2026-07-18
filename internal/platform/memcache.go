@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const ttlCacheMaxEntries = 4096
+
 type TTLCache[K comparable, V any] struct {
 	mu    sync.RWMutex
 	items map[K]ttlCacheEntry[V]
@@ -50,10 +52,24 @@ func (c *TTLCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	if c == nil || ttl <= 0 {
 		return
 	}
+	now := c.now()
 	c.mu.Lock()
+	if _, exists := c.items[key]; !exists && len(c.items) >= ttlCacheMaxEntries {
+		for currentKey, entry := range c.items {
+			if !entry.expireAt.After(now) {
+				delete(c.items, currentKey)
+			}
+		}
+		for len(c.items) >= ttlCacheMaxEntries {
+			for currentKey := range c.items {
+				delete(c.items, currentKey)
+				break
+			}
+		}
+	}
 	c.items[key] = ttlCacheEntry[V]{
 		value:    value,
-		expireAt: c.now().Add(ttl),
+		expireAt: now.Add(ttl),
 	}
 	c.mu.Unlock()
 }

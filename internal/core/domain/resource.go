@@ -91,6 +91,8 @@ type MicrosoftResource struct {
 	TokenLastRequestID   string
 	ForSale              bool
 	Status               MicrosoftResourceStatus
+	ValidationGeneration uint64
+	ValidationFailures   int
 	QualityScore         int
 	PlusDailyLimit       int
 	LastSafeError        string // Sanitized diagnostic summary
@@ -138,25 +140,28 @@ func (r *MicrosoftResource) TransitionStatus(next MicrosoftResourceStatus) error
 	return nil
 }
 
-// QueueValidationAdmin marks an eligible resource as waiting for Redis task
-// assignment. An already-validating resource keeps its current assignment.
+// QueueValidationAdmin starts a new validation generation. This deliberately
+// fences an already-running worker when an administrator explicitly retries.
 func (r *MicrosoftResource) QueueValidationAdmin() (bool, error) {
 	switch r.Status {
 	case MicrosoftStatusDeleted:
 		return false, ErrResourceNotFound
 	case MicrosoftStatusDisabled:
 		return false, ErrInvalidResourceStatus
-	case MicrosoftStatusValidating:
-		return false, nil
-	case MicrosoftStatusPending:
-		changed := r.LastSafeError != ""
-		r.LastSafeError = ""
-		return changed, nil
-	default:
-		r.Status = MicrosoftStatusPending
-		r.LastSafeError = ""
-		return true, nil
 	}
+	r.beginValidationGeneration()
+	return true, nil
+}
+
+func (r *MicrosoftResource) beginValidationGeneration() {
+	if r.ValidationGeneration == 0 {
+		r.ValidationGeneration = 1
+	} else {
+		r.ValidationGeneration++
+	}
+	r.ValidationFailures = 0
+	r.Status = MicrosoftStatusPending
+	r.LastSafeError = ""
 }
 
 // MarkDeleted applies the user private-delete command. deleted is a terminal
@@ -184,7 +189,7 @@ func (r *MicrosoftResource) EnableAdmin() error {
 	if r.Status != MicrosoftStatusDisabled {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = MicrosoftStatusPending
+	r.beginValidationGeneration()
 	r.GraphAvailable = false
 	r.QualityScore = 0
 	r.RTExpireAt = nil
@@ -248,7 +253,7 @@ func (r *MicrosoftResource) RecoverAdmin() error {
 	if r.Status != MicrosoftStatusDeleted {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = MicrosoftStatusPending
+	r.beginValidationGeneration()
 	r.ForSale = false
 	r.GraphAvailable = false
 	r.QualityScore = 0
@@ -271,7 +276,7 @@ func (r *MicrosoftResource) InvalidateMicrosoftIdentity(now time.Time) error {
 	}
 	r.CredentialRevision++
 	r.CredentialUpdatedAt = now.UTC()
-	r.Status = MicrosoftStatusPending
+	r.beginValidationGeneration()
 	r.GraphAvailable = false
 	r.QualityScore = 0
 	r.RTExpireAt = nil
@@ -309,7 +314,7 @@ func (r *MicrosoftResource) InvalidateMicrosoftBinding(now time.Time) error {
 	}
 	r.CredentialRevision++
 	r.CredentialUpdatedAt = now.UTC()
-	r.Status = MicrosoftStatusPending
+	r.beginValidationGeneration()
 	r.GraphAvailable = false
 	r.QualityScore = 0
 	r.LastSafeError = ""
@@ -354,16 +359,18 @@ type MicrosoftImportLine struct {
 
 // MailDomainResource holds self-hosted domain-specific resource fields.
 type MailDomainResource struct {
-	ID                uint // Shared PK = EmailResource.ID
-	Domain            string
-	MailServerID      uint
-	Purpose           ResourcePurpose
-	Status            MailDomainStatus
-	MailboxDailyLimit int
-	LastSafeError     string // Sanitized diagnostic summary
-	LastAllocatedAt   *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                   uint // Shared PK = EmailResource.ID
+	Domain               string
+	MailServerID         uint
+	Purpose              ResourcePurpose
+	Status               MailDomainStatus
+	ValidationGeneration uint64
+	ValidationFailures   int
+	MailboxDailyLimit    int
+	LastSafeError        string // Sanitized diagnostic summary
+	LastAllocatedAt      *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // IsValidDomainStatus returns true if the status is a valid state.
@@ -412,17 +419,20 @@ func (r *MailDomainResource) QueueValidationAdmin() (bool, error) {
 		return false, ErrResourceNotFound
 	case DomainStatusDisabled:
 		return false, ErrInvalidResourceStatus
-	case DomainStatusValidating:
-		return false, nil
-	case DomainStatusPending:
-		changed := r.LastSafeError != ""
-		r.LastSafeError = ""
-		return changed, nil
-	default:
-		r.Status = DomainStatusPending
-		r.LastSafeError = ""
-		return true, nil
 	}
+	r.beginValidationGeneration()
+	return true, nil
+}
+
+func (r *MailDomainResource) beginValidationGeneration() {
+	if r.ValidationGeneration == 0 {
+		r.ValidationGeneration = 1
+	} else {
+		r.ValidationGeneration++
+	}
+	r.ValidationFailures = 0
+	r.Status = DomainStatusPending
+	r.LastSafeError = ""
 }
 
 // MarkDNSStatusAdmin records a validation result without doubling as an
@@ -470,8 +480,7 @@ func (r *MailDomainResource) EnableAdmin() error {
 	if r.Status != DomainStatusDisabled {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = DomainStatusPending
-	r.LastSafeError = ""
+	r.beginValidationGeneration()
 	return nil
 }
 
@@ -501,9 +510,8 @@ func (r *MailDomainResource) RecoverAdmin() error {
 	if r.Status != DomainStatusDeleted {
 		return ErrInvalidResourceStatus
 	}
-	r.Status = DomainStatusPending
+	r.beginValidationGeneration()
 	r.Purpose = PurposeNotSale
-	r.LastSafeError = ""
 	r.LastAllocatedAt = nil
 	return nil
 }

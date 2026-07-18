@@ -16,7 +16,7 @@ const (
 	TypeOutboundSend     = "mailtransport:outbound_send"
 	TypeOutboundDispatch = "mailtransport:outbound_dispatch"
 	mailQueueName        = platform.QueueMailtransport
-	outboundTaskMaxRetry = 3
+	outboundTaskMaxRetry = platform.BackgroundTaskMaxRetry
 	outboundTaskTimeout  = 3 * time.Minute
 	dispatchTaskTimeout  = 30 * time.Second
 )
@@ -30,18 +30,23 @@ func (q *OutboundMailQueue) EnqueueOutboundDispatch(ctx context.Context, delay t
 		return fmt.Errorf("outbound mail queue is unavailable")
 	}
 	asynqTask := asynq.NewTask(TypeOutboundDispatch, nil)
+	uniqueTTL := dispatchTaskTimeout
+	if delay > 0 {
+		uniqueTTL += delay
+	}
 	options := []asynq.Option{
 		asynq.Queue(mailQueueName),
+		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(dispatchTaskTimeout),
-		asynq.TaskID(TypeOutboundDispatch),
+		asynq.Retention(0),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue outbound mail dispatcher task: %w", err)
@@ -53,28 +58,29 @@ func NewOutboundMailQueue(client *asynq.Client) *OutboundMailQueue {
 	return &OutboundMailQueue{client: client}
 }
 
-func (q *OutboundMailQueue) EnqueueOutboundSend(ctx context.Context, task mailapp.OutboundSendTask) error {
+func (q *OutboundMailQueue) EnqueueOutboundSend(ctx context.Context, task mailapp.OutboundSendTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("outbound mail queue is unavailable")
+		return false, fmt.Errorf("outbound mail queue is unavailable")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return fmt.Errorf("marshal outbound mail task: %w", err)
+		return false, fmt.Errorf("marshal outbound mail task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeOutboundSend, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(mailQueueName),
-		asynq.TaskID(fmt.Sprintf("%s:%s", TypeOutboundSend, task.IdempotencyKey)),
+		asynq.Unique(outboundTaskTimeout),
 		asynq.MaxRetry(outboundTaskMaxRetry),
 		asynq.Timeout(outboundTaskTimeout),
+		asynq.Retention(0),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
 		}
-		return fmt.Errorf("enqueue outbound mail task: %w", err)
+		return false, fmt.Errorf("enqueue outbound mail task: %w", err)
 	}
-	return nil
+	return true, nil
 }

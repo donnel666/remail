@@ -63,6 +63,8 @@ type MicrosoftResourceModel struct {
 	TokenLastRequestID   string     `gorm:"type:varchar(64);not null;default:'';column:token_last_request_id"`
 	ForSale              bool       `gorm:"not null;default:false;column:for_sale"`
 	Status               string     `gorm:"type:varchar(32);not null;default:'pending'"`
+	ValidationGeneration uint64     `gorm:"not null;default:1;column:validation_generation"`
+	ValidationFailures   int        `gorm:"not null;default:0;column:validation_failures"`
 	QualityScore         int        `gorm:"not null;default:0;column:quality_score"`
 	PlusDailyLimit       int        `gorm:"not null;default:10000;column:plus_daily_limit"`
 	AllocBucket          uint8      `gorm:"not null;default:0;column:alloc_bucket"`
@@ -92,6 +94,8 @@ func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 		TokenLastRequestID:   m.TokenLastRequestID,
 		ForSale:              m.ForSale,
 		Status:               domain.MicrosoftResourceStatus(m.Status),
+		ValidationGeneration: m.ValidationGeneration,
+		ValidationFailures:   m.ValidationFailures,
 		QualityScore:         m.QualityScore,
 		PlusDailyLimit:       m.PlusDailyLimit,
 		LastSafeError:        m.LastSafeError,
@@ -110,6 +114,10 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 	if credentialUpdatedAt.IsZero() {
 		credentialUpdatedAt = time.Now().UTC()
 	}
+	validationGeneration := ms.ValidationGeneration
+	if validationGeneration == 0 {
+		validationGeneration = 1
+	}
 	return &MicrosoftResourceModel{
 		ID:                   ms.ID,
 		EmailAddress:         ms.EmailAddress,
@@ -126,6 +134,8 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 		TokenLastRequestID:   ms.TokenLastRequestID,
 		ForSale:              ms.ForSale,
 		Status:               string(ms.Status),
+		ValidationGeneration: validationGeneration,
+		ValidationFailures:   ms.ValidationFailures,
 		QualityScore:         ms.QualityScore,
 		PlusDailyLimit:       normalizeDailyLimit(ms.PlusDailyLimit, domain.DefaultPlusDailyLimit),
 		AllocBucket:          uint8(ms.ID % 64),
@@ -138,19 +148,21 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 
 // DomainResourceModel is the GORM model for the domain_resources table.
 type DomainResourceModel struct {
-	ID                uint       `gorm:"primaryKey"`
-	Domain            string     `gorm:"type:varchar(255);not null;uniqueIndex"`
-	DomainTLD         string     `gorm:"type:varchar(64);not null;default:'';column:domain_tld"`
-	OwnerUserID       uint       `gorm:"not null;column:owner_user_id"`
-	MailServerID      uint       `gorm:"not null;column:mail_server_id"`
-	Purpose           string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
-	Status            string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
-	LastSafeError     string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	MailboxDailyLimit int        `gorm:"not null;default:10000;column:mailbox_daily_limit"`
-	AllocBucket       uint8      `gorm:"not null;default:0;column:alloc_bucket"`
-	LastAllocatedAt   *time.Time `gorm:"column:last_allocated_at"`
-	CreatedAt         time.Time  `gorm:"not null;autoCreateTime"`
-	UpdatedAt         time.Time  `gorm:"not null;autoUpdateTime"`
+	ID                   uint       `gorm:"primaryKey"`
+	Domain               string     `gorm:"type:varchar(255);not null;uniqueIndex"`
+	DomainTLD            string     `gorm:"type:varchar(64);not null;default:'';column:domain_tld"`
+	OwnerUserID          uint       `gorm:"not null;column:owner_user_id"`
+	MailServerID         uint       `gorm:"not null;column:mail_server_id"`
+	Purpose              string     `gorm:"type:varchar(32);not null;default:'not_sale'"`
+	Status               string     `gorm:"type:varchar(32);not null;default:'abnormal'"`
+	ValidationGeneration uint64     `gorm:"not null;default:1;column:validation_generation"`
+	ValidationFailures   int        `gorm:"not null;default:0;column:validation_failures"`
+	LastSafeError        string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	MailboxDailyLimit    int        `gorm:"not null;default:10000;column:mailbox_daily_limit"`
+	AllocBucket          uint8      `gorm:"not null;default:0;column:alloc_bucket"`
+	LastAllocatedAt      *time.Time `gorm:"column:last_allocated_at"`
+	CreatedAt            time.Time  `gorm:"not null;autoCreateTime"`
+	UpdatedAt            time.Time  `gorm:"not null;autoUpdateTime"`
 }
 
 func (DomainResourceModel) TableName() string {
@@ -159,16 +171,18 @@ func (DomainResourceModel) TableName() string {
 
 func (m *DomainResourceModel) toDomain() *domain.MailDomainResource {
 	return &domain.MailDomainResource{
-		ID:                m.ID,
-		Domain:            m.Domain,
-		MailServerID:      m.MailServerID,
-		Purpose:           domain.ResourcePurpose(m.Purpose),
-		Status:            domain.MailDomainStatus(m.Status),
-		MailboxDailyLimit: m.MailboxDailyLimit,
-		LastSafeError:     m.LastSafeError,
-		LastAllocatedAt:   m.LastAllocatedAt,
-		CreatedAt:         m.CreatedAt,
-		UpdatedAt:         m.UpdatedAt,
+		ID:                   m.ID,
+		Domain:               m.Domain,
+		MailServerID:         m.MailServerID,
+		Purpose:              domain.ResourcePurpose(m.Purpose),
+		Status:               domain.MailDomainStatus(m.Status),
+		ValidationGeneration: m.ValidationGeneration,
+		ValidationFailures:   m.ValidationFailures,
+		MailboxDailyLimit:    m.MailboxDailyLimit,
+		LastSafeError:        m.LastSafeError,
+		LastAllocatedAt:      m.LastAllocatedAt,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
 	}
 }
 
@@ -317,6 +331,8 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 		resource.CreatedAt = root.CreatedAt
 		resource.UpdatedAt = root.UpdatedAt
 		ms.ID = msModel.ID
+		ms.ValidationGeneration = msModel.ValidationGeneration
+		ms.ValidationFailures = msModel.ValidationFailures
 		ms.CreatedAt = msModel.CreatedAt
 		ms.UpdatedAt = msModel.UpdatedAt
 		return nil
@@ -383,17 +399,19 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		restoreResult := tx.Model(&DomainResourceModel{}).
 			Where("id = ? AND status = ?", existing.ID, string(domain.DomainStatusDeleted)).
 			Updates(map[string]any{
-				"owner_user_id":       resource.OwnerUserID,
-				"domain":              dr.Domain,
-				"domain_tld":          domain.TLD(dr.Domain),
-				"mail_server_id":      dr.MailServerID,
-				"purpose":             string(dr.Purpose),
-				"status":              string(dr.Status),
-				"last_safe_error":     dr.LastSafeError,
-				"mailbox_daily_limit": normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
-				"alloc_bucket":        uint8(existing.ID % 64),
-				"last_allocated_at":   nil,
-				"updated_at":          now,
+				"owner_user_id":         resource.OwnerUserID,
+				"domain":                dr.Domain,
+				"domain_tld":            domain.TLD(dr.Domain),
+				"mail_server_id":        dr.MailServerID,
+				"purpose":               string(dr.Purpose),
+				"status":                string(dr.Status),
+				"validation_generation": gorm.Expr("validation_generation + 1"),
+				"validation_failures":   0,
+				"last_safe_error":       dr.LastSafeError,
+				"mailbox_daily_limit":   normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+				"alloc_bucket":          uint8(existing.ID % 64),
+				"last_allocated_at":     nil,
+				"updated_at":            now,
 			})
 		if restoreResult.Error != nil {
 			return fmt.Errorf("restore deleted domain resource: %w", restoreResult.Error)
@@ -416,6 +434,8 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		resource.CreatedAt = existing.CreatedAt
 		resource.UpdatedAt = now
 		dr.ID = existing.ID
+		dr.ValidationGeneration = existing.ValidationGeneration + 1
+		dr.ValidationFailures = 0
 		dr.CreatedAt = existing.CreatedAt
 		dr.UpdatedAt = now
 		return nil
@@ -429,17 +449,23 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		return fmt.Errorf("create email resource: %w", err)
 	}
 
+	validationGeneration := dr.ValidationGeneration
+	if validationGeneration == 0 {
+		validationGeneration = 1
+	}
 	domainModel := &DomainResourceModel{
-		ID:                root.ID,
-		OwnerUserID:       root.OwnerUserID,
-		Domain:            dr.Domain,
-		DomainTLD:         domain.TLD(dr.Domain),
-		MailServerID:      dr.MailServerID,
-		Purpose:           string(dr.Purpose),
-		Status:            string(dr.Status),
-		LastSafeError:     dr.LastSafeError,
-		MailboxDailyLimit: normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
-		AllocBucket:       uint8(root.ID % 64),
+		ID:                   root.ID,
+		OwnerUserID:          root.OwnerUserID,
+		Domain:               dr.Domain,
+		DomainTLD:            domain.TLD(dr.Domain),
+		MailServerID:         dr.MailServerID,
+		Purpose:              string(dr.Purpose),
+		Status:               string(dr.Status),
+		ValidationGeneration: validationGeneration,
+		ValidationFailures:   dr.ValidationFailures,
+		LastSafeError:        dr.LastSafeError,
+		MailboxDailyLimit:    normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
+		AllocBucket:          uint8(root.ID % 64),
 	}
 	if err := tx.Create(domainModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -452,6 +478,8 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 	resource.CreatedAt = root.CreatedAt
 	resource.UpdatedAt = root.UpdatedAt
 	dr.ID = domainModel.ID
+	dr.ValidationGeneration = domainModel.ValidationGeneration
+	dr.ValidationFailures = domainModel.ValidationFailures
 	dr.CreatedAt = domainModel.CreatedAt
 	dr.UpdatedAt = domainModel.UpdatedAt
 	return nil
@@ -521,6 +549,8 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		resources[i].CreatedAt = existing.CreatedAt
 		resources[i].UpdatedAt = now
 		ms[i].ID = existing.ID
+		ms[i].ValidationGeneration = existing.ValidationGeneration + 1
+		ms[i].ValidationFailures = 0
 		ms[i].CreatedAt = existing.CreatedAt
 		ms[i].UpdatedAt = now
 	}
@@ -563,6 +593,8 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		resources[i].CreatedAt = rootModels[i].CreatedAt
 		resources[i].UpdatedAt = rootModels[i].UpdatedAt
 		ms[i].ID = msModels[i].ID
+		ms[i].ValidationGeneration = msModels[i].ValidationGeneration
+		ms[i].ValidationFailures = msModels[i].ValidationFailures
 		ms[i].CreatedAt = msModels[i].CreatedAt
 		ms[i].UpdatedAt = msModels[i].UpdatedAt
 	}
@@ -643,6 +675,8 @@ SET mr.email_address = ir.email_address,
 	mr.rt_expire_at = ir.rt_expire_at,
 	mr.for_sale = FALSE,
 	mr.status = ir.status,
+	mr.validation_generation = mr.validation_generation + 1,
+	mr.validation_failures = 0,
 	mr.quality_score = ir.quality_score,
 	mr.last_safe_error = ir.last_safe_error,
 	mr.last_allocated_at = NULL,

@@ -2,12 +2,137 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
 )
+
+type candidateRefreshRepoStub struct {
+	Repository
+	pending          []domain.CandidateRefresh
+	events           []string
+	markProcessing   bool
+	runCurrent       bool
+	runErr           error
+	releaseCalls     int
+	recordCalls      int
+	recordedAbnormal bool
+}
+
+func (r *candidateRefreshRepoStub) ListPendingCandidateRefreshes(context.Context, int) ([]domain.CandidateRefresh, error) {
+	return append([]domain.CandidateRefresh(nil), r.pending...), nil
+}
+
+func (r *candidateRefreshRepoStub) MarkCandidateRefreshProcessing(context.Context, uint, uint64) (bool, error) {
+	r.events = append(r.events, "processing")
+	return r.markProcessing, nil
+}
+
+func (r *candidateRefreshRepoStub) RunCandidateRefresh(context.Context, uint, uint64) (int, bool, error) {
+	return 0, r.runCurrent, r.runErr
+}
+
+func (r *candidateRefreshRepoStub) ReleaseCandidateRefreshInfrastructureFailure(context.Context, uint, uint64, string) (bool, error) {
+	r.releaseCalls++
+	return true, nil
+}
+
+func (r *candidateRefreshRepoStub) RecordCandidateRefreshFailure(context.Context, uint, uint64, string) (bool, bool, error) {
+	r.recordCalls++
+	r.recordedAbnormal = r.recordCalls >= 3
+	return true, r.recordedAbnormal, nil
+}
+
+type candidateRefreshQueueStub struct {
+	accepted        bool
+	err             error
+	events          *[]string
+	dispatcherCalls int
+}
+
+func (q *candidateRefreshQueueStub) EnqueueCandidateRefresh(context.Context, CandidateRefreshTask) (bool, error) {
+	if q.events != nil {
+		*q.events = append(*q.events, "enqueue")
+	}
+	return q.accepted, q.err
+}
+
+func (q *candidateRefreshQueueStub) EnqueueCandidateRefreshDispatcher(context.Context, time.Duration) error {
+	q.dispatcherCalls++
+	return nil
+}
+
+func TestCandidateRefreshMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
+	tests := []struct {
+		name             string
+		accepted         bool
+		queueErr         error
+		wantEvents       []string
+		wantQueued       int
+		wantDispatchFail int
+	}{
+		{name: "accepted", accepted: true, wantEvents: []string{"enqueue", "processing"}, wantQueued: 1},
+		{name: "duplicate", wantEvents: []string{"enqueue"}},
+		{name: "redis failure", queueErr: errors.New("redis unavailable"), wantEvents: []string{"enqueue"}, wantDispatchFail: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &candidateRefreshRepoStub{
+				pending:        []domain.CandidateRefresh{{ProjectID: 10, Generation: 7, Status: domain.CandidateRefreshPending}},
+				markProcessing: true,
+			}
+			queue := &candidateRefreshQueueStub{accepted: tt.accepted, err: tt.queueErr, events: &repo.events}
+			result, err := NewUseCase(repo, queue).DispatchCandidateRefreshes(context.Background(), 100)
+			if err != nil {
+				t.Fatalf("DispatchCandidateRefreshes() error = %v", err)
+			}
+			if !slices.Equal(repo.events, tt.wantEvents) {
+				t.Fatalf("events = %v, want %v", repo.events, tt.wantEvents)
+			}
+			if result.Queued != tt.wantQueued || result.Failed != tt.wantDispatchFail {
+				t.Fatalf("result = %#v, want queued=%d failed=%d", result, tt.wantQueued, tt.wantDispatchFail)
+			}
+		})
+	}
+}
+
+func TestCandidateRefreshInfrastructureFailureDoesNotCountBusinessFailure(t *testing.T) {
+	repo := &candidateRefreshRepoStub{
+		runCurrent: true,
+		runErr:     fmt.Errorf("%w: database disconnected", domain.ErrCandidateRefreshInfrastructure),
+	}
+	err := NewUseCase(repo).ProcessCandidateRefresh(context.Background(), CandidateRefreshTask{ProjectID: 10, Generation: 7})
+	if !errors.Is(err, domain.ErrCandidateRefreshInfrastructure) {
+		t.Fatalf("ProcessCandidateRefresh() error = %v", err)
+	}
+	if repo.releaseCalls != 1 || repo.recordCalls != 0 {
+		t.Fatalf("release calls = %d, record calls = %d; want 1, 0", repo.releaseCalls, repo.recordCalls)
+	}
+}
+
+func TestCandidateRefreshThirdBusinessFailureBecomesAbnormal(t *testing.T) {
+	businessErr := errors.New("candidate refresh rejected")
+	repo := &candidateRefreshRepoStub{runCurrent: true, runErr: businessErr}
+	queue := &candidateRefreshQueueStub{}
+	uc := NewUseCase(repo, queue)
+	for attempt := 1; attempt <= 3; attempt++ {
+		err := uc.ProcessCandidateRefresh(context.Background(), CandidateRefreshTask{ProjectID: 10, Generation: uint64(attempt)})
+		if !errors.Is(err, businessErr) {
+			t.Fatalf("attempt %d error = %v", attempt, err)
+		}
+	}
+	if repo.recordCalls != 3 || !repo.recordedAbnormal {
+		t.Fatalf("record calls = %d, abnormal = %v; want 3, true", repo.recordCalls, repo.recordedAbnormal)
+	}
+	if queue.dispatcherCalls != 2 {
+		t.Fatalf("dispatcher calls = %d, want 2 before terminal failure", queue.dispatcherCalls)
+	}
+}
 
 type generatedMailboxRetryRepo struct {
 	Repository

@@ -129,20 +129,20 @@ type AdminResourceImportDispatchItem struct {
 	LongLived     bool
 	ErrorStrategy domain.ImportErrorStrategy
 	RequestID     string
-	DispatchToken string
+	Generation    uint64
 }
 
 type AdminResourceImportDispatchRepository interface {
 	ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]AdminResourceImportDispatchItem, error)
-	MarkAdminImportRunning(ctx context.Context, importID uint, dispatchToken string) (claimToken string, claimed bool, err error)
-	MarkAdminImportDispatchFailed(ctx context.Context, importID uint, dispatchToken, safeError string) error
-	MarkAdminImportRetryableFailure(ctx context.Context, importID uint, claimToken, safeError string) (exhausted bool, err error)
+	MarkAdminImportDispatched(ctx context.Context, importID uint, generation uint64) (activated bool, err error)
+	MarkAdminImportRunning(ctx context.Context, importID uint, generation uint64) (claimToken string, claimed bool, err error)
+	MarkAdminImportPending(ctx context.Context, importID uint, generation uint64, safeError string) error
 	MarkAdminImportFailed(ctx context.Context, importID uint, claimToken, failureObjectKey, safeError string) error
 }
 
 // ResourceImportQueue enqueues asynchronous import work.
 type ResourceImportQueue interface {
-	EnqueueMicrosoftImport(ctx context.Context, task MicrosoftImportTask) error
+	EnqueueMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (accepted bool, err error)
 }
 
 // MicrosoftBindingInputRecorder records MailTransport auxiliary mailbox inputs
@@ -169,7 +169,7 @@ type MicrosoftImportTask struct {
 	LongLived       bool                       `json:"longLived"`
 	ErrorStrategy   domain.ImportErrorStrategy `json:"errorStrategy"`
 	RequestID       string                     `json:"requestId"`
-	DispatchToken   string                     `json:"dispatchToken,omitempty"`
+	Generation      uint64                     `json:"generation,omitempty"`
 	ClaimToken      string                     `json:"-"`
 }
 
@@ -212,10 +212,7 @@ type ImportUseCase struct {
 	bindingRecorder MicrosoftBindingInputRecorder
 }
 
-const (
-	adminResourceImportRunningStale  = 45 * time.Minute
-	adminResourceImportDispatchLease = 60 * time.Minute
-)
+var ErrImportTemporaryUnavailable = errors.New("resource import temporarily unavailable")
 
 // NewImportUseCase creates a new ImportUseCase.
 func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportRepository, parser TXTParser, files governanceapp.FilePort, queue ResourceImportQueue, recorders ...MicrosoftBindingInputRecorder) *ImportUseCase {
@@ -267,7 +264,7 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 		ErrorStrategy:   errorStrategy,
 		SourceObjectKey: storedSource.ObjectKey,
 		Status:          domain.ResourceImportProcessing,
-		DispatchStatus:  "queued",
+		DispatchStatus:  "pending",
 		MaxAttempts:     3,
 		RequestID:       importID,
 	}
@@ -366,12 +363,8 @@ func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (i
 	if limit <= 0 {
 		limit = 100
 	}
-	now := time.Now().UTC()
 	items, err := dispatch.ClaimAdminImportDispatchable(
-		ctx,
-		limit,
-		now.Add(-adminResourceImportRunningStale),
-		now.Add(-adminResourceImportDispatchLease),
+		ctx, limit, time.Time{}, time.Time{},
 	)
 	if err != nil {
 		return 0, err
@@ -379,22 +372,26 @@ func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (i
 	queued := 0
 	var result error
 	for _, item := range items {
-		err := uc.queue.EnqueueMicrosoftImport(ctx, MicrosoftImportTask{
+		accepted, err := uc.queue.EnqueueMicrosoftImport(ctx, MicrosoftImportTask{
 			ImportID: item.ImportID, OwnerUserID: item.OwnerUserID,
 			LongLived: item.LongLived, ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID,
-			DispatchToken: item.DispatchToken,
+			Generation: item.Generation,
 		})
 		if err != nil {
-			releaseErr := dispatch.MarkAdminImportDispatchFailed(
-				ctx,
-				item.ImportID,
-				item.DispatchToken,
-				"Import queue is temporarily unavailable; dispatcher will retry.",
-			)
-			result = errors.Join(result, err, releaseErr)
+			result = errors.Join(result, err)
 			continue
 		}
-		queued++
+		if !accepted {
+			continue
+		}
+		activated, activateErr := dispatch.MarkAdminImportDispatched(ctx, item.ImportID, item.Generation)
+		if activateErr != nil {
+			result = errors.Join(result, activateErr)
+			continue
+		}
+		if activated {
+			queued++
+		}
 	}
 	return queued, result
 }
@@ -403,12 +400,24 @@ func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (i
 // Each line uses the P1-I2 Microsoft TXT import format documented in docs/14.
 func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (*MicrosoftImportProcessResult, error) {
 	dispatch, adminTask := uc.imports.(AdminResourceImportDispatchRepository)
-	if adminTask && strings.TrimSpace(task.DispatchToken) != "" {
-		claimToken, claimed, err := dispatch.MarkAdminImportRunning(ctx, task.ImportID, task.DispatchToken)
+	if adminTask {
+		generation := task.Generation
+		if generation == 0 {
+			return nil, domain.ErrResourceImportInvalidClaim
+		}
+		task.Generation = generation
+		claimToken, claimed, err := dispatch.MarkAdminImportRunning(ctx, task.ImportID, generation)
 		if err != nil {
 			return nil, err
 		}
 		if !claimed {
+			current, findErr := uc.imports.FindByID(ctx, task.ImportID)
+			if findErr != nil {
+				return nil, findErr
+			}
+			if current != nil && current.Generation == generation && current.Status == domain.ResourceImportProcessing && current.DispatchStatus != "failed" && current.DispatchStatus != "succeeded" {
+				return nil, ErrImportTemporaryUnavailable
+			}
 			return &MicrosoftImportProcessResult{}, nil
 		}
 		task.ClaimToken = claimToken
@@ -432,13 +441,7 @@ func (uc *ImportUseCase) ProcessMicrosoftImport(ctx context.Context, task Micros
 		markErr := dispatch.MarkAdminImportFailed(ctx, task.ImportID, task.ClaimToken, "", "Invalid import task.")
 		return result, errors.Join(err, markErr)
 	}
-	_, retryErr := dispatch.MarkAdminImportRetryableFailure(
-		ctx,
-		task.ImportID,
-		task.ClaimToken,
-		"Import processing failed. Please retry later.",
-	)
-	return result, errors.Join(err, retryErr)
+	return result, err
 }
 
 func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task MicrosoftImportTask) (*MicrosoftImportProcessResult, error) {
@@ -891,6 +894,16 @@ func (uc *ImportUseCase) saveImportFailures(ctx context.Context, ownerUserID uin
 // MarkImportFailed marks a processing import as failed with a safe system error.
 func (uc *ImportUseCase) MarkImportFailed(ctx context.Context, importRecordID uint, safeError string) error {
 	return uc.imports.MarkFailed(ctx, importRecordID, "", safeError)
+}
+
+// MarkImportPending returns an infrastructure-failed generation to the
+// pending dispatcher without consuming a business import attempt.
+func (uc *ImportUseCase) MarkImportPending(ctx context.Context, importRecordID uint, generation uint64, safeError string) error {
+	dispatch, ok := uc.imports.(AdminResourceImportDispatchRepository)
+	if !ok {
+		return domain.ErrResourceDependency
+	}
+	return dispatch.MarkAdminImportPending(ctx, importRecordID, generation, safeError)
 }
 
 func importFailuresDetail(failures []importFailure) string {

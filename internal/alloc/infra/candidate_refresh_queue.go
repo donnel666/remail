@@ -29,30 +29,34 @@ func NewCandidateRefreshQueue(client *asynq.Client) *CandidateRefreshQueue {
 	return &CandidateRefreshQueue{client: client}
 }
 
-func (q *CandidateRefreshQueue) EnqueueCandidateRefresh(ctx context.Context, task allocapp.CandidateRefreshTask) error {
+func (q *CandidateRefreshQueue) EnqueueCandidateRefresh(ctx context.Context, task allocapp.CandidateRefreshTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("candidate refresh queue is unavailable")
+		return false, fmt.Errorf("candidate refresh queue is unavailable")
+	}
+	if task.ProjectID == 0 || task.Generation == 0 {
+		return false, fmt.Errorf("candidate refresh task identity is missing")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return fmt.Errorf("marshal candidate refresh task: %w", err)
+		return false, fmt.Errorf("marshal candidate refresh task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeCandidateRefresh, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(allocationQueueName),
-		asynq.TaskID(fmt.Sprintf("%s:%d", TypeCandidateRefresh, task.JobID)),
-		asynq.MaxRetry(0),
+		asynq.Unique(candidateRefreshTaskTimeout),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.Timeout(candidateRefreshTaskTimeout),
+		asynq.Retention(0),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
 		}
-		return fmt.Errorf("enqueue candidate refresh task: %w", err)
+		return false, fmt.Errorf("enqueue candidate refresh task: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (q *CandidateRefreshQueue) EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error {
@@ -60,18 +64,23 @@ func (q *CandidateRefreshQueue) EnqueueCandidateRefreshDispatcher(ctx context.Co
 		return fmt.Errorf("candidate refresh dispatcher queue is unavailable")
 	}
 	asynqTask := asynq.NewTask(TypeCandidateRefreshDispatcher, nil)
+	uniqueTTL := candidateRefreshDispatcherTaskTimeout
+	if delay > 0 {
+		uniqueTTL += delay
+	}
 	options := []asynq.Option{
 		asynq.Queue(allocationQueueName),
-		asynq.TaskID(TypeCandidateRefreshDispatcher),
+		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(candidateRefreshDispatcherTaskTimeout),
+		asynq.Retention(0),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue candidate refresh dispatcher task: %w", err)

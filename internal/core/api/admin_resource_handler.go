@@ -717,7 +717,7 @@ func (h *CoreHandler) applyAdminResourceStateBatch(c *gin.Context, command corea
 }
 
 // submitAdminResourceStateBulk accepts a Microsoft publish/unpublish/delete
-// batch (explicit IDs or filter) into the durable AdminResourceBulkService, the
+// batch (explicit IDs or filter) into the Redis-backed AdminResourceBulkService, the
 // same asynchronous worker that already runs bulk maintenance. Large Microsoft
 // tables no longer block the request thread; the client polls the returned task.
 func (h *CoreHandler) submitAdminResourceStateBulk(c *gin.Context, bulkAction coreapp.AdminResourceBulkAction) {
@@ -865,7 +865,10 @@ func toAdminTaskSummary(task *coreapp.AdminTaskSummary) *adminTaskSummaryRespons
 
 func toAdminImportResponse(item *coreapp.ResourceImportStatusView, reused bool) adminMicrosoftImportResponse {
 	taskStatus := item.TaskStatus
-	if taskStatus == "" || taskStatus == "legacy" {
+	if taskStatus == "pending" {
+		taskStatus = "queued"
+	}
+	if taskStatus == "" {
 		taskStatus = "running"
 		switch item.Status {
 		case string(domain.ResourceImportImported):

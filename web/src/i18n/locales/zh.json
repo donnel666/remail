@@ -304,6 +304,7 @@
   "Normal": "正常",
   "Abnormal": "异常",
   "Pending": "待验证",
+  "Pending check": "待检测",
   "Validating": "验证中",
   "Disabled": "已禁用",
   "All statuses": "全部状态",

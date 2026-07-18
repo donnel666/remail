@@ -55,6 +55,7 @@ func TestProxyStatusTransitions(t *testing.T) {
 	require.Equal(t, ProxyStatusNormal, proxy.Status)
 	require.Equal(t, 2, proxy.Errors)
 
+	require.NoError(t, proxy.MarkPending())
 	require.NoError(t, proxy.MarkChecking())
 	require.Equal(t, 0, proxy.Errors)
 	require.NoError(t, proxy.ApplyCheckSuccess(CheckResult{
@@ -75,28 +76,10 @@ func TestProxyCheckFailureRetryability(t *testing.T) {
 	require.NoError(t, retryable.ApplyCheckFailure(CheckResult{
 		LastSafeError: "Proxy endpoint is unreachable.",
 		CheckedAt:     checkedAt,
-	}))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
-	require.Equal(t, 1, retryable.Errors)
-
-	require.NoError(t, retryable.ApplyCheckFailure(CheckResult{
-		LastSafeError: "Proxy endpoint is unreachable.",
-		CheckedAt:     checkedAt,
-	}))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
-	require.Equal(t, 2, retryable.Errors)
-	require.NoError(t, retryable.ApplyCheckFailure(CheckResult{
-		LastSafeError: "Proxy endpoint is unreachable.",
-		CheckedAt:     checkedAt,
+		Attempts:      3,
 	}))
 	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
 	require.Equal(t, 3, retryable.Errors)
-	require.NoError(t, retryable.ApplyCheckFailure(CheckResult{
-		LastSafeError: "Proxy endpoint is unreachable.",
-		CheckedAt:     checkedAt,
-	}))
-	require.Equal(t, ProxyStatusAbnormal, retryable.Status)
-	require.Equal(t, 4, retryable.Errors)
 
 	nonRetryable := &Proxy{Status: ProxyStatusNormal}
 	require.NoError(t, nonRetryable.ApplyCheckFailure(CheckResult{
@@ -131,11 +114,8 @@ func TestProxyReportFailureRetryability(t *testing.T) {
 	require.Equal(t, ProxyStatusNormal, retryable.Status)
 	require.Equal(t, 2, retryable.Errors)
 	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusChecking, retryable.Status)
-	require.Equal(t, 3, retryable.Errors)
-	require.NoError(t, retryable.ReportFailure("network timeout", true))
-	require.Equal(t, ProxyStatusChecking, retryable.Status)
-	require.Equal(t, 4, retryable.Errors)
+	require.Equal(t, ProxyStatusPending, retryable.Status)
+	require.Equal(t, 0, retryable.Errors)
 
 	nonRetryable := &Proxy{Status: ProxyStatusNormal}
 	require.NoError(t, nonRetryable.ReportFailure("invalid proxy url", false))
@@ -167,6 +147,7 @@ func TestProxyExpiredTransitionsRequireCheckingBeforeResult(t *testing.T) {
 
 	require.False(t, CanTransitionProxyStatus(ProxyStatusExpired, ProxyStatusNormal))
 	require.False(t, CanTransitionProxyStatus(ProxyStatusExpired, ProxyStatusAbnormal))
+	require.NoError(t, proxy.MarkPending())
 	require.NoError(t, proxy.MarkChecking())
 
 	require.NoError(t, proxy.ApplyCheckSuccess(CheckResult{

@@ -16,10 +16,13 @@ import (
 )
 
 type inboundRepoStub struct {
-	mu       sync.Mutex
-	nextID   uint
-	mails    map[uint]*domain.InboundMail
-	onCreate func()
+	mu           sync.Mutex
+	nextID       uint
+	mails        map[uint]*domain.InboundMail
+	onCreate     func()
+	activateRace bool
+	activateErr  error
+	markStoreErr error
 }
 
 func newInboundRepoStub() *inboundRepoStub {
@@ -51,22 +54,29 @@ func (r *inboundRepoStub) FindByID(_ context.Context, id uint) (*domain.InboundM
 	return nil, nil
 }
 
-func (r *inboundRepoStub) ClaimProcessing(_ context.Context, id uint) (bool, error) {
+func (r *inboundRepoStub) ActivateProcessing(_ context.Context, id uint, generation uint64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.activateErr != nil {
+		return false, r.activateErr
+	}
 	mail, ok := r.mails[id]
 	if !ok {
 		return false, errors.New("not found")
 	}
-	if mail.Status != domain.InboundStatusPending {
+	if mail.Status != domain.InboundStatusPending || mail.ProcessGeneration != generation {
 		return false, nil
 	}
 	mail.Status = domain.InboundStatusProcessing
 	mail.FailureReason = ""
+	if r.activateRace {
+		r.activateRace = false
+		return false, nil
+	}
 	return true, nil
 }
 
-func (r *inboundRepoStub) ClaimDispatchable(_ context.Context, limit int, staleBefore time.Time) ([]domain.InboundMail, error) {
+func (r *inboundRepoStub) ListPending(_ context.Context, limit int) ([]domain.InboundMail, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if limit <= 0 {
@@ -74,8 +84,7 @@ func (r *inboundRepoStub) ClaimDispatchable(_ context.Context, limit int, staleB
 	}
 	mails := make([]domain.InboundMail, 0, len(r.mails))
 	for _, mail := range r.mails {
-		if mail.Status == domain.InboundStatusPending ||
-			(mail.Status == domain.InboundStatusProcessing && mail.UpdatedAt.Before(staleBefore)) {
+		if mail.Status == domain.InboundStatusPending {
 			mails = append(mails, *mail)
 		}
 	}
@@ -85,16 +94,26 @@ func (r *inboundRepoStub) ClaimDispatchable(_ context.Context, limit int, staleB
 	return mails, nil
 }
 
-func (r *inboundRepoStub) MarkPending(_ context.Context, id uint, safeError string) error {
-	return r.update(id, domain.InboundStatusPending, safeError)
+func (r *inboundRepoStub) ReleasePending(_ context.Context, id uint, generation uint64, safeError string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mail := r.mails[id]
+	if mail == nil || mail.Status != domain.InboundStatusProcessing || mail.ProcessGeneration != generation {
+		return false, nil
+	}
+	mail.ReleasePending(time.Now().UTC(), safeError)
+	return true, nil
 }
 
-func (r *inboundRepoStub) SaveParsedSummary(_ context.Context, id uint, summary domain.InboundMailSummary) error {
+func (r *inboundRepoStub) SaveParsedSummary(_ context.Context, id uint, generation uint64, summary domain.InboundMailSummary) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	mail, ok := r.mails[id]
 	if !ok {
-		return errors.New("not found")
+		return false, errors.New("not found")
+	}
+	if mail.Status != domain.InboundStatusProcessing || mail.ProcessGeneration != generation {
+		return false, nil
 	}
 	mail.HeaderFrom = summary.HeaderFrom
 	mail.Subject = summary.Subject
@@ -105,11 +124,31 @@ func (r *inboundRepoStub) SaveParsedSummary(_ context.Context, id uint, summary 
 	parsedAt := summary.ParsedAt
 	mail.ReceivedAt = &receivedAt
 	mail.ParsedAt = &parsedAt
-	return nil
+	return true, nil
 }
 
-func (r *inboundRepoStub) MarkStored(_ context.Context, id uint) error {
-	return r.update(id, domain.InboundStatusStored, "")
+func (r *inboundRepoStub) RecordProcessFailure(_ context.Context, id uint, generation uint64, safeError string, retryable bool) (bool, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mail := r.mails[id]
+	if mail == nil || mail.Status != domain.InboundStatusProcessing || mail.ProcessGeneration != generation {
+		return false, false, nil
+	}
+	return mail.RecordProcessFailure(time.Now().UTC(), safeError, retryable), true, nil
+}
+
+func (r *inboundRepoStub) MarkStored(_ context.Context, id uint, generation uint64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.markStoreErr != nil {
+		return false, r.markStoreErr
+	}
+	mail := r.mails[id]
+	if mail == nil || mail.Status != domain.InboundStatusProcessing || mail.ProcessGeneration != generation {
+		return false, nil
+	}
+	mail.MarkStored(time.Now().UTC())
+	return true, nil
 }
 
 func (r *inboundRepoStub) MarkFailed(_ context.Context, id uint, safeError string) error {
@@ -223,14 +262,28 @@ type inboundQueueStub struct {
 	tasks      []InboundProcessTask
 	dispatches []time.Duration
 	err        error
+	duplicate  bool
 }
 
-func (q *inboundQueueStub) EnqueueInboundProcess(_ context.Context, task InboundProcessTask) error {
+type inboundConsumerStub struct {
+	err   error
+	calls int
+}
+
+func (s *inboundConsumerStub) IngestInboundMail(context.Context, InboundConsumeRequest) error {
+	s.calls++
+	return s.err
+}
+
+func (q *inboundQueueStub) EnqueueInboundProcess(_ context.Context, task InboundProcessTask) (bool, error) {
 	if q.err != nil {
-		return q.err
+		return false, q.err
+	}
+	if q.duplicate {
+		return false, nil
 	}
 	q.tasks = append(q.tasks, task)
-	return nil
+	return true, nil
 }
 
 func (q *inboundQueueStub) EnqueueInboundDispatch(_ context.Context, delay time.Duration) error {
@@ -259,6 +312,10 @@ func TestInboundServiceAcceptStoresRawMailAndEnqueuesPerRecipient(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, mails, 2)
 	require.Len(t, queue.tasks, 2)
+	first, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, domain.InboundStatusProcessing, first.Status)
 	assert.Equal(t, "sender@example.com", mails[0].EnvelopeFrom)
 	assert.Equal(t, mails[0].SourceObjectKey, mails[1].SourceObjectKey)
 	assert.Contains(t, mails[0].SourceObjectKey, "mailtransport/inbound/2026/07/03/")
@@ -426,4 +483,229 @@ func TestInboundServiceAcceptKeepsPendingAndLogsWhenQueueUnavailable(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, stored)
 	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+}
+
+func TestInboundServiceDuplicateEnqueueLeavesPending(t *testing.T) {
+	repo := newInboundRepoStub()
+	service := NewInboundService(repo, inboundResolverStub{}, newFileStoreStub(), &inboundQueueStub{duplicate: true}, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+	assert.Equal(t, uint64(1), stored.ProcessGeneration)
+}
+
+func TestInboundServiceWorkerActivatesPendingGeneration(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	service := NewInboundService(repo, inboundResolverStub{}, files, &inboundQueueStub{duplicate: true}, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: 1}, false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusStored, stored.Status)
+}
+
+func TestInboundServiceWorkerContinuesWhenDispatcherWinsActivationRace(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	service := NewInboundService(repo, inboundResolverStub{}, files, &inboundQueueStub{duplicate: true}, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	repo.activateRace = true
+	require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: 1}, false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusStored, stored.Status)
+}
+
+func TestInboundServiceStaleGenerationCannotProcess(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	service := NewInboundService(repo, inboundResolverStub{}, files, &inboundQueueStub{duplicate: true}, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: 2}, false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+	assert.Zero(t, files.readCount)
+}
+
+func TestInboundServiceThirdBusinessFailureIsTerminal(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	consumer := &inboundConsumerStub{err: &InboundConsumeFailure{SafeMessage: "Mail matching failed.", Retryable: true, Cause: errors.New("match failed")}}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+	service.SetConsumer(consumer)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	for generation := uint64(1); generation <= 3; generation++ {
+		require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: generation}, false))
+		stored, findErr := repo.FindByID(context.Background(), mails[0].ID)
+		require.NoError(t, findErr)
+		require.NotNil(t, stored)
+		assert.Equal(t, int(generation), stored.ProcessAttempts)
+		if generation < 3 {
+			assert.Equal(t, domain.InboundStatusPending, stored.Status)
+			assert.Equal(t, generation+1, stored.ProcessGeneration)
+		} else {
+			assert.Equal(t, domain.InboundStatusFailed, stored.Status)
+		}
+	}
+	assert.Equal(t, 3, consumer.calls)
+}
+
+func TestInboundServiceSuccessResetsBusinessAttempts(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	consumer := &inboundConsumerStub{err: &InboundConsumeFailure{SafeMessage: "Mail matching failed.", Retryable: true, Cause: errors.New("match failed")}}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+	service.SetConsumer(consumer)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: 1}, false))
+	consumer.err = nil
+	require.NoError(t, service.Process(context.Background(), InboundProcessTask{InboundMailID: mails[0].ID, ProcessGeneration: 2}, false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusStored, stored.Status)
+	assert.Zero(t, stored.ProcessAttempts)
+}
+
+func TestInboundServiceInfrastructureExhaustionReleasesPendingWithoutAttempt(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	delete(files.files, mails[0].SourceObjectKey)
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0], true))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+	assert.Equal(t, uint64(2), stored.ProcessGeneration)
+	assert.Zero(t, stored.ProcessAttempts)
+}
+
+func TestInboundServiceUnknownConsumerErrorIsInfrastructureFailure(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	consumer := &inboundConsumerStub{err: errors.New("database unavailable")}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+	service.SetConsumer(consumer)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0], true))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+	assert.Equal(t, uint64(2), stored.ProcessGeneration)
+	assert.Zero(t, stored.ProcessAttempts)
+}
+
+func TestInboundServiceNonRetryableBusinessFailureIsTerminal(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	consumer := &inboundConsumerStub{err: &InboundConsumeFailure{SafeMessage: "Inbound message is invalid.", Cause: errors.New("invalid message")}}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+	service.SetConsumer(consumer)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0], false))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusFailed, stored.Status)
+	assert.Equal(t, 1, stored.ProcessAttempts)
+}
+
+func TestInboundServiceCompletionPersistenceExhaustionReleasesPending(t *testing.T) {
+	repo := newInboundRepoStub()
+	files := newFileStoreStub()
+	queue := &inboundQueueStub{}
+	service := NewInboundService(repo, inboundResolverStub{}, files, queue, nil)
+
+	mails, err := service.Accept(context.Background(), InboundRawMessage{
+		EnvelopeFrom: "sender@example.com",
+		Recipients:   []domain.InboundRecipient{{Email: "a@test.com", ResourceID: 10, ResourceType: domain.InboundResourceDomain, OwnerUserID: 1}},
+		ContentBytes: []byte("Subject: hi\r\n\r\nbody"),
+	})
+	require.NoError(t, err)
+	repo.markStoreErr = errors.New("database unavailable")
+	require.NoError(t, service.Process(context.Background(), queue.tasks[0], true))
+
+	stored, err := repo.FindByID(context.Background(), mails[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, domain.InboundStatusPending, stored.Status)
+	assert.Equal(t, uint64(2), stored.ProcessGeneration)
+	assert.Zero(t, stored.ProcessAttempts)
+	require.NotEmpty(t, queue.dispatches)
 }

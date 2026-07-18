@@ -44,44 +44,33 @@ type MessageModel struct {
 
 func (MessageModel) TableName() string { return "mailmatch_messages" }
 
-type FetchJobModel struct {
-	ID              uint       `gorm:"primaryKey;autoIncrement"`
-	OrderNo         string     `gorm:"type:varchar(64);not null;column:order_no"`
-	Purpose         string     `gorm:"type:varchar(32);not null;default:'order_fetch'"`
-	AllocationType  string     `gorm:"type:varchar(32);not null;column:allocation_type"`
-	AllocationID    uint       `gorm:"not null;column:allocation_id"`
-	ProjectID       uint       `gorm:"not null;column:project_id"`
-	EmailResourceID uint       `gorm:"not null;column:email_resource_id"`
-	Recipient       string     `gorm:"type:varchar(255);not null"`
-	Status          string     `gorm:"type:varchar(32);not null;default:'pending'"`
-	Attempts        int        `gorm:"not null;default:0"`
-	MaxAttempts     int        `gorm:"not null;default:3;column:max_attempts"`
-	SinceAt         *time.Time `gorm:"column:since_at"`
-	UntilAt         *time.Time `gorm:"column:until_at"`
-	FetchedCount    int        `gorm:"not null;default:0;column:fetched_count"`
-	StoredCount     int        `gorm:"not null;default:0;column:stored_count"`
-	MatchedCount    int        `gorm:"not null;default:0;column:matched_count"`
-	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	RequestID       string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
-	StartedAt       *time.Time `gorm:"column:started_at"`
-	FinishedAt      *time.Time `gorm:"column:finished_at"`
-	CreatedAt       time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
-}
-
-func (FetchJobModel) TableName() string { return "mailmatch_fetch_jobs" }
-
 type FetchStateModel struct {
-	EmailResourceID uint       `gorm:"primaryKey;column:email_resource_id"`
-	LastJobID       *uint      `gorm:"column:last_job_id"`
-	LastStatus      string     `gorm:"type:varchar(32);not null;default:'';column:last_status"`
-	LastSubmittedAt *time.Time `gorm:"column:last_submitted_at"`
-	LastSuccessAt   *time.Time `gorm:"column:last_success_at"`
-	LastReceivedAt  *time.Time `gorm:"column:last_received_at"`
-	CooldownUntil   *time.Time `gorm:"column:cooldown_until"`
-	LastSafeError   string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	CreatedAt       time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt       time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	EmailResourceID            uint       `gorm:"primaryKey;column:email_resource_id"`
+	Status                     string     `gorm:"type:varchar(32);not null;default:'normal'"`
+	Generation                 uint64     `gorm:"not null;default:0"`
+	Failures                   int        `gorm:"not null;default:0"`
+	OperationKind              string     `gorm:"type:varchar(32);not null;default:'order_fetch';column:operation_kind"`
+	OrderNo                    string     `gorm:"type:varchar(64);not null;default:'';column:order_no"`
+	Purpose                    string     `gorm:"type:varchar(32);not null;default:'order_fetch'"`
+	OperatorUserID             *uint      `gorm:"column:operator_user_id"`
+	ExpectedCredentialRevision uint64     `gorm:"not null;default:0;column:expected_credential_revision"`
+	SinceAt                    *time.Time `gorm:"column:since_at"`
+	UntilAt                    *time.Time `gorm:"column:until_at"`
+	FetchedCount               int        `gorm:"not null;default:0;column:fetched_count"`
+	StoredCount                int        `gorm:"not null;default:0;column:stored_count"`
+	MatchedCount               int        `gorm:"not null;default:0;column:matched_count"`
+	RequestID                  string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
+	Path                       string     `gorm:"type:varchar(255);not null;default:''"`
+	IdempotencyKey             string     `gorm:"type:varchar(128);not null;default:'';column:idempotency_key"`
+	RequestedAt                *time.Time `gorm:"column:requested_at"`
+	StartedAt                  *time.Time `gorm:"column:started_at"`
+	FinishedAt                 *time.Time `gorm:"column:finished_at"`
+	LastSuccessAt              *time.Time `gorm:"column:last_success_at"`
+	LastReceivedAt             *time.Time `gorm:"column:last_received_at"`
+	CooldownUntil              *time.Time `gorm:"column:cooldown_until"`
+	LastSafeError              string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
+	CreatedAt                  time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt                  time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (FetchStateModel) TableName() string { return "mailmatch_resource_fetch_states" }
@@ -592,21 +581,6 @@ func (r *Repo) FindLatestReceivedAt(ctx context.Context, emailResourceID uint) (
 	return state.LastReceivedAt, nil
 }
 
-func (r *Repo) FindActiveFetchJobByResource(ctx context.Context, emailResourceID uint) (*domain.FetchJob, error) {
-	var model FetchJobModel
-	err := r.dbFor(ctx).Where("email_resource_id = ? AND status IN ?", emailResourceID, activeFetchStatuses()).
-		Order("created_at ASC, id ASC").
-		First(&model).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find active fetch job: %w", err)
-	}
-	item := fetchJobModelToDomain(model)
-	return &item, nil
-}
-
 func (r *Repo) FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error) {
 	db := r.dbFor(ctx)
 	if _, ok := platform.GormTxFromContext(ctx); ok {
@@ -624,207 +598,199 @@ func (r *Repo) FindFetchStateForUpdate(ctx context.Context, emailResourceID uint
 	return &item, nil
 }
 
-func (r *Repo) CreateFetchState(ctx context.Context, emailResourceID uint) (*domain.FetchState, error) {
-	model := FetchStateModel{EmailResourceID: emailResourceID}
-	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
-		if !isDuplicateKeyError(err) {
-			return nil, fmt.Errorf("create fetch state: %w", err)
-		}
-		return r.FindFetchStateForUpdate(ctx, emailResourceID)
+func (r *Repo) RequestFetch(ctx context.Context, job *domain.FetchJob, cooldownUntil time.Time, now time.Time) error {
+	if job == nil || job.EmailResourceID == 0 {
+		return domain.ErrInvalidRequest
 	}
-	item := fetchStateModelToDomain(model)
-	return &item, nil
-}
-
-func (r *Repo) CreateFetchJob(ctx context.Context, job *domain.FetchJob) error {
-	model := fetchJobModelFromDomain(*job)
-	if model.MaxAttempts <= 0 {
-		model.MaxAttempts = 3
+	model := FetchStateModel{
+		EmailResourceID: job.EmailResourceID, Status: string(domain.FetchJobPending), Generation: 1,
+		OperationKind: "order_fetch", OrderNo: strings.TrimSpace(job.OrderNo), Purpose: string(job.Purpose),
+		SinceAt: job.SinceAt, UntilAt: job.UntilAt, RequestID: strings.TrimSpace(job.RequestID),
+		RequestedAt: &now, CooldownUntil: &cooldownUntil,
 	}
-	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
-		if isDuplicateKeyError(err) {
-			return domain.ErrFetchJobConflict
-		}
-		return fmt.Errorf("create fetch job: %w", err)
+	db := r.dbFor(ctx)
+	err := db.Create(&model).Error
+	if err != nil && !isDuplicateKeyError(err) {
+		return fmt.Errorf("create fetch state: %w", err)
 	}
-	*job = fetchJobModelToDomain(model)
-	return nil
-}
-
-func (r *Repo) MarkFetchJobQueued(ctx context.Context, jobID uint) error {
-	result := r.dbFor(ctx).Model(&FetchJobModel{}).
-		Where("id = ? AND status = ?", jobID, string(domain.FetchJobPending)).
-		Updates(map[string]any{"status": string(domain.FetchJobQueued), "updated_at": time.Now().UTC()})
-	if result.Error != nil {
-		return fmt.Errorf("mark fetch job queued: %w", result.Error)
-	}
-	return nil
-}
-
-func (r *Repo) FindFetchJob(ctx context.Context, jobID uint) (*domain.FetchJob, error) {
-	var model FetchJobModel
-	err := r.dbFor(ctx).First(&model, "id = ?", jobID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find fetch job: %w", err)
-	}
-	item := fetchJobModelToDomain(model)
-	return &item, nil
-}
-
-func (r *Repo) ClaimFetchJobRunning(ctx context.Context, jobID uint, now time.Time) (bool, error) {
-	result := r.dbFor(ctx).Model(&FetchJobModel{}).
-		Where("id = ? AND status IN ?", jobID, []string{string(domain.FetchJobPending), string(domain.FetchJobQueued)}).
-		Updates(map[string]any{
-			"status":          string(domain.FetchJobRunning),
-			"attempts":        gorm.Expr("attempts + 1"),
-			"last_safe_error": "",
-			"started_at":      now,
-			"updated_at":      now,
+	if isDuplicateKeyError(err) {
+		result := db.Model(&FetchStateModel{}).Where("email_resource_id = ?", job.EmailResourceID).Updates(map[string]any{
+			"status":                       string(domain.FetchJobPending),
+			"generation":                   gorm.Expr("generation + 1"),
+			"failures":                     0,
+			"operation_kind":               "order_fetch",
+			"order_no":                     strings.TrimSpace(job.OrderNo),
+			"purpose":                      string(job.Purpose),
+			"operator_user_id":             nil,
+			"expected_credential_revision": job.ExpectedCredentialRevision,
+			"since_at":                     job.SinceAt,
+			"until_at":                     job.UntilAt,
+			"fetched_count":                0,
+			"stored_count":                 0,
+			"matched_count":                0,
+			"request_id":                   strings.TrimSpace(job.RequestID),
+			"path":                         "",
+			"idempotency_key":              "",
+			"requested_at":                 now,
+			"started_at":                   nil,
+			"finished_at":                  nil,
+			"cooldown_until":               cooldownUntil,
+			"last_safe_error":              "",
 		})
-	if result.Error != nil {
-		return false, fmt.Errorf("claim fetch job running: %w", result.Error)
+		if result.Error != nil {
+			return fmt.Errorf("replace fetch state: %w", result.Error)
+		}
 	}
-	return result.RowsAffected == 1, nil
-}
-
-func (r *Repo) MarkFetchJobSucceeded(ctx context.Context, jobID uint, fetched int, stored int, matched int, _ *time.Time, now time.Time) error {
-	return r.updateFetchJobStatus(ctx, jobID, domain.FetchJobSucceeded, map[string]any{
-		"fetched_count":   fetched,
-		"stored_count":    stored,
-		"matched_count":   matched,
-		"last_safe_error": "",
-		"finished_at":     now,
-		"updated_at":      now,
-	})
-}
-
-func (r *Repo) MarkFetchJobSkipped(ctx context.Context, jobID uint, safeError string, now time.Time) error {
-	return r.updateFetchJobStatus(ctx, jobID, domain.FetchJobSkipped, map[string]any{
-		"last_safe_error": safeDiagnostic(safeError),
-		"finished_at":     now,
-		"updated_at":      now,
-	})
-}
-
-func (r *Repo) MarkFetchJobFailed(ctx context.Context, jobID uint, safeError string, retry bool, now time.Time) error {
-	status := domain.FetchJobFailed
-	if retry {
-		status = domain.FetchJobPending
+	var saved FetchStateModel
+	if err := db.First(&saved, "email_resource_id = ?", job.EmailResourceID).Error; err != nil {
+		return fmt.Errorf("read requested fetch state: %w", err)
 	}
-	updates := map[string]any{
-		"last_safe_error": safeDiagnostic(safeError),
-		"updated_at":      now,
-	}
-	if !retry {
-		updates["finished_at"] = now
-	}
-	return r.updateFetchJobStatus(ctx, jobID, status, updates)
-}
-
-func (r *Repo) updateFetchJobStatus(ctx context.Context, jobID uint, status domain.FetchJobStatus, updates map[string]any) error {
-	updates["status"] = string(status)
-	result := r.dbFor(ctx).Model(&FetchJobModel{}).Where("id = ?", jobID).Updates(updates)
-	if result.Error != nil {
-		return fmt.Errorf("update fetch job: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return domain.ErrFetchJobNotFound
-	}
+	*job = fetchStateModelToJob(saved)
 	return nil
 }
 
-func (r *Repo) ClaimDispatchableFetchJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.FetchJob, error) {
+func (r *Repo) ListPendingFetches(ctx context.Context, limit int) ([]domain.FetchJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	var models []FetchJobModel
-	now := time.Now().UTC()
-	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? OR (status IN ? AND updated_at < ?)",
-				string(domain.FetchJobPending),
-				[]string{string(domain.FetchJobQueued), string(domain.FetchJobRunning)},
-				staleBefore,
-			).
-			Order("created_at ASC, id ASC").
-			Limit(limit).
-			Find(&models).Error; err != nil {
-			return fmt.Errorf("claim dispatchable fetch jobs: %w", err)
-		}
-		if len(models) == 0 {
-			return nil
-		}
-		staleRunningIDs := make([]uint, 0, len(models))
-		for i := range models {
-			if models[i].Status == string(domain.FetchJobRunning) {
-				staleRunningIDs = append(staleRunningIDs, models[i].ID)
-				models[i].Status = string(domain.FetchJobPending)
-			}
-		}
-		if len(staleRunningIDs) > 0 {
-			result := tx.Model(&FetchJobModel{}).
-				Where("id IN ? AND status = ?", staleRunningIDs, string(domain.FetchJobRunning)).
-				Updates(map[string]any{"status": string(domain.FetchJobPending), "updated_at": now})
-			if result.Error != nil {
-				return fmt.Errorf("recover stale running fetch jobs: %w", result.Error)
-			}
-			if result.RowsAffected != int64(len(staleRunningIDs)) {
-				return domain.ErrFetchJobConflict
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	var models []FetchStateModel
+	if err := r.dbFor(ctx).
+		Where("status = ? AND operation_kind = ?", string(domain.FetchJobPending), "order_fetch").
+		Order("requested_at ASC, email_resource_id ASC").Limit(limit).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list pending fetches: %w", err)
 	}
 	items := make([]domain.FetchJob, len(models))
 	for i := range models {
-		items[i] = fetchJobModelToDomain(models[i])
+		items[i] = fetchStateModelToJob(models[i])
 	}
 	return items, nil
 }
 
-func (r *Repo) UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error {
+func (r *Repo) MarkFetchProcessing(ctx context.Context, emailResourceID uint, generation uint64, now time.Time) (bool, error) {
 	result := r.dbFor(ctx).Model(&FetchStateModel{}).
-		Where("email_resource_id = ?", emailResourceID).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobPending)).
 		Updates(map[string]any{
-			"last_job_id":       jobID,
-			"last_status":       status,
-			"last_submitted_at": now,
-			"cooldown_until":    cooldownUntil,
-			"last_safe_error":   "",
-			"updated_at":        now,
+			"status": string(domain.FetchJobRunning), "started_at": now, "finished_at": nil, "last_safe_error": "",
 		})
 	if result.Error != nil {
-		return fmt.Errorf("update fetch state submitted: %w", result.Error)
+		return false, fmt.Errorf("mark fetch processing: %w", result.Error)
 	}
-	if result.RowsAffected == 0 {
-		return domain.ErrFetchJobNotFound
+	if result.RowsAffected == 1 {
+		return true, nil
+	}
+	var count int64
+	err := r.dbFor(ctx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+		Count(&count).Error
+	return count == 1, err
+}
+
+func (r *Repo) FindFetch(ctx context.Context, emailResourceID uint, generation uint64) (*domain.FetchJob, error) {
+	var model FetchStateModel
+	err := r.dbFor(ctx).First(&model, "email_resource_id = ? AND generation = ?", emailResourceID, generation).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find fetch: %w", err)
+	}
+	job := fetchStateModelToJob(model)
+	return &job, nil
+}
+
+func (r *Repo) AssertFetchFence(ctx context.Context, emailResourceID uint, generation uint64) error {
+	var count int64
+	err := r.dbFor(ctx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+		Count(&count).Error
+	if err != nil {
+		return fmt.Errorf("assert fetch fence: %w", err)
+	}
+	if count != 1 {
+		return domain.ErrFetchJobConflict
 	}
 	return nil
 }
 
-func (r *Repo) UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error {
+func (r *Repo) CompleteFetch(ctx context.Context, emailResourceID uint, generation uint64, fetched int, stored int, matched int, lastReceivedAt *time.Time, now time.Time) (bool, error) {
 	updates := map[string]any{
-		"last_job_id":     jobID,
-		"last_status":     status,
-		"last_safe_error": safeDiagnostic(safeError),
-		"updated_at":      now,
-	}
-	if status == string(domain.FetchJobSucceeded) {
-		updates["last_success_at"] = now
+		"status": string(domain.FetchJobSucceeded), "failures": 0,
+		"fetched_count": max(fetched, 0), "stored_count": max(stored, 0), "matched_count": max(matched, 0),
+		"last_success_at": now, "last_safe_error": "", "finished_at": now,
 	}
 	if lastReceivedAt != nil {
 		updates["last_received_at"] = *lastReceivedAt
 	}
-	result := r.dbFor(ctx).Model(&FetchStateModel{}).Where("email_resource_id = ?", emailResourceID).Updates(updates)
+	result := r.dbFor(ctx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+		Updates(updates)
 	if result.Error != nil {
-		return fmt.Errorf("update fetch state completed: %w", result.Error)
+		return false, fmt.Errorf("complete fetch: %w", result.Error)
 	}
-	return nil
+	return result.RowsAffected == 1, nil
+}
+
+func (r *Repo) SkipFetch(ctx context.Context, emailResourceID uint, generation uint64, safeError string, now time.Time) (bool, error) {
+	result := r.dbFor(ctx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+		Updates(map[string]any{
+			"status": string(domain.FetchJobSucceeded), "failures": 0,
+			"last_safe_error": safeDiagnostic(safeError), "finished_at": now,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("skip fetch: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *Repo) ReleaseFetchInfrastructureFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string) (bool, error) {
+	result := r.dbFor(ctx).Model(&FetchStateModel{}).
+		Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+		Updates(map[string]any{
+			"status": string(domain.FetchJobPending), "generation": gorm.Expr("generation + 1"),
+			"started_at": nil, "last_safe_error": safeDiagnostic(safeError),
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("release fetch infrastructure failure: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (r *Repo) RecordFetchFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string, retryable bool, now time.Time) (recorded bool, abnormal bool, err error) {
+	err = r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var model FetchStateModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+			First(&model).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		failures := model.Failures + 1
+		status := string(domain.FetchJobPending)
+		if !retryable || failures >= 3 {
+			status = string(domain.FetchJobFailed)
+			failures = min(failures, 3)
+			abnormal = true
+		}
+		updates := map[string]any{
+			"status": status, "failures": failures, "last_safe_error": safeDiagnostic(safeError), "started_at": nil,
+		}
+		if abnormal {
+			updates["finished_at"] = now
+		}
+		result := tx.Model(&FetchStateModel{}).
+			Where("email_resource_id = ? AND generation = ? AND status = ?", emailResourceID, generation, string(domain.FetchJobRunning)).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		recorded = result.RowsAffected == 1
+		return nil
+	})
+	return recorded, abnormal && recorded, err
 }
 
 func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error) {
@@ -886,10 +852,6 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) ([
 		stored[i] = item
 	}
 	return stored, nil
-}
-
-func activeFetchStatuses() []string {
-	return []string{string(domain.FetchJobPending), string(domain.FetchJobQueued), string(domain.FetchJobRunning)}
 }
 
 func messageModelToDomain(model MessageModel) domain.Message {
@@ -992,70 +954,46 @@ func normalizeRecipients(values []string) []string {
 	return out
 }
 
-func fetchJobModelToDomain(model FetchJobModel) domain.FetchJob {
-	return domain.FetchJob{
-		ID:              model.ID,
-		OrderNo:         model.OrderNo,
-		Purpose:         domain.FetchPurpose(model.Purpose),
-		AllocationType:  domain.ResourceType(model.AllocationType),
-		AllocationID:    model.AllocationID,
-		ProjectID:       model.ProjectID,
-		EmailResourceID: model.EmailResourceID,
-		Recipient:       model.Recipient,
-		Status:          domain.FetchJobStatus(model.Status),
-		Attempts:        model.Attempts,
-		MaxAttempts:     model.MaxAttempts,
-		SinceAt:         model.SinceAt,
-		UntilAt:         model.UntilAt,
-		FetchedCount:    model.FetchedCount,
-		StoredCount:     model.StoredCount,
-		MatchedCount:    model.MatchedCount,
-		LastSafeError:   model.LastSafeError,
-		RequestID:       model.RequestID,
-		StartedAt:       model.StartedAt,
-		FinishedAt:      model.FinishedAt,
-		CreatedAt:       model.CreatedAt,
-		UpdatedAt:       model.UpdatedAt,
+func fetchStateModelToJob(model FetchStateModel) domain.FetchJob {
+	createdAt := model.CreatedAt
+	if model.RequestedAt != nil {
+		createdAt = *model.RequestedAt
 	}
-}
-
-func fetchJobModelFromDomain(item domain.FetchJob) FetchJobModel {
-	return FetchJobModel{
-		ID:              item.ID,
-		OrderNo:         item.OrderNo,
-		Purpose:         string(item.Purpose),
-		AllocationType:  string(item.AllocationType),
-		AllocationID:    item.AllocationID,
-		ProjectID:       item.ProjectID,
-		EmailResourceID: item.EmailResourceID,
-		Recipient:       strings.ToLower(strings.TrimSpace(item.Recipient)),
-		Status:          string(item.Status),
-		Attempts:        item.Attempts,
-		MaxAttempts:     item.MaxAttempts,
-		SinceAt:         item.SinceAt,
-		UntilAt:         item.UntilAt,
-		FetchedCount:    item.FetchedCount,
-		StoredCount:     item.StoredCount,
-		MatchedCount:    item.MatchedCount,
-		LastSafeError:   truncate(item.LastSafeError, 500),
-		RequestID:       truncate(item.RequestID, 64),
-		StartedAt:       item.StartedAt,
-		FinishedAt:      item.FinishedAt,
+	return domain.FetchJob{
+		ID:                         model.EmailResourceID,
+		Generation:                 model.Generation,
+		ExpectedCredentialRevision: model.ExpectedCredentialRevision,
+		OrderNo:                    model.OrderNo,
+		Purpose:                    domain.FetchPurpose(model.Purpose),
+		EmailResourceID:            model.EmailResourceID,
+		Status:                     domain.FetchJobStatus(model.Status),
+		Attempts:                   model.Failures,
+		MaxAttempts:                3,
+		SinceAt:                    model.SinceAt,
+		UntilAt:                    model.UntilAt,
+		FetchedCount:               model.FetchedCount,
+		StoredCount:                model.StoredCount,
+		MatchedCount:               model.MatchedCount,
+		LastSafeError:              model.LastSafeError,
+		RequestID:                  model.RequestID,
+		StartedAt:                  model.StartedAt,
+		FinishedAt:                 model.FinishedAt,
+		CreatedAt:                  createdAt,
+		UpdatedAt:                  model.UpdatedAt,
 	}
 }
 
 func fetchStateModelToDomain(model FetchStateModel) domain.FetchState {
 	return domain.FetchState{
-		EmailResourceID: model.EmailResourceID,
-		LastJobID:       model.LastJobID,
-		LastStatus:      model.LastStatus,
-		LastSubmittedAt: model.LastSubmittedAt,
-		LastSuccessAt:   model.LastSuccessAt,
-		LastReceivedAt:  model.LastReceivedAt,
-		CooldownUntil:   model.CooldownUntil,
-		LastSafeError:   model.LastSafeError,
-		CreatedAt:       model.CreatedAt,
-		UpdatedAt:       model.UpdatedAt,
+		EmailResourceID: model.EmailResourceID, Generation: model.Generation, Failures: model.Failures,
+		OperationKind: model.OperationKind, OrderNo: model.OrderNo, Purpose: domain.FetchPurpose(model.Purpose),
+		OperatorUserID: model.OperatorUserID, CredentialRev: model.ExpectedCredentialRevision,
+		SinceAt: model.SinceAt, UntilAt: model.UntilAt,
+		FetchedCount: model.FetchedCount, StoredCount: model.StoredCount, MatchedCount: model.MatchedCount,
+		LastStatus: model.Status, LastSubmittedAt: model.RequestedAt,
+		LastSuccessAt: model.LastSuccessAt, LastReceivedAt: model.LastReceivedAt,
+		CooldownUntil: model.CooldownUntil, LastSafeError: model.LastSafeError,
+		CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 }
 

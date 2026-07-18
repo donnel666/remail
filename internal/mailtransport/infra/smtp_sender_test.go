@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/textproto"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,23 @@ func TestSMTPMessageUsesMultipartAlternative(t *testing.T) {
 	assert.Contains(t, raw, "#8a4a34")
 	assert.Contains(t, raw, "#ff3d73")
 	assert.Contains(t, raw, "<h1")
+}
+
+func TestClassifySMTPFailureSeparatesRemoteBusinessResultsFromInfrastructure(t *testing.T) {
+	retryable := classifySMTPFailure("smtp send failed", &textproto.Error{Code: 451, Msg: "try later"})
+	var retryableFailure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, retryable, &retryableFailure)
+	require.True(t, retryableFailure.Retryable)
+
+	permanent := classifySMTPFailure("smtp send failed", &textproto.Error{Code: 550, Msg: "mailbox unavailable"})
+	var permanentFailure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, permanent, &permanentFailure)
+	require.False(t, permanentFailure.Retryable)
+
+	infrastructure := classifySMTPFailure("smtp send failed", errors.New("dial timeout"))
+	var businessFailure *mailapp.OutboundSendFailure
+	require.False(t, errors.As(infrastructure, &businessFailure))
+	require.ErrorIs(t, infrastructure, domain.ErrDeliveryUnavailable)
 }
 
 func TestSMTPMessageSanitizesHeadersAndHTML(t *testing.T) {

@@ -228,10 +228,9 @@ INSERT INTO microsoft_resource_project_matches(
 	require.Zero(t, historicalOrders, "MailMatch must not write Trade-owned order facts directly")
 }
 
-func TestResourceFetchStateAndActiveJobConstraintsMySQL(t *testing.T) {
+func TestResourceFetchStateConstraintsMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)
-	now := time.Now().UTC()
 
 	err := db.Exec(`
 INSERT INTO mailmatch_resource_fetch_states(email_resource_id)
@@ -242,37 +241,17 @@ VALUES (99999)`).Error
 INSERT INTO mailmatch_resource_fetch_states(email_resource_id)
 VALUES (100)`).Error)
 
-	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_fetch_jobs(
-    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
-    recipient, status, since_at, until_at
-) VALUES (
-    'OR_FETCH_RESOURCE_A', 'order_fetch', 'microsoft', 1000, 10, 100,
-    'a@example.com', 'pending', ?, ?
-)`, now.Add(-time.Hour), now).Error)
-
 	err = db.Exec(`
-INSERT INTO mailmatch_fetch_jobs(
-    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
-    recipient, status, since_at, until_at
-) VALUES (
-    'OR_FETCH_RESOURCE_B', 'order_fetch', 'microsoft', 1001, 10, 100,
-    'b@example.com', 'pending', ?, ?
-)`, now.Add(-time.Hour), now).Error
+UPDATE mailmatch_resource_fetch_states
+SET status = 'invalid'
+WHERE email_resource_id = 100`).Error
 	require.Error(t, err)
 
-	require.NoError(t, db.Exec(`
-UPDATE mailmatch_fetch_jobs
-SET status = 'succeeded'
-WHERE order_no = 'OR_FETCH_RESOURCE_A'`).Error)
-	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_fetch_jobs(
-    order_no, purpose, allocation_type, allocation_id, project_id, email_resource_id,
-    recipient, status, since_at, until_at
-) VALUES (
-    'OR_FETCH_RESOURCE_B', 'order_fetch', 'microsoft', 1001, 10, 100,
-    'b@example.com', 'pending', ?, ?
-)`, now.Add(-time.Hour), now).Error)
+	err = db.Exec(`
+UPDATE mailmatch_resource_fetch_states
+SET failures = 4
+WHERE email_resource_id = 100`).Error
+	require.Error(t, err)
 }
 
 func seedMailmatchOrder(t *testing.T, db *gorm.DB, orderNo string) uint {

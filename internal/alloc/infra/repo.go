@@ -284,24 +284,23 @@ type DomainRoutingCandidateModel struct {
 
 func (DomainRoutingCandidateModel) TableName() string { return "domain_routing_candidates" }
 
-type CandidateRefreshJobModel struct {
-	ID             uint       `gorm:"primaryKey;autoIncrement"`
-	ProjectID      uint       `gorm:"not null;column:project_id"`
-	OperatorUserID uint       `gorm:"not null;column:operator_user_id"`
-	Status         string     `gorm:"type:varchar(32);not null;default:'pending'"`
-	Affected       int        `gorm:"not null;default:0"`
-	Attempts       int        `gorm:"not null;default:0"`
-	MaxAttempts    int        `gorm:"not null;default:1;column:max_attempts"`
-	LastSafeError  string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
-	RequestID      string     `gorm:"type:varchar(64);not null;default:'';column:request_id"`
-	Path           string     `gorm:"type:varchar(255);not null;default:''"`
-	StartedAt      *time.Time `gorm:"column:started_at"`
-	FinishedAt     *time.Time `gorm:"column:finished_at"`
-	CreatedAt      time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt      time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+type CandidateRefreshProjectModel struct {
+	ProjectID      uint       `gorm:"primaryKey;column:id"`
+	Generation     uint64     `gorm:"column:candidate_refresh_generation"`
+	OperatorUserID *uint      `gorm:"column:candidate_refresh_operator_user_id"`
+	Status         string     `gorm:"column:candidate_refresh_status"`
+	Affected       int        `gorm:"column:candidate_refresh_affected"`
+	Failures       int        `gorm:"column:candidate_refresh_failures"`
+	LastSafeError  string     `gorm:"column:candidate_refresh_last_safe_error"`
+	RequestID      string     `gorm:"column:candidate_refresh_request_id"`
+	Path           string     `gorm:"column:candidate_refresh_path"`
+	RequestedAt    *time.Time `gorm:"column:candidate_refresh_requested_at"`
+	StartedAt      *time.Time `gorm:"column:candidate_refresh_started_at"`
+	FinishedAt     *time.Time `gorm:"column:candidate_refresh_finished_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
 }
 
-func (CandidateRefreshJobModel) TableName() string { return "allocation_candidate_refresh_jobs" }
+func (CandidateRefreshProjectModel) TableName() string { return "projects" }
 
 type DailyUsageModel struct {
 	UsageDate    time.Time `gorm:"primaryKey;column:usage_date"`
@@ -315,40 +314,24 @@ type DailyUsageModel struct {
 
 func (DailyUsageModel) TableName() string { return "allocation_daily_usages" }
 
-func candidateRefreshJobModel(job *domain.CandidateRefreshJob) *CandidateRefreshJobModel {
-	return &CandidateRefreshJobModel{
-		ID:             job.ID,
-		ProjectID:      job.ProjectID,
-		OperatorUserID: job.OperatorUserID,
-		Status:         string(job.Status),
-		Affected:       job.Affected,
-		Attempts:       job.Attempts,
-		MaxAttempts:    normalizeCandidateRefreshMaxAttempts(job.MaxAttempts),
-		LastSafeError:  safeCandidateRefreshMessage(job.LastSafeError),
-		RequestID:      strings.TrimSpace(job.RequestID),
-		Path:           strings.TrimSpace(job.Path),
-		StartedAt:      job.StartedAt,
-		FinishedAt:     job.FinishedAt,
-		CreatedAt:      job.CreatedAt,
-		UpdatedAt:      job.UpdatedAt,
+func (m CandidateRefreshProjectModel) toDomain() domain.CandidateRefresh {
+	operatorUserID := uint(0)
+	if m.OperatorUserID != nil {
+		operatorUserID = *m.OperatorUserID
 	}
-}
-
-func (m CandidateRefreshJobModel) toDomain() domain.CandidateRefreshJob {
-	return domain.CandidateRefreshJob{
-		ID:             m.ID,
+	return domain.CandidateRefresh{
 		ProjectID:      m.ProjectID,
-		OperatorUserID: m.OperatorUserID,
+		Generation:     m.Generation,
+		OperatorUserID: operatorUserID,
 		Status:         domain.CandidateRefreshStatus(m.Status),
 		Affected:       m.Affected,
-		Attempts:       m.Attempts,
-		MaxAttempts:    normalizeCandidateRefreshMaxAttempts(m.MaxAttempts),
+		Failures:       m.Failures,
 		LastSafeError:  m.LastSafeError,
 		RequestID:      m.RequestID,
 		Path:           m.Path,
+		RequestedAt:    m.RequestedAt,
 		StartedAt:      m.StartedAt,
 		FinishedAt:     m.FinishedAt,
-		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
 	}
 }
@@ -2015,264 +1998,238 @@ WHERE project_id = ?`
 	}
 }
 
-func (r *Repo) CreateCandidateRefreshJobWithLog(ctx context.Context, job *domain.CandidateRefreshJob) (bool, error) {
-	if job == nil || job.ProjectID == 0 || job.OperatorUserID == 0 {
-		return false, domain.ErrInvalidAllocationRequest
+func (r *Repo) RequestCandidateRefresh(ctx context.Context, projectID uint, operatorUserID uint, requestID string, path string) (*domain.CandidateRefresh, error) {
+	if projectID == 0 || operatorUserID == 0 {
+		return nil, domain.ErrInvalidAllocationRequest
 	}
-	created := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing CandidateRefreshJobModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("project_id = ? AND status IN ?", job.ProjectID, []string{
-				string(domain.CandidateRefreshPending),
-				string(domain.CandidateRefreshQueued),
-				string(domain.CandidateRefreshRunning),
-			}).
-			Order("id DESC").
-			First(&existing).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("find active candidate refresh job: %w", err)
-		}
-		if err == nil {
-			*job = existing.toDomain()
-			return nil
-		}
-
-		job.Status = domain.CandidateRefreshPending
-		job.MaxAttempts = normalizeCandidateRefreshMaxAttempts(job.MaxAttempts)
-		model := candidateRefreshJobModel(job)
-		if err := tx.Create(model).Error; err != nil {
-			if isDuplicateKeyError(err) {
-				var duplicate CandidateRefreshJobModel
-				findErr := tx.Where("project_id = ? AND status IN ?", job.ProjectID, []string{
-					string(domain.CandidateRefreshPending),
-					string(domain.CandidateRefreshQueued),
-					string(domain.CandidateRefreshRunning),
-				}).Order("id DESC").First(&duplicate).Error
-				if findErr == nil {
-					*job = duplicate.toDomain()
-					return nil
-				}
-				if !errors.Is(findErr, gorm.ErrRecordNotFound) {
-					return fmt.Errorf("find duplicate candidate refresh job: %w", findErr)
-				}
-			}
-			if isForeignKeyError(err) {
+	requestID = strings.TrimSpace(requestID)
+	path = strings.TrimSpace(path)
+	var state domain.CandidateRefresh
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		now := time.Now().UTC()
+		var model CandidateRefreshProjectModel
+		db := r.dbFor(txCtx)
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, projectID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrInvalidAllocationRequest
 			}
-			return fmt.Errorf("create candidate refresh job: %w", err)
+			return fmt.Errorf("lock candidate refresh project: %w", err)
 		}
-		*job = model.toDomain()
-		created = true
+		model.Generation++
+		model.OperatorUserID = &operatorUserID
+		model.Status = string(domain.CandidateRefreshPending)
+		model.Affected = 0
+		model.Failures = 0
+		model.LastSafeError = ""
+		model.RequestID = requestID
+		model.Path = path
+		model.RequestedAt = &now
+		model.StartedAt = nil
+		model.FinishedAt = nil
+		model.UpdatedAt = now
+		if err := db.Model(&CandidateRefreshProjectModel{}).
+			Where("id = ?", projectID).
+			Updates(map[string]any{
+				"candidate_refresh_generation":       model.Generation,
+				"candidate_refresh_operator_user_id": operatorUserID,
+				"candidate_refresh_status":           model.Status,
+				"candidate_refresh_affected":         0,
+				"candidate_refresh_failures":         0,
+				"candidate_refresh_last_safe_error":  "",
+				"candidate_refresh_request_id":       requestID,
+				"candidate_refresh_path":             path,
+				"candidate_refresh_requested_at":     now,
+				"candidate_refresh_started_at":       nil,
+				"candidate_refresh_finished_at":      nil,
+				"updated_at":                         now,
+			}).Error; err != nil {
+			return fmt.Errorf("request candidate refresh: %w", err)
+		}
+		state = model.toDomain()
 		if r.operationLogs != nil {
-			log := &governancedomain.OperationLog{
-				OperatorUserID: job.OperatorUserID,
+			if err := r.operationLogs.CreateInTx(ctx, db, &governancedomain.OperationLog{
+				OperatorUserID: operatorUserID,
 				OperationType:  "alloc.candidates.refresh",
 				ResourceType:   "project",
-				ResourceID:     fmt.Sprintf("%d", job.ProjectID),
-				Path:           job.Path,
+				ResourceID:     fmt.Sprintf("%d", projectID),
+				Path:           path,
 				Result:         "success",
-				SafeSummary:    "Candidate refresh job queued.",
-				RequestID:      job.RequestID,
-			}
-			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
+				SafeSummary:    "Candidate refresh requested.",
+				RequestID:      requestID,
+			}); err != nil {
 				return fmt.Errorf("create candidate refresh operation log: %w", err)
 			}
 		}
 		return nil
 	})
-	return created, err
-}
-
-func (r *Repo) FindCandidateRefreshJob(ctx context.Context, jobID uint) (*domain.CandidateRefreshJob, error) {
-	var model CandidateRefreshJobModel
-	if err := r.dbFor(ctx).First(&model, jobID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("find candidate refresh job: %w", err)
-	}
-	job := model.toDomain()
-	return &job, nil
-}
-
-func (r *Repo) ExpireStaleCandidateRefreshJobs(ctx context.Context, staleBefore time.Time) (int, error) {
-	now := time.Now().UTC()
-	message := "Candidate refresh job expired before completion."
-	var expired []CandidateRefreshJobModel
-	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? AND attempts >= max_attempts AND updated_at < ?",
-				string(domain.CandidateRefreshRunning),
-				staleBefore,
-			).
-			Order("id ASC").
-			Limit(100).
-			Find(&expired).Error; err != nil {
-			return fmt.Errorf("find stale candidate refresh jobs: %w", err)
-		}
-		if len(expired) == 0 {
-			return nil
-		}
-		ids := make([]uint, len(expired))
-		for i := range expired {
-			ids[i] = expired[i].ID
-		}
-		if err := tx.Model(&CandidateRefreshJobModel{}).
-			Where("id IN ? AND status = ?", ids, string(domain.CandidateRefreshRunning)).
-			Updates(map[string]any{
-				"status":          string(domain.CandidateRefreshFailed),
-				"last_safe_error": message,
-				"finished_at":     now,
-				"updated_at":      now,
-			}).Error; err != nil {
-			return fmt.Errorf("expire stale candidate refresh jobs: %w", err)
-		}
-		return nil
-	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	for i := range expired {
-		if r.systemLogs == nil {
-			continue
-		}
-		_ = r.systemLogs.Create(ctx, &governancedomain.SystemLog{
-			Level:     "error",
-			Module:    "alloc",
-			EventType: "alloc.candidates.refresh_expired",
-			RequestID: expired[i].RequestID,
-			BizType:   "candidate_refresh_job",
-			BizID:     fmt.Sprintf("%d", expired[i].ID),
-			Message:   "Candidate refresh job expired.",
-			Detail:    message,
-		})
-	}
-	return len(expired), nil
+	return &state, nil
 }
 
-func (r *Repo) ClaimDispatchableCandidateRefreshJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.CandidateRefreshJob, error) {
-	if limit <= 0 {
+func (r *Repo) ListPendingCandidateRefreshes(ctx context.Context, limit int) ([]domain.CandidateRefresh, error) {
+	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	var models []CandidateRefreshJobModel
-	err := r.dbFor(ctx).
-		Where("status = ? OR (status IN ? AND updated_at < ?)",
-			string(domain.CandidateRefreshPending),
-			[]string{string(domain.CandidateRefreshQueued), string(domain.CandidateRefreshRunning)},
-			staleBefore,
-		).
-		Order("id ASC").
+	var models []CandidateRefreshProjectModel
+	if err := r.dbFor(ctx).
+		Where("candidate_refresh_status = ?", string(domain.CandidateRefreshPending)).
+		Order("candidate_refresh_requested_at ASC, id ASC").
 		Limit(limit).
-		Find(&models).Error
-	if err != nil {
-		return nil, fmt.Errorf("claim candidate refresh jobs: %w", err)
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list pending candidate refreshes: %w", err)
 	}
-	result := make([]domain.CandidateRefreshJob, len(models))
+	result := make([]domain.CandidateRefresh, len(models))
 	for i := range models {
 		result[i] = models[i].toDomain()
 	}
 	return result, nil
 }
 
-func (r *Repo) MarkCandidateRefreshJobQueued(ctx context.Context, jobID uint) (bool, error) {
+func (r *Repo) MarkCandidateRefreshProcessing(ctx context.Context, projectID uint, generation uint64) (bool, error) {
+	if projectID == 0 || generation == 0 {
+		return false, domain.ErrInvalidAllocationRequest
+	}
 	now := time.Now().UTC()
-	result := r.dbFor(ctx).Model(&CandidateRefreshJobModel{}).
-		Where("id = ? AND status IN ?", jobID, []string{
-			string(domain.CandidateRefreshPending),
-			string(domain.CandidateRefreshQueued),
-			string(domain.CandidateRefreshRunning),
-		}).
+	result := r.dbFor(ctx).Model(&CandidateRefreshProjectModel{}).
+		Where("id = ? AND candidate_refresh_generation = ? AND candidate_refresh_status = ?",
+			projectID, generation, string(domain.CandidateRefreshPending)).
 		Updates(map[string]any{
-			"status":          string(domain.CandidateRefreshQueued),
-			"last_safe_error": "",
-			"updated_at":      now,
+			"candidate_refresh_status":          string(domain.CandidateRefreshProcessing),
+			"candidate_refresh_last_safe_error": "",
+			"candidate_refresh_started_at":      now,
+			"candidate_refresh_finished_at":     nil,
+			"updated_at":                        now,
 		})
 	if result.Error != nil {
-		return false, fmt.Errorf("mark candidate refresh queued: %w", result.Error)
+		return false, fmt.Errorf("mark candidate refresh processing: %w", result.Error)
 	}
-	return result.RowsAffected > 0, nil
+	return result.RowsAffected == 1, nil
 }
 
-func (r *Repo) MarkCandidateRefreshJobDispatchFailed(ctx context.Context, jobID uint, safeError string) error {
-	return r.dbFor(ctx).Model(&CandidateRefreshJobModel{}).
-		Where("id = ? AND status IN ?", jobID, []string{string(domain.CandidateRefreshPending), string(domain.CandidateRefreshQueued)}).
-		Updates(map[string]any{
-			"status":          string(domain.CandidateRefreshPending),
-			"last_safe_error": safeCandidateRefreshMessage(safeError),
-			"updated_at":      time.Now().UTC(),
-		}).Error
+func (r *Repo) RunCandidateRefresh(ctx context.Context, projectID uint, generation uint64) (int, bool, error) {
+	if projectID == 0 || generation == 0 {
+		return 0, false, domain.ErrInvalidAllocationRequest
+	}
+	total := 0
+	current := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		var state CandidateRefreshProjectModel
+		err := r.dbFor(txCtx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND candidate_refresh_generation = ? AND candidate_refresh_status = ?",
+				projectID, generation, string(domain.CandidateRefreshProcessing)).
+			First(&state).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read candidate refresh generation: %w", err)
+		}
+		current = true
+		total, err = r.RefreshRoutingCandidates(txCtx, projectID)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		result := r.dbFor(txCtx).Model(&CandidateRefreshProjectModel{}).
+			Where("id = ? AND candidate_refresh_generation = ? AND candidate_refresh_status = ?",
+				projectID, generation, string(domain.CandidateRefreshProcessing)).
+			Updates(map[string]any{
+				"candidate_refresh_status":          string(domain.CandidateRefreshNormal),
+				"candidate_refresh_affected":        max(0, total),
+				"candidate_refresh_last_safe_error": "",
+				"candidate_refresh_finished_at":     now,
+				"updated_at":                        now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("finish candidate refresh: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			current = false
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, current, fmt.Errorf("%w: %w", domain.ErrCandidateRefreshInfrastructure, err)
+	}
+	return total, current, nil
 }
 
-func (r *Repo) MarkCandidateRefreshJobRunning(ctx context.Context, jobID uint) (bool, error) {
+func (r *Repo) ReleaseCandidateRefreshInfrastructureFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, error) {
+	if projectID == 0 || generation == 0 {
+		return false, domain.ErrInvalidAllocationRequest
+	}
 	now := time.Now().UTC()
-	staleBefore := now.Add(-10 * time.Minute)
-	result := r.dbFor(ctx).Model(&CandidateRefreshJobModel{}).
-		Where("id = ? AND attempts < max_attempts AND (status = ? OR (status = ? AND updated_at < ?))",
-			jobID,
-			string(domain.CandidateRefreshQueued),
-			string(domain.CandidateRefreshRunning),
-			staleBefore,
-		).
+	result := r.dbFor(ctx).Model(&CandidateRefreshProjectModel{}).
+		Where("id = ? AND candidate_refresh_generation = ? AND candidate_refresh_status = ?",
+			projectID, generation, string(domain.CandidateRefreshProcessing)).
 		Updates(map[string]any{
-			"status":          string(domain.CandidateRefreshRunning),
-			"attempts":        gorm.Expr("attempts + 1"),
-			"last_safe_error": "",
-			"started_at":      now,
-			"updated_at":      now,
+			"candidate_refresh_status":          string(domain.CandidateRefreshPending),
+			"candidate_refresh_generation":      gorm.Expr("candidate_refresh_generation + 1"),
+			"candidate_refresh_last_safe_error": safeCandidateRefreshMessage(safeError),
+			"candidate_refresh_started_at":      nil,
+			"candidate_refresh_finished_at":     nil,
+			"updated_at":                        now,
 		})
 	if result.Error != nil {
-		return false, fmt.Errorf("mark candidate refresh running: %w", result.Error)
+		return false, fmt.Errorf("release candidate refresh infrastructure failure: %w", result.Error)
 	}
-	return result.RowsAffected > 0, nil
+	return result.RowsAffected == 1, nil
 }
 
-func (r *Repo) MarkCandidateRefreshJobSucceeded(ctx context.Context, jobID uint, affected int) error {
-	if affected < 0 {
-		affected = 0
+func (r *Repo) RecordCandidateRefreshFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, bool, error) {
+	if projectID == 0 || generation == 0 {
+		return false, false, domain.ErrInvalidAllocationRequest
 	}
-	now := time.Now().UTC()
-	return r.dbFor(ctx).Model(&CandidateRefreshJobModel{}).
-		Where("id = ? AND status = ?", jobID, string(domain.CandidateRefreshRunning)).
-		Updates(map[string]any{
-			"status":          string(domain.CandidateRefreshSucceeded),
-			"affected":        affected,
-			"last_safe_error": "",
-			"finished_at":     now,
-			"updated_at":      now,
-		}).Error
-}
-
-func (r *Repo) MarkCandidateRefreshJobFailed(ctx context.Context, jobID uint, safeError string) error {
-	now := time.Now().UTC()
 	message := safeCandidateRefreshMessage(safeError)
-	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var job CandidateRefreshJobModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&job, jobID).Error; err != nil {
+	recorded := false
+	abnormal := false
+	err := r.WithTx(ctx, func(txCtx context.Context) error {
+		db := r.dbFor(txCtx)
+		var state CandidateRefreshProjectModel
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, projectID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrAllocationNotFound
 			}
-			return fmt.Errorf("lock candidate refresh job failure: %w", err)
+			return fmt.Errorf("lock candidate refresh failure: %w", err)
 		}
-		if err := tx.Model(&CandidateRefreshJobModel{}).
-			Where("id = ? AND status = ?", jobID, string(domain.CandidateRefreshRunning)).
+		if state.Generation != generation || state.Status != string(domain.CandidateRefreshProcessing) {
+			return nil
+		}
+		failures := state.Failures + 1
+		abnormal = failures >= 3
+		status := domain.CandidateRefreshPending
+		var finishedAt any
+		if abnormal {
+			status = domain.CandidateRefreshAbnormal
+			finishedAt = time.Now().UTC()
+		}
+		now := time.Now().UTC()
+		if err := db.Model(&CandidateRefreshProjectModel{}).
+			Where("id = ? AND candidate_refresh_generation = ? AND candidate_refresh_status = ?",
+				projectID, generation, string(domain.CandidateRefreshProcessing)).
 			Updates(map[string]any{
-				"status":          string(domain.CandidateRefreshFailed),
-				"last_safe_error": message,
-				"finished_at":     now,
-				"updated_at":      now,
+				"candidate_refresh_status":          string(status),
+				"candidate_refresh_generation":      gorm.Expr("candidate_refresh_generation + 1"),
+				"candidate_refresh_failures":        failures,
+				"candidate_refresh_last_safe_error": message,
+				"candidate_refresh_started_at":      nil,
+				"candidate_refresh_finished_at":     finishedAt,
+				"updated_at":                        now,
 			}).Error; err != nil {
-			return fmt.Errorf("mark candidate refresh failed: %w", err)
+			return fmt.Errorf("record candidate refresh failure: %w", err)
 		}
-		if r.systemLogs != nil {
-			if err := r.systemLogs.CreateInTx(ctx, tx, &governancedomain.SystemLog{
+		recorded = true
+		if abnormal && r.systemLogs != nil {
+			if err := r.systemLogs.CreateInTx(ctx, db, &governancedomain.SystemLog{
 				Level:     "error",
 				Module:    "alloc",
-				EventType: "alloc.candidates.refresh_failed",
-				RequestID: job.RequestID,
-				BizType:   "candidate_refresh_job",
-				BizID:     fmt.Sprintf("%d", job.ID),
-				Message:   "Candidate refresh job failed.",
+				EventType: "alloc.candidates.refresh_abnormal",
+				RequestID: state.RequestID,
+				BizType:   "project",
+				BizID:     fmt.Sprintf("%d", projectID),
+				Message:   "Candidate refresh became abnormal after three failures.",
 				Detail:    message,
 			}); err != nil {
 				return err
@@ -2280,7 +2237,7 @@ func (r *Repo) MarkCandidateRefreshJobFailed(ctx context.Context, jobID uint, sa
 		}
 		return nil
 	})
-	return err
+	return recorded, abnormal, err
 }
 
 func (r *Repo) findByGuard(ctx context.Context, guard OrderGuardModel) (*domain.UnifiedAllocation, error) {
@@ -2404,13 +2361,6 @@ func allocationConditions(filter allocapp.AllocationFilter) ([]string, []any) {
 		args = append(args, string(filter.Status))
 	}
 	return conditions, args
-}
-
-func normalizeCandidateRefreshMaxAttempts(maxAttempts int) int {
-	if maxAttempts != 1 {
-		return 1
-	}
-	return maxAttempts
 }
 
 func safeCandidateRefreshMessage(message string) string {

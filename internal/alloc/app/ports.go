@@ -145,8 +145,9 @@ type RoutingCandidate struct {
 }
 
 type CandidateRefreshTask struct {
-	JobID     uint   `json:"jobId"`
-	RequestID string `json:"requestId"`
+	ProjectID  uint   `json:"projectId"`
+	Generation uint64 `json:"generation"`
+	RequestID  string `json:"requestId"`
 }
 
 type CandidateRefreshSubmitResult struct {
@@ -163,7 +164,6 @@ type CandidateRefreshDispatchResult struct {
 	Attempted int
 	Queued    int
 	Failed    int
-	Expired   int
 }
 
 type AllocationFilter struct {
@@ -248,7 +248,7 @@ type CandidateListResult struct {
 }
 
 type CandidateRefreshQueue interface {
-	EnqueueCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error
+	EnqueueCandidateRefresh(ctx context.Context, task CandidateRefreshTask) (bool, error)
 	EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -297,13 +297,10 @@ type Repository interface {
 	RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error)
 	ListRoutingCandidates(ctx context.Context, filter CandidateFilter) (*CandidateListResult, error)
 
-	CreateCandidateRefreshJobWithLog(ctx context.Context, job *domain.CandidateRefreshJob) (bool, error)
-	FindCandidateRefreshJob(ctx context.Context, jobID uint) (*domain.CandidateRefreshJob, error)
-	ExpireStaleCandidateRefreshJobs(ctx context.Context, staleBefore time.Time) (int, error)
-	ClaimDispatchableCandidateRefreshJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.CandidateRefreshJob, error)
-	MarkCandidateRefreshJobQueued(ctx context.Context, jobID uint) (bool, error)
-	MarkCandidateRefreshJobDispatchFailed(ctx context.Context, jobID uint, safeError string) error
-	MarkCandidateRefreshJobRunning(ctx context.Context, jobID uint) (bool, error)
-	MarkCandidateRefreshJobSucceeded(ctx context.Context, jobID uint, affected int) error
-	MarkCandidateRefreshJobFailed(ctx context.Context, jobID uint, safeError string) error
+	RequestCandidateRefresh(ctx context.Context, projectID uint, operatorUserID uint, requestID string, path string) (*domain.CandidateRefresh, error)
+	ListPendingCandidateRefreshes(ctx context.Context, limit int) ([]domain.CandidateRefresh, error)
+	MarkCandidateRefreshProcessing(ctx context.Context, projectID uint, generation uint64) (bool, error)
+	RunCandidateRefresh(ctx context.Context, projectID uint, generation uint64) (affected int, current bool, err error)
+	ReleaseCandidateRefreshInfrastructureFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, error)
+	RecordCandidateRefreshFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (recorded bool, abnormal bool, err error)
 }

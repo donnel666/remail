@@ -21,19 +21,17 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if module == nil || module.UseCase == nil {
 			return nil
 		}
-		defer module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), candidateRefreshDispatcherInterval)
-		result, err := module.UseCase.DispatchCandidateRefreshJobs(ctx, 0)
+		result, err := module.UseCase.DispatchCandidateRefreshes(ctx, 0)
 		if err != nil {
 			slog.Warn("candidate refresh dispatcher failed", "error", err)
 			return err
 		}
-		if result != nil && (result.Attempted > 0 || result.Expired > 0) {
+		if result != nil && result.Attempted > 0 {
 			slog.Info(
 				"candidate refresh dispatcher finished",
 				"attempted", result.Attempted,
 				"queued", result.Queued,
 				"failed", result.Failed,
-				"expired", result.Expired,
 			)
 		}
 		return nil
@@ -48,15 +46,15 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode candidate refresh task: %w: %w", err, asynq.SkipRetry)
 		}
-		slog.Info("processing candidate refresh task", "job_id", payload.JobID, "request_id", payload.RequestID)
+		slog.Info("processing candidate refresh task", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID)
 		if err := module.UseCase.ProcessCandidateRefresh(ctx, payload); err != nil {
-			slog.Warn("candidate refresh task failed", "job_id", payload.JobID, "request_id", payload.RequestID, "error", err)
+			slog.Warn("candidate refresh task failed", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID, "error", err)
 			if errors.Is(err, domain.ErrAllocationNotFound) || errors.Is(err, domain.ErrInvalidAllocationRequest) {
 				return fmt.Errorf("non-retryable candidate refresh task failure: %w: %w", err, asynq.SkipRetry)
 			}
 			return err
 		}
-		slog.Info("candidate refresh task finished", "job_id", payload.JobID, "request_id", payload.RequestID)
+		slog.Info("candidate refresh task finished", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID)
 		return nil
 	})
 }

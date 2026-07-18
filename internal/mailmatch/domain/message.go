@@ -35,11 +35,11 @@ type FetchJobStatus string
 
 const (
 	FetchJobPending   FetchJobStatus = "pending"
-	FetchJobQueued    FetchJobStatus = "queued"
-	FetchJobRunning   FetchJobStatus = "running"
-	FetchJobSucceeded FetchJobStatus = "succeeded"
-	FetchJobFailed    FetchJobStatus = "failed"
-	FetchJobSkipped   FetchJobStatus = "skipped"
+	FetchJobQueued    FetchJobStatus = "processing"
+	FetchJobRunning   FetchJobStatus = "processing"
+	FetchJobSucceeded FetchJobStatus = "normal"
+	FetchJobFailed    FetchJobStatus = "abnormal"
+	FetchJobSkipped   FetchJobStatus = "normal"
 )
 
 type Message struct {
@@ -78,33 +78,46 @@ type MailContent struct {
 }
 
 type FetchJob struct {
-	ID              uint
+	ID                         uint
+	Generation                 uint64
+	ExpectedCredentialRevision uint64
+	OrderNo                    string
+	Purpose                    FetchPurpose
+	AllocationType             ResourceType
+	AllocationID               uint
+	ProjectID                  uint
+	EmailResourceID            uint
+	Recipient                  string
+	Status                     FetchJobStatus
+	Attempts                   int
+	MaxAttempts                int
+	SinceAt                    *time.Time
+	UntilAt                    *time.Time
+	FetchedCount               int
+	StoredCount                int
+	MatchedCount               int
+	LastSafeError              string
+	RequestID                  string
+	StartedAt                  *time.Time
+	FinishedAt                 *time.Time
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+}
+
+type FetchState struct {
+	EmailResourceID uint
+	Generation      uint64
+	Failures        int
+	OperationKind   string
 	OrderNo         string
 	Purpose         FetchPurpose
-	AllocationType  ResourceType
-	AllocationID    uint
-	ProjectID       uint
-	EmailResourceID uint
-	Recipient       string
-	Status          FetchJobStatus
-	Attempts        int
-	MaxAttempts     int
+	OperatorUserID  *uint
+	CredentialRev   uint64
 	SinceAt         *time.Time
 	UntilAt         *time.Time
 	FetchedCount    int
 	StoredCount     int
 	MatchedCount    int
-	LastSafeError   string
-	RequestID       string
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
-type FetchState struct {
-	EmailResourceID uint
-	LastJobID       *uint
 	LastStatus      string
 	LastSubmittedAt *time.Time
 	LastSuccessAt   *time.Time
@@ -124,7 +137,6 @@ var (
 	ErrMessageNotFound              = errors.New("mailmatch: message not found")
 	ErrAdminMessageResourceNotFound = errors.New("mailmatch: admin message resource not found")
 	ErrFetchQueueUnavailable        = errors.New("mailmatch: fetch queue unavailable")
-	ErrFetchJobNotFound             = errors.New("mailmatch: fetch job not found")
 	ErrFetchJobConflict             = errors.New("mailmatch: fetch job conflict")
 	ErrMailServiceUnavailable       = errors.New("mailmatch: mail service unavailable")
 )
@@ -145,10 +157,5 @@ func NormalizeFetchPurpose(value string) FetchPurpose {
 }
 
 func IsTerminalFetchStatus(status FetchJobStatus) bool {
-	switch status {
-	case FetchJobSucceeded, FetchJobFailed, FetchJobSkipped:
-		return true
-	default:
-		return false
-	}
+	return status == FetchJobSucceeded || status == FetchJobFailed
 }

@@ -42,24 +42,26 @@ type InboundRecipient struct {
 }
 
 type InboundMail struct {
-	ID               uint                `json:"id"`
-	EnvelopeFrom     string              `json:"envelopeFrom"`
-	HeaderFrom       string              `json:"headerFrom"`
-	Recipient        string              `json:"recipient"`
-	Subject          string              `json:"subject"`
-	BodyPreview      string              `json:"bodyPreview"`
-	VerificationCode string              `json:"verificationCode"`
-	MessageIDHeader  string              `json:"messageIdHeader"`
-	ResourceID       uint                `json:"resourceId"`
-	ResourceType     InboundResourceType `json:"resourceType"`
-	OwnerUserID      uint                `json:"ownerUserId"`
-	SourceObjectKey  string              `json:"sourceObjectKey"`
-	Status           InboundStatus       `json:"status"`
-	FailureReason    string              `json:"failureReason"`
-	ReceivedAt       *time.Time          `json:"receivedAt"`
-	ParsedAt         *time.Time          `json:"parsedAt"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	UpdatedAt        time.Time           `json:"updatedAt"`
+	ID                uint                `json:"id"`
+	EnvelopeFrom      string              `json:"envelopeFrom"`
+	HeaderFrom        string              `json:"headerFrom"`
+	Recipient         string              `json:"recipient"`
+	Subject           string              `json:"subject"`
+	BodyPreview       string              `json:"bodyPreview"`
+	VerificationCode  string              `json:"verificationCode"`
+	MessageIDHeader   string              `json:"messageIdHeader"`
+	ResourceID        uint                `json:"resourceId"`
+	ResourceType      InboundResourceType `json:"resourceType"`
+	OwnerUserID       uint                `json:"ownerUserId"`
+	SourceObjectKey   string              `json:"sourceObjectKey"`
+	Status            InboundStatus       `json:"status"`
+	ProcessGeneration uint64              `json:"-"`
+	ProcessAttempts   int                 `json:"-"`
+	FailureReason     string              `json:"failureReason"`
+	ReceivedAt        *time.Time          `json:"receivedAt"`
+	ParsedAt          *time.Time          `json:"parsedAt"`
+	CreatedAt         time.Time           `json:"createdAt"`
+	UpdatedAt         time.Time           `json:"updatedAt"`
 }
 
 // InboundMailSummary is the bounded, safe summary extracted from an RFC822
@@ -77,15 +79,16 @@ type InboundMailSummary struct {
 
 func NewInboundMail(envelopeFrom string, recipient InboundRecipient, sourceObjectKey string, now time.Time) *InboundMail {
 	return &InboundMail{
-		EnvelopeFrom:    envelopeFrom,
-		Recipient:       recipient.Email,
-		ResourceID:      recipient.ResourceID,
-		ResourceType:    recipient.ResourceType,
-		OwnerUserID:     recipient.OwnerUserID,
-		SourceObjectKey: sourceObjectKey,
-		Status:          InboundStatusPending,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		EnvelopeFrom:      envelopeFrom,
+		Recipient:         recipient.Email,
+		ResourceID:        recipient.ResourceID,
+		ResourceType:      recipient.ResourceType,
+		OwnerUserID:       recipient.OwnerUserID,
+		SourceObjectKey:   sourceObjectKey,
+		Status:            InboundStatusPending,
+		ProcessGeneration: 1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 }
 
@@ -95,8 +98,28 @@ func (m *InboundMail) MarkProcessing(now time.Time) {
 	m.UpdatedAt = now
 }
 
+func (m *InboundMail) ReleasePending(now time.Time, reason string) {
+	m.Status = InboundStatusPending
+	m.ProcessGeneration++
+	m.FailureReason = reason
+	m.UpdatedAt = now
+}
+
+func (m *InboundMail) RecordProcessFailure(now time.Time, reason string, retryable bool) bool {
+	if m.ProcessAttempts < 3 {
+		m.ProcessAttempts++
+	}
+	if !retryable || m.ProcessAttempts >= 3 {
+		m.MarkFailed(now, reason)
+		return true
+	}
+	m.ReleasePending(now, reason)
+	return false
+}
+
 func (m *InboundMail) MarkStored(now time.Time) {
 	m.Status = InboundStatusStored
+	m.ProcessAttempts = 0
 	m.FailureReason = ""
 	m.UpdatedAt = now
 }

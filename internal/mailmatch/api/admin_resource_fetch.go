@@ -123,11 +123,11 @@ func adminResourceFetchTaskResponse(job domain.ResourceFetchJob) adminResourceFe
 	}
 	credentialRevision := job.ExpectedCredentialRevision
 	return adminResourceFetchTaskView{
-		TaskID:             "fetch:" + strconv.FormatUint(uint64(job.ID), 10),
+		TaskID:             "fetch:" + strconv.FormatUint(uint64(job.ResourceID), 10),
 		BizType:            "microsoft_resource",
 		BizID:              job.ResourceID,
 		Kind:               string(job.Kind),
-		Status:             string(job.Status),
+		Status:             adminResourceFetchStatus(job.Status),
 		Attempts:           job.Attempts,
 		MaxAttempts:        maxAttempts,
 		RemainingAttempts:  remaining,
@@ -137,6 +137,19 @@ func adminResourceFetchTaskResponse(job domain.ResourceFetchJob) adminResourceFe
 		FinishedAt:         job.FinishedAt,
 		UpdatedAt:          job.UpdatedAt,
 		Progress:           nil,
+	}
+}
+
+func adminResourceFetchStatus(status domain.ResourceFetchJobStatus) string {
+	switch status {
+	case domain.ResourceFetchJobQueued:
+		return "queued"
+	case domain.ResourceFetchJobRunning:
+		return "running"
+	case domain.ResourceFetchJobSucceeded:
+		return "succeeded"
+	default:
+		return "failed"
 	}
 }
 

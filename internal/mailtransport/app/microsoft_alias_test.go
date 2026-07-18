@@ -42,6 +42,8 @@ type fakeMicrosoftAliasStore struct {
 	ensureResourceErr   error
 	dispatchTasks       []MicrosoftAliasTask
 	markDispatchErr     error
+	markQueued          bool
+	markQueuedCalls     int
 	adminSchedule       *MicrosoftAliasAdminSchedule
 	adminScheduleErr    error
 	expediteResult      *MicrosoftAliasExpediteResult
@@ -67,9 +69,14 @@ func (f *fakeMicrosoftAliasStore) FindDispatchable(context.Context, int, time.Ti
 	return append([]MicrosoftAliasTask(nil), f.dispatchTasks...), nil
 }
 
-func (f *fakeMicrosoftAliasStore) Claim(_ context.Context, task MicrosoftAliasTask, _ time.Time) (*MicrosoftAliasAccount, bool, error) {
+func (f *fakeMicrosoftAliasStore) MarkQueued(context.Context, MicrosoftAliasTask, time.Time) (bool, error) {
+	f.markQueuedCalls++
+	return f.markQueued, nil
+}
+
+func (f *fakeMicrosoftAliasStore) Claim(_ context.Context, _ MicrosoftAliasTask, _ time.Time) (*MicrosoftAliasAccount, bool, error) {
 	if f.account != nil {
-		f.account.ClaimToken = task.DispatchToken
+		f.account.ClaimToken = "claim-token"
 	}
 	return f.account, f.claimed, nil
 }
@@ -197,11 +204,12 @@ func (f *fakeMicrosoftAliasStore) AcceptAdminAliasExpedite(
 
 type fakeMicrosoftAliasAdminQueue struct {
 	dispatches int
+	accepted   bool
 	err        error
 }
 
-func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAlias(context.Context, MicrosoftAliasTask) error {
-	return q.err
+func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAlias(context.Context, MicrosoftAliasTask) (bool, error) {
+	return q.accepted && q.err == nil, q.err
 }
 
 func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAliasDispatcher(context.Context, time.Duration) error {
@@ -254,7 +262,7 @@ func (f *fakeMicrosoftAliasCreator) CreateMicrosoftAliases(_ context.Context, re
 }
 
 func microsoftAliasTestTask(resourceID uint) MicrosoftAliasTask {
-	return MicrosoftAliasTask{ResourceID: resourceID, DispatchToken: "0123456789abcdef0123456789abcdef"}
+	return MicrosoftAliasTask{ResourceID: resourceID, Generation: 1}
 }
 
 func TestMicrosoftAliasAdminScheduleReturnsSafeUsageAndLimits(t *testing.T) {
@@ -400,22 +408,44 @@ func TestMicrosoftAliasValidationEnsuresOnlyTheValidatedSchedule(t *testing.T) {
 	assert.Zero(t, store.ensureCalls, "validation must not start the broad daily scan")
 }
 
-func TestMicrosoftAliasDispatchReportsFailureToRestoreUnqueuedSchedule(t *testing.T) {
-	store := &fakeMicrosoftAliasStore{
-		dispatchTasks:   []MicrosoftAliasTask{microsoftAliasTestTask(42)},
-		markDispatchErr: errors.New("database unavailable"),
+func TestMicrosoftAliasDispatchActivatesOnlyAcceptedTask(t *testing.T) {
+	tests := []struct {
+		name          string
+		accepted      bool
+		queueErr      error
+		wantMarkCalls int
+		wantQueued    int
+		wantFailed    int
+	}{
+		{name: "accepted", accepted: true, wantMarkCalls: 1, wantQueued: 1},
+		{name: "duplicate"},
+		{name: "redis failure", queueErr: errors.New("redis unavailable"), wantFailed: 1},
 	}
-	service := NewMicrosoftAliasService(store, nil, nil)
-	service.now = func() time.Time {
-		return time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeMicrosoftAliasStore{
+				dispatchTasks: []MicrosoftAliasTask{microsoftAliasTestTask(42)},
+				markQueued:    true,
+			}
+			queue := &fakeMicrosoftAliasAdminQueue{accepted: tt.accepted, err: tt.queueErr}
+			service := NewMicrosoftAliasService(store, queue, nil)
+			service.now = func() time.Time {
+				return time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+			}
+
+			result, err := service.DispatchPending(context.Background(), 1)
+			if tt.queueErr != nil {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			assert.Equal(t, tt.wantMarkCalls, store.markQueuedCalls,
+				"pending must change only after the queue explicitly accepts the task")
+			assert.Equal(t, tt.wantQueued, result.Queued)
+			assert.Equal(t, tt.wantFailed, result.Failed)
+		})
 	}
-
-	result, err := service.DispatchPending(context.Background(), 1)
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "restore unqueued microsoft alias task 42")
-	require.NotNil(t, result)
-	assert.Equal(t, 1, result.Failed)
 }
 
 func TestMicrosoftAliasProcessCreatesTwoAndWaitsForNextCalendarWeek(t *testing.T) {

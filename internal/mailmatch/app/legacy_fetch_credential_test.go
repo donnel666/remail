@@ -15,13 +15,14 @@ type legacyFetchRepoStub struct {
 	job       domain.FetchJob
 	scope     OrderScope
 	succeeded bool
+	skipped   bool
 }
 
-func (*legacyFetchRepoStub) ClaimFetchJobRunning(context.Context, uint, time.Time) (bool, error) {
+func (*legacyFetchRepoStub) MarkFetchProcessing(context.Context, uint, uint64, time.Time) (bool, error) {
 	return true, nil
 }
 
-func (s *legacyFetchRepoStub) FindFetchJob(context.Context, uint) (*domain.FetchJob, error) {
+func (s *legacyFetchRepoStub) FindFetch(context.Context, uint, uint64) (*domain.FetchJob, error) {
 	job := s.job
 	return &job, nil
 }
@@ -39,17 +40,54 @@ func (*legacyFetchRepoStub) UpsertMessages(_ context.Context, messages []domain.
 	return messages, nil
 }
 
-func (s *legacyFetchRepoStub) MarkFetchJobSucceeded(context.Context, uint, int, int, int, *time.Time, time.Time) error {
+func (*legacyFetchRepoStub) AssertFetchFence(context.Context, uint, uint64) error { return nil }
+
+func (s *legacyFetchRepoStub) CompleteFetch(context.Context, uint, uint64, int, int, int, *time.Time, time.Time) (bool, error) {
 	s.succeeded = true
-	return nil
+	return true, nil
 }
 
-func (*legacyFetchRepoStub) UpdateFetchStateCompleted(context.Context, uint, uint, string, *time.Time, string, time.Time) error {
-	return nil
+func (s *legacyFetchRepoStub) SkipFetch(context.Context, uint, uint64, string, time.Time) (bool, error) {
+	s.skipped = true
+	return true, nil
 }
 
 type legacyFetchTransportStub struct {
 	result FetchMessagesResult
+}
+
+type legacyFetchQueueStub struct{ accepted bool }
+
+func (s legacyFetchQueueStub) EnqueueFetch(context.Context, FetchTask) (bool, error) {
+	return s.accepted, nil
+}
+func (legacyFetchQueueStub) EnqueueFetchDispatcher(context.Context, time.Duration) error { return nil }
+
+type legacyFetchDispatchRepoStub struct {
+	Repository
+	pending    []domain.FetchJob
+	processing int
+}
+
+func (s *legacyFetchDispatchRepoStub) ListPendingFetches(context.Context, int) ([]domain.FetchJob, error) {
+	return s.pending, nil
+}
+func (s *legacyFetchDispatchRepoStub) MarkFetchProcessing(context.Context, uint, uint64, time.Time) (bool, error) {
+	s.processing++
+	return true, nil
+}
+
+func TestOrderFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
+	repo := &legacyFetchDispatchRepoStub{pending: []domain.FetchJob{{EmailResourceID: 91, Generation: 5}}}
+	uc := NewUseCase(repo, legacyFetchQueueStub{}, nil, nil)
+	require.NoError(t, func() error { _, err := uc.DispatchFetchJobs(context.Background(), 10); return err }())
+	require.Zero(t, repo.processing)
+
+	uc.queue = legacyFetchQueueStub{accepted: true}
+	queued, err := uc.DispatchFetchJobs(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, queued)
+	require.Equal(t, 1, repo.processing)
 }
 
 func (s legacyFetchTransportStub) FetchMicrosoftMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error) {
@@ -71,7 +109,7 @@ func (s *legacyFetchCredentialStub) ApplyMicrosoftFetchRefreshToken(_ context.Co
 func TestLegacyOrderFetchUsesCredentialRevisionFence(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	repo := &legacyFetchRepoStub{
-		job: domain.FetchJob{ID: 5, OrderNo: "ORDER-5", EmailResourceID: 91, MaxAttempts: 3, CreatedAt: now},
+		job: domain.FetchJob{ID: 91, Generation: 5, OrderNo: "ORDER-5", EmailResourceID: 91, MaxAttempts: 3, CreatedAt: now},
 		scope: OrderScope{
 			OrderNo: "ORDER-5", OrderStatus: "active", ServiceMode: "purchase",
 			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 8, EmailResourceID: 91,
@@ -83,7 +121,7 @@ func TestLegacyOrderFetchUsesCredentialRevisionFence(t *testing.T) {
 	uc.SetMicrosoftCredentialPort(credentials)
 	uc.now = func() time.Time { return now }
 
-	require.NoError(t, uc.ProcessFetch(context.Background(), FetchTask{JobID: 5}))
+	require.NoError(t, uc.ProcessFetch(context.Background(), FetchTask{EmailResourceID: 91, Generation: 5}))
 	require.True(t, repo.succeeded)
 	require.Equal(t, uint(91), credentials.update.ResourceID)
 	require.Equal(t, uint64(17), credentials.update.ExpectedCredentialRevision)
@@ -93,7 +131,7 @@ func TestLegacyOrderFetchUsesCredentialRevisionFence(t *testing.T) {
 func TestLegacyOrderFetchDoesNotOverwriteNewerCredential(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	repo := &legacyFetchRepoStub{
-		job: domain.FetchJob{ID: 6, OrderNo: "ORDER-6", EmailResourceID: 92, MaxAttempts: 3, CreatedAt: now},
+		job: domain.FetchJob{ID: 92, Generation: 6, OrderNo: "ORDER-6", EmailResourceID: 92, MaxAttempts: 3, CreatedAt: now},
 		scope: OrderScope{
 			OrderNo: "ORDER-6", OrderStatus: "active", ServiceMode: "purchase",
 			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 9, EmailResourceID: 92,
@@ -105,6 +143,7 @@ func TestLegacyOrderFetchDoesNotOverwriteNewerCredential(t *testing.T) {
 	uc.SetMicrosoftCredentialPort(credentials)
 	uc.now = func() time.Time { return now }
 
-	require.NoError(t, uc.ProcessFetch(context.Background(), FetchTask{JobID: 6}))
-	require.True(t, repo.succeeded, "fetched messages remain usable while the newer RT wins the fence")
+	require.NoError(t, uc.ProcessFetch(context.Background(), FetchTask{EmailResourceID: 92, Generation: 6}))
+	require.True(t, repo.skipped)
+	require.False(t, repo.succeeded)
 }

@@ -68,14 +68,14 @@ func TestAdminResourceFetchRouteReturnsOpenAPITaskShapeWithoutSecrets(t *testing
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.Equal(t, "fetch:42", body["taskId"])
+	require.Equal(t, "fetch:100", body["taskId"])
 	require.Equal(t, "test-request", body["requestId"])
 	require.Equal(t, "queued", body["status"])
 	require.Equal(t, float64(1), body["accepted"])
 	require.Equal(t, false, body["reused"])
 	task, ok := body["task"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "fetch:42", task["taskId"])
+	require.Equal(t, "fetch:100", task["taskId"])
 	require.Equal(t, "microsoft_resource", task["bizType"])
 	require.Equal(t, "fetch", task["kind"])
 	require.Equal(t, "queued", task["status"])
@@ -111,7 +111,7 @@ func TestAdminResourceProjectScanReusesDurableFetchTaskState(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	task := body["task"].(map[string]any)
 	require.Equal(t, "history", task["kind"])
-	require.Equal(t, "fetch:42", task["taskId"])
+	require.Equal(t, "fetch:100", task["taskId"])
 }
 
 func newAdminResourceFetchTestRouter(allowed bool) (*gin.Engine, *adminResourceFetchRepoStub, *adminResourceFetchPermissionChecker) {
@@ -190,6 +190,7 @@ type adminResourceFetchRepoStub struct {
 func (r *adminResourceFetchRepoStub) CreateOrReuseResourceFetch(_ context.Context, job *mailmatchdomain.ResourceFetchJob, log *governancedomain.OperationLog) (bool, error) {
 	now := time.Date(2026, 7, 12, 8, 0, 0, 0, time.UTC)
 	job.ID = 42
+	job.Generation = 3
 	job.ExpectedCredentialRevision = 7
 	job.Recipient = "main@example.com"
 	job.CreatedAt = now
@@ -199,54 +200,50 @@ func (r *adminResourceFetchRepoStub) CreateOrReuseResourceFetch(_ context.Contex
 	return false, nil
 }
 
-func (*adminResourceFetchRepoStub) FindResourceFetchJob(context.Context, uint) (*mailmatchdomain.ResourceFetchJob, error) {
+func (*adminResourceFetchRepoStub) FindResourceFetch(context.Context, uint, uint64) (*mailmatchdomain.ResourceFetchJob, error) {
 	return nil, nil
 }
 
-func (*adminResourceFetchRepoStub) ClaimDispatchableResourceFetches(context.Context, int, time.Time, time.Time) ([]mailmatchdomain.ResourceFetchJob, error) {
+func (*adminResourceFetchRepoStub) ListPendingResourceFetches(context.Context, int) ([]mailmatchdomain.ResourceFetchJob, error) {
 	return nil, nil
 }
 
-func (*adminResourceFetchRepoStub) MarkResourceFetchRunning(context.Context, uint, string) (string, bool, error) {
-	return "", false, nil
+func (*adminResourceFetchRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
+	return false, nil
 }
 
-func (*adminResourceFetchRepoStub) ReleaseResourceFetchDispatch(context.Context, uint, string) error {
-	return nil
-}
-
-func (*adminResourceFetchRepoStub) MarkResourceFetchDispatchFailed(context.Context, uint, string, string, *governancedomain.SystemLog) error {
-	return nil
+func (*adminResourceFetchRepoStub) ReleaseResourceFetchInfrastructureFailure(context.Context, uint, uint64, string, *governancedomain.SystemLog) (bool, error) {
+	return false, nil
 }
 
 func (*adminResourceFetchRepoStub) LoadResourceFetchScope(context.Context, uint, uint64) (*mailmatchdomain.ResourceFetchScope, error) {
 	return nil, nil
 }
 
-func (*adminResourceFetchRepoStub) AssertResourceFetchFence(context.Context, uint, string, uint, uint64) error {
+func (*adminResourceFetchRepoStub) AssertResourceFetchFence(context.Context, uint, uint64, uint64) error {
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, string, uint, uint64, string, int, int, int, time.Time, *governancedomain.SystemLog) error {
+func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) CompleteResourceFetchTask(context.Context, uint, string, time.Time, *governancedomain.SystemLog) error {
+func (*adminResourceFetchRepoStub) CompleteResourceFetchTask(context.Context, uint, uint64, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) MarkResourceFetchCanceled(context.Context, uint, string, string, time.Time, *governancedomain.SystemLog) error {
+func (*adminResourceFetchRepoStub) MarkResourceFetchCanceled(context.Context, uint, uint64, string, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 
-func (*adminResourceFetchRepoStub) MarkResourceFetchFailure(context.Context, uint, string, string, bool, time.Time, *governancedomain.SystemLog) (bool, error) {
+func (*adminResourceFetchRepoStub) MarkResourceFetchFailure(context.Context, uint, uint64, string, bool, time.Time, *governancedomain.SystemLog) (bool, error) {
 	return false, nil
 }
 
 type adminResourceFetchQueueStub struct{}
 
-func (adminResourceFetchQueueStub) EnqueueResourceFetch(context.Context, mailmatchapp.ResourceFetchTask) error {
-	return nil
+func (adminResourceFetchQueueStub) EnqueueResourceFetch(context.Context, mailmatchapp.ResourceFetchTask) (bool, error) {
+	return true, nil
 }
 
 func (adminResourceFetchQueueStub) EnqueueFetchDispatcher(context.Context, time.Duration) error {

@@ -2081,6 +2081,7 @@ const (
 	ProxyBulkFilterStatusDisabled ProxyBulkFilterStatus = "disabled"
 	ProxyBulkFilterStatusExpired  ProxyBulkFilterStatus = "expired"
 	ProxyBulkFilterStatusNormal   ProxyBulkFilterStatus = "normal"
+	ProxyBulkFilterStatusPending  ProxyBulkFilterStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the ProxyBulkFilterStatus enum.
@@ -2095,6 +2096,8 @@ func (e ProxyBulkFilterStatus) Valid() bool {
 	case ProxyBulkFilterStatusExpired:
 		return true
 	case ProxyBulkFilterStatusNormal:
+		return true
+	case ProxyBulkFilterStatusPending:
 		return true
 	default:
 		return false
@@ -2126,6 +2129,7 @@ const (
 	ProxyItemStatusDisabled ProxyItemStatus = "disabled"
 	ProxyItemStatusExpired  ProxyItemStatus = "expired"
 	ProxyItemStatusNormal   ProxyItemStatus = "normal"
+	ProxyItemStatusPending  ProxyItemStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the ProxyItemStatus enum.
@@ -2140,6 +2144,8 @@ func (e ProxyItemStatus) Valid() bool {
 	case ProxyItemStatusExpired:
 		return true
 	case ProxyItemStatusNormal:
+		return true
+	case ProxyItemStatusPending:
 		return true
 	default:
 		return false
@@ -2879,6 +2885,7 @@ const (
 	GetAdminProxiesParamsStatusDisabled GetAdminProxiesParamsStatus = "disabled"
 	GetAdminProxiesParamsStatusExpired  GetAdminProxiesParamsStatus = "expired"
 	GetAdminProxiesParamsStatusNormal   GetAdminProxiesParamsStatus = "normal"
+	GetAdminProxiesParamsStatusPending  GetAdminProxiesParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxiesParamsStatus enum.
@@ -2893,6 +2900,8 @@ func (e GetAdminProxiesParamsStatus) Valid() bool {
 	case GetAdminProxiesParamsStatusExpired:
 		return true
 	case GetAdminProxiesParamsStatusNormal:
+		return true
+	case GetAdminProxiesParamsStatusPending:
 		return true
 	default:
 		return false
@@ -2966,6 +2975,7 @@ const (
 	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
 	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
 	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
@@ -2980,6 +2990,8 @@ func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	case GetAdminProxyStatsParamsStatusExpired:
 		return true
 	case GetAdminProxyStatsParamsStatusNormal:
+		return true
+	case GetAdminProxyStatsParamsStatusPending:
 		return true
 	default:
 		return false

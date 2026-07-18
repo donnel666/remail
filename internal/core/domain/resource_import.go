@@ -48,12 +48,11 @@ type ResourceImport struct {
 	ImportedCount    int
 	AcceptedCount    int
 	SkippedCount     int
+	Generation       uint64
 	DispatchStatus   string
 	Attempts         int
 	MaxAttempts      int
 	ClaimToken       string
-	DispatchToken    string
-	DispatchedAt     *time.Time
 	LastSafeError    string
 	RequestID        string
 	StartedAt        *time.Time

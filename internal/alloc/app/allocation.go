@@ -454,38 +454,29 @@ func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID u
 	if projectID == 0 || operatorUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	job := &domain.CandidateRefreshJob{
-		ProjectID:      projectID,
-		OperatorUserID: operatorUserID,
-		Status:         domain.CandidateRefreshPending,
-		MaxAttempts:    1,
-		RequestID:      strings.TrimSpace(requestID),
-		Path:           strings.TrimSpace(path),
-	}
-	created, err := uc.repo.CreateCandidateRefreshJobWithLog(ctx, job)
+	state, err := uc.repo.RequestCandidateRefresh(
+		ctx,
+		projectID,
+		operatorUserID,
+		strings.TrimSpace(requestID),
+		strings.TrimSpace(path),
+	)
 	if err != nil {
 		return nil, err
 	}
-	if created {
-		if err := uc.enqueueCandidateRefresh(ctx, job); err != nil {
-			job.LastSafeError = "Candidate refresh queue is unavailable; dispatcher will retry."
-			_ = uc.repo.MarkCandidateRefreshJobDispatchFailed(ctx, job.ID, job.LastSafeError)
-		}
-	} else {
-		uc.ScheduleCandidateRefreshDispatcher(ctx, 0)
-	}
-	message := "Candidate refresh job accepted."
-	if !created {
-		message = "Candidate refresh job already exists."
+	uc.ScheduleCandidateRefreshDispatcher(ctx, 0)
+	requestedAt := state.UpdatedAt
+	if state.RequestedAt != nil {
+		requestedAt = *state.RequestedAt
 	}
 	return &CandidateRefreshSubmitResult{
-		JobID:     job.ID,
-		ProjectID: job.ProjectID,
-		Status:    job.Status,
-		Created:   created,
-		Message:   message,
-		CreatedAt: job.CreatedAt,
-		UpdatedAt: job.UpdatedAt,
+		JobID:     state.ProjectID,
+		ProjectID: state.ProjectID,
+		Status:    state.Status,
+		Created:   true,
+		Message:   "Candidate refresh accepted.",
+		CreatedAt: requestedAt,
+		UpdatedAt: state.UpdatedAt,
 	}, nil
 }
 
@@ -509,55 +500,62 @@ func cloneProductInventoryTotals(totals ProjectProductInventoryTotals) *ProjectP
 }
 
 func (uc *UseCase) ProcessCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error {
-	if task.JobID == 0 {
+	if task.ProjectID == 0 || task.Generation == 0 {
 		return domain.ErrAllocationNotFound
 	}
-	job, err := uc.repo.FindCandidateRefreshJob(ctx, task.JobID)
-	if err != nil {
+	if _, err := uc.repo.MarkCandidateRefreshProcessing(ctx, task.ProjectID, task.Generation); err != nil {
 		return err
 	}
-	if job == nil {
-		return domain.ErrAllocationNotFound
-	}
-	if domain.IsTerminalCandidateRefreshStatus(job.Status) {
+	_, current, err := uc.repo.RunCandidateRefresh(ctx, task.ProjectID, task.Generation)
+	if err == nil || !current {
 		return nil
 	}
-	claimed, err := uc.repo.MarkCandidateRefreshJobRunning(ctx, task.JobID)
-	if err != nil {
+	if errors.Is(err, domain.ErrCandidateRefreshInfrastructure) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, releaseErr := uc.repo.ReleaseCandidateRefreshInfrastructureFailure(
+			cleanupCtx,
+			task.ProjectID,
+			task.Generation,
+			"Candidate refresh infrastructure failed; dispatcher will retry.",
+		); releaseErr != nil {
+			return errors.Join(err, releaseErr)
+		}
 		return err
 	}
-	if !claimed {
-		return nil
+	recorded, abnormal, recordErr := uc.repo.RecordCandidateRefreshFailure(
+		ctx,
+		task.ProjectID,
+		task.Generation,
+		"Candidate refresh failed.",
+	)
+	if recordErr != nil {
+		return errors.Join(err, recordErr)
 	}
-	affected, err := uc.repo.RefreshRoutingCandidates(ctx, job.ProjectID)
-	if err != nil {
-		_ = uc.repo.MarkCandidateRefreshJobFailed(ctx, task.JobID, "Candidate refresh failed.")
-		return err
+	if recorded && !abnormal {
+		uc.ScheduleCandidateRefreshDispatcher(ctx, time.Second)
 	}
-	return uc.repo.MarkCandidateRefreshJobSucceeded(ctx, task.JobID, affected)
+	return err
 }
 
-func (uc *UseCase) DispatchCandidateRefreshJobs(ctx context.Context, limit int) (*CandidateRefreshDispatchResult, error) {
+func (uc *UseCase) DispatchCandidateRefreshes(ctx context.Context, limit int) (*CandidateRefreshDispatchResult, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	staleBefore := time.Now().UTC().Add(-10 * time.Minute)
-	expired, err := uc.repo.ExpireStaleCandidateRefreshJobs(ctx, staleBefore)
+	states, err := uc.repo.ListPendingCandidateRefreshes(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
-	jobs, err := uc.repo.ClaimDispatchableCandidateRefreshJobs(ctx, limit, staleBefore)
-	if err != nil {
-		return nil, err
-	}
-	result := &CandidateRefreshDispatchResult{Attempted: len(jobs), Expired: expired}
-	for i := range jobs {
-		if err := uc.enqueueCandidateRefresh(ctx, &jobs[i]); err != nil {
+	result := &CandidateRefreshDispatchResult{Attempted: len(states)}
+	for i := range states {
+		queued, err := uc.enqueueCandidateRefresh(ctx, states[i])
+		if err != nil {
 			result.Failed++
-			_ = uc.repo.MarkCandidateRefreshJobDispatchFailed(ctx, jobs[i].ID, "Candidate refresh queue is unavailable; dispatcher will retry.")
 			continue
 		}
-		result.Queued++
+		if queued {
+			result.Queued++
+		}
 	}
 	return result, nil
 }
@@ -569,24 +567,26 @@ func (uc *UseCase) ScheduleCandidateRefreshDispatcher(ctx context.Context, delay
 	_ = uc.queue.EnqueueCandidateRefreshDispatcher(ctx, delay)
 }
 
-func (uc *UseCase) enqueueCandidateRefresh(ctx context.Context, job *domain.CandidateRefreshJob) error {
+func (uc *UseCase) enqueueCandidateRefresh(ctx context.Context, state domain.CandidateRefresh) (bool, error) {
 	if uc == nil || uc.queue == nil {
-		return domain.ErrInvalidAllocationRequest
+		return false, domain.ErrInvalidAllocationRequest
 	}
-	if job == nil || job.ID == 0 {
-		return domain.ErrInvalidAllocationRequest
+	if state.ProjectID == 0 || state.Generation == 0 {
+		return false, domain.ErrInvalidAllocationRequest
 	}
-	if err := uc.queue.EnqueueCandidateRefresh(ctx, CandidateRefreshTask{JobID: job.ID, RequestID: job.RequestID}); err != nil {
-		return err
+	accepted, err := uc.queue.EnqueueCandidateRefresh(ctx, CandidateRefreshTask{
+		ProjectID:  state.ProjectID,
+		Generation: state.Generation,
+		RequestID:  state.RequestID,
+	})
+	if err != nil || !accepted {
+		return false, err
 	}
-	queued, err := uc.repo.MarkCandidateRefreshJobQueued(ctx, job.ID)
+	processing, err := uc.repo.MarkCandidateRefreshProcessing(ctx, state.ProjectID, state.Generation)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if queued {
-		job.Status = domain.CandidateRefreshQueued
-	}
-	return nil
+	return processing, nil
 }
 
 func (uc *UseCase) ListRoutingCandidates(ctx context.Context, filter CandidateFilter) (*CandidateListResult, error) {

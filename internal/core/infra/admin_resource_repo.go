@@ -220,6 +220,8 @@ func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain
 			"token_last_request_id":   resource.TokenLastRequestID,
 			"for_sale":                resource.ForSale,
 			"status":                  string(resource.Status),
+			"validation_generation":   resource.ValidationGeneration,
+			"validation_failures":     resource.ValidationFailures,
 			"quality_score":           resource.QualityScore,
 			"last_safe_error":         resource.LastSafeError,
 			"last_allocated_at":       resource.LastAllocatedAt,

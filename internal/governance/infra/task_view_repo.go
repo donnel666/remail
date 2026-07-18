@@ -89,9 +89,7 @@ SELECT
     imp.id AS biz_id,
     'import' AS kind,
     CASE
-        WHEN imp.dispatch_status = 'legacy' AND imp.status = 'imported' THEN 'succeeded'
-        WHEN imp.dispatch_status = 'legacy' AND imp.status = 'failed' THEN 'failed'
-        WHEN imp.dispatch_status = 'legacy' THEN 'running'
+		WHEN imp.dispatch_status = 'pending' THEN 'queued'
         ELSE imp.dispatch_status
     END AS status,
     imp.attempts AS attempts,
@@ -200,58 +198,65 @@ LEFT JOIN microsoft_alias_attempts AS latest_uncertain
 const tokenTaskSelect = `
 SELECT
     'token' AS source,
-    job.id AS source_id,
-    job.resource_id AS resource_scope_id,
+    resource.id AS source_id,
+    resource.id AS resource_scope_id,
     'microsoft_resource' AS biz_type,
-    job.resource_id AS biz_id,
+    resource.id AS biz_id,
     'token' AS kind,
-    job.status AS status,
-    job.attempts AS attempts,
-    job.max_attempts AS max_attempts,
-    job.expected_credential_revision AS credential_revision,
-    job.created_at AS queued_at,
-    job.started_at AS started_at,
-    job.finished_at AS finished_at,
-    job.updated_at AS updated_at,
+    CASE resource.token_refresh_status
+        WHEN 'pending' THEN 'queued'
+        WHEN 'processing' THEN 'running'
+        WHEN 'abnormal' THEN 'failed'
+        ELSE 'succeeded'
+    END AS status,
+    resource.token_refresh_failures AS attempts,
+    3 AS max_attempts,
+    resource.token_refresh_expected_credential_revision AS credential_revision,
+    COALESCE(resource.token_refresh_requested_at, resource.updated_at) AS queued_at,
+    resource.token_refresh_started_at AS started_at,
+    resource.token_refresh_finished_at AS finished_at,
+    resource.updated_at AS updated_at,
     NULL AS progress_total,
     NULL AS progress_processed,
     NULL AS progress_succeeded,
     NULL AS progress_skipped,
     NULL AS progress_failed,
     NULL AS reason_buckets
-FROM microsoft_token_refresh_jobs AS job`
+FROM microsoft_resources AS resource
+WHERE resource.token_refresh_generation > 0`
 
 const fetchTaskSelect = `
 SELECT
     'fetch' AS source,
-    job.id AS source_id,
-    job.resource_id AS resource_scope_id,
+    state.email_resource_id AS source_id,
+    state.email_resource_id AS resource_scope_id,
     'microsoft_resource' AS biz_type,
-    job.resource_id AS biz_id,
-	CASE
-		WHEN job.since_at IS NULL AND job.until_at IS NULL THEN 'history'
-		ELSE 'fetch'
-	END AS kind,
-    job.status AS status,
-    job.attempts AS attempts,
-    job.max_attempts AS max_attempts,
-    job.expected_credential_revision AS credential_revision,
-    job.created_at AS queued_at,
-    job.started_at AS started_at,
-    job.finished_at AS finished_at,
-    job.updated_at AS updated_at,
-    job.fetched_count AS progress_total,
-    job.fetched_count AS progress_processed,
-    job.stored_count AS progress_succeeded,
-    GREATEST(job.fetched_count - job.stored_count, 0) AS progress_skipped,
+    state.email_resource_id AS biz_id,
+    CASE WHEN state.operation_kind = 'resource_history' THEN 'history' ELSE 'fetch' END AS kind,
+    CASE state.status
+        WHEN 'pending' THEN 'queued'
+        WHEN 'processing' THEN 'running'
+        WHEN 'abnormal' THEN 'failed'
+        ELSE 'succeeded'
+    END AS status,
+    state.failures AS attempts,
+    3 AS max_attempts,
+    state.expected_credential_revision AS credential_revision,
+    state.requested_at AS queued_at,
+    state.started_at AS started_at,
+    state.finished_at AS finished_at,
+    state.updated_at AS updated_at,
+    state.fetched_count AS progress_total,
+    state.fetched_count AS progress_processed,
+    state.stored_count AS progress_succeeded,
+    GREATEST(state.fetched_count - state.stored_count, 0) AS progress_skipped,
     0 AS progress_failed,
     NULL AS reason_buckets
-FROM mailmatch_resource_fetch_jobs AS job`
+FROM mailmatch_resource_fetch_states AS state
+WHERE state.operation_kind IN ('resource_fetch', 'resource_history')`
 
-// Bulk commands are intentionally absent from the per-resource UNION. Their
-// fact stores an aggregate selection and checkpoint, not immutable per-resource
-// membership; re-evaluating selection_json after resource changes would invent
-// history. They remain available through the source-qualified Q08 lookup.
+// Redis-only bulk cursors are intentionally absent: this view exposes durable
+// business facts only.
 const microsoftResourceTaskUnion = importResourceTaskSelect + `
 UNION ALL
 ` + aliasAttemptTaskSelect + `
@@ -276,9 +281,7 @@ SELECT
     imp.id AS biz_id,
     'import' AS kind,
     CASE
-        WHEN imp.dispatch_status = 'legacy' AND imp.status = 'imported' THEN 'succeeded'
-        WHEN imp.dispatch_status = 'legacy' AND imp.status = 'failed' THEN 'failed'
-        WHEN imp.dispatch_status = 'legacy' THEN 'running'
+		WHEN imp.dispatch_status = 'pending' THEN 'queued'
         ELSE imp.dispatch_status
     END AS status,
     imp.attempts AS attempts,
@@ -303,38 +306,6 @@ SELECT
     NULL AS reason_buckets
 FROM resource_imports AS imp
 WHERE imp.resource_type = 'microsoft'`
-
-const bulkSingleTaskSelect = `
-SELECT
-    'bulk' AS source,
-    command.id AS source_id,
-    0 AS resource_scope_id,
-    'microsoft_resource_bulk' AS biz_type,
-    command.id AS biz_id,
-    CASE command.action
-        WHEN 'validate' THEN 'bulk_validation'
-		WHEN 'alias' THEN 'bulk_alias'
-		WHEN 'history' THEN 'bulk_history'
-		WHEN 'token' THEN 'bulk_token'
-        WHEN 'publish' THEN 'bulk_publish'
-        WHEN 'unpublish' THEN 'bulk_unpublish'
-        ELSE 'bulk_delete'
-    END AS kind,
-    command.status AS status,
-    command.attempts AS attempts,
-    command.max_attempts AS max_attempts,
-    NULL AS credential_revision,
-    command.created_at AS queued_at,
-    command.started_at AS started_at,
-    command.finished_at AS finished_at,
-    command.updated_at AS updated_at,
-    command.matched_count AS progress_total,
-    command.processed_count AS progress_processed,
-    command.affected_count AS progress_succeeded,
-    command.skipped_count AS progress_skipped,
-    GREATEST(command.processed_count - command.affected_count - command.skipped_count, 0) AS progress_failed,
-    command.reason_buckets AS reason_buckets
-FROM admin_resource_bulk_commands AS command`
 
 func (r *AdminTaskViewRepo) MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error) {
 	if r == nil || r.db == nil || resourceID == 0 {
@@ -456,8 +427,6 @@ func singleTaskSelect(source string) (string, error) {
 		return tokenTaskSelect, nil
 	case governanceapp.AdminTaskSourceFetch:
 		return fetchTaskSelect, nil
-	case governanceapp.AdminTaskSourceBulk:
-		return bulkSingleTaskSelect, nil
 	default:
 		return "", governanceapp.ErrInvalidAdminTaskQuery
 	}

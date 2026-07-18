@@ -430,6 +430,9 @@ func (r *mockResourceRepo) CreateMicrosoft(_ context.Context, resource *coredoma
 	resource.CreatedAt = time.Now()
 	resource.UpdatedAt = time.Now()
 	ms.ID = resource.ID
+	if ms.ValidationGeneration == 0 {
+		ms.ValidationGeneration = 1
+	}
 	ms.CreatedAt = resource.CreatedAt
 	r.resources[resource.ID] = resource
 	r.microsoft[resource.ID] = ms
@@ -453,6 +456,8 @@ func (r *mockResourceRepo) CreateDomain(_ context.Context, resource *coredomain.
 		existing.MailServerID = dr.MailServerID
 		existing.Purpose = dr.Purpose
 		existing.Status = dr.Status
+		existing.ValidationGeneration++
+		existing.ValidationFailures = 0
 		existing.LastAllocatedAt = nil
 		existing.UpdatedAt = resource.UpdatedAt
 		*dr = *existing
@@ -463,6 +468,9 @@ func (r *mockResourceRepo) CreateDomain(_ context.Context, resource *coredomain.
 	resource.CreatedAt = time.Now()
 	resource.UpdatedAt = time.Now()
 	dr.ID = resource.ID
+	if dr.ValidationGeneration == 0 {
+		dr.ValidationGeneration = 1
+	}
 	dr.CreatedAt = resource.CreatedAt
 	r.resources[resource.ID] = resource
 	r.domains[resource.ID] = dr
@@ -1173,6 +1181,12 @@ func (r *mockImportRepo) Create(_ context.Context, item *coredomain.ResourceImpo
 	item.ID = r.seq
 	item.CreatedAt = time.Now()
 	item.UpdatedAt = item.CreatedAt
+	if item.Generation == 0 {
+		item.Generation = 1
+	}
+	if item.DispatchStatus == "" || item.DispatchStatus == "queued" {
+		item.DispatchStatus = "pending"
+	}
 	snapshot := *item
 	r.imports[item.ID] = &snapshot
 	return nil
@@ -1203,53 +1217,46 @@ func (r *mockImportRepo) ClaimAdminImportDispatchable(_ context.Context, limit i
 	items := make([]coreapp.AdminResourceImportDispatchItem, 0)
 	for id := uint(1); id <= r.seq && len(items) < limit; id++ {
 		item := r.imports[id]
-		if item == nil || item.Status != coredomain.ResourceImportProcessing || item.DispatchStatus != "queued" || item.DispatchToken != "" {
+		if item == nil || item.Status != coredomain.ResourceImportProcessing || item.DispatchStatus != "pending" {
 			continue
 		}
-		item.DispatchToken = fmt.Sprintf("dispatch-%d", id)
 		items = append(items, coreapp.AdminResourceImportDispatchItem{
 			ImportID: item.ID, OwnerUserID: item.OwnerUserID, LongLived: item.LongLived,
-			ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID, DispatchToken: item.DispatchToken,
+			ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID,
+			Generation: item.Generation,
 		})
 	}
 	return items, nil
 }
 
-func (r *mockImportRepo) MarkAdminImportRunning(_ context.Context, id uint, dispatchToken string) (string, bool, error) {
+func (r *mockImportRepo) MarkAdminImportDispatched(_ context.Context, id uint, generation uint64) (bool, error) {
 	item := r.imports[id]
-	if item == nil || item.DispatchStatus != "queued" || item.DispatchToken != dispatchToken {
+	if item == nil || item.DispatchStatus != "pending" || item.Generation != generation {
+		return false, nil
+	}
+	item.DispatchStatus = "queued"
+	return true, nil
+}
+
+func (r *mockImportRepo) MarkAdminImportRunning(_ context.Context, id uint, generation uint64) (string, bool, error) {
+	item := r.imports[id]
+	if item == nil || (item.DispatchStatus != "pending" && item.DispatchStatus != "queued") || item.Generation != generation {
 		return "", false, nil
 	}
 	item.DispatchStatus = "running"
-	item.DispatchToken = ""
 	item.ClaimToken = fmt.Sprintf("claim-%d", id)
-	item.Attempts++
 	return item.ClaimToken, true, nil
 }
 
-func (r *mockImportRepo) MarkAdminImportDispatchFailed(_ context.Context, id uint, dispatchToken, safeError string) error {
+func (r *mockImportRepo) MarkAdminImportPending(_ context.Context, id uint, generation uint64, safeError string) error {
 	item := r.imports[id]
-	if item != nil && item.DispatchStatus == "queued" && item.DispatchToken == dispatchToken {
-		item.DispatchToken = ""
+	if item != nil && item.Generation == generation && (item.DispatchStatus == "queued" || item.DispatchStatus == "running") {
+		item.DispatchStatus = "pending"
+		item.Generation++
+		item.ClaimToken = ""
 		item.LastSafeError = safeError
 	}
 	return nil
-}
-
-func (r *mockImportRepo) MarkAdminImportRetryableFailure(_ context.Context, id uint, claimToken, safeError string) (bool, error) {
-	item := r.imports[id]
-	if item == nil || item.DispatchStatus != "running" || item.ClaimToken != claimToken {
-		return false, coredomain.ErrResourceImportInvalidClaim
-	}
-	item.ClaimToken = ""
-	item.LastSafeError = safeError
-	if item.Attempts >= item.MaxAttempts {
-		item.Status = coredomain.ResourceImportFailed
-		item.DispatchStatus = "failed"
-		return true, nil
-	}
-	item.DispatchStatus = "queued"
-	return false, nil
 }
 
 func (r *mockImportRepo) MarkAdminImportFailed(_ context.Context, id uint, claimToken, failureObjectKey, safeError string) error {
@@ -1257,11 +1264,16 @@ func (r *mockImportRepo) MarkAdminImportFailed(_ context.Context, id uint, claim
 	if item == nil || item.DispatchStatus != "running" || item.ClaimToken != claimToken {
 		return coredomain.ErrResourceImportInvalidClaim
 	}
-	item.Status = coredomain.ResourceImportFailed
-	item.DispatchStatus = "failed"
+	item.Attempts++
+	item.Generation++
+	item.DispatchStatus = "pending"
 	item.ClaimToken = ""
 	item.FailureObjectKey = failureObjectKey
 	item.LastSafeError = safeError
+	if item.Attempts >= item.MaxAttempts {
+		item.Status = coredomain.ResourceImportFailed
+		item.DispatchStatus = "failed"
+	}
 	return nil
 }
 
@@ -1292,6 +1304,8 @@ func (r *mockImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(ctx context.Co
 		}
 	}
 	item.Status = coredomain.ResourceImportImported
+	item.DispatchStatus = "succeeded"
+	item.ClaimToken = ""
 	item.ImportedCount = len(ms)
 	item.FailureObjectKey = failureObjectKey
 	item.LastSafeError = safeSummary
@@ -1360,20 +1374,27 @@ func (s *mockFileStore) ListPrivate(_ context.Context, prefix string, startAfter
 }
 
 type mockImportQueue struct {
-	tasks []coreapp.MicrosoftImportTask
+	tasks     []coreapp.MicrosoftImportTask
+	duplicate bool
+	err       error
 }
 
-func (q *mockImportQueue) EnqueueMicrosoftImport(_ context.Context, task coreapp.MicrosoftImportTask) error {
+func (q *mockImportQueue) EnqueueMicrosoftImport(_ context.Context, task coreapp.MicrosoftImportTask) (bool, error) {
+	if q.err != nil {
+		return false, q.err
+	}
+	if q.duplicate {
+		return false, nil
+	}
 	q.tasks = append(q.tasks, task)
-	return nil
+	return true, nil
 }
 
 type mockValidationRepo struct {
 	resources               *mockResourceRepo
 	batches                 []coreapp.ResourceValidationBatchTask
-	savedProgress           []coreapp.MicrosoftValidationResult
 	appliedMicrosoftResults []coreapp.MicrosoftValidationResult
-	saveProgressErr         error
+	markDispatchedErr       error
 	applyMicrosoftErr       error
 }
 
@@ -1394,10 +1415,10 @@ func (r *mockValidationRepo) MarkResourcePendingWithLog(_ context.Context, resou
 		if resource.Status == coredomain.MicrosoftStatusDisabled {
 			return coredomain.ErrInvalidResourceStatus
 		}
-		if resource.Status != coredomain.MicrosoftStatusValidating {
-			resource.Status = coredomain.MicrosoftStatusPending
-			resource.LastSafeError = ""
-		}
+		resource.Status = coredomain.MicrosoftStatusPending
+		resource.ValidationGeneration++
+		resource.ValidationFailures = 0
+		resource.LastSafeError = ""
 	case coredomain.ResourceTypeDomain:
 		resource := r.resources.domains[resourceID]
 		if resource == nil || resource.Status == coredomain.DomainStatusDeleted {
@@ -1406,10 +1427,10 @@ func (r *mockValidationRepo) MarkResourcePendingWithLog(_ context.Context, resou
 		if resource.Status == coredomain.DomainStatusDisabled {
 			return coredomain.ErrInvalidResourceStatus
 		}
-		if resource.Status != coredomain.DomainStatusValidating {
-			resource.Status = coredomain.DomainStatusPending
-			resource.LastSafeError = ""
-		}
+		resource.Status = coredomain.DomainStatusPending
+		resource.ValidationGeneration++
+		resource.ValidationFailures = 0
+		resource.LastSafeError = ""
 	}
 	return nil
 }
@@ -1428,11 +1449,11 @@ func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit in
 		if resource.Status != coredomain.MicrosoftStatusPending {
 			continue
 		}
-		resource.Status = coredomain.MicrosoftStatusValidating
 		root := r.resources.resources[id]
 		result = append(result, coreapp.ResourceValidationTask{
 			ResourceID: id, ResourceType: coredomain.ResourceTypeMicrosoft,
-			OwnerUserID: root.OwnerUserID, ExpectedCredentialRevision: resource.CredentialRevision,
+			OwnerUserID: root.OwnerUserID, ValidationGeneration: resource.ValidationGeneration,
+			ExpectedCredentialRevision: resource.CredentialRevision,
 		})
 		if limit > 0 && len(result) >= limit {
 			return result, nil
@@ -1442,14 +1463,39 @@ func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit in
 		if resource.Status != coredomain.DomainStatusPending {
 			continue
 		}
-		resource.Status = coredomain.DomainStatusValidating
 		root := r.resources.resources[id]
-		result = append(result, coreapp.ResourceValidationTask{ResourceID: id, ResourceType: coredomain.ResourceTypeDomain, OwnerUserID: root.OwnerUserID})
+		result = append(result, coreapp.ResourceValidationTask{ResourceID: id, ResourceType: coredomain.ResourceTypeDomain, OwnerUserID: root.OwnerUserID, ValidationGeneration: resource.ValidationGeneration})
 		if limit > 0 && len(result) >= limit {
 			break
 		}
 	}
 	return result, nil
+}
+
+func (r *mockValidationRepo) MarkValidationDispatched(_ context.Context, task coreapp.ResourceValidationTask) (bool, error) {
+	if r.markDispatchedErr != nil {
+		return false, r.markDispatchedErr
+	}
+	if r.resources == nil {
+		return false, nil
+	}
+	switch task.ResourceType {
+	case coredomain.ResourceTypeMicrosoft:
+		resource := r.resources.microsoft[task.ResourceID]
+		if resource == nil || resource.Status != coredomain.MicrosoftStatusPending || resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {
+			return false, nil
+		}
+		resource.Status = coredomain.MicrosoftStatusValidating
+	case coredomain.ResourceTypeDomain:
+		resource := r.resources.domains[task.ResourceID]
+		if resource == nil || resource.Status != coredomain.DomainStatusPending || resource.ValidationGeneration != task.ValidationGeneration {
+			return false, nil
+		}
+		resource.Status = coredomain.DomainStatusValidating
+	default:
+		return false, coredomain.ErrInvalidResourceType
+	}
+	return true, nil
 }
 
 func (r *mockValidationRepo) ReleaseValidation(_ context.Context, task coreapp.ResourceValidationTask) error {
@@ -1458,47 +1504,16 @@ func (r *mockValidationRepo) ReleaseValidation(_ context.Context, task coreapp.R
 	}
 	switch task.ResourceType {
 	case coredomain.ResourceTypeMicrosoft:
-		if resource := r.resources.microsoft[task.ResourceID]; resource != nil && resource.Status == coredomain.MicrosoftStatusValidating && resource.CredentialRevision == task.ExpectedCredentialRevision {
+		if resource := r.resources.microsoft[task.ResourceID]; resource != nil && resource.Status == coredomain.MicrosoftStatusValidating && resource.ValidationGeneration == task.ValidationGeneration && resource.CredentialRevision == task.ExpectedCredentialRevision {
 			resource.Status = coredomain.MicrosoftStatusPending
+			resource.ValidationGeneration++
 		}
 	case coredomain.ResourceTypeDomain:
-		if resource := r.resources.domains[task.ResourceID]; resource != nil && resource.Status == coredomain.DomainStatusValidating {
+		if resource := r.resources.domains[task.ResourceID]; resource != nil && resource.Status == coredomain.DomainStatusValidating && resource.ValidationGeneration == task.ValidationGeneration {
 			resource.Status = coredomain.DomainStatusPending
+			resource.ValidationGeneration++
 		}
 	}
-	return nil
-}
-
-func (r *mockValidationRepo) ResetValidationAssignments(ctx context.Context) error {
-	if r.resources == nil {
-		return nil
-	}
-	for id, resource := range r.resources.microsoft {
-		_ = r.ReleaseValidation(ctx, coreapp.ResourceValidationTask{ResourceID: id, ResourceType: coredomain.ResourceTypeMicrosoft, ExpectedCredentialRevision: resource.CredentialRevision})
-	}
-	for id := range r.resources.domains {
-		_ = r.ReleaseValidation(ctx, coreapp.ResourceValidationTask{ResourceID: id, ResourceType: coredomain.ResourceTypeDomain})
-	}
-	return nil
-}
-
-func (r *mockValidationRepo) SaveMicrosoftProgress(_ context.Context, task coreapp.ResourceValidationTask, result coreapp.MicrosoftValidationResult) error {
-	if r.saveProgressErr != nil {
-		return r.saveProgressErr
-	}
-	resource := r.resources.microsoft[task.ResourceID]
-	if resource == nil || resource.Status != coredomain.MicrosoftStatusValidating || resource.CredentialRevision != task.ExpectedCredentialRevision {
-		return coreapp.ErrValidationResultStale
-	}
-	if result.CredentialsAuthoritative {
-		if value := strings.TrimSpace(result.ClientID); value != "" {
-			resource.ClientID = value
-		}
-		if value := strings.TrimSpace(result.RefreshToken); value != "" {
-			resource.RefreshToken = value
-		}
-	}
-	r.savedProgress = append(r.savedProgress, result)
 	return nil
 }
 
@@ -1507,7 +1522,7 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 		return r.applyMicrosoftErr
 	}
 	resource := r.resources.microsoft[task.ResourceID]
-	if resource == nil || resource.Status != coredomain.MicrosoftStatusValidating || resource.CredentialRevision != task.ExpectedCredentialRevision {
+	if resource == nil || resource.Status != coredomain.MicrosoftStatusValidating || resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {
 		return coreapp.ErrValidationResultStale
 	}
 	r.appliedMicrosoftResults = append(r.appliedMicrosoftResults, result)
@@ -1521,11 +1536,18 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 	}
 	if result.Valid {
 		resource.Status = coredomain.MicrosoftStatusNormal
+		resource.ValidationFailures = 0
 		resource.LastSafeError = ""
 		resource.QualityScore = 100
 		resource.GraphAvailable = result.GraphAvailable
 	} else {
-		resource.Status = coredomain.MicrosoftStatusAbnormal
+		resource.ValidationFailures++
+		if result.Retryable && resource.ValidationFailures < coreapp.ResourceValidationMaxFailures {
+			resource.Status = coredomain.MicrosoftStatusPending
+			resource.ValidationGeneration++
+		} else {
+			resource.Status = coredomain.MicrosoftStatusAbnormal
+		}
 		resource.LastSafeError = result.SafeMessage
 		resource.QualityScore = 0
 		resource.GraphAvailable = false
@@ -1535,14 +1557,21 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 
 func (r *mockValidationRepo) ApplyDomainResult(_ context.Context, task coreapp.ResourceValidationTask, result coreapp.DomainValidationResult, _ *governancedomain.SystemLog) error {
 	resource := r.resources.domains[task.ResourceID]
-	if resource == nil || resource.Status != coredomain.DomainStatusValidating {
+	if resource == nil || resource.Status != coredomain.DomainStatusValidating || resource.ValidationGeneration != task.ValidationGeneration {
 		return coreapp.ErrValidationResultStale
 	}
 	if result.Valid {
 		resource.Status = coredomain.DomainStatusNormal
+		resource.ValidationFailures = 0
 		resource.LastSafeError = ""
 	} else {
-		resource.Status = coredomain.DomainStatusAbnormal
+		resource.ValidationFailures++
+		if result.Retryable && resource.ValidationFailures < coreapp.ResourceValidationMaxFailures {
+			resource.Status = coredomain.DomainStatusPending
+			resource.ValidationGeneration++
+		} else {
+			resource.Status = coredomain.DomainStatusAbnormal
+		}
 		resource.LastSafeError = result.SafeMessage
 	}
 	return nil
@@ -1554,12 +1583,13 @@ func mockValidationTask(repo *mockValidationRepo, resourceID uint) coreapp.Resou
 		resource.Status = coredomain.MicrosoftStatusValidating
 		return coreapp.ResourceValidationTask{
 			ResourceID: resourceID, ResourceType: coredomain.ResourceTypeMicrosoft,
-			OwnerUserID: root.OwnerUserID, ExpectedCredentialRevision: resource.CredentialRevision,
+			OwnerUserID: root.OwnerUserID, ValidationGeneration: resource.ValidationGeneration,
+			ExpectedCredentialRevision: resource.CredentialRevision,
 		}
 	}
 	if resource := repo.resources.domains[resourceID]; resource != nil {
 		resource.Status = coredomain.DomainStatusValidating
-		return coreapp.ResourceValidationTask{ResourceID: resourceID, ResourceType: coredomain.ResourceTypeDomain, OwnerUserID: root.OwnerUserID}
+		return coreapp.ResourceValidationTask{ResourceID: resourceID, ResourceType: coredomain.ResourceTypeDomain, OwnerUserID: root.OwnerUserID, ValidationGeneration: resource.ValidationGeneration}
 	}
 	return coreapp.ResourceValidationTask{ResourceID: resourceID}
 }
@@ -1569,14 +1599,18 @@ type mockValidationQueue struct {
 	batches     []coreapp.ResourceValidationBatchTask
 	dispatchers int
 	enqueueErr  error
+	duplicate   bool
 }
 
-func (q *mockValidationQueue) EnqueueResourceValidation(_ context.Context, task coreapp.ResourceValidationTask) error {
+func (q *mockValidationQueue) EnqueueResourceValidation(_ context.Context, task coreapp.ResourceValidationTask) (bool, error) {
 	if q.enqueueErr != nil {
-		return q.enqueueErr
+		return false, q.enqueueErr
+	}
+	if q.duplicate {
+		return false, nil
 	}
 	q.tasks = append(q.tasks, task)
-	return nil
+	return true, nil
 }
 
 func (q *mockValidationQueue) EnqueueResourceValidationBatch(_ context.Context, task coreapp.ResourceValidationBatchTask) error {
@@ -1936,6 +1970,63 @@ func TestCoreHandler_RequiresSupplierRoleForPrivilegedResourceCommands(t *testin
 	}
 }
 
+func TestImportDispatcherChangesStateOnlyAfterAcceptedEnqueue(t *testing.T) {
+	resources := newMockResourceRepo()
+	imports := newMockImportRepo(resources)
+	item := &coredomain.ResourceImport{
+		OwnerUserID: 1, ResourceType: coredomain.ResourceTypeMicrosoft,
+		Status: coredomain.ResourceImportProcessing, DispatchStatus: "pending", Generation: 1,
+	}
+	require.NoError(t, imports.Create(context.Background(), item))
+	queue := &mockImportQueue{err: errors.New("redis unavailable")}
+	useCase := coreapp.NewImportUseCase(resources, imports, nil, nil, queue)
+
+	queued, err := useCase.DispatchAdminImports(context.Background(), 10)
+	require.Error(t, err)
+	require.Zero(t, queued)
+	require.Equal(t, "pending", imports.imports[item.ID].DispatchStatus)
+
+	queue.err = nil
+	queue.duplicate = true
+	queued, err = useCase.DispatchAdminImports(context.Background(), 10)
+	require.NoError(t, err)
+	require.Zero(t, queued)
+	require.Equal(t, "pending", imports.imports[item.ID].DispatchStatus)
+
+	queue.duplicate = false
+	queued, err = useCase.DispatchAdminImports(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, queued)
+	require.Equal(t, "queued", imports.imports[item.ID].DispatchStatus)
+	require.Equal(t, uint64(1), queue.tasks[0].Generation)
+}
+
+func TestImportWorkerActivatesPendingGeneration(t *testing.T) {
+	resources := newMockResourceRepo()
+	imports := newMockImportRepo(resources)
+	files := newMockFileStore()
+	const sourceObjectKey = "imports/microsoft/source/pending-generation.txt"
+	files.files[sourceObjectKey] = governancedomain.PrivateFile{
+		ObjectKey: sourceObjectKey, ContentBytes: []byte("pending@example.com----pass123"),
+	}
+	item := &coredomain.ResourceImport{
+		OwnerUserID: 1, ResourceType: coredomain.ResourceTypeMicrosoft,
+		SourceObjectKey: sourceObjectKey, Status: coredomain.ResourceImportProcessing,
+		DispatchStatus: "pending", Generation: 2, ErrorStrategy: coredomain.ImportErrorStrategySkip,
+	}
+	require.NoError(t, imports.Create(context.Background(), item))
+	useCase := coreapp.NewImportUseCase(resources, imports, &mockTXTParser{}, files, nil)
+
+	result, err := useCase.ProcessMicrosoftImport(context.Background(), coreapp.MicrosoftImportTask{
+		ImportID: item.ID, OwnerUserID: 1, Generation: 2, ErrorStrategy: coredomain.ImportErrorStrategySkip,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Imported)
+	require.Equal(t, "succeeded", imports.imports[item.ID].DispatchStatus)
+	require.Equal(t, coredomain.ResourceImportImported, imports.imports[item.ID].Status)
+	require.Zero(t, imports.imports[item.ID].Attempts)
+}
+
 func TestCoreHandler_ImportSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2027,11 +2118,21 @@ func TestCoreHandler_ImportInvalidFormatAbortFails(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	require.Len(t, importQueue.tasks, 1)
-	require.Equal(t, coredomain.ImportErrorStrategyAbort, importQueue.tasks[0].ErrorStrategy)
-	result, err := mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), importQueue.tasks[0])
-	require.NoError(t, err)
-	require.Empty(t, result.ImportedResourceIDs)
+	for attempt := 1; attempt <= 3; attempt++ {
+		task := importQueue.tasks[len(importQueue.tasks)-1]
+		require.Equal(t, coredomain.ImportErrorStrategyAbort, task.ErrorStrategy)
+		result, err := mod.ImportUseCase.ProcessMicrosoftImport(context.Background(), task)
+		require.NoError(t, err)
+		require.Empty(t, result.ImportedResourceIDs)
+		if attempt < 3 {
+			require.Equal(t, coredomain.ResourceImportProcessing, importRepo.imports[task.ImportID].Status)
+			require.Equal(t, "pending", importRepo.imports[task.ImportID].DispatchStatus)
+			_, err = mod.ImportUseCase.DispatchAdminImports(context.Background(), 10)
+			require.NoError(t, err)
+		}
+	}
 	require.Equal(t, coredomain.ResourceImportFailed, importRepo.imports[importQueue.tasks[0].ImportID].Status)
+	require.Equal(t, 3, importRepo.imports[importQueue.tasks[0].ImportID].Attempts)
 }
 
 func TestCoreHandler_ImportDuplicateDefaultSkips(t *testing.T) {
@@ -2237,6 +2338,78 @@ func TestResourceValidationUseCase_DispatchFailureReturnsResourcePending(t *test
 	require.Equal(t, coredomain.DomainStatusPending, resourceRepo.domains[root.ID].Status)
 }
 
+func TestResourceValidationUseCase_DuplicateDispatchLeavesResourcePending(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	queue := &mockValidationQueue{duplicate: true}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, queue, mockResourceValidator{})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+	require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, &coredomain.MailDomainResource{
+		Domain: "duplicate.example.com", MailServerID: 1, Purpose: coredomain.PurposeNotSale, Status: coredomain.DomainStatusPending,
+	}))
+	result, err := uc.DispatchPending(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Attempted)
+	require.Zero(t, result.Queued)
+	require.Zero(t, result.Failed)
+	require.Equal(t, coredomain.DomainStatusPending, resourceRepo.domains[root.ID].Status)
+}
+
+func TestResourceValidationUseCase_ActivationFailureLeavesResourcePending(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	validationRepo.markDispatchedErr = errors.New("database unavailable")
+	queue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, queue, mockResourceValidator{})
+
+	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
+		EmailAddress: "activation@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 2,
+	}))
+	result, err := uc.DispatchPending(context.Background(), 1)
+	require.Error(t, err)
+	require.Equal(t, 1, result.Failed)
+	require.Zero(t, result.Queued)
+	require.Len(t, queue.tasks, 1, "the accepted Redis task remains available to retry the activation race")
+	require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
+}
+
+func TestResourceValidationUseCase_WorkerActivatesPendingGeneration(t *testing.T) {
+	t.Run("microsoft", func(t *testing.T) {
+		resourceRepo := newMockResourceRepo()
+		validationRepo := newMockValidationRepo(resourceRepo)
+		uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
+			msResult: coreapp.MicrosoftValidationResult{Valid: true},
+		})
+		root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
+			EmailAddress: "pending-race@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 3,
+		}))
+		task := coreapp.ResourceValidationTask{
+			ResourceID: root.ID, ResourceType: coredomain.ResourceTypeMicrosoft,
+			OwnerUserID: 1, ValidationGeneration: resourceRepo.microsoft[root.ID].ValidationGeneration, ExpectedCredentialRevision: 3,
+		}
+		require.NoError(t, uc.Process(context.Background(), task, false))
+		require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
+	})
+
+	t.Run("domain", func(t *testing.T) {
+		resourceRepo := newMockResourceRepo()
+		validationRepo := newMockValidationRepo(resourceRepo)
+		uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
+			domainResult: coreapp.DomainValidationResult{Valid: true},
+		})
+		root := &coredomain.EmailResource{Type: coredomain.ResourceTypeDomain, OwnerUserID: 1}
+		require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, &coredomain.MailDomainResource{
+			Domain: "pending-race.example.com", MailServerID: 1, Purpose: coredomain.PurposeNotSale, Status: coredomain.DomainStatusPending,
+		}))
+		task := coreapp.ResourceValidationTask{ResourceID: root.ID, ResourceType: coredomain.ResourceTypeDomain, OwnerUserID: 1, ValidationGeneration: resourceRepo.domains[root.ID].ValidationGeneration}
+		require.NoError(t, uc.Process(context.Background(), task, false))
+		require.Equal(t, coredomain.DomainStatusNormal, resourceRepo.domains[root.ID].Status)
+	})
+}
+
 func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *testing.T) {
 	resourceRepo := newMockResourceRepo()
 	validationRepo := newMockValidationRepo(resourceRepo)
@@ -2339,7 +2512,7 @@ func TestResourceValidationUseCase_ProcessDomainFailureWritesDiagnostic(t *testi
 	require.Equal(t, "Domain MX record is not configured correctly.", resourceRepo.domains[root.ID].LastSafeError)
 }
 
-func TestResourceValidationUseCase_FinalAttemptCommitsAbnormalInsteadOfLooping(t *testing.T) {
+func TestResourceValidationUseCase_ThirdBusinessFailureCommitsAbnormal(t *testing.T) {
 	resourceRepo := newMockResourceRepo()
 	validationRepo := newMockValidationRepo(resourceRepo)
 	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, &mockValidationQueue{}, mockResourceValidator{
@@ -2350,19 +2523,19 @@ func TestResourceValidationUseCase_FinalAttemptCommitsAbnormalInsteadOfLooping(t
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
 		EmailAddress: "auth-timeout@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1,
 	}))
-	task := mockValidationTask(validationRepo, root.ID)
-
-	// Non-final attempts defer and keep the resource validating (looping is expected mid-retry).
-	require.ErrorIs(t, uc.Process(context.Background(), task, false), coreapp.ErrValidationTemporaryUnavailable)
-	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
-	require.Empty(t, validationRepo.appliedMicrosoftResults)
-
-	// Final attempt must commit the failure to abnormal + last_safe_error instead
-	// of releasing back to pending, so the resource stops looping forever.
-	require.NoError(t, uc.Process(context.Background(), task, true))
+	for attempt := 1; attempt <= coreapp.ResourceValidationMaxFailures; attempt++ {
+		task := mockValidationTask(validationRepo, root.ID)
+		require.NoError(t, uc.Process(context.Background(), task, false))
+		require.Equal(t, attempt, resourceRepo.microsoft[root.ID].ValidationFailures)
+		if attempt < coreapp.ResourceValidationMaxFailures {
+			require.Equal(t, coredomain.MicrosoftStatusPending, resourceRepo.microsoft[root.ID].Status)
+		} else {
+			require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
+		}
+	}
 	require.Equal(t, coredomain.MicrosoftStatusAbnormal, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, "Microsoft authorization timed out.", resourceRepo.microsoft[root.ID].LastSafeError)
-	require.Len(t, validationRepo.appliedMicrosoftResults, 1)
+	require.Len(t, validationRepo.appliedMicrosoftResults, coreapp.ResourceValidationMaxFailures)
 }
 
 func TestResourceValidationUseCase_CreateRejectsDisabledResource(t *testing.T) {

@@ -28,7 +28,7 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
 		ErrorStrategy:   domain.ImportErrorStrategyAbort,
 		SourceObjectKey: "imports/microsoft/source/user-durable.txt",
 		Status:          domain.ResourceImportProcessing,
-		DispatchStatus:  "queued",
+		DispatchStatus:  "pending",
 		MaxAttempts:     3,
 		RequestID:       "req-user-durable-import",
 	}
@@ -37,7 +37,7 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
 	var row ResourceImportModel
 	require.NoError(t, db.First(&row, item.ID).Error)
 	require.Nil(t, row.OperatorUserID)
-	require.Equal(t, "queued", row.DispatchStatus)
+	require.Equal(t, "pending", row.DispatchStatus)
 	require.True(t, row.LongLived)
 	require.Equal(t, string(domain.ImportErrorStrategyAbort), row.ErrorStrategy)
 	require.Equal(t, item.RequestID, row.RequestID)
@@ -50,44 +50,38 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
 	require.True(t, dispatchable[0].LongLived)
 	require.Equal(t, domain.ImportErrorStrategyAbort, dispatchable[0].ErrorStrategy)
 	require.Equal(t, item.RequestID, dispatchable[0].RequestID)
-	require.NotEmpty(t, dispatchable[0].DispatchToken)
+	require.Equal(t, uint64(1), dispatchable[0].Generation)
 
-	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), item.ID, dispatchable[0].DispatchToken)
+	activated, err := repo.MarkAdminImportDispatched(context.Background(), item.ID, dispatchable[0].Generation)
+	require.NoError(t, err)
+	require.True(t, activated)
+	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), item.ID, dispatchable[0].Generation)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, repo.SetAdminImportCounts(context.Background(), item.ID, claimToken, 2, 1))
 }
 
-func TestLegacyResourceImportExpiresInsteadOfRunningWithIncompleteMetadataMySQL(t *testing.T) {
+func TestAdminResourceImportWorkerActivatesPendingGenerationMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, role, enabled)
-VALUES (1, 'legacy-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
-
+VALUES (1, 'import-activation-owner@test.local', 'hash', 'supplier', TRUE)`).Error)
 	repo := NewResourceImportRepo(db)
 	item := &domain.ResourceImport{
-		OwnerUserID:     1,
-		ResourceType:    domain.ResourceTypeMicrosoft,
-		SourceObjectKey: "imports/microsoft/source/legacy-incomplete.txt",
-		Status:          domain.ResourceImportProcessing,
-		DispatchStatus:  "legacy",
-		MaxAttempts:     3,
+		OwnerUserID: 1, ResourceType: domain.ResourceTypeMicrosoft,
+		SourceObjectKey: "imports/microsoft/source/activation.txt", Status: domain.ResourceImportProcessing,
+		DispatchStatus: "pending", Generation: 1, MaxAttempts: 3,
 	}
 	require.NoError(t, repo.Create(context.Background(), item))
-	require.NoError(t, db.Model(&ResourceImportModel{}).Where("id = ?", item.ID).
-		UpdateColumn("updated_at", time.Now().UTC().Add(-2*time.Hour)).Error)
 
-	now := time.Now().UTC()
-	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), item.ID, item.Generation)
 	require.NoError(t, err)
-	require.Empty(t, dispatchable)
+	require.True(t, claimed, "the accepted Redis task may run before the dispatcher CAS commits queued")
+	require.NotEmpty(t, claimToken)
 
-	var row ResourceImportModel
-	require.NoError(t, db.First(&row, item.ID).Error)
-	require.Equal(t, string(domain.ResourceImportFailed), row.Status)
-	require.Equal(t, "failed", row.DispatchStatus)
-	require.Contains(t, row.LastSafeError, "submit the import again")
-	require.NotNil(t, row.FinishedAt)
+	activated, err := repo.MarkAdminImportDispatched(context.Background(), item.ID, item.Generation)
+	require.NoError(t, err)
+	require.False(t, activated, "a worker-owned running generation must not be moved backward to queued")
 }
 
 func TestAdminResourceImportSerializedQueueTaskHydratesDurableObjectKeyMySQL(t *testing.T) {
@@ -118,6 +112,9 @@ VALUES
 	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
+	activated, err := repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
+	require.NoError(t, err)
+	require.True(t, activated)
 
 	// SourceObjectKey is deliberately populated to model an older in-memory
 	// caller. JSON serialization must still strip it before the Asynq boundary.
@@ -125,14 +122,14 @@ VALUES
 		ImportID: stored.ID, OwnerUserID: dispatchable[0].OwnerUserID,
 		SourceObjectKey: sourceObjectKey, LongLived: dispatchable[0].LongLived,
 		ErrorStrategy: dispatchable[0].ErrorStrategy, RequestID: dispatchable[0].RequestID,
-		DispatchToken: dispatchable[0].DispatchToken,
+		Generation: dispatchable[0].Generation,
 	}
 	payload, err := json.Marshal(queuedTask)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), sourceObjectKey)
 	require.NotContains(t, string(payload), passwordCanary)
 	require.NotContains(t, string(payload), "sourceObjectKey")
-	require.Contains(t, string(payload), dispatchable[0].DispatchToken)
+	require.Contains(t, string(payload), `"generation":1`)
 
 	var decoded coreapp.MicrosoftImportTask
 	require.NoError(t, json.Unmarshal(payload, &decoded))
@@ -153,9 +150,8 @@ VALUES
 	require.NoError(t, db.First(&row, stored.ID).Error)
 	require.Equal(t, string(domain.ResourceImportImported), row.Status)
 	require.Equal(t, "succeeded", row.DispatchStatus)
-	require.Equal(t, 1, row.Attempts)
+	require.Equal(t, 0, row.Attempts)
 	require.Empty(t, row.ClaimToken)
-	require.Empty(t, row.DispatchToken)
 
 	// Replaying the consumed opaque dispatch token must remain fenced and must
 	// not read the private object a second time.
@@ -200,7 +196,7 @@ VALUES
 	require.Equal(t, uint(9), *row.OperatorUserID)
 	require.True(t, row.LongLived)
 	require.Equal(t, string(domain.ImportErrorStrategyAbort), row.ErrorStrategy)
-	require.Equal(t, "queued", row.DispatchStatus)
+	require.Equal(t, "pending", row.DispatchStatus)
 	require.Equal(t, metadata.IdempotencyKey, row.IdempotencyKey)
 	require.Equal(t, metadata.RequestFingerprint, row.RequestFingerprint)
 	now := time.Now().UTC()
@@ -209,14 +205,17 @@ VALUES
 	require.Len(t, dispatchable, 1)
 	require.Equal(t, stored.ID, dispatchable[0].ImportID)
 	require.True(t, dispatchable[0].LongLived)
-	require.NotEmpty(t, dispatchable[0].DispatchToken)
-	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].DispatchToken)
+	require.Equal(t, uint64(1), dispatchable[0].Generation)
+	activated, err := repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
+	require.NoError(t, err)
+	require.True(t, activated)
+	claimToken, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].Generation)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotEmpty(t, claimToken)
 	require.NoError(t, db.First(&row, stored.ID).Error)
 	require.Equal(t, "running", row.DispatchStatus)
-	require.Equal(t, 1, row.Attempts)
+	require.Equal(t, 0, row.Attempts)
 	require.NotNil(t, row.StartedAt)
 	require.Equal(t, claimToken, row.ClaimToken)
 
@@ -347,19 +346,23 @@ VALUES
 	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
-	firstClaim, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].DispatchToken)
+	activated, err := repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
+	require.NoError(t, err)
+	require.True(t, activated)
+	firstClaim, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].Generation)
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	exhausted, err := repo.MarkAdminImportRetryableFailure(context.Background(), stored.ID, firstClaim, "Temporary import failure.")
-	require.NoError(t, err)
-	require.False(t, exhausted)
+	require.NoError(t, repo.MarkAdminImportFailed(context.Background(), stored.ID, firstClaim, "", "Temporary import failure."))
 	require.ErrorIs(t, repo.SetAdminImportCounts(context.Background(), stored.ID, firstClaim, 2, 1), domain.ErrResourceImportInvalidClaim)
 
 	dispatchable, err = repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(time.Hour))
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
-	secondClaim, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].DispatchToken)
+	activated, err = repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
+	require.NoError(t, err)
+	require.True(t, activated)
+	secondClaim, claimed, err := repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].Generation)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotEqual(t, firstClaim, secondClaim)
@@ -399,7 +402,7 @@ VALUES
 	require.Equal(t, 2, row.AcceptedCount)
 	require.Equal(t, 1, row.SkippedCount)
 	require.Empty(t, row.ClaimToken)
-	require.Equal(t, 2, row.Attempts)
+	require.Equal(t, 1, row.Attempts)
 
 	var items []ResourceImportItemModel
 	require.NoError(t, db.Where("import_id = ?", stored.ID).Order("line_number ASC").Find(&items).Error)
@@ -407,7 +410,7 @@ VALUES
 	require.Equal(t, []int{1, 2, 3}, []int{items[0].LineNumber, items[1].LineNumber, items[2].LineNumber})
 	require.Equal(t, []string{"imported", "imported", "skipped"}, []string{items[0].Outcome, items[1].Outcome, items[2].Outcome})
 
-	_, claimed, err = repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].DispatchToken)
+	_, claimed, err = repo.MarkAdminImportRunning(context.Background(), stored.ID, dispatchable[0].Generation)
 	require.NoError(t, err)
 	require.False(t, claimed, "a consumed dispatch token must not re-enter a terminal import")
 }

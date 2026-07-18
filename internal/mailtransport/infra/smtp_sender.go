@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	stdmail "net/mail"
+	"net/textproto"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	gomail "github.com/wneessen/go-mail"
 )
@@ -43,20 +46,20 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	}
 	to := envelopeAddress(message.To)
 	if addr == "" || from == "" || to == "" {
-		return deliveryError("smtp config incomplete", nil)
+		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("smtp config incomplete", nil))
 	}
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return deliveryError("invalid smtp addr", err)
+		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("invalid smtp addr", err))
 	}
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		return deliveryError("invalid smtp port", err)
+		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("invalid smtp port", err))
 	}
 	rawMessage, err := newSignedSMTPMessage(from, to, message, s.cfg.DKIM)
 	if err != nil {
-		return deliveryError("smtp message failed", err)
+		return permanentOutboundFailure("Outbound mail message is invalid.", deliveryError("smtp message failed", err))
 	}
 
 	options := []gomail.Option{
@@ -81,10 +84,10 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 
 	client, err := gomail.NewClient(host, options...)
 	if err != nil {
-		return deliveryError("smtp client failed", err)
+		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("smtp client failed", err))
 	}
 	if err := sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage); err != nil {
-		return deliveryError("smtp send failed", err)
+		return classifySMTPFailure("smtp send failed", err)
 	}
 	return nil
 }
@@ -204,6 +207,27 @@ func deliveryError(stage string, err error) error {
 		return fmt.Errorf("%w: %s", domain.ErrDeliveryUnavailable, stage)
 	}
 	return fmt.Errorf("%w: %s: %s", domain.ErrDeliveryUnavailable, stage, safeDiagnostic(err.Error()))
+}
+
+func classifySMTPFailure(stage string, err error) error {
+	var smtpError *textproto.Error
+	if !errors.As(err, &smtpError) || smtpError == nil {
+		return deliveryError(stage, err)
+	}
+	retryable := smtpError.Code >= 400 && smtpError.Code < 500
+	message := "SMTP server rejected the message."
+	if retryable {
+		message = "SMTP server temporarily rejected the message."
+	}
+	return &mailapp.OutboundSendFailure{
+		SafeMessage: message,
+		Retryable:   retryable,
+		Cause:       deliveryError(stage, err),
+	}
+}
+
+func permanentOutboundFailure(safeMessage string, cause error) error {
+	return &mailapp.OutboundSendFailure{SafeMessage: safeMessage, Cause: cause}
 }
 
 func envelopeAddress(value string) string {

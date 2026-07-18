@@ -515,6 +515,87 @@ func TestPublicAllocationExcludesRegularUserResourceMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 }
 
+func TestCandidateRefreshUsesProjectStateAndGenerationFenceMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	state, err := repo.RequestCandidateRefresh(ctx, 10, 4, "request-1", "/projects/10/candidates/refresh")
+	require.NoError(t, err)
+	require.Equal(t, domain.CandidateRefreshPending, state.Status)
+	require.Equal(t, uint64(1), state.Generation)
+	require.Zero(t, state.Failures)
+
+	pending, err := repo.ListPendingCandidateRefreshes(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, uint(10), pending[0].ProjectID)
+	processing, err := repo.MarkCandidateRefreshProcessing(ctx, 10, state.Generation)
+	require.NoError(t, err)
+	require.True(t, processing)
+
+	released, err := repo.ReleaseCandidateRefreshInfrastructureFailure(ctx, 10, state.Generation, "database unavailable")
+	require.NoError(t, err)
+	require.True(t, released)
+	pending, err = repo.ListPendingCandidateRefreshes(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, uint64(2), pending[0].Generation)
+	require.Zero(t, pending[0].Failures, "infrastructure failure must not consume the business budget")
+
+	generation := pending[0].Generation
+	for failure := 1; failure <= 3; failure++ {
+		processing, err = repo.MarkCandidateRefreshProcessing(ctx, 10, generation)
+		require.NoError(t, err)
+		require.True(t, processing)
+		recorded, abnormal, err := repo.RecordCandidateRefreshFailure(ctx, 10, generation, "refresh rejected")
+		require.NoError(t, err)
+		require.True(t, recorded)
+		require.Equal(t, failure == 3, abnormal)
+		generation++
+	}
+
+	var terminal CandidateRefreshProjectModel
+	require.NoError(t, db.First(&terminal, 10).Error)
+	require.Equal(t, string(domain.CandidateRefreshAbnormal), terminal.Status)
+	require.Equal(t, 3, terminal.Failures)
+	require.Equal(t, generation, terminal.Generation)
+
+	retriggered, err := repo.RequestCandidateRefresh(ctx, 10, 4, "request-2", "/projects/10/candidates/refresh")
+	require.NoError(t, err)
+	require.Equal(t, domain.CandidateRefreshPending, retriggered.Status)
+	require.Zero(t, retriggered.Failures)
+	require.Equal(t, generation+1, retriggered.Generation)
+	processing, err = repo.MarkCandidateRefreshProcessing(ctx, 10, retriggered.Generation)
+	require.NoError(t, err)
+	require.True(t, processing)
+
+	newer, err := repo.RequestCandidateRefresh(ctx, 10, 4, "request-3", "/projects/10/candidates/refresh")
+	require.NoError(t, err)
+	_, current, err := repo.RunCandidateRefresh(ctx, 10, retriggered.Generation)
+	require.NoError(t, err)
+	require.False(t, current, "an old generation must not execute after a retrigger")
+	processing, err = repo.MarkCandidateRefreshProcessing(ctx, 10, newer.Generation)
+	require.NoError(t, err)
+	require.True(t, processing)
+	affected, current, err := repo.RunCandidateRefresh(ctx, 10, newer.Generation)
+	require.NoError(t, err)
+	require.True(t, current)
+	require.Equal(t, 1, affected)
+	require.NoError(t, db.First(&terminal, 10).Error)
+	require.Equal(t, string(domain.CandidateRefreshNormal), terminal.Status)
+
+	var legacyTableCount int64
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM information_schema.tables
+WHERE table_schema = DATABASE() AND table_name = 'allocation_candidate_refresh_jobs'`).Scan(&legacyTableCount).Error)
+	require.Zero(t, legacyTableCount)
+	requireIndexExists(t, db, "projects", "idx_projects_candidate_refresh_pending")
+}
+
 func TestOwnedAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

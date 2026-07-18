@@ -53,22 +53,19 @@ func TestAdminTokenRefreshRouteRequiresSessionPermissionCSRFAndIdempotency(t *te
 
 func TestAdminTokenRefreshRouteReturnsOpenAPITaskShapeWithoutSecrets(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
-	job := &mailapp.MicrosoftTokenRefreshJob{
-		ID:                         91,
+	state := &mailapp.MicrosoftTokenRefreshState{
 		ResourceID:                 100,
+		Generation:                 3,
 		ExpectedCredentialRevision: 7,
-		Status:                     mailapp.MicrosoftTokenRefreshQueued,
-		Attempts:                   0,
-		MaxAttempts:                3,
-		ClaimToken:                 "claim-token-canary",
-		DispatchToken:              "dispatch-token-canary",
+		Status:                     mailapp.MicrosoftTokenRefreshPending,
+		Failures:                   0,
 		LastSafeError:              "refresh-token-canary",
 		RequestID:                  "internal-request-canary",
 		Path:                       "internal-path-canary",
-		CreatedAt:                  now,
+		RequestedAt:                &now,
 		UpdatedAt:                  now,
 	}
-	router, repo, checker := newAdminTokenRefreshTestRouter(true, job)
+	router, repo, checker := newAdminTokenRefreshTestRouter(true, state)
 	response := performAdminTokenRefreshRequest(router, true, true, true)
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.Equal(t, "core:resource", checker.resource)
@@ -84,14 +81,14 @@ func TestAdminTokenRefreshRouteReturnsOpenAPITaskShapeWithoutSecrets(t *testing.
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	assert.Equal(t, "token:91", body["taskId"])
+	assert.Equal(t, "token:100", body["taskId"])
 	assert.Equal(t, "internal-request-canary", body["requestId"])
 	assert.Equal(t, "queued", body["status"])
 	assert.Equal(t, float64(1), body["accepted"])
 	assert.Equal(t, false, body["reused"])
 	task, ok := body["task"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "token:91", task["taskId"])
+	assert.Equal(t, "token:100", task["taskId"])
 	assert.Equal(t, "microsoft_resource", task["bizType"])
 	assert.Equal(t, "token", task["kind"])
 	assert.Equal(t, "queued", task["status"])
@@ -140,22 +137,22 @@ func TestAdminTokenRefreshRouteUsesSafeErrors(t *testing.T) {
 }
 
 type adminTokenRefreshRepoStub struct {
-	job           *mailapp.MicrosoftTokenRefreshJob
-	createErr     error
-	command       mailapp.MicrosoftTokenRefreshCommand
-	operationLog  *governancedomain.OperationLog
-	releaseCalls  int
-	releasedID    uint64
-	releasedToken string
-	execution     *mailapp.MicrosoftTokenRefreshExecution
-	claimed       bool
+	state              *mailapp.MicrosoftTokenRefreshState
+	createErr          error
+	command            mailapp.MicrosoftTokenRefreshCommand
+	operationLog       *governancedomain.OperationLog
+	releaseCalls       int
+	releasedID         uint
+	releasedGeneration uint64
+	execution          *mailapp.MicrosoftTokenRefreshExecution
+	claimed            bool
 }
 
-func (r *adminTokenRefreshRepoStub) CreateOrReuse(
+func (r *adminTokenRefreshRepoStub) Request(
 	_ context.Context,
 	command mailapp.MicrosoftTokenRefreshCommand,
 	operationLog *governancedomain.OperationLog,
-) (*mailapp.MicrosoftTokenRefreshJob, bool, error) {
+) (*mailapp.MicrosoftTokenRefreshState, bool, error) {
 	r.command = command
 	if operationLog != nil {
 		clone := *operationLog
@@ -164,53 +161,52 @@ func (r *adminTokenRefreshRepoStub) CreateOrReuse(
 	if r.createErr != nil {
 		return nil, false, r.createErr
 	}
-	if r.job == nil {
+	if r.state == nil {
 		now := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
-		return &mailapp.MicrosoftTokenRefreshJob{
-			ID:                         91,
+		return &mailapp.MicrosoftTokenRefreshState{
 			ResourceID:                 command.ResourceID,
+			Generation:                 1,
 			ExpectedCredentialRevision: 7,
-			Status:                     mailapp.MicrosoftTokenRefreshQueued,
-			MaxAttempts:                3,
-			CreatedAt:                  now,
+			Status:                     mailapp.MicrosoftTokenRefreshPending,
+			RequestedAt:                &now,
 			UpdatedAt:                  now,
 		}, false, nil
 	}
-	clone := *r.job
+	clone := *r.state
 	return &clone, false, nil
 }
 
-func (*adminTokenRefreshRepoStub) ClaimDispatchable(context.Context, int, time.Time, time.Time) ([]mailapp.MicrosoftTokenRefreshJob, error) {
+func (*adminTokenRefreshRepoStub) ListPending(context.Context, int) ([]mailapp.MicrosoftTokenRefreshState, error) {
 	return nil, nil
 }
 
-func (*adminTokenRefreshRepoStub) MarkDispatchFailed(context.Context, uint64, string, string) error {
-	return nil
+func (*adminTokenRefreshRepoStub) MarkProcessing(context.Context, uint, uint64) (bool, error) {
+	return true, nil
 }
 
-func (r *adminTokenRefreshRepoStub) ReleaseDispatch(_ context.Context, id uint64, token string) error {
+func (r *adminTokenRefreshRepoStub) ReleaseInfrastructureFailure(_ context.Context, id uint, generation uint64, _ string) (bool, error) {
 	r.releaseCalls++
 	r.releasedID = id
-	r.releasedToken = token
-	return nil
+	r.releasedGeneration = generation
+	return true, nil
 }
 
-func (r *adminTokenRefreshRepoStub) ClaimExecution(context.Context, uint64, string, time.Time) (*mailapp.MicrosoftTokenRefreshExecution, bool, error) {
+func (r *adminTokenRefreshRepoStub) LoadExecution(context.Context, mailapp.MicrosoftTokenRefreshTask) (*mailapp.MicrosoftTokenRefreshExecution, bool, error) {
 	return r.execution, r.claimed, nil
 }
 
-func (*adminTokenRefreshRepoStub) MarkRetryableFailure(context.Context, uint64, string, string) (bool, error) {
+func (*adminTokenRefreshRepoStub) RecordRetryableFailure(context.Context, mailapp.MicrosoftTokenRefreshTask, string) (bool, error) {
 	return false, nil
 }
 
-func (*adminTokenRefreshRepoStub) ApplyResult(context.Context, uint64, string, mailapp.MicrosoftTokenRefreshProtocolResult) error {
+func (*adminTokenRefreshRepoStub) ApplyResult(context.Context, mailapp.MicrosoftTokenRefreshTask, mailapp.MicrosoftTokenRefreshProtocolResult) error {
 	return nil
 }
 
 type adminTokenRefreshQueueStub struct{}
 
-func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefresh(context.Context, mailapp.MicrosoftTokenRefreshTask) error {
-	return nil
+func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefresh(context.Context, mailapp.MicrosoftTokenRefreshTask) (bool, error) {
+	return true, nil
 }
 
 func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context.Context, time.Duration) error {
@@ -219,9 +215,9 @@ func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context
 
 func newAdminTokenRefreshTestRouter(
 	allowed bool,
-	job *mailapp.MicrosoftTokenRefreshJob,
+	state *mailapp.MicrosoftTokenRefreshState,
 ) (*gin.Engine, *adminTokenRefreshRepoStub, *adminAliasExpeditePermissionChecker) {
-	repo := &adminTokenRefreshRepoStub{job: job}
+	repo := &adminTokenRefreshRepoStub{state: state}
 	service := mailapp.NewMicrosoftTokenRefreshService(repo, adminTokenRefreshQueueStub{}, nil)
 	checker := &adminAliasExpeditePermissionChecker{allowed: allowed}
 	router := gin.New()

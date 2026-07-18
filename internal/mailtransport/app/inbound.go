@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -14,16 +15,15 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 )
 
-const inboundProcessingStaleAge = 2 * time.Minute
-
 type InboundMailRepository interface {
 	CreateMany(ctx context.Context, mails []domain.InboundMail) error
 	FindByID(ctx context.Context, id uint) (*domain.InboundMail, error)
-	ClaimProcessing(ctx context.Context, id uint) (bool, error)
-	ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.InboundMail, error)
-	SaveParsedSummary(ctx context.Context, id uint, summary domain.InboundMailSummary) error
-	MarkPending(ctx context.Context, id uint, safeError string) error
-	MarkStored(ctx context.Context, id uint) error
+	ListPending(ctx context.Context, limit int) ([]domain.InboundMail, error)
+	ActivateProcessing(ctx context.Context, id uint, generation uint64) (bool, error)
+	SaveParsedSummary(ctx context.Context, id uint, generation uint64, summary domain.InboundMailSummary) (bool, error)
+	ReleasePending(ctx context.Context, id uint, generation uint64, safeError string) (bool, error)
+	RecordProcessFailure(ctx context.Context, id uint, generation uint64, safeError string, retryable bool) (terminal bool, applied bool, err error)
+	MarkStored(ctx context.Context, id uint, generation uint64) (bool, error)
 	MarkFailed(ctx context.Context, id uint, safeError string) error
 }
 
@@ -32,7 +32,7 @@ type InboundResourceResolver interface {
 }
 
 type InboundMailQueue interface {
-	EnqueueInboundProcess(ctx context.Context, task InboundProcessTask) error
+	EnqueueInboundProcess(ctx context.Context, task InboundProcessTask) (bool, error)
 	EnqueueInboundDispatch(ctx context.Context, delay time.Duration) error
 }
 
@@ -49,6 +49,35 @@ type InboundConsumeRequest struct {
 	ReceivedAt      time.Time
 }
 
+// InboundConsumeFailure marks an explicit business outcome from an inbound
+// consumer. Unknown consumer errors are infrastructure failures and must not
+// consume the business retry budget.
+type InboundConsumeFailure struct {
+	SafeMessage string
+	Retryable   bool
+	Cause       error
+}
+
+func (e *InboundConsumeFailure) Error() string {
+	if e == nil {
+		return "inbound consumer failure"
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	if strings.TrimSpace(e.SafeMessage) != "" {
+		return e.SafeMessage
+	}
+	return "inbound consumer failure"
+}
+
+func (e *InboundConsumeFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 type InboundRawMessage struct {
 	EnvelopeFrom string
 	Recipients   []domain.InboundRecipient
@@ -59,8 +88,8 @@ type InboundRawMessage struct {
 }
 
 type InboundProcessTask struct {
-	InboundMailID uint   `json:"inboundMailId"`
-	ObjectKey     string `json:"objectKey"`
+	InboundMailID     uint   `json:"inboundMailId"`
+	ProcessGeneration uint64 `json:"processGeneration"`
 }
 
 type InboundDispatchResult struct {
@@ -145,10 +174,16 @@ func (s *InboundService) Accept(ctx context.Context, message InboundRawMessage) 
 	}
 
 	for _, mail := range mails {
-		if err := s.enqueueInbound(ctx, InboundProcessTask{InboundMailID: mail.ID, ObjectKey: mail.SourceObjectKey}); err != nil {
-			_ = s.repo.MarkPending(ctx, mail.ID, "Inbound mail task enqueue failed.")
+		accepted, err := s.enqueueInbound(ctx, InboundProcessTask{InboundMailID: mail.ID, ProcessGeneration: mail.ProcessGeneration})
+		if err != nil {
 			writeSystemLog(ctx, s.logs, "error", "mail.inbound_enqueue_failed", "", "inbound_mail", fmt.Sprintf("%d", mail.ID), "Inbound mail task could not be queued.", err)
 			continue
+		}
+		if !accepted {
+			continue
+		}
+		if _, err := s.repo.ActivateProcessing(ctx, mail.ID, mail.ProcessGeneration); err != nil {
+			writeSystemLog(ctx, s.logs, "error", "mail.inbound_activation_failed", "", "inbound_mail", fmt.Sprintf("%d", mail.ID), "Inbound mail task was queued but could not be activated.", err)
 		}
 	}
 	return mails, nil
@@ -176,55 +211,52 @@ func (s *InboundService) saveRawMessage(ctx context.Context, objectKey string, m
 }
 
 func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, finalAttempt bool) error {
-	if task.InboundMailID == 0 || strings.TrimSpace(task.ObjectKey) == "" {
+	if task.InboundMailID == 0 || task.ProcessGeneration == 0 {
 		return fmt.Errorf("%w: inbound mail task invalid", domain.ErrInboundStorageUnavailable)
 	}
 
 	mail, err := s.repo.FindByID(ctx, task.InboundMailID)
 	if err != nil {
-		return err
+		return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail could not be loaded.", err)
 	}
 	if mail == nil {
 		return fmt.Errorf("%w: inbound mail not found", domain.ErrInboundStorageUnavailable)
 	}
-	if mail.Status == domain.InboundStatusStored || mail.Status == domain.InboundStatusFailed {
+	if mail.ProcessGeneration != task.ProcessGeneration || mail.Status == domain.InboundStatusStored || mail.Status == domain.InboundStatusFailed {
 		return nil
 	}
-	if mail.SourceObjectKey != task.ObjectKey {
-		_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail object mismatch.")
-		writeSystemLog(ctx, s.logs, "error", "mail.inbound_object_mismatch", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail task object key mismatched.", "Inbound mail object mismatch.")
-		return nil
-	}
-
-	claimed, err := s.repo.ClaimProcessing(ctx, task.InboundMailID)
-	if err != nil {
-		return err
-	}
-	if !claimed {
-		return nil
-	}
-	file, err := s.files.ReadPrivate(ctx, task.ObjectKey)
-	if err != nil || file == nil {
-		if finalAttempt {
-			_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail object unavailable.")
-			writeSystemLog(ctx, s.logs, "error", "mail.inbound_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing failed.", "private object read failed")
-		} else {
-			_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail object unavailable.")
-			writeSystemLog(ctx, s.logs, "warning", "mail.inbound_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail processing will retry.", "private object read failed")
+	if mail.Status == domain.InboundStatusPending {
+		activated, err := s.repo.ActivateProcessing(ctx, task.InboundMailID, task.ProcessGeneration)
+		if err != nil {
+			return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail could not be activated.", err)
 		}
-		return fmt.Errorf("%w: inbound mail object unavailable", domain.ErrInboundStorageUnavailable)
+		if !activated {
+			mail, err = s.repo.FindByID(ctx, task.InboundMailID)
+			if err != nil {
+				return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail could not be reloaded.", err)
+			}
+			if mail == nil || mail.ProcessGeneration != task.ProcessGeneration || mail.Status != domain.InboundStatusProcessing {
+				return nil
+			}
+		}
+	} else if mail.Status != domain.InboundStatusProcessing {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail processing interrupted.", ctx.Err())
+	}
+	file, err := s.files.ReadPrivate(ctx, mail.SourceObjectKey)
+	if err != nil || file == nil {
+		return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail object unavailable.", fmt.Errorf("%w: inbound mail object unavailable", domain.ErrInboundStorageUnavailable))
 	}
 	if mail.ParsedAt == nil {
 		parsed := parseInboundMessage(file.ContentBytes, mail.CreatedAt)
-		if err := s.repo.SaveParsedSummary(ctx, task.InboundMailID, parsed.Summary); err != nil {
-			if finalAttempt {
-				_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail summary could not be stored.")
-				writeSystemLog(ctx, s.logs, "error", "mail.inbound_summary_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail summary could not be stored.", err)
-			} else {
-				_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail summary could not be stored.")
-				writeSystemLog(ctx, s.logs, "warning", "mail.inbound_summary_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail summary persistence will retry.", err)
-			}
-			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+		applied, err := s.repo.SaveParsedSummary(ctx, task.InboundMailID, task.ProcessGeneration, parsed.Summary)
+		if err != nil {
+			return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail summary could not be stored.", fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error())))
+		}
+		if !applied {
+			return nil
 		}
 	}
 	if mail.ResourceType == domain.InboundResourceDomain && s.consumer != nil {
@@ -236,36 +268,43 @@ func (s *InboundService) Process(ctx context.Context, task InboundProcessTask, f
 			Raw:             file.ContentBytes,
 			ReceivedAt:      mail.CreatedAt,
 		}); err != nil {
-			if finalAttempt {
-				_ = s.repo.MarkFailed(ctx, task.InboundMailID, "Inbound mail match failed.")
-				writeSystemLog(ctx, s.logs, "error", "mail.inbound_match_failed", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail could not be consumed by MailMatch.", err)
-			} else {
-				_ = s.repo.MarkPending(ctx, task.InboundMailID, "Inbound mail match failed.")
-				writeSystemLog(ctx, s.logs, "warning", "mail.inbound_match_retry", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail MailMatch consume will retry.", err)
+			var failure *InboundConsumeFailure
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && errors.As(err, &failure) {
+				return s.inboundBusinessFailure(ctx, task, finalAttempt, failure)
 			}
-			return fmt.Errorf("%w: %s", domain.ErrInboundStorageUnavailable, safeDiagnostic(err.Error()))
+			return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail consumer is temporarily unavailable.", err)
 		}
 	}
-	return s.repo.MarkStored(ctx, task.InboundMailID)
+	if _, err = s.repo.MarkStored(ctx, task.InboundMailID, task.ProcessGeneration); err != nil {
+		return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail completion could not be stored.", err)
+	}
+	return nil
 }
 
 func (s *InboundService) DispatchPending(ctx context.Context, limit int) (*InboundDispatchResult, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	mails, err := s.repo.ClaimDispatchable(ctx, limit, s.now().Add(-inboundProcessingStaleAge))
+	mails, err := s.repo.ListPending(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
 	result := &InboundDispatchResult{Attempted: len(mails)}
 	for _, mail := range mails {
-		if err := s.enqueueInbound(ctx, InboundProcessTask{InboundMailID: mail.ID, ObjectKey: mail.SourceObjectKey}); err != nil {
+		accepted, err := s.enqueueInbound(ctx, InboundProcessTask{InboundMailID: mail.ID, ProcessGeneration: mail.ProcessGeneration})
+		if err != nil {
 			result.Failed++
-			_ = s.repo.MarkPending(ctx, mail.ID, "Inbound mail task enqueue failed.")
 			writeSystemLog(ctx, s.logs, "error", "mail.inbound_dispatch_failed", "", "inbound_mail", fmt.Sprintf("%d", mail.ID), "Inbound mail dispatcher could not queue task.", err)
 			continue
 		}
+		if !accepted {
+			continue
+		}
 		result.Queued++
+		if _, err := s.repo.ActivateProcessing(ctx, mail.ID, mail.ProcessGeneration); err != nil {
+			result.Failed++
+			writeSystemLog(ctx, s.logs, "error", "mail.inbound_activation_failed", "", "inbound_mail", fmt.Sprintf("%d", mail.ID), "Inbound mail task was queued but could not be activated.", err)
+		}
 	}
 	return result, nil
 }
@@ -279,11 +318,45 @@ func (s *InboundService) ScheduleDispatcher(ctx context.Context, delay time.Dura
 	}
 }
 
-func (s *InboundService) enqueueInbound(ctx context.Context, task InboundProcessTask) error {
+func (s *InboundService) enqueueInbound(ctx context.Context, task InboundProcessTask) (bool, error) {
 	if s.queue == nil {
-		return fmt.Errorf("inbound mail queue is unavailable")
+		return false, fmt.Errorf("inbound mail queue is unavailable")
 	}
 	return s.queue.EnqueueInboundProcess(ctx, task)
+}
+
+func (s *InboundService) inboundInfrastructureFailure(ctx context.Context, task InboundProcessTask, finalAttempt bool, reason string, cause error) error {
+	if !finalAttempt {
+		return cause
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	applied, err := s.repo.ReleasePending(cleanupCtx, task.InboundMailID, task.ProcessGeneration, reason)
+	if err != nil {
+		return fmt.Errorf("%w: release inbound mail pending: %s", cause, safeDiagnostic(err.Error()))
+	}
+	if applied {
+		writeSystemLog(cleanupCtx, s.logs, "warning", "mail.inbound_infrastructure_released", "", "inbound_mail", fmt.Sprintf("%d", task.InboundMailID), "Inbound mail was released for retry after infrastructure failure.", cause)
+		s.ScheduleDispatcher(cleanupCtx, 0)
+	}
+	return nil
+}
+
+func (s *InboundService) inboundBusinessFailure(ctx context.Context, task InboundProcessTask, finalAttempt bool, failure *InboundConsumeFailure) error {
+	safeMessage := "Inbound mail could not be consumed."
+	if message := strings.TrimSpace(failure.SafeMessage); message != "" {
+		safeMessage = message
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	terminal, applied, err := s.repo.RecordProcessFailure(persistCtx, task.InboundMailID, task.ProcessGeneration, safeMessage, failure.Retryable)
+	if err != nil {
+		return s.inboundInfrastructureFailure(ctx, task, finalAttempt, "Inbound mail failure state could not be stored.", errors.Join(failure, err))
+	}
+	if applied && !terminal {
+		s.ScheduleDispatcher(persistCtx, time.Second)
+	}
+	return nil
 }
 
 func normalizeEmailAddress(value string) string {

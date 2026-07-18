@@ -135,12 +135,13 @@ func bumpResourceVersionTx(tx *gorm.DB, resourceID uint, now time.Time) error {
 }
 
 type validationCandidateRow struct {
-	ID                 uint
-	ResourceType       string `gorm:"column:resource_type"`
-	OwnerUserID        uint   `gorm:"column:owner_user_id"`
-	CredentialRevision uint64 `gorm:"column:credential_revision"`
-	MicrosoftStatus    string `gorm:"column:microsoft_status"`
-	DomainStatus       string `gorm:"column:domain_status"`
+	ID                   uint
+	ResourceType         string `gorm:"column:resource_type"`
+	OwnerUserID          uint   `gorm:"column:owner_user_id"`
+	CredentialRevision   uint64 `gorm:"column:credential_revision"`
+	ValidationGeneration uint64 `gorm:"column:validation_generation"`
+	MicrosoftStatus      string `gorm:"column:microsoft_status"`
+	DomainStatus         string `gorm:"column:domain_status"`
 }
 
 // Explicit selections skip resources that are unavailable or outside the
@@ -152,7 +153,7 @@ func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, 
 	var rows []validationCandidateRow
 	query := tx.WithContext(ctx).
 		Table("email_resources AS er").
-		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
+		Select("er.id, er.type AS resource_type, er.owner_user_id, COALESCE(ms.credential_revision, 0) AS credential_revision, COALESCE(ms.validation_generation, dr.validation_generation, 0) AS validation_generation, COALESCE(ms.status, '') AS microsoft_status, COALESCE(dr.status, '') AS domain_status").
 		Joins("LEFT JOIN microsoft_resources AS ms ON ms.id = er.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Joins("LEFT JOIN domain_resources AS dr ON dr.id = er.id AND er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("er.id IN ?", ids).
@@ -173,12 +174,12 @@ func selectAvailableValidationCandidatesByIDs(ctx context.Context, tx *gorm.DB, 
 		switch domain.ResourceType(row.ResourceType) {
 		case domain.ResourceTypeMicrosoft:
 			status := domain.MicrosoftResourceStatus(row.MicrosoftStatus)
-			if status == "" || status == domain.MicrosoftStatusDeleted || status == domain.MicrosoftStatusDisabled || status == domain.MicrosoftStatusValidating {
+			if status == "" || status == domain.MicrosoftStatusDeleted || status == domain.MicrosoftStatusDisabled {
 				continue
 			}
 		case domain.ResourceTypeDomain:
 			status := domain.MailDomainStatus(row.DomainStatus)
-			if status == "" || status == domain.DomainStatusDeleted || status == domain.DomainStatusDisabled || status == domain.DomainStatusValidating {
+			if status == "" || status == domain.DomainStatusDeleted || status == domain.DomainStatusDisabled {
 				continue
 			}
 		default:
@@ -202,7 +203,7 @@ func selectValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerU
 
 func selectMicrosoftValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, selection coreapp.ResourceBulkSelection, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := microsoftValidationCandidateQuery(ctx, tx, ownerUserID, selection, afterID, throughID).
-		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.status AS microsoft_status, '' AS domain_status")
+		Select("er.id, er.type AS resource_type, er.owner_user_id, ms.credential_revision AS credential_revision, ms.validation_generation AS validation_generation, ms.status AS microsoft_status, '' AS domain_status")
 
 	var rows []validationCandidateRow
 	q = q.Order("er.id ASC")
@@ -222,7 +223,7 @@ func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUs
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Where("er.id <= ?", throughID).
-		Where("ms.status NOT IN ?", []string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled), string(domain.MicrosoftStatusValidating)})
+		Where("ms.status NOT IN ?", []string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)})
 	if !selection.AdminScope {
 		q = q.Where("er.owner_user_id = ?", ownerUserID)
 	} else if filter.OwnerID > 0 {
@@ -287,7 +288,7 @@ func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUs
 
 func selectDomainValidationCandidatesByFilter(ctx context.Context, tx *gorm.DB, ownerUserID uint, selection coreapp.ResourceBulkSelection, afterID uint, throughID uint, limit int) ([]validationCandidateRow, error) {
 	q := domainValidationCandidateQuery(ctx, tx, ownerUserID, selection, afterID, throughID).
-		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, '' AS microsoft_status, dr.status AS domain_status")
+		Select("er.id, er.type AS resource_type, er.owner_user_id, 0 AS credential_revision, dr.validation_generation AS validation_generation, '' AS microsoft_status, dr.status AS domain_status")
 
 	var rows []validationCandidateRow
 	q = q.Order("er.id ASC")
@@ -308,7 +309,7 @@ func domainValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUserI
 		Where("er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("er.id <= ?", throughID).
 		Where("dr.owner_user_id = er.owner_user_id").
-		Where("dr.status NOT IN ?", []string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled), string(domain.DomainStatusValidating)})
+		Where("dr.status NOT IN ?", []string{string(domain.DomainStatusDeleted), string(domain.DomainStatusDisabled)})
 	if !selection.AdminScope {
 		q = q.Where("er.owner_user_id = ?", ownerUserID)
 	} else if filter.OwnerID > 0 {
@@ -414,12 +415,13 @@ func markValidationCandidatesPendingTx(ctx context.Context, tx *gorm.DB, candida
 			Where("id IN ? AND status NOT IN ?", microsoftIDs[start:end], []string{
 				string(domain.MicrosoftStatusDeleted),
 				string(domain.MicrosoftStatusDisabled),
-				string(domain.MicrosoftStatusValidating),
 			}).
 			Updates(map[string]interface{}{
-				"status":          string(domain.MicrosoftStatusPending),
-				"last_safe_error": "",
-				"updated_at":      now,
+				"status":                string(domain.MicrosoftStatusPending),
+				"validation_generation": gorm.Expr("validation_generation + 1"),
+				"validation_failures":   0,
+				"last_safe_error":       "",
+				"updated_at":            now,
 			})
 		if updated.Error != nil {
 			return fmt.Errorf("mark microsoft resources pending for validation: %w", updated.Error)
@@ -432,50 +434,16 @@ func markValidationCandidatesPendingTx(ctx context.Context, tx *gorm.DB, candida
 			Where("id IN ? AND status NOT IN ?", domainIDs[start:end], []string{
 				string(domain.DomainStatusDeleted),
 				string(domain.DomainStatusDisabled),
-				string(domain.DomainStatusValidating),
 			}).
 			Updates(map[string]interface{}{
-				"status":          string(domain.DomainStatusPending),
-				"last_safe_error": "",
-				"updated_at":      now,
+				"status":                string(domain.DomainStatusPending),
+				"validation_generation": gorm.Expr("validation_generation + 1"),
+				"validation_failures":   0,
+				"last_safe_error":       "",
+				"updated_at":            now,
 			})
 		if updated.Error != nil {
 			return fmt.Errorf("mark domain resources pending for validation: %w", updated.Error)
-		}
-	}
-	return nil
-}
-
-func markValidationCandidatesValidatingTx(ctx context.Context, tx *gorm.DB, candidates []validationCandidateRow) error {
-	microsoftIDs := make([]uint, 0, len(candidates))
-	domainIDs := make([]uint, 0, len(candidates))
-	for _, candidate := range candidates {
-		switch domain.ResourceType(candidate.ResourceType) {
-		case domain.ResourceTypeMicrosoft:
-			microsoftIDs = append(microsoftIDs, candidate.ID)
-		case domain.ResourceTypeDomain:
-			domainIDs = append(domainIDs, candidate.ID)
-		}
-	}
-	now := time.Now().UTC()
-	if len(microsoftIDs) > 0 {
-		if err := tx.WithContext(ctx).Model(&MicrosoftResourceModel{}).
-			Where("id IN ? AND status = ?", microsoftIDs, string(domain.MicrosoftStatusPending)).
-			Updates(map[string]any{
-				"status":     string(domain.MicrosoftStatusValidating),
-				"updated_at": now,
-			}).Error; err != nil {
-			return fmt.Errorf("mark microsoft resources validating: %w", err)
-		}
-	}
-	if len(domainIDs) > 0 {
-		if err := tx.WithContext(ctx).Model(&DomainResourceModel{}).
-			Where("id IN ? AND status = ?", domainIDs, string(domain.DomainStatusPending)).
-			Updates(map[string]any{
-				"status":     string(domain.DomainStatusValidating),
-				"updated_at": now,
-			}).Error; err != nil {
-			return fmt.Errorf("mark domain resources validating: %w", err)
 		}
 	}
 	return nil

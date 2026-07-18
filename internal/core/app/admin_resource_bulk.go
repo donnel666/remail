@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -60,54 +62,63 @@ type AdminResourceBulkSelection struct {
 	Filter      AdminResourceBulkFilterValue   `json:"filter,omitempty"`
 }
 
+// AdminResourceBulkCommand is the acceptance response only. Bulk execution
+// state is deliberately not durable: Redis owns the live cursor while the
+// Microsoft resource rows remain the business source of truth.
 type AdminResourceBulkCommand struct {
-	ID                   uint64
-	OperatorUserID       uint
-	Action               AdminResourceBulkAction
-	Selection            AdminResourceBulkSelection
-	SelectionFingerprint string
-	IdempotencyKey       string
-	MaxResourceID        uint
-	CheckpointResourceID uint
-	Status               string
-	MatchedCount         int
-	ProcessedCount       int
-	AffectedCount        int
-	SkippedCount         int
-	ReasonCounts         map[string]int64
-	Attempts             int
-	MaxAttempts          int
-	ClaimToken           string
-	DispatchToken        string
-	LastSafeError        string
-	RequestID            string
-	Path                 string
-	DispatchedAt         *time.Time
-	StartedAt            *time.Time
-	FinishedAt           *time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	ID             uint64
+	Action         AdminResourceBulkAction
+	Status         string
+	MatchedCount   int
+	ProcessedCount int
+	AffectedCount  int
+	SkippedCount   int
+	ReasonCounts   map[string]int64
+	Attempts       int
+	MaxAttempts    int
+	RequestID      string
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
+// AdminResourceBulkTask is a Redis-only cursor. BatchID identifies the
+// operator/idempotency-key scope; RequestFingerprint detects conflicting
+// replays while the lease is alive.
 type AdminResourceBulkTask struct {
-	CommandID     uint64 `json:"commandId"`
-	DispatchToken string `json:"dispatchToken"`
+	BatchID            string                     `json:"batchId"`
+	ClaimToken         string                     `json:"claimToken,omitempty"`
+	RequestFingerprint string                     `json:"requestFingerprint"`
+	CommandID          uint64                     `json:"commandId"`
+	Action             AdminResourceBulkAction    `json:"action"`
+	Selection          AdminResourceBulkSelection `json:"selection"`
+	AfterID            uint                       `json:"afterId"`
+	ThroughID          uint                       `json:"throughId"`
+	OperatorUserID     uint                       `json:"operatorUserId"`
+	RequestID          string                     `json:"requestId"`
+	Path               string                     `json:"path"`
 }
 
+type AdminResourceBulkPageResult struct {
+	Affected  int
+	Skipped   int
+	AfterID   uint
+	ThroughID uint
+	Done      bool
+}
+
+// AdminResourceBulkRepository performs read-only, bounded candidate paging.
+// It stores no task or progress rows.
 type AdminResourceBulkRepository interface {
-	CreateWithLog(ctx context.Context, command *AdminResourceBulkCommand, log *governancedomain.OperationLog) (bool, error)
-	FindByID(ctx context.Context, id uint64) (*AdminResourceBulkCommand, error)
-	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]AdminResourceBulkCommand, error)
-	MarkRunning(ctx context.Context, id uint64, dispatchToken string) (*AdminResourceBulkCommand, bool, error)
-	ListCandidateIDs(ctx context.Context, command *AdminResourceBulkCommand, limit int, now time.Time) ([]uint, error)
-	CompletePage(ctx context.Context, id uint64, claimToken string, checkpoint uint, matched, processed, affected, skipped int, reasons map[string]int64, done bool) error
-	MarkRetryableFailure(ctx context.Context, id uint64, claimToken, safeError string) (bool, error)
-	MarkDispatchFailed(ctx context.Context, id uint64, dispatchToken, safeError string) error
+	MaxCandidateID(ctx context.Context, filter AdminResourceBulkFilterValue, now time.Time) (uint, error)
+	ListCandidateIDs(ctx context.Context, filter AdminResourceBulkFilterValue, afterID, throughID uint, limit int, now time.Time) ([]uint, error)
 }
 
 type AdminResourceBulkQueue interface {
-	EnqueueAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) error
-	EnqueueAdminResourceBulkDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) (accepted bool, err error)
+	RefreshAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) (owned bool, err error)
+	ReleaseAdminResourceBulk(ctx context.Context, task AdminResourceBulkTask) error
 }
 
 type AdminResourceMaintenanceCommand struct {
@@ -119,10 +130,6 @@ type AdminResourceMaintenanceCommand struct {
 	Path           string
 }
 
-// AdminResourceMaintenancePort submits work to the existing MailTransport or
-// MailMatch task lifecycle. Expected per-resource conflicts are returned as a
-// safe skip reason; transient infrastructure failures remain errors so the
-// durable bulk page can retry with the same child idempotency keys.
 type AdminResourceMaintenancePort interface {
 	SubmitAdminResourceMaintenance(ctx context.Context, command AdminResourceMaintenanceCommand) (skipReason string, err error)
 }
@@ -138,8 +145,6 @@ type AdminResourceBulkService struct {
 const (
 	AdminResourceBulkMaxExplicitIDs = 1000
 	adminResourceBulkPageSize       = 100
-	adminResourceBulkRunningStale   = 20 * time.Minute
-	adminResourceBulkDispatchLease  = time.Hour
 )
 
 func NewAdminResourceBulkService(repo AdminResourceBulkRepository, queue AdminResourceBulkQueue, commands *AdminResourceCommandService) *AdminResourceBulkService {
@@ -160,15 +165,10 @@ func (s *AdminResourceBulkService) Submit(ctx context.Context, action AdminResou
 	if err != nil {
 		return nil, false, err
 	}
-	if normalized.Mode == AdminResourceBulkFilter && action == "disable" {
-		return nil, false, domain.ErrInvalidResourceCommand
-	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey == "" || len(idempotencyKey) > 128 {
 		return nil, false, domain.ErrInvalidResourceCommand
 	}
-	// The fingerprint represents the caller's request. The owner IDs resolved
-	// below are an internal execution snapshot and may change between retries.
 	fingerprint, err := adminBulkFingerprint(action, normalized)
 	if err != nil {
 		return nil, false, err
@@ -189,169 +189,191 @@ func (s *AdminResourceBulkService) Submit(ctx context.Context, action AdminResou
 		}
 		normalized.Filter.OwnerIDs = uniqueAdminResourceIDs(ownerIDs)
 	}
-	command := &AdminResourceBulkCommand{
-		OperatorUserID: operatorUserID, Action: action, Selection: normalized,
-		SelectionFingerprint: fingerprint, IdempotencyKey: idempotencyKey,
-		Status: "queued", MaxAttempts: 3, ReasonCounts: map[string]int64{},
-		RequestID: strings.TrimSpace(requestID), Path: strings.TrimSpace(path),
+
+	identity := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", operatorUserID, idempotencyKey)))
+	task := AdminResourceBulkTask{
+		BatchID:            "admin-resource-bulk:" + hex.EncodeToString(identity[:]),
+		RequestFingerprint: fingerprint,
+		CommandID:          binary.BigEndian.Uint64(identity[:8]),
+		Action:             action,
+		Selection:          normalized,
+		OperatorUserID:     operatorUserID,
+		RequestID:          strings.TrimSpace(requestID),
+		Path:               strings.TrimSpace(path),
 	}
-	created, err := s.repo.CreateWithLog(ctx, command, &governancedomain.OperationLog{
-		OperatorUserID: operatorUserID,
-		OperationType:  "core.admin_resource." + string(action) + "_bulk",
-		ResourceType:   "microsoft_resource",
-		ResourceID:     string(normalized.Mode),
-		Path:           strings.TrimSpace(path),
-		Result:         "success",
-		SafeSummary:    "Microsoft resource batch command accepted.",
-		RequestID:      strings.TrimSpace(requestID),
-	})
+	if task.CommandID == 0 {
+		task.CommandID = 1
+	}
+	accepted, err := s.queue.EnqueueAdminResourceBulk(ctx, task)
 	if err != nil {
 		return nil, false, err
 	}
-	if created {
-		s.ScheduleDispatcher(ctx, 0)
-	}
-	return command, !created, nil
-}
-
-func (s *AdminResourceBulkService) Get(ctx context.Context, commandID uint64) (*AdminResourceBulkCommand, error) {
-	if s == nil || s.repo == nil || commandID == 0 {
-		return nil, domain.ErrResourceNotFound
-	}
-	command, err := s.repo.FindByID(ctx, commandID)
-	if err != nil {
-		return nil, err
-	}
-	if command == nil {
-		return nil, domain.ErrResourceNotFound
-	}
-	return command, nil
-}
-
-func (s *AdminResourceBulkService) DispatchPending(ctx context.Context, limit int) error {
-	if s == nil || s.repo == nil || s.queue == nil {
-		return domain.ErrResourceDependency
-	}
-	if limit <= 0 {
-		limit = 32
+	if accepted && s.commands.logs != nil {
+		if logErr := s.commands.logs.Create(ctx, &governancedomain.OperationLog{
+			OperatorUserID: operatorUserID,
+			OperationType:  "core.admin_resource." + string(action) + "_bulk",
+			ResourceType:   "microsoft_resource",
+			ResourceID:     "batch",
+			Path:           task.Path,
+			Result:         "success",
+			SafeSummary:    "Microsoft resource batch command accepted.",
+			RequestID:      task.RequestID,
+		}); logErr != nil {
+			slog.Warn("admin Microsoft bulk acceptance audit log failed", "operator_user_id", operatorUserID, "action", action, "error", logErr)
+		}
 	}
 	now := s.now()
-	commands, err := s.repo.ClaimDispatchable(ctx, limit, now.Add(-adminResourceBulkRunningStale), now.Add(-adminResourceBulkDispatchLease))
-	if err != nil {
-		return err
+	matched := 0
+	if normalized.Mode == AdminResourceBulkIDs {
+		matched = len(normalized.ResourceIDs)
 	}
-	var result error
-	for i := range commands {
-		err := s.queue.EnqueueAdminResourceBulk(ctx, AdminResourceBulkTask{CommandID: commands[i].ID, DispatchToken: commands[i].DispatchToken})
-		if err == nil {
-			continue
-		}
-		result = errors.Join(result, err)
-		if releaseErr := s.repo.MarkDispatchFailed(ctx, commands[i].ID, commands[i].DispatchToken, "Batch queue is temporarily unavailable."); releaseErr != nil {
-			result = errors.Join(result, releaseErr)
-		}
-	}
-	return result
+	return &AdminResourceBulkCommand{
+		ID: task.CommandID, Action: action, Status: "queued", MatchedCount: matched,
+		ReasonCounts: map[string]int64{}, MaxAttempts: 1, RequestID: task.RequestID,
+		CreatedAt: now, UpdatedAt: now,
+	}, !accepted, nil
 }
 
 func (s *AdminResourceBulkService) Process(ctx context.Context, task AdminResourceBulkTask) error {
-	if s == nil || s.repo == nil || s.commands == nil || task.CommandID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if s == nil || s.repo == nil || s.queue == nil || s.commands == nil || strings.TrimSpace(task.BatchID) == "" ||
+		strings.TrimSpace(task.ClaimToken) == "" || strings.TrimSpace(task.RequestFingerprint) == "" || task.OperatorUserID == 0 || !validAdminBulkAction(task.Action) {
 		return domain.ErrInvalidResourceCommand
 	}
-	command, claimed, err := s.repo.MarkRunning(ctx, task.CommandID, task.DispatchToken)
-	if err != nil || !claimed {
+	owned, err := s.queue.RefreshAdminResourceBulk(ctx, task)
+	if err != nil || !owned {
 		return err
 	}
-	ids, err := s.repo.ListCandidateIDs(ctx, command, adminResourceBulkPageSize, s.now())
+	page, err := s.applyPage(ctx, task, adminResourceBulkPageSize)
 	if err != nil {
-		return s.retry(ctx, command, err)
+		return err
+	}
+	if page.Done {
+		return s.queue.ReleaseAdminResourceBulk(ctx, task)
+	}
+	task.AfterID = page.AfterID
+	task.ThroughID = page.ThroughID
+	_, err = s.queue.EnqueueAdminResourceBulk(ctx, task)
+	return err
+}
+
+func (s *AdminResourceBulkService) applyPage(ctx context.Context, task AdminResourceBulkTask, limit int) (*AdminResourceBulkPageResult, error) {
+	result := &AdminResourceBulkPageResult{AfterID: task.AfterID, ThroughID: task.ThroughID}
+	var ids []uint
+	var err error
+	switch task.Selection.Mode {
+	case AdminResourceBulkIDs:
+		ids = adminResourceBulkIDPage(task.Selection.ResourceIDs, task.AfterID, limit+1)
+	case AdminResourceBulkFilter:
+		if result.ThroughID == 0 {
+			result.ThroughID, err = s.repo.MaxCandidateID(ctx, task.Selection.Filter, s.now())
+			if err != nil {
+				return nil, err
+			}
+			if result.ThroughID == 0 {
+				result.Done = true
+				return result, nil
+			}
+		}
+		ids, err = s.repo.ListCandidateIDs(ctx, task.Selection.Filter, task.AfterID, result.ThroughID, limit+1, s.now())
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, domain.ErrInvalidResourceCommand
+	}
+	result.Done = len(ids) <= limit
+	if len(ids) > limit {
+		ids = ids[:limit]
 	}
 	if len(ids) == 0 {
-		return s.repo.CompletePage(ctx, command.ID, command.ClaimToken, command.CheckpointResourceID, 0, 0, 0, 0, command.ReasonCounts, true)
+		result.Done = true
+		return result, nil
 	}
-	reasons := cloneAdminBulkReasons(command.ReasonCounts)
-	affected, skipped := 0, 0
 	checkpoint := ids[len(ids)-1]
-	done := len(ids) < adminResourceBulkPageSize
-	// Both explicit-ID and filter selections capture their matched total at
-	// acceptance time (repo CreateWithLog), so per-page processing must never
-	// re-add matches or the command would report roughly double the real count.
-	matched := 0
-	if isAdminResourceMaintenanceAction(command.Action) {
+	if checkpoint <= task.AfterID {
+		return nil, fmt.Errorf("admin resource bulk batch made no progress past id %d", task.AfterID)
+	}
+
+	if isAdminResourceMaintenanceAction(task.Action) {
 		if s.maintenance == nil {
-			return s.retry(ctx, command, domain.ErrResourceDependency)
+			return nil, domain.ErrResourceDependency
 		}
 		for _, resourceID := range ids {
-			reason, eligibilityErr := s.commands.maintenanceEligibilityForBulk(ctx, command.Action, resourceID)
+			reason, eligibilityErr := s.commands.maintenanceEligibilityForBulk(ctx, task.Action, resourceID)
 			if eligibilityErr != nil {
-				return s.retry(ctx, command, eligibilityErr)
+				return nil, eligibilityErr
 			}
 			if reason != "" {
-				skipped++
-				reasons[reason]++
+				result.Skipped++
 				continue
 			}
 			reason, itemErr := s.maintenance.SubmitAdminResourceMaintenance(ctx, AdminResourceMaintenanceCommand{
-				Action:         command.Action,
-				ResourceID:     resourceID,
-				OperatorUserID: command.OperatorUserID,
-				IdempotencyKey: fmt.Sprintf("bulk:%d:%s:%d", command.ID, command.Action, resourceID),
-				RequestID:      command.RequestID,
-				Path:           command.Path,
+				Action: task.Action, ResourceID: resourceID, OperatorUserID: task.OperatorUserID,
+				IdempotencyKey: fmt.Sprintf("bulk:%d:%s:%d", task.CommandID, task.Action, resourceID),
+				RequestID:      task.RequestID, Path: task.Path,
 			})
 			if itemErr != nil {
-				return s.retry(ctx, command, itemErr)
+				return nil, itemErr
 			}
 			if reason == "" {
-				affected++
-				continue
+				result.Affected++
+			} else {
+				result.Skipped++
 			}
-			skipped++
-			reasons[reason]++
 		}
-		if err := s.repo.CompletePage(ctx, command.ID, command.ClaimToken, checkpoint, matched, len(ids), affected, skipped, reasons, done); err != nil {
-			return s.retry(ctx, command, err)
-		}
-		if !done {
-			s.ScheduleDispatcher(ctx, 0)
-		}
-		return nil
+		result.AfterID = checkpoint
+		return result, nil
 	}
+
 	err = s.commands.repo.WithTx(ctx, func(txCtx context.Context) error {
 		for _, resourceID := range ids {
 			var changed bool
-			var reason string
 			var itemErr error
-			if command.Action == AdminResourceBulkValidate {
-				changed, reason, itemErr = s.commands.validateOneForBulk(txCtx, resourceID)
+			if task.Action == AdminResourceBulkValidate {
+				changed, _, itemErr = s.commands.validateOneForBulk(txCtx, resourceID)
 			} else {
-				changed, reason, itemErr = s.commands.applyStateOneForBulk(txCtx, AdminMicrosoftStateCommand(command.Action), resourceID)
+				changed, _, itemErr = s.commands.applyStateOneForBulk(txCtx, AdminMicrosoftStateCommand(task.Action), resourceID)
 			}
 			if itemErr != nil {
 				return itemErr
 			}
 			if changed {
-				affected++
+				result.Affected++
 			} else {
-				skipped++
-				if reason == "" {
-					reason = "not_changed"
-				}
-				reasons[reason]++
+				result.Skipped++
 			}
 		}
-		return s.repo.CompletePage(txCtx, command.ID, command.ClaimToken, checkpoint, matched, len(ids), affected, skipped, reasons, done)
+		return nil
 	})
 	if err != nil {
-		return s.retry(ctx, command, err)
+		return nil, err
 	}
-	if command.Action == AdminResourceBulkValidate && affected > 0 && s.commands.validation != nil {
+	if task.Action == AdminResourceBulkValidate && result.Affected > 0 && s.commands.validation != nil {
 		s.commands.validation.ScheduleDispatcher(ctx, 0)
 	}
-	if !done {
-		s.ScheduleDispatcher(ctx, 0)
+	result.AfterID = checkpoint
+	return result, nil
+}
+
+func (s *AdminResourceBulkService) ReleaseBatch(ctx context.Context, task AdminResourceBulkTask) error {
+	if s == nil || s.queue == nil {
+		return nil
 	}
-	return nil
+	return s.queue.ReleaseAdminResourceBulk(ctx, task)
+}
+
+func adminResourceBulkIDPage(ids []uint, afterID uint, limit int) []uint {
+	page := make([]uint, 0, limit)
+	for _, id := range ids {
+		if id <= afterID {
+			continue
+		}
+		page = append(page, id)
+		if len(page) == limit {
+			break
+		}
+	}
+	return page
 }
 
 func (s *AdminResourceCommandService) maintenanceEligibilityForBulk(ctx context.Context, action AdminResourceBulkAction, resourceID uint) (string, error) {
@@ -395,35 +417,6 @@ func (s *AdminResourceCommandService) maintenanceEligibilityForBulk(ctx context.
 		return "", err
 	}
 	return reason, nil
-}
-
-// ReleaseDispatch returns a fenced, not-yet-started command to its durable
-// dispatcher. It is only needed while draining Asynq messages created by older
-// releases with MaxRetry(0).
-func (s *AdminResourceBulkService) ReleaseDispatch(ctx context.Context, task AdminResourceBulkTask) error {
-	if s == nil || s.repo == nil || task.CommandID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
-		return nil
-	}
-	return s.repo.MarkDispatchFailed(ctx, task.CommandID, task.DispatchToken, "")
-}
-
-func (s *AdminResourceBulkService) retry(ctx context.Context, command *AdminResourceBulkCommand, cause error) error {
-	exhausted, err := s.repo.MarkRetryableFailure(ctx, command.ID, command.ClaimToken, "Batch processing failed temporarily.")
-	if err != nil {
-		return err
-	}
-	if !exhausted {
-		s.ScheduleDispatcher(ctx, time.Second)
-		return nil
-	}
-	return cause
-}
-
-func (s *AdminResourceBulkService) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
-	if s == nil || s.queue == nil {
-		return
-	}
-	_ = s.queue.EnqueueAdminResourceBulkDispatcher(ctx, delay)
 }
 
 func (s *AdminResourceCommandService) validateOneForBulk(ctx context.Context, resourceID uint) (bool, string, error) {
@@ -521,13 +514,8 @@ func (s *AdminResourceCommandService) applyStateOneForBulk(ctx context.Context, 
 
 func validAdminBulkAction(action AdminResourceBulkAction) bool {
 	switch action {
-	case AdminResourceBulkValidate,
-		AdminResourceBulkAlias,
-		AdminResourceBulkHistory,
-		AdminResourceBulkToken,
-		AdminResourceBulkPublish,
-		AdminResourceBulkUnpublish,
-		AdminResourceBulkDelete:
+	case AdminResourceBulkValidate, AdminResourceBulkAlias, AdminResourceBulkHistory, AdminResourceBulkToken,
+		AdminResourceBulkPublish, AdminResourceBulkUnpublish, AdminResourceBulkDelete:
 		return true
 	default:
 		return false
@@ -581,12 +569,4 @@ func adminBulkFingerprint(action AdminResourceBulkAction, selection AdminResourc
 	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
-}
-
-func cloneAdminBulkReasons(values map[string]int64) map[string]int64 {
-	result := make(map[string]int64, len(values))
-	for key, value := range values {
-		result[key] = value
-	}
-	return result
 }

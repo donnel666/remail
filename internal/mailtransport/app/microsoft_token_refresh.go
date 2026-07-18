@@ -12,16 +12,12 @@ import (
 )
 
 const (
-	MicrosoftTokenRefreshQueued    = "queued"
-	MicrosoftTokenRefreshRunning   = "running"
-	MicrosoftTokenRefreshSucceeded = "succeeded"
-	MicrosoftTokenRefreshFailed    = "failed"
-	MicrosoftTokenRefreshCanceled  = "canceled"
+	MicrosoftTokenRefreshPending    = "pending"
+	MicrosoftTokenRefreshProcessing = "processing"
+	MicrosoftTokenRefreshNormal     = "normal"
+	MicrosoftTokenRefreshAbnormal   = "abnormal"
 
 	MicrosoftTokenRefreshDefaultMaxAttempts = 3
-
-	microsoftTokenRefreshRunningStaleAfter = 20 * time.Minute
-	microsoftTokenRefreshDispatchLease     = 4 * time.Hour
 )
 
 var (
@@ -34,23 +30,20 @@ var (
 	ErrMicrosoftTokenRefreshStale        = errors.New("microsoft token refresh result is stale")
 )
 
-type MicrosoftTokenRefreshJob struct {
-	ID                         uint64
+type MicrosoftTokenRefreshState struct {
 	ResourceID                 uint
+	Generation                 uint64
 	OperatorUserID             uint
 	ExpectedCredentialRevision uint64
 	Status                     string
-	Attempts                   int
-	MaxAttempts                int
-	ClaimToken                 string
-	DispatchToken              string
+	Failures                   int
 	LastSafeError              string
+	IdempotencyKey             string
 	RequestID                  string
 	Path                       string
-	DispatchedAt               *time.Time
+	RequestedAt                *time.Time
 	StartedAt                  *time.Time
 	FinishedAt                 *time.Time
-	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
 
@@ -63,14 +56,14 @@ type MicrosoftTokenRefreshCommand struct {
 }
 
 type MicrosoftTokenRefreshTask struct {
-	JobID         uint64 `json:"jobId"`
-	ResourceID    uint   `json:"resourceId"`
-	DispatchToken string `json:"dispatchToken"`
-	RequestID     string `json:"requestId"`
+	ResourceID                 uint   `json:"resourceId"`
+	Generation                 uint64 `json:"generation"`
+	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
+	RequestID                  string `json:"requestId"`
 }
 
 type MicrosoftTokenRefreshExecution struct {
-	Job          MicrosoftTokenRefreshJob
+	State        MicrosoftTokenRefreshState
 	EmailAddress string
 	ClientID     string
 	RefreshToken string
@@ -93,17 +86,17 @@ type MicrosoftTokenRefreshProtocolResult struct {
 }
 
 type MicrosoftTokenRefreshRepository interface {
-	CreateOrReuse(ctx context.Context, command MicrosoftTokenRefreshCommand, operationLog *governancedomain.OperationLog) (*MicrosoftTokenRefreshJob, bool, error)
-	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore, dispatchStaleBefore time.Time) ([]MicrosoftTokenRefreshJob, error)
-	MarkDispatchFailed(ctx context.Context, id uint64, dispatchToken, safeError string) error
-	ReleaseDispatch(ctx context.Context, id uint64, dispatchToken string) error
-	ClaimExecution(ctx context.Context, id uint64, dispatchToken string, runningStaleBefore time.Time) (*MicrosoftTokenRefreshExecution, bool, error)
-	MarkRetryableFailure(ctx context.Context, id uint64, claimToken, safeError string) (bool, error)
-	ApplyResult(ctx context.Context, id uint64, claimToken string, result MicrosoftTokenRefreshProtocolResult) error
+	Request(ctx context.Context, command MicrosoftTokenRefreshCommand, operationLog *governancedomain.OperationLog) (*MicrosoftTokenRefreshState, bool, error)
+	ListPending(ctx context.Context, limit int) ([]MicrosoftTokenRefreshState, error)
+	MarkProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error)
+	ReleaseInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string) (bool, error)
+	LoadExecution(ctx context.Context, task MicrosoftTokenRefreshTask) (*MicrosoftTokenRefreshExecution, bool, error)
+	RecordRetryableFailure(ctx context.Context, task MicrosoftTokenRefreshTask, safeError string) (abnormal bool, err error)
+	ApplyResult(ctx context.Context, task MicrosoftTokenRefreshTask, result MicrosoftTokenRefreshProtocolResult) error
 }
 
 type MicrosoftTokenRefreshQueue interface {
-	EnqueueMicrosoftTokenRefresh(ctx context.Context, task MicrosoftTokenRefreshTask) error
+	EnqueueMicrosoftTokenRefresh(ctx context.Context, task MicrosoftTokenRefreshTask) (bool, error)
 	EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -115,16 +108,10 @@ type MicrosoftTokenRefreshService struct {
 	repo      MicrosoftTokenRefreshRepository
 	queue     MicrosoftTokenRefreshQueue
 	refresher MicrosoftTokenRefresher
-	now       func() time.Time
 }
 
 func NewMicrosoftTokenRefreshService(repo MicrosoftTokenRefreshRepository, queue MicrosoftTokenRefreshQueue, refresher MicrosoftTokenRefresher) *MicrosoftTokenRefreshService {
-	return &MicrosoftTokenRefreshService{
-		repo:      repo,
-		queue:     queue,
-		refresher: refresher,
-		now:       func() time.Time { return time.Now().UTC() },
-	}
+	return &MicrosoftTokenRefreshService{repo: repo, queue: queue, refresher: refresher}
 }
 
 func (s *MicrosoftTokenRefreshService) Accept(ctx context.Context, command MicrosoftTokenRefreshCommand) (*AdminTaskAcceptedResult, error) {
@@ -137,7 +124,7 @@ func (s *MicrosoftTokenRefreshService) Accept(ctx context.Context, command Micro
 	if command.ResourceID == 0 || command.OperatorUserID == 0 || command.IdempotencyKey == "" || len(command.IdempotencyKey) > 128 {
 		return nil, ErrInvalidMicrosoftTokenRefresh
 	}
-	job, reused, err := s.repo.CreateOrReuse(ctx, command, &governancedomain.OperationLog{
+	state, reused, err := s.repo.Request(ctx, command, &governancedomain.OperationLog{
 		OperatorUserID: command.OperatorUserID,
 		OperationType:  "mailtransport.microsoft_token_refresh.accept",
 		ResourceType:   "microsoft_resource",
@@ -152,7 +139,7 @@ func (s *MicrosoftTokenRefreshService) Accept(ctx context.Context, command Micro
 	}
 	s.ScheduleDispatcher(ctx, 0)
 	return &AdminTaskAcceptedResult{
-		Task: microsoftTokenRefreshTaskView(*job), RequestID: job.RequestID, Reused: reused,
+		Task: microsoftTokenRefreshTaskView(*state), RequestID: state.RequestID, Reused: reused,
 	}, nil
 }
 
@@ -169,97 +156,113 @@ func (s *MicrosoftTokenRefreshService) DispatchPending(ctx context.Context, limi
 	if limit <= 0 {
 		limit = 32
 	}
-	now := s.now().UTC()
-	jobs, err := s.repo.ClaimDispatchable(
-		ctx,
-		limit,
-		now.Add(-microsoftTokenRefreshRunningStaleAfter),
-		now.Add(-microsoftTokenRefreshDispatchLease),
-	)
+	states, err := s.repo.ListPending(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
-	result := &MicrosoftTokenRefreshDispatchResult{Attempted: len(jobs)}
+	result := &MicrosoftTokenRefreshDispatchResult{Attempted: len(states)}
 	var dispatchErr error
-	for i := range jobs {
-		job := jobs[i]
-		if err := s.queue.EnqueueMicrosoftTokenRefresh(ctx, MicrosoftTokenRefreshTask{
-			JobID:         job.ID,
-			ResourceID:    job.ResourceID,
-			DispatchToken: job.DispatchToken,
-			RequestID:     job.RequestID,
-		}); err != nil {
+	for _, state := range states {
+		task := MicrosoftTokenRefreshTask{
+			ResourceID:                 state.ResourceID,
+			Generation:                 state.Generation,
+			ExpectedCredentialRevision: state.ExpectedCredentialRevision,
+			RequestID:                  state.RequestID,
+		}
+		accepted, enqueueErr := s.queue.EnqueueMicrosoftTokenRefresh(ctx, task)
+		if enqueueErr != nil {
 			result.Failed++
-			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("enqueue microsoft token refresh %d: %w", job.ID, err))
-			if releaseErr := s.repo.MarkDispatchFailed(ctx, job.ID, job.DispatchToken, "Microsoft token refresh queue is unavailable; dispatcher will retry."); releaseErr != nil {
-				dispatchErr = errors.Join(dispatchErr, fmt.Errorf("release microsoft token refresh %d: %w", job.ID, releaseErr))
-			}
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("enqueue microsoft token refresh %d: %w", state.ResourceID, enqueueErr))
 			continue
 		}
-		result.Queued++
+		if !accepted {
+			continue
+		}
+		processing, processingErr := s.repo.MarkProcessing(ctx, state.ResourceID, state.Generation)
+		if processingErr != nil {
+			result.Failed++
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("activate microsoft token refresh %d: %w", state.ResourceID, processingErr))
+			continue
+		}
+		if processing {
+			result.Queued++
+		}
 	}
 	return result, dispatchErr
 }
 
 func (s *MicrosoftTokenRefreshService) Process(ctx context.Context, task MicrosoftTokenRefreshTask) error {
-	if s == nil || s.repo == nil || task.JobID == 0 {
+	if s == nil || s.repo == nil || task.ResourceID == 0 || task.Generation == 0 {
 		return ErrMicrosoftTokenRefreshNotFound
 	}
-	if strings.TrimSpace(task.DispatchToken) == "" {
-		return nil
-	}
-	execution, claimed, err := s.repo.ClaimExecution(
-		ctx,
-		task.JobID,
-		task.DispatchToken,
-		s.now().UTC().Add(-microsoftTokenRefreshRunningStaleAfter),
-	)
-	if err != nil || !claimed || execution == nil {
+	if _, err := s.repo.MarkProcessing(ctx, task.ResourceID, task.Generation); err != nil {
 		return err
 	}
-	result := MicrosoftTokenRefreshProtocolResult{
-		Category:    "request",
-		SafeMessage: "Microsoft mail service is temporarily unavailable.",
+	execution, current, err := s.repo.LoadExecution(ctx, task)
+	if err != nil {
+		s.releaseInfrastructureFailure(ctx, task)
+		return err
 	}
-	if s.refresher != nil {
-		result, err = s.refresher.RefreshMicrosoftToken(ctx, MicrosoftTokenRefreshProtocolRequest{
-			ResourceID:   execution.Job.ResourceID,
-			EmailAddress: execution.EmailAddress,
-			ClientID:     execution.ClientID,
-			RefreshToken: execution.RefreshToken,
-			RequestID:    execution.Job.RequestID,
-		})
-		if err != nil {
-			result = MicrosoftTokenRefreshProtocolResult{
-				Category:    "request",
-				SafeMessage: "Microsoft mail service is temporarily unavailable.",
-			}
-		}
+	if !current || execution == nil {
+		return nil
+	}
+	if s.refresher == nil {
+		s.releaseInfrastructureFailure(ctx, task)
+		return ErrMicrosoftTokenRefreshUnavailable
+	}
+	result, err := s.refresher.RefreshMicrosoftToken(ctx, MicrosoftTokenRefreshProtocolRequest{
+		ResourceID:   execution.State.ResourceID,
+		EmailAddress: execution.EmailAddress,
+		ClientID:     execution.ClientID,
+		RefreshToken: execution.RefreshToken,
+		RequestID:    execution.State.RequestID,
+	})
+	if err != nil {
+		s.releaseInfrastructureFailure(ctx, task)
+		return err
 	}
 	result.Category = normalizeMicrosoftTokenRefreshCategory(result.Category)
 	result.SafeMessage = microsoftTokenRefreshSafeMessage(result.Valid, result.Category)
 	if !result.Valid && isRetryableMicrosoftTokenRefreshCategory(result.Category) {
-		exhausted, retryErr := s.repo.MarkRetryableFailure(ctx, execution.Job.ID, execution.Job.ClaimToken, result.SafeMessage)
+		abnormal, retryErr := s.repo.RecordRetryableFailure(ctx, task, result.SafeMessage)
 		if retryErr != nil {
+			if errors.Is(retryErr, ErrMicrosoftTokenRefreshUnavailable) {
+				s.releaseInfrastructureFailure(ctx, task)
+			}
 			return retryErr
 		}
-		if !exhausted {
+		if !abnormal {
 			s.ScheduleDispatcher(ctx, time.Second)
 		}
 		return nil
 	}
-	err = s.repo.ApplyResult(ctx, execution.Job.ID, execution.Job.ClaimToken, result)
+	err = s.repo.ApplyResult(ctx, task, result)
 	if errors.Is(err, ErrMicrosoftTokenRefreshStale) {
 		return nil
+	}
+	if errors.Is(err, ErrMicrosoftTokenRefreshUnavailable) {
+		s.releaseInfrastructureFailure(ctx, task)
 	}
 	return err
 }
 
 func (s *MicrosoftTokenRefreshService) ReleaseDispatch(ctx context.Context, task MicrosoftTokenRefreshTask) error {
-	if s == nil || s.repo == nil || task.JobID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if s == nil || s.repo == nil || task.ResourceID == 0 || task.Generation == 0 {
 		return nil
 	}
-	return s.repo.ReleaseDispatch(ctx, task.JobID, task.DispatchToken)
+	_, err := s.repo.ReleaseInfrastructureFailure(ctx, task.ResourceID, task.Generation, "")
+	return err
+}
+
+func (s *MicrosoftTokenRefreshService) releaseInfrastructureFailure(ctx context.Context, task MicrosoftTokenRefreshTask) {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, _ = s.repo.ReleaseInfrastructureFailure(
+		releaseCtx,
+		task.ResourceID,
+		task.Generation,
+		"Microsoft token refresh infrastructure failed; dispatcher will retry.",
+	)
 }
 
 func (s *MicrosoftTokenRefreshService) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
@@ -269,25 +272,38 @@ func (s *MicrosoftTokenRefreshService) ScheduleDispatcher(ctx context.Context, d
 	_ = s.queue.EnqueueMicrosoftTokenRefreshDispatcher(ctx, delay)
 }
 
-func microsoftTokenRefreshTaskView(job MicrosoftTokenRefreshJob) governanceapp.AdminTaskView {
-	revision := job.ExpectedCredentialRevision
-	maxAttempts := job.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = MicrosoftTokenRefreshDefaultMaxAttempts
+func microsoftTokenRefreshTaskView(state MicrosoftTokenRefreshState) governanceapp.AdminTaskView {
+	revision := state.ExpectedCredentialRevision
+	queuedAt := state.UpdatedAt
+	if state.RequestedAt != nil {
+		queuedAt = *state.RequestedAt
 	}
 	return governanceapp.AdminTaskView{
-		Ref:                governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: job.ID},
+		Ref:                governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: uint64(state.ResourceID)},
 		BizType:            governanceapp.AdminTaskBizMicrosoftResource,
-		BizID:              uint64(job.ResourceID),
+		BizID:              uint64(state.ResourceID),
 		Kind:               governanceapp.AdminTaskKindToken,
-		Status:             job.Status,
-		Attempts:           job.Attempts,
-		MaxAttempts:        maxAttempts,
+		Status:             microsoftTokenRefreshAdminStatus(state.Status),
+		Attempts:           state.Failures,
+		MaxAttempts:        MicrosoftTokenRefreshDefaultMaxAttempts,
 		CredentialRevision: &revision,
-		QueuedAt:           job.CreatedAt,
-		StartedAt:          job.StartedAt,
-		FinishedAt:         job.FinishedAt,
-		UpdatedAt:          job.UpdatedAt,
+		QueuedAt:           queuedAt,
+		StartedAt:          state.StartedAt,
+		FinishedAt:         state.FinishedAt,
+		UpdatedAt:          state.UpdatedAt,
+	}
+}
+
+func microsoftTokenRefreshAdminStatus(status string) string {
+	switch status {
+	case MicrosoftTokenRefreshPending:
+		return governanceapp.AdminTaskStatusQueued
+	case MicrosoftTokenRefreshProcessing:
+		return governanceapp.AdminTaskStatusRunning
+	case MicrosoftTokenRefreshAbnormal:
+		return governanceapp.AdminTaskStatusFailed
+	default:
+		return governanceapp.AdminTaskStatusSucceeded
 	}
 }
 
@@ -303,7 +319,7 @@ func isRetryableMicrosoftTokenRefreshCategory(category string) bool {
 func normalizeMicrosoftTokenRefreshCategory(category string) string {
 	category = strings.ToLower(strings.TrimSpace(category))
 	switch category {
-	case "request", "auth_timeout", "rate_limited", "oauth_invalid_grant", "oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password", "unknown_mailbox", "locked":
+	case "request", "auth_timeout", "rate_limited", "oauth_invalid_grant", "oauth_client", "oauth_permission", "mfa", "passkey", "phone", "password", "unknown_mailbox", "locked", "success":
 		return category
 	default:
 		return "request"

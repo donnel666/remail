@@ -304,6 +304,7 @@
   "Normal": "Normal",
   "Abnormal": "Abnormal",
   "Pending": "Pending",
+  "Pending check": "Pending check",
   "Validating": "Validating",
   "Disabled": "Disabled",
   "All statuses": "All statuses",

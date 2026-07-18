@@ -19,16 +19,15 @@ type ResourceValidationRepository interface {
 	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
 	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
+	MarkValidationDispatched(ctx context.Context, task ResourceValidationTask) (bool, error)
 	ReleaseValidation(ctx context.Context, task ResourceValidationTask) error
-	ResetValidationAssignments(ctx context.Context) error
-	SaveMicrosoftProgress(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult) error
 	ApplyMicrosoftResult(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
 	ApplyDomainResult(ctx context.Context, task ResourceValidationTask, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
 }
 
 // ResourceValidationQueue enqueues asynchronous resource validation work.
 type ResourceValidationQueue interface {
-	EnqueueResourceValidation(ctx context.Context, task ResourceValidationTask) error
+	EnqueueResourceValidation(ctx context.Context, task ResourceValidationTask) (accepted bool, err error)
 	EnqueueResourceValidationBatch(ctx context.Context, task ResourceValidationBatchTask) error
 	EnqueueResourceValidationDispatcher(ctx context.Context, delay time.Duration) error
 }
@@ -83,6 +82,7 @@ type MicrosoftValidationRequest struct {
 
 type MicrosoftValidationResult struct {
 	Valid        bool
+	Retryable    bool
 	ClientID     string
 	RefreshToken string
 	// CredentialsAuthoritative is set only after a refresh-token exchange or
@@ -143,6 +143,7 @@ type DomainValidationRequest struct {
 
 type DomainValidationResult struct {
 	Valid       bool
+	Retryable   bool
 	Category    string
 	SafeMessage string
 }
@@ -151,6 +152,7 @@ type ResourceValidationTask struct {
 	ResourceID                 uint                `json:"resourceId"`
 	ResourceType               domain.ResourceType `json:"resourceType"`
 	OwnerUserID                uint                `json:"ownerUserId"`
+	ValidationGeneration       uint64              `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64              `json:"expectedCredentialRevision,omitempty"`
 	RequestID                  string              `json:"requestId,omitempty"`
 }
@@ -214,6 +216,7 @@ const ResourceValidationMaxExplicitIDs = 10_000
 const (
 	resourceValidationBatchPageSize = 1000
 	resourceValidationDispatchDelay = time.Second
+	ResourceValidationMaxFailures   = 3
 )
 
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
@@ -389,8 +392,11 @@ func (uc *ResourceValidationUseCase) ReleaseBatch(ctx context.Context, task Reso
 }
 
 func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
-	if uc == nil || uc.resources == nil || uc.validations == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || !domain.IsValidResourceType(task.ResourceType) {
+	if uc == nil || uc.resources == nil || uc.validations == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || task.ValidationGeneration == 0 || !domain.IsValidResourceType(task.ResourceType) {
 		return domain.ErrInvalidResourceCommand
+	}
+	if _, err := uc.validations.MarkValidationDispatched(ctx, task); err != nil {
+		return err
 	}
 	var processErr error
 	switch task.ResourceType {
@@ -420,17 +426,6 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 	return nil
 }
 
-func (uc *ResourceValidationUseCase) ResetAssignments(ctx context.Context) error {
-	if uc == nil || uc.validations == nil {
-		return nil
-	}
-	if err := uc.validations.ResetValidationAssignments(ctx); err != nil {
-		return err
-	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return nil
-}
-
 func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceValidationsResult, error) {
 	if uc == nil || uc.validations == nil || uc.queue == nil {
 		return nil, ErrValidationTemporaryUnavailable
@@ -445,18 +440,24 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 	result := &DispatchResourceValidationsResult{Attempted: len(tasks)}
 	var dispatchErrors []error
 	for _, task := range tasks {
-		if err := uc.queue.EnqueueResourceValidation(ctx, task); err != nil {
+		accepted, err := uc.queue.EnqueueResourceValidation(ctx, task)
+		if err != nil {
 			result.Failed++
 			dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue validation for resource %d: %w", task.ResourceID, err))
-			recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			releaseErr := uc.validations.ReleaseValidation(recoveryCtx, task)
-			cancel()
-			if releaseErr != nil {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf("release resource %d after enqueue failure: %w", task.ResourceID, releaseErr))
-			}
 			continue
 		}
-		result.Queued++
+		if !accepted {
+			continue
+		}
+		activated, err := uc.validations.MarkValidationDispatched(ctx, task)
+		if err != nil {
+			result.Failed++
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("activate validation for resource %d: %w", task.ResourceID, err))
+			continue
+		}
+		if activated {
+			result.Queued++
+		}
 	}
 	return result, errors.Join(dispatchErrors...)
 }
@@ -477,7 +478,7 @@ func (uc *ResourceValidationUseCase) ScheduleDispatcher(ctx context.Context, del
 	_ = uc.queue.EnqueueResourceValidationDispatcher(ctx, max(delay, resourceValidationDispatchDelay))
 }
 
-func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
+func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task ResourceValidationTask, _ bool) error {
 	ms, err := uc.resources.FindMicrosoftByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
@@ -485,7 +486,10 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	if ms == nil || ms.Status == domain.MicrosoftStatusDeleted {
 		return domain.ErrResourceNotFound
 	}
-	if ms.Status != domain.MicrosoftStatusValidating || ms.CredentialRevision != task.ExpectedCredentialRevision {
+	if ms.Status == domain.MicrosoftStatusPending && ms.ValidationGeneration == task.ValidationGeneration && ms.CredentialRevision == task.ExpectedCredentialRevision {
+		return ErrValidationTemporaryUnavailable
+	}
+	if ms.Status != domain.MicrosoftStatusValidating || ms.ValidationGeneration != task.ValidationGeneration || ms.CredentialRevision != task.ExpectedCredentialRevision {
 		return ErrValidationResultStale
 	}
 	var result MicrosoftValidationResult
@@ -512,21 +516,7 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 			result.SafeMessage = "Microsoft mail service is temporarily unavailable."
 		}
 	}
-	if isRetryableValidationCategory(result.Category) && !result.Valid {
-		if !finalAttempt {
-			if err := uc.validations.SaveMicrosoftProgress(ctx, task, result); err != nil {
-				if errors.Is(err, ErrValidationResultStale) {
-					return nil
-				}
-				return err
-			}
-			return ErrValidationTemporaryUnavailable
-		}
-		// Retry budget exhausted. Do not defer again: fall through to
-		// ApplyMicrosoftResult below so the resource commits to abnormal with a
-		// last_safe_error instead of looping pending→validating forever. The
-		// admin re-validates to move it back to pending.
-	}
+	result.Retryable = !result.Valid && isRetryableValidationCategory(result.Category)
 	if result.Valid && uc.historyTrigger != nil {
 		// The task carries only resource identity, so enqueue it before committing
 		// the healthy resource state. Its worker rechecks status and credentials;
@@ -549,6 +539,9 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	}
 	if err != nil {
 		return err
+	}
+	if result.Retryable {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), time.Second)
 	}
 	if !result.Valid {
 		return nil
@@ -584,7 +577,7 @@ func releaseMicrosoftValidationRecoveryLease(ctx context.Context, task ResourceV
 	}
 }
 
-func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task ResourceValidationTask, finalAttempt bool) error {
+func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task ResourceValidationTask, _ bool) error {
 	dr, err := uc.resources.FindDomainByID(ctx, task.ResourceID)
 	if err != nil {
 		return err
@@ -592,7 +585,10 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task Res
 	if dr == nil || dr.Status == domain.DomainStatusDeleted {
 		return domain.ErrResourceNotFound
 	}
-	if dr.Status != domain.DomainStatusValidating {
+	if dr.Status == domain.DomainStatusPending && dr.ValidationGeneration == task.ValidationGeneration {
+		return ErrValidationTemporaryUnavailable
+	}
+	if dr.Status != domain.DomainStatusValidating || dr.ValidationGeneration != task.ValidationGeneration {
 		return ErrValidationResultStale
 	}
 	var result DomainValidationResult
@@ -614,10 +610,12 @@ func (uc *ResourceValidationUseCase) processDomain(ctx context.Context, task Res
 			result.SafeMessage = "Domain DNS validation failed."
 		}
 	}
-	if isRetryableValidationCategory(result.Category) && !result.Valid && !finalAttempt {
-		return ErrValidationTemporaryUnavailable
+	result.Retryable = !result.Valid && isRetryableValidationCategory(result.Category)
+	err = uc.validations.ApplyDomainResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
+	if err == nil && result.Retryable {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), time.Second)
 	}
-	return uc.validations.ApplyDomainResult(ctx, task, result, validationSystemLog(task, result.Valid, result.Category, result.SafeMessage))
+	return err
 }
 
 func isRetryableValidationCategory(category string) bool {

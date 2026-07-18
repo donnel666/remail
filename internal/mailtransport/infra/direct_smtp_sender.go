@@ -43,12 +43,12 @@ func (s *DirectSMTPDelivery) Send(ctx context.Context, message domain.OutboundMe
 	from := envelopeAddress(firstNonEmpty(message.From, s.cfg.From))
 	to := envelopeAddress(message.To)
 	if from == "" || to == "" {
-		return deliveryError("direct smtp envelope incomplete", nil)
+		return permanentOutboundFailure("Outbound mail envelope is invalid.", deliveryError("direct smtp envelope incomplete", nil))
 	}
 
 	recipientDomain := recipientDomain(to)
 	if recipientDomain == "" {
-		return deliveryError("direct smtp recipient invalid", nil)
+		return permanentOutboundFailure("Outbound mail recipient is invalid.", deliveryError("direct smtp recipient invalid", nil))
 	}
 	targets, err := lookupMXTargets(ctx, recipientDomain)
 	if err != nil {
@@ -64,7 +64,7 @@ func (s *DirectSMTPDelivery) Send(ctx context.Context, message domain.OutboundMe
 		}
 		return nil
 	}
-	return deliveryError("direct smtp delivery failed", lastErr)
+	return classifySMTPFailure("direct smtp delivery failed", lastErr)
 }
 
 func (s *DirectSMTPDelivery) sendToTarget(ctx context.Context, target, heloName, from, to string, message domain.OutboundMessage) error {

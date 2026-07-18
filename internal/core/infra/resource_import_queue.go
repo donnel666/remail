@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 const (
 	TypeMicrosoftImport = "core:microsoft_import"
 
-	importQueueName    = platform.QueueDefault
-	importTaskMaxRetry = 3
-	importTaskTimeout  = 30 * time.Minute
+	importQueueName       = platform.QueueDefault
+	importTaskMaxRetry    = platform.BackgroundTaskMaxRetry
+	importTaskTimeout     = 30 * time.Minute
+	importActivationDelay = time.Second
 )
 
 // ResourceImportQueue enqueues resource import tasks in Asynq.
@@ -29,10 +31,13 @@ func NewResourceImportQueue(client *asynq.Client) *ResourceImportQueue {
 	return &ResourceImportQueue{client: client}
 }
 
-func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task coreapp.MicrosoftImportTask) error {
+func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task coreapp.MicrosoftImportTask) (bool, error) {
+	if q == nil || q.client == nil {
+		return false, fmt.Errorf("resource import queue is unavailable")
+	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return fmt.Errorf("marshal microsoft import task: %w", err)
+		return false, fmt.Errorf("marshal microsoft import task: %w", err)
 	}
 
 	asynqTask := asynq.NewTask(TypeMicrosoftImport, payload)
@@ -40,31 +45,17 @@ func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task c
 		ctx,
 		asynqTask,
 		asynq.Queue(importQueueName),
-		asynq.TaskID(importTaskID(task)),
-		asynq.MaxRetry(importMaxRetry(task)),
+		asynq.Unique(importTaskTimeout+importActivationDelay),
+		asynq.MaxRetry(importTaskMaxRetry),
 		asynq.Timeout(importTaskTimeout),
+		asynq.ProcessIn(importActivationDelay),
+		asynq.Retention(0),
 	)
-	if err == asynq.ErrTaskIDConflict {
-		return nil
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("enqueue microsoft import task: %w", err)
+		return false, fmt.Errorf("enqueue microsoft import task: %w", err)
 	}
-	return nil
-}
-
-func importTaskID(task coreapp.MicrosoftImportTask) string {
-	if task.DispatchToken != "" {
-		return fmt.Sprintf("%s:%d:%s", TypeMicrosoftImport, task.ImportID, task.DispatchToken)
-	}
-	return fmt.Sprintf("%s:%d", TypeMicrosoftImport, task.ImportID)
-}
-
-func importMaxRetry(task coreapp.MicrosoftImportTask) int {
-	// Administrator imports retry from their durable database fact with a new
-	// dispatch token. Replaying this Asynq payload would reuse a consumed token.
-	if task.DispatchToken != "" {
-		return 0
-	}
-	return importTaskMaxRetry
+	return true, nil
 }

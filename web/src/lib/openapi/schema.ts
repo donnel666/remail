@@ -2778,7 +2778,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a resource-level Microsoft mail fetch
-         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch persists or reuses a resource-level single-flight fetch job before returning 202. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+         * @description Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch updates the resource's current fetch generation before returning 202; Redis/Asynq carries only temporary execution data. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
          */
         post: operations["postAdminMicrosoftResourceMessagesFetch"];
         delete?: never;
@@ -4474,7 +4474,7 @@ export interface components {
             ip?: "auto" | "ipv4" | "ipv6";
             ipv6?: boolean;
             /** @enum {string} */
-            status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
+            status?: "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
             country?: string;
             search?: string;
             /** Format: date-time */
@@ -4664,7 +4664,7 @@ export interface components {
             country: string;
             latencyMs: number;
             /** @enum {string} */
-            status: "checking" | "normal" | "abnormal" | "disabled" | "expired";
+            status: "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
             errors: number;
             lastSafeError?: string;
             /** Format: date-time */
@@ -12940,7 +12940,7 @@ export interface operations {
                 pool?: "resource" | "system";
                 ip?: "auto" | "ipv4" | "ipv6";
                 ipv6?: boolean;
-                status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
+                status?: "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
                 country?: string;
                 search?: string;
                 createdFrom?: string;
@@ -12998,7 +12998,7 @@ export interface operations {
                 pool?: "resource" | "system";
                 ip?: "auto" | "ipv4" | "ipv6";
                 ipv6?: boolean;
-                status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
+                status?: "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
                 country?: string;
                 search?: string;
                 createdFrom?: string;

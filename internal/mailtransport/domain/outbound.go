@@ -53,6 +53,7 @@ type OutboundMail struct {
 	TextBody       string          `json:"textBody"`
 	HTMLBody       string          `json:"htmlBody"`
 	Status         OutboundStatus  `json:"status"`
+	SendGeneration uint64          `json:"-"`
 	Retries        int             `json:"retries"`
 	FailureReason  string          `json:"failureReason"`
 	CreatedAt      time.Time       `json:"createdAt"`
@@ -72,6 +73,7 @@ func NewOutboundMail(message OutboundMessage, now time.Time) *OutboundMail {
 		TextBody:       message.TextBody,
 		HTMLBody:       message.HTMLBody,
 		Status:         OutboundStatusPending,
+		SendGeneration: 1,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -88,19 +90,37 @@ func (m OutboundMessage) RequestHash() string {
 
 func (m *OutboundMail) MarkSending(now time.Time) {
 	m.Status = OutboundStatusSending
-	m.Retries++
 	m.FailureReason = ""
 	m.UpdatedAt = now
 }
 
 func (m *OutboundMail) MarkPending(now time.Time, reason string) {
 	m.Status = OutboundStatusPending
+	m.SendGeneration++
 	m.FailureReason = reason
 	m.UpdatedAt = now
 }
 
+func (m *OutboundMail) ResetForRetry(now time.Time, reason string) {
+	m.Retries = 0
+	m.MarkPending(now, reason)
+}
+
+func (m *OutboundMail) RecordSendFailure(now time.Time, reason string, retryable bool) bool {
+	if m.Retries < 3 {
+		m.Retries++
+	}
+	if !retryable || m.Retries >= 3 {
+		m.MarkFailed(now, reason)
+		return true
+	}
+	m.MarkPending(now, reason)
+	return false
+}
+
 func (m *OutboundMail) MarkSent(now time.Time) {
 	m.Status = OutboundStatusSent
+	m.Retries = 0
 	m.FailureReason = ""
 	m.UpdatedAt = now
 	m.SentAt = &now

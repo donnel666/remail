@@ -180,11 +180,10 @@ func (*adminHandlerValidationRepo) MarkValidationBatchPending(context.Context, c
 func (*adminHandlerValidationRepo) ClaimPendingValidations(context.Context, int) ([]coreapp.ResourceValidationTask, error) {
 	return nil, nil
 }
-func (*adminHandlerValidationRepo) ReleaseValidation(context.Context, coreapp.ResourceValidationTask) error {
-	return nil
+func (*adminHandlerValidationRepo) MarkValidationDispatched(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
 }
-func (*adminHandlerValidationRepo) ResetValidationAssignments(context.Context) error { return nil }
-func (*adminHandlerValidationRepo) SaveMicrosoftProgress(context.Context, coreapp.ResourceValidationTask, coreapp.MicrosoftValidationResult) error {
+func (*adminHandlerValidationRepo) ReleaseValidation(context.Context, coreapp.ResourceValidationTask) error {
 	return nil
 }
 func (*adminHandlerValidationRepo) ApplyMicrosoftResult(context.Context, coreapp.ResourceValidationTask, coreapp.MicrosoftValidationResult, *governancedomain.SystemLog) error {
@@ -196,8 +195,8 @@ func (*adminHandlerValidationRepo) ApplyDomainResult(context.Context, coreapp.Re
 
 type adminHandlerValidationQueue struct{}
 
-func (adminHandlerValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
-	return nil
+func (adminHandlerValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
 }
 func (adminHandlerValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
 	return nil
@@ -221,46 +220,27 @@ type adminHandlerBulkRepo struct {
 	action *coreapp.AdminResourceBulkAction
 }
 
-func (r adminHandlerBulkRepo) CreateWithLog(_ context.Context, command *coreapp.AdminResourceBulkCommand, _ *governancedomain.OperationLog) (bool, error) {
-	if r.action != nil {
-		*r.action = command.Action
+func (adminHandlerBulkRepo) MaxCandidateID(context.Context, coreapp.AdminResourceBulkFilterValue, time.Time) (uint, error) {
+	return 42, nil
+}
+func (adminHandlerBulkRepo) ListCandidateIDs(context.Context, coreapp.AdminResourceBulkFilterValue, uint, uint, int, time.Time) ([]uint, error) {
+	return []uint{42}, nil
+}
+
+type adminHandlerBulkQueue struct {
+	action *coreapp.AdminResourceBulkAction
+}
+
+func (q adminHandlerBulkQueue) EnqueueAdminResourceBulk(_ context.Context, task coreapp.AdminResourceBulkTask) (bool, error) {
+	if q.action != nil {
+		*q.action = task.Action
 	}
-	command.ID = 700
-	if command.Selection.Mode == coreapp.AdminResourceBulkIDs {
-		command.MatchedCount = len(command.Selection.ResourceIDs)
-	}
-	command.CreatedAt = time.Now().UTC()
-	command.UpdatedAt = command.CreatedAt
 	return true, nil
 }
-func (adminHandlerBulkRepo) FindByID(context.Context, uint64) (*coreapp.AdminResourceBulkCommand, error) {
-	return nil, nil
+func (adminHandlerBulkQueue) RefreshAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
+	return true, nil
 }
-func (adminHandlerBulkRepo) ClaimDispatchable(context.Context, int, time.Time, time.Time) ([]coreapp.AdminResourceBulkCommand, error) {
-	return nil, nil
-}
-func (adminHandlerBulkRepo) MarkRunning(context.Context, uint64, string) (*coreapp.AdminResourceBulkCommand, bool, error) {
-	return nil, false, nil
-}
-func (adminHandlerBulkRepo) ListCandidateIDs(context.Context, *coreapp.AdminResourceBulkCommand, int, time.Time) ([]uint, error) {
-	return nil, nil
-}
-func (adminHandlerBulkRepo) CompletePage(context.Context, uint64, string, uint, int, int, int, int, map[string]int64, bool) error {
-	return nil
-}
-func (adminHandlerBulkRepo) MarkRetryableFailure(context.Context, uint64, string, string) (bool, error) {
-	return false, nil
-}
-func (adminHandlerBulkRepo) MarkDispatchFailed(context.Context, uint64, string, string) error {
-	return nil
-}
-
-type adminHandlerBulkQueue struct{}
-
-func (adminHandlerBulkQueue) EnqueueAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
-	return nil
-}
-func (adminHandlerBulkQueue) EnqueueAdminResourceBulkDispatcher(context.Context, time.Duration) error {
+func (adminHandlerBulkQueue) ReleaseAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
 	return nil
 }
 
@@ -457,7 +437,8 @@ func (r *adminHandlerImportRepo) CreateAdminWithLog(_ context.Context, item *dom
 	stored.OperatorUserID = metadata.OperatorUserID
 	stored.LongLived = metadata.LongLived
 	stored.ErrorStrategy = metadata.ErrorStrategy
-	stored.DispatchStatus = "queued"
+	stored.DispatchStatus = "pending"
+	stored.Generation = 1
 	stored.MaxAttempts = 3
 	stored.RequestID = metadata.RequestID
 	stored.CreatedAt = now
@@ -473,16 +454,16 @@ func (*adminHandlerImportRepo) ClaimAdminImportDispatchable(context.Context, int
 	return nil, nil
 }
 
-func (*adminHandlerImportRepo) MarkAdminImportRunning(context.Context, uint, string) (string, bool, error) {
+func (*adminHandlerImportRepo) MarkAdminImportDispatched(context.Context, uint, uint64) (bool, error) {
+	return false, nil
+}
+
+func (*adminHandlerImportRepo) MarkAdminImportRunning(context.Context, uint, uint64) (string, bool, error) {
 	return "", false, nil
 }
 
-func (*adminHandlerImportRepo) MarkAdminImportDispatchFailed(context.Context, uint, string, string) error {
+func (*adminHandlerImportRepo) MarkAdminImportPending(context.Context, uint, uint64, string) error {
 	return nil
-}
-
-func (*adminHandlerImportRepo) MarkAdminImportRetryableFailure(context.Context, uint, string, string) (bool, error) {
-	return false, nil
 }
 
 func (*adminHandlerImportRepo) MarkAdminImportFailed(context.Context, uint, string, string, string) error {
@@ -838,7 +819,7 @@ func TestAdminMicrosoftBulkHandlersSubmitDurableCommandsForIDsAndFilter(t *testi
 	require.Equal(t, http.StatusAccepted, idsResponse.Code, idsResponse.Body.String())
 	var idsPayload map[string]any
 	require.NoError(t, json.Unmarshal(idsResponse.Body.Bytes(), &idsPayload))
-	require.Equal(t, "bulk:700", idsPayload["taskId"])
+	require.Contains(t, idsPayload["taskId"], "bulk:")
 	require.Equal(t, "queued", idsPayload["status"])
 	require.Equal(t, float64(1), idsPayload["accepted"], "explicit IDs have an exact bounded count")
 	require.NotNil(t, idsPayload["task"])
@@ -856,7 +837,7 @@ func TestAdminMicrosoftBulkHandlersSubmitDurableCommandsForIDsAndFilter(t *testi
 	require.Equal(t, http.StatusAccepted, filterResponse.Code, filterResponse.Body.String())
 	var filterPayload map[string]any
 	require.NoError(t, json.Unmarshal(filterResponse.Body.Bytes(), &filterPayload))
-	require.Equal(t, "bulk:700", filterPayload["taskId"])
+	require.Contains(t, filterPayload["taskId"], "bulk:")
 	require.Equal(t, "durable-bulk-request", filterPayload["requestId"])
 	require.Equal(t, "queued", filterPayload["status"])
 	require.Equal(t, float64(0), filterPayload["accepted"], "filter matches are unknown until durable expansion")
@@ -869,7 +850,7 @@ func TestAdminMicrosoftMaintenanceHandlerSubmitsOneDurableBulkCommand(t *testing
 	var action coreapp.AdminResourceBulkAction
 	bulk := coreapp.NewAdminResourceBulkService(
 		adminHandlerBulkRepo{action: &action},
-		adminHandlerBulkQueue{},
+		adminHandlerBulkQueue{action: &action},
 		&coreapp.AdminResourceCommandService{},
 	)
 	handler := NewCoreHandler(&CoreModule{AdminBulk: bulk})
@@ -890,7 +871,7 @@ func TestAdminMicrosoftMaintenanceHandlerSubmitsOneDurableBulkCommand(t *testing
 	require.Equal(t, coreapp.AdminResourceBulkHistory, action)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
-	require.Equal(t, "bulk:700", payload["taskId"])
+	require.Contains(t, payload["taskId"], "bulk:")
 	require.Equal(t, "maintenance-bulk-request", payload["requestId"])
 	require.Equal(t, float64(2), payload["accepted"])
 	task := payload["task"].(map[string]any)

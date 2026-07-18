@@ -317,6 +317,7 @@ func (r *AdminResourceRepo) SaveAdminDomain(ctx context.Context, root *domain.Em
 		Updates(map[string]any{
 			"owner_user_id": root.OwnerUserID, "domain": resource.Domain, "domain_tld": domain.TLD(resource.Domain),
 			"mail_server_id": resource.MailServerID, "purpose": string(resource.Purpose), "status": string(resource.Status),
+			"validation_generation": resource.ValidationGeneration, "validation_failures": resource.ValidationFailures,
 			"mailbox_daily_limit": normalizeDailyLimit(resource.MailboxDailyLimit, domain.DefaultMailboxDailyLimit),
 			"last_safe_error":     resource.LastSafeError, "last_allocated_at": resource.LastAllocatedAt, "updated_at": now,
 		})

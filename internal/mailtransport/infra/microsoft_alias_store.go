@@ -19,6 +19,7 @@ import (
 
 type MicrosoftAliasScheduleModel struct {
 	ResourceID               uint       `gorm:"primaryKey;column:resource_id"`
+	Generation               uint64     `gorm:"not null;default:1"`
 	Status                   string     `gorm:"type:varchar(32);not null;default:'pending'"`
 	NextRunAt                time.Time  `gorm:"not null;column:next_run_at"`
 	Attempts                 int        `gorm:"not null;default:0"`
@@ -86,6 +87,8 @@ const (
 	legacyMicrosoftAliasPublicOnlyMessage         = "Microsoft resource is not publicly available for alias creation."
 )
 
+var errMicrosoftAliasGenerationStillRunning = errors.New("microsoft alias generation is still running")
+
 func NewMicrosoftAliasStore(db *gorm.DB) *MicrosoftAliasStore {
 	return &MicrosoftAliasStore{
 		db:                           db,
@@ -103,7 +106,7 @@ JOIN (
         SELECT candidate.resource_id
         FROM microsoft_alias_schedules AS candidate
         JOIN microsoft_resources AS mr ON mr.id = candidate.resource_id
-        WHERE candidate.status IN ('pending', 'queued')
+        WHERE candidate.status = 'pending'
           AND mr.status <> 'normal'
         ORDER BY candidate.resource_id
         LIMIT ?
@@ -111,6 +114,7 @@ JOIN (
 ) AS due ON due.resource_id = schedule.resource_id
 JOIN microsoft_resources AS current_resource ON current_resource.id = schedule.resource_id
 SET schedule.status = 'paused',
+	    schedule.generation = schedule.generation + 1,
     schedule.claim_token = '',
     schedule.last_safe_error = ?,
     schedule.blocked_resource_signature = SHA2(CONCAT_WS(
@@ -145,7 +149,7 @@ SET schedule.status = 'paused',
     schedule.blocked_resource_updated_at = current_resource.updated_at,
     schedule.blocked_last_allocated_at = current_resource.last_allocated_at,
     schedule.updated_at = ?
-WHERE schedule.status IN ('pending', 'queued')
+WHERE schedule.status = 'pending'
   AND current_resource.status <> 'normal'`, microsoftAliasScheduleEnsureBatch, mailapp.MicrosoftAliasResourceNotNormalMessage, now)
 	if paused.Error != nil {
 		return 0, fmt.Errorf("pause ineligible microsoft alias schedules: %w", paused.Error)
@@ -275,6 +279,7 @@ EXISTS (
 			Where("resource_id IN ? AND status = ?", pausedResourceIDs, "paused").
 			Updates(map[string]any{
 				"status":                      "pending",
+				"generation":                  gorm.Expr("generation + 1"),
 				"next_run_at":                 now,
 				"failure_streak":              0,
 				"blocked_resource_signature":  "",
@@ -467,6 +472,7 @@ func microsoftAliasBindingExternal(address string, bindingDomainReady bool) bool
 func microsoftAliasScheduleWakeUpdates(now time.Time) map[string]any {
 	return map[string]any{
 		"status":                      "pending",
+		"generation":                  gorm.Expr("generation + 1"),
 		"claim_token":                 "",
 		"next_run_at":                 now,
 		"failure_streak":              0,
@@ -478,97 +484,35 @@ func microsoftAliasScheduleWakeUpdates(now time.Time) map[string]any {
 	}
 }
 
-func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, now, queuedStaleBefore, runningStaleBefore time.Time) ([]mailapp.MicrosoftAliasTask, error) {
+func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, now, _ time.Time, _ time.Time) ([]mailapp.MicrosoftAliasTask, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	tasks := make([]mailapp.MicrosoftAliasTask, 0, limit)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		schedules := make([]MicrosoftAliasScheduleModel, 0, limit)
-		loadStale := func(status string, before time.Time, order string) error {
-			remaining := limit - len(schedules)
-			if remaining <= 0 {
-				return nil
-			}
-			var batch []MicrosoftAliasScheduleModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-				Where("status = ? AND updated_at < ?", status, before).
-				Order(order).
-				Limit(remaining).
-				Find(&batch).Error; err != nil {
-				return err
-			}
-			schedules = append(schedules, batch...)
-			return nil
-		}
-		if err := loadStale("running", runningStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
+		pending, err := lockDueMicrosoftAliasSchedules(tx, now, microsoftAliasDispatchScanLimit(limit))
+		if err != nil {
 			return err
 		}
-		if err := loadStale("queued", queuedStaleBefore, "updated_at ASC, resource_id ASC"); err != nil {
+		states, err := loadMicrosoftAliasDispatchEligibility(tx, pending)
+		if err != nil {
 			return err
 		}
-		if remaining := limit - len(schedules); remaining > 0 {
-			pending, err := lockDueMicrosoftAliasSchedules(tx, now, microsoftAliasDispatchScanLimit(remaining))
-			if err != nil {
-				return err
+		for _, schedule := range pending {
+			state, ok := states[schedule.ResourceID]
+			if !ok {
+				return fmt.Errorf("load microsoft alias dispatch eligibility: resource %d is missing", schedule.ResourceID)
 			}
-			states, err := loadMicrosoftAliasDispatchEligibility(tx, pending)
-			if err != nil {
-				return err
-			}
-			for _, schedule := range pending {
-				state, ok := states[schedule.ResourceID]
-				if !ok {
-					return fmt.Errorf("load microsoft alias dispatch eligibility: resource %d is missing", schedule.ResourceID)
+			if safeMessage := microsoftAliasDispatchIneligibleMessage(state); safeMessage != "" {
+				if err := pausePendingMicrosoftAliasSchedule(tx, schedule, state, now, safeMessage); err != nil {
+					return err
 				}
-				if safeMessage := microsoftAliasDispatchIneligibleMessage(state); safeMessage != "" {
-					if err := pausePendingMicrosoftAliasSchedule(tx, schedule, state, now, safeMessage); err != nil {
-						return err
-					}
-					continue
-				}
-				if len(schedules) < limit {
-					schedules = append(schedules, schedule)
-				}
-			}
-		}
-		for _, schedule := range schedules {
-			token, err := newMicrosoftAliasClaimToken()
-			if err != nil {
-				return err
-			}
-			if schedule.Status == "running" {
-				if err := tx.Model(&MicrosoftAliasAttemptModel{}).
-					Where("resource_id = ? AND status = ?", schedule.ResourceID, mailapp.MicrosoftAliasAttemptRunning).
-					Updates(map[string]any{
-						"status":          mailapp.MicrosoftAliasAttemptUncertain,
-						"category":        "request",
-						"last_safe_error": "Microsoft alias result requires reconciliation.",
-						"was_attempted":   true,
-						"uncertain_since": gorm.Expr("COALESCE(uncertain_since, ?)", now),
-						"updated_at":      now,
-					}).Error; err != nil {
-					return fmt.Errorf("mark stale microsoft alias attempts uncertain: %w", err)
-				}
-			}
-			result := tx.Model(&MicrosoftAliasScheduleModel{}).
-				Where("resource_id = ? AND status = ? AND claim_token = ?", schedule.ResourceID, schedule.Status, schedule.ClaimToken).
-				Updates(map[string]any{
-					"status":          "queued",
-					"claim_token":     token,
-					"last_safe_error": "",
-					"updated_at":      now,
-				})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected == 0 {
 				continue
 			}
-			tasks = append(tasks, mailapp.MicrosoftAliasTask{
-				ResourceID:    schedule.ResourceID,
-				DispatchToken: token,
-			})
+			if len(tasks) == limit {
+				break
+			}
+			tasks = append(tasks, mailapp.MicrosoftAliasTask{ResourceID: schedule.ResourceID, Generation: schedule.Generation})
 		}
 		return nil
 	})
@@ -576,6 +520,22 @@ func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, n
 		return nil, fmt.Errorf("find microsoft alias schedules: %w", err)
 	}
 	return tasks, nil
+}
+
+func (s *MicrosoftAliasStore) MarkQueued(ctx context.Context, task mailapp.MicrosoftAliasTask, now time.Time) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&MicrosoftAliasScheduleModel{}).
+		Where("resource_id = ? AND generation = ? AND status = ? AND next_run_at <= ?",
+			task.ResourceID, task.Generation, "pending", now).
+		Updates(map[string]any{
+			"status":          "queued",
+			"claim_token":     "",
+			"last_safe_error": "",
+			"updated_at":      now,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("mark microsoft alias queued: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }
 
 type microsoftAliasDispatchEligibility struct {
@@ -683,6 +643,7 @@ func pausePendingMicrosoftAliasSchedule(
 		Where("resource_id = ? AND status = ? AND claim_token = ?", schedule.ResourceID, "pending", schedule.ClaimToken).
 		Updates(map[string]any{
 			"status":                      "paused",
+			"generation":                  gorm.Expr("generation + 1"),
 			"claim_token":                 "",
 			"last_safe_error":             safeAliasStoreMessage(safeMessage),
 			"blocked_resource_signature":  state.ResourceSignature,
@@ -702,13 +663,24 @@ func (s *MicrosoftAliasStore) Claim(ctx context.Context, task mailapp.MicrosoftA
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var schedule MicrosoftAliasScheduleModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+			Where("resource_id = ? AND generation = ?", task.ResourceID, task.Generation).
 			First(&schedule).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("lock microsoft alias schedule: %w", err)
+		}
+		switch schedule.Status {
+		case "queued":
+		case "running":
+			return errMicrosoftAliasGenerationStillRunning
+		default:
+			return nil
+		}
+		claimToken, err := newMicrosoftAliasClaimToken()
+		if err != nil {
+			return err
 		}
 
 		var row struct {
@@ -766,9 +738,10 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 		}
 		if row.ResourceStatus != "normal" {
 			result := tx.Model(&MicrosoftAliasScheduleModel{}).
-				Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+				Where("resource_id = ? AND generation = ? AND status = ?", task.ResourceID, task.Generation, "queued").
 				Updates(map[string]any{
 					"status":                      "paused",
+					"generation":                  gorm.Expr("generation + 1"),
 					"claim_token":                 "",
 					"last_safe_error":             mailapp.MicrosoftAliasResourceNotNormalMessage,
 					"blocked_resource_signature":  row.ResourceSignature,
@@ -783,9 +756,10 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 		}
 		if microsoftAliasBindingExternal(row.BindingAddress, row.BindingDomainReady) {
 			result := tx.Model(&MicrosoftAliasScheduleModel{}).
-				Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+				Where("resource_id = ? AND generation = ? AND status = ?", task.ResourceID, task.Generation, "queued").
 				Updates(map[string]any{
 					"status":                      "paused",
+					"generation":                  gorm.Expr("generation + 1"),
 					"claim_token":                 "",
 					"last_safe_error":             mailapp.MicrosoftAliasExternalRecoveryMessage,
 					"blocked_resource_signature":  row.ResourceSignature,
@@ -799,9 +773,10 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 			return nil
 		}
 		result := tx.Model(&MicrosoftAliasScheduleModel{}).
-			Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
+			Where("resource_id = ? AND generation = ? AND status = ?", task.ResourceID, task.Generation, "queued").
 			Updates(map[string]any{
 				"status":                      "running",
+				"claim_token":                 claimToken,
 				"attempts":                    gorm.Expr("attempts + 1"),
 				"last_safe_error":             "",
 				"blocked_resource_signature":  row.ResourceSignature,
@@ -823,7 +798,7 @@ LIMIT 1`, task.ResourceID).Scan(&row).Error; err != nil {
 			BindingAddress: row.BindingAddress,
 			ResourceStatus: row.ResourceStatus,
 			FailureStreak:  schedule.FailureStreak,
-			ClaimToken:     task.DispatchToken,
+			ClaimToken:     claimToken,
 		}
 		claimed = true
 		return nil
@@ -1399,6 +1374,7 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 			Where("resource_id = ? AND status = ? AND claim_token = ?", resourceID, "running", claimToken).
 			Updates(map[string]any{
 				"status":                      "paused",
+				"generation":                  gorm.Expr("generation + 1"),
 				"claim_token":                 "",
 				"next_run_at":                 now,
 				"last_safe_error":             safeError,
@@ -1418,25 +1394,53 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 }
 
 func (s *MicrosoftAliasStore) MarkDispatchFailed(ctx context.Context, task mailapp.MicrosoftAliasTask, nextRunAt time.Time, safeError string) error {
-	result := s.db.WithContext(ctx).
-		Model(&MicrosoftAliasScheduleModel{}).
-		Where("resource_id = ? AND status = ? AND claim_token = ?", task.ResourceID, "queued", task.DispatchToken).
-		Updates(map[string]any{
-			"status":          "pending",
-			"claim_token":     "",
-			"next_run_at":     nextRunAt,
-			"last_safe_error": safeAliasStoreMessage(safeError),
-			"updated_at":      time.Now().UTC(),
-		})
-	if result.Error != nil {
-		return fmt.Errorf("mark microsoft alias dispatch failed: %w", result.Error)
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var schedule MicrosoftAliasScheduleModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("resource_id = ? AND generation = ? AND status IN ?", task.ResourceID, task.Generation, []string{"queued", "running"}).
+			Take(&schedule).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock failed microsoft alias dispatch: %w", err)
+		}
+		now := time.Now().UTC()
+		if schedule.Status == "running" {
+			if err := tx.Model(&MicrosoftAliasAttemptModel{}).
+				Where("resource_id = ? AND status = ?", task.ResourceID, mailapp.MicrosoftAliasAttemptRunning).
+				Updates(map[string]any{
+					"status":          mailapp.MicrosoftAliasAttemptUncertain,
+					"category":        "request",
+					"last_safe_error": "Microsoft alias result requires reconciliation.",
+					"was_attempted":   true,
+					"uncertain_since": gorm.Expr("COALESCE(uncertain_since, ?)", now),
+					"updated_at":      now,
+				}).Error; err != nil {
+				return fmt.Errorf("fence interrupted microsoft alias attempts: %w", err)
+			}
+		}
+		result := tx.Model(&MicrosoftAliasScheduleModel{}).
+			Where("resource_id = ? AND generation = ? AND status = ?", task.ResourceID, task.Generation, schedule.Status).
+			Updates(map[string]any{
+				"status":          "pending",
+				"generation":      gorm.Expr("generation + 1"),
+				"claim_token":     "",
+				"next_run_at":     nextRunAt,
+				"last_safe_error": safeAliasStoreMessage(safeError),
+				"updated_at":      now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mark microsoft alias dispatch failed: %w", result.Error)
+		}
+		return nil
+	})
 }
 
 func updateMicrosoftAliasScheduleTx(tx *gorm.DB, resourceID uint, claimToken, status string, nextRunAt time.Time, safeError string, failed *bool) error {
 	updates := map[string]any{
 		"status":          status,
+		"generation":      gorm.Expr("generation + 1"),
 		"claim_token":     "",
 		"next_run_at":     nextRunAt,
 		"last_safe_error": safeAliasStoreMessage(safeError),

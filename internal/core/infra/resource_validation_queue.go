@@ -21,9 +21,10 @@ const (
 	TypeResourceValidationDispatcher = "core:resource_validation_dispatcher"
 
 	ResourceValidationQueueName     = platform.QueueBackgroundValidation
-	validationTaskMaxRetry          = 3
+	validationTaskMaxRetry          = platform.BackgroundTaskMaxRetry
 	validationBatchTaskMaxRetry     = platform.BackgroundTaskMaxRetry
 	validationTaskTimeout           = 15 * time.Minute
+	validationTaskActivationDelay   = time.Second
 	validationBatchTaskTimeout      = time.Minute
 	validationDispatcherTaskTimeout = 30 * time.Second
 	validationBatchLeaseDuration    = 24 * time.Hour
@@ -39,34 +40,35 @@ func NewResourceValidationQueue(client *asynq.Client, redisClient redis.Universa
 	return &ResourceValidationQueue{client: client, redis: redisClient}
 }
 
-func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
+func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context, task coreapp.ResourceValidationTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("resource validation queue is unavailable")
+		return false, fmt.Errorf("resource validation queue is unavailable")
 	}
-	if task.ResourceID == 0 || task.OwnerUserID == 0 || !coreappValidationTaskTypeValid(task) {
-		return fmt.Errorf("resource validation task identity is required")
+	if task.ResourceID == 0 || task.OwnerUserID == 0 || task.ValidationGeneration == 0 || !coreappValidationTaskTypeValid(task) {
+		return false, fmt.Errorf("resource validation task identity is required")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return fmt.Errorf("marshal resource validation task: %w", err)
+		return false, fmt.Errorf("marshal resource validation task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidation, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(ResourceValidationQueueName),
-		asynq.TaskID(fmt.Sprintf("resource-validation:%s:%d:%d", task.ResourceType, task.ResourceID, task.ExpectedCredentialRevision)),
+		asynq.Unique(validationTaskTimeout+validationTaskActivationDelay),
 		asynq.MaxRetry(validationTaskMaxRetry),
 		asynq.Timeout(validationTaskTimeout),
+		asynq.ProcessIn(validationTaskActivationDelay),
 		asynq.Retention(0),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
-			return nil
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
 		}
-		return fmt.Errorf("enqueue resource validation task: %w", err)
+		return false, fmt.Errorf("enqueue resource validation task: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func coreappValidationTaskTypeValid(task coreapp.ResourceValidationTask) bool {
@@ -113,7 +115,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationBatch(ctx context.Con
 		ctx,
 		asynq.NewTask(TypeResourceValidationBatch, payload),
 		asynq.Queue(platform.QueueResource),
-		asynq.TaskID(resourceValidationBatchTaskID(task)),
+		asynq.Unique(validationBatchTaskTimeout),
 		asynq.MaxRetry(validationBatchTaskMaxRetry),
 		asynq.Timeout(validationBatchTaskTimeout),
 		asynq.Retention(0),
@@ -122,7 +124,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationBatch(ctx context.Con
 		if initial {
 			q.releaseInitialResourceValidationBatch(ctx, task)
 		}
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue resource validation batch task: %w", err)
@@ -173,11 +175,6 @@ func resourceValidationBatchLeaseKey(batchID string) string {
 	return fmt.Sprintf("remail:core:resource-validation-batch:%x", digest)
 }
 
-func resourceValidationBatchTaskID(task coreapp.ResourceValidationBatchTask) string {
-	digest := sha256.Sum256([]byte(strings.TrimSpace(task.BatchID)))
-	return fmt.Sprintf("resource-validation-batch:%x:%s:%d", digest, task.ClaimToken, task.AfterID)
-}
-
 // batchLeaseRefreshScript and batchLeaseReleaseScript are generic Redis
 // compare-and-act lease primitives shared by every core batch cursor
 // (resource validation, admin domain bulk): refresh extends the lease only if
@@ -202,21 +199,26 @@ func (q *ResourceValidationQueue) EnqueueResourceValidationDispatcher(ctx contex
 		return fmt.Errorf("resource validation queue is unavailable")
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, nil)
+	uniqueTTL := validationDispatcherTaskTimeout
+	if delay > 0 {
+		uniqueTTL += delay
+	}
 	options := []asynq.Option{
-		asynq.Queue("default"),
+		asynq.Queue(platform.QueueDefault),
 		// Asynq releases the uniqueness key as soon as the dispatcher finishes.
 		// Keeping the lease for the full task timeout prevents a slow scan from
 		// spawning overlapping dispatcher tasks every two seconds.
-		asynq.Unique(validationDispatcherTaskTimeout),
+		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(validationDispatcherTaskTimeout),
+		asynq.Retention(0),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue resource validation dispatcher task: %w", err)

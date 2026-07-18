@@ -158,7 +158,6 @@ func orderMailResponse(items []domain.MailContent, state *domain.FetchState) Ord
 	}
 	if state != nil {
 		resp.Fetch = &FetchStateResponse{
-			LastJobID:          state.LastJobID,
 			LastStatus:         state.LastStatus,
 			LastSubmittedAt:    state.LastSubmittedAt,
 			LastSuccessAt:      state.LastSuccessAt,

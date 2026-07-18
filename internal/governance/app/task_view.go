@@ -43,7 +43,6 @@ const (
 	AdminTaskSourceAliasSchedule = "alias_schedule"
 	AdminTaskSourceToken         = "token"
 	AdminTaskSourceFetch         = "fetch"
-	AdminTaskSourceBulk          = "bulk"
 )
 
 var (
@@ -90,8 +89,7 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceAlias,
 		AdminTaskSourceAliasSchedule,
 		AdminTaskSourceToken,
-		AdminTaskSourceFetch,
-		AdminTaskSourceBulk:
+		AdminTaskSourceFetch:
 		return true
 	default:
 		return false

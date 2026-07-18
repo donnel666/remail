@@ -28,16 +28,8 @@ func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, befor
 	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE resource_type = ? AND received_at < ? ORDER BY received_at, id LIMIT ?", resourceType, before, limit)
 }
 
-func (r *RetentionRepo) DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
-	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_fetch_jobs WHERE status IN ('succeeded', 'failed', 'skipped') AND updated_at < ? LIMIT ?", before, limit)
-}
-
 func (r *RetentionRepo) DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	return r.deleteBySQL(ctx, "DELETE FROM allocation_daily_usages WHERE usage_date < ? ORDER BY usage_date LIMIT ?", before.UTC().Format("2006-01-02"), limit)
-}
-
-func (r *RetentionRepo) DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
-	return r.deleteBySQL(ctx, "DELETE FROM proxy_check_jobs WHERE status IN ('succeeded', 'failed') AND updated_at < ? LIMIT ?", before, limit)
 }
 
 func (r *RetentionRepo) DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {

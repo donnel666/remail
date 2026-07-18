@@ -16,8 +16,6 @@ import (
 
 const (
 	resourceFetchLookbackWindow       = 90 * 24 * time.Hour
-	resourceFetchRunningStaleAfter    = 20 * time.Minute
-	resourceFetchQueuedDispatchLease  = 60 * time.Minute
 	resourceFetchDefaultDispatchLimit = 100
 )
 
@@ -65,9 +63,9 @@ type ResourceFetchSubmitResult struct {
 }
 
 type ResourceFetchTask struct {
-	JobID         uint   `json:"jobId"`
-	DispatchToken string `json:"dispatchToken"`
-	RequestID     string `json:"requestId"`
+	ResourceID uint   `json:"resourceId"`
+	Generation uint64 `json:"generation"`
+	RequestID  string `json:"requestId"`
 }
 
 type DispatchResourceFetchJobsResult struct {
@@ -78,21 +76,20 @@ type DispatchResourceFetchJobsResult struct {
 
 type ResourceFetchRepository interface {
 	CreateOrReuseResourceFetch(ctx context.Context, job *domain.ResourceFetchJob, log *governancedomain.OperationLog) (bool, error)
-	FindResourceFetchJob(ctx context.Context, id uint) (*domain.ResourceFetchJob, error)
-	ClaimDispatchableResourceFetches(ctx context.Context, limit int, runningStaleBefore time.Time, queuedDispatchStaleBefore time.Time) ([]domain.ResourceFetchJob, error)
-	MarkResourceFetchRunning(ctx context.Context, id uint, dispatchToken string) (string, bool, error)
-	ReleaseResourceFetchDispatch(ctx context.Context, id uint, dispatchToken string) error
-	MarkResourceFetchDispatchFailed(ctx context.Context, id uint, dispatchToken string, safeError string, log *governancedomain.SystemLog) error
+	FindResourceFetch(ctx context.Context, resourceID uint, generation uint64) (*domain.ResourceFetchJob, error)
+	ListPendingResourceFetches(ctx context.Context, limit int) ([]domain.ResourceFetchJob, error)
+	MarkResourceFetchProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error)
+	ReleaseResourceFetchInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, log *governancedomain.SystemLog) (bool, error)
 	LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64) (*domain.ResourceFetchScope, error)
-	AssertResourceFetchFence(ctx context.Context, jobID uint, claimToken string, resourceID uint, expectedCredentialRevision uint64) error
-	CompleteResourceFetch(ctx context.Context, jobID uint, claimToken string, resourceID uint, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
-	CompleteResourceFetchTask(ctx context.Context, jobID uint, claimToken string, now time.Time, log *governancedomain.SystemLog) error
-	MarkResourceFetchCanceled(ctx context.Context, jobID uint, claimToken string, safeError string, now time.Time, log *governancedomain.SystemLog) error
-	MarkResourceFetchFailure(ctx context.Context, jobID uint, claimToken string, safeError string, retryable bool, now time.Time, log *governancedomain.SystemLog) (bool, error)
+	AssertResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
+	CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
+	CompleteResourceFetchTask(ctx context.Context, resourceID uint, generation uint64, now time.Time, log *governancedomain.SystemLog) error
+	MarkResourceFetchCanceled(ctx context.Context, resourceID uint, generation uint64, safeError string, now time.Time, log *governancedomain.SystemLog) error
+	MarkResourceFetchFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, retryable bool, now time.Time, log *governancedomain.SystemLog) (bool, error)
 }
 
 type ResourceFetchQueue interface {
-	EnqueueResourceFetch(ctx context.Context, task ResourceFetchTask) error
+	EnqueueResourceFetch(ctx context.Context, task ResourceFetchTask) (bool, error)
 	EnqueueFetchDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -181,29 +178,23 @@ func (uc *ResourceFetchUseCase) Submit(ctx context.Context, cmd ResourceFetchSub
 }
 
 func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchTask) error {
-	if uc == nil || uc.repo == nil || task.JobID == 0 {
+	if uc == nil || uc.repo == nil || task.ResourceID == 0 || task.Generation == 0 {
 		return domain.ErrInvalidRequest
 	}
-	if strings.TrimSpace(task.DispatchToken) == "" {
-		// Old or forged payloads cannot consume an unfenced durable job. The
-		// dispatcher will issue a fresh generation.
-		return nil
-	}
-	job, err := uc.repo.FindResourceFetchJob(ctx, task.JobID)
-	if err != nil {
+	claimed, err := uc.repo.MarkResourceFetchProcessing(ctx, task.ResourceID, task.Generation)
+	if err != nil || !claimed {
 		return err
 	}
+	job, err := uc.repo.FindResourceFetch(ctx, task.ResourceID, task.Generation)
+	if err != nil {
+		return uc.releaseResourceFetchInfrastructure(ctx, task.ResourceID, task.Generation, err)
+	}
 	if job == nil {
-		return domain.ErrResourceFetchJobNotFound
+		return nil
 	}
 	if domain.IsTerminalResourceFetchStatus(job.Status) {
 		return nil
 	}
-	claimToken, claimed, err := uc.repo.MarkResourceFetchRunning(ctx, task.JobID, task.DispatchToken)
-	if err != nil || !claimed {
-		return err
-	}
-	job.ClaimToken = claimToken
 	platform.ObserveQueueWait("mailmatch_resource_fetch", job.CreatedAt)
 
 	scope, err := uc.repo.LoadResourceFetchScope(ctx, job.ResourceID, job.ExpectedCredentialRevision)
@@ -214,7 +205,7 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		return uc.processResourceHistory(ctx, *job)
 	}
 	if uc.transport == nil {
-		return uc.retryResourceFetch(ctx, *job, "Microsoft mail service is temporarily unavailable.", "request", true, domain.ErrMailServiceUnavailable)
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("microsoft mail transport is unavailable"))
 	}
 	fetched, err := uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
 		Scope: OrderScope{
@@ -231,6 +222,9 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		RequestID: job.RequestID,
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+		}
 		safe, category, retryable := classifyResourceFetchFailure(err)
 		return uc.retryResourceFetch(ctx, *job, safe, category, retryable, err)
 	}
@@ -239,14 +233,13 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 	}
 
 	if uc.messages == nil {
-		return uc.retryResourceFetch(ctx, *job, "Mail message ingestion failed.", "ingestion", true, errors.New("mailmatch message use case is unavailable"))
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("mailmatch message use case is unavailable"))
 	}
 	stored, matched, _, err := uc.messages.ingestFetchedMessagesWithFence(ctx, fetched.Messages, func(txCtx context.Context) error {
 		return uc.repo.AssertResourceFetchFence(
 			txCtx,
-			job.ID,
-			job.ClaimToken,
 			job.ResourceID,
+			job.Generation,
 			job.ExpectedCredentialRevision,
 		)
 	})
@@ -260,15 +253,17 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		if stageErr := (*mailIngestError)(nil); errors.As(err, &stageErr) {
 			safe = stageErr.safe
 		}
-		return uc.retryResourceFetch(ctx, *job, safe, "ingestion", true, err)
+		if safe == "Mail match result notification failed." {
+			return uc.retryResourceFetch(ctx, *job, safe, "ingestion", true, err)
+		}
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
 
 	now := uc.now()
 	if err := uc.repo.CompleteResourceFetch(
 		ctx,
-		job.ID,
-		job.ClaimToken,
 		job.ResourceID,
+		job.Generation,
 		job.ExpectedCredentialRevision,
 		strings.TrimSpace(fetched.RefreshToken),
 		len(fetched.Messages),
@@ -285,14 +280,14 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 		if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
 			return nil
 		}
-		return err
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
 	return nil
 }
 
 func (uc *ResourceFetchUseCase) processResourceHistory(ctx context.Context, job domain.ResourceFetchJob) error {
 	if uc.history == nil {
-		return uc.retryResourceFetch(ctx, job, "Project history scan is temporarily unavailable.", "request", true, domain.ErrMailServiceUnavailable)
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("project history scan service is unavailable"))
 	}
 	err := uc.history.scanValidatedMicrosoftHistory(ctx, ValidatedMicrosoftHistoryScanTask{
 		ResourceID: job.ResourceID, RequestID: job.RequestID,
@@ -309,17 +304,20 @@ func (uc *ResourceFetchUseCase) processResourceHistory(ctx context.Context, job 
 			safe, category, retryable := classifyResourceFetchFailure(err)
 			return uc.retryResourceFetch(ctx, job, safe, category, retryable, err)
 		}
-		return uc.retryResourceFetch(ctx, job, "Project history scan failed.", "request", true, err)
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
 	now := uc.now()
 	err = uc.repo.CompleteResourceFetchTask(
-		ctx, job.ID, job.ClaimToken, now,
+		ctx, job.ResourceID, job.Generation, now,
 		resourceFetchSystemLog(job, "info", "resource_history_scan_succeeded", "Microsoft resource project history scan completed.", ""),
 	)
 	if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+	}
+	return nil
 }
 
 func (uc *ResourceFetchUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceFetchJobsResult, error) {
@@ -329,49 +327,50 @@ func (uc *ResourceFetchUseCase) DispatchPending(ctx context.Context, limit int) 
 	if limit <= 0 {
 		limit = resourceFetchDefaultDispatchLimit
 	}
-	now := uc.now()
-	jobs, err := uc.repo.ClaimDispatchableResourceFetches(
-		ctx,
-		limit,
-		now.Add(-resourceFetchRunningStaleAfter),
-		now.Add(-resourceFetchQueuedDispatchLease),
-	)
+	jobs, err := uc.repo.ListPendingResourceFetches(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
 	result := &DispatchResourceFetchJobsResult{Attempted: len(jobs)}
 	var dispatchErrors []error
 	for _, job := range jobs {
-		err := uc.queue.EnqueueResourceFetch(ctx, ResourceFetchTask{
-			JobID:         job.ID,
-			DispatchToken: job.DispatchToken,
-			RequestID:     job.RequestID,
+		accepted, err := uc.queue.EnqueueResourceFetch(ctx, ResourceFetchTask{
+			ResourceID: job.ResourceID,
+			Generation: job.Generation,
+			RequestID:  job.RequestID,
 		})
-		if err == nil {
-			result.Queued++
+		if err != nil {
+			result.Failed++
+			dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue resource fetch %d generation %d: %w", job.ResourceID, job.Generation, err))
 			continue
 		}
-		result.Failed++
-		dispatchErrors = append(dispatchErrors, fmt.Errorf("enqueue resource fetch job %d: %w", job.ID, err))
-		releaseErr := uc.repo.MarkResourceFetchDispatchFailed(
-			ctx,
-			job.ID,
-			job.DispatchToken,
-			resourceFetchQueueUnavailable(job.Kind),
-			resourceFetchSystemLog(job, "warning", "resource_fetch_dispatch_failed", resourceFetchDispatchFailedMessage(job.Kind), "queue_unavailable"),
-		)
-		if releaseErr != nil {
-			dispatchErrors = append(dispatchErrors, fmt.Errorf("release resource fetch job %d: %w", job.ID, releaseErr))
+		if !accepted {
+			continue
+		}
+		processing, markErr := uc.repo.MarkResourceFetchProcessing(ctx, job.ResourceID, job.Generation)
+		if markErr != nil {
+			result.Failed++
+			dispatchErrors = append(dispatchErrors, markErr)
+			continue
+		}
+		if processing {
+			result.Queued++
 		}
 	}
 	return result, errors.Join(dispatchErrors...)
 }
 
 func (uc *ResourceFetchUseCase) ReleaseDispatch(ctx context.Context, task ResourceFetchTask) error {
-	if uc == nil || uc.repo == nil || task.JobID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if uc == nil || uc.repo == nil || task.ResourceID == 0 || task.Generation == 0 {
 		return nil
 	}
-	return uc.repo.ReleaseResourceFetchDispatch(ctx, task.JobID, task.DispatchToken)
+	released, err := uc.repo.ReleaseResourceFetchInfrastructureFailure(
+		ctx, task.ResourceID, task.Generation, "Microsoft resource fetch execution capacity is temporarily unavailable.", nil,
+	)
+	if released {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return err
 }
 
 func (uc *ResourceFetchUseCase) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
@@ -391,16 +390,27 @@ func (uc *ResourceFetchUseCase) finishScopeFailure(ctx context.Context, job doma
 	case errors.Is(err, domain.ErrResourceFetchCredentialsMissing):
 		return uc.retryResourceFetch(ctx, job, "Microsoft mail fetch credentials are incomplete.", "missing_token", false, err)
 	default:
-		return err
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
+}
+
+func (uc *ResourceFetchUseCase) releaseResourceFetchInfrastructure(ctx context.Context, resourceID uint, generation uint64, cause error) error {
+	released, err := uc.repo.ReleaseResourceFetchInfrastructureFailure(
+		context.WithoutCancel(ctx), resourceID, generation,
+		"Microsoft resource fetch infrastructure is temporarily unavailable.", nil,
+	)
+	if released {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return errors.Join(cause, err)
 }
 
 func (uc *ResourceFetchUseCase) cancelResourceFetch(ctx context.Context, job domain.ResourceFetchJob, safe string, category string) error {
 	now := uc.now()
 	err := uc.repo.MarkResourceFetchCanceled(
 		ctx,
-		job.ID,
-		job.ClaimToken,
+		job.ResourceID,
+		job.Generation,
 		safe,
 		now,
 		resourceFetchSystemLog(job, "warning", "resource_fetch_canceled", safe, safeResourceFetchCategory(category)),
@@ -422,8 +432,8 @@ func (uc *ResourceFetchUseCase) retryResourceFetch(
 	now := uc.now()
 	retryScheduled, err := uc.repo.MarkResourceFetchFailure(
 		ctx,
-		job.ID,
-		job.ClaimToken,
+		job.ResourceID,
+		job.Generation,
 		safe,
 		retryable,
 		now,
@@ -438,8 +448,7 @@ func (uc *ResourceFetchUseCase) retryResourceFetch(
 	if retryScheduled {
 		uc.ScheduleDispatcher(context.WithoutCancel(ctx), time.Second)
 	}
-	// The durable row already owns retry/exhaustion. Returning nil prevents
-	// Asynq from replaying a consumed dispatch token.
+	// The business state owns retry/exhaustion; Asynq retry count is separate.
 	_ = cause
 	return nil
 }
@@ -515,20 +524,6 @@ func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 		return "project history scan"
 	}
 	return "mail fetch"
-}
-
-func resourceFetchQueueUnavailable(kind domain.ResourceFetchJobKind) string {
-	if kind == domain.ResourceFetchJobHistory {
-		return "Project history scan queue is temporarily unavailable; dispatcher will retry."
-	}
-	return "Mail fetch queue is temporarily unavailable; dispatcher will retry."
-}
-
-func resourceFetchDispatchFailedMessage(kind domain.ResourceFetchJobKind) string {
-	if kind == domain.ResourceFetchJobHistory {
-		return "Microsoft resource project history scan dispatch failed."
-	}
-	return "Microsoft resource mail fetch dispatch failed."
 }
 
 func safeResourceFetchCategory(value string) string {

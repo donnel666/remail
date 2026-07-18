@@ -12,48 +12,43 @@ import (
 )
 
 type projectHistoryJobsStub struct {
-	running  ProjectHistoryScanJob
-	planned  []ProjectHistoryScanJob
-	advanced uint
-	matched  bool
-	skipped  bool
-	failed   uint
-	failures int
-	retry    bool
-	complete bool
+	pending          []ProjectHistoryScanState
+	processing       int
+	completed        int
+	completedScanned int
+	completedMatched int
+	completedSkipped int
+	released         int
+	failures         int
+	abnormal         bool
 }
 
-func (*projectHistoryJobsStub) CreatePlanner(context.Context, uint, string) error { return nil }
-func (*projectHistoryJobsStub) EnsureMissingPlanners(context.Context, int) (int, error) {
-	return 0, nil
+func (s *projectHistoryJobsStub) RequestProjectHistoryScan(_ context.Context, projectID uint, requestID string) (*ProjectHistoryScanState, error) {
+	state := &ProjectHistoryScanState{ProjectID: projectID, Status: "pending", Generation: 1, RequestID: requestID}
+	return state, nil
 }
-func (*projectHistoryJobsStub) ClaimDispatchable(context.Context, int, time.Time, time.Time) ([]ProjectHistoryScanJob, error) {
-	return nil, nil
+func (s *projectHistoryJobsStub) ListPendingProjectHistoryScans(context.Context, int) ([]ProjectHistoryScanState, error) {
+	return append([]ProjectHistoryScanState(nil), s.pending...), nil
 }
-func (s *projectHistoryJobsStub) MarkRunning(context.Context, uint, string) (*ProjectHistoryScanJob, bool, error) {
-	job := s.running
-	return &job, true, nil
+func (s *projectHistoryJobsStub) MarkProjectHistoryProcessing(context.Context, uint, uint64) (bool, error) {
+	s.processing++
+	return true, nil
 }
-func (s *projectHistoryJobsStub) PlanShards(_ context.Context, _ uint, _ string, shards []ProjectHistoryScanJob) error {
-	s.planned = append(s.planned, shards...)
+func (*projectHistoryJobsStub) AssertProjectHistoryFence(context.Context, uint, uint64) error {
 	return nil
 }
-func (s *projectHistoryJobsStub) Advance(_ context.Context, _ uint, _ string, resourceID uint, matched, skipped bool, _ string) error {
-	s.advanced, s.matched, s.skipped = resourceID, matched, skipped
-	return nil
+func (s *projectHistoryJobsStub) CompleteProjectHistoryScan(_ context.Context, _ uint, _ uint64, scanned, matched, skipped int) (bool, error) {
+	s.completed++
+	s.completedScanned, s.completedMatched, s.completedSkipped = scanned, matched, skipped
+	return true, nil
 }
-func (s *projectHistoryJobsStub) Complete(context.Context, uint, string) error {
-	s.complete = true
-	return nil
+func (s *projectHistoryJobsStub) ReleaseProjectHistoryInfrastructureFailure(context.Context, uint, uint64, string) (bool, error) {
+	s.released++
+	return true, nil
 }
-func (s *projectHistoryJobsStub) MarkFailure(_ context.Context, _ ProjectHistoryScanJob, resourceID uint, retryable bool, _ string) error {
+func (s *projectHistoryJobsStub) RecordProjectHistoryFailure(context.Context, uint, uint64, string) (bool, bool, error) {
 	s.failures++
-	s.failed, s.retry = resourceID, retryable
-	return nil
-}
-func (*projectHistoryJobsStub) ReleaseDispatch(context.Context, uint, string) error { return nil }
-func (*projectHistoryJobsStub) MarkDispatchFailed(context.Context, uint, string, string) error {
-	return nil
+	return true, s.abnormal, nil
 }
 
 type projectHistoryMatchesStub struct {
@@ -89,14 +84,11 @@ func (s *projectHistoryMatchesStub) FindHistoricalProjectScopeForUpdate(context.
 	return s.scope, nil
 }
 func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint) error {
-	s.cleared = resourceID
-	s.clearProject = projectID
+	s.cleared, s.clearProject = resourceID, projectID
 	return nil
 }
 
-type projectHistoryUsageStub struct {
-	matches []HistoricalProjectMatch
-}
+type projectHistoryUsageStub struct{ matches []HistoricalProjectMatch }
 
 func (s *projectHistoryUsageStub) ImportHistoricalMicrosoftUsage(_ context.Context, matches []HistoricalProjectMatch) error {
 	s.matches = append([]HistoricalProjectMatch(nil), matches...)
@@ -104,12 +96,15 @@ func (s *projectHistoryUsageStub) ImportHistoricalMicrosoftUsage(_ context.Conte
 }
 
 type projectHistoryQueueStub struct {
+	accepted   bool
 	dispatches int
+	queued     []ProjectHistoryScanTask
 	validated  []ValidatedMicrosoftHistoryScanTask
 }
 
-func (*projectHistoryQueueStub) EnqueueProjectHistoryScan(context.Context, ProjectHistoryScanTask) error {
-	return nil
+func (q *projectHistoryQueueStub) EnqueueProjectHistoryScan(_ context.Context, task ProjectHistoryScanTask) (bool, error) {
+	q.queued = append(q.queued, task)
+	return q.accepted, nil
 }
 func (q *projectHistoryQueueStub) EnqueueValidatedMicrosoftHistoryScan(_ context.Context, task ValidatedMicrosoftHistoryScanTask) error {
 	q.validated = append(q.validated, task)
@@ -167,185 +162,79 @@ type projectHistoryTransportStub struct {
 func (s *projectHistoryTransportStub) FetchMicrosoftMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
 	s.request = request
 	if request.OnMessages != nil && s.err == nil {
-		pages := s.pages
-		if pages == nil {
-			pages = [][]FetchedMessage{{{
-				EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
-				Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
-			}}, {{
-				EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Junk",
-				Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: time.Now().UTC(),
-			}}}
-		}
-		for _, page := range pages {
+		for _, page := range s.pages {
 			request.OnMessages(page)
 		}
 	}
 	return s.result, s.err
 }
 
-func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
+func TestProjectHistoryDispatchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
+	jobs := &projectHistoryJobsStub{pending: []ProjectHistoryScanState{{ProjectID: 7, Generation: 3, Status: "pending"}}}
 	queue := &projectHistoryQueueStub{}
-	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
+	uc := NewProjectHistoryScanUseCase(jobs, nil, queue, nil)
+	require.NoError(t, uc.DispatchPending(context.Background(), 10))
+	require.Zero(t, jobs.processing)
 
-	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
-	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
+	queue.accepted = true
+	require.NoError(t, uc.DispatchPending(context.Background(), 10))
+	require.Equal(t, 1, jobs.processing)
 }
 
-func TestValidatedMicrosoftHistoryScanMatchesMainAndAliasRecipientsAcrossProjects(t *testing.T) {
+func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	now := time.Now().UTC()
-	matches := &projectHistoryMatchesStub{scopes: []HistoricalProjectScope{
-		projectHistoryScopeFor(7, "exact", `main@service\.test`),
-		projectHistoryScopeFor(8, "plus", `plus@service\.test`),
-		projectHistoryScopeFor(9, "dot", `dot@service\.test`),
-		projectHistoryScopeFor(10, "exact", `alias@service\.test`),
-	}}
-	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{{
-		ResourceID: 10, Status: "normal", EmailAddress: "firstname@example.com",
-		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
-	}}}
-	transport := &projectHistoryTransportStub{
-		result: &FetchMessagesResult{RefreshToken: "rotated"},
-		pages: [][]FetchedMessage{{
-			{Recipients: []string{"firstname@example.com", "coworker@another-domain.test"}, Sender: "main@service.test", ReceivedAt: now},
-			{Recipients: []string{"firstname+used@example.com"}, Sender: "plus@service.test", ReceivedAt: now.Add(time.Minute)},
-			{Recipients: []string{"first.name@example.com"}, Sender: "dot@service.test", ReceivedAt: now.Add(2 * time.Minute)},
-			{Recipients: []string{"custom-alias@example.com"}, Sender: "alias@service.test", ReceivedAt: now.Add(3 * time.Minute)},
-		}},
-	}
-	history := &projectHistoryUsageStub{}
-	uc := NewProjectHistoryScanUseCase(nil, matches, &projectHistoryQueueStub{}, transport)
-	uc.SetMicrosoftCredentialPort(credentials)
-	uc.SetHistoricalMicrosoftUsagePort(history)
-
-	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{
-		ResourceID: 10, RequestID: "request-1",
-	}))
-	require.True(t, transport.request.FullHistory)
-	require.Equal(t, "request-1", transport.request.RequestID)
-	require.Len(t, history.matches, 4)
-	want := []struct {
-		projectID   uint
-		mailboxType HistoricalMailboxType
-		email       string
-	}{
-		{7, HistoricalMailboxMain, "firstname@example.com"},
-		{8, HistoricalMailboxPlus, "firstname+used@example.com"},
-		{9, HistoricalMailboxDot, "first.name@example.com"},
-		{10, HistoricalMailboxAlias, "custom-alias@example.com"},
-	}
-	for i, expected := range want {
-		require.Equal(t, expected.projectID, history.matches[i].ProjectID)
-		require.Equal(t, uint(10), history.matches[i].ResourceID)
-		require.Equal(t, expected.mailboxType, history.matches[i].MailboxType)
-		require.Equal(t, expected.email, history.matches[i].MailboxEmail)
-		require.Equal(t, 1, history.matches[i].EvidenceCount)
-	}
-	require.Equal(t, uint(10), matches.cleared)
-	require.Zero(t, matches.clearProject)
-	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
-}
-
-func TestProjectHistoryPlannerCreatesFourDurableShards(t *testing.T) {
-	jobs := &projectHistoryJobsStub{running: ProjectHistoryScanJob{ID: 1, ProjectID: 7, Shard: -1, ClaimToken: "claim"}}
+	jobs := &projectHistoryJobsStub{}
 	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
-	queue := &projectHistoryQueueStub{}
-	credentials := &projectHistoryCredentialsStub{maxID: 10}
-	uc := NewProjectHistoryScanUseCase(jobs, matches, queue, nil)
-	uc.SetMicrosoftCredentialPort(credentials)
-
-	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 1, DispatchToken: "dispatch"}))
-	require.Len(t, jobs.planned, 4)
-	require.Equal(t, uint(1), jobs.planned[0].StartResourceID)
-	require.Equal(t, uint(3), jobs.planned[0].EndResourceID)
-	require.Equal(t, uint(10), jobs.planned[3].EndResourceID)
-}
-
-func TestProjectHistoryShardStreamsInboxAndJunkThenAdvances(t *testing.T) {
-	jobs := &projectHistoryJobsStub{running: ProjectHistoryScanJob{
-		ID: 2, ProjectID: 7, Shard: 0, ClaimToken: "claim", EndResourceID: 100,
+	credentials := &projectHistoryCredentialsStub{maxID: 10, resources: []*coreapp.MicrosoftCredentialScope{
+		{ResourceID: 5},
+		{ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4},
 	}}
-	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
-	queue := &projectHistoryQueueStub{}
-	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{{
-		ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
-	}}}
-	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}}
+	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
+		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
+		Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: now,
+	}}}}
 	history := &projectHistoryUsageStub{}
+	queue := &projectHistoryQueueStub{accepted: true}
 	uc := NewProjectHistoryScanUseCase(jobs, matches, queue, transport)
 	uc.SetMicrosoftCredentialPort(credentials)
 	uc.SetHistoricalMicrosoftUsagePort(history)
 
-	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
-	require.True(t, transport.request.FullHistory)
-	require.NotNil(t, transport.request.OnMessages)
-	require.Len(t, history.matches, 1)
-	require.Equal(t, 2, history.matches[0].EvidenceCount)
-	require.Equal(t, uint(10), matches.cleared)
-	require.Equal(t, uint(7), matches.clearProject)
-	require.Equal(t, uint(10), jobs.advanced)
-	require.True(t, jobs.matched)
-	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
-}
-
-func TestProjectHistoryRetryableFetchFailureDoesNotAdvance(t *testing.T) {
-	jobs := &projectHistoryJobsStub{running: ProjectHistoryScanJob{
-		ID: 2, ProjectID: 7, Shard: 0, ClaimToken: "claim", EndResourceID: 100,
-	}}
-	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
-	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{{
-		ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
-	}}}
-	transport := &projectHistoryTransportStub{err: &MailFetchFailure{Retryable: true, Cause: errors.New("temporary")}}
-	uc := NewProjectHistoryScanUseCase(jobs, matches, &projectHistoryQueueStub{}, transport)
-	uc.SetMicrosoftCredentialPort(credentials)
-
-	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
-	require.Zero(t, jobs.advanced)
-	require.Equal(t, uint(10), jobs.failed)
-	require.True(t, jobs.retry)
-}
-
-func TestProjectHistoryFetchFailurePersistsRotatedTokenBeforeRetry(t *testing.T) {
-	jobs := &projectHistoryJobsStub{running: ProjectHistoryScanJob{
-		ID: 2, ProjectID: 7, Shard: 0, ClaimToken: "claim", EndResourceID: 100,
-	}}
-	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
-	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{{
-		ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
-	}}}
-	transport := &projectHistoryTransportStub{err: &MailFetchFailure{
-		Retryable: false, RefreshToken: "rotated", Cause: errors.New("forbidden"),
-	}}
-	uc := NewProjectHistoryScanUseCase(jobs, matches, &projectHistoryQueueStub{}, transport)
-	uc.SetMicrosoftCredentialPort(credentials)
-
-	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
-	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
-	require.Equal(t, uint(10), jobs.failed)
-	require.False(t, jobs.retry)
-}
-
-func TestProjectHistoryCredentialChangeRetriesWithoutAdvancingCheckpoint(t *testing.T) {
-	jobs := &projectHistoryJobsStub{running: ProjectHistoryScanJob{
-		ID: 2, ProjectID: 7, Shard: 0, ClaimToken: "claim", EndResourceID: 100,
-	}}
-	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
-	credentials := &projectHistoryCredentialsStub{
-		resources: []*coreapp.MicrosoftCredentialScope{{
-			ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
-		}},
-		rotationErr: coreapp.ErrMicrosoftCredentialChanged,
+	task := ProjectHistoryScanTask{ProjectID: 7, Generation: 2, RequestID: "request-2"}
+	for jobs.completed == 0 {
+		require.NoError(t, uc.Process(context.Background(), task))
+		if jobs.completed == 0 {
+			require.NotEmpty(t, queue.queued)
+			task = queue.queued[len(queue.queued)-1]
+		}
 	}
-	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}}
+	require.Equal(t, 1, jobs.completed)
+	require.Equal(t, 2, jobs.completedScanned)
+	require.Equal(t, 1, jobs.completedMatched)
+	require.Equal(t, 1, jobs.completedSkipped)
+	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
+}
+
+func TestProjectHistoryRetryableBusinessFailureIsRecorded(t *testing.T) {
+	jobs := &projectHistoryJobsStub{}
+	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
+	credentials := &projectHistoryCredentialsStub{maxID: 10, resources: []*coreapp.MicrosoftCredentialScope{{
+		ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}}}
+	transport := &projectHistoryTransportStub{err: &MailFetchFailure{SafeMessage: "Temporary mailbox failure.", Retryable: true, Cause: errors.New("temporary")}}
 	uc := NewProjectHistoryScanUseCase(jobs, matches, &projectHistoryQueueStub{}, transport)
 	uc.SetMicrosoftCredentialPort(credentials)
 
-	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{JobID: 2, DispatchToken: "dispatch"}))
-	require.Zero(t, jobs.advanced)
+	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{ProjectID: 7, Generation: 2}))
 	require.Equal(t, 1, jobs.failures)
-	require.Zero(t, jobs.failed)
-	require.True(t, jobs.retry)
+	require.Zero(t, jobs.completed)
+	require.Zero(t, jobs.released)
+}
+
+func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
+	queue := &projectHistoryQueueStub{}
+	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
+	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
+	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
 }
 
 func projectHistoryScope() *HistoricalProjectScope {
@@ -354,16 +243,6 @@ func projectHistoryScope() *HistoricalProjectScope {
 		Rules: []MailRule{
 			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
 			{Type: MailRuleSender, Pattern: `noreply@github\.com`, Enabled: true},
-		},
-	}
-}
-
-func projectHistoryScopeFor(projectID uint, recipientKind, senderPattern string) HistoricalProjectScope {
-	return HistoricalProjectScope{
-		ProjectID: projectID, ProductID: projectID + 100, LooseMatch: true,
-		Rules: []MailRule{
-			{Type: MailRuleRecipient, Pattern: recipientKind, Enabled: true},
-			{Type: MailRuleSender, Pattern: senderPattern, Enabled: true},
 		},
 	}
 }

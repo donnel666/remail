@@ -32,8 +32,8 @@ func (s *validationBatchQueueStub) EnqueueResourceValidationBatch(_ context.Cont
 	return nil
 }
 
-func (*validationBatchQueueStub) EnqueueResourceValidation(context.Context, ResourceValidationTask) error {
-	return nil
+func (*validationBatchQueueStub) EnqueueResourceValidation(context.Context, ResourceValidationTask) (bool, error) {
+	return true, nil
 }
 
 func (*validationBatchQueueStub) EnqueueResourceValidationDispatcher(context.Context, time.Duration) error {

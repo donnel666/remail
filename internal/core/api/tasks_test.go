@@ -40,7 +40,7 @@ func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t
 	RegisterCoreTaskHandlers(mux, module)
 	encoded, err := json.Marshal(coreapp.ResourceValidationTask{
 		ResourceID: root.ID, ResourceType: coredomain.ResourceTypeMicrosoft,
-		OwnerUserID: 1, ExpectedCredentialRevision: 3,
+		OwnerUserID: 1, ValidationGeneration: resources.microsoft[root.ID].ValidationGeneration, ExpectedCredentialRevision: 3,
 	})
 	require.NoError(t, err)
 
@@ -55,8 +55,8 @@ type dispatcherCountingQueue struct {
 	calls atomic.Int32
 }
 
-func (*dispatcherCountingQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
-	return nil
+func (*dispatcherCountingQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
 }
 
 func (*dispatcherCountingQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
@@ -73,7 +73,7 @@ func TestResourceValidationDispatcherSeederStopsOnCleanup(t *testing.T) {
 	module := &CoreModule{
 		ValidationUseCase: coreapp.NewResourceValidationUseCase(nil, nil, queue, nil),
 	}
-	cleanup := startResourceValidationDispatcher(context.Background(), module, 2*time.Millisecond)
+	cleanup := startResourceValidationDispatcher(context.Background(), module, 2*time.Millisecond, time.Second)
 	require.Eventually(t, func() bool {
 		return queue.calls.Load() >= 2
 	}, 100*time.Millisecond, time.Millisecond)
@@ -85,4 +85,83 @@ func TestResourceValidationDispatcherSeederStopsOnCleanup(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	require.Equal(t, stoppedAt, queue.calls.Load())
+}
+
+type deadlineBlockingDispatcherQueue struct {
+	calls atomic.Int32
+}
+
+func (*deadlineBlockingDispatcherQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
+}
+
+func (*deadlineBlockingDispatcherQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {
+	return nil
+}
+
+func (q *deadlineBlockingDispatcherQueue) EnqueueResourceValidationDispatcher(ctx context.Context, _ time.Duration) error {
+	q.calls.Add(1)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type deadlineBlockingImportRepo struct {
+	*mockImportRepo
+	calls atomic.Int32
+}
+
+func (r *deadlineBlockingImportRepo) ClaimAdminImportDispatchable(ctx context.Context, _ int, _, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+	r.calls.Add(1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestResourceValidationDispatcherDeadlinesAllowLaterTicksAndShutdown(t *testing.T) {
+	validationQueue := &deadlineBlockingDispatcherQueue{}
+	importRepo := &deadlineBlockingImportRepo{mockImportRepo: newMockImportRepo(newMockResourceRepo())}
+	module := &CoreModule{
+		ValidationUseCase: coreapp.NewResourceValidationUseCase(nil, nil, validationQueue, nil),
+		ImportUseCase:     coreapp.NewImportUseCase(nil, importRepo, nil, nil, &mockImportQueue{}),
+	}
+
+	startedAt := time.Now()
+	cleanup := startResourceValidationDispatcher(context.Background(), module, time.Millisecond, 5*time.Millisecond)
+	require.Less(t, time.Since(startedAt), 100*time.Millisecond, "the initial validation seed must have a deadline")
+	require.Eventually(t, func() bool {
+		return validationQueue.calls.Load() >= 3 && importRepo.calls.Load() >= 2
+	}, 250*time.Millisecond, time.Millisecond, "a timed-out call must not stop later dispatcher ticks")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	shutdownAt := time.Now()
+	cleanup(shutdownCtx)
+	require.Less(t, time.Since(shutdownAt), 50*time.Millisecond, "shutdown must cancel the active call")
+}
+
+type adminResourceBulkCleanupQueue struct {
+	released atomic.Bool
+}
+
+func (*adminResourceBulkCleanupQueue) EnqueueAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
+	return false, nil
+}
+
+func (*adminResourceBulkCleanupQueue) RefreshAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) (bool, error) {
+	return false, nil
+}
+
+func (q *adminResourceBulkCleanupQueue) ReleaseAdminResourceBulk(context.Context, coreapp.AdminResourceBulkTask) error {
+	q.released.Store(true)
+	return nil
+}
+
+func TestAdminResourceBulkCleanupReleasesExhaustedLease(t *testing.T) {
+	queue := &adminResourceBulkCleanupQueue{}
+	module := &CoreModule{AdminBulk: coreapp.NewAdminResourceBulkService(nil, queue, nil)}
+
+	cleanupAdminResourceBulk(context.Background(), module, coreapp.AdminResourceBulkTask{
+		BatchID: "batch", ClaimToken: "claim", RequestFingerprint: "fingerprint", CommandID: 42,
+	})
+
+	require.True(t, queue.released.Load())
 }

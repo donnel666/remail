@@ -24,16 +24,15 @@ import (
 )
 
 const (
-	defaultFetchCooldown       = 5 * time.Second
-	autoFetchCooldown          = 5 * time.Second
-	fetchLookbackWindow        = 90 * 24 * time.Hour
-	fetchOverlapWindow         = 5 * time.Minute
-	readWindowSkew             = 2 * time.Minute
-	codeReadLimit              = 1
-	purchaseReadLimit          = 30
-	messageScanLimit           = 40
-	defaultFetchMaxAttempts    = 3
-	staleFetchRunningThreshold = 90 * time.Second
+	defaultFetchCooldown    = 5 * time.Second
+	autoFetchCooldown       = 5 * time.Second
+	fetchLookbackWindow     = 90 * 24 * time.Hour
+	fetchOverlapWindow      = 5 * time.Minute
+	readWindowSkew          = 2 * time.Minute
+	codeReadLimit           = 1
+	purchaseReadLimit       = 30
+	messageScanLimit        = 40
+	defaultFetchMaxAttempts = 3
 )
 
 type MailRuleType string
@@ -139,24 +138,21 @@ type Repository interface {
 	CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
-	FindActiveFetchJobByResource(ctx context.Context, emailResourceID uint) (*domain.FetchJob, error)
 	FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
-	CreateFetchState(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
-	CreateFetchJob(ctx context.Context, job *domain.FetchJob) error
-	MarkFetchJobQueued(ctx context.Context, jobID uint) error
-	FindFetchJob(ctx context.Context, jobID uint) (*domain.FetchJob, error)
-	ClaimFetchJobRunning(ctx context.Context, jobID uint, now time.Time) (bool, error)
-	MarkFetchJobSucceeded(ctx context.Context, jobID uint, fetched int, stored int, matched int, lastReceivedAt *time.Time, now time.Time) error
-	MarkFetchJobSkipped(ctx context.Context, jobID uint, safeError string, now time.Time) error
-	MarkFetchJobFailed(ctx context.Context, jobID uint, safeError string, retry bool, now time.Time) error
-	ClaimDispatchableFetchJobs(ctx context.Context, limit int, staleBefore time.Time) ([]domain.FetchJob, error)
-	UpdateFetchStateSubmitted(ctx context.Context, emailResourceID uint, jobID uint, status string, cooldownUntil time.Time, now time.Time) error
-	UpdateFetchStateCompleted(ctx context.Context, emailResourceID uint, jobID uint, status string, lastReceivedAt *time.Time, safeError string, now time.Time) error
+	RequestFetch(ctx context.Context, job *domain.FetchJob, cooldownUntil time.Time, now time.Time) error
+	ListPendingFetches(ctx context.Context, limit int) ([]domain.FetchJob, error)
+	MarkFetchProcessing(ctx context.Context, emailResourceID uint, generation uint64, now time.Time) (bool, error)
+	FindFetch(ctx context.Context, emailResourceID uint, generation uint64) (*domain.FetchJob, error)
+	AssertFetchFence(ctx context.Context, emailResourceID uint, generation uint64) error
+	CompleteFetch(ctx context.Context, emailResourceID uint, generation uint64, fetched int, stored int, matched int, lastReceivedAt *time.Time, now time.Time) (bool, error)
+	SkipFetch(ctx context.Context, emailResourceID uint, generation uint64, safeError string, now time.Time) (bool, error)
+	ReleaseFetchInfrastructureFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string) (bool, error)
+	RecordFetchFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string, retryable bool, now time.Time) (recorded bool, abnormal bool, err error)
 	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
 }
 
 type FetchQueue interface {
-	EnqueueFetch(ctx context.Context, task FetchTask) error
+	EnqueueFetch(ctx context.Context, task FetchTask) (bool, error)
 	EnqueueFetchDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -171,7 +167,8 @@ type MatchResult struct {
 }
 
 type FetchTask struct {
-	JobID uint `json:"jobId"`
+	EmailResourceID uint   `json:"emailResourceId"`
+	Generation      uint64 `json:"generation"`
 }
 
 type FetchSubmitRequest struct {
@@ -397,31 +394,12 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 			}
 			return nil
 		}
-		active, err := uc.repo.FindActiveFetchJobByResource(txCtx, scope.EmailResourceID)
-		if err != nil {
-			return err
-		}
-		if active != nil {
-			result = &FetchSubmitResult{
-				Accepted: false,
-				Reason:   "active_job_exists",
-				JobID:    active.ID,
-				Status:   string(active.Status),
-			}
-			return nil
-		}
 		state, err := uc.repo.FindFetchStateForUpdate(txCtx, scope.EmailResourceID)
 		if err != nil {
 			return err
 		}
-		if state == nil {
-			state, err = uc.repo.CreateFetchState(txCtx, scope.EmailResourceID)
-			if err != nil {
-				return err
-			}
-		}
 		now := uc.now()
-		if state.CooldownUntil != nil && state.CooldownUntil.After(now) {
+		if state != nil && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
 			result = &FetchSubmitResult{
 				Accepted:           false,
 				Reason:             "cooldown",
@@ -440,45 +418,29 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 			purpose = domain.FetchPurposeOrder
 		}
 		job := &domain.FetchJob{
-			OrderNo:         scope.OrderNo,
-			Purpose:         purpose,
-			AllocationType:  scope.AllocationType,
-			AllocationID:    scope.AllocationID,
-			ProjectID:       scope.ProjectID,
-			EmailResourceID: scope.EmailResourceID,
-			Recipient:       scope.Recipient,
-			Status:          domain.FetchJobPending,
-			MaxAttempts:     defaultFetchMaxAttempts,
-			SinceAt:         &sinceAt,
-			UntilAt:         &untilAt,
-			RequestID:       strings.TrimSpace(req.RequestID),
-		}
-		if err := uc.repo.CreateFetchJob(txCtx, job); err != nil {
-			if errors.Is(err, domain.ErrFetchJobConflict) {
-				active, findErr := uc.repo.FindActiveFetchJobByResource(txCtx, scope.EmailResourceID)
-				if findErr != nil {
-					return findErr
-				}
-				if active != nil {
-					result = &FetchSubmitResult{
-						Accepted: false,
-						Reason:   "active_job_exists",
-						JobID:    active.ID,
-						Status:   string(active.Status),
-					}
-					return nil
-				}
-			}
-			return err
+			ID:                         scope.EmailResourceID,
+			ExpectedCredentialRevision: scope.CredentialRevision,
+			OrderNo:                    scope.OrderNo,
+			Purpose:                    purpose,
+			AllocationType:             scope.AllocationType,
+			AllocationID:               scope.AllocationID,
+			ProjectID:                  scope.ProjectID,
+			EmailResourceID:            scope.EmailResourceID,
+			Recipient:                  scope.Recipient,
+			Status:                     domain.FetchJobPending,
+			MaxAttempts:                defaultFetchMaxAttempts,
+			SinceAt:                    &sinceAt,
+			UntilAt:                    &untilAt,
+			RequestID:                  strings.TrimSpace(req.RequestID),
 		}
 		cooldownUntil := now.Add(fetchCooldown(purpose))
-		if err := uc.repo.UpdateFetchStateSubmitted(txCtx, scope.EmailResourceID, job.ID, string(job.Status), cooldownUntil, now); err != nil {
+		if err := uc.repo.RequestFetch(txCtx, job, cooldownUntil, now); err != nil {
 			return err
 		}
 		result = &FetchSubmitResult{
 			Accepted:           true,
 			Reason:             "created",
-			JobID:              job.ID,
+			JobID:              scope.EmailResourceID,
 			Status:             string(job.Status),
 			NextFetchAllowedAt: &cooldownUntil,
 		}
@@ -488,58 +450,55 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 		return nil, err
 	}
 	if result != nil && result.Accepted {
-		_ = uc.enqueueFetch(ctx, FetchTask{JobID: result.JobID})
+		uc.ScheduleFetchDispatcher(ctx, 0)
 	}
 	return result, nil
 }
 
 func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
-	if task.JobID == 0 {
+	if task.EmailResourceID == 0 || task.Generation == 0 {
 		return domain.ErrInvalidRequest
 	}
 	now := uc.now()
-	claimed, err := uc.repo.ClaimFetchJobRunning(ctx, task.JobID, now)
+	claimed, err := uc.repo.MarkFetchProcessing(ctx, task.EmailResourceID, task.Generation, now)
 	if err != nil {
 		return err
 	}
 	if !claimed {
 		return nil
 	}
-	job, err := uc.repo.FindFetchJob(ctx, task.JobID)
+	job, err := uc.repo.FindFetch(ctx, task.EmailResourceID, task.Generation)
 	if err != nil {
-		return err
+		return uc.releaseFetchInfrastructure(ctx, task, err)
 	}
 	if job == nil {
-		return domain.ErrFetchJobNotFound
+		return nil
 	}
 	platform.ObserveQueueWait("mailmatch_fetch", job.CreatedAt)
 	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, job.OrderNo)
 	if err != nil {
-		_ = uc.repo.MarkFetchJobSkipped(ctx, task.JobID, "Order is not available for mail fetch.", uc.now())
-		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
-		return nil
+		if errors.Is(err, domain.ErrOrderNotFound) || errors.Is(err, domain.ErrOrderUnavailable) || errors.Is(err, domain.ErrOrderForbidden) {
+			_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Order is not available for mail fetch.", uc.now())
+			return nil
+		}
+		return uc.releaseFetchInfrastructure(ctx, task, err)
 	}
 	if !scopeFetchable(*scope, uc.now) {
-		_ = uc.repo.MarkFetchJobSkipped(ctx, task.JobID, "Order is not available for mail fetch.", uc.now())
-		_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSkipped), nil, "Order is not available for mail fetch.", uc.now())
+		_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Order is not available for mail fetch.", uc.now())
 		return nil
 	}
 	fetched, fetchErr := uc.fetchMessages(ctx, *scope, *job)
 	if fetchErr != nil {
-		retry := job.Attempts < job.MaxAttempts
-		_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Mail service is temporarily unavailable.", retry, uc.now())
-		if !retry {
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Mail service is temporarily unavailable.", uc.now())
-		}
-		return fetchErr
+		return uc.finishFetchFailure(ctx, task, "Mail service is temporarily unavailable.", true, fetchErr)
+	}
+	if fetched == nil {
+		return uc.finishFetchFailure(ctx, task, "Mail service is temporarily unavailable.", true, domain.ErrMailServiceUnavailable)
 	}
 	if strings.TrimSpace(fetched.RefreshToken) != "" &&
 		strings.TrimSpace(fetched.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT) &&
 		scope.AllocationType == domain.ResourceTypeMicrosoft {
 		if uc.credentials == nil {
-			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Microsoft credential refresh failed.", false, uc.now())
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
-			return fmt.Errorf("microsoft credential service is unavailable")
+			return uc.releaseFetchInfrastructure(ctx, task, errors.New("microsoft credential service is unavailable"))
 		}
 		err := uc.credentials.ApplyMicrosoftFetchRefreshToken(ctx, coreapp.MicrosoftFetchRefreshTokenRotation{
 			ResourceID:                 scope.EmailResourceID,
@@ -547,32 +506,64 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 			RefreshToken:               fetched.RefreshToken,
 			Now:                        uc.now(),
 		})
-		if err != nil && !errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) && !errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) && !errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
-			_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, "Microsoft credential refresh failed.", false, uc.now())
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), nil, "Microsoft credential refresh failed.", uc.now())
-			return err
+		if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
+			_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Microsoft credentials changed while mail was being fetched.", uc.now())
+			return nil
+		}
+		if err != nil {
+			return uc.releaseFetchInfrastructure(ctx, task, err)
 		}
 	}
-	stored, matched, lastReceivedAt, err := uc.ingestFetchedMessages(ctx, fetched.Messages)
+	stored, matched, lastReceivedAt, err := uc.ingestFetchedMessagesWithFence(ctx, fetched.Messages, func(txCtx context.Context) error {
+		return uc.repo.AssertFetchFence(txCtx, task.EmailResourceID, task.Generation)
+	})
 	if err != nil {
 		safeError := "Mail message ingestion failed."
 		if stageErr := (*mailIngestError)(nil); errors.As(err, &stageErr) {
 			safeError = stageErr.safe
 		}
-		retry := job.Attempts < job.MaxAttempts && safeError == "Mail match result notification failed."
-		_ = uc.repo.MarkFetchJobFailed(ctx, task.JobID, safeError, retry, uc.now())
-		if !retry {
-			_ = uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobFailed), lastReceivedAt, safeError, uc.now())
+		if safeError == "Mail match result notification failed." {
+			return uc.finishFetchFailure(ctx, task, safeError, true, err)
 		}
-		return err
+		return uc.releaseFetchInfrastructure(ctx, task, err)
 	}
-	if err := uc.repo.MarkFetchJobSucceeded(ctx, task.JobID, len(fetched.Messages), stored, matched, lastReceivedAt, uc.now()); err != nil {
-		return err
-	}
-	if err := uc.repo.UpdateFetchStateCompleted(ctx, job.EmailResourceID, job.ID, string(domain.FetchJobSucceeded), lastReceivedAt, "", uc.now()); err != nil {
-		return err
+	if _, err := uc.repo.CompleteFetch(ctx, task.EmailResourceID, task.Generation, len(fetched.Messages), stored, matched, lastReceivedAt, uc.now()); err != nil {
+		return uc.releaseFetchInfrastructure(ctx, task, err)
 	}
 	return nil
+}
+
+func (uc *UseCase) finishFetchFailure(ctx context.Context, task FetchTask, safeError string, retryable bool, cause error) error {
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		return uc.releaseFetchInfrastructure(ctx, task, cause)
+	}
+	var failure *MailFetchFailure
+	if errors.As(cause, &failure) && failure != nil {
+		retryable = failure.Retryable
+		if strings.TrimSpace(failure.SafeMessage) != "" {
+			safeError = failure.SafeMessage
+		}
+	}
+	recorded, abnormal, err := uc.repo.RecordFetchFailure(
+		context.WithoutCancel(ctx), task.EmailResourceID, task.Generation, safeError, retryable, uc.now(),
+	)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if recorded && !abnormal {
+		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), time.Second)
+	}
+	return nil
+}
+
+func (uc *UseCase) releaseFetchInfrastructure(ctx context.Context, task FetchTask, cause error) error {
+	released, err := uc.repo.ReleaseFetchInfrastructureFailure(
+		context.WithoutCancel(ctx), task.EmailResourceID, task.Generation, "Mail fetch infrastructure is temporarily unavailable.",
+	)
+	if released {
+		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return errors.Join(cause, err)
 }
 
 func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
@@ -707,13 +698,14 @@ func (uc *UseCase) DispatchFetchJobs(ctx context.Context, limit int) (int, error
 	if limit <= 0 {
 		limit = 100
 	}
-	jobs, err := uc.repo.ClaimDispatchableFetchJobs(ctx, limit, uc.now().Add(-staleFetchRunningThreshold))
+	jobs, err := uc.repo.ListPendingFetches(ctx, limit)
 	if err != nil {
 		return 0, err
 	}
 	queued := 0
 	for _, job := range jobs {
-		if err := uc.enqueueFetch(ctx, FetchTask{JobID: job.ID}); err != nil {
+		accepted, err := uc.enqueueFetch(ctx, FetchTask{EmailResourceID: job.EmailResourceID, Generation: job.Generation})
+		if err != nil || !accepted {
 			continue
 		}
 		queued++
@@ -771,15 +763,19 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 	}
 }
 
-func (uc *UseCase) enqueueFetch(ctx context.Context, task FetchTask) error {
+func (uc *UseCase) enqueueFetch(ctx context.Context, task FetchTask) (bool, error) {
 	if uc.queue == nil {
-		return domain.ErrFetchQueueUnavailable
+		return false, domain.ErrFetchQueueUnavailable
 	}
-	if err := uc.queue.EnqueueFetch(ctx, task); err != nil {
-		return err
+	accepted, err := uc.queue.EnqueueFetch(ctx, task)
+	if err != nil || !accepted {
+		return false, err
 	}
-	_ = uc.repo.MarkFetchJobQueued(ctx, task.JobID)
-	return nil
+	processing, err := uc.repo.MarkFetchProcessing(ctx, task.EmailResourceID, task.Generation, uc.now())
+	if err != nil {
+		return false, err
+	}
+	return processing, nil
 }
 
 func scopeReadable(scope OrderScope, now func() time.Time) bool {

@@ -28,7 +28,6 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if module == nil {
 			return nil
 		}
-		defer scheduleMailmatchFetchDispatcher(context.Background(), module, fetchDispatcherInterval)
 		var dispatchErrors []error
 		if module.UseCase != nil {
 			queued, err := module.UseCase.DispatchFetchJobs(ctx, 0)
@@ -74,10 +73,10 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 			return fmt.Errorf("decode mailmatch fetch task: %w: %w", err, asynq.SkipRetry)
 		}
 		if err := module.UseCase.ProcessFetch(ctx, payload); err != nil {
-			slog.Warn("mailmatch fetch task failed", "job_id", payload.JobID, "error", err)
+			slog.Warn("mailmatch fetch task failed", "resource_id", payload.EmailResourceID, "generation", payload.Generation, "error", err)
 			return err
 		}
-		slog.Info("mailmatch fetch task finished", "job_id", payload.JobID)
+		slog.Info("mailmatch fetch task finished", "resource_id", payload.EmailResourceID, "generation", payload.Generation)
 		return nil
 	})
 
@@ -92,7 +91,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := module.ResourceFetch.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"mailmatch resource fetch task failed",
-				"job_id", payload.JobID,
+				"resource_id", payload.ResourceID,
+				"generation", payload.Generation,
 				"request_id", payload.RequestID,
 				"error", err,
 			)
@@ -100,7 +100,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		slog.Info(
 			"mailmatch resource fetch task finished",
-			"job_id", payload.JobID,
+			"resource_id", payload.ResourceID,
+			"generation", payload.Generation,
 			"request_id", payload.RequestID,
 		)
 		return nil
@@ -130,7 +131,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := module.ProjectHistory.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"project history scan task failed",
-				"job_id", payload.JobID,
+				"project_id", payload.ProjectID,
+				"generation", payload.Generation,
 				"error", err,
 			)
 			return err
@@ -173,7 +175,6 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if module == nil || module.ProjectHistory == nil {
 			return nil
 		}
-		defer module.ProjectHistory.ScheduleDispatcher(context.Background(), fetchDispatcherInterval)
 		if err := module.ProjectHistory.DispatchPending(ctx, projectHistoryDispatchLimit); err != nil {
 			slog.Warn("project history dispatcher failed", "error", err)
 		}

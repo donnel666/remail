@@ -14,12 +14,11 @@ import (
 
 const (
 	TypeProxyCheck           = "proxy:check"
-	TypeProxyCheckBatch      = "proxy:check_batch"
 	TypeProxyCheckDispatcher = "proxy:check_dispatcher"
 
 	proxyQueueName                  = platform.QueueDefault
 	proxyCheckTaskTimeout           = 90 * time.Second
-	proxyCheckBatchTaskTimeout      = 10 * time.Minute
+	proxyCheckTaskUniqueTTL         = 15 * time.Minute
 	proxyCheckDispatcherTaskTimeout = 30 * time.Second
 )
 
@@ -31,66 +30,37 @@ func NewProxyCheckQueue(client *asynq.Client) *ProxyCheckQueue {
 	return &ProxyCheckQueue{client: client}
 }
 
-func (q *ProxyCheckQueue) EnqueueProxyCheck(ctx context.Context, task proxyapp.ProxyCheckTask) error {
+func (q *ProxyCheckQueue) EnqueueProxyCheck(ctx context.Context, task proxyapp.ProxyCheckTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return fmt.Errorf("proxy check queue is unavailable")
+		return false, fmt.Errorf("proxy check queue is unavailable")
 	}
-	payload, err := json.Marshal(task)
+	if task.ProxyID == 0 || task.CheckGeneration == 0 {
+		return false, fmt.Errorf("proxy check task identity is required")
+	}
+	payload, err := json.Marshal(struct {
+		ProxyID         uint   `json:"proxyId"`
+		CheckGeneration uint64 `json:"checkGeneration"`
+	}{ProxyID: task.ProxyID, CheckGeneration: task.CheckGeneration})
 	if err != nil {
-		return fmt.Errorf("marshal proxy check task: %w", err)
+		return false, fmt.Errorf("marshal proxy check task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeProxyCheck, payload)
-	options := []asynq.Option{
+	_, err = q.client.EnqueueContext(
+		ctx,
+		asynqTask,
 		asynq.Queue(proxyQueueName),
-		asynq.MaxRetry(0),
+		asynq.Unique(proxyCheckTaskUniqueTTL),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
 		asynq.Timeout(proxyCheckTaskTimeout),
-	}
-	if task.JobID != 0 {
-		options = append(options, asynq.TaskID(fmt.Sprintf("%s:%d", TypeProxyCheck, task.JobID)))
-	}
-	_, err = q.client.EnqueueContext(
-		ctx,
-		asynqTask,
-		options...,
+		asynq.Retention(0),
 	)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return false, nil
 		}
-		return fmt.Errorf("enqueue proxy check task: %w", err)
+		return false, fmt.Errorf("enqueue proxy check task: %w", err)
 	}
-	return nil
-}
-
-func (q *ProxyCheckQueue) EnqueueProxyCheckBatch(ctx context.Context, task proxyapp.ProxyCheckBatchTask) error {
-	if q == nil || q.client == nil {
-		return fmt.Errorf("proxy check queue is unavailable")
-	}
-	payload, err := json.Marshal(task)
-	if err != nil {
-		return fmt.Errorf("marshal proxy check batch task: %w", err)
-	}
-	asynqTask := asynq.NewTask(TypeProxyCheckBatch, payload)
-	options := []asynq.Option{
-		asynq.Queue(proxyQueueName),
-		asynq.MaxRetry(0),
-		asynq.Timeout(proxyCheckBatchTaskTimeout),
-	}
-	if task.JobID != 0 {
-		options = append(options, asynq.TaskID(fmt.Sprintf("%s:%d", TypeProxyCheckBatch, task.JobID)))
-	}
-	_, err = q.client.EnqueueContext(
-		ctx,
-		asynqTask,
-		options...,
-	)
-	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
-		}
-		return fmt.Errorf("enqueue proxy check batch task: %w", err)
-	}
-	return nil
+	return true, nil
 }
 
 func (q *ProxyCheckQueue) EnqueueProxyCheckDispatcher(ctx context.Context, delay time.Duration) error {
@@ -98,18 +68,23 @@ func (q *ProxyCheckQueue) EnqueueProxyCheckDispatcher(ctx context.Context, delay
 		return fmt.Errorf("proxy check queue is unavailable")
 	}
 	asynqTask := asynq.NewTask(TypeProxyCheckDispatcher, nil)
+	uniqueTTL := proxyCheckDispatcherTaskTimeout
+	if delay > 0 {
+		uniqueTTL += delay
+	}
 	options := []asynq.Option{
 		asynq.Queue(proxyQueueName),
+		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(proxyCheckDispatcherTaskTimeout),
-		asynq.TaskID(TypeProxyCheckDispatcher),
+		asynq.Retention(0),
 	}
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynqTask, options...)
 	if err != nil {
-		if errors.Is(err, asynq.ErrTaskIDConflict) {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil
 		}
 		return fmt.Errorf("enqueue proxy check dispatcher task: %w", err)

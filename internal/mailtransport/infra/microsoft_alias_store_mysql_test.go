@@ -147,6 +147,20 @@ func createVerifiedMicrosoftAliasBinding(t *testing.T, db *gorm.DB, resourceID u
 	)
 }
 
+func claimMicrosoftAliasTestTask(
+	ctx context.Context,
+	t *testing.T,
+	store *MicrosoftAliasStore,
+	task mailapp.MicrosoftAliasTask,
+	now time.Time,
+) (*mailapp.MicrosoftAliasAccount, bool, error) {
+	t.Helper()
+	queued, err := store.MarkQueued(ctx, task, now)
+	require.NoError(t, err)
+	require.True(t, queued, "the test task must be activated only after simulated enqueue acceptance")
+	return store.Claim(ctx, task, now)
+}
+
 func TestMicrosoftAliasStoreEnsuresValidatedResourceScheduleMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1008, "pending")
@@ -356,7 +370,7 @@ func TestMicrosoftAliasStoreDispatchesUnresolvedBindingToApplicationPreflightMyS
 	require.Len(t, tasks, 1)
 	require.Equal(t, uint(1032), tasks[0].ResourceID)
 	queued := loadAliasAdminSchedule(t, db, 1032)
-	require.Equal(t, "queued", queued.Status)
+	require.Equal(t, "pending", queued.Status, "scanning must not activate the task before enqueue acceptance")
 	require.Empty(t, queued.LastSafeError)
 }
 
@@ -419,7 +433,7 @@ func TestMicrosoftAliasStoreDispatchesAccountMismatchToApplicationPreflightMySQL
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, uint(1037), tasks[0].ResourceID)
-	require.Equal(t, "queued", loadAliasAdminSchedule(t, db, 1037).Status)
+	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1037).Status)
 }
 
 func TestMicrosoftAliasStoreBroadScanPaginatesPastMalformedRecoveredBindingsMySQL(t *testing.T) {
@@ -508,8 +522,8 @@ func TestMicrosoftAliasStoreClaimLetsBindingPreflightHandleUnresolvedStateMySQL(
 
 			store := NewMicrosoftAliasStore(db)
 			account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-				ResourceID:    test.resourceID,
-				DispatchToken: claimToken,
+				ResourceID: test.resourceID,
+				Generation: 1,
 			}, now)
 			require.NoError(t, err)
 			require.True(t, claimed)
@@ -540,10 +554,11 @@ func TestMicrosoftAliasStoreSaveBindingAddressUpgradesMaskInsideClaimFenceMySQL(
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID: 1046, DispatchToken: claimToken,
+		ResourceID: 1046, Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
+	claimToken = account.ClaimToken
 	require.Equal(t, "r*****d@recovery.test", account.BindingAddress)
 
 	require.NoError(t, store.SaveBindingAddress(context.Background(), 1046, claimToken, account.BindingAddress, "resolved@recovery.test"))
@@ -564,10 +579,11 @@ func TestMicrosoftAliasStoreSaveBindingAddressUpgradesMaskInsideClaimFenceMySQL(
 		ResourceID: 1047, Status: "queued", NextRunAt: now, ClaimToken: externalClaimToken,
 	}).Error)
 	externalAccount, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID: 1047, DispatchToken: externalClaimToken,
+		ResourceID: 1047, Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
+	externalClaimToken = externalAccount.ClaimToken
 	require.Empty(t, externalAccount.BindingAddress)
 	require.NoError(t, store.SaveBindingAddress(context.Background(), 1047, externalClaimToken, "", "e*****l@external.test"))
 	binding = MicrosoftBindingMailboxModel{}
@@ -594,10 +610,11 @@ func TestMicrosoftAliasStoreSaveBindingAddressRepairsSameConcreteAddressStateMyS
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID: 1048, DispatchToken: claimToken,
+		ResourceID: 1048, Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
+	claimToken = account.ClaimToken
 	require.NoError(t, store.SaveBindingAddress(
 		context.Background(), 1048, claimToken, account.BindingAddress, account.BindingAddress,
 	))
@@ -624,12 +641,13 @@ func TestMicrosoftAliasStoreCheckEligibilityRejectsBindingThatBecomesInvalidMySQ
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID:    1029,
-		DispatchToken: claimToken,
+		ResourceID: 1029,
+		Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotNil(t, account)
+	claimToken = account.ClaimToken
 
 	eligible, safeMessage, err := store.CheckEligibility(context.Background(), 1029, claimToken)
 	require.NoError(t, err)
@@ -701,8 +719,8 @@ func TestMicrosoftAliasStoreBindingDomainMustRemainActiveMySQL(t *testing.T) {
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID:    1044,
-		DispatchToken: claimToken,
+		ResourceID: 1044,
+		Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.False(t, claimed)
@@ -740,12 +758,13 @@ func TestMicrosoftAliasStoreRuntimeEligibilityRejectsInactiveBindingDomainMySQL(
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID:    1045,
-		DispatchToken: claimToken,
+		ResourceID: 1045,
+		Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotNil(t, account)
+	claimToken = account.ClaimToken
 
 	require.NoError(t, db.Table("domain_resources").
 		Where("domain = ?", "recovery.test").
@@ -790,12 +809,13 @@ func TestMicrosoftAliasStoreRuntimeBindingPauseCapturesCurrentSignatureMySQL(t *
 
 	store := NewMicrosoftAliasStore(db)
 	account, claimed, err := store.Claim(context.Background(), mailapp.MicrosoftAliasTask{
-		ResourceID:    1034,
-		DispatchToken: claimToken,
+		ResourceID: 1034,
+		Generation: 1,
 	}, now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotNil(t, account)
+	claimToken = account.ClaimToken
 
 	require.NoError(t, db.Model(&MicrosoftBindingMailboxModel{}).
 		Where("resource_id = ?", 1034).
@@ -905,104 +925,59 @@ func TestMicrosoftAliasStoreRefusesUnownedSuccessMySQL(t *testing.T) {
 	assert.Equal(t, mailapp.MicrosoftAliasAttemptRunning, attempt.Status)
 }
 
-func TestMicrosoftAliasStoreFencesStaleWorkerAndResumesCandidatesMySQL(t *testing.T) {
+func TestMicrosoftAliasStoreGenerationFencesReleasedDispatchMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1001, "normal")
 	createVerifiedMicrosoftAliasBinding(t, db, 1001)
 	store := NewMicrosoftAliasStore(db)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
-	yearStart := time.Date(2025, time.December, 31, 16, 0, 0, 0, time.UTC)
-	yearEnd := time.Date(2026, time.December, 31, 16, 0, 0, 0, time.UTC)
-	weekStart := time.Date(2026, time.July, 5, 16, 0, 0, 0, time.UTC)
-	weekEnd := time.Date(2026, time.July, 12, 16, 0, 0, 0, time.UTC)
 
 	ensured, err := store.EnsureSchedules(ctx, now)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, ensured)
-	tasks, err := store.FindDispatchable(ctx, 10, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
+	tasks, err := store.FindDispatchable(ctx, 1, now, time.Time{}, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	firstTask := tasks[0]
-	firstAccount, claimed, err := store.Claim(ctx, firstTask, now)
+	queued, err := store.MarkQueued(ctx, firstTask, now)
 	require.NoError(t, err)
-	require.True(t, claimed)
+	require.True(t, queued)
+	require.NoError(t, store.MarkDispatchFailed(ctx, firstTask, now.Add(time.Minute), "Redis admission failed."))
 
-	firstAttempts, usage, err := store.Reserve(
-		ctx,
-		1001,
-		firstAccount.ClaimToken,
-		[]string{"david123456@outlook.com", "liming654321@outlook.com"},
-		yearStart,
-		yearEnd,
-		weekStart,
-		weekEnd,
-		now,
-	)
+	account, claimed, err := store.Claim(ctx, firstTask, now)
 	require.NoError(t, err)
-	require.Len(t, firstAttempts, 2)
-	assert.Equal(t, 2, usage.WeekCount)
+	require.False(t, claimed, "the released generation must make the already-enqueued task a no-op")
+	require.Nil(t, account)
 
-	require.NoError(t, db.Exec(
-		"UPDATE microsoft_alias_schedules SET updated_at = ? WHERE resource_id = ?",
-		now.Add(-31*time.Minute),
-		1001,
-	).Error)
-	replacementTasks, err := store.FindDispatchable(ctx, 10, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
+	replacementTasks, err := store.FindDispatchable(ctx, 1, now.Add(time.Minute), time.Time{}, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, replacementTasks, 1)
-	replacementTask := replacementTasks[0]
-	assert.NotEqual(t, firstTask.DispatchToken, replacementTask.DispatchToken)
+	assert.Equal(t, firstTask.Generation+1, replacementTasks[0].Generation)
 
-	err = store.Complete(ctx, 1001, firstAccount.ClaimToken, []mailapp.MicrosoftAliasAttemptOutcome{
-		{AttemptID: firstAttempts[0].ID, Status: mailapp.MicrosoftAliasAttemptSucceeded},
-	}, now)
-	assert.ErrorIs(t, err, mailapp.ErrMicrosoftAliasStaleClaim)
-
-	replacementAccount, claimed, err := store.Claim(ctx, replacementTask, now)
+	replacement := replacementTasks[0]
+	account, claimed, err = claimMicrosoftAliasTestTask(ctx, t, store, replacement, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.True(t, claimed)
-	resumed, _, err := store.Reserve(
-		ctx,
-		1001,
-		replacementAccount.ClaimToken,
-		[]string{"other123456@outlook.com", "other654321@outlook.com"},
-		yearStart,
-		yearEnd,
-		weekStart,
-		weekEnd,
-		now,
+	attempts, _, err := store.Reserve(
+		ctx, 1001, account.ClaimToken, []string{"uncertain1001@outlook.com"},
+		now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0), now.AddDate(0, 0, -7), now.AddDate(0, 0, 7), now.Add(time.Minute),
 	)
 	require.NoError(t, err)
-	require.Len(t, resumed, 2)
-	assert.True(t, resumed[0].WasUncertain)
-	assert.True(t, resumed[1].WasUncertain)
-	assert.ElementsMatch(t,
-		[]string{"david123456@outlook.com", "liming654321@outlook.com"},
-		[]string{resumed[0].Alias, resumed[1].Alias},
-	)
+	require.Len(t, attempts, 1)
+	retryAccount, retryClaimed, retryErr := store.Claim(ctx, replacement, now.Add(2*time.Minute))
+	require.ErrorIs(t, retryErr, errMicrosoftAliasGenerationStillRunning)
+	require.False(t, retryClaimed, "a same-generation retry must not report a false successful no-op")
+	require.Nil(t, retryAccount)
+	require.NoError(t, store.MarkDispatchFailed(ctx, replacement, now.Add(2*time.Minute), "Database unavailable."))
 
-	outcomes := []mailapp.MicrosoftAliasAttemptOutcome{
-		{AttemptID: resumed[0].ID, Status: mailapp.MicrosoftAliasAttemptSucceeded, Category: "added"},
-		{AttemptID: resumed[1].ID, Status: mailapp.MicrosoftAliasAttemptSucceeded, Category: "added"},
-	}
-	require.NoError(t, store.Complete(ctx, 1001, replacementAccount.ClaimToken, outcomes, now.Add(time.Minute)))
-	usage, err = store.Usage(ctx, 1001, yearStart, yearEnd, weekStart, weekEnd)
-	require.NoError(t, err)
-	assert.Equal(t, 2, usage.YearCount)
-	assert.Equal(t, 2, usage.WeekCount)
-
-	var attempts, aliases int64
-	require.NoError(t, db.Model(&MicrosoftAliasAttemptModel{}).Where("resource_id = ?", 1001).Count(&attempts).Error)
-	require.NoError(t, db.Model(&MicrosoftExplicitAliasModel{}).Where("resource_id = ?", 1001).Count(&aliases).Error)
-	assert.EqualValues(t, 2, attempts)
-	assert.EqualValues(t, 2, aliases)
-	var nonSuperAdminOwnedAliases int64
-	require.NoError(t, db.Table("explicit_aliases AS alias_row").
-		Joins("JOIN users AS owner ON owner.id = alias_row.owner_user_id").
-		Where("alias_row.resource_id = ? AND owner.role <> ?", 1001, "super_admin").
-		Count(&nonSuperAdminOwnedAliases).Error)
-	assert.Zero(t, nonSuperAdminOwnedAliases)
+	persisted := loadAliasAdminSchedule(t, db, 1001)
+	assert.Equal(t, "pending", persisted.Status)
+	assert.Equal(t, replacement.Generation+1, persisted.Generation)
+	var attempt MicrosoftAliasAttemptModel
+	require.NoError(t, db.First(&attempt, attempts[0].ID).Error)
+	assert.Equal(t, mailapp.MicrosoftAliasAttemptUncertain, attempt.Status)
+	assert.True(t, attempt.WasAttempted)
 }
 
 func TestMicrosoftAliasStoreMovesSuccessAtBoundaryAndReleasesFailureMySQL(t *testing.T) {
@@ -1024,7 +999,7 @@ func TestMicrosoftAliasStoreMovesSuccessAtBoundaryAndReleasesFailureMySQL(t *tes
 	tasks, err := store.FindDispatchable(ctx, 1, startedAt, startedAt.Add(-4*time.Hour), startedAt.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], startedAt)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], startedAt)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	attempts, _, err := store.Reserve(
@@ -1082,7 +1057,7 @@ func TestMicrosoftAliasStoreWakesPausedNormalResourceMySQL(t *testing.T) {
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET status = 'abnormal' WHERE id = 1003").Error)
@@ -1119,7 +1094,7 @@ func TestMicrosoftAliasStoreSchedulesNormalResourcesRegardlessOfSaleStateMySQL(t
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 
-	account, claimed, err := store.Claim(ctx, tasks[0], now.Add(time.Minute))
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now.Add(time.Minute))
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NotNil(t, account)
@@ -1158,7 +1133,7 @@ func TestMicrosoftAliasStoreClaimPausesResourceThatBecomesAbnormalMySQL(t *testi
 	require.Len(t, tasks, 1)
 	require.NoError(t, db.Exec("UPDATE microsoft_resources SET status = 'abnormal', updated_at = ? WHERE id = 1017", now.Add(time.Minute)).Error)
 
-	account, claimed, err := store.Claim(ctx, tasks[0], now.Add(time.Minute))
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now.Add(time.Minute))
 	require.NoError(t, err)
 	assert.False(t, claimed)
 	assert.Nil(t, account)
@@ -1226,7 +1201,7 @@ func TestMicrosoftAliasStorePermanentPauseWakesOnlyAfterResourceChangeMySQL(t *t
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, store.Pause(ctx, 1007, account.ClaimToken, "Microsoft account password is incorrect."))
@@ -1281,7 +1256,7 @@ func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	first, _, err := store.Reserve(ctx, 1008, account.ClaimToken,
@@ -1323,7 +1298,7 @@ func TestMicrosoftAliasStorePersistsConservativeUncertainReconciliationMySQL(t *
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	attempts, _, err := store.Reserve(ctx, 1009, account.ClaimToken,
@@ -1380,7 +1355,7 @@ func TestMicrosoftAliasStorePermanentPauseDetectsCredentialChangeDuringRunMySQL(
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 
@@ -1394,7 +1369,7 @@ func TestMicrosoftAliasStorePermanentPauseDetectsCredentialChangeDuringRunMySQL(
 	assert.Equal(t, "pending", status)
 }
 
-func TestMicrosoftAliasStoreRotatesExpiredQueuedDispatchTokenMySQL(t *testing.T) {
+func TestMicrosoftAliasStoreDoesNotRecoverQueuedSchedulesByAgeMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1012, "normal")
 	createVerifiedMicrosoftAliasBinding(t, db, 1012)
@@ -1407,6 +1382,9 @@ func TestMicrosoftAliasStoreRotatesExpiredQueuedDispatchTokenMySQL(t *testing.T)
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+	queued, err := store.MarkQueued(ctx, tasks[0], now)
+	require.NoError(t, err)
+	require.True(t, queued)
 	require.NoError(t, db.Exec(
 		"UPDATE microsoft_alias_schedules SET updated_at = ? WHERE resource_id = 1012",
 		now.Add(-4*time.Hour-time.Minute),
@@ -1414,8 +1392,7 @@ func TestMicrosoftAliasStoreRotatesExpiredQueuedDispatchTokenMySQL(t *testing.T)
 
 	recovered, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
-	require.Len(t, recovered, 1)
-	assert.NotEqual(t, tasks[0].DispatchToken, recovered[0].DispatchToken)
+	require.Empty(t, recovered, "the dispatcher scans pending only; queued work is never age-reclaimed")
 }
 
 func TestMicrosoftAliasStoreReconciledSuccessKeepsOriginalQuotaWindowMySQL(t *testing.T) {
@@ -1437,7 +1414,7 @@ func TestMicrosoftAliasStoreReconciledSuccessKeepsOriginalQuotaWindowMySQL(t *te
 	tasks, err := store.FindDispatchable(ctx, 1, startedAt, startedAt.Add(-4*time.Hour), startedAt.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], startedAt)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], startedAt)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	attempts, _, err := store.Reserve(ctx, 1011, account.ClaimToken,
@@ -1485,7 +1462,7 @@ func TestMicrosoftAliasStoreSerializesConcurrentQuotaReservationsMySQL(t *testin
 	tasks, err := store.FindDispatchable(ctx, 1, now, now.Add(-4*time.Hour), now.Add(-30*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	account, claimed, err := store.Claim(ctx, tasks[0], now)
+	account, claimed, err := claimMicrosoftAliasTestTask(ctx, t, store, tasks[0], now)
 	require.NoError(t, err)
 	require.True(t, claimed)
 

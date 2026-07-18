@@ -12,9 +12,13 @@ import (
 )
 
 type memoryOutboundMailStore struct {
-	mu     sync.Mutex
-	nextID uint
-	mails  map[string]*domain.OutboundMail
+	mu           sync.Mutex
+	nextID       uint
+	mails        map[string]*domain.OutboundMail
+	activateRace bool
+	findErr      error
+	recordErr    error
+	markSentErr  error
 }
 
 func newMemoryOutboundMailStore() *memoryOutboundMailStore {
@@ -38,26 +42,16 @@ func (s *memoryOutboundMailStore) Reserve(_ context.Context, mail *domain.Outbou
 	return cloneOutboundMail(next), true, nil
 }
 
-func (s *memoryOutboundMailStore) ClaimSending(_ context.Context, idempotencyKey string, staleBefore time.Time, now time.Time) (*domain.OutboundMail, bool, error) {
+func (s *memoryOutboundMailStore) FindByIdempotencyKey(_ context.Context, idempotencyKey string) (*domain.OutboundMail, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	existing := s.mails[idempotencyKey]
-	if existing == nil {
-		return nil, false, nil
+	if s.findErr != nil {
+		return nil, s.findErr
 	}
-	canClaim := existing.Status == domain.OutboundStatusPending ||
-		(existing.Status == domain.OutboundStatusSending && existing.UpdatedAt.Before(staleBefore))
-	if !canClaim {
-		return nil, false, nil
-	}
-	next := cloneOutboundMail(existing)
-	next.MarkSending(now)
-	s.mails[idempotencyKey] = next
-	return cloneOutboundMail(next), true, nil
+	return cloneOutboundMail(s.mails[idempotencyKey]), nil
 }
 
-func (s *memoryOutboundMailStore) ClaimDispatchable(_ context.Context, limit int, staleBefore time.Time) ([]domain.OutboundMail, error) {
+func (s *memoryOutboundMailStore) ListPending(_ context.Context, limit int) ([]domain.OutboundMail, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -66,8 +60,7 @@ func (s *memoryOutboundMailStore) ClaimDispatchable(_ context.Context, limit int
 	}
 	var mails []domain.OutboundMail
 	for _, mail := range s.mails {
-		if mail.Status == domain.OutboundStatusPending ||
-			(mail.Status == domain.OutboundStatusSending && mail.UpdatedAt.Before(staleBefore)) {
+		if mail.Status == domain.OutboundStatusPending {
 			mails = append(mails, *cloneOutboundMail(mail))
 		}
 	}
@@ -83,21 +76,46 @@ func (s *memoryOutboundMailStore) ClaimDispatchable(_ context.Context, limit int
 	return mails, nil
 }
 
-func (s *memoryOutboundMailStore) MarkPending(_ context.Context, idempotencyKey string, reason string) error {
-	return s.update(idempotencyKey, func(mail *domain.OutboundMail) {
+func (s *memoryOutboundMailStore) ActivateSending(_ context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error) {
+	applied, err := s.updateIf(idempotencyKey, generation, domain.OutboundStatusPending, func(mail *domain.OutboundMail) {
+		mail.MarkSending(now)
+	})
+	if applied && s.activateRace {
+		s.activateRace = false
+		return false, err
+	}
+	return applied, err
+}
+
+func (s *memoryOutboundMailStore) ReleasePending(_ context.Context, idempotencyKey string, generation uint64, reason string) (bool, error) {
+	return s.updateIf(idempotencyKey, generation, domain.OutboundStatusSending, func(mail *domain.OutboundMail) {
 		mail.MarkPending(time.Now().UTC(), reason)
 	})
 }
 
-func (s *memoryOutboundMailStore) MarkSent(_ context.Context, idempotencyKey string, now time.Time) error {
-	return s.update(idempotencyKey, func(mail *domain.OutboundMail) {
-		mail.MarkSent(now)
+func (s *memoryOutboundMailStore) ResetPending(_ context.Context, idempotencyKey string, generation uint64, reason string) (bool, error) {
+	return s.updateIf(idempotencyKey, generation, domain.OutboundStatusFailed, func(mail *domain.OutboundMail) {
+		mail.ResetForRetry(time.Now().UTC(), reason)
 	})
 }
 
-func (s *memoryOutboundMailStore) MarkFailed(_ context.Context, idempotencyKey string, reason string) error {
-	return s.update(idempotencyKey, func(mail *domain.OutboundMail) {
-		mail.MarkFailed(time.Now().UTC(), reason)
+func (s *memoryOutboundMailStore) RecordSendFailure(_ context.Context, idempotencyKey string, generation uint64, reason string, retryable bool) (bool, bool, error) {
+	if s.recordErr != nil {
+		return false, false, s.recordErr
+	}
+	terminal := false
+	applied, err := s.updateIf(idempotencyKey, generation, domain.OutboundStatusSending, func(mail *domain.OutboundMail) {
+		terminal = mail.RecordSendFailure(time.Now().UTC(), reason, retryable)
+	})
+	return terminal, applied, err
+}
+
+func (s *memoryOutboundMailStore) MarkSent(_ context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error) {
+	if s.markSentErr != nil {
+		return false, s.markSentErr
+	}
+	return s.updateIf(idempotencyKey, generation, domain.OutboundStatusSending, func(mail *domain.OutboundMail) {
+		mail.MarkSent(now)
 	})
 }
 
@@ -117,18 +135,21 @@ func (s *memoryOutboundMailStore) get(idempotencyKey string) *domain.OutboundMai
 	return cloneOutboundMail(s.mails[idempotencyKey])
 }
 
-func (s *memoryOutboundMailStore) update(idempotencyKey string, apply func(*domain.OutboundMail)) error {
+func (s *memoryOutboundMailStore) updateIf(idempotencyKey string, generation uint64, status domain.OutboundStatus, apply func(*domain.OutboundMail)) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	mail := s.mails[idempotencyKey]
 	if mail == nil {
-		return errors.New("not found")
+		return false, errors.New("not found")
+	}
+	if mail.SendGeneration != generation || mail.Status != status {
+		return false, nil
 	}
 	next := cloneOutboundMail(mail)
 	apply(next)
 	s.mails[idempotencyKey] = next
-	return nil
+	return true, nil
 }
 
 type senderStub struct {

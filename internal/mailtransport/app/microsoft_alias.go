@@ -13,8 +13,6 @@ const (
 	MicrosoftAliasWeeklyLimit = 2
 	MicrosoftAliasYearlyLimit = 10
 
-	microsoftAliasRunningTimeout = 30 * time.Minute
-	microsoftAliasQueuedTimeout  = 4 * time.Hour
 	// The broad eligibility scan is deliberately daily. Immediate validation
 	// success and an administrator expedite use the targeted path below, so the
 	// periodic scanner is a recovery/backfill mechanism rather than a hot loop.
@@ -115,7 +113,8 @@ type MicrosoftAliasBindingPreparationResult struct {
 type MicrosoftAliasScheduleStore interface {
 	EnsureSchedules(ctx context.Context, now time.Time) (int64, error)
 	EnsureScheduleForResource(ctx context.Context, resourceID uint, now time.Time) (bool, error)
-	FindDispatchable(ctx context.Context, limit int, now, queuedStaleBefore, runningStaleBefore time.Time) ([]MicrosoftAliasTask, error)
+	FindDispatchable(ctx context.Context, limit int, now, _ time.Time, _ time.Time) ([]MicrosoftAliasTask, error)
+	MarkQueued(ctx context.Context, task MicrosoftAliasTask, now time.Time) (bool, error)
 	Claim(ctx context.Context, task MicrosoftAliasTask, now time.Time) (*MicrosoftAliasAccount, bool, error)
 	CheckEligibility(ctx context.Context, resourceID uint, claimToken string) (bool, string, error)
 	ReloadEligibleAccount(ctx context.Context, resourceID uint, claimToken string) (*MicrosoftAliasAccount, bool, string, error)
@@ -158,7 +157,7 @@ func (s *MicrosoftAliasService) EnsureForValidatedMicrosoftResource(ctx context.
 }
 
 type MicrosoftAliasQueue interface {
-	EnqueueMicrosoftAlias(ctx context.Context, task MicrosoftAliasTask) error
+	EnqueueMicrosoftAlias(ctx context.Context, task MicrosoftAliasTask) (bool, error)
 	EnqueueMicrosoftAliasDispatcher(ctx context.Context, delay time.Duration) error
 }
 
@@ -169,8 +168,8 @@ type MicrosoftAliasCreator interface {
 }
 
 type MicrosoftAliasTask struct {
-	ResourceID    uint   `json:"resourceId"`
-	DispatchToken string `json:"dispatchToken"`
+	ResourceID uint   `json:"resourceId"`
+	Generation uint64 `json:"generation"`
 }
 
 type MicrosoftAliasDispatchResult struct {
@@ -222,13 +221,7 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 			return nil, fmt.Errorf("ensure microsoft alias schedules: %w", err)
 		}
 	}
-	tasks, err := s.store.FindDispatchable(
-		ctx,
-		limit,
-		now,
-		now.Add(-microsoftAliasQueuedTimeout),
-		now.Add(-microsoftAliasRunningTimeout),
-	)
+	tasks, err := s.store.FindDispatchable(ctx, limit, now, time.Time{}, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("find dispatchable microsoft alias schedules: %w", err)
 	}
@@ -237,20 +230,26 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 	for _, task := range tasks {
 		if s.queue == nil {
 			result.Failed++
-			if err := s.store.MarkDispatchFailed(ctx, task, now.Add(time.Minute), "Microsoft alias task could not be queued."); err != nil {
-				dispatchErr = errors.Join(dispatchErr, fmt.Errorf("restore unqueued microsoft alias task %d: %w", task.ResourceID, err))
-			}
 			continue
 		}
-		if err := s.queue.EnqueueMicrosoftAlias(ctx, task); err != nil {
+		accepted, err := s.queue.EnqueueMicrosoftAlias(ctx, task)
+		if err != nil {
 			result.Failed++
 			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("enqueue microsoft alias task %d: %w", task.ResourceID, err))
-			if markErr := s.store.MarkDispatchFailed(ctx, task, now.Add(time.Minute), "Microsoft alias task could not be queued."); markErr != nil {
-				dispatchErr = errors.Join(dispatchErr, fmt.Errorf("restore unqueued microsoft alias task %d: %w", task.ResourceID, markErr))
-			}
 			continue
 		}
-		result.Queued++
+		if !accepted {
+			continue
+		}
+		queued, err := s.store.MarkQueued(ctx, task, now)
+		if err != nil {
+			result.Failed++
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("activate microsoft alias task %d: %w", task.ResourceID, err))
+			continue
+		}
+		if queued {
+			result.Queued++
+		}
 	}
 	return result, dispatchErr
 }
@@ -284,11 +283,14 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	if s == nil || s.store == nil {
 		return fmt.Errorf("microsoft alias schedule store is unavailable")
 	}
-	if task.ResourceID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if task.ResourceID == 0 || task.Generation == 0 {
 		return fmt.Errorf("microsoft alias resource is missing")
 	}
 
 	now := s.now().UTC()
+	if _, err := s.store.MarkQueued(ctx, task, now); err != nil {
+		return fmt.Errorf("activate microsoft alias schedule: %w", err)
+	}
 	account, claimed, err := s.store.Claim(ctx, task, now)
 	if err != nil {
 		return fmt.Errorf("claim microsoft alias schedule: %w", err)

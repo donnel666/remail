@@ -81,6 +81,7 @@ const (
 	// is reloaded from the DB into msacl (eventually consistent; a newly-added
 	// binding domain becomes usable within one interval).
 	auxiliaryDomainRefreshInterval = 60 * time.Second
+	dispatcherSeedTimeout          = 5 * time.Second
 
 	// Proactive refresh-token expiry scan: once a day at ~dawn, enqueue a
 	// refresh for every account whose refresh token expires within the lookahead
@@ -93,16 +94,47 @@ const (
 // refreshAuxiliaryDomains loads the binding-purpose domains from the DB into the
 // msacl auxiliary-domain list. On error it leaves the previous list in place.
 func refreshAuxiliaryDomains(ctx context.Context, lister bindingDomainLister) {
+	refreshAuxiliaryDomainsWithin(ctx, lister, dispatcherSeedTimeout)
+}
+
+func refreshAuxiliaryDomainsWithin(ctx context.Context, lister bindingDomainLister, timeout time.Duration) {
 	if lister == nil {
 		return
 	}
-	domains, err := lister.ListBindingDomains(ctx)
-	if err != nil {
-		slog.Warn("load auxiliary binding domains failed", "error", err)
+	runDispatcherSeed(ctx, timeout, func(seedCtx context.Context) {
+		domains, err := lister.ListBindingDomains(seedCtx)
+		if err != nil {
+			slog.Warn("load auxiliary binding domains failed", "error", err)
+			return
+		}
+		msacl.SetAuxiliaryDomains(domains)
+		slog.Info("auxiliary binding domains loaded", "count", len(domains))
+	})
+}
+
+func runDispatcherSeed(ctx context.Context, timeout time.Duration, seed func(context.Context)) {
+	if seed == nil || ctx.Err() != nil {
 		return
 	}
-	msacl.SetAuxiliaryDomains(domains)
-	slog.Info("auxiliary binding domains loaded", "count", len(domains))
+	seedCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	seed(seedCtx)
+}
+
+func seedMailDispatchers(ctx context.Context, module *MailTransportModule) {
+	if module == nil {
+		return
+	}
+	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) {
+		if module.OutboundDelivery != nil {
+			module.OutboundDelivery.ScheduleDispatcher(seedCtx, 0)
+		}
+	})
+	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) {
+		if module.InboundUseCase != nil {
+			module.InboundUseCase.ScheduleDispatcher(seedCtx, 0)
+		}
+	})
 }
 
 // scanExpiringTokenRefresh enqueues a proactive refresh task for every Microsoft
@@ -271,9 +303,9 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	var once sync.Once
-	scheduleMailDispatchers(ctx, m, 0)
-	scheduleMicrosoftAliasDispatcher(ctx, m, 0)
-	scheduleMicrosoftTokenRefreshDispatcher(ctx, m, 0)
+	seedMailDispatchers(ctx, m)
+	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
+	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
 	go func() {
 		mailTicker := time.NewTicker(mailDispatcherInterval)
 		aliasTicker := time.NewTicker(microsoftAliasDispatcherInterval)
@@ -286,11 +318,11 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 		for {
 			select {
 			case <-mailTicker.C:
-				scheduleMailDispatchers(ctx, m, 0)
+				seedMailDispatchers(ctx, m)
 			case <-aliasTicker.C:
-				scheduleMicrosoftAliasDispatcher(ctx, m, 0)
+				runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
 			case <-tokenRefreshTicker.C:
-				scheduleMicrosoftTokenRefreshDispatcher(ctx, m, 0)
+				runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
 			case <-bindingDomainTicker.C:
 				refreshAuxiliaryDomains(ctx, m.bindingDomains)
 			case <-ctx.Done():

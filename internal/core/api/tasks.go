@@ -30,19 +30,6 @@ func StartCoreWorkers(server *asynq.Server, module *CoreModule) error {
 }
 
 func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
-	mux.HandleFunc(coreinfra.TypeAdminResourceBulkDispatcher, func(ctx context.Context, _ *asynq.Task) error {
-		if module == nil || module.AdminBulk == nil {
-			return nil
-		}
-		// This dispatcher has no periodic seeder and performs only a bounded
-		// DB-to-Redis handoff. Always let it seed at least one durable command;
-		// the command handler itself remains governed by the global window.
-		limit := max(1, backgroundDispatchLimit(module.BackgroundExecution, 32))
-		if err := module.AdminBulk.DispatchPending(ctx, limit); err != nil {
-			slog.Warn("admin resource bulk dispatcher failed", "error", err)
-		}
-		return nil
-	})
 	mux.HandleFunc(coreinfra.TypeAdminResourceBulk, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.AdminBulk == nil {
 			return nil
@@ -51,19 +38,23 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode admin resource bulk task: %w: %w", err, asynq.SkipRetry)
 		}
-		if payload.CommandID == 0 || payload.DispatchToken == "" {
+		if payload.CommandID == 0 || payload.BatchID == "" || payload.ClaimToken == "" || payload.RequestFingerprint == "" {
 			return fmt.Errorf("decode admin resource bulk task: identity is missing: %w", asynq.SkipRetry)
 		}
 		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
 		if err != nil {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupAdminResourceBulk(ctx, module, payload)
+				return nil
+			}
 			return err
 		}
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
 				defer cancel()
-				if err := module.AdminBulk.ReleaseDispatch(recoveryCtx, payload); err != nil {
-					return fmt.Errorf("release legacy admin resource bulk dispatch: %w", err)
+				if err := module.AdminBulk.ReleaseBatch(recoveryCtx, payload); err != nil {
+					return fmt.Errorf("release admin resource bulk batch: %w", err)
 				}
 				return nil
 			}
@@ -72,6 +63,10 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		defer release()
 		if err := module.AdminBulk.Process(ctx, payload); err != nil {
 			slog.Warn("admin resource bulk task failed", "command_id", payload.CommandID, "error", err)
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupAdminResourceBulk(ctx, module, payload)
+				return nil
+			}
 			return err
 		}
 		return nil
@@ -115,6 +110,10 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
 		if err != nil {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupResourceValidationBatch(ctx, module, payload)
+				return nil
+			}
 			return err
 		}
 		if !admitted {
@@ -151,6 +150,10 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
 		if err != nil {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				cleanupAdminDomainBulk(ctx, module, payload)
+				return nil
+			}
 			return err
 		}
 		if !admitted {
@@ -180,27 +183,21 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			slog.Warn("discard malformed resource validation task", "error", err)
 			return nil
 		}
-		if payload.ResourceID == 0 || payload.OwnerUserID == 0 || !coredomain.IsValidResourceType(payload.ResourceType) {
+		if payload.ResourceID == 0 || payload.OwnerUserID == 0 || payload.ValidationGeneration == 0 || !coredomain.IsValidResourceType(payload.ResourceType) {
 			slog.Warn("discard resource validation task without identity")
 			return nil
 		}
 		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
 		if err != nil {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				releaseResourceValidationDispatch(ctx, module, payload)
+				return nil
+			}
 			return err
 		}
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
-				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
-				defer cancel()
-				if err := module.ValidationUseCase.ReleaseDispatch(recoveryCtx, payload); err != nil {
-					slog.Warn(
-						"release exhausted resource validation admission failed",
-						"resource_id", payload.ResourceID,
-						"request_id", payload.RequestID,
-						"error", err,
-					)
-				}
-				module.ValidationUseCase.ScheduleDispatcher(recoveryCtx, time.Second)
+				releaseResourceValidationDispatch(ctx, module, payload)
 				return nil
 			}
 			return platform.ErrBackgroundExecutionDeferred
@@ -252,11 +249,16 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				"final_attempt", finalAttempt,
 				"error", err,
 			)
-			if payload.DispatchToken != "" {
-				// Durable imports persist retry/terminal state under a fenced
-				// claim. Returning the error to Asynq would replay a consumed token;
-				// the periodic durable dispatcher issues a fresh token instead.
-				return nil
+			if payload.Generation != 0 {
+				if isNonRetryableImportError(err) {
+					return fmt.Errorf("non-retryable microsoft import task failure: %w: %w", err, asynq.SkipRetry)
+				}
+				if finalAttempt {
+					if pendingErr := module.ImportUseCase.MarkImportPending(ctx, payload.ImportID, payload.Generation, "Import infrastructure is temporarily unavailable; dispatcher will retry."); pendingErr != nil {
+						slog.Warn("return microsoft import to pending after infrastructure retries", "import_id", payload.ImportID, "error", pendingErr)
+					}
+				}
+				return err
 			}
 			if isNonRetryableImportError(err) {
 				_ = module.ImportUseCase.MarkImportFailed(ctx, payload.ImportID, "Invalid import task.")
@@ -297,6 +299,34 @@ func cleanupResourceValidationBatch(ctx context.Context, module *CoreModule, tas
 	if err := module.ValidationUseCase.ReleaseBatch(cleanupCtx, task); err != nil {
 		slog.Warn("release resource validation batch lease failed", "batch_id", task.BatchID, "error", err)
 	}
+}
+
+func cleanupAdminResourceBulk(ctx context.Context, module *CoreModule, task coreapp.AdminResourceBulkTask) {
+	if module == nil || module.AdminBulk == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+	defer cancel()
+	if err := module.AdminBulk.ReleaseBatch(cleanupCtx, task); err != nil {
+		slog.Warn("release admin resource bulk lease failed", "command_id", task.CommandID, "error", err)
+	}
+}
+
+func releaseResourceValidationDispatch(ctx context.Context, module *CoreModule, task coreapp.ResourceValidationTask) {
+	if module == nil || module.ValidationUseCase == nil {
+		return
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+	defer cancel()
+	if err := module.ValidationUseCase.ReleaseDispatch(recoveryCtx, task); err != nil {
+		slog.Warn(
+			"release exhausted resource validation admission failed",
+			"resource_id", task.ResourceID,
+			"request_id", task.RequestID,
+			"error", err,
+		)
+	}
+	module.ValidationUseCase.ScheduleDispatcher(recoveryCtx, time.Second)
 }
 
 func cleanupAdminDomainBulk(ctx context.Context, module *CoreModule, task coreapp.AdminDomainBulkTask) {
@@ -359,9 +389,6 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 		return 0, nil
 	}
 	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
-	if module.AdminBulk != nil {
-		module.AdminBulk.ScheduleDispatcher(ctx, 0)
-	}
 	if module.ImportUseCase != nil {
 		if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
 			slog.Warn("resource import dispatcher failed", "error", err)
@@ -373,21 +400,37 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 // StartResourceValidationDispatcher periodically recovers pending validation
 // work until the returned cleanup function is called.
 func StartResourceValidationDispatcher(ctx context.Context, module *CoreModule) func(context.Context) {
-	return startResourceValidationDispatcher(ctx, module, resourceValidationDispatcherInterval)
+	return startResourceValidationDispatcher(ctx, module, resourceValidationDispatcherInterval, backgroundLegacyReleaseTimeout)
 }
 
-func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, interval time.Duration) func(context.Context) {
+func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, interval, callTimeout time.Duration) func(context.Context) {
 	if module == nil || module.ValidationUseCase == nil {
 		return func(context.Context) {}
 	}
 	if interval <= 0 {
 		interval = resourceValidationDispatcherInterval
 	}
+	if callTimeout <= 0 {
+		callTimeout = backgroundLegacyReleaseTimeout
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	if err := module.ValidationUseCase.ResetAssignments(ctx); err != nil {
-		slog.Warn("reset resource validation assignments at startup failed", "error", err)
+	seedValidation := func() {
+		callCtx, callCancel := context.WithTimeout(ctx, callTimeout)
+		defer callCancel()
+		module.ValidationUseCase.ScheduleDispatcher(callCtx, 0)
 	}
+	dispatchImports := func() {
+		if module.ImportUseCase == nil {
+			return
+		}
+		callCtx, callCancel := context.WithTimeout(ctx, callTimeout)
+		defer callCancel()
+		if _, err := module.ImportUseCase.DispatchAdminImports(callCtx, 100); err != nil {
+			slog.Warn("resource import dispatcher failed", "error", err)
+		}
+	}
+	seedValidation()
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(interval)
@@ -395,15 +438,8 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 		for {
 			select {
 			case <-ticker.C:
-				module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
-				if module.AdminBulk != nil {
-					module.AdminBulk.ScheduleDispatcher(ctx, 0)
-				}
-				if module.ImportUseCase != nil {
-					if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
-						slog.Warn("resource import dispatcher failed", "error", err)
-					}
-				}
+				seedValidation()
+				dispatchImports()
 			case <-ctx.Done():
 				return
 			}

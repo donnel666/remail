@@ -6207,7 +6207,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [checking, normal, abnormal, disabled, expired]
+            enum: [pending, checking, normal, abnormal, disabled, expired]
         - name: country
           in: query
           schema:
@@ -6289,7 +6289,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [checking, normal, abnormal, disabled, expired]
+            enum: [pending, checking, normal, abnormal, disabled, expired]
         - name: country
           in: query
           schema:
@@ -8449,7 +8449,7 @@ paths:
     post:
       operationId: postAdminMicrosoftResourceMessagesFetch
       summary: Queue a resource-level Microsoft mail fetch
-      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch persists or reuses a resource-level single-flight fetch job before returning 202. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
+      description: Requires `mailmatch:message/operate`, Session authentication, CSRF, and an idempotency key. MailMatch updates the resource's current fetch generation before returning 202; Redis/Asynq carries only temporary execution data. Graph/IMAP work, deduplication, storage, and matching run asynchronously. Disabled resources may be diagnosed without being enabled; deleted resources return 409.
       tags:
         - Admin
       security:
@@ -12906,7 +12906,7 @@ components:
           type: boolean
         status:
           type: string
-          enum: [checking, normal, abnormal, disabled, expired]
+          enum: [pending, checking, normal, abnormal, disabled, expired]
         country:
           type: string
         search:
@@ -13427,7 +13427,7 @@ components:
           type: integer
         status:
           type: string
-          enum: [checking, normal, abnormal, disabled, expired]
+          enum: [pending, checking, normal, abnormal, disabled, expired]
         errors:
           type: integer
         lastSafeError:

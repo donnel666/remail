@@ -20,9 +20,7 @@ const (
 type RetentionRepository interface {
 	DeleteIdempotencyKeysBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error)
-	DeleteFetchJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteAllocationDailyUsagesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
-	DeleteProxyCheckJobsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteOutboundMailsTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	DeleteSystemLogsBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 	ListInboundMailObjectsBefore(ctx context.Context, before time.Time, limit int) ([]RetentionInboundMailObject, error)
@@ -107,14 +105,8 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", retentionBatchSize)
 	}))
-	summary = append(summary, s.deleteLoop(ctx, "mailmatch_fetch_jobs", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteFetchJobsTerminalBefore(ctx, before, retentionBatchSize)
-	}))
 	summary = append(summary, s.deleteLoop(ctx, "allocation_daily_usages", now.AddDate(0, 0, -14), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteAllocationDailyUsagesBefore(ctx, before, retentionBatchSize)
-	}))
-	summary = append(summary, s.deleteLoop(ctx, "proxy_check_jobs", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
-		return s.repo.DeleteProxyCheckJobsTerminalBefore(ctx, before, retentionBatchSize)
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "outbound_mails", now.AddDate(0, 0, -30), func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteOutboundMailsTerminalBefore(ctx, before, retentionBatchSize)

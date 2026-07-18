@@ -263,7 +263,7 @@ func createRunningValidationBindingTask(t *testing.T, db *gorm.DB, resourceID ui
 	}).Error)
 	return coreapp.ResourceValidationTask{
 		ResourceID: resourceID, ResourceType: domain.ResourceTypeMicrosoft,
-		OwnerUserID: resourceID, ExpectedCredentialRevision: 1,
+		OwnerUserID: resourceID, ValidationGeneration: 1, ExpectedCredentialRevision: 1,
 		RequestID: "req-binding-commit",
 	}
 }
@@ -277,8 +277,8 @@ func validationBindingRootVersion(t *testing.T, db *gorm.DB, resourceID uint) ui
 
 type adminIdentityValidationQueue struct{}
 
-func (adminIdentityValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) error {
-	return nil
+func (adminIdentityValidationQueue) EnqueueResourceValidation(context.Context, coreapp.ResourceValidationTask) (bool, error) {
+	return true, nil
 }
 
 func (adminIdentityValidationQueue) EnqueueResourceValidationBatch(context.Context, coreapp.ResourceValidationBatchTask) error {

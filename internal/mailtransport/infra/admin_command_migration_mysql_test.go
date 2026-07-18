@@ -9,50 +9,67 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestMicrosoftMaintenanceMigrationRoundTripMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 29))
+	require.True(t, db.Migrator().HasTable("microsoft_token_refresh_jobs"))
+	require.True(t, db.Migrator().HasTable("microsoft_token_refresh_requests"))
+	require.False(t, db.Migrator().HasColumn(&MicrosoftTokenRefreshStateModel{}, "token_refresh_generation"))
+	require.False(t, db.Migrator().HasColumn(&MicrosoftAliasScheduleModel{}, "generation"))
+	createMicrosoftAliasTestResource(t, db, 993001, "normal")
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_token_refresh_jobs(
+    resource_id, operator_user_id, expected_credential_revision,
+    status, attempts, max_attempts, request_id, path
+) VALUES (993001, 993001, 1, 'running', 2, 3, 'legacy-active', '/legacy')`).Error)
+
+	require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 30))
+	require.False(t, db.Migrator().HasTable("microsoft_token_refresh_jobs"))
+	require.False(t, db.Migrator().HasTable("microsoft_token_refresh_requests"))
+	require.True(t, db.Migrator().HasColumn(&MicrosoftTokenRefreshStateModel{}, "token_refresh_generation"))
+	require.True(t, db.Migrator().HasColumn(&MicrosoftAliasScheduleModel{}, "generation"))
+	var state struct {
+		Status   string `gorm:"column:token_refresh_status"`
+		Failures int    `gorm:"column:token_refresh_failures"`
+	}
+	require.NoError(t, db.Table("microsoft_resources").Where("id = 993001").Take(&state).Error)
+	require.Equal(t, "pending", state.Status)
+	require.Zero(t, state.Failures, "legacy execution attempts are not business failures")
+}
+
 func TestAdminMailTransportCommandReceiptMigrationConstraintsMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 9240, "normal")
 	createMicrosoftAliasTestResource(t, db, 9241, "normal")
 
-	assertMigrationPrimaryKey(t, db, "microsoft_token_refresh_requests", "operator_user_id,idempotency_key")
 	assertMigrationPrimaryKey(t, db, "microsoft_alias_expedite_requests", "operator_user_id,idempotency_key")
-	assertMigrationForeignKeyCount(t, db, "microsoft_token_refresh_requests", 3)
 	assertMigrationForeignKeyCount(t, db, "microsoft_alias_expedite_requests", 2)
-	assertMigrationColumnExists(t, db, "microsoft_token_refresh_requests", "reused")
+	assertMigrationColumnExists(t, db, "microsoft_resources", "token_refresh_generation")
+	assertMigrationColumnExists(t, db, "microsoft_resources", "token_refresh_idempotency_scope")
 	assertMigrationColumnExists(t, db, "microsoft_alias_expedite_requests", "reused")
 
 	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_jobs(
-    resource_id, operator_user_id, expected_credential_revision, status
-) VALUES (9240, 9240, 1, 'queued')`).Error)
-	var tokenJobID uint64
-	require.NoError(t, db.Raw(`
-SELECT id FROM microsoft_token_refresh_jobs WHERE resource_id = 9240
-`).Scan(&tokenJobID).Error)
-	require.NotZero(t, tokenJobID)
-
+UPDATE microsoft_resources
+SET token_refresh_status = 'pending', token_refresh_generation = 1,
+    token_refresh_operator_user_id = 9240,
+    token_refresh_idempotency_key = 'same-command-key'
+WHERE id = 9240`).Error)
+	assert.Error(t, db.Exec(`
+UPDATE microsoft_resources
+SET token_refresh_status = 'pending', token_refresh_generation = 1,
+    token_refresh_operator_user_id = 9240,
+    token_refresh_idempotency_key = 'same-command-key'
+WHERE id = 9241`).Error)
+	// The same opaque key remains independent across administrators.
 	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_requests(
-    operator_user_id, idempotency_key, resource_id, job_id
-) VALUES (?, 'same-command-key', 9240, ?)`, 9240, tokenJobID).Error)
-	assert.Error(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_requests(
-    operator_user_id, idempotency_key, resource_id, job_id
-) VALUES (?, 'same-command-key', 9240, ?)`, 9240, tokenJobID).Error)
-	// Idempotency scope is per operator, so a different administrator may use
-	// the same opaque key while still pointing at a valid durable fact.
-	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_requests(
-    operator_user_id, idempotency_key, resource_id, job_id
-) VALUES (?, 'same-command-key', 9240, ?)`, 9241, tokenJobID).Error)
-	assert.Error(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_requests(
-    operator_user_id, idempotency_key, resource_id, job_id
-) VALUES (9240, '', 9240, ?)`, tokenJobID).Error)
-	assert.Error(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_requests(
-    operator_user_id, idempotency_key, resource_id, job_id
-) VALUES (9240, 'invalid-job', 9240, 999999999)`).Error)
+UPDATE microsoft_resources
+SET token_refresh_status = 'pending', token_refresh_generation = 1,
+    token_refresh_operator_user_id = 9241,
+    token_refresh_idempotency_key = 'same-command-key'
+WHERE id = 9241`).Error)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO microsoft_alias_expedite_requests(
@@ -74,28 +91,6 @@ INSERT INTO microsoft_alias_expedite_requests(
 INSERT INTO microsoft_alias_expedite_requests(
     operator_user_id, idempotency_key, resource_id, reused
 ) VALUES (9240, 'invalid-resource', 999999999, FALSE)`).Error)
-}
-
-func TestAdminMailTransportCommandReceiptMigrationDownHasNoForeignKeyBlockerMySQL(t *testing.T) {
-	db := newMailTransportMySQLTestDB(t)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, mailTransportMigrationsDir(t), 8))
-
-	for _, table := range []string{
-		"microsoft_alias_expedite_requests",
-		"microsoft_token_refresh_requests",
-		"microsoft_token_refresh_jobs",
-	} {
-		var count int64
-		require.NoError(t, db.Raw(`
-SELECT COUNT(*)
-FROM information_schema.tables
-WHERE table_schema = DATABASE() AND table_name = ?`, table).Scan(&count).Error)
-		assert.Zero(t, count, table)
-	}
-	require.NoError(t, goose.UpTo(sqlDB, mailTransportMigrationsDir(t), 9))
 }
 
 func assertMigrationPrimaryKey(t *testing.T, db *gorm.DB, table string, expected string) {

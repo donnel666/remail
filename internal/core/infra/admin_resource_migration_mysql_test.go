@@ -10,6 +10,50 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestCoreAsyncStateSchemaMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	require.False(t, db.Migrator().HasTable("admin_resource_bulk_commands"))
+	require.True(t, db.Migrator().HasColumn(&ResourceImportModel{}, "generation"))
+	require.False(t, db.Migrator().HasColumn("resource_imports", "dispatch_token"))
+	require.False(t, db.Migrator().HasColumn("resource_imports", "dispatched_at"))
+}
+
+func TestResourceValidationGenerationMigrationTakesOverInflightAssignmentsMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 33))
+
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, enabled, role)
+VALUES (9801, 'validation-migration-owner@test.local', 'hash', 1, 'admin')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, server_address, status)
+VALUES (9802, 9801, '127.0.0.1', 'online')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (9803, 'microsoft', 9801), (9804, 'domain', 9801)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_resources(id, resource_type, email_address, password, status)
+VALUES (9803, 'microsoft', 'validation-migration@outlook.com', 'secret', 'validating')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, mail_server_id, purpose, status)
+VALUES (9804, 'domain', 9801, 'validation-migration.example.com', 9802, 'not_sale', 'validating')`).Error)
+
+	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 34))
+	for _, table := range []string{"microsoft_resources", "domain_resources"} {
+		var status string
+		var generation uint64
+		var failures int
+		require.NoError(t, db.Table(table).Select("status, validation_generation, validation_failures").Where("id IN ?", []uint{9803, 9804}).Row().Scan(&status, &generation, &failures))
+		require.Equal(t, "pending", status)
+		require.Equal(t, uint64(2), generation)
+		require.Zero(t, failures)
+		require.Error(t, db.Table(table).Where("id IN ?", []uint{9803, 9804}).Update("validation_failures", 4).Error)
+	}
+}
+
 func TestAdminMicrosoftMigrationBackfillsConcurrencyFactsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	sqlDB, err := db.DB()
@@ -83,7 +127,7 @@ SELECT operator_user_id, dispatch_status
 FROM resource_imports
 WHERE source_object_key = 'core/imports/legacy.txt'`).Row().Scan(&legacyOperator, &legacyDispatchStatus))
 	require.False(t, legacyOperator.Valid)
-	require.Equal(t, "legacy", legacyDispatchStatus)
+	require.Equal(t, "pending", legacyDispatchStatus)
 	require.NoError(t, db.Exec(`
 INSERT INTO microsoft_binding_mailboxes(
     resource_id, resource_type, owner_user_id, account_email,
@@ -121,46 +165,21 @@ INSERT INTO inbound_mails(
 	require.Error(t, db.Exec("UPDATE microsoft_resources SET quality_score = 101 WHERE id = 9401").Error)
 
 	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_jobs(
-    resource_id, operator_user_id, expected_credential_revision, status
-) VALUES (9401, 9302, 1, 'queued')`).Error)
+UPDATE microsoft_resources
+SET token_refresh_status = 'pending',
+    token_refresh_generation = 1,
+    token_refresh_expected_credential_revision = 1,
+    token_refresh_operator_user_id = 9302,
+    token_refresh_idempotency_key = 'migration-state-9401'
+WHERE id = 9401`).Error)
 	require.Error(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_jobs(
-    resource_id, operator_user_id, expected_credential_revision, status
-) VALUES (9401, 9302, 1, 'running')`).Error)
-	require.NoError(t, db.Exec(`
-UPDATE microsoft_token_refresh_jobs
-SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3)
-WHERE resource_id = 9401`).Error)
-	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_jobs(
-    resource_id, operator_user_id, expected_credential_revision, status
-) VALUES (9401, 9302, 1, 'queued')`).Error)
-
-	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_resource_fetch_jobs(
-    resource_id, operator_user_id, expected_credential_revision,
-    recipient, status, max_attempts
-) VALUES (
-    9401, 9302, 1, 'managed@outlook.com', 'queued', 3
-)`).Error)
-
-	require.NoError(t, db.Exec(`
-INSERT INTO admin_resource_bulk_commands(
-    operator_user_id, action, selection_mode, selection_json,
-    selection_fingerprint, idempotency_key, max_resource_id, status
-) VALUES (
-    9302, 'publish', 'filter', JSON_OBJECT('type', 'microsoft'),
-    REPEAT('a', 64), 'same-key', 9401, 'queued'
-)`).Error)
+UPDATE microsoft_resources
+SET token_refresh_failures = 4
+WHERE id = 9401`).Error)
 	require.Error(t, db.Exec(`
-INSERT INTO admin_resource_bulk_commands(
-    operator_user_id, action, selection_mode, selection_json,
-    selection_fingerprint, idempotency_key, max_resource_id, status
-) VALUES (
-    9302, 'publish', 'filter', JSON_OBJECT('type', 'microsoft'),
-    REPEAT('a', 64), 'same-key', 9401, 'queued'
-)`).Error)
+UPDATE microsoft_resources
+SET token_refresh_status = 'invalid'
+WHERE id = 9401`).Error)
 
 	var permissionCount int64
 	require.NoError(t, db.Table("casbin_rule").

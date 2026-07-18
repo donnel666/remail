@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,40 +12,31 @@ import (
 )
 
 const (
-	projectHistoryPlannerShard      = -1
-	projectHistoryScanShards        = 4 // ponytail: four global worker slots; raise only after measuring upstream capacity.
-	projectHistoryMaxAttempts       = 3
-	projectHistoryDispatchLimit     = 16
-	projectHistoryMailboxTimeout    = 15 * time.Minute
-	projectHistoryRunningStaleAfter = 25 * time.Minute
-	projectHistoryDispatchLease     = time.Hour
+	projectHistoryDispatchLimit  = 16
+	projectHistoryMailboxTimeout = 15 * time.Minute
 )
 
 var errProjectHistoryScopeChanged = errors.New("mailmatch: project history scope changed")
+var errProjectHistoryInfrastructure = errors.New("mailmatch: project history infrastructure failure")
 
-type ProjectHistoryScanJob struct {
-	ID                   uint
-	ProjectID            uint
-	Shard                int
-	Status               string
-	StartResourceID      uint
-	CheckpointResourceID uint
-	EndResourceID        uint
-	Attempts             int
-	MaxAttempts          int
-	ScannedCount         int
-	MatchedCount         int
-	SkippedCount         int
-	ClaimToken           string
-	DispatchToken        string
-	RequestID            string
-	DispatchedAt         *time.Time
-	UpdatedAt            time.Time
+type ProjectHistoryScanState struct {
+	ProjectID   uint
+	Status      string
+	Generation  uint64
+	Failures    int
+	RequestID   string
+	RequestedAt time.Time
 }
 
 type ProjectHistoryScanTask struct {
-	JobID         uint   `json:"jobId"`
-	DispatchToken string `json:"dispatchToken"`
+	ProjectID       uint   `json:"projectId"`
+	Generation      uint64 `json:"generation"`
+	RequestID       string `json:"requestId,omitempty"`
+	AfterResourceID uint   `json:"afterResourceId,omitempty"`
+	MaxResourceID   uint   `json:"maxResourceId,omitempty"`
+	ScannedCount    int    `json:"scannedCount,omitempty"`
+	MatchedCount    int    `json:"matchedCount,omitempty"`
+	SkippedCount    int    `json:"skippedCount,omitempty"`
 }
 
 type ValidatedMicrosoftHistoryScanTask struct {
@@ -53,16 +45,13 @@ type ValidatedMicrosoftHistoryScanTask struct {
 }
 
 type ProjectHistoryScanRepository interface {
-	CreatePlanner(ctx context.Context, projectID uint, requestID string) error
-	EnsureMissingPlanners(ctx context.Context, limit int) (int, error)
-	ClaimDispatchable(ctx context.Context, limit int, runningStaleBefore, dispatchStaleBefore time.Time) ([]ProjectHistoryScanJob, error)
-	MarkRunning(ctx context.Context, jobID uint, dispatchToken string) (*ProjectHistoryScanJob, bool, error)
-	PlanShards(ctx context.Context, plannerID uint, claimToken string, shards []ProjectHistoryScanJob) error
-	Advance(ctx context.Context, jobID uint, claimToken string, resourceID uint, matched bool, skipped bool, safeError string) error
-	Complete(ctx context.Context, jobID uint, claimToken string) error
-	MarkFailure(ctx context.Context, job ProjectHistoryScanJob, resourceID uint, retryable bool, safeError string) error
-	ReleaseDispatch(ctx context.Context, jobID uint, dispatchToken string) error
-	MarkDispatchFailed(ctx context.Context, jobID uint, dispatchToken string, safeError string) error
+	RequestProjectHistoryScan(ctx context.Context, projectID uint, requestID string) (*ProjectHistoryScanState, error)
+	ListPendingProjectHistoryScans(ctx context.Context, limit int) ([]ProjectHistoryScanState, error)
+	MarkProjectHistoryProcessing(ctx context.Context, projectID uint, generation uint64) (bool, error)
+	AssertProjectHistoryFence(ctx context.Context, projectID uint, generation uint64) error
+	CompleteProjectHistoryScan(ctx context.Context, projectID uint, generation uint64, scanned int, matched int, skipped int) (bool, error)
+	ReleaseProjectHistoryInfrastructureFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, error)
+	RecordProjectHistoryFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (recorded bool, abnormal bool, err error)
 }
 
 type ProjectHistoryMatchRepository interface {
@@ -79,7 +68,7 @@ type HistoricalMicrosoftUsagePort interface {
 }
 
 type ProjectHistoryScanQueue interface {
-	EnqueueProjectHistoryScan(ctx context.Context, task ProjectHistoryScanTask) error
+	EnqueueProjectHistoryScan(ctx context.Context, task ProjectHistoryScanTask) (bool, error)
 	EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error
 	EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration) error
 }
@@ -117,7 +106,7 @@ func (uc *ProjectHistoryScanUseCase) Schedule(ctx context.Context, projectID uin
 	if uc == nil || uc.jobs == nil || projectID == 0 {
 		return domain.ErrInvalidRequest
 	}
-	if err := uc.jobs.CreatePlanner(ctx, projectID, strings.TrimSpace(requestID)); err != nil {
+	if _, err := uc.jobs.RequestProjectHistoryScan(ctx, projectID, strings.TrimSpace(requestID)); err != nil {
 		return err
 	}
 	uc.ScheduleDispatcher(ctx, 0)
@@ -141,33 +130,70 @@ func (uc *ProjectHistoryScanUseCase) DispatchPending(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = projectHistoryDispatchLimit
 	}
-	_, ensureErr := uc.jobs.EnsureMissingPlanners(ctx, limit)
-	now := uc.now()
-	jobs, err := uc.jobs.ClaimDispatchable(ctx, limit, now.Add(-projectHistoryRunningStaleAfter), now.Add(-projectHistoryDispatchLease))
+	states, err := uc.jobs.ListPendingProjectHistoryScans(ctx, limit)
 	if err != nil {
-		return errors.Join(ensureErr, err)
+		return err
 	}
 	var result error
-	for _, job := range jobs {
-		if err := uc.queue.EnqueueProjectHistoryScan(ctx, ProjectHistoryScanTask{JobID: job.ID, DispatchToken: job.DispatchToken}); err != nil {
-			result = errors.Join(result, err, uc.jobs.MarkDispatchFailed(ctx, job.ID, job.DispatchToken, "Project history queue is temporarily unavailable."))
+	for _, state := range states {
+		accepted, enqueueErr := uc.queue.EnqueueProjectHistoryScan(ctx, ProjectHistoryScanTask{
+			ProjectID: state.ProjectID, Generation: state.Generation, RequestID: state.RequestID,
+		})
+		if enqueueErr != nil {
+			result = errors.Join(result, enqueueErr)
+			continue
+		}
+		if !accepted {
+			continue
+		}
+		if _, markErr := uc.jobs.MarkProjectHistoryProcessing(ctx, state.ProjectID, state.Generation); markErr != nil {
+			result = errors.Join(result, markErr)
 		}
 	}
-	return errors.Join(ensureErr, result)
+	return result
 }
 
 func (uc *ProjectHistoryScanUseCase) Process(ctx context.Context, task ProjectHistoryScanTask) error {
-	if uc == nil || uc.jobs == nil || uc.matches == nil || uc.queue == nil || uc.credentials == nil || task.JobID == 0 || strings.TrimSpace(task.DispatchToken) == "" {
+	if uc == nil || uc.jobs == nil || uc.matches == nil || uc.queue == nil || uc.credentials == nil || task.ProjectID == 0 || task.Generation == 0 {
 		return domain.ErrInvalidRequest
 	}
-	job, claimed, err := uc.jobs.MarkRunning(ctx, task.JobID, task.DispatchToken)
-	if err != nil || !claimed {
+	current, err := uc.jobs.MarkProjectHistoryProcessing(ctx, task.ProjectID, task.Generation)
+	if err != nil || !current {
 		return err
 	}
-	if job.Shard == projectHistoryPlannerShard {
-		return uc.processPlanner(ctx, *job)
+	done, next, err := uc.scanProjectHistoryPage(ctx, task)
+	if err == nil && done {
+		_, err = uc.jobs.CompleteProjectHistoryScan(
+			ctx, task.ProjectID, task.Generation, next.ScannedCount, next.MatchedCount, next.SkippedCount,
+		)
+		return err
 	}
-	return uc.processShard(ctx, *job)
+	if err == nil {
+		_, enqueueErr := uc.queue.EnqueueProjectHistoryScan(ctx, next)
+		if enqueueErr == nil {
+			return nil
+		}
+		err = fmt.Errorf("%w: enqueue project history continuation: %v", errProjectHistoryInfrastructure, enqueueErr)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errProjectHistoryInfrastructure) {
+		released, releaseErr := uc.jobs.ReleaseProjectHistoryInfrastructureFailure(
+			context.WithoutCancel(ctx), task.ProjectID, task.Generation, "Project history infrastructure is temporarily unavailable.",
+		)
+		if released {
+			uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
+		}
+		return errors.Join(err, releaseErr)
+	}
+	recorded, abnormal, recordErr := uc.jobs.RecordProjectHistoryFailure(
+		context.WithoutCancel(ctx), task.ProjectID, task.Generation, safeProjectHistoryFailure(err),
+	)
+	if recordErr != nil {
+		return errors.Join(err, recordErr)
+	}
+	if recorded && !abnormal {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), time.Second)
+	}
+	return nil
 }
 
 func (uc *ProjectHistoryScanUseCase) ProcessValidatedMicrosoftHistory(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error {
@@ -280,202 +306,164 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	return nil
 }
 
-func (uc *ProjectHistoryScanUseCase) processPlanner(ctx context.Context, job ProjectHistoryScanJob) error {
-	scope, err := uc.matches.FindHistoricalProjectScope(ctx, job.ProjectID)
+func (uc *ProjectHistoryScanUseCase) scanProjectHistoryPage(ctx context.Context, task ProjectHistoryScanTask) (done bool, next ProjectHistoryScanTask, resultErr error) {
+	next = task
+	scope, err := uc.matches.FindHistoricalProjectScope(ctx, task.ProjectID)
 	if err != nil {
-		return uc.retry(ctx, job, 0, true, "Project history planning failed.")
+		return false, next, fmt.Errorf("%w: load project history scope: %v", errProjectHistoryInfrastructure, err)
 	}
 	if scope == nil {
-		return uc.complete(ctx, job)
+		return true, next, nil
 	}
-	maxID, err := uc.credentials.MaxMicrosoftResourceID(ctx)
-	if err != nil {
-		return uc.retry(ctx, job, 0, true, "Project history resource snapshot failed.")
-	}
-	if maxID == 0 {
-		return uc.complete(ctx, job)
-	}
-	span := (maxID + projectHistoryScanShards - 1) / projectHistoryScanShards
-	shards := make([]ProjectHistoryScanJob, 0, projectHistoryScanShards)
-	for start := uint(1); start <= maxID; start += span {
-		end := start + span - 1
-		if end > maxID || end < start {
-			end = maxID
-		}
-		shards = append(shards, ProjectHistoryScanJob{
-			ProjectID: job.ProjectID, Shard: len(shards), Status: "queued",
-			StartResourceID: start, CheckpointResourceID: start - 1, EndResourceID: end,
-			MaxAttempts: projectHistoryMaxAttempts, RequestID: job.RequestID,
-		})
-		if end == maxID {
-			break
+	if next.MaxResourceID == 0 {
+		next.MaxResourceID, err = uc.credentials.MaxMicrosoftResourceID(ctx)
+		if err != nil {
+			return false, next, fmt.Errorf("%w: read microsoft resource high-water mark: %v", errProjectHistoryInfrastructure, err)
 		}
 	}
-	if err := uc.jobs.PlanShards(ctx, job.ID, job.ClaimToken, shards); err != nil {
-		return uc.retry(ctx, job, 0, true, "Project history planning failed.")
-	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return nil
-}
-
-func (uc *ProjectHistoryScanUseCase) processShard(ctx context.Context, job ProjectHistoryScanJob) error {
-	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, job.CheckpointResourceID, job.EndResourceID)
+	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, next.AfterResourceID, next.MaxResourceID)
 	if err != nil {
-		return uc.retry(ctx, job, 0, true, "Project history resource lookup failed.")
+		return false, next, fmt.Errorf("%w: find next microsoft resource: %v", errProjectHistoryInfrastructure, err)
 	}
 	if resource == nil {
-		return uc.complete(ctx, job)
+		return true, next, nil
 	}
+	next.AfterResourceID = resource.ResourceID
+	next.ScannedCount++
 	if strings.TrimSpace(resource.EmailAddress) == "" || strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
-		return uc.skipIncompleteCredential(ctx, job, *resource)
+		next.SkippedCount++
+		return false, next, nil
 	}
-	scope, err := uc.matches.FindHistoricalProjectScope(ctx, job.ProjectID)
-	if err != nil {
-		return uc.retry(ctx, job, resource.ResourceID, true, "Project history rules could not be loaded.")
+	resourceMatched, resourceSkipped, err := uc.scanProjectHistoryResource(ctx, task, *scope, *resource)
+	if resourceMatched {
+		next.MatchedCount++
 	}
-	if scope == nil {
-		return uc.complete(ctx, job)
+	if resourceSkipped {
+		next.SkippedCount++
+	}
+	return false, next, err
+}
+
+func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
+	ctx context.Context,
+	task ProjectHistoryScanTask,
+	scope HistoricalProjectScope,
+	resource coreapp.MicrosoftCredentialScope,
+) (matched bool, skipped bool, resultErr error) {
+	if uc.transport == nil {
+		return false, false, &MailFetchFailure{SafeMessage: "Microsoft mail service is temporarily unavailable.", Retryable: true, Cause: domain.ErrMailServiceUnavailable}
 	}
 	accumulator := historicalMatchesAccumulator{
 		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
-		scopes: []HistoricalProjectScope{*scope}, scannedAt: uc.now(),
-	}
-	if uc.transport == nil {
-		return uc.retry(ctx, job, resource.ResourceID, true, "Microsoft mail service is temporarily unavailable.")
+		scopes: []HistoricalProjectScope{scope}, scannedAt: uc.now(),
 	}
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, projectHistoryMailboxTimeout)
-	fetched, err := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
+	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
 		Scope: OrderScope{
 			OrderNo: "project-history", AllocationType: domain.ResourceTypeMicrosoft,
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
 		},
-		RequestID: job.RequestID, FullHistory: true, OnMessages: accumulator.add, OnReset: accumulator.reset,
+		RequestID: task.RequestID, FullHistory: true, OnMessages: accumulator.add, OnReset: accumulator.reset,
 	})
 	cancelFetch()
-	if err != nil {
-		retryable := true
-		refreshToken := ""
-		var failure *MailFetchFailure
-		if errors.As(err, &failure) {
-			retryable = failure.Retryable
-			refreshToken = failure.RefreshToken
+	if fetched == nil && fetchErr == nil {
+		fetchErr = &MailFetchFailure{SafeMessage: "Microsoft mailbox history fetch failed.", Retryable: true, Cause: domain.ErrMailServiceUnavailable}
+	}
+	refreshToken := ""
+	if fetched != nil {
+		refreshToken = strings.TrimSpace(fetched.RefreshToken)
+	}
+	failure := (*MailFetchFailure)(nil)
+	if errors.As(fetchErr, &failure) && failure != nil {
+		refreshToken = strings.TrimSpace(failure.RefreshToken)
+	}
+	if fetchErr != nil {
+		err := uc.applyProjectHistoryRefreshToken(ctx, resource, refreshToken)
+		if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
+			return false, true, nil
 		}
-		return uc.recordFetchFailure(ctx, job, *resource, retryable, refreshToken)
+		if err != nil {
+			return false, false, fmt.Errorf("%w: persist microsoft refresh token after fetch failure: %v", errProjectHistoryInfrastructure, err)
+		}
+		if failure != nil && !failure.Retryable {
+			return false, true, nil
+		}
+		if failure != nil {
+			return false, false, failure
+		}
+		return false, false, &MailFetchFailure{SafeMessage: "Microsoft mailbox history fetch failed.", Retryable: true, Cause: fetchErr}
 	}
-	if fetched == nil {
-		return uc.retry(ctx, job, resource.ResourceID, true, "Microsoft mailbox history fetch failed.")
-	}
-	err = uc.matches.WithTx(ctx, func(txCtx context.Context) error {
-		lockedScope, err := uc.matches.FindHistoricalProjectScopeForUpdate(txCtx, job.ProjectID)
+
+	matches := accumulator.results()
+	err := uc.matches.WithTx(ctx, func(txCtx context.Context) error {
+		if err := uc.jobs.AssertProjectHistoryFence(txCtx, task.ProjectID, task.Generation); err != nil {
+			return err
+		}
+		lockedScope, err := uc.matches.FindHistoricalProjectScopeForUpdate(txCtx, task.ProjectID)
 		if err != nil {
 			return err
 		}
-		if lockedScope == nil {
-			return uc.jobs.Complete(txCtx, job.ID, job.ClaimToken)
-		}
-		if !sameHistoricalProjectScope(scope, lockedScope) {
+		if lockedScope == nil || !sameHistoricalProjectScope(&scope, lockedScope) {
 			return errProjectHistoryScopeChanged
 		}
 		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
 			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: strings.TrimSpace(fetched.RefreshToken), Now: uc.now(),
+			RefreshToken: refreshToken, Now: uc.now(),
 		}); err != nil {
 			return err
 		}
-		matches := accumulator.results()
 		if len(matches) > 0 {
 			if uc.history == nil {
-				return domain.ErrInvalidRequest
+				return errors.New("historical microsoft usage service is unavailable")
 			}
 			if err := uc.history.ImportHistoricalMicrosoftUsage(txCtx, matches); err != nil {
 				return err
 			}
 		}
-		if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, job.ProjectID); err != nil {
-			return err
-		}
-		return uc.jobs.Advance(txCtx, job.ID, job.ClaimToken, resource.ResourceID, len(matches) > 0, false, "")
+		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, task.ProjectID)
 	})
-	if err != nil {
-		if errors.Is(err, errProjectHistoryScopeChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) {
-			return uc.retry(ctx, job, 0, true, "Project history scope changed while mail was being fetched.")
-		}
-		if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
-			return uc.retry(ctx, job, resource.ResourceID, false, "Microsoft resource is no longer available.")
-		}
-		return uc.retry(ctx, job, resource.ResourceID, true, "Project history match commit failed.")
+	if errors.Is(err, errProjectHistoryScopeChanged) {
+		return false, false, err
 	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return nil
-}
-
-func (uc *ProjectHistoryScanUseCase) skipIncompleteCredential(ctx context.Context, job ProjectHistoryScanJob, resource coreapp.MicrosoftCredentialScope) error {
-	err := uc.matches.WithTx(ctx, func(txCtx context.Context) error {
-		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
-			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision, Now: uc.now(),
-		}); err != nil {
-			return err
-		}
-		return uc.jobs.Advance(txCtx, job.ID, job.ClaimToken, resource.ResourceID, false, true, "Microsoft credentials are incomplete.")
-	})
-	if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) {
-		return uc.retry(ctx, job, 0, true, "Microsoft credentials changed before history scan.")
-	}
-	if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
-		return uc.retry(ctx, job, resource.ResourceID, false, "Microsoft resource is no longer available.")
+	if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
+		return false, true, nil
 	}
 	if err != nil {
-		return err
+		return false, false, fmt.Errorf("%w: commit project history match: %v", errProjectHistoryInfrastructure, err)
 	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return nil
+	return len(matches) > 0, false, nil
 }
 
-func (uc *ProjectHistoryScanUseCase) recordFetchFailure(ctx context.Context, job ProjectHistoryScanJob, resource coreapp.MicrosoftCredentialScope, retryable bool, refreshToken string) error {
-	err := uc.matches.WithTx(ctx, func(txCtx context.Context) error {
-		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
-			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: strings.TrimSpace(refreshToken), Now: uc.now(),
-		}); err != nil {
-			return err
-		}
-		return uc.jobs.MarkFailure(txCtx, job, resource.ResourceID, retryable, "Microsoft mailbox history fetch failed.")
+func (uc *ProjectHistoryScanUseCase) applyProjectHistoryRefreshToken(ctx context.Context, resource coreapp.MicrosoftCredentialScope, refreshToken string) error {
+	return uc.credentials.ApplyMicrosoftFetchRefreshToken(ctx, coreapp.MicrosoftFetchRefreshTokenRotation{
+		ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+		RefreshToken: strings.TrimSpace(refreshToken), Now: uc.now(),
 	})
-	if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) {
-		return uc.retry(ctx, job, 0, true, "Microsoft credentials changed while history was being fetched.")
-	}
-	if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
-		return uc.retry(ctx, job, resource.ResourceID, false, "Microsoft resource is no longer available.")
-	}
-	if err != nil {
-		return err
-	}
-	uc.ScheduleDispatcher(ctx, time.Second)
-	return nil
 }
 
-func (uc *ProjectHistoryScanUseCase) retry(ctx context.Context, job ProjectHistoryScanJob, resourceID uint, retryable bool, safeError string) error {
-	if err := uc.jobs.MarkFailure(ctx, job, resourceID, retryable, safeError); err != nil {
-		return err
+func safeProjectHistoryFailure(err error) string {
+	var failure *MailFetchFailure
+	if errors.As(err, &failure) && failure != nil && strings.TrimSpace(failure.SafeMessage) != "" {
+		return failure.SafeMessage
 	}
-	uc.ScheduleDispatcher(ctx, time.Second)
-	return nil
-}
-
-func (uc *ProjectHistoryScanUseCase) complete(ctx context.Context, job ProjectHistoryScanJob) error {
-	if err := uc.jobs.Complete(ctx, job.ID, job.ClaimToken); err != nil {
-		return err
+	if errors.Is(err, errProjectHistoryScopeChanged) {
+		return "Project history scope changed while mail was being fetched."
 	}
-	uc.ScheduleDispatcher(ctx, 0)
-	return nil
+	return "Project history scan failed."
 }
 
 func (uc *ProjectHistoryScanUseCase) ReleaseDispatch(ctx context.Context, task ProjectHistoryScanTask) error {
-	if uc == nil || uc.jobs == nil {
+	if uc == nil || uc.jobs == nil || task.ProjectID == 0 || task.Generation == 0 {
 		return nil
 	}
-	return uc.jobs.ReleaseDispatch(ctx, task.JobID, task.DispatchToken)
+	released, err := uc.jobs.ReleaseProjectHistoryInfrastructureFailure(
+		ctx, task.ProjectID, task.Generation, "Project history execution capacity is temporarily unavailable.",
+	)
+	if released {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	return err
 }
 
 func (uc *ProjectHistoryScanUseCase) ScheduleDispatcher(ctx context.Context, delay time.Duration) {

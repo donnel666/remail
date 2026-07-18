@@ -29,7 +29,7 @@ export interface ProxyListFilter {
   ipv6?: boolean;
   pool?: "resource" | "system";
   search?: string;
-  status?: "checking" | "normal" | "abnormal" | "disabled" | "expired";
+  status?: "pending" | "checking" | "normal" | "abnormal" | "disabled" | "expired";
 }
 
 export async function listAdminProxies(

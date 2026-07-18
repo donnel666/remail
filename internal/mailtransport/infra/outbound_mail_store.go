@@ -10,7 +10,6 @@ import (
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type OutboundMailModel struct {
@@ -25,6 +24,7 @@ type OutboundMailModel struct {
 	TextBody       string     `gorm:"type:mediumtext;not null;column:text_body"`
 	HTMLBody       string     `gorm:"type:mediumtext;not null;column:html_body"`
 	Status         string     `gorm:"type:varchar(32);not null"`
+	SendGeneration uint64     `gorm:"not null;default:1;column:send_generation"`
 	Retries        int        `gorm:"not null"`
 	FailureReason  string     `gorm:"type:varchar(500);not null;column:failure_reason"`
 	SentAt         *time.Time `gorm:"column:sent_at"`
@@ -53,7 +53,7 @@ func (s *OutboundMailStore) Reserve(ctx context.Context, mail *domain.OutboundMa
 	if !isDuplicateKeyError(err) {
 		return nil, false, fmt.Errorf("create outbound mail: %w", err)
 	}
-	existing, findErr := s.findByIdempotencyKey(ctx, mail.IdempotencyKey)
+	existing, findErr := s.FindByIdempotencyKey(ctx, mail.IdempotencyKey)
 	if findErr != nil {
 		return nil, false, findErr
 	}
@@ -66,76 +66,36 @@ func (s *OutboundMailStore) Reserve(ctx context.Context, mail *domain.OutboundMa
 	return existing, false, nil
 }
 
-func (s *OutboundMailStore) ClaimSending(ctx context.Context, idempotencyKey string, staleBefore time.Time, now time.Time) (*domain.OutboundMail, bool, error) {
+func (s *OutboundMailStore) ActivateSending(ctx context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
-	if idempotencyKey == "" {
-		return nil, false, nil
+	if idempotencyKey == "" || generation == 0 {
+		return false, nil
 	}
-	var model OutboundMailModel
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where(
-				"idempotency_key = ? AND (status = ? OR (status = ? AND updated_at < ?))",
-				idempotencyKey,
-				string(domain.OutboundStatusPending),
-				string(domain.OutboundStatusSending),
-				staleBefore,
-			).
-			First(&model).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			return fmt.Errorf("lock outbound mail for claim: %w", err)
-		}
-		next := outboundMailFromModel(model)
-		next.MarkSending(now)
-		result := tx.Model(&OutboundMailModel{}).
-			Where("id = ? AND status IN ?", model.ID, []string{string(domain.OutboundStatusPending), string(domain.OutboundStatusSending)}).
-			Updates(map[string]any{
-				"status":         string(next.Status),
-				"retries":        next.Retries,
-				"failure_reason": "",
-				"updated_at":     now,
-			})
-		if result.Error != nil {
-			return fmt.Errorf("claim outbound mail: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			model.ID = 0
-			return nil
-		}
-		model.Status = string(next.Status)
-		model.Retries = next.Retries
-		model.FailureReason = ""
-		model.UpdatedAt = now
-		return nil
-	})
-	if err != nil {
-		return nil, false, err
+	result := s.db.WithContext(ctx).Model(&OutboundMailModel{}).
+		Where("idempotency_key = ? AND status = ? AND send_generation = ?", idempotencyKey, string(domain.OutboundStatusPending), generation).
+		Updates(map[string]any{
+			"status":         string(domain.OutboundStatusSending),
+			"failure_reason": "",
+			"updated_at":     now,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("activate outbound mail sending: %w", result.Error)
 	}
-	if model.ID == 0 {
-		return nil, false, nil
-	}
-	return outboundMailFromModel(model), true, nil
+	return result.RowsAffected > 0, nil
 }
 
-func (s *OutboundMailStore) ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.OutboundMail, error) {
+func (s *OutboundMailStore) ListPending(ctx context.Context, limit int) ([]domain.OutboundMail, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var models []OutboundMailModel
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? OR (status = ? AND updated_at < ?)", string(domain.OutboundStatusPending), string(domain.OutboundStatusSending), staleBefore).
-			Order("created_at ASC, id ASC").
-			Limit(limit).
-			Find(&models).Error; err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("claim dispatchable outbound mails: %w", err)
+	if err := s.db.WithContext(ctx).
+		Select("idempotency_key", "send_generation").
+		Where("status = ?", string(domain.OutboundStatusPending)).
+		Order("created_at ASC, id ASC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list pending outbound mails: %w", err)
 	}
 	mails := make([]domain.OutboundMail, 0, len(models))
 	for _, model := range models {
@@ -144,45 +104,107 @@ func (s *OutboundMailStore) ClaimDispatchable(ctx context.Context, limit int, st
 	return mails, nil
 }
 
-func (s *OutboundMailStore) MarkPending(ctx context.Context, idempotencyKey string, reason string) error {
-	return s.updateStatus(ctx, idempotencyKey, domain.OutboundStatusPending, safeDiagnostic(reason), nil)
+func (s *OutboundMailStore) ReleasePending(ctx context.Context, idempotencyKey string, generation uint64, reason string) (bool, error) {
+	return s.markPending(ctx, idempotencyKey, generation, reason, false)
 }
 
-func (s *OutboundMailStore) MarkSent(ctx context.Context, idempotencyKey string, now time.Time) error {
-	return s.updateStatus(ctx, idempotencyKey, domain.OutboundStatusSent, "", &now)
+func (s *OutboundMailStore) ResetPending(ctx context.Context, idempotencyKey string, generation uint64, reason string) (bool, error) {
+	return s.markPending(ctx, idempotencyKey, generation, reason, true)
 }
 
-func (s *OutboundMailStore) MarkFailed(ctx context.Context, idempotencyKey string, reason string) error {
-	return s.updateStatus(ctx, idempotencyKey, domain.OutboundStatusFailed, safeDiagnostic(reason), nil)
-}
-
-func (s *OutboundMailStore) updateStatus(ctx context.Context, idempotencyKey string, status domain.OutboundStatus, reason string, sentAt *time.Time) error {
+func (s *OutboundMailStore) markPending(ctx context.Context, idempotencyKey string, generation uint64, reason string, resetAttempts bool) (bool, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
-	if idempotencyKey == "" {
-		return nil
+	if idempotencyKey == "" || generation == 0 {
+		return false, nil
 	}
 	updates := map[string]any{
-		"status":         string(status),
-		"failure_reason": reason,
-		"updated_at":     time.Now().UTC(),
+		"status":          string(domain.OutboundStatusPending),
+		"send_generation": gorm.Expr("send_generation + 1"),
+		"failure_reason":  safeDiagnostic(reason),
+		"updated_at":      time.Now().UTC(),
 	}
-	if sentAt != nil {
-		updates["sent_at"] = sentAt.UTC()
+	allowedStatus := domain.OutboundStatusSending
+	if resetAttempts {
+		updates["retries"] = 0
+		allowedStatus = domain.OutboundStatusFailed
 	}
-	result := s.db.WithContext(ctx).
-		Model(&OutboundMailModel{}).
-		Where("idempotency_key = ?", idempotencyKey).
+	result := s.db.WithContext(ctx).Model(&OutboundMailModel{}).
+		Where("idempotency_key = ? AND send_generation = ? AND status = ?", idempotencyKey, generation, string(allowedStatus)).
 		Updates(updates)
 	if result.Error != nil {
-		return fmt.Errorf("update outbound mail status: %w", result.Error)
+		return false, fmt.Errorf("release outbound mail pending: %w", result.Error)
 	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("outbound mail not found")
-	}
-	return nil
+	return result.RowsAffected > 0, nil
 }
 
-func (s *OutboundMailStore) findByIdempotencyKey(ctx context.Context, idempotencyKey string) (*domain.OutboundMail, error) {
+func (s *OutboundMailStore) RecordSendFailure(ctx context.Context, idempotencyKey string, generation uint64, reason string, retryable bool) (bool, bool, error) {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" || generation == 0 {
+		return false, false, nil
+	}
+	current := func() *gorm.DB {
+		return s.db.WithContext(ctx).Model(&OutboundMailModel{}).
+			Where("idempotency_key = ? AND status = ? AND send_generation = ?", idempotencyKey, string(domain.OutboundStatusSending), generation)
+	}
+	now := time.Now().UTC()
+	if !retryable {
+		terminal := current().Updates(map[string]any{
+			"status":         string(domain.OutboundStatusFailed),
+			"retries":        gorm.Expr("LEAST(retries + 1, 3)"),
+			"failure_reason": safeDiagnostic(reason),
+			"updated_at":     now,
+		})
+		if terminal.Error != nil {
+			return false, false, fmt.Errorf("record terminal outbound mail failure: %w", terminal.Error)
+		}
+		return true, terminal.RowsAffected > 0, nil
+	}
+	terminal := current().Where("retries >= 2").Updates(map[string]any{
+		"status":         string(domain.OutboundStatusFailed),
+		"retries":        3,
+		"failure_reason": safeDiagnostic(reason),
+		"updated_at":     now,
+	})
+	if terminal.Error != nil {
+		return false, false, fmt.Errorf("record terminal outbound mail failure: %w", terminal.Error)
+	}
+	if terminal.RowsAffected > 0 {
+		return true, true, nil
+	}
+	retry := current().Where("retries < 2").Updates(map[string]any{
+		"status":          string(domain.OutboundStatusPending),
+		"retries":         gorm.Expr("retries + 1"),
+		"send_generation": gorm.Expr("send_generation + 1"),
+		"failure_reason":  safeDiagnostic(reason),
+		"updated_at":      now,
+	})
+	if retry.Error != nil {
+		return false, false, fmt.Errorf("record retryable outbound mail failure: %w", retry.Error)
+	}
+	return false, retry.RowsAffected > 0, nil
+}
+
+func (s *OutboundMailStore) MarkSent(ctx context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error) {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" || generation == 0 {
+		return false, nil
+	}
+	result := s.db.WithContext(ctx).Model(&OutboundMailModel{}).
+		Where("idempotency_key = ? AND status = ? AND send_generation = ?", idempotencyKey, string(domain.OutboundStatusSending), generation).
+		Updates(map[string]any{
+			"status":         string(domain.OutboundStatusSent),
+			"retries":        0,
+			"failure_reason": "",
+			"sent_at":        now.UTC(),
+			"updated_at":     now.UTC(),
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("mark outbound mail sent: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (s *OutboundMailStore) FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (*domain.OutboundMail, error) {
 	var model OutboundMailModel
 	err := s.db.WithContext(ctx).Where("idempotency_key = ?", idempotencyKey).First(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -207,6 +229,7 @@ func outboundMailModel(mail *domain.OutboundMail) *OutboundMailModel {
 		TextBody:       mail.TextBody,
 		HTMLBody:       mail.HTMLBody,
 		Status:         string(mail.Status),
+		SendGeneration: mail.SendGeneration,
 		Retries:        mail.Retries,
 		FailureReason:  mail.FailureReason,
 		SentAt:         mail.SentAt,
@@ -228,6 +251,7 @@ func outboundMailFromModel(model OutboundMailModel) *domain.OutboundMail {
 		TextBody:       model.TextBody,
 		HTMLBody:       model.HTMLBody,
 		Status:         domain.OutboundStatus(model.Status),
+		SendGeneration: model.SendGeneration,
 		Retries:        model.Retries,
 		FailureReason:  model.FailureReason,
 		SentAt:         model.SentAt,

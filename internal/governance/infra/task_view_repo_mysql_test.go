@@ -45,9 +45,9 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 		Limit:   20,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(6), total)
+	require.Equal(t, int64(5), total)
 	require.Equal(t, int64(3), succeeded)
-	require.Len(t, items, 6)
+	require.Len(t, items, 5)
 
 	byID := make(map[string]governanceapp.AdminTaskView, len(items))
 	for i := range items {
@@ -56,13 +56,12 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 	require.Contains(t, byID, "import:6201")
 	require.Contains(t, byID, "alias:6301")
 	require.Contains(t, byID, "alias_schedule:6001")
-	require.Contains(t, byID, "token:6401")
-	require.Contains(t, byID, "fetch:6501")
-	require.Contains(t, byID, "fetch:6502")
+	require.Contains(t, byID, "token:6001")
+	require.Contains(t, byID, "fetch:6001")
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias:6301"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, byID["alias_schedule:6001"].Status)
-	require.Equal(t, governanceapp.AdminTaskStatusCanceled, byID["fetch:6501"].Status)
-	require.Equal(t, governanceapp.AdminTaskKindHistory, byID["fetch:6502"].Kind)
+	require.Equal(t, governanceapp.AdminTaskStatusSucceeded, byID["fetch:6001"].Status)
+	require.Equal(t, governanceapp.AdminTaskKindHistory, byID["fetch:6001"].Kind)
 	require.NotNil(t, byID["import:6201"].Progress)
 	require.Equal(t, int64(3), byID["import:6201"].Progress.Total)
 	require.Equal(t, []governanceapp.AdminTaskReasonCount{
@@ -89,7 +88,7 @@ func TestAdminTaskViewRepoAggregatesSafeResourceTasksMySQL(t *testing.T) {
 	require.Nil(t, scheduleTask.FinishedAt)
 }
 
-func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
+func TestAdminTaskViewRepoFindsDurableTaskFactsMySQL(t *testing.T) {
 	db := newGovernanceMySQLTestDB(t)
 	seedGovernanceTaskFacts(t, db)
 	repo := NewAdminTaskViewRepo(db)
@@ -101,9 +100,8 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceImport, ID: 6201}, kind: governanceapp.AdminTaskKindImport, bizType: governanceapp.AdminTaskBizMicrosoftResourceImport},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAlias, ID: 6301}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceAliasSchedule, ID: 6001}, kind: governanceapp.AdminTaskKindAlias, bizType: governanceapp.AdminTaskBizMicrosoftResource},
-		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: 6401}, kind: governanceapp.AdminTaskKindToken, bizType: governanceapp.AdminTaskBizMicrosoftResource},
-		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6501}, kind: governanceapp.AdminTaskKindFetch, bizType: governanceapp.AdminTaskBizMicrosoftResource},
-		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6502}, kind: governanceapp.AdminTaskKindHistory, bizType: governanceapp.AdminTaskBizMicrosoftResource},
+		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceToken, ID: 6001}, kind: governanceapp.AdminTaskKindToken, bizType: governanceapp.AdminTaskBizMicrosoftResource},
+		{ref: governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceFetch, ID: 6001}, kind: governanceapp.AdminTaskKindHistory, bizType: governanceapp.AdminTaskBizMicrosoftResource},
 	} {
 		task, err := repo.FindByRef(context.Background(), testCase.ref)
 		require.NoError(t, err, testCase.ref.String())
@@ -112,28 +110,7 @@ func TestAdminTaskViewRepoFindsBulkWithoutLeakingSelectionMySQL(t *testing.T) {
 		require.Equal(t, testCase.bizType, task.BizType)
 	}
 
-	task, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceBulk, ID: 6601})
-	require.NoError(t, err)
-	require.Equal(t, "bulk:6601", task.TaskID())
-	require.Equal(t, governanceapp.AdminTaskBizMicrosoftResourceBulk, task.BizType)
-	require.Equal(t, governanceapp.AdminTaskKindBulkPublish, task.Kind)
-	require.NotNil(t, task.Progress)
-	require.Equal(t, int64(10), task.Progress.Total)
-	require.Equal(t, int64(8), task.Progress.Processed)
-	require.Equal(t, int64(5), task.Progress.Succeeded)
-	require.Equal(t, int64(2), task.Progress.Skipped)
-	require.Equal(t, int64(1), task.Progress.Failed)
-	require.Equal(t, []governanceapp.AdminTaskReasonCount{
-		{Reason: "active_allocation", Count: 2},
-		{Reason: "other", Count: 1},
-	}, task.Progress.ReasonCounts)
-
-	historyTask, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: governanceapp.AdminTaskSourceBulk, ID: 6602})
-	require.NoError(t, err)
-	require.Equal(t, governanceapp.AdminTaskKindBulkHistory, historyTask.Kind)
-	require.Equal(t, governanceapp.AdminTaskBizMicrosoftResourceBulk, historyTask.BizType)
-
-	_, err = repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: "validation", ID: 6101})
+	_, err := repo.FindByRef(context.Background(), governanceapp.AdminTaskRef{Source: "validation", ID: 6101})
 	require.ErrorIs(t, err, governanceapp.ErrInvalidAdminTaskQuery)
 }
 
@@ -159,12 +136,12 @@ INSERT INTO microsoft_resources(
 	require.NoError(t, db.Exec(`
 INSERT INTO resource_imports(
     id, owner_user_id, operator_user_id, resource_type, source_object_key,
-    status, imported_count, accepted_count, skipped_count, dispatch_status,
-    attempts, max_attempts, claim_token, dispatch_token, created_at, updated_at
+	    status, imported_count, accepted_count, skipped_count, dispatch_status,
+	    attempts, max_attempts, claim_token, created_at, updated_at
 ) VALUES (
     6201, 5001, 5001, 'microsoft', 'private/never-return-import.txt',
     'imported', 1, 1, 2, 'succeeded',
-    1, 3, 'never-return-claim', 'never-return-dispatch', ?, ?
+	    1, 3, 'never-return-claim', ?, ?
 )`, base.Add(2*time.Minute), base.Add(2*time.Minute)).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO resource_import_items(import_id, resource_id, line_number, outcome, category)
@@ -191,47 +168,28 @@ INSERT INTO microsoft_alias_schedules(
 )`, time.Now().UTC().Add(24*time.Hour), base.Add(4*time.Minute), base, base.Add(8*time.Minute)).Error)
 
 	require.NoError(t, db.Exec(`
-INSERT INTO microsoft_token_refresh_jobs(
-    id, resource_id, operator_user_id, expected_credential_revision, status,
-    attempts, max_attempts, claim_token, dispatch_token, created_at, updated_at
-) VALUES (
-    6401, 6001, 5001, 4, 'succeeded',
-    1, 3, 'never-return-token-claim', 'never-return-token-dispatch', ?, ?
-)`, base.Add(5*time.Minute), base.Add(5*time.Minute)).Error)
+UPDATE microsoft_resources
+SET token_refresh_status = 'normal',
+    token_refresh_generation = 1,
+    token_refresh_failures = 1,
+    token_refresh_expected_credential_revision = 4,
+    token_refresh_operator_user_id = 5001,
+    token_refresh_idempotency_key = 'governance-token-view',
+    token_refresh_requested_at = ?,
+    token_refresh_finished_at = ?,
+    updated_at = ?
+WHERE id = 6001`, base.Add(5*time.Minute), base.Add(5*time.Minute), base.Add(5*time.Minute)).Error)
 
 	require.NoError(t, db.Exec(`
-INSERT INTO mailmatch_resource_fetch_jobs(
-    id, resource_id, operator_user_id, expected_credential_revision, recipient,
-    status, attempts, max_attempts, fetched_count, stored_count, matched_count,
-    since_at, until_at, claim_token, dispatch_token, created_at, updated_at
+INSERT INTO mailmatch_resource_fetch_states(
+    email_resource_id, status, generation, failures, operation_kind,
+    operator_user_id, expected_credential_revision,
+    fetched_count, stored_count, matched_count,
+    request_id, requested_at, finished_at, created_at, updated_at
 ) VALUES (
-    6501, 6001, 5001, 4, 'task-view@outlook.com',
-    'canceled', 1, 3, 5, 4, 2,
-    ?, ?, 'never-return-fetch-claim', 'never-return-fetch-dispatch', ?, ?
-), (
-    6502, 6001, 5001, 4, 'task-view@outlook.com',
-    'succeeded', 1, 3, 0, 0, 0,
-    NULL, NULL, '', '', ?, ?
-)`, base.Add(-24*time.Hour), base, base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute+time.Second), base.Add(6*time.Minute+time.Second)).Error)
+    6001, 'normal', 2, 1, 'resource_history',
+    5001, 4, 0, 0, 0,
+    'governance-fetch-view', ?, ?, ?, ?
+)`, base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute), base.Add(6*time.Minute)).Error)
 
-	require.NoError(t, db.Exec(`
-INSERT INTO admin_resource_bulk_commands(
-    id, operator_user_id, action, selection_mode, selection_json,
-    selection_fingerprint, max_resource_id, checkpoint_resource_id, status,
-    matched_count, processed_count, affected_count, skipped_count, reason_buckets,
-    attempts, max_attempts, claim_token, dispatch_token, created_at, updated_at
-) VALUES (
-    6601, 5001, 'publish', 'filter', JSON_OBJECT('secret', 'never-return-selection'),
-    REPEAT('a', 64), 6001, 6001, 'running',
-    10, 8, 5, 2, JSON_OBJECT('active_allocation', 2, 'password=never-return', 1),
-    1, 3, 'never-return-bulk-claim', 'never-return-bulk-dispatch', ?, ?
-), (
-    6602, 5001, 'history', 'ids', JSON_OBJECT('mode', 'ids', 'resourceIds', JSON_ARRAY(6001)),
-    REPEAT('b', 64), 6001, 0, 'queued',
-    1, 0, 0, 0, JSON_OBJECT(),
-    0, 3, '', '', ?, ?
-)`,
-		base.Add(7*time.Minute), base.Add(7*time.Minute),
-		base.Add(8*time.Minute), base.Add(8*time.Minute),
-	).Error)
 }

@@ -14,15 +14,45 @@ const (
 
 type OutboundMailStore interface {
 	Reserve(ctx context.Context, mail *domain.OutboundMail) (*domain.OutboundMail, bool, error)
-	ClaimSending(ctx context.Context, idempotencyKey string, staleBefore time.Time, now time.Time) (*domain.OutboundMail, bool, error)
-	ClaimDispatchable(ctx context.Context, limit int, staleBefore time.Time) ([]domain.OutboundMail, error)
-	MarkPending(ctx context.Context, idempotencyKey string, reason string) error
-	MarkSent(ctx context.Context, idempotencyKey string, now time.Time) error
-	MarkFailed(ctx context.Context, idempotencyKey string, reason string) error
+	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (*domain.OutboundMail, error)
+	ListPending(ctx context.Context, limit int) ([]domain.OutboundMail, error)
+	ActivateSending(ctx context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error)
+	ReleasePending(ctx context.Context, idempotencyKey string, generation uint64, reason string) (bool, error)
+	ResetPending(ctx context.Context, idempotencyKey string, generation uint64, reason string) (bool, error)
+	RecordSendFailure(ctx context.Context, idempotencyKey string, generation uint64, reason string, retryable bool) (terminal bool, applied bool, err error)
+	MarkSent(ctx context.Context, idempotencyKey string, generation uint64, now time.Time) (bool, error)
 }
 
 type SenderPort interface {
 	Send(ctx context.Context, message domain.OutboundMessage) error
+}
+
+// OutboundSendFailure is an explicit remote business result. Unknown sender
+// errors are infrastructure failures and must not consume the business budget.
+type OutboundSendFailure struct {
+	SafeMessage string
+	Retryable   bool
+	Cause       error
+}
+
+func (e *OutboundSendFailure) Error() string {
+	if e == nil {
+		return "outbound send failure"
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	if e.SafeMessage != "" {
+		return e.SafeMessage
+	}
+	return "outbound send failure"
+}
+
+func (e *OutboundSendFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 func deliveryUnavailable(stage string, err error) error {
