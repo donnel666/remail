@@ -18,6 +18,80 @@ func TestCoreAsyncStateSchemaMySQL(t *testing.T) {
 	require.False(t, db.Migrator().HasColumn("resource_imports", "dispatched_at"))
 }
 
+func TestCoreAsyncStateMigrationResumesAfterGenerationWasCommittedMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, coreMigrationsDir(t), 30))
+
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, enabled, role)
+VALUES (990311, 'core-async-migration@test.local', 'hash', 1, 'admin')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO resource_imports(
+    owner_user_id, operator_user_id, resource_type, source_object_key,
+    status, dispatch_status, claim_token, started_at
+) VALUES
+(
+    990311, 990311, 'microsoft', 'imports/partial.txt',
+    'processing', 'queued', '', NULL
+),
+(
+    990311, 990311, 'microsoft', 'imports/running.txt',
+    'processing', 'running', REPEAT('r', 36), CURRENT_TIMESTAMP(3)
+),
+(
+    990311, 990311, 'microsoft', 'imports/imported.txt',
+    'imported', 'legacy', '', NULL
+),
+(
+    990311, 990311, 'microsoft', 'imports/failed.txt',
+    'failed', 'legacy', '', NULL
+)`).Error)
+
+	// Reproduce the production failure: MySQL committed these statements, but
+	// Goose never recorded migration 31 because the following UPDATE failed.
+	require.NoError(t, db.Exec("DROP TABLE IF EXISTS admin_resource_bulk_commands").Error)
+	require.NoError(t, db.Exec(`
+ALTER TABLE resource_imports
+ADD COLUMN generation BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER max_attempts`).Error)
+
+	require.NoError(t, goose.UpTo(sqlDB, coreMigrationsDir(t), 31))
+	var rows []struct {
+		SourceObjectKey string     `gorm:"column:source_object_key"`
+		DispatchStatus  string     `gorm:"column:dispatch_status"`
+		Generation      uint64     `gorm:"column:generation"`
+		ClaimToken      string     `gorm:"column:claim_token"`
+		StartedAt       *time.Time `gorm:"column:started_at"`
+	}
+	require.NoError(t, db.Table("resource_imports").Where("owner_user_id = 990311").Order("source_object_key").Find(&rows).Error)
+	require.Len(t, rows, 4)
+	require.Equal(t, "failed", rows[0].DispatchStatus)
+	require.Equal(t, "succeeded", rows[1].DispatchStatus)
+	require.Equal(t, "pending", rows[2].DispatchStatus)
+	require.Equal(t, "pending", rows[3].DispatchStatus)
+	for _, row := range rows {
+		require.Equal(t, uint64(1), row.Generation)
+		if row.DispatchStatus == "pending" {
+			require.Empty(t, row.ClaimToken)
+			require.Nil(t, row.StartedAt)
+		}
+	}
+	require.False(t, db.Migrator().HasColumn("resource_imports", "dispatch_token"))
+	require.False(t, db.Migrator().HasColumn("resource_imports", "dispatched_at"))
+	require.False(t, db.Migrator().HasTable("admin_resource_bulk_commands"))
+	require.Error(t, db.Table("resource_imports").Where("source_object_key = 'imports/partial.txt'").Update("dispatch_status", "legacy").Error)
+	var indexColumns string
+	require.NoError(t, db.Raw(`
+SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',')
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = 'resource_imports'
+  AND index_name = 'idx_resource_imports_pending_generation'`).Scan(&indexColumns).Error)
+	require.Equal(t, "status,dispatch_status,generation,id", indexColumns)
+}
+
 func TestResourceValidationGenerationMigrationTakesOverInflightAssignmentsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	sqlDB, err := db.DB()

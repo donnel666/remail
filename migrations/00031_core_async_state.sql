@@ -2,27 +2,107 @@
 
 -- Administrator Microsoft bulk selection/cursor state is transient. Redis owns
 -- the TTL lease and Asynq cursor; resource rows remain the only business facts.
-DROP TABLE IF EXISTS admin_resource_bulk_commands;
-
 -- Imports are durable business facts, but dispatch state is a fenced handoff:
 -- pending -> queued (accepted by Redis) -> running (worker activation) ->
 -- succeeded/failed. A generation invalidates every task from an older retry.
-ALTER TABLE resource_imports
-    ADD COLUMN generation BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER max_attempts;
+-- MySQL commits each ALTER even when a later statement fails. Keep this Up
+-- resumable because an earlier image added generation before the legacy CHECK
+-- rejected the pending-state UPDATE.
+DROP PROCEDURE IF EXISTS migrate_core_async_state_00031;
 
-UPDATE resource_imports
-SET dispatch_status = 'pending'
-WHERE dispatch_status IN ('legacy', 'queued');
+-- +goose StatementBegin
+CREATE PROCEDURE migrate_core_async_state_00031()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND column_name = 'generation'
+    ) THEN
+        ALTER TABLE resource_imports
+            ADD COLUMN generation BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER max_attempts;
+    END IF;
 
-ALTER TABLE resource_imports
-    MODIFY COLUMN dispatch_status VARCHAR(32) NOT NULL DEFAULT 'pending',
-    DROP CHECK chk_resource_imports_dispatch_status,
-    DROP INDEX idx_resource_imports_dispatch,
-    DROP COLUMN dispatch_token,
-    DROP COLUMN dispatched_at,
-    ADD CONSTRAINT chk_resource_imports_dispatch_status
-        CHECK (dispatch_status IN ('pending', 'queued', 'running', 'succeeded', 'failed')),
-    ADD INDEX idx_resource_imports_pending_generation (status, dispatch_status, generation, id);
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND constraint_name = 'chk_resource_imports_dispatch_status'
+    ) THEN
+        ALTER TABLE resource_imports
+            DROP CHECK chk_resource_imports_dispatch_status;
+    END IF;
+
+    UPDATE resource_imports
+    SET dispatch_status = CASE status
+            WHEN 'processing' THEN 'pending'
+            WHEN 'imported' THEN 'succeeded'
+            WHEN 'failed' THEN 'failed'
+        END,
+        claim_token = CASE WHEN status = 'processing' THEN '' ELSE claim_token END,
+        started_at = CASE WHEN status = 'processing' THEN NULL ELSE started_at END
+    WHERE dispatch_status IN ('legacy', 'queued', 'running');
+
+    ALTER TABLE resource_imports
+        MODIFY COLUMN dispatch_status VARCHAR(32) NOT NULL DEFAULT 'pending';
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND index_name = 'idx_resource_imports_dispatch'
+    ) THEN
+        ALTER TABLE resource_imports DROP INDEX idx_resource_imports_dispatch;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND column_name = 'dispatch_token'
+    ) THEN
+        ALTER TABLE resource_imports DROP COLUMN dispatch_token;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND column_name = 'dispatched_at'
+    ) THEN
+        ALTER TABLE resource_imports DROP COLUMN dispatched_at;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND constraint_name = 'chk_resource_imports_dispatch_status'
+    ) THEN
+        ALTER TABLE resource_imports
+            ADD CONSTRAINT chk_resource_imports_dispatch_status
+                CHECK (dispatch_status IN ('pending', 'queued', 'running', 'succeeded', 'failed'));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name = 'resource_imports'
+          AND index_name = 'idx_resource_imports_pending_generation'
+    ) THEN
+        ALTER TABLE resource_imports
+            ADD INDEX idx_resource_imports_pending_generation
+                (status, dispatch_status, generation, id);
+    END IF;
+END
+-- +goose StatementEnd
+
+CALL migrate_core_async_state_00031();
+DROP PROCEDURE migrate_core_async_state_00031;
+
+-- Drop the obsolete command table only after the durable import state has
+-- completed its resumable schema transition.
+DROP TABLE IF EXISTS admin_resource_bulk_commands;
 
 -- +goose Down
 
