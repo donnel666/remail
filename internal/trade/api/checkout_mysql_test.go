@@ -180,7 +180,7 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 3},
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "dot", Email: "ms.1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "plus", Email: "ms1000+used@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
-		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "legacy-alias@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "legacy-alias@outlook.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
 	}
 	uc := newTradeUseCase(db)
 	for range 2 {
@@ -230,12 +230,12 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 	require.Zero(t, tokenCount)
 
 	rollbackMatches := []tradeapp.HistoricalMicrosoftUsage{
-		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "rolled-back@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "rolled-back@outlook.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "corrected@example.com", FirstMatchedAt: first, LastMatchedAt: last},
 	}
 	require.Error(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), rollbackMatches))
 	var rolledBackAliases int64
-	require.NoError(t, db.Table("explicit_aliases").Where("resource_id = ? AND email = ?", 1000, "rolled-back@example.com").Count(&rolledBackAliases).Error)
+	require.NoError(t, db.Table("explicit_aliases").Where("resource_id = ? AND email = ?", 1000, "rolled-back@outlook.com").Count(&rolledBackAliases).Error)
 	require.Zero(t, rolledBackAliases)
 }
 
