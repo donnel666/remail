@@ -14,10 +14,16 @@ import { formatDateTime } from "./utils";
 
 const { Text } = Typography;
 
-function matchesMail(message: WorkbenchMessage, search: string) {
+function matchesMail(message: WorkbenchMessage, search: string, email: string) {
   const q = search.trim().toLowerCase();
   if (!q) return true;
-  return [message.subject, message.preview, message.body]
+  return [
+    message.sender,
+    message.recipient || email,
+    message.subject,
+    message.preview,
+    message.body,
+  ]
     .join(" ")
     .toLowerCase()
     .includes(q);
@@ -55,8 +61,8 @@ export function MailboxClient({
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const filteredMessages = useMemo(
-    () => messages.filter((message) => matchesMail(message, search)),
-    [messages, search]
+    () => messages.filter((message) => matchesMail(message, search, email)),
+    [email, messages, search]
   );
   const [selectedMessageId, setSelectedMessageId] = useState("");
   const [loadedBodies, setLoadedBodies] = useState<Record<string, string>>({});
@@ -144,7 +150,7 @@ export function MailboxClient({
         <Input
           className="resources-search-input mailbox-client-search"
           onChange={(value) => setSearch(String(value))}
-          placeholder={t("Search subject or body")}
+          placeholder={t("Search sender, recipient, subject or body")}
           prefix={<IconSearch />}
           showClear
           value={search}
@@ -206,6 +212,12 @@ export function MailboxClient({
                 </span>
                 <OverflowTooltip
                   className="mailbox-client-item-preview"
+                  content={message.recipient || email}
+                >
+                  {message.recipient || email}
+                </OverflowTooltip>
+                <OverflowTooltip
+                  className="mailbox-client-item-preview"
                   content={message.preview}
                 >
                   {message.preview}
@@ -220,7 +232,7 @@ export function MailboxClient({
         {selectedMessage ? (
           <>
             <div className="mailbox-client-detail-head">
-              <div className="min-w-0">
+              <div className="flex min-w-0 flex-col">
                 <OverflowTooltip
                   className="mailbox-client-subject"
                   content={selectedMessage.subject}
@@ -234,6 +246,12 @@ export function MailboxClient({
                   )}`}
                 >
                   {selectedMessage.sender} · {formatDateTime(selectedMessage.receivedAt)}
+                </OverflowTooltip>
+                <OverflowTooltip
+                  className="mailbox-client-sender"
+                  content={selectedMessage.recipient || email}
+                >
+                  {selectedMessage.recipient || email}
                 </OverflowTooltip>
               </div>
               {selectedMessage.verificationCode ? (

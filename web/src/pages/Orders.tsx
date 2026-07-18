@@ -117,6 +117,7 @@ function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[
       id: String(item.id),
       preview: item.bodyPreview,
       receivedAt: item.receivedAt,
+      recipient: item.recipient,
       sender: item.sender,
       status: item.verificationCode ? "matched" : "received",
       subject: item.subject || "(No subject)",
@@ -170,8 +171,12 @@ export default function Orders() {
   const [mailboxOrder, setMailboxOrder] = useState<OrderResponse | null>(null);
   const [mailboxMessages, setMailboxMessages] = useState<WorkbenchMessage[]>([]);
   const mailboxOrderNoRef = useRef<string | null>(null);
-  const mailboxFetchInFlightRef = useRef<Promise<number | void> | null>(null);
+  const mailboxFetchInFlightRef = useRef(
+    new Map<string, Promise<number | void>>()
+  );
+  const mailboxOpenSeqRef = useRef(0);
   const orderDetailCacheRef = useRef(new Map<string, OrderResponse>());
+  const pickupInFlightRef = useRef(false);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
@@ -336,12 +341,12 @@ export default function Orders() {
 
   const runMailboxFetch = useCallback(
     async (source: FetchSource) => {
-      const existing = mailboxFetchInFlightRef.current;
+      const orderNo = mailboxOrderNoRef.current;
+      if (!orderNo) return;
+      const existing = mailboxFetchInFlightRef.current.get(orderNo);
       if (existing) return existing;
 
       const request = (async (): Promise<number | void> => {
-        const orderNo = mailboxOrderNoRef.current;
-        if (!orderNo) return;
         try {
           const detail = await resolveOrderDetail(orderNo);
           if (!detail.serviceToken) {
@@ -376,10 +381,10 @@ export default function Orders() {
             Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
           }
         } finally {
-          mailboxFetchInFlightRef.current = null;
+          mailboxFetchInFlightRef.current.delete(orderNo);
         }
       })();
-      mailboxFetchInFlightRef.current = request;
+      mailboxFetchInFlightRef.current.set(orderNo, request);
       return request;
     },
     [refresh, resolveOrderDetail, t]
@@ -387,9 +392,12 @@ export default function Orders() {
 
   const openOrderMailbox = useCallback(
     async (record: OrderResponse) => {
+      const seq = mailboxOpenSeqRef.current + 1;
+      mailboxOpenSeqRef.current = seq;
       setViewLoadingOrderNo(record.orderNo);
       try {
         const detail = await resolveOrderDetail(record.orderNo);
+        if (mailboxOpenSeqRef.current !== seq) return;
         if (!detail.serviceToken) {
           Toast.error(t("Service credential is unavailable."));
           return;
@@ -399,16 +407,22 @@ export default function Orders() {
         setMailboxMessages([]);
         void runMailboxFetch("auto");
       } catch (error) {
-        Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+        if (mailboxOpenSeqRef.current === seq) {
+          Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+        }
       } finally {
-        setViewLoadingOrderNo(null);
+        if (mailboxOpenSeqRef.current === seq) {
+          setViewLoadingOrderNo(null);
+        }
       }
     },
     [resolveOrderDetail, runMailboxFetch, t]
   );
 
   const closeOrderMailbox = useCallback(() => {
+    mailboxOpenSeqRef.current += 1;
     mailboxOrderNoRef.current = null;
+    setViewLoadingOrderNo(null);
     setMailboxOrder(null);
     setMailboxMessages([]);
   }, []);
@@ -431,6 +445,8 @@ export default function Orders() {
 
   const copyOrderPickupUrl = useCallback(
     async (record: OrderResponse) => {
+      if (pickupInFlightRef.current) return;
+      pickupInFlightRef.current = true;
       setPickupLoadingOrderNo(record.orderNo);
       try {
         const detail = await resolveOrderDetail(record.orderNo);
@@ -443,6 +459,7 @@ export default function Orders() {
       } catch (error) {
         Toast.error(getIamErrorMessage(t, error, "Copy failed."));
       } finally {
+        pickupInFlightRef.current = false;
         setPickupLoadingOrderNo(null);
       }
     },
@@ -644,7 +661,9 @@ export default function Orders() {
                 position="top"
               >
                 <Button
-                  disabled={!orderCanUseService(record)}
+                  disabled={
+                    pickupLoadingOrderNo !== null || !orderCanUseService(record)
+                  }
                   loading={pickupLoadingOrderNo === record.orderNo}
                   type="tertiary"
                   size="small"

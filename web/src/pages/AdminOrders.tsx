@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -10,6 +10,7 @@ import {
   Tabs,
   Tag,
   Toast,
+  Tooltip,
 } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import {
@@ -34,9 +35,17 @@ import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
+import { IamApiError } from "@/lib/api-client";
+import { copyText } from "@/lib/clipboard";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
+  readPickupMail,
+  readPickupMessage,
+  type OrderMailResponse,
+} from "@/lib/mailmatch-api";
+import {
   adminRefundOrder,
+  getOrder,
   listOrders,
   type OrderListFacets,
   type OrderListFilter,
@@ -44,7 +53,10 @@ import {
   type OrderServiceMode,
   type OrderStatus,
 } from "@/lib/orders-api";
+import { MailboxClientModal } from "@/pages/workbench/mailbox-client";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
+import type { FetchSource, WorkbenchMessage } from "@/pages/workbench/types";
+import { buildPickupUrl } from "@/pages/workbench/utils";
 
 import {
   DATE_RANGE_DROPDOWN_CLASS,
@@ -69,6 +81,51 @@ import { OrderOwnerCell } from "./orders/order-requester-cell";
 
 type StatusFilter = "all" | OrderStatus;
 type ServiceModeFilter = "all" | OrderServiceMode;
+
+const DEFAULT_FETCH_COOLDOWN_SECONDS = 5;
+
+function isFutureTime(value?: string | null) {
+  if (!value) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && time > Date.now();
+}
+
+function orderCanUseService(order: OrderResponse) {
+  if (order.status === "active") return true;
+  if (order.status !== "completed") return false;
+  if (order.serviceMode === "purchase") return true;
+  return isFutureTime(order.receiveUntil);
+}
+
+function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
+  return items
+    .map<WorkbenchMessage>((item) => ({
+      body: "",
+      id: String(item.id),
+      preview: item.bodyPreview,
+      receivedAt: item.receivedAt,
+      recipient: item.recipient,
+      sender: item.sender,
+      status: item.verificationCode ? "matched" : "received",
+      subject: item.subject || "(No subject)",
+      verificationCode: item.verificationCode,
+    }))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.receivedAt);
+      const rightTime = Date.parse(right.receivedAt);
+      return (
+        (Number.isFinite(rightTime) ? rightTime : 0) -
+        (Number.isFinite(leftTime) ? leftTime : 0)
+      );
+    });
+}
+
+function cooldownSecondsFrom(nextFetchAllowedAt?: string | null) {
+  if (!nextFetchAllowedAt) return DEFAULT_FETCH_COOLDOWN_SECONDS;
+  const next = Date.parse(nextFetchAllowedAt);
+  if (!Number.isFinite(next)) return DEFAULT_FETCH_COOLDOWN_SECONDS;
+  return Math.max(1, Math.ceil((next - Date.now()) / 1000));
+}
 
 // Admin refunds target the standard active/completed lifecycle; other states
 // (pending/paid/failed/closed) go through retry/terminate flows, and the
@@ -97,6 +154,17 @@ export default function AdminOrders() {
   const [orderFacets, setOrderFacets] = useState<OrderListFacets | null>(null);
   const [detailOrder, setDetailOrder] = useState<OrderResponse | null>(null);
   const [refundingOrderNo, setRefundingOrderNo] = useState<string | null>(null);
+  const [viewLoadingOrderNo, setViewLoadingOrderNo] = useState<string | null>(null);
+  const [pickupLoadingOrderNo, setPickupLoadingOrderNo] = useState<string | null>(null);
+  const [mailboxOrder, setMailboxOrder] = useState<OrderResponse | null>(null);
+  const [mailboxMessages, setMailboxMessages] = useState<WorkbenchMessage[]>([]);
+  const mailboxOrderNoRef = useRef<string | null>(null);
+  const mailboxFetchInFlightRef = useRef(
+    new Map<string, Promise<number | void>>()
+  );
+  const mailboxOpenSeqRef = useRef(0);
+  const orderDetailCacheRef = useRef(new Map<string, OrderResponse>());
+  const pickupInFlightRef = useRef(false);
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
@@ -165,6 +233,7 @@ export default function AdminOrders() {
   }, [refreshStats]);
 
   const refresh = useCallback(async () => {
+    orderDetailCacheRef.current.clear();
     await Promise.all([refreshStats(), refreshList()]);
   }, [refreshList, refreshStats]);
 
@@ -239,6 +308,143 @@ export default function AdminOrders() {
     setServiceModeFilter(value);
     setActivePage(1);
   };
+
+  const resolveOrderDetail = useCallback(
+    async (orderNo: string, options?: { force?: boolean }) => {
+      if (!options?.force) {
+        const cached = orderDetailCacheRef.current.get(orderNo);
+        if (cached) return cached;
+      }
+      const detail = await getOrder(orderNo);
+      orderDetailCacheRef.current.set(orderNo, detail);
+      return detail;
+    },
+    []
+  );
+
+  const runMailboxFetch = useCallback(
+    async (source: FetchSource) => {
+      const orderNo = mailboxOrderNoRef.current;
+      if (!orderNo) return;
+      const existing = mailboxFetchInFlightRef.current.get(orderNo);
+      if (existing) return existing;
+
+      const request = (async (): Promise<number | void> => {
+        try {
+          const detail = await resolveOrderDetail(orderNo);
+          if (!detail.serviceToken) {
+            if (source === "manual") {
+              Toast.error(t("Service credential is unavailable."));
+            }
+            return;
+          }
+          const result = await readPickupMail(detail.deliveryEmail, detail.serviceToken);
+          if (mailboxOrderNoRef.current !== orderNo) return;
+          const messages = toMailboxMessages(result.items);
+          setMailboxMessages(messages);
+          const latestCode = messages.find(
+            (message) => message.verificationCode
+          )?.verificationCode;
+          if (latestCode && latestCode !== detail.verificationCode) {
+            const refreshed = await resolveOrderDetail(orderNo, { force: true });
+            if (mailboxOrderNoRef.current === orderNo) {
+              setMailboxOrder(refreshed);
+            }
+            void refresh();
+          }
+          return cooldownSecondsFrom(result.fetch?.nextFetchAllowedAt);
+        } catch (error) {
+          if (error instanceof IamApiError && error.status === 429) {
+            return error.retryAfterSeconds;
+          }
+          if (source === "manual") {
+            Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+          }
+        } finally {
+          mailboxFetchInFlightRef.current.delete(orderNo);
+        }
+      })();
+      mailboxFetchInFlightRef.current.set(orderNo, request);
+      return request;
+    },
+    [refresh, resolveOrderDetail, t]
+  );
+
+  const openOrderMailbox = useCallback(
+    async (record: OrderResponse) => {
+      const seq = mailboxOpenSeqRef.current + 1;
+      mailboxOpenSeqRef.current = seq;
+      setViewLoadingOrderNo(record.orderNo);
+      try {
+        const detail = await resolveOrderDetail(record.orderNo);
+        if (mailboxOpenSeqRef.current !== seq) return;
+        if (!detail.serviceToken) {
+          Toast.error(t("Service credential is unavailable."));
+          return;
+        }
+        mailboxOrderNoRef.current = record.orderNo;
+        setMailboxOrder(detail);
+        setMailboxMessages([]);
+        void runMailboxFetch("auto");
+      } catch (error) {
+        if (mailboxOpenSeqRef.current === seq) {
+          Toast.error(getIamErrorMessage(t, error, "Mail load failed."));
+        }
+      } finally {
+        if (mailboxOpenSeqRef.current === seq) {
+          setViewLoadingOrderNo(null);
+        }
+      }
+    },
+    [resolveOrderDetail, runMailboxFetch, t]
+  );
+
+  const closeOrderMailbox = useCallback(() => {
+    mailboxOpenSeqRef.current += 1;
+    mailboxOrderNoRef.current = null;
+    setViewLoadingOrderNo(null);
+    setMailboxOrder(null);
+    setMailboxMessages([]);
+  }, []);
+
+  const loadMailboxMessageBody = useCallback(
+    async (messageId: string) => {
+      const orderNo = mailboxOrderNoRef.current;
+      if (!orderNo) return "";
+      const detail = await resolveOrderDetail(orderNo);
+      if (!detail.serviceToken) return "";
+      const response = await readPickupMessage(
+        detail.deliveryEmail,
+        detail.serviceToken,
+        Number(messageId)
+      );
+      return response.body;
+    },
+    [resolveOrderDetail]
+  );
+
+  const copyOrderPickupUrl = useCallback(
+    async (record: OrderResponse) => {
+      if (pickupInFlightRef.current) return;
+      pickupInFlightRef.current = true;
+      setPickupLoadingOrderNo(record.orderNo);
+      try {
+        const detail = await resolveOrderDetail(record.orderNo);
+        if (!detail.serviceToken) {
+          Toast.error(t("Service credential is unavailable."));
+          return;
+        }
+        await copyText(buildPickupUrl(detail.deliveryEmail, detail.serviceToken));
+        Toast.success(t("Copied"));
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Copy failed."));
+      } finally {
+        pickupInFlightRef.current = false;
+        setPickupLoadingOrderNo(null);
+      }
+    },
+    [resolveOrderDetail, t]
+  );
 
   const runRefund = useCallback(
     async (order: OrderResponse) => {
@@ -388,7 +594,7 @@ export default function AdminOrders() {
           key: "operate",
           title: t("Action"),
           dataIndex: "operate",
-          width: 180,
+          width: 300,
           fixed: "right",
           render: (_: unknown, record: OrderResponse) => (
             <Space spacing={4} wrap={false}>
@@ -399,6 +605,40 @@ export default function AdminOrders() {
               >
                 {t("Details")}
               </Button>
+              <Tooltip
+                content={t("Open mailbox")}
+                mouseEnterDelay={0}
+                mouseLeaveDelay={0.05}
+                position="top"
+              >
+                <Button
+                  disabled={!orderCanUseService(record)}
+                  loading={viewLoadingOrderNo === record.orderNo}
+                  type="tertiary"
+                  size="small"
+                  onClick={() => void openOrderMailbox(record)}
+                >
+                  {t("View")}
+                </Button>
+              </Tooltip>
+              <Tooltip
+                content={t("Copy pickup URL")}
+                mouseEnterDelay={0}
+                mouseLeaveDelay={0.05}
+                position="top"
+              >
+                <Button
+                  disabled={
+                    pickupLoadingOrderNo !== null || !orderCanUseService(record)
+                  }
+                  loading={pickupLoadingOrderNo === record.orderNo}
+                  type="tertiary"
+                  size="small"
+                  onClick={() => void copyOrderPickupUrl(record)}
+                >
+                  {t("Pickup")}
+                </Button>
+              </Tooltip>
               {canRefund ? (
                 <Button
                   type="danger"
@@ -414,7 +654,16 @@ export default function AdminOrders() {
           ),
         },
       ] as any[],
-    [canRefund, confirmRefund, refundingOrderNo, t]
+    [
+      canRefund,
+      confirmRefund,
+      copyOrderPickupUrl,
+      openOrderMailbox,
+      pickupLoadingOrderNo,
+      refundingOrderNo,
+      t,
+      viewLoadingOrderNo,
+    ]
   );
 
   const tableColumns = useMemo(() => {
@@ -649,7 +898,7 @@ export default function AdminOrders() {
           pagination={false}
           className="overflow-hidden rounded-xl"
           rowKey="orderNo"
-          scroll={{ x: "max(100%, 1720px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1840px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -657,6 +906,18 @@ export default function AdminOrders() {
       <OrderDetailModal
         onClose={() => setDetailOrder(null)}
         order={detailOrder}
+      />
+      <MailboxClientModal
+        autoFetchEnabled={
+          mailboxOrder?.status === "active" && !mailboxOrder.verificationCode
+        }
+        email={mailboxOrder?.deliveryEmail}
+        fetchEnabled={mailboxOrder?.productType !== "domain"}
+        fetchKey={mailboxOrder?.orderNo}
+        messages={mailboxMessages}
+        onClose={closeOrderMailbox}
+        onFetch={runMailboxFetch}
+        onLoadMessage={loadMailboxMessageBody}
       />
     </div>
   );

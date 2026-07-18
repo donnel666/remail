@@ -21,6 +21,7 @@ function toPickupMessages(items: OrderMailResponse["items"]): WorkbenchMessage[]
       id: String(item.id),
       preview: item.bodyPreview,
       receivedAt: item.receivedAt,
+      recipient: item.recipient,
       sender: item.sender,
       status: item.verificationCode ? "matched" : "received",
       subject: item.subject || "(No subject)",

@@ -270,6 +270,7 @@ function toWorkbenchMessages(
       id: String(item.id),
       preview: item.bodyPreview,
       receivedAt: item.receivedAt,
+      recipient: item.recipient,
       sender: item.sender,
       status: "matched",
       subject: item.subject || "(No subject)",

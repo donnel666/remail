@@ -60,6 +60,7 @@ export interface WorkbenchMessage {
   id: string;
   preview: string;
   receivedAt: string;
+  recipient?: string;
   sender: string;
   status: "matched" | "received" | "ignored";
   subject: string;
