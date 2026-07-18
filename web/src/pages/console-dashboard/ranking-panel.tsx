@@ -28,9 +28,7 @@ function RankingColumn({
 
     return (
       <div
-        className={`grid grid-cols-4 items-center py-2 transition-colors hover:bg-[var(--semi-color-fill-0)] ${
-          item.isCurrentUser ? "bg-[var(--semi-color-primary-light-default)]" : ""
-        }`}
+        className="grid grid-cols-4 items-center py-2 transition-colors hover:bg-[var(--semi-color-fill-0)]"
         key={item.name}
       >
         <div className="flex items-center justify-center">
