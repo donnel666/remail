@@ -72,6 +72,19 @@ function CurrentUserRankRow({ item }: { item: DashboardRankItem }) {
   );
 }
 
+function topRankingItems(items: DashboardRankItem[], currentUserRank?: DashboardRankItem) {
+  const top = items.slice(0, 10);
+  if (
+    !currentUserRank ||
+    currentUserRank.rank < 1 ||
+    currentUserRank.rank > 10 ||
+    top.some((item) => item.isCurrentUser)
+  ) {
+    return top;
+  }
+  return [...top, currentUserRank].sort((left, right) => left.rank - right.rank).slice(0, 10);
+}
+
 export function RankingPanel({
   currentUserRank,
   items,
@@ -86,11 +99,11 @@ export function RankingPanel({
   title: string;
 }) {
   const { t } = useTranslation();
-  const top = items.slice(0, 10);
+  const top = topRankingItems(items, currentUserRank);
   const columns = [top.slice(0, 5), top.slice(5, 10)];
   const TitleIcon = kind === "today" ? Trophy : History;
   const currentUserInTop = top.some((item) => item.isCurrentUser);
-  const showCurrentUserRank = currentUserRank && !currentUserInTop;
+  const showCurrentUserRank = currentUserRank && currentUserRank.rank > 10 && !currentUserInTop;
 
   return (
     <Card
@@ -116,14 +129,18 @@ export function RankingPanel({
       ) : (
         <div>
           <div className="grid grid-cols-1 md:grid-cols-2">
-            <div className="md:border-r">
+            <div className="md:border-r" data-testid="ranking-left-column">
               <RankingColumn items={columns[0]!} />
             </div>
-            <div>
+            <div data-testid="ranking-right-column">
               <RankingColumn items={columns[1]!} />
             </div>
           </div>
-          {showCurrentUserRank ? <CurrentUserRankRow item={currentUserRank} /> : null}
+          {showCurrentUserRank ? (
+            <div data-testid="ranking-current-user-row">
+              <CurrentUserRankRow item={currentUserRank} />
+            </div>
+          ) : null}
         </div>
       )}
     </Card>
