@@ -3,13 +3,16 @@
 ## 部署基线
 
 - 应用保持单活；MySQL、Redis、MinIO 可以独立部署和备份。
+- 雷池 WAF 独立部署，业务站点反代到宿主机 `http://127.0.0.1:8080`；应用 Compose 不监听 80/443。
+- 首次切换由运维人员手动停止并删除旧 Nginx 容器，CI 不清理 Compose orphan。
 - 生产必须设置 `APP_ENV=production`、`SESSION_SECURE=true`。
 - `PPROF_ADDR` 只能绑定 `localhost` 或回环 IP，禁止公网监听。
-- Nginx 对 `/v1/pickup` 关闭 access log，避免 Token 进入 query 日志。
+- 雷池对 `/pickup`、`/v1/pickup` 关闭或脱敏 query 日志，并禁用验证码、JS Challenge 等会改变 API 响应的挑战。
+- 雷池必须阻止公网访问 `/metrics`，上传限制不得低于 100 MB，并传递 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`。
 
 ## 监控与告警
 
-Prometheus 从宿主机抓取 `http://127.0.0.1:8080/metrics`；Nginx 不向公网暴露该端点。首次部署必须确认抓取成功和指标名称存在。首版只保留能直接指导排障的指标：
+Prometheus 从宿主机抓取 `http://127.0.0.1:8080/metrics`；雷池 WAF 不向公网暴露该端点。首次部署必须确认抓取成功和指标名称存在。首版只保留能直接指导排障的指标：
 
 - `remail_http_requests_total`、`remail_http_request_duration_seconds`
 - `remail_db_open_connections`、`remail_db_in_use_connections`、`remail_db_wait_count_total`
