@@ -115,11 +115,11 @@ func TestTXTParser_ParseMicrosoftImport_RejectsNonMicrosoftPrimary(t *testing.T)
 	parser := NewTXTParser()
 	content := strings.Join([]string{
 		"keep@outlook.com----pw----recovery@icloud.com", // whitelisted primary, any binding
-		"keep2@outlook.co.th----pw",                      // whitelisted country variant
-		"drop@icloud.com----pw",                          // non-Microsoft primary
-		"drop2@alumni.sysu.edu.cn----pw",                 // non-Microsoft primary
-		"drop3@hotmail.co.uk----pw",                      // hotmail variant excluded by policy
-		"drop4@live.com----pw",                           // live.com excluded by policy
+		"keep2@outlook.co.th----pw",                     // whitelisted country variant
+		"drop@icloud.com----pw",                         // non-Microsoft primary
+		"drop2@alumni.sysu.edu.cn----pw",                // non-Microsoft primary
+		"drop3@hotmail.co.uk----pw",                     // hotmail variant excluded by policy
+		"drop4@live.com----pw",                          // live.com excluded by policy
 	}, "\n")
 
 	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
