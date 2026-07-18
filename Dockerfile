@@ -8,7 +8,7 @@ COPY web/ ./
 RUN pnpm build
 
 # Stage 2: Go build
-FROM golang:1.25-alpine AS backend
+FROM golang:1.25.12-alpine AS backend
 WORKDIR /app
 ENV GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 COPY go.mod go.sum ./

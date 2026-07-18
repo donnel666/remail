@@ -19,6 +19,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 	require.NotNil(t, cfg)
 
 	assert.Equal(t, ":8080", cfg.Server.Addr)
+	assert.Equal(t, []string{"127.0.0.1", "::1"}, cfg.Server.TrustedProxies)
 	assert.Equal(t, "development", cfg.Environment)
 	assert.Equal(t, "test:test@tcp(127.0.0.1:3306)/test", cfg.MySQL.DSN)
 	assert.Equal(t, "127.0.0.1:6379", cfg.Redis.Addr)
@@ -79,6 +80,35 @@ func TestConfigRequiresSecureSessionInProduction(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SESSION_SECURE")
+}
+
+func TestConfigRequiresTrustedProxiesInProduction(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("SESSION_SECURE", "true")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TRUSTED_PROXIES")
+}
+
+func TestConfigLoadsTrustedProxyList(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("TRUSTED_PROXIES", "172.20.0.1, 127.0.0.1/32")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"172.20.0.1", "127.0.0.1/32"}, cfg.Server.TrustedProxies)
 }
 
 func TestConfigRejectsPublicPprofAddress(t *testing.T) {
@@ -142,6 +172,7 @@ func clearConfigEnv(t *testing.T) {
 		"APP_ENV",
 		"SERVER_ADDR",
 		"SERVER_TIMEOUT",
+		"TRUSTED_PROXIES",
 		"MYSQL_DSN",
 		"REDIS_ADDR",
 		"REDIS_PASSWORD",

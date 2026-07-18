@@ -12,9 +12,11 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
+	"net/netip"
 	"net/textproto"
 	"strings"
 	"sync"
@@ -243,6 +245,7 @@ func TestDirectSMTPDeliveryUsesTCP4AndStandardSMTPFlow(t *testing.T) {
 
 	err := sender.sendRawToTarget(
 		context.Background(),
+		"tcp4",
 		addr,
 		"localhost",
 		"mx.example.com",
@@ -285,6 +288,7 @@ func TestDirectSMTPDeliveryUpgradesWhenSTARTTLSAdvertised(t *testing.T) {
 
 	err := sender.sendRawToTarget(
 		context.Background(),
+		"tcp4",
 		addr,
 		"localhost",
 		"mx.example.com",
@@ -306,6 +310,213 @@ func TestDirectSMTPDeliveryUpgradesWhenSTARTTLSAdvertised(t *testing.T) {
 	require.Less(t, firstEHLO, startTLS)
 	require.Less(t, startTLS, secondEHLO)
 	require.Less(t, secondEHLO, mailFrom)
+}
+
+func TestDirectSMTPTargetsRejectUnsafeAddresses(t *testing.T) {
+	targets, err := lookupSMTPHostTargets(
+		context.Background(),
+		"mx.example.com",
+		func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{
+				netip.MustParseAddr("0.0.0.0"),
+				netip.MustParseAddr("127.0.0.1"),
+				netip.MustParseAddr("10.0.0.1"),
+				netip.MustParseAddr("100.64.0.1"),
+				netip.MustParseAddr("169.254.0.1"),
+				netip.MustParseAddr("224.0.0.1"),
+				netip.MustParseAddr("::"),
+				netip.MustParseAddr("::1"),
+				netip.MustParseAddr("::ffff:192.0.2.1"),
+				netip.MustParseAddr("fc00::1"),
+				netip.MustParseAddr("fe80::1"),
+				netip.MustParseAddr("ff02::1"),
+			}, nil
+		},
+	)
+
+	require.Error(t, err)
+	assert.Empty(t, targets)
+}
+
+func TestDirectSMTPDeliveryDialsResolvedPublicIP(t *testing.T) {
+	cert, roots := newTestServerTLS(t)
+	localAddress, _, _, stop := startDirectCapturingSMTPServer(t, true, cert)
+	defer stop()
+
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{From: "no-reply@example.com"})
+	sender.lookupMX = func(context.Context, string) ([]*net.MX, error) {
+		return []*net.MX{
+			{Host: "backup.example.com.", Pref: 20},
+			{Host: "mx.example.com.", Pref: 10},
+		}, nil
+	}
+	sender.lookupNetIP = func(_ context.Context, _ string, host string) ([]netip.Addr, error) {
+		if host != "mx.example.com" {
+			t.Fatalf("resolved backup MX before trying the usable primary: %s", host)
+		}
+		return []netip.Addr{
+			netip.MustParseAddr("10.0.0.1"),
+			netip.MustParseAddr("93.184.216.33"),
+			netip.MustParseAddr("93.184.216.34"),
+		}, nil
+	}
+	var network, tlsServerName string
+	var addresses []string
+	dialer := &net.Dialer{}
+	sender.dialContext = func(ctx context.Context, gotNetwork, gotAddress string) (net.Conn, error) {
+		network = gotNetwork
+		addresses = append(addresses, gotAddress)
+		if gotAddress == "93.184.216.33:25" {
+			return nil, errors.New("primary address unavailable")
+		}
+		return dialer.DialContext(ctx, gotNetwork, localAddress)
+	}
+	sender.tlsConfig = func(serverName string) *tls.Config {
+		tlsServerName = serverName
+		return &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "localhost", RootCAs: roots}
+	}
+
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "tcp4", network)
+	assert.Equal(t, []string{"93.184.216.33:25", "93.184.216.34:25"}, addresses)
+	assert.Equal(t, "mx.example.com", tlsServerName)
+}
+
+func TestDirectSMTPFailureClassificationKeepsAnyTemporarySMTPResultRetryable(t *testing.T) {
+	err := classifyDirectSMTPFailures("direct smtp delivery failed", []error{
+		fmt.Errorf("primary failed: %w", &textproto.Error{Code: 451, Msg: "try later"}),
+		fmt.Errorf("backup failed: %w", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}),
+	})
+
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	assert.True(t, failure.Retryable)
+}
+
+func TestDirectSMTPFailureClassificationGivesInfrastructurePriority(t *testing.T) {
+	err := classifyDirectSMTPFailures("direct smtp delivery failed", []error{
+		errors.New("dial timeout"),
+		fmt.Errorf("backup failed: %w", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}),
+	})
+
+	var failure *mailapp.OutboundSendFailure
+	assert.False(t, errors.As(err, &failure))
+	assert.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+}
+
+func TestDirectSMTPFailureClassificationKeepsSTARTTLSTemporaryResponseRetryable(t *testing.T) {
+	err := classifyDirectSMTPFailures("direct smtp delivery failed", []error{
+		fmt.Errorf("direct smtp starttls failed: %w", &textproto.Error{Code: 454, Msg: "TLS unavailable"}),
+		fmt.Errorf("backup failed: %w", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}),
+	})
+
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	assert.True(t, failure.Retryable)
+}
+
+func TestDirectSMTPNullMXIsPermanentBusinessFailure(t *testing.T) {
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{From: "no-reply@example.com"})
+	sender.lookupMX = func(context.Context, string) ([]*net.MX, error) {
+		return []*net.MX{{Host: ".", Pref: 0}}, nil
+	}
+	sender.lookupNetIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Fatal("must not resolve an address for a null MX")
+		return nil, nil
+	}
+
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	assert.False(t, failure.Retryable)
+	assert.Equal(t, "Recipient domain does not accept email.", failure.SafeMessage)
+}
+
+func TestDirectSMTPOnlyUnsafeTargetsIsPermanentBusinessFailure(t *testing.T) {
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{From: "no-reply@example.com"})
+	sender.lookupMX = func(context.Context, string) ([]*net.MX, error) {
+		return []*net.MX{{Host: "mx.example.com."}}, nil
+	}
+	sender.lookupNetIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("fec0::1")}, nil
+	}
+	sender.dialContext = func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("must not dial a rejected address")
+		return nil, nil
+	}
+
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	assert.False(t, failure.Retryable)
+	assert.Equal(t, "Recipient mail server address is not allowed.", failure.SafeMessage)
+}
+
+func TestDirectSMTPMissingRecipientAddressIsPermanentBusinessFailure(t *testing.T) {
+	sender := NewDirectSMTPDelivery(DirectSMTPConfig{From: "no-reply@example.com"})
+	sender.lookupMX = func(context.Context, string) ([]*net.MX, error) {
+		return nil, &net.DNSError{IsNotFound: true, Name: "example.com"}
+	}
+	sender.lookupNetIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		return nil, &net.DNSError{IsNotFound: true, Name: "example.com"}
+	}
+
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("user@example.com", "123456"))
+
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	assert.False(t, failure.Retryable)
+	assert.Equal(t, "Recipient domain has no usable mail server.", failure.SafeMessage)
+}
+
+func TestDirectSMTPFallbackRejectsPrivateAddress(t *testing.T) {
+	hosts, err := lookupMXHosts(
+		context.Background(),
+		"example.com",
+		func(context.Context, string) ([]*net.MX, error) {
+			return nil, &net.DNSError{IsNotFound: true}
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"example.com"}, hosts)
+
+	targets, err := lookupSMTPHostTargets(
+		context.Background(),
+		hosts[0],
+		func(_ context.Context, _ string, host string) ([]netip.Addr, error) {
+			assert.Equal(t, "example.com", host)
+			return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+		},
+	)
+
+	require.Error(t, err)
+	assert.Empty(t, targets)
+}
+
+func TestDirectSMTPAddressFilterRejectsSpecialUseRanges(t *testing.T) {
+	tests := map[string]bool{
+		"93.184.216.34":   true,
+		"2606:4700::1111": true,
+		"0.0.0.1":         false,
+		"100.64.0.1":      false,
+		"192.0.2.1":       false,
+		"198.18.0.1":      false,
+		"240.0.0.1":       false,
+		"64:ff9b::a00:1":  false,
+		"2001:db8::1":     false,
+		"2002:a00:1::":    false,
+		"fec0::1":         false,
+	}
+
+	for raw, want := range tests {
+		t.Run(raw, func(t *testing.T) {
+			assert.Equal(t, want, isPublicSMTPAddress(netip.MustParseAddr(raw)))
+		})
+	}
 }
 
 func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {

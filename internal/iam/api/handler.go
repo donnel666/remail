@@ -74,6 +74,18 @@ func (h *IAMHandler) PostActivation(c *gin.Context) {
 
 // POST /v1/captchas
 func (h *IAMHandler) PostCaptcha(c *gin.Context) {
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.HitCaptcha(c.Request.Context(), c.ClientIP())
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return
+		}
+	}
+
 	result, err := h.module.CaptchaUseCase.Create(c.Request.Context())
 	if err != nil {
 		writeError(c, err)
@@ -97,9 +109,15 @@ func (h *IAMHandler) PostEmailCode(c *gin.Context) {
 		return
 	}
 
-	if err := h.module.EmailCodeUseCase.SendWithCaptcha(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer); err != nil {
+	created, err := h.module.EmailCodeUseCase.SendWithCaptcha(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer)
+	if err != nil {
 		writeError(c, err)
 		return
+	}
+	if created && h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.ClearEmailCodeFailures(c.Request.Context(), req.Email); err != nil {
+			slog.Warn("clear email code abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
 	}
 
 	c.Status(http.StatusNoContent)
@@ -119,12 +137,36 @@ func (h *IAMHandler) PostRegister(c *gin.Context) {
 		return
 	}
 
+	clientIP := c.ClientIP()
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.TakeRegistration(c.Request.Context(), req.Email, clientIP)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return
+		}
+	}
+
 	user, err := h.module.RegistrationUseCase.Register(
 		c.Request.Context(), req.Email, req.Password, req.Nickname, req.Code, req.InviteCode,
 	)
 	if err != nil {
+		if !errors.Is(err, domain.ErrVerificationCodeIncorrect) && h.module.AbuseLimiter != nil {
+			if limitErr := h.module.AbuseLimiter.CancelRegistration(c.Request.Context(), req.Email, clientIP); limitErr != nil {
+				writeError(c, limitErr)
+				return
+			}
+		}
 		writeError(c, err)
 		return
+	}
+	if h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.CompleteRegistration(c.Request.Context(), req.Email, clientIP); err != nil {
+			slog.Warn("clear registration abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"user": toUserResponse(user)})
@@ -141,9 +183,15 @@ func (h *IAMHandler) PostPasswordResetRequest(c *gin.Context) {
 		})
 		return
 	}
-	if err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer); err != nil {
+	created, err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer)
+	if err != nil {
 		writeError(c, err)
 		return
+	}
+	if created && h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.ClearEmailCodeFailures(c.Request.Context(), req.Email); err != nil {
+			slog.Warn("clear password reset email abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -159,9 +207,34 @@ func (h *IAMHandler) PostPasswordReset(c *gin.Context) {
 		})
 		return
 	}
+
+	clientIP := c.ClientIP()
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.TakePasswordReset(c.Request.Context(), req.Email, clientIP)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return
+		}
+	}
+
 	if err := h.module.PasswordResetUseCase.Reset(c.Request.Context(), req.Email, req.Code, req.NewPassword); err != nil {
+		if !errors.Is(err, domain.ErrVerificationCodeIncorrect) && h.module.AbuseLimiter != nil {
+			if limitErr := h.module.AbuseLimiter.CancelPasswordReset(c.Request.Context(), req.Email, clientIP); limitErr != nil {
+				writeError(c, limitErr)
+				return
+			}
+		}
 		writeError(c, err)
 		return
+	}
+	if h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.CompletePasswordReset(c.Request.Context(), req.Email, clientIP); err != nil {
+			slog.Warn("clear password reset abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -186,15 +259,52 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password, req.CaptchaID, req.CaptchaAnswer, h.sessionMaxAge)
-	if err != nil {
+	if err := app.VerifyCaptcha(c.Request.Context(), h.module.CaptchaStore, req.CaptchaID, req.CaptchaAnswer); err != nil {
 		writeError(c, err)
 		return
+	}
+
+	clientIP := c.ClientIP()
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.TakeLogin(c.Request.Context(), req.Email, clientIP)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return
+		}
+	}
+
+	result, err := h.module.LoginUseCase.LoginVerified(c.Request.Context(), req.Email, req.Password, h.sessionMaxAge)
+	if err != nil {
+		if !errors.Is(err, domain.ErrAccountOrPasswordIncorrect) && h.module.AbuseLimiter != nil {
+			if limitErr := h.module.AbuseLimiter.CancelLogin(c.Request.Context(), req.Email, clientIP); limitErr != nil {
+				writeError(c, limitErr)
+				return
+			}
+		}
+		writeError(c, err)
+		return
+	}
+	if h.module.AbuseLimiter != nil {
+		if err := h.module.AbuseLimiter.CompleteLogin(c.Request.Context(), req.Email, clientIP); err != nil {
+			slog.Warn("clear login abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
+		}
 	}
 
 	setAuthCookies(c, result.Session.ID, csrfToken, h.sessionMaxAge, h.sessionSecure)
 
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
+}
+
+func writeTooManyRequests(c *gin.Context, retryAfter int) {
+	c.Header("Retry-After", strconv.Itoa(retryAfter))
+	c.JSON(http.StatusTooManyRequests, gin.H{
+		"message":   "Too many requests.",
+		"requestId": middleware.GetRequestID(c),
+	})
 }
 
 // DELETE /v1/sessions/current
@@ -1485,22 +1595,8 @@ func newCSRFToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(token[:]), nil
 }
 
-// validationErrors extracts field-level validation error messages.
-func validationErrors(err error) map[string]string {
-	type validator interface {
-		Field() string
-		Tag() string
-	}
-
-	fields := make(map[string]string)
-	if errs, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, e := range errs.Unwrap() {
-			if v, ok := e.(validator); ok {
-				fields[v.Field()] = v.Tag() + " validation failed"
-			}
-		}
-	} else {
-		fields["body"] = err.Error()
-	}
-	return fields
+// validationErrors deliberately keeps parser and validator internals out of
+// public responses while preserving the existing fields.body contract.
+func validationErrors(error) map[string]string {
+	return map[string]string{"body": "Invalid request body."}
 }

@@ -4,6 +4,7 @@
 
 - 应用保持单活；MySQL、Redis、MinIO 可以独立部署和备份。
 - 生产必须设置 `APP_ENV=production`、`SESSION_SECURE=true`。
+- 生产必须把 `TRUSTED_PROXIES` 设置为应用容器实际看到的反向代理精确 IP/CIDR；反向代理必须覆盖客户端自带的 `X-Forwarded-For`，只传递规范客户端地址。
 - `PPROF_ADDR` 只能绑定 `localhost` 或回环 IP，禁止公网监听。
 - Nginx 对 `/v1/pickup` 关闭 access log，避免 Token 进入 query 日志。
 

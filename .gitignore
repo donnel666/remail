@@ -15,6 +15,11 @@ web/.rsbuild/
 web/coverage/
 scripts/perf/pickup-fixtures.json
 
+# Local security assessment artifacts
+.cyberstrike/
+strix_runs/
+.shannon/
+
 # Env
 .env
 .local-secrets/

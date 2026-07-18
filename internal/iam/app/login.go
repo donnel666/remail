@@ -33,11 +33,14 @@ type LoginResult struct {
 // Disabled accounts return the same error to prevent account enumeration
 // (docs/8-iam.md:109 — only "Account or password is incorrect" is safe to expose).
 func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, captchaAnswer string, sessionTTL int) (*LoginResult, error) {
-	// Verify captcha first to avoid leaking user existence
 	if err := VerifyCaptcha(ctx, uc.captcha, captchaID, captchaAnswer); err != nil {
 		return nil, err
 	}
+	return uc.LoginVerified(ctx, email, password, sessionTTL)
+}
 
+// LoginVerified authenticates after the caller has consumed a valid captcha.
+func (uc *LoginUseCase) LoginVerified(ctx context.Context, email, password string, sessionTTL int) (*LoginResult, error) {
 	user, err := uc.repo.FindByEmail(ctx, normalizeEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("login find user: %w", err)
@@ -57,14 +60,18 @@ func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, c
 		return nil, domain.ErrAccountOrPasswordIncorrect
 	}
 
-	// Update last login time
-	now := time.Now()
-	user.LastLoginAt = &now
-	if err := uc.repo.Update(ctx, user); err != nil {
+	// Record the login only if the enabled/password snapshot verified above is
+	// still current, and use the freshly loaded role/token version for session.
+	user, err = uc.repo.RecordLogin(ctx, user.ID, user.PasswordHash)
+	if err != nil {
 		return nil, fmt.Errorf("login update last login: %w", err)
+	}
+	if user == nil {
+		return nil, domain.ErrAccountOrPasswordIncorrect
 	}
 
 	// Create session
+	now := time.Now()
 	sessionID, err := newCryptoID()
 	if err != nil {
 		return nil, fmt.Errorf("login generate session id: %w", err)

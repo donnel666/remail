@@ -114,6 +114,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaptchaResponse"
+        "429":
+          description: Captcha request rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/email/code:
     post:
@@ -138,6 +148,16 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Captcha incorrect or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Verification code resend cooldown active
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -175,14 +195,18 @@ paths:
                   user:
                     $ref: "#/components/schemas/UserResponse"
                 additionalProperties: false
-        "409":
-          description: Email already exists
+        "422":
+          description: Verification code incorrect or validation error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "422":
-          description: Verification code incorrect or validation error
+        "429":
+          description: Registration verification attempt rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -227,6 +251,16 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Account or password is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Login rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -497,6 +531,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          description: Password reset code resend cooldown active
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "503":
           description: Mail service is temporarily unavailable
           content:
@@ -527,6 +571,16 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Verification code is incorrect or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Password reset rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:

@@ -36,6 +36,7 @@ type mockUserRepo struct {
 	reloads              int
 	reloadErr            error
 	seq                  uint
+	updatePasswordErr    error
 }
 
 func newMockUserRepo() *mockUserRepo {
@@ -259,6 +260,34 @@ func (r *mockUserRepo) Update(_ context.Context, user *domain.User) error {
 		r.users[user.ID] = &cp
 	}
 	return nil
+}
+
+func (r *mockUserRepo) RecordLogin(_ context.Context, userID uint, expectedPasswordHash string) (*domain.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user := r.users[userID]
+	if user == nil || !user.Enabled || user.PasswordHash != expectedPasswordHash {
+		return nil, nil
+	}
+	now := time.Now()
+	user.LastLoginAt = &now
+	cp := *user
+	return &cp, nil
+}
+
+func (r *mockUserRepo) UpdatePassword(_ context.Context, userID uint, expectedPasswordHash, passwordHash string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.updatePasswordErr != nil {
+		return false, r.updatePasswordErr
+	}
+	user := r.users[userID]
+	if user == nil || !user.Enabled || user.PasswordHash != expectedPasswordHash {
+		return false, nil
+	}
+	user.PasswordHash = passwordHash
+	user.TokenVersion++
+	return true, nil
 }
 
 func (r *mockUserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User, log *governancedomain.OperationLog) error {
@@ -1027,14 +1056,17 @@ func (c permissionMapChecker) Check(_ context.Context, _ uint, _ domain.Role, re
 func (permissionMapChecker) Reload(context.Context) error { return nil }
 
 type mockEmailCodeStore struct {
-	mu        sync.Mutex
-	codes     map[string]string
-	cooldowns map[string]bool
-	deleteErr error
+	mu         sync.Mutex
+	codes      map[string]string
+	claims     map[string]string
+	cooldowns  map[string]bool
+	claimErr   error
+	commitErr  error
+	restoreErr error
 }
 
 func newMockEmailCodeStore() *mockEmailCodeStore {
-	return &mockEmailCodeStore{codes: make(map[string]string), cooldowns: make(map[string]bool)}
+	return &mockEmailCodeStore{codes: make(map[string]string), claims: make(map[string]string), cooldowns: make(map[string]bool)}
 }
 
 func (s *mockEmailCodeStore) StartCooldown(_ context.Context, key string, seconds int) (bool, int, error) {
@@ -1070,12 +1102,50 @@ func (s *mockEmailCodeStore) Get(_ context.Context, key string) (string, error) 
 	return s.codes[key], nil
 }
 
+func (s *mockEmailCodeStore) Claim(_ context.Context, key, expected, claimToken string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.codes[key] != expected {
+		return false, nil
+	}
+	delete(s.codes, key)
+	s.claims[key] = claimToken
+	if s.claimErr != nil {
+		return false, s.claimErr
+	}
+	return true, nil
+}
+
+func (s *mockEmailCodeStore) Commit(_ context.Context, key, claimToken string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claims[key] != claimToken {
+		return false, nil
+	}
+	delete(s.claims, key)
+	if s.commitErr != nil {
+		return false, s.commitErr
+	}
+	return true, nil
+}
+
+func (s *mockEmailCodeStore) Restore(_ context.Context, key, claimToken, code string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claims[key] != claimToken {
+		return false, nil
+	}
+	if s.restoreErr != nil {
+		return false, s.restoreErr
+	}
+	delete(s.claims, key)
+	s.codes[key] = code
+	return true, nil
+}
+
 func (s *mockEmailCodeStore) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.deleteErr != nil {
-		return s.deleteErr
-	}
 	delete(s.codes, key)
 	return nil
 }
@@ -1333,10 +1403,11 @@ func TestPasswordResetRequestThrottlesUnknownEmailIdentically(t *testing.T) {
 	h := newTestHandler()
 
 	cap1 := seedCaptcha(t, h, "1234")
-	require.NoError(t, h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap1, "1234"))
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap1, "1234")
+	require.NoError(t, err)
 
 	cap2 := seedCaptcha(t, h, "1234")
-	err := h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap2, "1234")
+	_, err = h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap2, "1234")
 	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
 }
 
@@ -1411,20 +1482,52 @@ func TestPostRegister_ExistingEmailWithWrongEmailCodeReturnsVerificationError(t 
 	require.NotContains(t, w.Body.String(), "Email already exists")
 }
 
-func TestPostRegister_ExistingEmailWithValidEmailCodeReturnsConflict(t *testing.T) {
+func TestPostRegister_ExistingEmailWithValidEmailCodeDoesNotRevealCode(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 	seedUser(t, h, "user@test.com")
 
 	code := requestEmailCode(t, h, r, "user@test.com", "1234")
+	register := func(submittedCode string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"email":"user@test.com","password":"User123!","code":%q}`, submittedCode)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	wrong := register("wrong")
+	correct := register(code)
+	require.Equal(t, http.StatusUnprocessableEntity, wrong.Code)
+	require.Equal(t, wrong.Code, correct.Code)
+	require.Contains(t, wrong.Body.String(), "Verification code is incorrect or expired")
+	require.Contains(t, correct.Body.String(), "Verification code is incorrect or expired")
+	require.NotContains(t, correct.Body.String(), "Email already exists")
+	require.Equal(t, code, h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode())
+
+	body := fmt.Sprintf(`{"email":"user@test.com","newPassword":"Reset123!","code":%q}`, code)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestPostRegister_RestoreFailureReturnsServerError(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	code := requestEmailCode(t, h, r, "user@test.com", "1234")
+	h.module.EmailCodeStore.(*mockEmailCodeStore).restoreErr = errors.New("redis restore failed")
 	body := fmt.Sprintf(`{"email":"user@test.com","password":"User123!","code":%q}`, code)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusConflict, w.Code)
-	require.Contains(t, w.Body.String(), "Email already exists")
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.NotContains(t, w.Body.String(), "Verification code is incorrect")
 }
 
 // --- Login Tests ---
@@ -2313,18 +2416,19 @@ func TestChangePassword_RequiresCSRF(t *testing.T) {
 	require.Contains(t, w.Body.String(), "Permission denied")
 }
 
-func TestPostPasswordResetIgnoresCleanupFailuresAfterPasswordUpdate(t *testing.T) {
+func TestPostPasswordResetIgnoresSessionCleanupFailureAfterPasswordUpdate(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 	user := seedUser(t, h, "user@test.com")
 
 	captchaID := seedCaptcha(t, h, "1234")
-	require.NoError(t, h.module.PasswordResetUseCase.Request(context.Background(), "USER@Test.COM", captchaID, "1234"))
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "USER@Test.COM", captchaID, "1234")
+	require.NoError(t, err)
 	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
 	require.NotEmpty(t, code)
 
-	h.module.EmailCodeStore.(*mockEmailCodeStore).deleteErr = errors.New("redis email code delete failed")
 	h.module.SessionStore.(*mockSessionStore).deleteByUserIDErr = errors.New("redis session cleanup failed")
+	h.module.EmailCodeStore.(*mockEmailCodeStore).commitErr = errors.New("redis commit result unavailable")
 
 	body := fmt.Sprintf(`{"email":"%s","code":"%s","newPassword":"NewPass123!"}`, "USER@Test.COM", code)
 	w := httptest.NewRecorder()
@@ -2457,4 +2561,383 @@ func TestPostRegister_InvalidEmail(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"fields":{"body":"Invalid request body."}`)
+	assert.NotContains(t, w.Body.String(), "RegisterRequest")
+	assert.NotContains(t, w.Body.String(), "validation failed")
+}
+
+func TestPostRegister_MalformedJSONDoesNotExposeParserError(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(`{"email":`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"fields":{"body":"Invalid request body."}`)
+	require.NotContains(t, w.Body.String(), "unexpected EOF")
+}
+
+type fakeAbuseLimiter struct {
+	captchaRetry      int
+	loginRetry        int
+	resetRetry        int
+	loginTaken        int
+	loginCanceled     int
+	loginCompleted    int
+	registerRetry     int
+	registerTaken     int
+	registerCanceled  int
+	registerCompleted int
+	resetTaken        int
+	resetCanceled     int
+	resetCompleted    int
+	resetCleared      int
+	resetClearErr     error
+}
+
+func (l *fakeAbuseLimiter) HitCaptcha(context.Context, string) (int, error) {
+	return l.captchaRetry, nil
+}
+
+func (l *fakeAbuseLimiter) TakeLogin(context.Context, string, string) (int, error) {
+	l.loginTaken++
+	return l.loginRetry, nil
+}
+
+func (l *fakeAbuseLimiter) CancelLogin(context.Context, string, string) error {
+	l.loginCanceled++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) CompleteLogin(context.Context, string, string) error {
+	l.loginCompleted++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) TakeRegistration(context.Context, string, string) (int, error) {
+	l.registerTaken++
+	return l.registerRetry, nil
+}
+
+func (l *fakeAbuseLimiter) CancelRegistration(context.Context, string, string) error {
+	l.registerCanceled++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) CompleteRegistration(context.Context, string, string) error {
+	l.registerCompleted++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) TakePasswordReset(context.Context, string, string) (int, error) {
+	l.resetTaken++
+	return l.resetRetry, nil
+}
+
+func (l *fakeAbuseLimiter) CancelPasswordReset(context.Context, string, string) error {
+	l.resetCanceled++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) CompletePasswordReset(context.Context, string, string) error {
+	l.resetCompleted++
+	return nil
+}
+
+func (l *fakeAbuseLimiter) ClearEmailCodeFailures(context.Context, string) error {
+	l.resetCleared++
+	return l.resetClearErr
+}
+
+func TestPostLoginAbuseLimiterCountsOnlyCredentialFailuresAndClearsOnSuccess(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+
+	body := `{"email":"admin@test.com","password":"Admin123!"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/activation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	login := func(email, password, captchaAnswer, submittedAnswer string) *httptest.ResponseRecorder {
+		captchaID := seedCaptcha(t, h, captchaAnswer)
+		body := fmt.Sprintf(`{"email":%q,"password":%q,"captchaId":%q,"captchaAnswer":%q}`, email, password, captchaID, submittedAnswer)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusUnprocessableEntity, login("admin@test.com", "Admin123!", "1234", "wrong").Code)
+	require.Zero(t, limiter.loginTaken, "captcha failures must not consume the account failure budget")
+
+	wrongPassword := login("admin@test.com", "wrong", "1234", "1234")
+	require.Equal(t, http.StatusUnprocessableEntity, wrongPassword.Code)
+	require.Contains(t, wrongPassword.Body.String(), "Account or password is incorrect")
+
+	unknownAccount := login("ghost@test.com", "wrong", "1234", "1234")
+	require.Equal(t, http.StatusUnprocessableEntity, unknownAccount.Code)
+	require.Contains(t, unknownAccount.Body.String(), "Account or password is incorrect")
+	require.Equal(t, 2, limiter.loginTaken)
+
+	require.Equal(t, http.StatusOK, login("admin@test.com", "Admin123!", "1234", "1234").Code)
+	require.Equal(t, 3, limiter.loginTaken)
+	require.Equal(t, 1, limiter.loginCompleted)
+}
+
+func TestIAMAbuseLimiterReturnsRetryAfter(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{captchaRetry: 17, loginRetry: 42, registerRetry: 58, resetRetry: 73}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/captchas", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "17", w.Header().Get("Retry-After"))
+
+	captchaID := seedCaptcha(t, h, "1234")
+	body := fmt.Sprintf(`{"email":"user@test.com","password":"wrong","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "42", w.Header().Get("Retry-After"))
+
+	body = `{"email":"user@test.com","password":"User123!","code":"123456"}`
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "58", w.Header().Get("Retry-After"))
+
+	body = `{"email":"user@test.com","code":"123456","newPassword":"NewPass123!"}`
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "73", w.Header().Get("Retry-After"))
+}
+
+func TestPostRegisterAbuseLimiterCountsCodeFailuresAndClearsOnSuccess(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+	code := requestEmailCode(t, h, r, "new@test.com", "1234")
+
+	register := func(code string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"email":"new@test.com","password":"User123!","code":%q}`, code)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusUnprocessableEntity, register("wrong").Code)
+	require.Equal(t, 1, limiter.registerTaken)
+	require.Zero(t, limiter.registerCanceled)
+	require.Equal(t, http.StatusCreated, register(code).Code)
+	require.Equal(t, 2, limiter.registerTaken)
+	require.Equal(t, 1, limiter.registerCompleted)
+}
+
+func TestPostPasswordResetAbuseLimiterCountsInvalidCodeAndClearsOnSuccess(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	captchaID := seedCaptcha(t, h, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	require.NoError(t, err)
+	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
+	require.NotEmpty(t, code)
+
+	reset := func(code string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"email":"user@test.com","code":%q,"newPassword":"NewPass123!"}`, code)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusUnprocessableEntity, reset("wrong").Code)
+	require.Equal(t, 1, limiter.resetTaken)
+	require.Equal(t, http.StatusNoContent, reset(code).Code)
+	require.Equal(t, 2, limiter.resetTaken)
+	require.Equal(t, 1, limiter.resetCompleted)
+}
+
+func TestPasswordResetRequestClearsFailuresOnlyForNewCodeGeneration(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	request := func() *httptest.ResponseRecorder {
+		captchaID := seedCaptcha(t, h, "1234")
+		body := fmt.Sprintf(`{"email":"user@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	require.Equal(t, http.StatusNoContent, request().Code)
+	require.Equal(t, 1, limiter.resetCleared)
+
+	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
+	store.mu.Lock()
+	store.cooldowns = make(map[string]bool)
+	store.mu.Unlock()
+	require.Equal(t, http.StatusNoContent, request().Code)
+	require.Equal(t, 1, limiter.resetCleared, "resending the same code must not reset its failure budget")
+}
+
+func TestUnknownPasswordResetRequestCreatesDummyGeneration(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+	captchaID := seedCaptcha(t, h, "1234")
+	body := fmt.Sprintf(`{"email":"ghost@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Equal(t, 1, limiter.resetCleared)
+	require.Equal(t, 1, h.module.EmailCodeStore.(*mockEmailCodeStore).codeCount())
+}
+
+func TestPasswordResetRestoresClaimAfterDatabaseFailure(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+
+	captchaID := seedCaptcha(t, h, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	require.NoError(t, err)
+	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
+	code := store.firstCode()
+	require.NotEmpty(t, code)
+
+	testRepo(h).updatePasswordErr = errors.New("database unavailable")
+	body := fmt.Sprintf(`{"email":"user@test.com","code":%q,"newPassword":"NewPass123!"}`, code)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, code, store.firstCode(), "database failure must restore the claimed code")
+
+	testRepo(h).updatePasswordErr = nil
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestPasswordReset_RestoreFailureReturnsServerError(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	user := seedUser(t, h, "user@test.com")
+
+	captchaID := seedCaptcha(t, h, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	require.NoError(t, err)
+	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
+	code := store.firstCode()
+	user.Enabled = false
+	store.restoreErr = errors.New("redis restore failed")
+
+	body := fmt.Sprintf(`{"email":"user@test.com","code":%q,"newPassword":"NewPass123!"}`, code)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.NotContains(t, w.Body.String(), "Verification code is incorrect")
+}
+
+func TestPasswordResetConcurrentCorrectCodeSucceedsOnce(t *testing.T) {
+	h := newTestHandler()
+	seedUser(t, h, "user@test.com")
+	captchaID := seedCaptcha(t, h, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	require.NoError(t, err)
+	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
+
+	const requests = 20
+	errs := make(chan error, requests)
+	var wg sync.WaitGroup
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- h.module.PasswordResetUseCase.Reset(context.Background(), "user@test.com", code, "NewPass123!")
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	succeeded := 0
+	for resetErr := range errs {
+		if resetErr == nil {
+			succeeded++
+			continue
+		}
+		require.ErrorIs(t, resetErr, domain.ErrVerificationCodeIncorrect)
+	}
+	require.Equal(t, 1, succeeded)
+}
+
+func TestPasswordResetRestoresAmbiguousClaim(t *testing.T) {
+	h := newTestHandler()
+	seedUser(t, h, "user@test.com")
+	captchaID := seedCaptcha(t, h, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	require.NoError(t, err)
+	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
+	code := store.firstCode()
+	store.claimErr = errors.New("redis connection lost after script")
+
+	err = h.module.PasswordResetUseCase.Reset(context.Background(), "user@test.com", code, "NewPass123!")
+	require.Error(t, err)
+	require.Equal(t, code, store.firstCode(), "an ambiguous claim result must be restored when the claim actually ran")
+}
+
+func TestPasswordResetRequestDoesNotFailAfterCodeWasCreated(t *testing.T) {
+	h := newTestHandler()
+	limiter := &fakeAbuseLimiter{resetClearErr: errors.New("redis clear failed")}
+	h.module.AbuseLimiter = limiter
+	r := setupTestRouterWithHandler(h)
+	seedUser(t, h, "user@test.com")
+	captchaID := seedCaptcha(t, h, "1234")
+	body := fmt.Sprintf(`{"email":"user@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.NotEmpty(t, h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode())
 }

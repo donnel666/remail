@@ -19,6 +19,20 @@ type UserFinder interface {
 	FindByID(ctx context.Context, id uint) (*domain.User, error)
 }
 
+type abuseLimiter interface {
+	HitCaptcha(ctx context.Context, ip string) (int, error)
+	TakeLogin(ctx context.Context, email, ip string) (int, error)
+	CancelLogin(ctx context.Context, email, ip string) error
+	CompleteLogin(ctx context.Context, email, ip string) error
+	TakeRegistration(ctx context.Context, email, ip string) (int, error)
+	CancelRegistration(ctx context.Context, email, ip string) error
+	CompleteRegistration(ctx context.Context, email, ip string) error
+	TakePasswordReset(ctx context.Context, email, ip string) (int, error)
+	CancelPasswordReset(ctx context.Context, email, ip string) error
+	CompletePasswordReset(ctx context.Context, email, ip string) error
+	ClearEmailCodeFailures(ctx context.Context, email string) error
+}
+
 // IAMModule holds all wired dependencies for the IAM module.
 type IAMModule struct {
 	ActivationUseCase          *app.ActivationUseCase
@@ -41,6 +55,7 @@ type IAMModule struct {
 	SessionStore               app.SessionStore
 	CaptchaStore               app.CaptchaStore
 	EmailCodeStore             app.EmailCodeStore
+	AbuseLimiter               abuseLimiter
 	AdminResourceOwners        coreapp.OwnerQueryPort
 	AdminUserSelectionResolver *AdminUserSelectionResolver
 }
@@ -84,6 +99,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		SessionStore:               sessionStore,
 		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,
+		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
 		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
 		AdminUserSelectionResolver: NewAdminUserSelectionResolver(userRepo),
 	}, nil

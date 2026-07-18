@@ -75,6 +75,7 @@ type Platform struct {
 	BackgroundAsynqServer *asynq.Server
 	BackgroundLoad        *BackgroundLoadController
 	SMTP                  SMTPConfig
+	TrustedProxies        []string
 	SessionMaxAge         int
 	SessionSecure         bool
 	Diagnostics           DiagnosticsConfig
@@ -118,6 +119,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrency)
 	SetMetricsBackgroundLoad(p.BackgroundLoad)
 	p.SMTP = cfg.SMTP
+	p.TrustedProxies = append([]string(nil), cfg.Server.TrustedProxies...)
 
 	cleanup := func() {
 		p.Close()

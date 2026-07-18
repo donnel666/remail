@@ -365,15 +365,43 @@ func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) 
 	return model.toDomain(), nil
 }
 
-func (r *UserRepo) Update(ctx context.Context, user *domain.User) error {
-	model := fromDomain(user)
-	// Uses Select("*") to ensure zero values (e.g. Enabled=false) are persisted.
-	// GORM's Updates() with a struct skips zero values by default.
-	err := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", user.ID).Select("*").Updates(model).Error
+func (r *UserRepo) RecordLogin(ctx context.Context, userID uint, expectedPasswordHash string) (*domain.User, error) {
+	var user *domain.User
+	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&UserModel{}).
+			Where("id = ? AND enabled = ? AND BINARY password_hash = ?", userID, true, expectedPasswordHash).
+			UpdateColumn("last_login_at", time.Now())
+		if result.Error != nil {
+			return fmt.Errorf("update last login: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+
+		var model UserModel
+		if err := tx.Preload("UserGroup").First(&model, userID).Error; err != nil {
+			return fmt.Errorf("reload user after login: %w", err)
+		}
+		user = model.toDomain()
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("update user: %w", err)
+		return nil, err
 	}
-	return nil
+	return user, nil
+}
+
+func (r *UserRepo) UpdatePassword(ctx context.Context, userID uint, expectedPasswordHash, passwordHash string) (bool, error) {
+	result := r.dbFor(ctx).Model(&UserModel{}).
+		Where("id = ? AND enabled = ? AND BINARY password_hash = ?", userID, true, expectedPasswordHash).
+		UpdateColumns(map[string]any{
+			"password_hash": passwordHash,
+			"token_version": gorm.Expr("token_version + 1"),
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("update password: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User, log *governancedomain.OperationLog) error {

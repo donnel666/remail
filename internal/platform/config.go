@@ -27,8 +27,9 @@ type Config struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Addr    string
-	Timeout time.Duration
+	Addr           string
+	Timeout        time.Duration
+	TrustedProxies []string
 }
 
 // MySQLConfig holds database connection settings.
@@ -121,11 +122,17 @@ func Load() (*Config, error) {
 	// Load .env file for local development; ignore error if file doesn't exist
 	_ = godotenv.Load()
 
+	environment := strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "development")))
+	trustedProxiesDefault := "127.0.0.1,::1"
+	if environment == "production" {
+		trustedProxiesDefault = ""
+	}
 	cfg := &Config{
-		Environment: strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "development"))),
+		Environment: environment,
 		Server: ServerConfig{
-			Addr:    getEnv("SERVER_ADDR", ":8080"),
-			Timeout: getDuration("SERVER_TIMEOUT", 30*time.Second),
+			Addr:           getEnv("SERVER_ADDR", ":8080"),
+			Timeout:        getDuration("SERVER_TIMEOUT", 30*time.Second),
+			TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", trustedProxiesDefault)),
 		},
 		MySQL: MySQLConfig{
 			DSN:          getEnv("MYSQL_DSN", ""),
@@ -181,6 +188,17 @@ func (c *Config) validate() error {
 	}
 	if c.Environment == "production" && !c.Session.Secure {
 		return fmt.Errorf("SESSION_SECURE must be true in production")
+	}
+	if c.Environment == "production" && len(c.Server.TrustedProxies) == 0 {
+		return fmt.Errorf("TRUSTED_PROXIES is required in production")
+	}
+	for _, trustedProxy := range c.Server.TrustedProxies {
+		if net.ParseIP(trustedProxy) != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(trustedProxy); err != nil {
+			return fmt.Errorf("TRUSTED_PROXIES contains invalid IP or CIDR %q", trustedProxy)
+		}
 	}
 	if c.Diagnostics.PprofAddr != "" {
 		host, port, err := net.SplitHostPort(c.Diagnostics.PprofAddr)
@@ -245,6 +263,17 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
 }
 
 func loadSMTPConfig() SMTPConfig {

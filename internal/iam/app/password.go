@@ -42,12 +42,12 @@ func (uc *ChangePasswordUseCase) Change(ctx context.Context, userID uint, oldPas
 		return fmt.Errorf("change password hash: %w", err)
 	}
 
-	// Update password and increment tokenVersion
-	user.PasswordHash = hash
-	user.TokenVersion++
-
-	if err := uc.repo.Update(ctx, user); err != nil {
+	updated, err := uc.repo.UpdatePassword(ctx, user.ID, user.PasswordHash, hash)
+	if err != nil {
 		return fmt.Errorf("change password update: %w", err)
+	}
+	if !updated {
+		return domain.ErrInvalidPassword
 	}
 
 	// TokenVersion is the authoritative invalidation fact. Redis cleanup is

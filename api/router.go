@@ -37,6 +37,9 @@ import (
 // feFS is the embedded frontend dist filesystem (nil in development mode).
 func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Context), error) {
 	r := gin.New()
+	if err := r.SetTrustedProxies(p.TrustedProxies); err != nil {
+		return nil, func(context.Context) {}, err
+	}
 	cleanupFuncs := make([]func(context.Context), 0, 4)
 	cleanup := func(ctx context.Context) {
 		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
@@ -47,6 +50,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	// Global middleware
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID())
+	r.Use(middleware.SecurityHeaders())
 	r.Use(platform.HTTPMetricsMiddleware())
 	r.Use(middleware.RequestLogger(p.Diagnostics.SlowRequestThreshold))
 	r.Use(middleware.CORS("http://localhost:3000", "http://127.0.0.1:3000"))

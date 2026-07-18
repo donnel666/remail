@@ -50,6 +50,7 @@ services:
     environment:
       APP_ENV: "production"
       SERVER_ADDR: ":8080"
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES}"
       MYSQL_DSN: "${MYSQL_DSN}"
       MYSQL_MAX_OPEN_CONNS: "${MYSQL_MAX_OPEN_CONNS:-200}"
       MYSQL_MAX_IDLE_CONNS: "${MYSQL_MAX_IDLE_CONNS:-50}"

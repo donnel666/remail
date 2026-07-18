@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/internal/iam/domain"
 )
@@ -24,23 +27,40 @@ func NewRegistrationUseCase(repo UserRepository, hasher Hasher, codeStore EmailC
 // It requires a valid email verification code for the submitted email.
 func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, nickname, code, inviteCode string) (*domain.User, error) {
 	normalizedEmail := normalizeEmail(email)
-
-	if err := uc.verifyEmailCode(ctx, normalizedEmail, code); err != nil {
-		return nil, err
+	key := emailCodeKey(normalizedEmail)
+	code = strings.TrimSpace(code)
+	claimToken, err := newCryptoID()
+	if err != nil {
+		return nil, fmt.Errorf("register generate claim: %w", err)
+	}
+	restore := func(cause error) error {
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, restoreErr := uc.codeStore.Restore(restoreCtx, key, claimToken, code); restoreErr != nil {
+			return fmt.Errorf("restore registration code after %v: %w", cause, restoreErr)
+		}
+		return cause
+	}
+	claimed, err := uc.codeStore.Claim(ctx, key, code, claimToken)
+	if err != nil {
+		return nil, restore(fmt.Errorf("register claim email code: %w", err))
+	}
+	if !claimed {
+		return nil, domain.ErrVerificationCodeIncorrect
 	}
 
 	// Check email uniqueness
 	existing, err := uc.repo.FindByEmail(ctx, normalizedEmail)
 	if err != nil {
-		return nil, fmt.Errorf("register check email: %w", err)
+		return nil, restore(fmt.Errorf("register check email: %w", err))
 	}
 	if existing != nil {
-		return nil, domain.ErrEmailAlreadyExists
+		return nil, restore(domain.ErrVerificationCodeIncorrect)
 	}
 
 	hash, err := uc.hasher.Hash(password)
 	if err != nil {
-		return nil, fmt.Errorf("register hash: %w", err)
+		return nil, restore(fmt.Errorf("register hash: %w", err))
 	}
 
 	user := &domain.User{
@@ -55,25 +75,23 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 
 	if strings.TrimSpace(inviteCode) != "" {
 		if err := uc.repo.CreateWithInvite(ctx, user, strings.TrimSpace(inviteCode)); err != nil {
-			return nil, err
+			if errors.Is(err, domain.ErrEmailAlreadyExists) {
+				err = domain.ErrVerificationCodeIncorrect
+			}
+			return nil, restore(err)
 		}
 	} else if err := uc.repo.Create(ctx, user); err != nil {
-		return nil, err
+		if errors.Is(err, domain.ErrEmailAlreadyExists) {
+			err = domain.ErrVerificationCodeIncorrect
+		}
+		return nil, restore(err)
 	}
 
-	_ = uc.codeStore.Delete(ctx, emailCodeKey(normalizedEmail))
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if committed, commitErr := uc.codeStore.Commit(commitCtx, key, claimToken); commitErr != nil || !committed {
+		slog.Warn("commit registration code", "error", commitErr, "committed", committed)
+	}
 
 	return user, nil
-}
-
-func (uc *RegistrationUseCase) verifyEmailCode(ctx context.Context, email, code string) error {
-	storedCode, err := uc.codeStore.Get(ctx, emailCodeKey(email))
-	if err != nil {
-		return fmt.Errorf("register get email code: %w", err)
-	}
-	if storedCode == "" || storedCode != strings.TrimSpace(code) {
-		return domain.ErrVerificationCodeIncorrect
-	}
-
-	return nil
 }

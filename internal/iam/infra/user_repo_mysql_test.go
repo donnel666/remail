@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -140,6 +141,33 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 		Where("operation_type = ? AND resource_type = ? AND resource_id = ? AND request_id = ?", "iam.user.update", "user", fmt.Sprintf("%d", user.ID), "req-user-update").
 		Count(&logCount).Error)
 	require.Equal(t, int64(1), logCount)
+}
+
+func TestUserRepoCredentialSnapshotComparisonIsCaseSensitiveMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	ctx := context.Background()
+	originalHash := "CaseSensitiveHashABC"
+	user := &domain.User{
+		Email:        "credential-cas@test.local",
+		PasswordHash: originalHash,
+		Enabled:      true,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(ctx, user))
+
+	staleHash := strings.ToLower(originalHash)
+	loggedIn, err := repo.RecordLogin(ctx, user.ID, staleHash)
+	require.NoError(t, err)
+	require.Nil(t, loggedIn)
+
+	updated, err := repo.UpdatePassword(ctx, user.ID, staleHash, "new-hash")
+	require.NoError(t, err)
+	require.False(t, updated)
+
+	stored, err := repo.FindByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, originalHash, stored.PasswordHash)
 }
 
 func TestUserRepoUpdateNonSuperAdminAccessWithOperationLogProtectsCurrentRoleMySQL(t *testing.T) {

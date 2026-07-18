@@ -22,8 +22,14 @@ type UserRepository interface {
 	// FindByID looks up a user by primary key. Returns nil, nil if not found.
 	FindByID(ctx context.Context, id uint) (*domain.User, error)
 
-	// Update applies partial updates to an existing user.
-	Update(ctx context.Context, user *domain.User) error
+	// RecordLogin updates only last_login_at when the verified credential
+	// snapshot is still current, then returns the latest user state.
+	RecordLogin(ctx context.Context, userID uint, expectedPasswordHash string) (*domain.User, error)
+
+	// UpdatePassword updates only password_hash and atomically bumps
+	// token_version when the account is still enabled and the password snapshot
+	// is current. The bool reports whether the guarded update was applied.
+	UpdatePassword(ctx context.Context, userID uint, expectedPasswordHash, passwordHash string) (bool, error)
 
 	// List returns a paginated slice of users ordered by created_at desc.
 	List(ctx context.Context, offset, limit int) ([]domain.User, error)
@@ -183,6 +189,16 @@ type EmailCodeStore interface {
 
 	// Get retrieves a code. Returns "", nil if not found.
 	Get(ctx context.Context, key string) (string, error)
+
+	// Claim atomically replaces a matching code with an opaque claim marker.
+	Claim(ctx context.Context, key, expected, claimToken string) (bool, error)
+
+	// Commit deletes a code only when it is still held by claimToken.
+	Commit(ctx context.Context, key, claimToken string) (bool, error)
+
+	// Restore puts the original code back only when it is still held by
+	// claimToken, preserving its remaining lifetime.
+	Restore(ctx context.Context, key, claimToken, code string) (bool, error)
 
 	// Delete removes a verification code.
 	Delete(ctx context.Context, key string) error

@@ -5867,6 +5867,16 @@ export interface operations {
                     "application/json": components["schemas"]["CaptchaResponse"];
                 };
             };
+            /** @description Captcha request rate limit exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     postEmailCode: {
@@ -5901,6 +5911,16 @@ export interface operations {
             /** @description Captcha incorrect or expired */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verification code resend cooldown active */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5951,8 +5971,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists */
-            409: {
+            /** @description Verification code incorrect or validation error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5960,9 +5980,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Verification code incorrect or validation error */
-            422: {
+            /** @description Registration verification attempt rate limit exceeded */
+            429: {
                 headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6006,6 +6027,16 @@ export interface operations {
             /** @description Account or password is incorrect */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Login rate limit exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6365,6 +6396,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Password reset code resend cooldown active */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Mail service is temporarily unavailable */
             503: {
                 headers: {
@@ -6408,6 +6449,16 @@ export interface operations {
             /** @description Verification code is incorrect or expired */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Password reset rate limit exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

@@ -14,11 +14,12 @@ import (
 type emailCodeStoreStub struct {
 	mu        sync.Mutex
 	codes     map[string]string
+	claims    map[string]string
 	cooldowns map[string]bool
 }
 
 func newEmailCodeStoreStub() *emailCodeStoreStub {
-	return &emailCodeStoreStub{codes: make(map[string]string), cooldowns: make(map[string]bool)}
+	return &emailCodeStoreStub{codes: make(map[string]string), claims: make(map[string]string), cooldowns: make(map[string]bool)}
 }
 
 func (s *emailCodeStoreStub) StartCooldown(_ context.Context, key string, seconds int) (bool, int, error) {
@@ -52,6 +53,38 @@ func (s *emailCodeStoreStub) Get(_ context.Context, key string) (string, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.codes[key], nil
+}
+
+func (s *emailCodeStoreStub) Claim(_ context.Context, key, expected, claimToken string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.codes[key] != expected {
+		return false, nil
+	}
+	delete(s.codes, key)
+	s.claims[key] = claimToken
+	return true, nil
+}
+
+func (s *emailCodeStoreStub) Commit(_ context.Context, key, claimToken string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claims[key] != claimToken {
+		return false, nil
+	}
+	delete(s.claims, key)
+	return true, nil
+}
+
+func (s *emailCodeStoreStub) Restore(_ context.Context, key, claimToken, code string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claims[key] != claimToken {
+		return false, nil
+	}
+	delete(s.claims, key)
+	s.codes[key] = code
+	return true, nil
 }
 
 func (s *emailCodeStoreStub) Delete(_ context.Context, key string) error {
@@ -133,4 +166,22 @@ func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 
 	// The cooldown is released so the user can retry immediately after a failure.
 	require.False(t, store.cooldowns[emailCodeKey("user@test.com")])
+}
+
+func TestEmailCodeUseCaseFailedResendKeepsExistingCode(t *testing.T) {
+	store := newEmailCodeStoreStub()
+	sender := &mailDeliveryStub{}
+	uc := NewEmailCodeUseCase(store, sender, nil)
+	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
+	code, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	delete(store.cooldowns, emailCodeKey("user@test.com"))
+	sender.err = maildomain.ErrDeliveryUnavailable
+	require.Error(t, uc.Send(context.Background(), "user@test.com"))
+
+	stored, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, err)
+	require.Equal(t, code, stored)
 }

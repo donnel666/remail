@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -89,9 +90,63 @@ func (s *EmailCodeStore) Get(ctx context.Context, key string) (string, error) {
 		}
 		return "", fmt.Errorf("redis email code get: %w", err)
 	}
+	if strings.HasPrefix(val, "claimed:") {
+		if separator := strings.LastIndexByte(val, ':'); separator > len("claimed:") {
+			return val[separator+1:], nil
+		}
+	}
 	return val, nil
+}
+
+func (s *EmailCodeStore) Claim(ctx context.Context, key, expected, claimToken string) (bool, error) {
+	claimed, err := emailCodeClaimScript.Run(ctx, s.rdb, []string{emailCodeRedisKey(key)}, expected, claimToken).Int64()
+	if err != nil {
+		return false, fmt.Errorf("redis email code claim: %w", err)
+	}
+	return claimed == 1, nil
+}
+
+func (s *EmailCodeStore) Commit(ctx context.Context, key, claimToken string) (bool, error) {
+	committed, err := emailCodeCommitScript.Run(ctx, s.rdb, []string{emailCodeRedisKey(key)}, claimToken).Int64()
+	if err != nil {
+		return false, fmt.Errorf("redis email code commit: %w", err)
+	}
+	return committed == 1, nil
+}
+
+func (s *EmailCodeStore) Restore(ctx context.Context, key, claimToken, code string) (bool, error) {
+	restored, err := emailCodeRestoreScript.Run(ctx, s.rdb, []string{emailCodeRedisKey(key)}, claimToken, code).Int64()
+	if err != nil {
+		return false, fmt.Errorf("redis email code restore: %w", err)
+	}
+	return restored == 1, nil
 }
 
 func (s *EmailCodeStore) Delete(ctx context.Context, key string) error {
 	return s.rdb.Del(ctx, emailCodeRedisKey(key)).Err()
 }
+
+var emailCodeClaimScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+redis.call('SET', KEYS[1], 'claimed:' .. ARGV[2] .. ':' .. ARGV[1], 'KEEPTTL')
+return 1
+`)
+
+var emailCodeCommitScript = redis.NewScript(`
+local value = redis.call('GET', KEYS[1])
+local prefix = 'claimed:' .. ARGV[1] .. ':'
+if not value or string.sub(value, 1, string.len(prefix)) ~= prefix then
+    return 0
+end
+return redis.call('DEL', KEYS[1])
+`)
+
+var emailCodeRestoreScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= 'claimed:' .. ARGV[1] .. ':' .. ARGV[2] then
+    return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+return 1
+`)
