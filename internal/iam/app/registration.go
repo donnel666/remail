@@ -67,7 +67,7 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 		Email:        normalizedEmail,
 		PasswordHash: hash,
 		Nickname:     strings.TrimSpace(nickname),
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 		UserGroupID:  1,
 		TokenVersion: 0,

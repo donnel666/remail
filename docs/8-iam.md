@@ -13,6 +13,7 @@
 | 2026-07-09 | V1.6 | Codex | 按接口命名清洁度要求规范 IAM URI：供应商申请改为 `/v1/suppliers/applications`，用户权益分组改为 `/v1/admin/users/groups`；只调整 URI 命名，不改变 RBAC、供应商申请和权益分组语义。 |
 | 2026-07-12 | V1.7 | Codex | 补充管理员 Microsoft 资源管理的 owner 批量查询、安全显示、转移/公开供给资格和组合权限规则；IAM 只提供身份与资格，不接管资源事实。 |
 | 2026-07-17 | V1.8 | Codex | 补充管理员用户管理落地：`GET /v1/admin/users` 增加 `role/enabled/userGroupId/created*` 过滤与 `facets`；新增管理员建号 `POST /v1/admin/users`、资料/邮箱/密码编辑扩展 `PATCH`、单条 `DELETE`、`selection`(ids/filter) 批量启停/删除/强退，以及 `GET .../{userId}/invitations` 邀请关系总览。批量恒排除 `super_admin`、`filter` 模式必须携带 `filter` 对象、无条数上限（大量匹配由服务端分块执行）；沿用既有 `iam:user` read/write/operate 权限，不新增权限或改变 RBAC/Casbin 语义。 |
+| 2026-07-19 | V1.9 | Codex | 用户生命周期统一为 `active/disabled/deleted`，`status` 是唯一状态源；管理员删除改为逻辑删除并保留订单、钱包、资源和供应商申请等跨 BC 历史。现有 API `enabled` 字段和筛选保持兼容，由 `status=active` 派生。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -245,10 +246,10 @@ canceled
 | `GET` | `/v1/admin/users` | 用户查询；支持 `ids` 批量精确查询、`search` 邮箱/昵称/ID 搜索，以及 `role`/`enabled`/`userGroupId`/`createdFrom`/`createdTo` 过滤；非 `ids` 查询返回 `facets`（角色/状态/权益分组计数，供页签与筛选计数）。 |
 | `POST` | `/v1/admin/users` | 管理员直接创建用户；管理员设定初始密码，不走邮箱验证码。提升为 `super_admin` 需 `iam:permission/sensitive`。 |
 | `PATCH` | `/v1/admin/users/{userId}` | 启停、RBAC 角色、权益分组、邮箱、昵称、密码变更；改密与禁用按原规则递增 `tokenVersion` 并清理会话。 |
-| `DELETE` | `/v1/admin/users/{userId}` | 硬删除单个非 `super_admin` 用户并清理其会话；其他 BC 的历史记录按 owner id 保留。 |
+| `DELETE` | `/v1/admin/users/{userId}` | 将单个非 `super_admin` 用户标记为 `deleted`，递增 `tokenVersion` 并清理会话；保留邮箱唯一占用以及其他 BC 的历史记录。 |
 | `POST` | `/v1/admin/users/enable` | 按 `selection`（`mode=ids/filter`）批量启用；返回 `{requested,affected,skipped}`。 |
 | `POST` | `/v1/admin/users/disable` | 按 `selection` 批量禁用（递增 `tokenVersion`、清理会话）。 |
-| `POST` | `/v1/admin/users/delete` | 按 `selection` 批量硬删除。 |
+| `POST` | `/v1/admin/users/delete` | 按 `selection` 批量标记为 `deleted`。 |
 | `POST` | `/v1/admin/users/sessions/revoke` | 按 `selection` 批量强制退出。批量端点恒排除 `super_admin`，`filter` 模式必须携带 `filter` 对象（缺失即 `400`），空值 `filter` 表示“全部匹配”；无条数上限，大量匹配由服务端分块执行。 |
 | `GET` | `/v1/admin/users/{userId}/invitations` | 用户邀请关系总览（邀请人 + 直接被邀请人），源自 referral 邀请码消费事实。 |
 | `GET` | `/v1/admin/users/groups` | 用户权益分组列表。 |

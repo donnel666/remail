@@ -26,7 +26,7 @@ type UserModel struct {
 	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null"`
 	PasswordHash string         `gorm:"type:varchar(255);not null;column:password_hash"`
 	Nickname     string         `gorm:"type:varchar(100);not null;default:''"`
-	Enabled      bool           `gorm:"not null;default:true"`
+	Status       string         `gorm:"type:varchar(32);not null;default:'active'"`
 	Role         string         `gorm:"type:varchar(32);not null;default:'user'"`
 	UserGroupID  uint           `gorm:"not null;default:1;column:user_group_id"`
 	UserGroup    UserGroupModel `gorm:"foreignKey:UserGroupID"`
@@ -112,7 +112,7 @@ func (m *UserModel) toDomain() *domain.User {
 		Email:        m.Email,
 		PasswordHash: m.PasswordHash,
 		Nickname:     m.Nickname,
-		Enabled:      m.Enabled,
+		Status:       domain.UserStatus(m.Status),
 		Role:         domain.Role(m.Role),
 		UserGroupID:  m.UserGroupID,
 		UserGroup: domain.UserGroup{
@@ -146,7 +146,7 @@ func fromDomain(u *domain.User) *UserModel {
 		Email:        u.Email,
 		PasswordHash: u.PasswordHash,
 		Nickname:     u.Nickname,
-		Enabled:      u.Enabled,
+		Status:       u.Status.String(),
 		Role:         role.String(),
 		UserGroupID:  userGroupID,
 		TokenVersion: u.TokenVersion,
@@ -232,6 +232,7 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 	}
 	user.ID = model.ID
 	user.UserGroupID = model.UserGroupID
+	user.Status = domain.UserStatus(model.Status)
 	user.CreatedAt = model.CreatedAt
 	user.UpdatedAt = model.UpdatedAt
 	_ = r.loadUserGroup(ctx, user)
@@ -264,6 +265,7 @@ func (r *UserRepo) CreateWithInvite(ctx context.Context, user *domain.User, invi
 
 		user.ID = model.ID
 		user.UserGroupID = model.UserGroupID
+		user.Status = domain.UserStatus(model.Status)
 		user.CreatedAt = model.CreatedAt
 		user.UpdatedAt = model.UpdatedAt
 		return nil
@@ -328,6 +330,7 @@ func (r *UserRepo) CreateFirstUser(ctx context.Context, user *domain.User) error
 
 		user.ID = model.ID
 		user.UserGroupID = model.UserGroupID
+		user.Status = domain.UserStatus(model.Status)
 		user.CreatedAt = model.CreatedAt
 		user.UpdatedAt = model.UpdatedAt
 		return nil
@@ -355,7 +358,7 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 
 func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
 	var model UserModel
-	err := r.dbFor(ctx).Preload("UserGroup").First(&model, id).Error
+	err := r.dbFor(ctx).Preload("UserGroup").Where("id = ? AND status <> ?", id, domain.UserStatusDeleted).First(&model).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -369,7 +372,7 @@ func (r *UserRepo) RecordLogin(ctx context.Context, userID uint, expectedPasswor
 	var user *domain.User
 	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&UserModel{}).
-			Where("id = ? AND enabled = ? AND BINARY password_hash = ?", userID, true, expectedPasswordHash).
+			Where("id = ? AND status = ? AND BINARY password_hash = ?", userID, domain.UserStatusActive, expectedPasswordHash).
 			UpdateColumn("last_login_at", time.Now())
 		if result.Error != nil {
 			return fmt.Errorf("update last login: %w", result.Error)
@@ -393,7 +396,7 @@ func (r *UserRepo) RecordLogin(ctx context.Context, userID uint, expectedPasswor
 
 func (r *UserRepo) UpdatePassword(ctx context.Context, userID uint, expectedPasswordHash, passwordHash string) (bool, error) {
 	result := r.dbFor(ctx).Model(&UserModel{}).
-		Where("id = ? AND enabled = ? AND BINARY password_hash = ?", userID, true, expectedPasswordHash).
+		Where("id = ? AND status = ? AND BINARY password_hash = ?", userID, domain.UserStatusActive, expectedPasswordHash).
 		UpdateColumns(map[string]any{
 			"password_hash": passwordHash,
 			"token_version": gorm.Expr("token_version + 1"),
@@ -407,7 +410,7 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, userID uint, expectedPass
 func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := fromDomain(user)
-		if err := tx.Model(&UserModel{}).Where("id = ?", user.ID).Select("*").Updates(model).Error; err != nil {
+		if err := tx.Model(&UserModel{}).Where("id = ? AND status <> ?", user.ID, domain.UserStatusDeleted).Select("*").Updates(model).Error; err != nil {
 			return fmt.Errorf("update user with log: %w", err)
 		}
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -420,7 +423,7 @@ func (r *UserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.User
 func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	updates := make(map[string]any, 4)
 	if enabled != nil {
-		updates["enabled"] = *enabled
+		updates["status"] = userStatusFromEnabled(*enabled)
 	}
 	if role != nil {
 		updates["role"] = role.String()
@@ -432,7 +435,7 @@ func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context
 }
 
 // UpdateNonSuperAdminProfileWithOperationLog updates profile and access fields
-// (email, nickname, password, enabled, role, group) atomically, refuses a
+// (email, nickname, password, status, role, group) atomically, refuses a
 // super_admin row, and writes the operation log in the same transaction.
 func (r *UserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	updates := make(map[string]any, 6)
@@ -446,7 +449,7 @@ func (r *UserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Contex
 		updates["password_hash"] = *passwordHash
 	}
 	if enabled != nil {
-		updates["enabled"] = *enabled
+		updates["status"] = userStatusFromEnabled(*enabled)
 	}
 	if role != nil {
 		updates["role"] = role.String()
@@ -472,14 +475,14 @@ func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates
 		}
 
 		result := tx.Model(&UserModel{}).
-			Where("id = ? AND role <> ?", userID, domain.RoleSuperAdmin.String()).
+			Where("id = ? AND role <> ? AND status <> ?", userID, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted).
 			Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("update non-super-admin with log: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
 			var current UserModel
-			if err := tx.Select("id", "role").First(&current, userID).Error; err != nil {
+			if err := tx.Select("id", "role", "status").First(&current, userID).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return domain.ErrUserNotFound
 				}
@@ -488,13 +491,16 @@ func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates
 			if domain.Role(current.Role) == domain.RoleSuperAdmin {
 				return domain.ErrPermissionDenied
 			}
+			if domain.UserStatus(current.Status).IsDeleted() {
+				return domain.ErrUserNotFound
+			}
 		}
 
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
 			return fmt.Errorf("create operation log: %w", err)
 		}
 		var model UserModel
-		if err := tx.Preload("UserGroup").First(&model, userID).Error; err != nil {
+		if err := tx.Preload("UserGroup").Where("id = ? AND status <> ?", userID, domain.UserStatusDeleted).First(&model).Error; err != nil {
 			return fmt.Errorf("reload updated user access: %w", err)
 		}
 		updated = model.toDomain()
@@ -506,14 +512,21 @@ func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates
 	return updated, nil
 }
 
-// DeleteNonSuperAdminWithOperationLog hard-deletes a user, refusing a
-// super_admin row, and writes the operation log in the same transaction.
-// ponytail: leaves other BCs' historical rows (orders/wallet/resources) keyed
-// by owner id; add cascade cleanup if orphan rows ever need pruning.
+func userStatusFromEnabled(enabled bool) domain.UserStatus {
+	if enabled {
+		return domain.UserStatusActive
+	}
+	return domain.UserStatusDisabled
+}
+
+// DeleteNonSuperAdminWithOperationLog logically deletes a user, refusing a
+// super_admin row, invalidating sessions, and preserving cross-context history.
 func (r *UserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current UserModel
-		if err := tx.Select("id", "role").First(&current, userID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "role", "status").
+			First(&current, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrUserNotFound
 			}
@@ -522,8 +535,20 @@ func (r *UserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, user
 		if domain.Role(current.Role) == domain.RoleSuperAdmin {
 			return domain.ErrPermissionDenied
 		}
-		if err := tx.Delete(&UserModel{}, userID).Error; err != nil {
-			return fmt.Errorf("delete user: %w", err)
+		if domain.UserStatus(current.Status).IsDeleted() {
+			return domain.ErrUserNotFound
+		}
+		result := tx.Model(&UserModel{}).
+			Where("id = ? AND role <> ? AND status <> ?", userID, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted).
+			UpdateColumns(map[string]any{
+				"status":        domain.UserStatusDeleted,
+				"token_version": gorm.Expr("token_version + 1"),
+			})
+		if result.Error != nil {
+			return fmt.Errorf("delete user: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrPermissionDenied
 		}
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
 			return fmt.Errorf("create operation log: %w", err)
@@ -532,10 +557,6 @@ func (r *UserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, user
 	})
 }
 
-// ResolveBulkUserIDs returns the non-super-admin user IDs targeted by a bulk
-// selection, newest first and capped at 1000. When ids is non-empty it selects
-// exactly those rows; otherwise it applies the admin list filter. super_admin
-// rows are always excluded.
 // bulkUserChunkSize bounds the id count per batch statement so an uncapped
 // filter selection can't exceed MySQL's prepared-statement placeholder limit.
 const bulkUserChunkSize = 5000
@@ -561,7 +582,8 @@ func batchInChunks(ids []uint, fn func(chunk []uint) (int64, error)) (int64, err
 // selection. Uncapped: filter selections operate on every matching user; the
 // follow-up mutation is chunked by batchInChunks.
 func (r *UserRepo) ResolveBulkUserIDs(ctx context.Context, ids []uint, filter domain.UserListFilter) ([]uint, error) {
-	q := r.dbFor(ctx).Model(&UserModel{}).Where("role <> ?", domain.RoleSuperAdmin.String())
+	q := r.dbFor(ctx).Model(&UserModel{}).
+		Where("role <> ? AND status <> ?", domain.RoleSuperAdmin.String(), domain.UserStatusDeleted)
 	if len(ids) > 0 {
 		q = q.Where("id IN ?", ids)
 	} else {
@@ -574,17 +596,18 @@ func (r *UserRepo) ResolveBulkUserIDs(ctx context.Context, ids []uint, filter do
 	return out, nil
 }
 
-// BatchSetEnabledNonSuperAdmin flips enabled for the given non-super-admin rows
-// whose current enabled differs, bumping token_version when disabling so live
+// BatchSetEnabledNonSuperAdmin flips active/disabled for non-super-admin rows,
+// bumping token_version when disabling so live
 // sessions are rejected (INV-I3). Returns the number of rows changed.
 func (r *UserRepo) BatchSetEnabledNonSuperAdmin(ctx context.Context, ids []uint, enabled bool) (int64, error) {
+	status := userStatusFromEnabled(enabled)
 	return batchInChunks(ids, func(chunk []uint) (int64, error) {
-		updates := map[string]any{"enabled": enabled}
+		updates := map[string]any{"status": status}
 		if !enabled {
 			updates["token_version"] = gorm.Expr("token_version + 1")
 		}
 		result := r.dbFor(ctx).Model(&UserModel{}).
-			Where("id IN ? AND role <> ? AND enabled <> ?", chunk, domain.RoleSuperAdmin.String(), enabled).
+			Where("id IN ? AND role <> ? AND status <> ? AND status <> ?", chunk, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted, status).
 			Updates(updates)
 		if result.Error != nil {
 			return 0, fmt.Errorf("batch set enabled non-super-admin: %w", result.Error)
@@ -598,7 +621,7 @@ func (r *UserRepo) BatchSetEnabledNonSuperAdmin(ctx context.Context, ids []uint,
 func (r *UserRepo) BatchBumpTokenVersionNonSuperAdmin(ctx context.Context, ids []uint) (int64, error) {
 	return batchInChunks(ids, func(chunk []uint) (int64, error) {
 		result := r.dbFor(ctx).Model(&UserModel{}).
-			Where("id IN ? AND role <> ?", chunk, domain.RoleSuperAdmin.String()).
+			Where("id IN ? AND role <> ? AND status <> ?", chunk, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted).
 			Update("token_version", gorm.Expr("token_version + 1"))
 		if result.Error != nil {
 			return 0, fmt.Errorf("batch bump token version non-super-admin: %w", result.Error)
@@ -607,18 +630,30 @@ func (r *UserRepo) BatchBumpTokenVersionNonSuperAdmin(ctx context.Context, ids [
 	})
 }
 
-// BatchDeleteNonSuperAdmin hard-deletes the given non-super-admin rows and
+// BatchDeleteNonSuperAdmin logically deletes the given non-super-admin rows and
 // returns the number deleted.
 func (r *UserRepo) BatchDeleteNonSuperAdmin(ctx context.Context, ids []uint) (int64, error) {
-	return batchInChunks(ids, func(chunk []uint) (int64, error) {
-		result := r.dbFor(ctx).
-			Where("id IN ? AND role <> ?", chunk, domain.RoleSuperAdmin.String()).
-			Delete(&UserModel{})
-		if result.Error != nil {
-			return 0, fmt.Errorf("batch delete non-super-admin: %w", result.Error)
-		}
-		return result.RowsAffected, nil
+	var affected int64
+	err := r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		affected, err = batchInChunks(ids, func(chunk []uint) (int64, error) {
+			result := tx.Model(&UserModel{}).
+				Where("id IN ? AND role <> ? AND status <> ?", chunk, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted).
+				UpdateColumns(map[string]any{
+					"status":        domain.UserStatusDeleted,
+					"token_version": gorm.Expr("token_version + 1"),
+				})
+			if result.Error != nil {
+				return 0, fmt.Errorf("delete users: %w", result.Error)
+			}
+			return result.RowsAffected, nil
+		})
+		return err
 	})
+	if err != nil {
+		return 0, fmt.Errorf("batch delete non-super-admin: %w", err)
+	}
+	return affected, nil
 }
 
 // FacetsByFilter returns admin-list aggregate counts. Each dimension is counted
@@ -646,18 +681,19 @@ func (r *UserRepo) FacetsByFilter(ctx context.Context, filter domain.UserListFil
 	statusFilter := filter
 	statusFilter.Enabled = nil
 	statusRows := []struct {
-		Enabled bool
-		Count   int64
+		Status string
+		Count  int64
 	}{}
 	if err := applyUserListFilter(r.db.WithContext(ctx).Model(&UserModel{}), statusFilter).
-		Select("enabled, COUNT(*) AS count").Group("enabled").Scan(&statusRows).Error; err != nil {
+		Select("status, COUNT(*) AS count").Group("status").Scan(&statusRows).Error; err != nil {
 		return nil, fmt.Errorf("facet status: %w", err)
 	}
 	status := domain.StatusFacet{}
 	for _, row := range statusRows {
-		if row.Enabled {
+		switch domain.UserStatus(row.Status) {
+		case domain.UserStatusActive:
 			status.Enabled = row.Count
-		} else {
+		case domain.UserStatusDisabled:
 			status.Disabled = row.Count
 		}
 	}
@@ -686,6 +722,7 @@ func (r *UserRepo) FacetsByFilter(ctx context.Context, filter domain.UserListFil
 }
 
 func applyUserListFilter(q *gorm.DB, filter domain.UserListFilter) *gorm.DB {
+	q = q.Where("status <> ?", domain.UserStatusDeleted)
 	if len(filter.IDs) > 0 {
 		q = q.Where("id IN ?", filter.IDs)
 	}
@@ -693,7 +730,7 @@ func applyUserListFilter(q *gorm.DB, filter domain.UserListFilter) *gorm.DB {
 		q = q.Where("role = ?", filter.Role.String())
 	}
 	if filter.Enabled != nil {
-		q = q.Where("enabled = ?", *filter.Enabled)
+		q = q.Where("status = ?", userStatusFromEnabled(*filter.Enabled))
 	}
 	if filter.UserGroupID != nil {
 		q = q.Where("user_group_id = ?", *filter.UserGroupID)
@@ -768,7 +805,11 @@ func (r *UserRepo) ListByFilter(ctx context.Context, filter domain.UserListFilte
 }
 
 func (r *UserRepo) Count(ctx context.Context) (int64, error) {
-	return r.CountByFilter(ctx, domain.UserListFilter{})
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return count, nil
 }
 
 func (r *UserRepo) CountByFilter(ctx context.Context, filter domain.UserListFilter) (int64, error) {
@@ -1266,13 +1307,16 @@ func (r *UserRepo) GetOrCreateReferralInvite(ctx context.Context, userID uint, c
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user UserModel
 		if err := tx.WithContext(ctx).
-			Select("id").
+			Select("id", "status").
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&user, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrUserNotFound
 			}
 			return fmt.Errorf("lock referral invite owner: %w", err)
+		}
+		if domain.UserStatus(user.Status) != domain.UserStatusActive {
+			return domain.ErrUserNotFound
 		}
 
 		var existing InviteModel

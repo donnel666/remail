@@ -36,9 +36,9 @@ func TestUserRepoInviteBrowseAndEnrichmentMySQL(t *testing.T) {
 	vip := &domain.UserGroup{Code: "vip", Name: "VIP", Enabled: true}
 	require.NoError(t, repo.CreateUserGroup(ctx, vip))
 
-	admin := &domain.User{Email: "admin@test.local", PasswordHash: "h", Nickname: "Admin", Enabled: true, Role: domain.RoleAdmin, UserGroupID: staff.ID}
+	admin := &domain.User{Email: "admin@test.local", PasswordHash: "h", Nickname: "Admin", Status: domain.UserStatusActive, Role: domain.RoleAdmin, UserGroupID: staff.ID}
 	require.NoError(t, repo.Create(ctx, admin))
-	member := &domain.User{Email: "member@test.local", PasswordHash: "h", Nickname: "Member", Enabled: true, Role: domain.RoleUser, UserGroupID: vip.ID}
+	member := &domain.User{Email: "member@test.local", PasswordHash: "h", Nickname: "Member", Status: domain.UserStatusActive, Role: domain.RoleUser, UserGroupID: vip.ID}
 	require.NoError(t, repo.Create(ctx, member))
 
 	inv1 := &domain.Invite{Code: "ADMIN1", Enabled: true, MaxUse: 5}

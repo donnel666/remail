@@ -64,8 +64,8 @@ func (s *credentialSessionStoreStub) DeleteByUserID(context.Context, uint) error
 
 func TestLoginUsesCurrentAuthorizationStateAfterCredentialCheck(t *testing.T) {
 	repo := &credentialRepoStub{
-		byEmail:  &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Enabled: true, Role: domain.RoleUser, TokenVersion: 1},
-		recorded: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Enabled: true, Role: domain.RoleSupplier, TokenVersion: 4},
+		byEmail:  &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive, Role: domain.RoleUser, TokenVersion: 1},
+		recorded: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive, Role: domain.RoleSupplier, TokenVersion: 4},
 	}
 	sessions := &credentialSessionStoreStub{}
 	result, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions, nil).
@@ -79,7 +79,7 @@ func TestLoginUsesCurrentAuthorizationStateAfterCredentialCheck(t *testing.T) {
 
 func TestLoginDoesNotCreateSessionWhenCredentialSnapshotBecameStale(t *testing.T) {
 	repo := &credentialRepoStub{
-		byEmail: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Enabled: true},
+		byEmail: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive},
 	}
 	sessions := &credentialSessionStoreStub{}
 	_, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions, nil).
@@ -91,7 +91,7 @@ func TestLoginDoesNotCreateSessionWhenCredentialSnapshotBecameStale(t *testing.T
 
 func TestChangePasswordDoesNotReportSuccessWhenGuardedUpdateLosesRace(t *testing.T) {
 	repo := &credentialRepoStub{
-		byID:     &domain.User{ID: 7, PasswordHash: "old-hash", Enabled: true},
+		byID:     &domain.User{ID: 7, PasswordHash: "old-hash", Status: domain.UserStatusActive},
 		updateOK: false,
 	}
 	sessions := &credentialSessionStoreStub{}

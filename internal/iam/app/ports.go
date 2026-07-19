@@ -16,10 +16,11 @@ type UserRepository interface {
 	// CreateWithInvite persists a new user and atomically consumes an invite.
 	CreateWithInvite(ctx context.Context, user *domain.User, inviteCode string) error
 
-	// FindByEmail looks up a user by email. Returns nil, nil if not found.
+	// FindByEmail includes logically deleted users so credentials retain their
+	// timing behavior and deleted emails remain reserved.
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 
-	// FindByID looks up a user by primary key. Returns nil, nil if not found.
+	// FindByID looks up a non-deleted user by primary key.
 	FindByID(ctx context.Context, id uint) (*domain.User, error)
 
 	// RecordLogin updates only last_login_at when the verified credential
@@ -27,14 +28,14 @@ type UserRepository interface {
 	RecordLogin(ctx context.Context, userID uint, expectedPasswordHash string) (*domain.User, error)
 
 	// UpdatePassword updates only password_hash and atomically bumps
-	// token_version when the account is still enabled and the password snapshot
+	// token_version when the account is active and the password snapshot
 	// is current. The bool reports whether the guarded update was applied.
 	UpdatePassword(ctx context.Context, userID uint, expectedPasswordHash, passwordHash string) (bool, error)
 
 	// List returns a paginated slice of users ordered by created_at desc.
 	List(ctx context.Context, offset, limit int) ([]domain.User, error)
 
-	// Count returns the total number of users.
+	// Count includes deleted users for the one-time activation invariant.
 	Count(ctx context.Context) (int64, error)
 
 	// ListByFilter returns a paginated slice of users matching admin filters.
@@ -43,7 +44,7 @@ type UserRepository interface {
 	// CountByFilter returns the total number of users matching admin filters.
 	CountByFilter(ctx context.Context, filter domain.UserListFilter) (int64, error)
 
-	// FindByIDs returns users matching the given IDs.
+	// FindByIDs includes deleted users for historical cross-context summaries.
 	FindByIDs(ctx context.Context, ids []uint) ([]domain.User, error)
 
 	ListUserGroups(ctx context.Context) ([]domain.UserGroup, error)
@@ -64,21 +65,21 @@ type UserRepository interface {
 	UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
 
 	// UpdateNonSuperAdminProfileWithOperationLog updates profile and access
-	// fields (email, nickname, password, enabled, role, group) atomically,
+	// fields (email, nickname, password, status, role, group) atomically,
 	// refuses a super_admin row, and writes the operation log in one transaction.
 	UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
 
-	// DeleteNonSuperAdminWithOperationLog hard-deletes a user, refusing a
+	// DeleteNonSuperAdminWithOperationLog logically deletes a user, refusing a
 	// super_admin row, and writes the operation log in the same transaction.
 	DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error
 
-	// ResolveBulkUserIDs returns non-super-admin user IDs for a bulk selection,
-	// capped at 1000. When ids is non-empty it selects those rows; otherwise it
-	// applies the list filter.
+	// ResolveBulkUserIDs returns non-super-admin user IDs for a bulk selection.
+	// When ids is non-empty it selects those rows; otherwise it applies the list
+	// filter. Large selections are chunked by the follow-up mutation.
 	ResolveBulkUserIDs(ctx context.Context, ids []uint, filter domain.UserListFilter) ([]uint, error)
 
-	// BatchSetEnabledNonSuperAdmin flips enabled for the given non-super-admin
-	// rows whose value differs (bumping token_version on disable) and returns the
+	// BatchSetEnabledNonSuperAdmin flips active/disabled for the given
+	// non-super-admin rows (bumping token_version on disable) and returns the
 	// number of rows changed.
 	BatchSetEnabledNonSuperAdmin(ctx context.Context, ids []uint, enabled bool) (int64, error)
 
@@ -86,7 +87,7 @@ type UserRepository interface {
 	// non-super-admin rows and returns the number of rows changed.
 	BatchBumpTokenVersionNonSuperAdmin(ctx context.Context, ids []uint) (int64, error)
 
-	// BatchDeleteNonSuperAdmin hard-deletes the given non-super-admin rows and
+	// BatchDeleteNonSuperAdmin logically deletes the given non-super-admin rows and
 	// returns the number of rows deleted.
 	BatchDeleteNonSuperAdmin(ctx context.Context, ids []uint) (int64, error)
 

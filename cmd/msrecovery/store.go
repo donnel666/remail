@@ -142,7 +142,7 @@ func (s *recoveryStore) validateOperator(ctx context.Context, operatorUserID uin
 	if err != nil {
 		return err
 	}
-	if operator == nil || !operator.Enabled || !operator.Role.HasAdminAccess() {
+	if operator == nil || !operator.IsActive() || !operator.Role.HasAdminAccess() {
 		return errRecoveryOperatorUnauthorized
 	}
 	return nil

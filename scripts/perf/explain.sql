@@ -14,7 +14,7 @@ JOIN users u ON u.id = er.owner_user_id
 WHERE ms.alloc_bucket = MOD(@resource_id, 64)
   AND ms.for_sale = TRUE
   AND ms.status = 'normal'
-  AND u.enabled = TRUE
+  AND u.status = 'active'
   AND u.role IN ('supplier', 'admin', 'super_admin')
 	  AND NOT EXISTS (
 	      SELECT 1

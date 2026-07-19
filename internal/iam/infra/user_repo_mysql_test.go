@@ -15,6 +15,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -62,7 +63,7 @@ func TestUserRepoCreateFirstUserConcurrentMySQL(t *testing.T) {
 			errs <- repo.CreateFirstUser(context.Background(), &domain.User{
 				Email:        fmt.Sprintf("admin-%d@test.local", i),
 				PasswordHash: "hash",
-				Enabled:      true,
+				Status:       domain.UserStatusActive,
 				Role:         domain.RoleSuperAdmin,
 			})
 		}(i)
@@ -106,6 +107,40 @@ func TestUserRepoRoleCheckMySQL(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestUserStatusMigrationMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir(t), 34))
+
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (990351, 'active-migration@test.local', 'hash', 'active', TRUE, 'user'),
+    (990352, 'disabled-migration@test.local', 'hash', 'disabled', FALSE, 'user')`).Error)
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir(t), 35))
+
+	var rows []struct {
+		ID     uint
+		Status string
+	}
+	require.NoError(t, db.Table("users").Select("id", "status").Where("id IN ?", []uint{990351, 990352}).Order("id ASC").Scan(&rows).Error)
+	require.Equal(t, []struct {
+		ID     uint
+		Status string
+	}{
+		{ID: 990351, Status: string(domain.UserStatusActive)},
+		{ID: 990352, Status: string(domain.UserStatusDisabled)},
+	}, rows)
+
+	var enabledColumns int64
+	require.NoError(t, db.Raw(`
+SELECT COUNT(*)
+FROM information_schema.columns
+WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'enabled'`).Scan(&enabledColumns).Error)
+	require.Zero(t, enabledColumns)
+}
+
 func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 	repo := NewUserRepo(db)
@@ -113,12 +148,12 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 	user := &domain.User{
 		Email:        "user@test.local",
 		PasswordHash: "hash",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), user))
 
-	user.Enabled = false
+	user.Status = domain.UserStatusDisabled
 	user.TokenVersion++
 	require.NoError(t, repo.UpdateWithOperationLog(context.Background(), user, &governancedomain.OperationLog{
 		OperatorUserID: 1,
@@ -133,7 +168,7 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 
 	var model UserModel
 	require.NoError(t, db.First(&model, user.ID).Error)
-	require.False(t, model.Enabled)
+	require.Equal(t, string(domain.UserStatusDisabled), model.Status)
 	require.Equal(t, 1, model.TokenVersion)
 
 	var logCount int64
@@ -141,6 +176,86 @@ func TestUserRepoUpdateWithOperationLogMySQL(t *testing.T) {
 		Where("operation_type = ? AND resource_type = ? AND resource_id = ? AND request_id = ?", "iam.user.update", "user", fmt.Sprintf("%d", user.ID), "req-user-update").
 		Count(&logCount).Error)
 	require.Equal(t, int64(1), logCount)
+}
+
+func TestUserRepoDeleteLogicallyDeletesAndPreservesHistoryMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	ctx := context.Background()
+	user := &domain.User{
+		Email:        "supplier-delete@test.local",
+		PasswordHash: "hash",
+		Status:       domain.UserStatusActive,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(ctx, user))
+	require.NoError(t, db.Create(&SupplierApplicationModel{
+		ApplicantUserID: user.ID,
+		Reason:          "test application",
+		Status:          string(domain.SupplierApplicationReviewing),
+	}).Error)
+
+	require.NoError(t, repo.DeleteNonSuperAdminWithOperationLog(ctx, user.ID, &governancedomain.OperationLog{
+		OperatorUserID: 1,
+		OperationType:  "iam.user.delete",
+		ResourceType:   "user",
+		ResourceID:     fmt.Sprintf("%d", user.ID),
+		Path:           fmt.Sprintf("/v1/admin/users/%d", user.ID),
+		Result:         "success",
+		SafeSummary:    "User deleted.",
+		RequestID:      "req-supplier-user-delete",
+	}))
+
+	visible, err := repo.FindByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.Nil(t, visible)
+	var stored UserModel
+	require.NoError(t, db.First(&stored, user.ID).Error)
+	require.Equal(t, string(domain.UserStatusDeleted), stored.Status)
+	require.Equal(t, 1, stored.TokenVersion)
+	var applicationCount int64
+	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", user.ID).Count(&applicationCount).Error)
+	require.Equal(t, int64(1), applicationCount)
+	require.ErrorIs(t, repo.DeleteNonSuperAdminWithOperationLog(ctx, user.ID, &governancedomain.OperationLog{}), domain.ErrUserNotFound)
+	require.ErrorIs(t, repo.Create(ctx, &domain.User{Email: user.Email, PasswordHash: "hash", Status: domain.UserStatusActive, Role: domain.RoleUser}), domain.ErrEmailAlreadyExists)
+
+	bulkUser := &domain.User{
+		Email:        "supplier-bulk-delete@test.local",
+		PasswordHash: "hash",
+		Status:       domain.UserStatusActive,
+		Role:         domain.RoleUser,
+	}
+	require.NoError(t, repo.Create(ctx, bulkUser))
+	protectedUser := &domain.User{
+		Email:        "supplier-protected@test.local",
+		PasswordHash: "hash",
+		Status:       domain.UserStatusActive,
+		Role:         domain.RoleSuperAdmin,
+	}
+	require.NoError(t, repo.Create(ctx, protectedUser))
+	for _, applicantUserID := range []uint{bulkUser.ID, protectedUser.ID} {
+		require.NoError(t, db.Create(&SupplierApplicationModel{
+			ApplicantUserID: applicantUserID,
+			Reason:          "batch test application",
+			Status:          string(domain.SupplierApplicationReviewing),
+		}).Error)
+	}
+
+	affected, err := repo.BatchDeleteNonSuperAdmin(ctx, []uint{bulkUser.ID, protectedUser.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), affected)
+	stored = UserModel{}
+	require.NoError(t, db.First(&stored, bulkUser.ID).Error)
+	require.Equal(t, string(domain.UserStatusDeleted), stored.Status)
+	require.Equal(t, 1, stored.TokenVersion)
+	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", bulkUser.ID).Count(&applicationCount).Error)
+	require.Equal(t, int64(1), applicationCount)
+	stored = UserModel{}
+	require.NoError(t, db.First(&stored, protectedUser.ID).Error)
+	require.Equal(t, string(domain.UserStatusActive), stored.Status)
+	require.Zero(t, stored.TokenVersion)
+	require.NoError(t, db.Model(&SupplierApplicationModel{}).Where("applicant_user_id = ?", protectedUser.ID).Count(&applicationCount).Error)
+	require.Equal(t, int64(1), applicationCount)
 }
 
 func TestUserRepoCredentialSnapshotComparisonIsCaseSensitiveMySQL(t *testing.T) {
@@ -151,7 +266,7 @@ func TestUserRepoCredentialSnapshotComparisonIsCaseSensitiveMySQL(t *testing.T) 
 	user := &domain.User{
 		Email:        "credential-cas@test.local",
 		PasswordHash: originalHash,
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(ctx, user))
@@ -177,7 +292,7 @@ func TestUserRepoUpdateNonSuperAdminAccessWithOperationLogProtectsCurrentRoleMyS
 	user := &domain.User{
 		Email:        "stale-admin-update@test.local",
 		PasswordHash: "hash",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), user))
@@ -202,7 +317,7 @@ func TestUserRepoUpdateNonSuperAdminAccessWithOperationLogProtectsCurrentRoleMyS
 	var stored UserModel
 	require.NoError(t, db.First(&stored, user.ID).Error)
 	require.Equal(t, domain.RoleSuperAdmin.String(), stored.Role)
-	require.True(t, stored.Enabled)
+	require.Equal(t, string(domain.UserStatusActive), stored.Status)
 
 	var logCount int64
 	require.NoError(t, db.Table("operation_logs").
@@ -218,7 +333,7 @@ func TestUserRepoUpdateNonSuperAdminAccessPreservesUnrelatedConcurrentFieldsMySQ
 	user := &domain.User{
 		Email:        "partial-admin-update@test.local",
 		PasswordHash: "hash",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), user))
@@ -238,12 +353,12 @@ func TestUserRepoUpdateNonSuperAdminAccessPreservesUnrelatedConcurrentFieldsMySQ
 		RequestID:      "req-partial-user-update",
 	})
 	require.NoError(t, err)
-	require.False(t, updated.Enabled)
+	require.False(t, updated.IsActive())
 	require.Equal(t, domain.RoleAdmin, updated.Role)
 
 	var stored UserModel
 	require.NoError(t, db.First(&stored, user.ID).Error)
-	require.False(t, stored.Enabled)
+	require.Equal(t, string(domain.UserStatusDisabled), stored.Status)
 	require.Equal(t, domain.RoleAdmin.String(), stored.Role)
 
 	updated, err = repo.UpdateNonSuperAdminAccessWithOperationLog(context.Background(), user.ID, nil, nil, nil, true, &governancedomain.OperationLog{
@@ -258,7 +373,7 @@ func TestUserRepoUpdateNonSuperAdminAccessPreservesUnrelatedConcurrentFieldsMySQ
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.RoleAdmin, updated.Role)
-	require.False(t, updated.Enabled)
+	require.False(t, updated.IsActive())
 	require.Equal(t, 1, updated.TokenVersion)
 }
 
@@ -270,7 +385,7 @@ func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 		Email:        "alpha-search@example.com",
 		PasswordHash: "hash",
 		Nickname:     "Project Alpha",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), alpha))
@@ -278,7 +393,7 @@ func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 		Email:        "beta-search@example.com",
 		PasswordHash: "hash",
 		Nickname:     "Beta User",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), beta))
@@ -404,7 +519,7 @@ func TestUserRepoCreateWithInviteConcurrentMySQL(t *testing.T) {
 			errs <- repo.CreateWithInvite(context.Background(), &domain.User{
 				Email:        fmt.Sprintf("invite-user-%d@test.local", i),
 				PasswordHash: "hash",
-				Enabled:      true,
+				Status:       domain.UserStatusActive,
 				Role:         domain.RoleUser,
 			}, "INVITE-1")
 		}(i)
@@ -446,7 +561,7 @@ func TestUserRepoReferralInviteConstraintsMySQL(t *testing.T) {
 	owner := &domain.User{
 		Email:        "referral-owner@test.local",
 		PasswordHash: "hash",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), owner))
@@ -538,7 +653,7 @@ func TestPermissionServiceGuardedReplaceProtectsSensitiveAndSuperAdminMySQL(t *t
 	user := &domain.User{
 		Email:        "guarded-permissions@test.local",
 		PasswordHash: "hash",
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, repo.Create(context.Background(), user))

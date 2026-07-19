@@ -156,13 +156,17 @@ func (r *SupplierApplicationRepo) ApproveSupplierApplicationWithUserAndLog(ctx c
 		if err := updateSupplierApplicationReviewInTx(ctx, tx, application); err != nil {
 			return err
 		}
-		if err := tx.Model(&UserModel{}).
-			Where("id = ?", user.ID).
+		result := tx.Model(&UserModel{}).
+			Where("id = ? AND status <> ?", user.ID, domain.UserStatusDeleted).
 			Updates(map[string]interface{}{
 				"role":       user.Role.String(),
 				"updated_at": time.Now().UTC(),
-			}).Error; err != nil {
-			return fmt.Errorf("promote supplier application user: %w", err)
+			})
+		if result.Error != nil {
+			return fmt.Errorf("promote supplier application user: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrUserNotFound
 		}
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
 			return fmt.Errorf("create supplier application operation log: %w", err)

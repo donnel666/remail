@@ -171,10 +171,10 @@ func TestAdminMicrosoftMigrationConstraintsAndOwnerHistoryMySQL(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, enabled, role)
-VALUES
-    (9301, 'source-owner@test.local', 'hash', 1, 'supplier'),
-    (9302, 'target-owner@test.local', 'hash', 1, 'admin')`).Error)
+	INSERT INTO users(id, email, password_hash, status, role)
+	VALUES
+	    (9301, 'source-owner@test.local', 'hash', 'active', 'supplier'),
+	    (9302, 'target-owner@test.local', 'hash', 'active', 'admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO email_resources(id, type, owner_user_id)
 VALUES (9401, 'microsoft', 9301)`).Error)

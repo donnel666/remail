@@ -30,6 +30,23 @@ func TestRoleValidation(t *testing.T) {
 	}
 }
 
+func TestUserStatusLifecycle(t *testing.T) {
+	for _, status := range []UserStatus{UserStatusActive, UserStatusDisabled, UserStatusDeleted} {
+		if !status.IsValid() {
+			t.Fatalf("status %q should be valid", status)
+		}
+	}
+	if !UserStatusActive.IsActive() || UserStatusDisabled.IsActive() || UserStatusDeleted.IsActive() {
+		t.Fatal("only active users may authenticate")
+	}
+	if !UserStatusDeleted.IsDeleted() || UserStatusActive.IsDeleted() || UserStatusDisabled.IsDeleted() {
+		t.Fatal("only deleted status is logically deleted")
+	}
+	if UserStatus("unknown").IsValid() {
+		t.Fatal("unknown user status should be invalid")
+	}
+}
+
 func TestIsActivationNeeded(t *testing.T) {
 	tests := []struct {
 		name  string

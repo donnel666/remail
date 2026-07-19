@@ -221,6 +221,9 @@ func (r *mockUserRepo) Create(_ context.Context, user *domain.User) error {
 	}
 	r.seq++
 	user.ID = r.seq
+	if user.Status == "" {
+		user.Status = domain.UserStatusActive
+	}
 	r.users[user.ID] = user
 	r.byID[user.Email] = user.ID
 	return nil
@@ -245,7 +248,7 @@ func (r *mockUserRepo) FindByEmail(_ context.Context, email string) (*domain.Use
 func (r *mockUserRepo) FindByID(_ context.Context, id uint) (*domain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if u, ok := r.users[id]; ok {
+	if u, ok := r.users[id]; ok && !u.IsDeleted() {
 		cp := *u
 		return &cp, nil
 	}
@@ -266,7 +269,7 @@ func (r *mockUserRepo) RecordLogin(_ context.Context, userID uint, expectedPassw
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	user := r.users[userID]
-	if user == nil || !user.Enabled || user.PasswordHash != expectedPasswordHash {
+	if user == nil || !user.IsActive() || user.PasswordHash != expectedPasswordHash {
 		return nil, nil
 	}
 	now := time.Now()
@@ -282,7 +285,7 @@ func (r *mockUserRepo) UpdatePassword(_ context.Context, userID uint, expectedPa
 		return false, r.updatePasswordErr
 	}
 	user := r.users[userID]
-	if user == nil || !user.Enabled || user.PasswordHash != expectedPasswordHash {
+	if user == nil || !user.IsActive() || user.PasswordHash != expectedPasswordHash {
 		return false, nil
 	}
 	user.PasswordHash = passwordHash
@@ -300,7 +303,7 @@ func (r *mockUserRepo) UpdateWithOperationLog(ctx context.Context, user *domain.
 func (r *mockUserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context, userID uint, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	r.mu.Lock()
 	current, ok := r.users[userID]
-	if !ok {
+	if !ok || current.IsDeleted() {
 		r.mu.Unlock()
 		return nil, domain.ErrUserNotFound
 	}
@@ -310,7 +313,7 @@ func (r *mockUserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Con
 	}
 	cp := *current
 	if enabled != nil {
-		cp.Enabled = *enabled
+		cp.Status = mockUserStatusFromEnabled(*enabled)
 	}
 	if role != nil {
 		cp.Role = *role
@@ -335,7 +338,7 @@ func (r *mockUserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Con
 func (r *mockUserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	r.mu.Lock()
 	current, ok := r.users[userID]
-	if !ok {
+	if !ok || current.IsDeleted() {
 		r.mu.Unlock()
 		return nil, domain.ErrUserNotFound
 	}
@@ -360,7 +363,7 @@ func (r *mockUserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Co
 		cp.PasswordHash = *passwordHash
 	}
 	if enabled != nil {
-		cp.Enabled = *enabled
+		cp.Status = mockUserStatusFromEnabled(*enabled)
 	}
 	if role != nil {
 		cp.Role = *role
@@ -393,8 +396,12 @@ func (r *mockUserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, 
 		r.mu.Unlock()
 		return domain.ErrPermissionDenied
 	}
-	delete(r.users, userID)
-	delete(r.byID, current.Email)
+	if current.IsDeleted() {
+		r.mu.Unlock()
+		return domain.ErrUserNotFound
+	}
+	current.Status = domain.UserStatusDeleted
+	current.TokenVersion++
 	r.mu.Unlock()
 	return r.operationLogs.Create(ctx, log)
 }
@@ -408,7 +415,7 @@ func (r *mockUserRepo) ResolveBulkUserIDs(_ context.Context, ids []uint, filter 
 	}
 	var out []uint
 	for _, u := range r.users {
-		if u.Role == domain.RoleSuperAdmin {
+		if u.Role == domain.RoleSuperAdmin || u.IsDeleted() {
 			continue
 		}
 		if len(ids) > 0 {
@@ -429,10 +436,10 @@ func (r *mockUserRepo) BatchSetEnabledNonSuperAdmin(_ context.Context, ids []uin
 	var affected int64
 	for _, id := range ids {
 		u, ok := r.users[id]
-		if !ok || u.Role == domain.RoleSuperAdmin || u.Enabled == enabled {
+		if !ok || u.Role == domain.RoleSuperAdmin || u.IsDeleted() || u.IsActive() == enabled {
 			continue
 		}
-		u.Enabled = enabled
+		u.Status = mockUserStatusFromEnabled(enabled)
 		if !enabled {
 			u.TokenVersion++
 		}
@@ -447,7 +454,7 @@ func (r *mockUserRepo) BatchBumpTokenVersionNonSuperAdmin(_ context.Context, ids
 	var affected int64
 	for _, id := range ids {
 		u, ok := r.users[id]
-		if !ok || u.Role == domain.RoleSuperAdmin {
+		if !ok || u.Role == domain.RoleSuperAdmin || u.IsDeleted() {
 			continue
 		}
 		u.TokenVersion++
@@ -462,11 +469,11 @@ func (r *mockUserRepo) BatchDeleteNonSuperAdmin(_ context.Context, ids []uint) (
 	var affected int64
 	for _, id := range ids {
 		u, ok := r.users[id]
-		if !ok || u.Role == domain.RoleSuperAdmin {
+		if !ok || u.Role == domain.RoleSuperAdmin || u.IsDeleted() {
 			continue
 		}
-		delete(r.users, id)
-		delete(r.byID, u.Email)
+		u.Status = domain.UserStatusDeleted
+		u.TokenVersion++
 		affected++
 	}
 	return affected, nil
@@ -488,7 +495,7 @@ func (r *mockUserRepo) FacetsByFilter(_ context.Context, filter domain.UserListF
 		statusFilter := filter
 		statusFilter.Enabled = nil
 		if mockUserMatchesFilter(u, statusFilter) {
-			if u.Enabled {
+			if u.IsActive() {
 				status.Enabled++
 			} else {
 				status.Disabled++
@@ -549,7 +556,9 @@ func (r *mockUserRepo) ListByFilter(_ context.Context, filter domain.UserListFil
 }
 
 func (r *mockUserRepo) Count(_ context.Context) (int64, error) {
-	return r.CountByFilter(context.Background(), domain.UserListFilter{})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return int64(len(r.users)), nil
 }
 
 func (r *mockUserRepo) CountByFilter(_ context.Context, filter domain.UserListFilter) (int64, error) {
@@ -565,6 +574,9 @@ func (r *mockUserRepo) CountByFilter(_ context.Context, filter domain.UserListFi
 }
 
 func mockUserMatchesFilter(user *domain.User, filter domain.UserListFilter) bool {
+	if user.IsDeleted() {
+		return false
+	}
 	if len(filter.IDs) > 0 {
 		found := false
 		for _, id := range filter.IDs {
@@ -577,6 +589,21 @@ func mockUserMatchesFilter(user *domain.User, filter domain.UserListFilter) bool
 			return false
 		}
 	}
+	if filter.Role != nil && user.Role != *filter.Role {
+		return false
+	}
+	if filter.Enabled != nil && user.IsActive() != *filter.Enabled {
+		return false
+	}
+	if filter.UserGroupID != nil && user.UserGroupID != *filter.UserGroupID {
+		return false
+	}
+	if filter.CreatedFrom != nil && user.CreatedAt.Before(*filter.CreatedFrom) {
+		return false
+	}
+	if filter.CreatedTo != nil && user.CreatedAt.After(*filter.CreatedTo) {
+		return false
+	}
 	search := strings.ToLower(strings.TrimSpace(filter.Search))
 	if search == "" {
 		return true
@@ -584,6 +611,13 @@ func mockUserMatchesFilter(user *domain.User, filter domain.UserListFilter) bool
 	return strings.Contains(strings.ToLower(user.Email), search) ||
 		strings.Contains(strings.ToLower(user.Nickname), search) ||
 		strings.Contains(fmt.Sprintf("%d", user.ID), search)
+}
+
+func mockUserStatusFromEnabled(enabled bool) domain.UserStatus {
+	if enabled {
+		return domain.UserStatusActive
+	}
+	return domain.UserStatusDisabled
 }
 
 func (r *mockUserRepo) FindByIDs(_ context.Context, ids []uint) ([]domain.User, error) {
@@ -1273,7 +1307,7 @@ func seedUser(t *testing.T, h *IAMHandler, email string) *domain.User {
 	user := &domain.User{
 		Email:        email,
 		PasswordHash: hash,
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleUser,
 	}
 	require.NoError(t, testRepo(h).Create(context.Background(), user))
@@ -1826,7 +1860,7 @@ func TestPatchAdminUserWritesOperationLog(t *testing.T) {
 	updated, err := testRepo(h).FindByID(context.Background(), target.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updated)
-	require.False(t, updated.Enabled)
+	require.False(t, updated.IsActive())
 	require.Equal(t, 1, updated.TokenVersion)
 
 	log := testRepo(h).lastLog()
@@ -2058,13 +2092,60 @@ func TestPostAdminRevokeSessionsRejectsSuperAdmin(t *testing.T) {
 	require.Zero(t, stored.TokenVersion)
 }
 
+func TestDeleteAdminUserLogicallyDeletesAndRejectsStaleSession(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	admin := seedAdminSession(t, h, "admin-session")
+	target := seedUserSession(t, h, "delete-user@test.com", "target-session")
+	oldTokenVersion := target.TokenVersion
+
+	application, err := h.module.SupplierApplicationUseCase.Submit(context.Background(), target.ID, "Keep this history.")
+	require.NoError(t, err)
+	h.module.SessionStore.(*mockSessionStore).deleteByUserIDErr = errors.New("redis unavailable")
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/admin/users/%d", target.ID), nil)
+	require.NoError(t, err)
+	addAuthenticatedRequest(req, "admin-session")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	visible, err := testRepo(h).FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Nil(t, visible)
+	stored, err := testRepo(h).FindByEmail(context.Background(), target.Email)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, domain.UserStatusDeleted, stored.Status)
+	require.Equal(t, oldTokenVersion+1, stored.TokenVersion)
+
+	staleSession, err := h.module.SessionStore.Get(context.Background(), "target-session")
+	require.NoError(t, err)
+	require.NotNil(t, staleSession, "the database status check must remain authoritative when Redis cleanup fails")
+	w = httptest.NewRecorder()
+	req, err = http.NewRequest(http.MethodGet, "/v1/me", nil)
+	require.NoError(t, err)
+	addAuthenticatedRequest(req, "target-session")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+
+	preserved, err := testRepo(h).FindSupplierApplicationByID(context.Background(), application.ID)
+	require.NoError(t, err)
+	require.NotNil(t, preserved)
+	log := testRepo(h).lastLog()
+	require.NotNil(t, log)
+	require.Equal(t, admin.ID, log.OperatorUserID)
+	require.Equal(t, "iam.user.delete", log.OperationType)
+	require.Equal(t, "success", log.Result)
+}
+
 func TestPostAdminUsersBulkDisableExcludesSuperAdminAndCountsSkipped(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 	admin := seedAdminSession(t, h, "admin-session")
 	active := seedUser(t, h, "bulk-active@test.com")
 	already := seedUser(t, h, "bulk-already@test.com")
-	already.Enabled = false
+	already.Status = domain.UserStatusDisabled
 	require.NoError(t, testRepo(h).Update(context.Background(), already))
 
 	body := fmt.Sprintf(`{"selection":{"mode":"ids","userIds":[%d,%d,%d]}}`, active.ID, already.ID, admin.ID)
@@ -2081,12 +2162,12 @@ func TestPostAdminUsersBulkDisableExcludesSuperAdminAndCountsSkipped(t *testing.
 
 	updated, err := testRepo(h).FindByID(context.Background(), active.ID)
 	require.NoError(t, err)
-	require.False(t, updated.Enabled)
+	require.False(t, updated.IsActive())
 	require.Equal(t, 1, updated.TokenVersion)
 
 	protectedAdmin, err := testRepo(h).FindByID(context.Background(), admin.ID)
 	require.NoError(t, err)
-	require.True(t, protectedAdmin.Enabled)
+	require.True(t, protectedAdmin.IsActive())
 	require.Zero(t, protectedAdmin.TokenVersion)
 
 	log := testRepo(h).lastLog()
@@ -2866,7 +2947,7 @@ func TestPasswordReset_RestoreFailureReturnsServerError(t *testing.T) {
 	require.NoError(t, err)
 	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
 	code := store.firstCode()
-	user.Enabled = false
+	user.Status = domain.UserStatusDisabled
 	store.restoreErr = errors.New("redis restore failed")
 
 	body := fmt.Sprintf(`{"email":"user@test.com","code":%q,"newPassword":"NewPass123!"}`, code)

@@ -264,8 +264,8 @@ func TestResourceValidationRepoDomainResultSurvivesOwnerTransferMySQL(t *testing
 	validations := NewResourceValidationRepo(db)
 	insertAdminValidationOwner(t, db)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
-VALUES (2, 'validation-new-owner@example.com', 'hash', 'supplier', 1)
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES (2, 'validation-new-owner@example.com', 'hash', 'supplier', 'active')
 ON DUPLICATE KEY UPDATE email = VALUES(email)`).Error)
 
 	root := &domain.EmailResource{Type: domain.ResourceTypeDomain, OwnerUserID: 1}
@@ -405,8 +405,8 @@ func TestResourceValidationRepoBindingFailureDoesNotUndoHealthyResultMySQL(t *te
 func insertAdminValidationOwner(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
-VALUES (1, 'validation-owner@example.com', 'hash', 'admin', 1)
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES (1, 'validation-owner@example.com', 'hash', 'admin', 'active')
 ON DUPLICATE KEY UPDATE email = VALUES(email)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO mail_servers(id, owner_user_id, server_address, status)

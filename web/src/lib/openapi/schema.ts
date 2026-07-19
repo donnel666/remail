@@ -328,7 +328,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Delete selected users */
+        /**
+         * Logically delete selected users
+         * @description Marks matching non-super-admin users as `deleted`, invalidates their authentication state, and preserves cross-context historical records. Deleted users are omitted from normal IAM lists.
+         */
         post: operations["postAdminUsersDelete"];
         delete?: never;
         options?: never;
@@ -363,7 +366,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete a user (admin only) */
+        /**
+         * Logically delete a user (admin only)
+         * @description Marks the non-super-admin user as `deleted`, invalidates authentication, and preserves related historical records.
+         */
         delete: operations["deleteAdminUser"];
         options?: never;
         head?: never;
@@ -6868,7 +6874,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description User deleted */
+            /** @description User logically deleted */
             204: {
                 headers: {
                     [name: string]: unknown;

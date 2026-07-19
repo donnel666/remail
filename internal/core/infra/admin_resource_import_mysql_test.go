@@ -17,8 +17,8 @@ import (
 func TestResourceImportWithoutAdministratorIsDurablyDispatchableMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
-VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', 'active')`).Error)
 
 	repo := NewResourceImportRepo(db)
 	item := &domain.ResourceImport{
@@ -64,8 +64,8 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', TRUE)`).Error)
 func TestAdminResourceImportWorkerActivatesPendingGenerationMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
-VALUES (1, 'import-activation-owner@test.local', 'hash', 'supplier', TRUE)`).Error)
+INSERT INTO users(id, email, password_hash, role, status)
+VALUES (1, 'import-activation-owner@test.local', 'hash', 'supplier', 'active')`).Error)
 	repo := NewResourceImportRepo(db)
 	item := &domain.ResourceImport{
 		OwnerUserID: 1, ResourceType: domain.ResourceTypeMicrosoft,
@@ -87,10 +87,10 @@ VALUES (1, 'import-activation-owner@test.local', 'hash', 'supplier', TRUE)`).Err
 func TestAdminResourceImportSerializedQueueTaskHydratesDurableObjectKeyMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
+INSERT INTO users(id, email, password_hash, role, status)
 VALUES
-    (1, 'serialized-import-owner@test.local', 'hash', 'supplier', TRUE),
-    (9, 'serialized-import-operator@test.local', 'hash', 'admin', TRUE)`).Error)
+    (1, 'serialized-import-owner@test.local', 'hash', 'supplier', 'active'),
+    (9, 'serialized-import-operator@test.local', 'hash', 'admin', 'active')`).Error)
 
 	const (
 		sourceObjectKey = "imports/microsoft/source/private-object-key-canary.txt"
@@ -164,10 +164,10 @@ VALUES
 func TestAdminResourceImportIdempotencyMetadataAndAuditMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
+INSERT INTO users(id, email, password_hash, role, status)
 VALUES
-    (1, 'import-owner@test.local', 'hash', 'supplier', TRUE),
-    (9, 'import-operator@test.local', 'hash', 'admin', TRUE)`).Error)
+    (1, 'import-owner@test.local', 'hash', 'supplier', 'active'),
+    (9, 'import-operator@test.local', 'hash', 'admin', 'active')`).Error)
 
 	repo := NewResourceImportRepo(db)
 	item := &domain.ResourceImport{
@@ -246,10 +246,10 @@ VALUES
 func TestAdminResourceImportSerializesConcurrentIdempotentRequestsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
+INSERT INTO users(id, email, password_hash, role, status)
 VALUES
-    (1, 'import-concurrent-owner@test.local', 'hash', 'supplier', TRUE),
-    (9, 'import-concurrent-operator@test.local', 'hash', 'admin', TRUE)`).Error)
+    (1, 'import-concurrent-owner@test.local', 'hash', 'supplier', 'active'),
+    (9, 'import-concurrent-operator@test.local', 'hash', 'admin', 'active')`).Error)
 	repo := NewResourceImportRepo(db)
 
 	const workerCount = 10
@@ -325,10 +325,10 @@ VALUES
 func TestAdminResourceImportClaimFencingAndResumeItemsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
+INSERT INTO users(id, email, password_hash, role, status)
 VALUES
-    (1, 'resume-owner@test.local', 'hash', 'supplier', TRUE),
-    (9, 'resume-operator@test.local', 'hash', 'admin', TRUE)`).Error)
+    (1, 'resume-owner@test.local', 'hash', 'supplier', 'active'),
+    (9, 'resume-operator@test.local', 'hash', 'admin', 'active')`).Error)
 
 	repo := NewResourceImportRepo(db)
 	stored, created, err := repo.CreateAdminWithLog(context.Background(), &domain.ResourceImport{

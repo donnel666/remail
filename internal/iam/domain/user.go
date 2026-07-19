@@ -2,6 +2,40 @@ package domain
 
 import "time"
 
+// UserStatus is the account lifecycle state and the single source of truth
+// for whether a user may authenticate.
+type UserStatus string
+
+const (
+	UserStatusActive   UserStatus = "active"
+	UserStatusDisabled UserStatus = "disabled"
+	UserStatusDeleted  UserStatus = "deleted"
+)
+
+func (s UserStatus) String() string {
+	if s == "" {
+		return string(UserStatusActive)
+	}
+	return string(s)
+}
+
+func (s UserStatus) IsValid() bool {
+	switch s {
+	case UserStatusActive, UserStatusDisabled, UserStatusDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s UserStatus) IsActive() bool {
+	return s == UserStatusActive
+}
+
+func (s UserStatus) IsDeleted() bool {
+	return s == UserStatusDeleted
+}
+
 // Role is the user's RBAC role assignment.
 // Entitlements such as quota, discounts, and limits are modeled separately by UserGroup.
 type Role string
@@ -54,7 +88,7 @@ type User struct {
 	Email        string
 	PasswordHash string
 	Nickname     string
-	Enabled      bool
+	Status       UserStatus
 	Role         Role
 	UserGroupID  uint
 	UserGroup    UserGroup
@@ -62,6 +96,14 @@ type User struct {
 	LastLoginAt  *time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+func (u User) IsActive() bool {
+	return u.Status.IsActive()
+}
+
+func (u User) IsDeleted() bool {
+	return u.Status.IsDeleted()
 }
 
 type UserListFilter struct {

@@ -45,7 +45,7 @@ func (uc *PasswordResetUseCase) Request(ctx context.Context, email, captchaID, c
 	if err != nil {
 		return false, fmt.Errorf("password reset find user: %w", err)
 	}
-	if user == nil || !user.Enabled {
+	if user == nil || !user.IsActive() {
 		return uc.emailCode.createDummy(ctx, normalized)
 	}
 	return uc.emailCode.deliver(ctx, normalized)
@@ -79,7 +79,7 @@ func (uc *PasswordResetUseCase) Reset(ctx context.Context, email, code, newPassw
 	if err != nil {
 		return restore(fmt.Errorf("password reset find user: %w", err))
 	}
-	if user == nil || !user.Enabled {
+	if user == nil || !user.IsActive() {
 		return restore(domain.ErrVerificationCodeIncorrect)
 	}
 

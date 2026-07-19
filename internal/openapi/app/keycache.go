@@ -78,6 +78,15 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string) (*domain.APIKe
 	if !meta.Enabled {
 		return nil, domain.ErrAPIKeyDisabled
 	}
+	ownerRole, active, err := rt.repo.GetAPIKeyOwnerAccess(ctx, meta.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, domain.ErrAPIKeyDisabled
+	}
+	meta.OwnerRole = ownerRole
+	state.meta.OwnerRole = ownerRole
 	if meta.ExpireAt != nil && !meta.ExpireAt.After(now) {
 		return nil, domain.ErrAPIKeyExpired
 	}

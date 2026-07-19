@@ -591,7 +591,7 @@ func (uc *AdminUseCase) CreateUser(ctx context.Context, operatorUserID uint, req
 		Email:        email,
 		PasswordHash: hash,
 		Nickname:     nickname,
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         req.Role,
 		UserGroupID:  req.UserGroupID,
 		TokenVersion: 1,
@@ -652,7 +652,7 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		passwordUpdate = &hash
 		tokenBump = true
 	}
-	if req.Enabled != nil && user.Enabled != *req.Enabled {
+	if req.Enabled != nil && user.IsActive() != *req.Enabled {
 		enabled := *req.Enabled
 		enabledUpdate = &enabled
 		if !enabled {
@@ -716,7 +716,7 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 	return updated, nil
 }
 
-// DeleteUser hard-deletes a non-super-admin user and clears their sessions.
+// DeleteUser logically deletes a non-super-admin user and clears their sessions.
 func (uc *AdminUseCase) DeleteUser(ctx context.Context, operatorUserID uint, requestID, path string, targetUserID uint) error {
 	if err := uc.repo.DeleteNonSuperAdminWithOperationLog(
 		ctx,
@@ -803,7 +803,7 @@ func (uc *AdminUseCase) BulkSetEnabled(ctx context.Context, operatorUserID uint,
 	return bulkResult(requested, int(affected)), nil
 }
 
-// BulkDeleteUsers hard-deletes a batch of non-super-admin users and clears the
+// BulkDeleteUsers logically deletes a batch of non-super-admin users and clears the
 // resolved users' sessions.
 func (uc *AdminUseCase) BulkDeleteUsers(ctx context.Context, operatorUserID uint, requestID, path string, sel UserBulkSelection) (*BulkResult, error) {
 	ids, requested, err := uc.resolveBulkTargets(ctx, sel)

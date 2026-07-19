@@ -79,7 +79,7 @@ func adminOwnerSummary(user domain.User) coreapp.AdminOwnerSummary {
 		Nickname:  user.Nickname,
 		GroupName: groupName,
 		Role:      user.Role.String(),
-		Enabled:   user.Enabled,
+		Enabled:   user.IsActive(),
 	}
 }
 

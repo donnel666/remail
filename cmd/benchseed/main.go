@@ -79,9 +79,9 @@ func main() {
 
 func seedFoundation(ctx context.Context, db *sql.DB) error {
 	statements := []string{
-		`INSERT IGNORE INTO users(id,email,password_hash,nickname,enabled,role) VALUES
-			 (900000000,'bench-super-admin@remail.local','bench','bench-super-admin',TRUE,'super_admin'),
-			 (900000001,'bench@remail.local','bench','bench',TRUE,'supplier')`,
+		`INSERT IGNORE INTO users(id,email,password_hash,nickname,status,role) VALUES
+			 (900000000,'bench-super-admin@remail.local','bench','bench-super-admin','active','super_admin'),
+			 (900000001,'bench@remail.local','bench','bench','active','supplier')`,
 		`INSERT IGNORE INTO projects(id,name,target_platform,status,access_type,loose_match)
 		 VALUES (900000001,'Benchmark Project','benchmark','listed','public',TRUE)`,
 		`INSERT IGNORE INTO project_products(

@@ -73,10 +73,10 @@ func TestConsoleDashboardViewRepoMySQL(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (2, 'buyer@test.local', 'hash', 'Buyer', TRUE, 'user'),
-    (3, 'regular@test.local', 'hash', '', TRUE, 'user'),
-    (4, 'four@test.local', 'hash', 'Four', TRUE, 'user')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (2, 'buyer@test.local', 'hash', 'Buyer', 'active', 'user'),
+    (3, 'regular@test.local', 'hash', '', 'active', 'user'),
+    (4, 'four@test.local', 'hash', 'Four', 'active', 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match) VALUES
     (10, 'Microsoft', 'trade', '', 'listed', 'public', TRUE),
@@ -223,10 +223,10 @@ func TestAdminViewRepoMySQL(t *testing.T) {
 	beforeRange := ref.Add(-30 * 24 * time.Hour)
 
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role, created_at, last_login_at) VALUES
-    (1, 'base@test.local', 'h', 'Base', TRUE, 'user', ?, NULL),
-    (2, 'buyer@test.local', 'h', 'Buyer', TRUE, 'user', ?, ?),
-    (3, 'fresh@test.local', 'h', 'Fresh', TRUE, 'user', ?, NULL)`,
+INSERT INTO users(id, email, password_hash, nickname, status, role, created_at, last_login_at) VALUES
+    (1, 'base@test.local', 'h', 'Base', 'active', 'user', ?, NULL),
+    (2, 'buyer@test.local', 'h', 'Buyer', 'active', 'user', ?, ?),
+    (3, 'fresh@test.local', 'h', 'Fresh', 'active', 'user', ?, NULL)`,
 		beforeRange, ref, ref, ref).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)

@@ -513,6 +513,18 @@ func TestPublicAllocationExcludesRegularUserResourceMySQL(t *testing.T) {
 		SupplyScope:      domain.SupplyScopePublic,
 	})
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	require.NoError(t, db.Table("users").Where("id = ?", 3).Updates(map[string]any{
+		"role":   "supplier",
+		"status": "deleted",
+	}).Error)
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo:          "ord-public-deleted-user-resource",
+		BuyerUserID:      2,
+		ProjectProductID: 20,
+		SupplyScope:      domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 }
 
 func TestCandidateRefreshUsesProjectStateAndGenerationFenceMySQL(t *testing.T) {
@@ -1041,11 +1053,11 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 func seedAllocBase(t *testing.T, db *gorm.DB, productType string, mainWeight, dotWeight, plusWeight int) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-	    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-	    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
-	    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user'),
-	    (4, 'alias-owner@test.local', 'hash', 'alias-owner', TRUE, 'super_admin')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+	    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+	    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
+	    (3, 'regular@test.local', 'hash', 'regular', 'active', 'user'),
+	    (4, 'alias-owner@test.local', 'hash', 'alias-owner', 'active', 'super_admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'Alloc Project', 'alloc', 'listed', 'public', TRUE)`).Error)

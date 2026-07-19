@@ -845,9 +845,9 @@ func adminCommandOwners() adminCommandOwnerPort {
 func insertAdminCommandUsers(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, role, enabled)
+INSERT INTO users(id, email, password_hash, role, status)
 VALUES
-    (1, 'owner-one@test.local', 'hash', 'supplier', TRUE),
-    (2, 'owner-two@test.local', 'hash', 'supplier', TRUE),
-    (9, 'operator@test.local', 'hash', 'admin', TRUE)`).Error)
+    (1, 'owner-one@test.local', 'hash', 'supplier', 'active'),
+    (2, 'owner-two@test.local', 'hash', 'supplier', 'active'),
+    (9, 'operator@test.local', 'hash', 'admin', 'active')`).Error)
 }

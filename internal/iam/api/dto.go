@@ -415,7 +415,7 @@ func toUserResponse(u *domain.User) UserResponse {
 		Nickname:    u.Nickname,
 		Role:        u.Role.String(),
 		UserGroup:   toUserGroupResponse(u.UserGroup),
-		Enabled:     u.Enabled,
+		Enabled:     u.IsActive(),
 		CreatedAt:   u.CreatedAt,
 		UpdatedAt:   u.UpdatedAt,
 		LastLoginAt: u.LastLoginAt,
@@ -460,7 +460,7 @@ func toAdminUserInvitationMember(user domain.User) AdminUserInvitationMember {
 		Email:    user.Email,
 		Nickname: user.Nickname,
 		Role:     user.Role.String(),
-		Enabled:  user.Enabled,
+		Enabled:  user.IsActive(),
 		JoinedAt: user.CreatedAt,
 	}
 }

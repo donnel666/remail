@@ -170,8 +170,8 @@ func performAllocAPIRequest(router *gin.Engine, method string, path string, auth
 func seedAllocationAPITestProject(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-	INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-	    (1, 'admin@test.local', 'hash', 'admin', TRUE, 'admin')`).Error)
+	INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+	    (1, 'admin@test.local', 'hash', 'admin', 'active', 'admin')`).Error)
 	require.NoError(t, db.Exec(`
 	INSERT INTO projects(id, name, target_platform, status, access_type)
 	VALUES (10, 'Alloc API Project', 'alloc', 'listed', 'public')`).Error)

@@ -56,7 +56,7 @@ func (uc *LoginUseCase) LoginVerified(ctx context.Context, email, password strin
 	}
 
 	// Check enabled after password verification (INV-I2)
-	if !user.Enabled {
+	if !user.IsActive() {
 		return nil, domain.ErrAccountOrPasswordIncorrect
 	}
 

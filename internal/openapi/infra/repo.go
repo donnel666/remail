@@ -202,26 +202,34 @@ func (r *Repo) FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.API
 		}
 		return nil, fmt.Errorf("find api key by plain: %w", err)
 	}
-	var owner struct {
-		Enabled bool
-		Role    string
+	ownerRole, active, err := r.GetAPIKeyOwnerAccess(ctx, model.UserID)
+	if err != nil {
+		return nil, err
 	}
-	if err := r.db.WithContext(ctx).
-		Table("users").
-		Select("enabled, role").
-		Where("id = ?", model.UserID).
-		Take(&owner).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrAPIKeyDisabled
-		}
-		return nil, fmt.Errorf("load api key owner: %w", err)
-	}
-	if !owner.Enabled {
+	if !active {
 		return nil, domain.ErrAPIKeyDisabled
 	}
 	item := apiKeyModelToDomain(model)
-	item.OwnerRole = owner.Role
+	item.OwnerRole = ownerRole
 	return &item, nil
+}
+
+func (r *Repo) GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (string, bool, error) {
+	var owner struct {
+		Status string
+		Role   string
+	}
+	if err := r.dbFor(ctx).
+		Table("users").
+		Select("status, role").
+		Where("id = ?", userID).
+		Take(&owner).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("load api key owner access: %w", err)
+	}
+	return owner.Role, owner.Status == "active", nil
 }
 
 func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyCommand) (*domain.APIKey, error) {

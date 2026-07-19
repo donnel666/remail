@@ -118,8 +118,8 @@ func seedGovernanceTaskFacts(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, enabled, role)
-VALUES (5001, 'governance-admin@test.local', 'hash', 1, 'admin')`).Error)
+INSERT INTO users(id, email, password_hash, status, role)
+VALUES (5001, 'governance-admin@test.local', 'hash', 'active', 'admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO email_resources(id, type, owner_user_id, version, created_at, updated_at)
 VALUES (6001, 'microsoft', 5001, 1, ?, ?)`, base, base).Error)

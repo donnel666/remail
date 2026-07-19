@@ -1098,8 +1098,8 @@ VALUES ('st_failed_tok', 'st_failed_token_plain', 'OR_FAILED_TOKEN', TRUE, ?, ?,
 func TestAPIKeyRequestLimitsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user')`).Error)
 
 	openapiMod := openapiapi.NewModule(db)
 	rateLimit := 1
@@ -1128,8 +1128,8 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
 func TestAPIKeyQuotaAndNullableLimitsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (2, 'quota-user@test.local', 'hash', 'quota-user', TRUE, 'user')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (2, 'quota-user@test.local', 'hash', 'quota-user', 'active', 'user')`).Error)
 
 	openapiMod := openapiapi.NewModule(db)
 	rateLimit := 10
@@ -1232,7 +1232,7 @@ INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
 	require.EqualValues(t, 4, usage.RequestCount)
 }
 
-func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
+func TestInactiveAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
@@ -1246,7 +1246,7 @@ func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 		RequestID:      "req-apikey-disabled-owner",
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.Table("users").Where("id = ?", 2).Update("enabled", false).Error)
+	require.NoError(t, db.Table("users").Where("id = ?", 2).Update("status", "disabled").Error)
 
 	router := gin.New()
 	router.Use(middleware.RequestID())
@@ -1264,6 +1264,17 @@ func TestDisabledAPIKeyOwnerCannotOrderMySQL(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
 	var orderCount int64
 	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "route-order-disabled-owner").Count(&orderCount).Error)
+	require.EqualValues(t, 0, orderCount)
+
+	require.NoError(t, db.Table("users").Where("id = ?", 2).Update("status", "deleted").Error)
+	req = httptest.NewRequest(http.MethodPost, "/v1/open/orders?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
+	req.Header.Set("Idempotency-Key", "route-order-deleted-owner")
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "route-order-deleted-owner").Count(&orderCount).Error)
 	require.EqualValues(t, 0, orderCount)
 }
 
@@ -1416,10 +1427,10 @@ func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 		mainWeight = 1
 	}
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
-    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
+    (3, 'regular@test.local', 'hash', 'regular', 'active', 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
 VALUES (10, 'Trade Project', 'trade', '/v1/projects/logos/trade-project', 'listed', 'public', TRUE)`).Error)

@@ -9560,7 +9560,7 @@ type ServerInterface interface {
 	// Create a user (admin only)
 	// (POST /v1/admin/users)
 	PostAdminUser(c *gin.Context, params PostAdminUserParams)
-	// Delete selected users
+	// Logically delete selected users
 	// (POST /v1/admin/users/delete)
 	PostAdminUsersDelete(c *gin.Context, params PostAdminUsersDeleteParams)
 	// Disable selected users
@@ -9575,7 +9575,7 @@ type ServerInterface interface {
 	// Revoke sessions for selected users
 	// (POST /v1/admin/users/sessions/revoke)
 	PostAdminUsersRevokeSessions(c *gin.Context, params PostAdminUsersRevokeSessionsParams)
-	// Delete a user (admin only)
+	// Logically delete a user (admin only)
 	// (DELETE /v1/admin/users/{userId})
 	DeleteAdminUser(c *gin.Context, userId int, params DeleteAdminUserParams)
 	// Update a user (enable/disable, change role)

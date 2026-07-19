@@ -82,13 +82,61 @@ func TestAPIKeyRuntimeRateLimitAndQuota(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrAPIKeyQuotaExceeded)
 }
 
+func TestAPIKeyRuntimeRejectsCachedKeyAfterOwnerDeletion(t *testing.T) {
+	ctx := context.Background()
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
+		ID:               1,
+		UserID:           2,
+		KeyPlain:         "rk-test",
+		Enabled:          true,
+		ConcurrencyLimit: 1,
+	})
+	rt := newAPIKeyRuntime(repo, time.Now)
+	defer func() { require.NoError(t, rt.close(ctx)) }()
+
+	_, err := rt.begin(ctx, "rk-test")
+	require.NoError(t, err)
+	rt.finish(1)
+	repo.userActive = false
+
+	_, err = rt.begin(ctx, "rk-test")
+	require.ErrorIs(t, err, domain.ErrAPIKeyDisabled)
+}
+
+func TestAPIKeyRuntimeUsesCurrentOwnerRoleForCachedKey(t *testing.T) {
+	ctx := context.Background()
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
+		ID:               1,
+		UserID:           2,
+		OwnerRole:        "supplier",
+		KeyPlain:         "rk-test",
+		Enabled:          true,
+		ConcurrencyLimit: 1,
+	})
+	rt := newAPIKeyRuntime(repo, time.Now)
+	defer func() { require.NoError(t, rt.close(ctx)) }()
+
+	key, err := rt.begin(ctx, "rk-test")
+	require.NoError(t, err)
+	require.Equal(t, "supplier", key.OwnerRole)
+	rt.finish(1)
+
+	repo.ownerRole = "user"
+	key, err = rt.begin(ctx, "rk-test")
+	require.NoError(t, err)
+	require.Equal(t, "user", key.OwnerRole)
+	rt.finish(1)
+}
+
 type apiKeyRuntimeRepoStub struct {
 	key        domain.APIKey
 	quotaAdded int64
+	userActive bool
+	ownerRole  string
 }
 
 func newAPIKeyRuntimeRepoStub(key domain.APIKey) *apiKeyRuntimeRepoStub {
-	return &apiKeyRuntimeRepoStub{key: key}
+	return &apiKeyRuntimeRepoStub{key: key, userActive: true, ownerRole: key.OwnerRole}
 }
 
 func (r *apiKeyRuntimeRepoStub) CreateAPIKey(context.Context, CreateAPIKeyCommand) (*domain.APIKey, bool, error) {
@@ -121,6 +169,10 @@ func (r *apiKeyRuntimeRepoStub) FindAPIKeyByPlain(_ context.Context, plain strin
 	}
 	keyCopy := r.key
 	return &keyCopy, nil
+}
+
+func (r *apiKeyRuntimeRepoStub) GetAPIKeyOwnerAccess(context.Context, uint) (string, bool, error) {
+	return r.ownerRole, r.userActive, nil
 }
 
 func (r *apiKeyRuntimeRepoStub) AddAPIKeyQuotaUsed(_ context.Context, keyID uint, delta int64, _ time.Time) error {

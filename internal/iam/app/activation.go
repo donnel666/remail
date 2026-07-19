@@ -47,7 +47,7 @@ func (uc *ActivationUseCase) Activate(ctx context.Context, email, password, nick
 		Email:        normalizeEmail(email),
 		PasswordHash: hash,
 		Nickname:     strings.TrimSpace(nickname),
-		Enabled:      true,
+		Status:       domain.UserStatusActive,
 		Role:         domain.RoleSuperAdmin,
 		UserGroupID:  1,
 		TokenVersion: 0,

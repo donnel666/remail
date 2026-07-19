@@ -28,6 +28,7 @@ type Repository interface {
 	UpdateAPIKey(ctx context.Context, cmd UpdateAPIKeyCommand) (*domain.APIKey, error)
 	DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error
 	FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.APIKey, error)
+	GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (role string, active bool, err error)
 	AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)

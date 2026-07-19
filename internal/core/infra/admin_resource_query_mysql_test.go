@@ -79,10 +79,10 @@ func TestAdminResourceQueryListFacetsDetailAndAliasesMySQL(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, role, enabled)
+INSERT INTO users(id, email, password_hash, nickname, role, status)
 VALUES
-    (1, 'alpha-owner@test.local', 'hash', 'Alpha Supplier', 'supplier', TRUE),
-    (2, 'beta-owner@test.local', 'hash', 'Beta Supplier', 'supplier', TRUE)`).Error)
+    (1, 'alpha-owner@test.local', 'hash', 'Alpha Supplier', 'supplier', 'active'),
+    (2, 'beta-owner@test.local', 'hash', 'Beta Supplier', 'supplier', 'active')`).Error)
 
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	validExpiry := now.Add(30 * 24 * time.Hour)
@@ -290,8 +290,8 @@ func seedAdminResourceQueryPlanFacts(t *testing.T, db *gorm.DB, count int) uint 
 	t.Helper()
 	require.GreaterOrEqual(t, count, 32)
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, role, enabled)
-VALUES (9901, 'admin-query-plan-owner@test.local', 'hash', 'Query Plan Owner', 'supplier', TRUE)`).Error)
+INSERT INTO users(id, email, password_hash, nickname, role, status)
+VALUES (9901, 'admin-query-plan-owner@test.local', 'hash', 'Query Plan Owner', 'supplier', 'active')`).Error)
 
 	rootValues := make([]string, 0, count)
 	rootArgs := make([]any, 0, count*5)

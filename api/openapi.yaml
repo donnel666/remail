@@ -837,7 +837,8 @@ paths:
   /v1/admin/users/delete:
     post:
       operationId: postAdminUsersDelete
-      summary: Delete selected users
+      summary: Logically delete selected users
+      description: Marks matching non-super-admin users as `deleted`, invalidates their authentication state, and preserves cross-context historical records. Deleted users are omitted from normal IAM lists.
       tags:
         - Admin
       security:
@@ -996,7 +997,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     delete:
       operationId: deleteAdminUser
-      summary: Delete a user (admin only)
+      summary: Logically delete a user (admin only)
+      description: Marks the non-super-admin user as `deleted`, invalidates authentication, and preserves related historical records.
       tags:
         - Admin
       security:
@@ -1010,7 +1012,7 @@ paths:
             type: integer
       responses:
         "204":
-          description: User deleted
+          description: User logically deleted
         "400":
           description: Invalid user ID
           content:

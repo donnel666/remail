@@ -45,7 +45,7 @@ func (f *sessionFetcher) FetchSession(ctx context.Context, sessionID string) (ui
 	// - Use the current role from DB, not the cached snapshot from Redis,
 	//   so role changes take effect immediately (docs/8-iam.md:123).
 	user, err := f.userRepo.FindByID(ctx, sess.UserID)
-	if err != nil || user == nil || !user.Enabled || user.TokenVersion != sess.TokenVersion {
+	if err != nil || user == nil || !user.IsActive() || user.TokenVersion != sess.TokenVersion {
 		return 0, "", "", false
 	}
 

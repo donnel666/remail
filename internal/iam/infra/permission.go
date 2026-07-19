@@ -111,7 +111,7 @@ func (s *PermissionService) ReplaceUserPermissionPoliciesGuarded(ctx context.Con
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user UserModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "role").
+			Select("id", "role", "status").
 			First(&user, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrUserNotFound
@@ -120,6 +120,9 @@ func (s *PermissionService) ReplaceUserPermissionPoliciesGuarded(ctx context.Con
 		}
 		if domain.Role(user.Role) == domain.RoleSuperAdmin {
 			return domain.ErrPermissionDenied
+		}
+		if domain.UserStatus(user.Status).IsDeleted() {
+			return domain.ErrUserNotFound
 		}
 
 		var models []CasbinRuleModel

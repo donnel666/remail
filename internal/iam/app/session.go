@@ -43,7 +43,7 @@ func (uc *SessionUseCase) GetCurrent(ctx context.Context, sessionID string) (*do
 	if user == nil {
 		return nil, nil
 	}
-	if !user.Enabled {
+	if !user.IsActive() {
 		return nil, nil
 	}
 

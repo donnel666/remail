@@ -307,10 +307,10 @@ WHERE email_resource_id = 100`).Error
 func seedMailmatchOrder(t *testing.T, db *gorm.DB, orderNo string) uint {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-	    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-	    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
-	    (3, 'history-owner@test.local', 'hash', 'history-owner', TRUE, 'super_admin')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+	    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+	    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
+	    (3, 'history-owner@test.local', 'hash', 'history-owner', 'active', 'super_admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'MailMatch Project', 'mailmatch', 'listed', 'public', TRUE)`).Error)
@@ -365,9 +365,9 @@ INSERT INTO mailmatch_messages(
 func seedMailmatchFetchResource(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
-    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user')`).Error)
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO email_resources(id, type, owner_user_id) VALUES
     (100, 'microsoft', 1)`).Error)
