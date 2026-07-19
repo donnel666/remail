@@ -390,7 +390,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-server ./cmd/server
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/remail/remail-msrecovery ./cmd/msrecovery
           cp -r migrations dist/remail/migrations
-          cp deploy/compose.yml deploy/nginx.conf dist/remail/
+          cp deploy/compose.yml dist/remail/
           tar -czf "dist/remail-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C dist remail
 
       - name: Publish GitHub Release
@@ -423,7 +423,6 @@ jobs:
       - name: Prepare deployment files
         env:
           APP_IMAGE: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
@@ -435,8 +434,8 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p /opt/remail/certs /opt/remail/secrets
-          cp deploy/compose.yml deploy/nginx.conf /opt/remail/
+          mkdir -p /opt/remail/secrets
+          cp deploy/compose.yml /opt/remail/
           if [ -z "$SMTP_DKIM_PRIVATE_KEY" ]; then
             echo "SMTP_DKIM_PRIVATE_KEY GitHub secret is required" >&2
             exit 1
@@ -449,7 +448,6 @@ jobs:
           chmod 600 /opt/remail/secrets/smtp-dkim-private-key.pem
           cat > /opt/remail/.env <<EOF
           APP_IMAGE=${APP_IMAGE}
-          DEPLOY_DOMAIN=${DEPLOY_DOMAIN}
           MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
           MYSQL_DATABASE=remail
           MYSQL_USER=remail
@@ -484,23 +482,6 @@ jobs:
           sed -i 's/^          //' /opt/remail/.env
           chmod 600 /opt/remail/.env
 
-      - name: Ensure origin certificate
-        run: |
-          set -euo pipefail
-          cd /opt/remail
-          DOMAIN="$(awk -F= '$1 == "DEPLOY_DOMAIN" {print $2}' .env)"
-          if [ -z "$DOMAIN" ]; then
-            echo "DEPLOY_DOMAIN is required" >&2
-            exit 1
-          fi
-          if [ ! -s "certs/${DOMAIN}.crt" ] || [ ! -s "certs/${DOMAIN}.key" ]; then
-            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-              -keyout "certs/${DOMAIN}.key" \
-              -out "certs/${DOMAIN}.crt" \
-              -subj "/CN=${DOMAIN}" \
-              -addext "subjectAltName=DNS:${DOMAIN}"
-          fi
-
       - name: Deploy compose stack
         env:
           GHCR_USER: ${{ github.actor }}
@@ -516,11 +497,6 @@ jobs:
             echo "docker compose plugin is required on the deploy host" >&2
             exit 1
           fi
-          if ! command -v openssl >/dev/null 2>&1; then
-            echo "openssl is required on the deploy host" >&2
-            exit 1
-          fi
-
           wait_for_health() {
             for _ in $(seq 1 60); do
               if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/readyz | grep -q '"ok"'; then
@@ -554,7 +530,7 @@ jobs:
           deploy_status=0
           docker compose --env-file .env -f compose.yml pull server || deploy_status=$?
           if [ "$deploy_status" -eq 0 ]; then
-            docker compose --env-file .env -f compose.yml up -d --remove-orphans || deploy_status=$?
+            docker compose --env-file .env -f compose.yml up -d || deploy_status=$?
           fi
 
           if [ "$deploy_status" -eq 0 ] && wait_for_health; then
@@ -565,20 +541,20 @@ jobs:
           fi
 
           echo "New deployment failed; collecting logs before rollback" >&2
-          docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
+          docker compose --env-file .env -f compose.yml logs --tail=200 server || true
           if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$CURRENT_IMAGE" ]; then
             echo "Rolling back to previous image: $PREVIOUS_IMAGE" >&2
             set_app_image "$PREVIOUS_IMAGE"
             docker compose --env-file .env -f compose.yml pull server || \
               echo "Previous image is unavailable remotely; trying the local image cache" >&2
             rollback_status=0
-            docker compose --env-file .env -f compose.yml up -d --remove-orphans || rollback_status=$?
+            docker compose --env-file .env -f compose.yml up -d || rollback_status=$?
             if [ "$rollback_status" -eq 0 ] && wait_for_health; then
               echo "Rollback completed; previous image is healthy" >&2
               docker compose --env-file .env -f compose.yml ps
             else
               echo "Rollback failed to start or pass health check" >&2
-              docker compose --env-file .env -f compose.yml logs --tail=200 server nginx || true
+              docker compose --env-file .env -f compose.yml logs --tail=200 server || true
             fi
           else
             echo "No previous image available for rollback" >&2
