@@ -297,7 +297,7 @@ func TestOrderServiceSnapshotMigrationBackfillsDelistedProductMySQL(t *testing.T
 	require.NoError(t, goose.SetDialect("mysql"))
 	require.NoError(t, goose.DownTo(sqlDB, tradeMigrationsDir(t), 12))
 
-	seedTradeBase(t, db, "microsoft")
+	seedTradeBaseLegacyEnabled(t, db, "microsoft")
 	require.NoError(t, db.Exec(`
 INSERT INTO orders(
     order_no, user_id, project_id, project_product_id, product_type,
@@ -1420,17 +1420,32 @@ func creditBuyer(t *testing.T, db *gorm.DB, userID uint, amount string) {
 
 func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
+    (3, 'regular@test.local', 'hash', 'regular', 'active', 'user')`).Error)
+	seedTradeBaseFacts(t, db, productType)
+}
+
+func seedTradeBaseLegacyEnabled(t *testing.T, db *gorm.DB, productType string) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+    (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
+	seedTradeBaseFacts(t, db, productType)
+}
+
+func seedTradeBaseFacts(t *testing.T, db *gorm.DB, productType string) {
+	t.Helper()
 	mainWeight := 0
 	dotWeight := 0
 	plusWeight := 0
 	if productType == "microsoft" {
 		mainWeight = 1
 	}
-	require.NoError(t, db.Exec(`
-INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
-    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
-    (3, 'regular@test.local', 'hash', 'regular', 'active', 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
 VALUES (10, 'Trade Project', 'trade', '/v1/projects/logos/trade-project', 'listed', 'public', TRUE)`).Error)
