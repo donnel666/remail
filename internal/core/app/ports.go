@@ -970,6 +970,10 @@ func safeObjectSegment(value string) string {
 func csvSafe(value string) string {
 	value = strings.ReplaceAll(value, "\r", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
+	trimmed := strings.TrimLeft(value, " ")
+	if trimmed != "" && strings.ContainsRune("\t=+-@", rune(trimmed[0])) {
+		value = "'" + value
+	}
 	value = strings.ReplaceAll(value, `"`, `""`)
 	return `"` + value + `"`
 }

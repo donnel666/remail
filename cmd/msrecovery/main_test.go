@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -109,6 +111,51 @@ func TestCommandResultSerializationHasNoCredentialFields(t *testing.T) {
 	for _, forbidden := range []string{"password\"", "refresh_token", "client_id", "epid", "recovery_token", "canary", "verification_code"} {
 		require.NotContains(t, serialized, forbidden)
 	}
+}
+
+func TestCommandResultTextReturnsLateWriteError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	writer := &failAfterWriter{
+		remaining: len("mode=recover-binding dry_run=false\n"),
+		err:       wantErr,
+	}
+
+	err := writeCommandResult(writer, false, commandResult{
+		Mode:         recoveryModeBinding,
+		ResourceID:   2,
+		AccountEmail: "owner@example.test",
+	})
+
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestCommandResultTextRejectsSilentShortWrite(t *testing.T) {
+	err := writeCommandResult(shortWriter{}, false, commandResult{Mode: recoveryModeBinding})
+	require.ErrorIs(t, err, io.ErrShortWrite)
+}
+
+type failAfterWriter struct {
+	remaining int
+	err       error
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if len(p) <= w.remaining {
+		w.remaining -= len(p)
+		return len(p), nil
+	}
+	if w.remaining <= 0 {
+		return 0, w.err
+	}
+	written := w.remaining
+	w.remaining = 0
+	return written, w.err
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) {
+	return len(p) / 2, nil
 }
 
 func TestSameRecoveryAccountRejectsDisabledResources(t *testing.T) {

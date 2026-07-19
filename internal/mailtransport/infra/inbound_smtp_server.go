@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -180,8 +181,9 @@ func (s *inboundSMTPSession) Data(r io.Reader) error {
 		return smtpTemporary("message read failed")
 	}
 	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		if err := cleanupInboundSMTPTempFile(tmp); err != nil {
+			slog.Warn("inbound smtp temporary message cleanup failed", "path", tmp.Name(), "error", err)
+		}
 	}()
 	size, err := io.Copy(tmp, io.LimitReader(r, limit+1))
 	if err != nil {
@@ -217,6 +219,20 @@ func (s *inboundSMTPSession) Data(r io.Reader) error {
 		slog.Info("inbound smtp accepted", "remote_addr", s.remoteAddr, "recipients", len(s.recipients), "bytes", size, "elapsed_ms", float64(elapsed.Microseconds())/1000)
 	}
 	return nil
+}
+
+func cleanupInboundSMTPTempFile(tmp *os.File) error {
+	if tmp == nil {
+		return nil
+	}
+	var cleanupErr error
+	if err := tmp.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close: %w", err))
+	}
+	if err := os.Remove(tmp.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove: %w", err))
+	}
+	return cleanupErr
 }
 
 func smtpPermanent(message string) error {

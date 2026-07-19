@@ -455,19 +455,17 @@ func writeCommandResult(w io.Writer, jsonOutput bool, result commandResult) erro
 		encoder.SetEscapeHTML(false)
 		return encoder.Encode(result)
 	}
-	_, err := fmt.Fprintf(w, "mode=%s dry_run=%t\n", result.Mode, result.DryRun)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "resource_id=%d account_email=%s status=%s\n", result.ResourceID, result.AccountEmail, result.ResourceStatus)
+	var output strings.Builder
+	fmt.Fprintf(&output, "mode=%s dry_run=%t\n", result.Mode, result.DryRun)
+	fmt.Fprintf(&output, "resource_id=%d account_email=%s status=%s\n", result.ResourceID, result.AccountEmail, result.ResourceStatus)
 	if result.CurrentBinding != "" {
-		fmt.Fprintf(w, "current_binding=%s current_binding_status=%s\n", result.CurrentBinding, result.CurrentBindingStatus)
+		fmt.Fprintf(&output, "current_binding=%s current_binding_status=%s\n", result.CurrentBinding, result.CurrentBindingStatus)
 	}
 	for _, proof := range result.Proofs {
-		fmt.Fprintf(w, "proof type=%s channel=%s masked=%s requires_reentry=%t\n", proof.Type, proof.Channel, proof.MaskedAddress, proof.RequiresReentry)
+		fmt.Fprintf(&output, "proof type=%s channel=%s masked=%s requires_reentry=%t\n", proof.Type, proof.Channel, proof.MaskedAddress, proof.RequiresReentry)
 	}
 	fmt.Fprintf(
-		w,
+		&output,
 		"recovered_binding=%s resolved=%t locally_receivable=%t confirmed=%t applied=%t changed=%t\n",
 		result.RecoveredBinding,
 		result.BindingResolved,
@@ -478,13 +476,21 @@ func writeCommandResult(w io.Writer, jsonOutput bool, result commandResult) erro
 	)
 	if result.PasswordReset || result.DatabasePasswordUpdated || result.PasswordArtifactRetained {
 		fmt.Fprintf(
-			w,
+			&output,
 			"password_reset=%t database_updated=%t credential_revision=%d artifact_retained=%t\n",
 			result.PasswordReset,
 			result.DatabasePasswordUpdated,
 			result.CredentialRevision,
 			result.PasswordArtifactRetained,
 		)
+	}
+	text := output.String()
+	written, err := io.WriteString(w, text)
+	if err != nil {
+		return err
+	}
+	if written != len(text) {
+		return io.ErrShortWrite
 	}
 	return nil
 }
