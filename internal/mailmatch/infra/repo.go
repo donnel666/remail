@@ -295,7 +295,7 @@ WHERE ma.resource_id = ?
   AND (
     ma.email = ?
     OR (
-      ma.mailbox = 'main'
+      ma.mailbox IN ('main', 'alias')
       AND SUBSTRING_INDEX(ma.email, '@', -1) = ?
       AND REPLACE(SUBSTRING_INDEX(ma.email, '@', 1), '.', '') = ?
     )

@@ -243,6 +243,62 @@ INSERT INTO microsoft_allocations(
 	}
 }
 
+func TestListMatchingScopesByRecipientNormalizesExplicitAliasVariantsMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_EXPLICIT_ALIAS_PLUS")
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
+    (10, 'recipient', 'exact', TRUE),
+    (10, 'recipient', 'dot', TRUE),
+    (10, 'recipient', 'plus', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_EXPLICIT_ALIAS_PLUS', 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', 'OR_EXPLICIT_ALIAS_PLUS', 'TX_EXPLICIT_ALIAS_PLUS')`).Error)
+	var debitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = ?", "TX_EXPLICIT_ALIAS_PLUS").Scan(&debitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (100, 1, 'explicitalias@example.com', 'normal')`).Error)
+	var aliasID uint
+	require.NoError(t, db.Table("explicit_aliases").Select("id").Where("resource_id = ? AND email = ?", 100, "explicitalias@example.com").Scan(&aliasID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_EXPLICIT_ALIAS_PLUS', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox, explicit_alias_id, email
+) VALUES ('OR_EXPLICIT_ALIAS_PLUS', 10, 20, 100, 'public', 'alias', ?, 'explicitalias@example.com')`, aliasID).Error)
+	var allocationID uint
+	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_EXPLICIT_ALIAS_PLUS").Scan(&allocationID).Error)
+	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
+		"status":             "active",
+		"debit_tx_id":        debitID,
+		"allocation_type":    "microsoft",
+		"microsoft_alloc_id": allocationID,
+		"delivery_email":     "explicitalias@example.com",
+		"receive_started_at": now.Add(-time.Minute),
+		"receive_until":      now.Add(10 * time.Minute),
+	}).Error)
+
+	repo := NewRepo(db, nil)
+	for _, recipient := range []string{"explicitalias+tag@example.com", "explicit.alias@example.com"} {
+		scopes, err := repo.ListMatchingScopesByRecipient(
+			context.Background(),
+			domain.ResourceTypeMicrosoft,
+			100,
+			recipient,
+			now,
+		)
+		require.NoError(t, err)
+		require.Len(t, scopes, 1, recipient)
+		require.Equal(t, orderID, scopes[0].OrderID)
+		require.Equal(t, "explicitalias@example.com", scopes[0].Recipient)
+	}
+}
+
 func TestHistoricalProjectScopeLockAndLegacyClearMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchOrder(t, db, "OR_HISTORY_MATCH")
@@ -311,6 +367,21 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
 	    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
 	    (3, 'history-owner@test.local', 'hash', 'history-owner', 'active', 'super_admin')`).Error)
+	return seedMailmatchOrderFacts(t, db, orderNo)
+}
+
+func seedMailmatchOrderLegacyEnabled(t *testing.T, db *gorm.DB, orderNo string) uint {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
+	    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+	    (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
+	    (3, 'history-owner@test.local', 'hash', 'history-owner', TRUE, 'super_admin')`).Error)
+	return seedMailmatchOrderFacts(t, db, orderNo)
+}
+
+func seedMailmatchOrderFacts(t *testing.T, db *gorm.DB, orderNo string) uint {
+	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'MailMatch Project', 'mailmatch', 'listed', 'public', TRUE)`).Error)

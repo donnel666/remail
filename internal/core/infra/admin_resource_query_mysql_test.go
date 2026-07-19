@@ -151,6 +151,14 @@ VALUES
 	require.EqualValues(t, 1, ownerSearch.Total)
 	require.Equal(t, r2Root.ID, ownerSearch.Items[0].ID)
 
+	for _, search := range []string{"explicit-two@outlook.com", "a.l.p.h.a@outlook.com", "alpha+one@outlook.com"} {
+		aliasSearch, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Search: search}, 0, 20, 0)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, aliasSearch.Total, search)
+		require.Equal(t, r1Root.ID, aliasSearch.Items[0].ID, search)
+		require.Equal(t, "alpha@outlook.com", aliasSearch.Items[0].EmailAddress, search)
+	}
+
 	suffixList, err := query.List(ctx, coreapp.AdminMicrosoftListFilter{Suffix: "@outlook.com"}, 0, 20, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, suffixList.Total)
@@ -283,6 +291,9 @@ func TestAdminMicrosoftFilterQueryUsesOneRootJoinShapeMySQL(t *testing.T) {
 	sql := strings.ToLower(strings.ReplaceAll(result.Statement.SQL.String(), string(rune(96)), ""))
 	require.Contains(t, sql, "from email_resources as er")
 	require.Contains(t, sql, "join microsoft_resources as mr")
+	require.Contains(t, sql, "exists (select 1 from explicit_aliases ea")
+	require.Contains(t, sql, "exists (select 1 from dot_aliases da")
+	require.Contains(t, sql, "exists (select 1 from plus_aliases pa")
 	require.Contains(t, sql, "er.owner_user_id in (?)")
 }
 

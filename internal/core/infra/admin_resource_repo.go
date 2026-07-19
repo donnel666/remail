@@ -479,8 +479,14 @@ func (r *AdminResourceRepo) adminMicrosoftFilterQuery(ctx context.Context, filte
 	}
 	if filter.Search != "" {
 		escaped := escapeAdminLike(filter.Search)
-		conditions := []string{"LOWER(mr.email_address) LIKE ? ESCAPE '\\\\'"}
-		args := []any{"%" + strings.ToLower(escaped) + "%"}
+		pattern := "%" + strings.ToLower(escaped) + "%"
+		conditions := []string{
+			"LOWER(mr.email_address) LIKE ? ESCAPE '\\\\'",
+			"EXISTS (SELECT 1 FROM explicit_aliases ea WHERE ea.resource_id = er.id AND LOWER(ea.email) LIKE ? ESCAPE '\\\\')",
+			"EXISTS (SELECT 1 FROM dot_aliases da WHERE da.resource_id = er.id AND LOWER(da.email) LIKE ? ESCAPE '\\\\')",
+			"EXISTS (SELECT 1 FROM plus_aliases pa WHERE pa.resource_id = er.id AND LOWER(pa.email) LIKE ? ESCAPE '\\\\')",
+		}
+		args := []any{pattern, pattern, pattern, pattern}
 		if id, err := strconv.ParseUint(filter.Search, 10, 64); err == nil && id > 0 {
 			conditions = append(conditions, idColumn+" = ?")
 			args = append(args, id)

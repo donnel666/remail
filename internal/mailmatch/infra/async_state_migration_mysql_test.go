@@ -66,7 +66,7 @@ func TestMailmatchFetchStateMigrationNormalizesLegacyCountsMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
 	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 32))
-	seedMailmatchOrder(t, db, "OR_MIGRATION_COUNTS")
+	seedMailmatchOrderLegacyEnabled(t, db, "OR_MIGRATION_COUNTS")
 
 	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_fetch_jobs(
@@ -104,7 +104,7 @@ func TestMailmatchFetchStateMigrationPreservesAdminIdempotencyMySQL(t *testing.T
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
 	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 32))
-	seedMailmatchOrder(t, db, "OR_MIGRATION_IDEMPOTENCY")
+	seedMailmatchOrderLegacyEnabled(t, db, "OR_MIGRATION_IDEMPOTENCY")
 
 	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_resource_fetch_jobs(
