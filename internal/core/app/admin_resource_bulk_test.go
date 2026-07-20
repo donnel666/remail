@@ -82,7 +82,7 @@ func TestAdminResourceBulkUsesRedisCursorAndBusinessRows(t *testing.T) {
 	queue := &adminResourceBulkQueueStub{}
 	logs := &adminResourceBulkLogStub{}
 	commandRepo := &adminResourceBulkCommandRepoStub{resources: map[uint]domain.MicrosoftResource{
-		2: {ID: 2, Status: domain.MicrosoftStatusNormal, ClientID: "client", RefreshToken: "token"},
+		2: {ID: 2, Status: domain.MicrosoftStatusIdentifying, ClientID: "client", RefreshToken: "token"},
 		3: {ID: 3, Status: domain.MicrosoftStatusNormal, ClientID: "client", RefreshToken: "token"},
 	}}
 	commands := NewAdminResourceCommandService(commandRepo, nil, logs)

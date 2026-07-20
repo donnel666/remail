@@ -65,6 +65,7 @@ const EMPTY_FACETS: AdminMicrosoftFacets = {
     all: 0,
     pending: 0,
     validating: 0,
+    identifying: 0,
     normal: 0,
     abnormal: 0,
     disabled: 0,

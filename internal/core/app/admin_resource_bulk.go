@@ -396,7 +396,7 @@ func (s *AdminResourceCommandService) maintenanceEligibilityForBulk(ctx context.
 				reason = "invalid_state"
 			}
 		case AdminResourceBulkHistory:
-			if resource.Status != domain.MicrosoftStatusNormal {
+			if resource.Status != domain.MicrosoftStatusNormal && resource.Status != domain.MicrosoftStatusIdentifying {
 				reason = "invalid_state"
 			} else if strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
 				reason = "credentials_missing"

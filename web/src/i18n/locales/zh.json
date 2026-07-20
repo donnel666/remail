@@ -305,6 +305,7 @@
   "Pending": "待验证",
   "Pending check": "待检测",
   "Validating": "验证中",
+  "Identifying": "识别中",
   "Disabled": "已禁用",
   "All statuses": "全部状态",
   "No email resources yet": "暂无微软邮箱资源",

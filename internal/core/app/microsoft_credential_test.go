@@ -97,6 +97,23 @@ func TestMicrosoftCredentialServiceMutations(t *testing.T) {
 		require.Equal(t, uint64(5), repo.resource.CredentialRevision)
 		require.Equal(t, domain.MicrosoftStatusPending, repo.resource.Status)
 	})
+
+	t.Run("history completion promotes identifying resource after rotating token", func(t *testing.T) {
+		repo := newMicrosoftCredentialRepositoryStub()
+		repo.resource.Status = domain.MicrosoftStatusIdentifying
+		service := NewMicrosoftCredentialService(repo)
+
+		err := service.ApplyMicrosoftHistoryScanResult(context.Background(), MicrosoftHistoryScanResult{
+			ResourceID: 10, ExpectedCredentialRevision: 4,
+			RefreshToken: "history-rotated-token", Completed: true, Now: now,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, domain.MicrosoftStatusNormal, repo.resource.Status)
+		require.Equal(t, "history-rotated-token", repo.resource.RefreshToken)
+		require.Equal(t, uint64(5), repo.resource.CredentialRevision)
+		require.Equal(t, 1, repo.saves)
+	})
 }
 
 type microsoftCredentialRepositoryStub struct {

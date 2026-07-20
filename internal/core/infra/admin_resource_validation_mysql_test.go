@@ -316,7 +316,7 @@ func TestResourceValidationRepoAppliesRedisMicrosoftResultWithRevisionFenceMySQL
 
 	var stored MicrosoftResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
-	require.Equal(t, string(domain.MicrosoftStatusNormal), stored.Status)
+	require.Equal(t, string(domain.MicrosoftStatusIdentifying), stored.Status)
 	require.Equal(t, "new-client", stored.ClientID)
 	require.Equal(t, "new-rt", stored.RefreshToken)
 	require.EqualValues(t, tasks[0].ExpectedCredentialRevision+1, stored.CredentialRevision)

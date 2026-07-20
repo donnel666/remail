@@ -5,6 +5,7 @@ export type LifetimeType = "short_lived" | "long_lived";
 export type ResourceStatus =
   | "pending"
   | "validating"
+  | "identifying"
   | "normal"
   | "abnormal"
   | "disabled";
@@ -47,6 +48,7 @@ export function toResourceStatus(status?: string): ResourceStatus {
   switch (status) {
     case "pending":
     case "validating":
+    case "identifying":
     case "normal":
     case "abnormal":
     case "disabled":

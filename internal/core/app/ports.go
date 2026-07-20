@@ -1046,12 +1046,13 @@ type ResourceListResult struct {
 }
 
 type ResourceFacetCounts struct {
-	All        int64
-	Normal     int64
-	Pending    int64
-	Validating int64
-	Abnormal   int64
-	Disabled   int64
+	All         int64
+	Normal      int64
+	Pending     int64
+	Validating  int64
+	Identifying int64
+	Abnormal    int64
+	Disabled    int64
 }
 
 type ResourceBooleanFacets struct {

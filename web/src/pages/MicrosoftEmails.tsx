@@ -77,6 +77,7 @@ type StatusFilter =
   | "all"
   | "pending"
   | "validating"
+  | "identifying"
   | "normal"
   | "abnormal"
   | "disabled";
@@ -264,6 +265,7 @@ export default function MicrosoftEmails() {
         normal: 0,
         pending: 0,
         validating: 0,
+        identifying: 0,
       },
     };
   }, [resourceFacets, total]);
@@ -956,6 +958,13 @@ export default function MicrosoftEmails() {
                   label={t("Validating")}
                   onSelect={applyStatusFilter}
                   value="validating"
+                />
+                <StatisticFilterOption
+                  active={statusFilter === "identifying"}
+                  count={resourceStats.status.identifying}
+                  label={t("Identifying")}
+                  onSelect={applyStatusFilter}
+                  value="identifying"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "abnormal"}

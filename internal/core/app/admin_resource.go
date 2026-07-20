@@ -179,13 +179,14 @@ type AdminMicrosoftRecord struct {
 }
 
 type AdminFacetCounts struct {
-	All        int64
-	Pending    int64
-	Validating int64
-	Normal     int64
-	Abnormal   int64
-	Disabled   int64
-	Deleted    int64
+	All         int64
+	Pending     int64
+	Validating  int64
+	Identifying int64
+	Normal      int64
+	Abnormal    int64
+	Disabled    int64
+	Deleted     int64
 }
 
 type AdminBooleanFacets struct {

@@ -1213,12 +1213,13 @@ func toResourceListFacetsResponse(facets *coreapp.ResourceListFacets) *ResourceL
 	}
 	return &ResourceListFacetsResponse{
 		Status: ResourceFacetCountsResponse{
-			All:        facets.Status.All,
-			Normal:     facets.Status.Normal,
-			Pending:    facets.Status.Pending,
-			Validating: facets.Status.Validating,
-			Abnormal:   facets.Status.Abnormal,
-			Disabled:   facets.Status.Disabled,
+			All:         facets.Status.All,
+			Normal:      facets.Status.Normal,
+			Pending:     facets.Status.Pending,
+			Validating:  facets.Status.Validating,
+			Identifying: facets.Status.Identifying,
+			Abnormal:    facets.Status.Abnormal,
+			Disabled:    facets.Status.Disabled,
 		},
 		Private: ResourceBooleanFacetsResponse{
 			All: facets.Private.All,

@@ -12183,6 +12183,7 @@ components:
         - normal
         - pending
         - validating
+        - identifying
         - abnormal
         - disabled
       properties:
@@ -12193,6 +12194,8 @@ components:
         pending:
           type: integer
         validating:
+          type: integer
+        identifying:
           type: integer
         abnormal:
           type: integer
@@ -12244,7 +12247,7 @@ components:
           type: integer
         status:
           type: string
-          description: Resource status (pending waits for assignment; validating has a live Redis/Asynq assignment).
+          description: Resource status (pending waits for validation assignment; validating has a live Redis/Asynq validation assignment; identifying waits for Microsoft project-history identification).
         forSale:
           type: boolean
           description: Microsoft resource is available for sale (Microsoft resources only)
@@ -14333,7 +14336,7 @@ components:
 
     AdminMicrosoftResourceStatus:
       type: string
-      enum: [pending, validating, normal, abnormal, disabled, deleted]
+      enum: [pending, validating, identifying, normal, abnormal, disabled, deleted]
     AdminMicrosoftTokenHealth:
       type: string
       description: "`expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot."
@@ -14455,7 +14458,7 @@ components:
       additionalProperties: false
     AdminMicrosoftStatusFacet:
       type: object
-      required: [all, pending, validating, normal, abnormal, disabled, deleted]
+      required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted]
       properties:
         all:
           type: integer
@@ -14467,6 +14470,10 @@ components:
           format: int64
           minimum: 0
         validating:
+          type: integer
+          format: int64
+          minimum: 0
+        identifying:
           type: integer
           format: int64
           minimum: 0

@@ -28,6 +28,12 @@ export function renderStatusTag(
         {t("Validating")}
       </Tag>
     );
+  } else if (status === "identifying") {
+    tag = (
+      <Tag color="blue" shape="circle" size="small">
+        {t("Identifying")}
+      </Tag>
+    );
   } else if (status === "abnormal") {
     tag = (
       <Tag color="red" shape="circle" size="small">

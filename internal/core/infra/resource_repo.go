@@ -997,12 +997,13 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 }
 
 type resourceStatusFacetRow struct {
-	All        int64 `gorm:"column:all_count"`
-	Normal     int64 `gorm:"column:normal_count"`
-	Pending    int64 `gorm:"column:pending_count"`
-	Validating int64 `gorm:"column:validating_count"`
-	Abnormal   int64 `gorm:"column:abnormal_count"`
-	Disabled   int64 `gorm:"column:disabled_count"`
+	All         int64 `gorm:"column:all_count"`
+	Normal      int64 `gorm:"column:normal_count"`
+	Pending     int64 `gorm:"column:pending_count"`
+	Validating  int64 `gorm:"column:validating_count"`
+	Identifying int64 `gorm:"column:identifying_count"`
+	Abnormal    int64 `gorm:"column:abnormal_count"`
+	Disabled    int64 `gorm:"column:disabled_count"`
 }
 
 func (r *ResourceRepo) resourceStatusFacets(ctx context.Context, ownerUserID uint, filter coreapp.ResourceListFilter) (coreapp.ResourceFacetCounts, error) {
@@ -1014,11 +1015,13 @@ func (r *ResourceRepo) resourceStatusFacets(ctx context.Context, ownerUserID uin
 			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS normal_count,
 			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS pending_count,
 			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS validating_count,
+			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS identifying_count,
 			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS abnormal_count,
 			COALESCE(SUM(CASE WHEN `+statusExpr+` = ? THEN 1 ELSE 0 END), 0) AS disabled_count`,
 			string(domain.MicrosoftStatusNormal),
 			string(domain.MicrosoftStatusPending),
 			string(domain.MicrosoftStatusValidating),
+			string(domain.MicrosoftStatusIdentifying),
 			string(domain.MicrosoftStatusAbnormal),
 			string(domain.MicrosoftStatusDisabled),
 		).
@@ -1027,12 +1030,13 @@ func (r *ResourceRepo) resourceStatusFacets(ctx context.Context, ownerUserID uin
 		return coreapp.ResourceFacetCounts{}, fmt.Errorf("resource status facets: %w", err)
 	}
 	return coreapp.ResourceFacetCounts{
-		All:        row.All,
-		Normal:     row.Normal,
-		Pending:    row.Pending,
-		Validating: row.Validating,
-		Abnormal:   row.Abnormal,
-		Disabled:   row.Disabled,
+		All:         row.All,
+		Normal:      row.Normal,
+		Pending:     row.Pending,
+		Validating:  row.Validating,
+		Identifying: row.Identifying,
+		Abnormal:    row.Abnormal,
+		Disabled:    row.Disabled,
 	}, nil
 }
 

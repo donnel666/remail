@@ -137,4 +137,19 @@ describe("MicrosoftMaintenanceModal", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Project history scan submitted.");
   });
+
+  it("defaults identifying resources to project scanning and allows resubmission", async () => {
+    render(
+      <MicrosoftMaintenanceModal
+        onCancel={vi.fn()}
+        onCompleted={vi.fn()}
+        target={{ ...target, status: "identifying" }}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /Scan projects/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+
+    await waitFor(() => expect(mocks.scanProjects).toHaveBeenCalledWith(41));
+  });
 });

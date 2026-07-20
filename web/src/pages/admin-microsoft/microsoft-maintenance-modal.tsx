@@ -28,6 +28,8 @@ function validationStatus(target: AdminMicrosoftResourceItem): MaintenanceStatus
       return "queued";
     case "validating":
       return "running";
+    case "identifying":
+      return "succeeded";
     case "normal":
       return "succeeded";
     case "abnormal":
@@ -70,7 +72,7 @@ export function MicrosoftMaintenanceModal({
 
   useEffect(() => {
     if (!target) return;
-    setSelected(target.status === "normal" ? "validate" : target.status === "disabled" ? "token" : "validate");
+    setSelected(target.status === "identifying" ? "history" : target.status === "normal" ? "validate" : target.status === "disabled" ? "token" : "validate");
     setTasks([]);
     const controller = new AbortController();
     setLoadingTasks(true);
@@ -139,7 +141,7 @@ export function MicrosoftMaintenanceModal({
     {
       action: scanAdminMicrosoftProjects,
       description: "Scan full Inbox and Junk history and restore existing project relationships.",
-      disabled: target.status !== "normal" || !tokenConfigured,
+      disabled: (target.status !== "normal" && target.status !== "identifying") || !tokenConfigured,
       disabledReason: "Project scanning requires a normal resource with OAuth credentials.",
       icon: ScanSearch,
       key: "history",

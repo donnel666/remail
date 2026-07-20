@@ -176,12 +176,13 @@ type ResourceListResponse struct {
 }
 
 type ResourceFacetCountsResponse struct {
-	All        int64 `json:"all"`
-	Normal     int64 `json:"normal"`
-	Pending    int64 `json:"pending"`
-	Validating int64 `json:"validating"`
-	Abnormal   int64 `json:"abnormal"`
-	Disabled   int64 `json:"disabled"`
+	All         int64 `json:"all"`
+	Normal      int64 `json:"normal"`
+	Pending     int64 `json:"pending"`
+	Validating  int64 `json:"validating"`
+	Identifying int64 `json:"identifying"`
+	Abnormal    int64 `json:"abnormal"`
+	Disabled    int64 `json:"disabled"`
 }
 
 type ResourceBooleanFacetsResponse struct {

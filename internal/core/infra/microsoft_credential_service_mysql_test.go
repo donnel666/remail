@@ -86,4 +86,19 @@ WHERE mr.id = ?`, 8101).Scan(&saved).Error)
 	require.Equal(t, "request-8101", saved.TokenLastRequestID)
 	require.Equal(t, "disabled", saved.Status)
 	require.Equal(t, uint64(2), saved.Version)
+
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).Where("id = ?", 8101).Update("status", "identifying").Error)
+	require.NoError(t, service.ApplyMicrosoftHistoryScanResult(context.Background(), coreapp.MicrosoftHistoryScanResult{
+		ResourceID: 8101, ExpectedCredentialRevision: 4,
+		RefreshToken: "refresh-v3", Completed: true, Now: now.Add(time.Minute),
+	}))
+	require.NoError(t, db.Raw(`
+SELECT mr.refresh_token, mr.credential_revision, mr.status, er.version
+FROM microsoft_resources mr
+JOIN email_resources er ON er.id = mr.id
+WHERE mr.id = ?`, 8101).Scan(&saved).Error)
+	require.Equal(t, "refresh-v3", saved.RefreshToken)
+	require.Equal(t, uint64(5), saved.CredentialRevision)
+	require.Equal(t, "normal", saved.Status)
+	require.Equal(t, uint64(3), saved.Version)
 }

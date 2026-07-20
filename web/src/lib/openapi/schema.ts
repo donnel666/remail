@@ -4124,6 +4124,7 @@ export interface components {
             normal: number;
             pending: number;
             validating: number;
+            identifying: number;
             abnormal: number;
             disabled: number;
         };
@@ -4140,7 +4141,7 @@ export interface components {
             id: number;
             type: string;
             ownerId: number;
-            /** @description Resource status (pending waits for assignment; validating has a live Redis/Asynq assignment). */
+            /** @description Resource status (pending waits for validation assignment; validating has a live Redis/Asynq validation assignment; identifying waits for Microsoft project-history identification). */
             status?: string;
             /** @description Microsoft resource is available for sale (Microsoft resources only) */
             forSale?: boolean;
@@ -5012,7 +5013,7 @@ export interface components {
             createdAt: string;
         };
         /** @enum {string} */
-        AdminMicrosoftResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
+        AdminMicrosoftResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
         /**
          * @description `expiring` means the configured refresh-token expiry is greater than now and no more than seven days away. List items, filters, and facets use the same request-time snapshot.
          * @enum {string}
@@ -5080,6 +5081,8 @@ export interface components {
             pending: number;
             /** Format: int64 */
             validating: number;
+            /** Format: int64 */
+            identifying: number;
             /** Format: int64 */
             normal: number;
             /** Format: int64 */

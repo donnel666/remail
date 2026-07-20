@@ -92,13 +92,14 @@ type adminMicrosoftResourceItemResponse struct {
 }
 
 type adminMicrosoftStatusFacetResponse struct {
-	All        int64 `json:"all"`
-	Pending    int64 `json:"pending"`
-	Validating int64 `json:"validating"`
-	Normal     int64 `json:"normal"`
-	Abnormal   int64 `json:"abnormal"`
-	Disabled   int64 `json:"disabled"`
-	Deleted    int64 `json:"deleted"`
+	All         int64 `json:"all"`
+	Pending     int64 `json:"pending"`
+	Validating  int64 `json:"validating"`
+	Identifying int64 `json:"identifying"`
+	Normal      int64 `json:"normal"`
+	Abnormal    int64 `json:"abnormal"`
+	Disabled    int64 `json:"disabled"`
+	Deleted     int64 `json:"deleted"`
 }
 
 type adminMicrosoftBooleanFacetResponse struct {

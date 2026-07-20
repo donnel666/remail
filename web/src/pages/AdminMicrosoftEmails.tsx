@@ -341,6 +341,7 @@ export default function AdminMicrosoftEmails() {
         normal: 0,
         pending: 0,
         validating: 0,
+        identifying: 0,
       },
       suffixes: [],
       tokenHealth: { all: total, expired: 0, expiring: 0, missing: 0, valid: 0 },
@@ -1044,7 +1045,7 @@ export default function AdminMicrosoftEmails() {
                 {t("Status")}
               </div>
               <div className="mb-2 space-y-1">
-                {(["all", "pending", "validating", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
+                {(["all", "pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
                   (value) => (
                     <StatisticFilterOption
                       active={statusFilter === value}

@@ -119,6 +119,7 @@ type projectHistoryCredentialsStub struct {
 	maxID       uint
 	resources   []*coreapp.MicrosoftCredentialScope
 	rotation    coreapp.MicrosoftFetchRefreshTokenRotation
+	history     coreapp.MicrosoftHistoryScanResult
 	rotationErr error
 }
 
@@ -150,6 +151,26 @@ func (*projectHistoryCredentialsStub) ApplyMicrosoftTokenRefreshFailure(context.
 func (s *projectHistoryCredentialsStub) ApplyMicrosoftFetchRefreshToken(_ context.Context, update coreapp.MicrosoftFetchRefreshTokenRotation) error {
 	s.rotation = update
 	return s.rotationErr
+}
+func (s *projectHistoryCredentialsStub) ApplyMicrosoftHistoryScanResult(_ context.Context, result coreapp.MicrosoftHistoryScanResult) error {
+	s.history = result
+	if s.rotationErr != nil {
+		return s.rotationErr
+	}
+	for _, resource := range s.resources {
+		if resource.ResourceID != result.ResourceID || resource.CredentialRevision != result.ExpectedCredentialRevision {
+			continue
+		}
+		if result.RefreshToken != "" && result.RefreshToken != resource.RefreshToken {
+			resource.RefreshToken = result.RefreshToken
+			resource.CredentialRevision++
+		}
+		if result.Completed && resource.Status == "identifying" {
+			resource.Status = "normal"
+		}
+		return nil
+	}
+	return coreapp.ErrMicrosoftCredentialNotFound
 }
 
 type projectHistoryTransportStub struct {
@@ -235,6 +256,48 @@ func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
 	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
 	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
 	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
+}
+
+func TestValidatedMicrosoftHistoryPromotesIdentifyingResourceAfterImport(t *testing.T) {
+	now := time.Now().UTC()
+	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
+	resource := &coreapp.MicrosoftCredentialScope{
+		ResourceID: 10, Status: "identifying", EmailAddress: "main@example.com",
+		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}
+	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
+	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
+		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
+		Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: now,
+	}}}}
+	history := &projectHistoryUsageStub{}
+	uc := NewProjectHistoryScanUseCase(nil, matches, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(credentials)
+	uc.SetHistoricalMicrosoftUsagePort(history)
+
+	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}))
+	require.Equal(t, "normal", resource.Status)
+	require.True(t, credentials.history.Completed)
+	require.Equal(t, "rotated", resource.RefreshToken)
+	require.Len(t, history.matches, 1)
+}
+
+func TestValidatedMicrosoftHistoryFailureLeavesResourceIdentifying(t *testing.T) {
+	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
+	resource := &coreapp.MicrosoftCredentialScope{
+		ResourceID: 10, Status: "identifying", EmailAddress: "main@example.com",
+		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}
+	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
+	transport := &projectHistoryTransportStub{err: &MailFetchFailure{
+		SafeMessage: "Mailbox rejected the history scan.", Retryable: false, Cause: errors.New("rejected"),
+	}}
+	uc := NewProjectHistoryScanUseCase(nil, matches, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(credentials)
+
+	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}))
+	require.Equal(t, "identifying", resource.Status)
+	require.False(t, credentials.history.Completed)
 }
 
 func projectHistoryScope() *HistoricalProjectScope {

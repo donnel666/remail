@@ -57,6 +57,7 @@ export const STATUS_META: Record<
 > = {
   pending: { color: "blue", label: "Pending" },
   validating: { color: "orange", label: "Validating" },
+  identifying: { color: "blue", label: "Identifying" },
   normal: { color: "green", label: "Normal" },
   abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },

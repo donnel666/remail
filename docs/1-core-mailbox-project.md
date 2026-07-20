@@ -45,6 +45,7 @@
 | 2026-07-16 | V1.38 | Codex | 补充密码登录授权 RT 的验证码路径：登录 proof 同样必须先识别辅助邮箱；规则可推算时按完整邮箱精确收码，推算失败时才按掩码和实际 recipient 反推，两条发码路径共用恢复租约。 |
 | 2026-07-16 | V1.39 | Codex | 定稿 Redis-only 资源验证调度：Microsoft/Domain 的 `pending` 表示待分配，`validating` 表示已有临时 Redis/Asynq 任务；批量 selection、分页游标、单资源执行和重试都只存在 Redis。MySQL 不保存 validation job/batch/history，dispatcher 按自适应执行窗口领取，任务完成立即清理；启动时把遗留 `validating` 重置为 `pending`。 |
 | 2026-07-17 | V1.40 | Codex | 将 Microsoft 旧项目识别从验证 worker 的同步全量拉取拆为独立 MailMatch 异步任务：验证只轻量探测 Inbox/Junk；扫描按确定性规则识别主邮箱/点号/加号/显式别名，复用既有订单与分配框架补齐超级管理员 0 元已过保历史订单。 |
+| 2026-07-20 | V1.41 | Codex | Microsoft 验证成功后先进入 `identifying`，旧项目识别及历史订单/分配事实在同一事务完成后才切换 `normal`；`identifying` 不进入分配池，并允许管理员按状态筛选后重新提交历史扫描。 |
 
 > 核心域。BC-CORE 是邮箱资源和项目规则的所有者。分配记录、订单、邮件事实、钱包余额不在本上下文内。
 
@@ -118,7 +119,7 @@ EmailResource
 | `graphAvailable` | 最近一次完成验证是否确认 Graph 可收件；Graph 成功为 `true`，IMAP 回退成功或确定性验证失败为 `false` |
 | `rtExpireAt` | RT 预计失效时间 |
 | `forSale` | 是否公开供给出售 |
-| `status` | `pending/validating/normal/abnormal/disabled/deleted`；`pending`=待验证，`validating`=已分配验证任务 |
+| `status` | `pending/validating/identifying/normal/abnormal/disabled/deleted`；`pending`=待验证，`validating`=已分配验证任务，`identifying`=验证已成功但仍在识别旧项目 |
 | `qualityScore` | 资源质量分 |
 | `lastSafeError` | 脱敏诊断摘要 |
 | `lastAllocatedAt` | 最近分配时间 |
@@ -184,8 +185,8 @@ Microsoft 协议交互细节不在 Core 领域模型中表达。登录页面、R
 | dispatcher 领取 | dispatcher 只挑选 `pending` 资源，并在同一短事务把它们置为 `validating` 后投递单资源 Redis task。总 `validating` 分配数不得超过当前自适应执行窗口；重复 dispatcher 不能让 Redis backlog 无界增长。 |
 | worker 执行 | 根据资源类型调用 BC-MAILTRANSPORT 的 Microsoft ACL 或 DNS 验证 Port；外部网络调用不得进入数据库事务。 |
 | Microsoft 成功条件 | MailTransport 完成 RT 获取/刷新，并通过 Graph 或 IMAP 任一路径轻量读取收件箱和垃圾箱后，即可判定 Microsoft 资源本体正常；验证阶段每个文件夹最多读取一封，不承担历史全量扫描。密码登录授权若触发辅助邮箱验证码，必须先按规则推算完整地址：推算成功则精确收码，推算失败才按掩码反推实际 recipient。辅助邮箱观察、恢复、绑定和持久化失败，以及后续项目邮件匹配失败，均不能推翻已经成立的 RT 与收件成功证据。完整流程见 [Microsoft 资源验证、辅助邮箱恢复与显式别名流程](20-microsoft-validation-binding-alias-flow.md)。 |
-| 成功回写 | 短事务把 Microsoft/Domain 资源状态置为 `normal`，清空安全错误；Microsoft 如返回 rotated RT，必须同步保存；Microsoft 如通过 Graph 收件则 `graphAvailable=true`，如通过 IMAP 回退收件则 `graphAvailable=false`。 |
-| 旧项目识别 | Microsoft 健康结果最终提交前，Core 先幂等投递独立 `validated_microsoft_history_scan` 任务；投递失败则保持 `validating` 交给现有验证重试，避免出现 `normal` 但永久漏任务。任务 worker 仅在资源已为 `normal` 后使用已提交凭据流式全量读取 Inbox/Junk：地址等于主邮箱为 `main`，同域去点后相同为 `dot`，同域且 `+` 前缀相同为 `plus`，其余实际收件地址为显式 `alias`。MailMatch 只提交识别结果；BC-TRADE 复用既有 BC-BILLING 零元扣款和 BC-ALLOC alias/guard/allocation Port，先创建或复用对应别名，再为确定性的 `super_admin` 创建一笔 0 元、`completed`、已过保且 Allocation 已 `released` 的幂等历史订单。任务执行失败不回滚已经提交的资源健康。 |
+| 成功回写 | 短事务把 Microsoft 资源状态置为 `identifying`、Domain 资源状态置为 `normal`，清空安全错误；Microsoft 如返回 rotated RT，必须同步保存；Microsoft 如通过 Graph 收件则 `graphAvailable=true`，如通过 IMAP 回退收件则 `graphAvailable=false`。 |
+| 旧项目识别 | Microsoft 健康结果提交前，Core 先幂等投递独立 `validated_microsoft_history_scan` 任务；投递失败则保持 `validating` 交给现有验证重试。健康结果成功提交后资源进入 `identifying`，不进入分配池。任务 worker 使用已提交凭据流式全量读取 Inbox/Junk：地址等于主邮箱为 `main`，同域去点后相同为 `dot`，同域且 `+` 前缀相同为 `plus`，其余实际收件地址为显式 `alias`。MailMatch 提交识别结果；BC-TRADE 复用既有 BC-BILLING 零元扣款和 BC-ALLOC alias/guard/allocation Port，先创建或复用对应别名，再为确定性的 `super_admin` 创建一笔 0 元、`completed`、已过保且 Allocation 已 `released` 的幂等历史订单；这些事实与 `identifying -> normal` 在同一数据库事务提交。失败时保持 `identifying`，管理员可按该状态筛选并重新提交历史扫描。 |
 | 失败回写 | 只有无法获得权威可用 RT，或使用最终 RT 发生确定性收件失败，才允许把资源置为 `abnormal`。辅助邮箱本身的掩码、外部域名、恢复超时、验证码错误或写入失败不是独立资源异常证据。写 `lastSafeError` 和 SystemLog 时必须记录真正的 RT/账号/收件失败原因；不得把资源自动置为 `disabled`，禁用只能由管理员命令触发。 |
 | 临时失败 | Microsoft/代理/DNS 服务临时不可用、请求超时或验证 Port 不可用时，Asynq 在同一临时 task 内重试，资源保持 `validating`。最终重试耗尽时必须先把资源恢复为 `pending`，handler 返回成功让该 Redis task 立即删除；不得写 `abnormal`，也不得进入 archived。 |
 | 投递失败 | `pending -> validating` 后如果 Redis enqueue 失败，立即按 resource type、status 和 credential revision fence 回滚为 `pending`。 |

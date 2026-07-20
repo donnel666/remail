@@ -286,7 +286,7 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 		nextStatus := string(domain.MicrosoftStatusAbnormal)
 		nextFailures := min(ms.ValidationFailures+1, coreapp.ResourceValidationMaxFailures)
 		if result.Valid {
-			nextStatus = string(domain.MicrosoftStatusNormal)
+			nextStatus = string(domain.MicrosoftStatusIdentifying)
 			nextFailures = 0
 			safeMessage = ""
 		} else if result.Retryable && nextFailures < coreapp.ResourceValidationMaxFailures {

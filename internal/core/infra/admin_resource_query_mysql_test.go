@@ -200,6 +200,40 @@ VALUES
 	require.Nil(t, other.Schedule)
 }
 
+func TestAdminMicrosoftIdentifyingStatusFilterAndFacetMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	ctx := context.Background()
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, role, status)
+VALUES (9101, 'identifying-owner@test.local', 'hash', 'Identifying Owner', 'supplier', 'active')`).Error)
+
+	resources := NewResourceRepo(db)
+	identifyingRoot := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9101}
+	require.NoError(t, resources.CreateMicrosoft(ctx, identifyingRoot, &domain.MicrosoftResource{
+		EmailAddress: "identifying@outlook.com", Password: "secret", ClientID: "client", RefreshToken: "refresh",
+		Status: domain.MicrosoftStatusIdentifying,
+	}))
+	normalRoot := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 9101}
+	require.NoError(t, resources.CreateMicrosoft(ctx, normalRoot, &domain.MicrosoftResource{
+		EmailAddress: "normal@outlook.com", Password: "secret", Status: domain.MicrosoftStatusNormal,
+	}))
+
+	repo := NewAdminResourceRepo(db)
+	items, total, err := repo.ListAdminMicrosoft(ctx, coreapp.AdminMicrosoftListFilter{
+		Status: domain.MicrosoftStatusIdentifying,
+	}, 0, 20, 0, time.Now().UTC())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	require.Equal(t, identifyingRoot.ID, items[0].ID)
+
+	facets, err := repo.AdminMicrosoftFacets(ctx, coreapp.AdminMicrosoftListFilter{}, time.Now().UTC())
+	require.NoError(t, err)
+	require.EqualValues(t, 2, facets.Status.All)
+	require.EqualValues(t, 1, facets.Status.Identifying)
+	require.EqualValues(t, 1, facets.Status.Normal)
+}
+
 func TestAdminResourceQueryPlansKeepListBoundedAndUseResourceIndexesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	rareResourceID := seedAdminResourceQueryPlanFacts(t, db, 256)

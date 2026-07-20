@@ -223,7 +223,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 		return coreapp.ErrMicrosoftCredentialChanged
 	}
 	switch strings.ToLower(strings.TrimSpace(resource.Status)) {
-	case "normal":
+	case "identifying", "normal":
 	case "pending", "validating":
 		return domain.ErrInvalidRequest
 	default:
@@ -233,8 +233,19 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 		return domain.ErrInvalidRequest
 	}
 	scopes, err := uc.matches.ListHistoricalProjectScopes(ctx)
-	if err != nil || len(scopes) == 0 {
+	if err != nil {
 		return err
+	}
+	if len(scopes) == 0 {
+		return uc.matches.WithTx(ctx, func(txCtx context.Context) error {
+			if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0); err != nil {
+				return err
+			}
+			return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
+				ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+				Completed: true, Now: uc.now(),
+			})
+		})
 	}
 	accumulator := historicalMatchesAccumulator{
 		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
@@ -274,14 +285,11 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 				return errProjectHistoryScopeChanged
 			}
 		}
-		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
-			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: refreshToken, Now: uc.now(),
-		}); err != nil {
-			return err
-		}
 		if fetchErr != nil {
-			return nil
+			return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
+				ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+				RefreshToken: refreshToken, Now: uc.now(),
+			})
 		}
 		matches := accumulator.results()
 		if len(matches) > 0 {
@@ -292,7 +300,13 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 				return err
 			}
 		}
-		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0)
+		if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0); err != nil {
+			return err
+		}
+		return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
+			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+			RefreshToken: refreshToken, Completed: true, Now: uc.now(),
+		})
 	})
 	if errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
 		return nil

@@ -23,12 +23,13 @@ const (
 type MicrosoftResourceStatus string
 
 const (
-	MicrosoftStatusPending    MicrosoftResourceStatus = "pending"
-	MicrosoftStatusValidating MicrosoftResourceStatus = "validating"
-	MicrosoftStatusNormal     MicrosoftResourceStatus = "normal"
-	MicrosoftStatusAbnormal   MicrosoftResourceStatus = "abnormal"
-	MicrosoftStatusDisabled   MicrosoftResourceStatus = "disabled"
-	MicrosoftStatusDeleted    MicrosoftResourceStatus = "deleted"
+	MicrosoftStatusPending     MicrosoftResourceStatus = "pending"
+	MicrosoftStatusValidating  MicrosoftResourceStatus = "validating"
+	MicrosoftStatusIdentifying MicrosoftResourceStatus = "identifying"
+	MicrosoftStatusNormal      MicrosoftResourceStatus = "normal"
+	MicrosoftStatusAbnormal    MicrosoftResourceStatus = "abnormal"
+	MicrosoftStatusDisabled    MicrosoftResourceStatus = "disabled"
+	MicrosoftStatusDeleted     MicrosoftResourceStatus = "deleted"
 )
 
 // MailDomainStatus represents the status of a domain resource.
@@ -104,7 +105,7 @@ type MicrosoftResource struct {
 // IsValidMicrosoftStatus returns true if the status is a valid state.
 func IsValidMicrosoftStatus(s string) bool {
 	switch MicrosoftResourceStatus(s) {
-	case MicrosoftStatusPending, MicrosoftStatusValidating, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled, MicrosoftStatusDeleted:
+	case MicrosoftStatusPending, MicrosoftStatusValidating, MicrosoftStatusIdentifying, MicrosoftStatusNormal, MicrosoftStatusAbnormal, MicrosoftStatusDisabled, MicrosoftStatusDeleted:
 		return true
 	default:
 		return false
@@ -117,6 +118,8 @@ func CanTransitionMicrosoftStatus(from, to MicrosoftResourceStatus) bool {
 	case MicrosoftStatusPending:
 		return to == MicrosoftStatusValidating || to == MicrosoftStatusDisabled
 	case MicrosoftStatusValidating:
+		return to == MicrosoftStatusPending || to == MicrosoftStatusIdentifying || to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled
+	case MicrosoftStatusIdentifying:
 		return to == MicrosoftStatusPending || to == MicrosoftStatusNormal || to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled
 	case MicrosoftStatusNormal:
 		return to == MicrosoftStatusPending || to == MicrosoftStatusAbnormal || to == MicrosoftStatusDisabled

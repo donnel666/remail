@@ -552,7 +552,7 @@ func (r *mockResourceRepo) Facets(_ context.Context, ownerUserID uint, filter co
 	statusBase := filter
 	statusBase.Status = ""
 	facets.Status.All = int64(len(r.listResources(ownerUserID, statusBase, 0, 0)))
-	for _, status := range []string{"normal", "pending", "validating", "abnormal", "disabled"} {
+	for _, status := range []string{"normal", "pending", "validating", "identifying", "abnormal", "disabled"} {
 		next := statusBase
 		next.Status = status
 		count := int64(len(r.listResources(ownerUserID, next, 0, 0)))
@@ -563,6 +563,8 @@ func (r *mockResourceRepo) Facets(_ context.Context, ownerUserID uint, filter co
 			facets.Status.Pending = count
 		case "validating":
 			facets.Status.Validating = count
+		case "identifying":
+			facets.Status.Identifying = count
 		case "abnormal":
 			facets.Status.Abnormal = count
 		case "disabled":
@@ -1553,7 +1555,7 @@ func (r *mockValidationRepo) ApplyMicrosoftResult(_ context.Context, task coreap
 		}
 	}
 	if result.Valid {
-		resource.Status = coredomain.MicrosoftStatusNormal
+		resource.Status = coredomain.MicrosoftStatusIdentifying
 		resource.ValidationFailures = 0
 		resource.LastSafeError = ""
 		resource.QualityScore = 100
@@ -2439,7 +2441,7 @@ func TestResourceValidationUseCase_WorkerActivatesPendingGeneration(t *testing.T
 			OwnerUserID: 1, ValidationGeneration: resourceRepo.microsoft[root.ID].ValidationGeneration, ExpectedCredentialRevision: 3,
 		}
 		require.NoError(t, uc.Process(context.Background(), task, false))
-		require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
+		require.Equal(t, coredomain.MicrosoftStatusIdentifying, resourceRepo.microsoft[root.ID].Status)
 	})
 
 	t.Run("domain", func(t *testing.T) {
@@ -2474,7 +2476,7 @@ func TestResourceValidationUseCase_ProcessMicrosoftSuccessUpdatesResource(t *tes
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
 	task := mockValidationTask(validationRepo, root.ID)
 	require.NoError(t, uc.Process(context.Background(), task, false))
-	require.Equal(t, coredomain.MicrosoftStatusNormal, resourceRepo.microsoft[root.ID].Status)
+	require.Equal(t, coredomain.MicrosoftStatusIdentifying, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, "rotated-rt", resourceRepo.microsoft[root.ID].RefreshToken)
 	require.Equal(t, []uint{root.ID}, trigger.resourceIDs)
 	require.Len(t, historyTrigger.tasks, 1)

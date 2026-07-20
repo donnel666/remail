@@ -50,6 +50,14 @@ type MicrosoftFetchRefreshTokenRotation struct {
 	Now                        time.Time
 }
 
+type MicrosoftHistoryScanResult struct {
+	ResourceID                 uint
+	ExpectedCredentialRevision uint64
+	RefreshToken               string
+	Completed                  bool
+	Now                        time.Time
+}
+
 // MicrosoftCredentialPort is the narrow Core-owned boundary used by other
 // bounded contexts for Microsoft protocol work.
 type MicrosoftCredentialPort interface {
@@ -59,6 +67,7 @@ type MicrosoftCredentialPort interface {
 	ApplyMicrosoftTokenRefreshSuccess(ctx context.Context, update MicrosoftTokenRefreshSuccess) error
 	ApplyMicrosoftTokenRefreshFailure(ctx context.Context, update MicrosoftTokenRefreshFailure) error
 	ApplyMicrosoftFetchRefreshToken(ctx context.Context, update MicrosoftFetchRefreshTokenRotation) error
+	ApplyMicrosoftHistoryScanResult(ctx context.Context, result MicrosoftHistoryScanResult) error
 }
 
 type MicrosoftCredentialRepository interface {
@@ -169,6 +178,48 @@ func (s *MicrosoftCredentialService) ApplyMicrosoftFetchRefreshToken(ctx context
 		resource.CredentialRevision++
 		resource.CredentialUpdatedAt = credentialTime(update.Now)
 		return true, nil
+	})
+}
+
+func (s *MicrosoftCredentialService) ApplyMicrosoftHistoryScanResult(ctx context.Context, result MicrosoftHistoryScanResult) error {
+	if s == nil || s.repo == nil || result.ResourceID == 0 {
+		return ErrMicrosoftCredentialNotFound
+	}
+	return s.repo.WithTx(ctx, func(txCtx context.Context) error {
+		root, resource, err := s.repo.LockAdminMicrosoft(txCtx, result.ResourceID)
+		if err != nil {
+			return microsoftCredentialError(err)
+		}
+		if resource.CredentialRevision != result.ExpectedCredentialRevision {
+			return ErrMicrosoftCredentialChanged
+		}
+		if resource.Status == domain.MicrosoftStatusDeleted {
+			return ErrMicrosoftCredentialDeleted
+		}
+		if resource.Status != domain.MicrosoftStatusIdentifying && resource.Status != domain.MicrosoftStatusNormal {
+			return ErrMicrosoftCredentialChanged
+		}
+
+		changed := false
+		if refreshToken := strings.TrimSpace(result.RefreshToken); refreshToken != "" && refreshToken != strings.TrimSpace(resource.RefreshToken) {
+			resource.RefreshToken = refreshToken
+			resource.CredentialRevision++
+			resource.CredentialUpdatedAt = credentialTime(result.Now)
+			changed = true
+		}
+		if result.Completed && resource.Status == domain.MicrosoftStatusIdentifying {
+			resource.Status = domain.MicrosoftStatusNormal
+			resource.ValidationFailures = 0
+			resource.LastSafeError = ""
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		if err := s.repo.SaveAdminMicrosoft(txCtx, root, resource, root.Version); err != nil {
+			return microsoftCredentialError(err)
+		}
+		return nil
 	})
 }
 

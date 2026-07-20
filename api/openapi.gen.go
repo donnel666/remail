@@ -741,12 +741,13 @@ func (e AdminMicrosoftResourceItemType) Valid() bool {
 
 // Defines values for AdminMicrosoftResourceStatus.
 const (
-	AdminMicrosoftResourceStatusAbnormal   AdminMicrosoftResourceStatus = "abnormal"
-	AdminMicrosoftResourceStatusDeleted    AdminMicrosoftResourceStatus = "deleted"
-	AdminMicrosoftResourceStatusDisabled   AdminMicrosoftResourceStatus = "disabled"
-	AdminMicrosoftResourceStatusNormal     AdminMicrosoftResourceStatus = "normal"
-	AdminMicrosoftResourceStatusPending    AdminMicrosoftResourceStatus = "pending"
-	AdminMicrosoftResourceStatusValidating AdminMicrosoftResourceStatus = "validating"
+	AdminMicrosoftResourceStatusAbnormal    AdminMicrosoftResourceStatus = "abnormal"
+	AdminMicrosoftResourceStatusDeleted     AdminMicrosoftResourceStatus = "deleted"
+	AdminMicrosoftResourceStatusDisabled    AdminMicrosoftResourceStatus = "disabled"
+	AdminMicrosoftResourceStatusIdentifying AdminMicrosoftResourceStatus = "identifying"
+	AdminMicrosoftResourceStatusNormal      AdminMicrosoftResourceStatus = "normal"
+	AdminMicrosoftResourceStatusPending     AdminMicrosoftResourceStatus = "pending"
+	AdminMicrosoftResourceStatusValidating  AdminMicrosoftResourceStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the AdminMicrosoftResourceStatus enum.
@@ -757,6 +758,8 @@ func (e AdminMicrosoftResourceStatus) Valid() bool {
 	case AdminMicrosoftResourceStatusDeleted:
 		return true
 	case AdminMicrosoftResourceStatusDisabled:
+		return true
+	case AdminMicrosoftResourceStatusIdentifying:
 		return true
 	case AdminMicrosoftResourceStatusNormal:
 		return true
@@ -4447,12 +4450,13 @@ type AdminMicrosoftStatusFacet struct {
 	Abnormal int64 `json:"abnormal"`
 
 	// All All matching non-deleted resources when the status dimension is ignored.
-	All        int64 `json:"all"`
-	Deleted    int64 `json:"deleted"`
-	Disabled   int64 `json:"disabled"`
-	Normal     int64 `json:"normal"`
-	Pending    int64 `json:"pending"`
-	Validating int64 `json:"validating"`
+	All         int64 `json:"all"`
+	Deleted     int64 `json:"deleted"`
+	Disabled    int64 `json:"disabled"`
+	Identifying int64 `json:"identifying"`
+	Normal      int64 `json:"normal"`
+	Pending     int64 `json:"pending"`
+	Validating  int64 `json:"validating"`
 }
 
 // AdminMicrosoftSuffixFacet defines model for AdminMicrosoftSuffixFacet.
@@ -6318,12 +6322,13 @@ type ResourceBulkSelection1Mode string
 
 // ResourceFacetCounts defines model for ResourceFacetCounts.
 type ResourceFacetCounts struct {
-	Abnormal   int `json:"abnormal"`
-	All        int `json:"all"`
-	Disabled   int `json:"disabled"`
-	Normal     int `json:"normal"`
-	Pending    int `json:"pending"`
-	Validating int `json:"validating"`
+	Abnormal    int `json:"abnormal"`
+	All         int `json:"all"`
+	Disabled    int `json:"disabled"`
+	Identifying int `json:"identifying"`
+	Normal      int `json:"normal"`
+	Pending     int `json:"pending"`
+	Validating  int `json:"validating"`
 }
 
 // ResourceItem defines model for ResourceItem.
@@ -6363,7 +6368,7 @@ type ResourceItem struct {
 	// Purpose Domain resource purpose (domain resources only; not_sale means user-side private/unavailable for sale, binding is displayed as auxiliary mailbox in Chinese)
 	Purpose *ResourceItemPurpose `json:"purpose,omitempty"`
 
-	// Status Resource status (pending waits for assignment; validating has a live Redis/Asynq assignment).
+	// Status Resource status (pending waits for validation assignment; validating has a live Redis/Asynq validation assignment; identifying waits for Microsoft project-history identification).
 	Status    *string   `json:"status,omitempty"`
 	Type      string    `json:"type"`
 	UpdatedAt time.Time `json:"updatedAt"`
