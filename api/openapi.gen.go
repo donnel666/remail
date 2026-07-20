@@ -1270,6 +1270,24 @@ func (e CreateDomainRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for CreateOrderBatchItemResponseStatus.
+const (
+	CreateOrderBatchItemResponseStatusFailed    CreateOrderBatchItemResponseStatus = "failed"
+	CreateOrderBatchItemResponseStatusSucceeded CreateOrderBatchItemResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the CreateOrderBatchItemResponseStatus enum.
+func (e CreateOrderBatchItemResponseStatus) Valid() bool {
+	switch e {
+	case CreateOrderBatchItemResponseStatusFailed:
+		return true
+	case CreateOrderBatchItemResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateProjectApplicationRequestAccessType.
 const (
 	CreateProjectApplicationRequestAccessTypePrivate CreateProjectApplicationRequestAccessType = "private"
@@ -1492,6 +1510,24 @@ func (e InviteResponseKind) Valid() bool {
 	}
 }
 
+// Defines values for OrderBatchItemErrorResponseCode.
+const (
+	OrderBatchItemErrorResponseCodeInsufficientBalance   OrderBatchItemErrorResponseCode = "insufficient_balance"
+	OrderBatchItemErrorResponseCodeInsufficientInventory OrderBatchItemErrorResponseCode = "insufficient_inventory"
+)
+
+// Valid indicates whether the value is a known member of the OrderBatchItemErrorResponseCode enum.
+func (e OrderBatchItemErrorResponseCode) Valid() bool {
+	switch e {
+	case OrderBatchItemErrorResponseCodeInsufficientBalance:
+		return true
+	case OrderBatchItemErrorResponseCodeInsufficientInventory:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrderEventResponseOperatorType.
 const (
 	OrderEventResponseOperatorTypeAdmin   OrderEventResponseOperatorType = "admin"
@@ -1554,28 +1590,28 @@ func (e OrderResponseClientChannel) Valid() bool {
 
 // Defines values for OrderResponseFailureCode.
 const (
-	ActivationFailed      OrderResponseFailureCode = "activation_failed"
-	AllocationFailed      OrderResponseFailureCode = "allocation_failed"
-	InsufficientBalance   OrderResponseFailureCode = "insufficient_balance"
-	InsufficientInventory OrderResponseFailureCode = "insufficient_inventory"
-	ServiceTokenFailed    OrderResponseFailureCode = "service_token_failed"
-	Unknown               OrderResponseFailureCode = "unknown"
+	OrderResponseFailureCodeActivationFailed      OrderResponseFailureCode = "activation_failed"
+	OrderResponseFailureCodeAllocationFailed      OrderResponseFailureCode = "allocation_failed"
+	OrderResponseFailureCodeInsufficientBalance   OrderResponseFailureCode = "insufficient_balance"
+	OrderResponseFailureCodeInsufficientInventory OrderResponseFailureCode = "insufficient_inventory"
+	OrderResponseFailureCodeServiceTokenFailed    OrderResponseFailureCode = "service_token_failed"
+	OrderResponseFailureCodeUnknown               OrderResponseFailureCode = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseFailureCode enum.
 func (e OrderResponseFailureCode) Valid() bool {
 	switch e {
-	case ActivationFailed:
+	case OrderResponseFailureCodeActivationFailed:
 		return true
-	case AllocationFailed:
+	case OrderResponseFailureCodeAllocationFailed:
 		return true
-	case InsufficientBalance:
+	case OrderResponseFailureCodeInsufficientBalance:
 		return true
-	case InsufficientInventory:
+	case OrderResponseFailureCodeInsufficientInventory:
 		return true
-	case ServiceTokenFailed:
+	case OrderResponseFailureCodeServiceTokenFailed:
 		return true
-	case Unknown:
+	case OrderResponseFailureCodeUnknown:
 		return true
 	default:
 		return false
@@ -1744,6 +1780,54 @@ func (e PermissionPolicyResponseEffect) Valid() bool {
 	case PermissionPolicyResponseEffectAllow:
 		return true
 	case PermissionPolicyResponseEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PickupBatchItemErrorResponseCode.
+const (
+	PickupBatchItemErrorResponseCodeCredentialInvalid  PickupBatchItemErrorResponseCode = "credential_invalid"
+	PickupBatchItemErrorResponseCodeInternalError      PickupBatchItemErrorResponseCode = "internal_error"
+	PickupBatchItemErrorResponseCodeInvalidRequest     PickupBatchItemErrorResponseCode = "invalid_request"
+	PickupBatchItemErrorResponseCodeOrderUnavailable   PickupBatchItemErrorResponseCode = "order_unavailable"
+	PickupBatchItemErrorResponseCodeRateLimited        PickupBatchItemErrorResponseCode = "rate_limited"
+	PickupBatchItemErrorResponseCodeServiceUnavailable PickupBatchItemErrorResponseCode = "service_unavailable"
+)
+
+// Valid indicates whether the value is a known member of the PickupBatchItemErrorResponseCode enum.
+func (e PickupBatchItemErrorResponseCode) Valid() bool {
+	switch e {
+	case PickupBatchItemErrorResponseCodeCredentialInvalid:
+		return true
+	case PickupBatchItemErrorResponseCodeInternalError:
+		return true
+	case PickupBatchItemErrorResponseCodeInvalidRequest:
+		return true
+	case PickupBatchItemErrorResponseCodeOrderUnavailable:
+		return true
+	case PickupBatchItemErrorResponseCodeRateLimited:
+		return true
+	case PickupBatchItemErrorResponseCodeServiceUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PickupBatchItemResponseStatus.
+const (
+	PickupBatchItemResponseStatusFailed    PickupBatchItemResponseStatus = "failed"
+	PickupBatchItemResponseStatusSucceeded PickupBatchItemResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the PickupBatchItemResponseStatus enum.
+func (e PickupBatchItemResponseStatus) Valid() bool {
+	switch e {
+	case PickupBatchItemResponseStatusFailed:
+		return true
+	case PickupBatchItemResponseStatusSucceeded:
 		return true
 	default:
 		return false
@@ -3261,16 +3345,16 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 
 // Defines values for PostOrderParamsServiceMode.
 const (
-	Code     PostOrderParamsServiceMode = "code"
-	Purchase PostOrderParamsServiceMode = "purchase"
+	PostOrderParamsServiceModeCode     PostOrderParamsServiceMode = "code"
+	PostOrderParamsServiceModePurchase PostOrderParamsServiceMode = "purchase"
 )
 
 // Valid indicates whether the value is a known member of the PostOrderParamsServiceMode enum.
 func (e PostOrderParamsServiceMode) Valid() bool {
 	switch e {
-	case Code:
+	case PostOrderParamsServiceModeCode:
 		return true
-	case Purchase:
+	case PostOrderParamsServiceModePurchase:
 		return true
 	default:
 		return false
@@ -3289,6 +3373,42 @@ func (e PostOrderParamsSupply) Valid() bool {
 	case PostOrderParamsSupplyPrivateFirst:
 		return true
 	case PostOrderParamsSupplyPublicOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOrderBatchParamsServiceMode.
+const (
+	PostOrderBatchParamsServiceModeCode     PostOrderBatchParamsServiceMode = "code"
+	PostOrderBatchParamsServiceModePurchase PostOrderBatchParamsServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the PostOrderBatchParamsServiceMode enum.
+func (e PostOrderBatchParamsServiceMode) Valid() bool {
+	switch e {
+	case PostOrderBatchParamsServiceModeCode:
+		return true
+	case PostOrderBatchParamsServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOrderBatchParamsSupply.
+const (
+	PrivateFirst PostOrderBatchParamsSupply = "private_first"
+	PublicOnly   PostOrderBatchParamsSupply = "public_only"
+)
+
+// Valid indicates whether the value is a known member of the PostOrderBatchParamsSupply enum.
+func (e PostOrderBatchParamsSupply) Valid() bool {
+	switch e {
+	case PrivateFirst:
+		return true
+	case PublicOnly:
 		return true
 	default:
 		return false
@@ -5034,6 +5154,31 @@ type CreateMailServerRequest struct {
 	SpfRecord     *string `json:"spfRecord,omitempty"`
 }
 
+// CreateOrderBatchItemResponse defines model for CreateOrderBatchItemResponse.
+type CreateOrderBatchItemResponse struct {
+	Error  *OrderBatchItemErrorResponse       `json:"error,omitempty"`
+	Index  int                                `json:"index"`
+	Order  OrderResponse                      `json:"order"`
+	Status CreateOrderBatchItemResponseStatus `json:"status"`
+}
+
+// CreateOrderBatchItemResponseStatus defines model for CreateOrderBatchItemResponse.Status.
+type CreateOrderBatchItemResponseStatus string
+
+// CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
+type CreateOrderBatchRequest struct {
+	// EmailSuffix Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+	EmailSuffix *string `json:"emailSuffix,omitempty"`
+	ProductId   int     `json:"productId"`
+	ProjectId   int     `json:"projectId"`
+
+	// Quantity Number of independent orders to create.
+	Quantity int `json:"quantity"`
+}
+
+// CreateOrderBatchResponse defines model for CreateOrderBatchResponse.
+type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
+
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
 	// EmailSuffix Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
@@ -5539,6 +5684,15 @@ type MicrosoftResourceDetail struct {
 // NonNegativeLedgerAmount Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 type NonNegativeLedgerAmount = string
 
+// OrderBatchItemErrorResponse defines model for OrderBatchItemErrorResponse.
+type OrderBatchItemErrorResponse struct {
+	Code    OrderBatchItemErrorResponseCode `json:"code"`
+	Message string                          `json:"message"`
+}
+
+// OrderBatchItemErrorResponseCode defines model for OrderBatchItemErrorResponse.Code.
+type OrderBatchItemErrorResponseCode string
+
 // OrderEventListResponse defines model for OrderEventListResponse.
 type OrderEventListResponse struct {
 	Items  []OrderEventResponse `json:"items"`
@@ -5759,6 +5913,40 @@ type PermissionPolicyResponse struct {
 
 // PermissionPolicyResponseEffect defines model for PermissionPolicyResponse.Effect.
 type PermissionPolicyResponseEffect string
+
+// PickupBatchItemErrorResponse defines model for PickupBatchItemErrorResponse.
+type PickupBatchItemErrorResponse struct {
+	Code    PickupBatchItemErrorResponseCode `json:"code"`
+	Message string                           `json:"message"`
+}
+
+// PickupBatchItemErrorResponseCode defines model for PickupBatchItemErrorResponse.Code.
+type PickupBatchItemErrorResponseCode string
+
+// PickupBatchItemResponse defines model for PickupBatchItemResponse.
+type PickupBatchItemResponse struct {
+	Data   *OrderMailResponse            `json:"data,omitempty"`
+	Error  *PickupBatchItemErrorResponse `json:"error,omitempty"`
+	Index  int                           `json:"index"`
+	Status PickupBatchItemResponseStatus `json:"status"`
+}
+
+// PickupBatchItemResponseStatus defines model for PickupBatchItemResponse.Status.
+type PickupBatchItemResponseStatus string
+
+// PickupBatchRequest defines model for PickupBatchRequest.
+type PickupBatchRequest struct {
+	Items []PickupCredentialRequest `json:"items"`
+}
+
+// PickupBatchResponse defines model for PickupBatchResponse.
+type PickupBatchResponse = []PickupBatchItemResponse
+
+// PickupCredentialRequest defines model for PickupCredentialRequest.
+type PickupCredentialRequest struct {
+	Email openapi_types.Email `json:"email"`
+	Token string              `json:"token"`
+}
 
 // ProductSuffixInventory defines model for ProductSuffixInventory.
 type ProductSuffixInventory struct {
@@ -8048,6 +8236,24 @@ type PostOrderParamsServiceMode string
 // PostOrderParamsSupply defines parameters for PostOrder.
 type PostOrderParamsSupply string
 
+// PostOrderBatchParams defines parameters for PostOrderBatch.
+type PostOrderBatchParams struct {
+	ServiceMode *PostOrderBatchParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
+	Supply      *PostOrderBatchParamsSupply      `form:"supply,omitempty" json:"supply,omitempty"`
+
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
+	XCSRFToken *OptionalCsrfToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// PostOrderBatchParamsServiceMode defines parameters for PostOrderBatch.
+type PostOrderBatchParamsServiceMode string
+
+// PostOrderBatchParamsSupply defines parameters for PostOrderBatch.
+type PostOrderBatchParamsSupply string
+
 // PostOrderArchiveParams defines parameters for PostOrderArchive.
 type PostOrderArchiveParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
@@ -8543,6 +8749,9 @@ type PostLoginJSONRequestBody = LoginRequest
 // PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
 type PostOrderJSONRequestBody = CreateOrderRequest
 
+// PostOrderBatchJSONRequestBody defines body for PostOrderBatch for application/json ContentType.
+type PostOrderBatchJSONRequestBody = CreateOrderBatchRequest
+
 // PatchPasswordJSONRequestBody defines body for PatchPassword for application/json ContentType.
 type PatchPasswordJSONRequestBody = ChangePasswordRequest
 
@@ -8551,6 +8760,9 @@ type PostPasswordResetJSONRequestBody = PasswordResetRequest
 
 // PostPasswordResetRequestJSONRequestBody defines body for PostPasswordResetRequest for application/json ContentType.
 type PostPasswordResetRequestJSONRequestBody = PasswordResetCodeRequest
+
+// PostPickupMessagesBatchJSONRequestBody defines body for PostPickupMessagesBatch for application/json ContentType.
+type PostPickupMessagesBatchJSONRequestBody = PickupBatchRequest
 
 // PostProjectJSONRequestBody defines body for PostProject for application/json ContentType.
 type PostProjectJSONRequestBody = CreateProjectApplicationRequest
@@ -9679,6 +9891,9 @@ type ServerInterface interface {
 	// Create one order through console or API key
 	// (POST /v1/orders)
 	PostOrder(c *gin.Context, params PostOrderParams)
+	// Create multiple independent orders through console or API key
+	// (POST /v1/orders/batch)
+	PostOrderBatch(c *gin.Context, params PostOrderBatchParams)
 	// Get one order
 	// (GET /v1/orders/{orderNo})
 	GetOrder(c *gin.Context, orderNo string)
@@ -9700,6 +9915,9 @@ type ServerInterface interface {
 	// Read mail messages with service email and token
 	// (GET /v1/pickup)
 	GetPickupMessages(c *gin.Context, params GetPickupMessagesParams)
+	// Read mail messages for multiple service credentials
+	// (POST /v1/pickup/batch)
+	PostPickupMessagesBatch(c *gin.Context)
 	// Read one mail body with service email and token
 	// (GET /v1/pickup/messages/{messageId})
 	GetPickupMessage(c *gin.Context, messageId int, params GetPickupMessageParams)
@@ -18683,6 +18901,88 @@ func (siw *ServerInterfaceWrapper) PostOrder(c *gin.Context) {
 	siw.Handler.PostOrder(c, params)
 }
 
+// PostOrderBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostOrderBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOrderBatchParams
+
+	// ------------- Optional query parameter "serviceMode" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "serviceMode", c.Request.URL.Query(), &params.ServiceMode, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter serviceMode: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "supply" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "supply", c.Request.URL.Query(), &params.Supply, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter supply: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken OptionalCsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = &XCSRFToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOrderBatch(c, params)
+}
+
 // GetOrder operation middleware
 func (siw *ServerInterfaceWrapper) GetOrder(c *gin.Context) {
 
@@ -18913,6 +19213,19 @@ func (siw *ServerInterfaceWrapper) GetPickupMessages(c *gin.Context) {
 	}
 
 	siw.Handler.GetPickupMessages(c, params)
+}
+
+// PostPickupMessagesBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostPickupMessagesBatch(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostPickupMessagesBatch(c)
 }
 
 // GetPickupMessage operation middleware
@@ -20757,6 +21070,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
+	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)
 	router.GET(options.BaseURL+"/v1/orders/:orderNo", wrapper.GetOrder)
 	router.POST(options.BaseURL+"/v1/orders/:orderNo/archive", wrapper.PostOrderArchive)
 	router.GET(options.BaseURL+"/v1/orders/:orderNo/events", wrapper.GetOrderEvents)
@@ -20764,6 +21078,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/password/reset", wrapper.PostPasswordReset)
 	router.POST(options.BaseURL+"/v1/password/reset/request", wrapper.PostPasswordResetRequest)
 	router.GET(options.BaseURL+"/v1/pickup", wrapper.GetPickupMessages)
+	router.POST(options.BaseURL+"/v1/pickup/batch", wrapper.PostPickupMessagesBatch)
 	router.GET(options.BaseURL+"/v1/pickup/messages/:messageId", wrapper.GetPickupMessage)
 	router.GET(options.BaseURL+"/v1/projects", wrapper.GetProjects)
 	router.POST(options.BaseURL+"/v1/projects", wrapper.PostProject)

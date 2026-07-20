@@ -1,7 +1,11 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -21,6 +25,11 @@ type Handler struct {
 	mod *Module
 }
 
+const (
+	maxCreateOrderQuantity = 100
+	maxOrderRequestBytes   = 8 << 10
+)
+
 func NewHandler(mod *Module) *Handler {
 	return &Handler{mod: mod}
 }
@@ -31,10 +40,31 @@ func (h *Handler) PostOrder(c *gin.Context) {
 		return
 	}
 	var req CreateOrderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "requestId": middleware.GetRequestID(c)})
+	if err := bindOrderJSON(c, &req); err != nil {
+		writeOrderBodyError(c, err)
 		return
 	}
+	h.postOrders(c, userID, req, 1)
+}
+
+func (h *Handler) PostOrderBatch(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	var req CreateOrderBatchRequest
+	if err := bindOrderJSON(c, &req); err != nil {
+		writeOrderBodyError(c, err)
+		return
+	}
+	if req.Quantity < 2 || req.Quantity > maxCreateOrderQuantity {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Quantity must be between 2 and 100.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	h.postOrders(c, userID, req.CreateOrderRequest, req.Quantity)
+}
+
+func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest, quantity int) {
 	channel, _ := openapiapi.CurrentClientChannel(c)
 	if channel == "" {
 		channel = openapiapi.ClientChannelConsole
@@ -43,29 +73,112 @@ func (h *Handler) PostOrder(c *gin.Context) {
 	if id, ok := openapiapi.CurrentAPIKeyID(c); ok && id > 0 {
 		apiKeyID = &id
 	}
-	result, err := h.mod.UseCase.Checkout(c.Request.Context(), tradeapp.CheckoutRequest{
-		UserID:         userID,
-		ProjectID:      req.ProjectID,
-		ProductID:      req.ProductID,
-		ServiceMode:    c.DefaultQuery("serviceMode", string(domain.ServiceModePurchase)),
-		SupplyPolicy:   c.DefaultQuery("supply", string(domain.SupplyPolicyPrivateFirst)),
-		EmailSuffix:    req.EmailSuffix,
-		ClientChannel:  domain.ClientChannel(channel),
-		APIKeyID:       apiKeyID,
-		IdempotencyKey: c.GetHeader("Idempotency-Key"),
-		RequestID:      middleware.GetRequestID(c),
-	})
-	if err != nil {
-		platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
-		writeTradeError(c, err)
-		return
+	batchResults := make(CreateOrderBatchResponse, 0, quantity)
+	var singleResult *OrderResponse
+	created := false
+	failed := false
+	baseIdempotencyKey := c.GetHeader("Idempotency-Key")
+	// ponytail: batches are capped at 100 and processed sequentially; add
+	// bounded parallelism only if measured checkout latency requires it.
+	for i := 0; i < quantity; i++ {
+		result, err := h.mod.UseCase.Checkout(c.Request.Context(), tradeapp.CheckoutRequest{
+			UserID:         userID,
+			ProjectID:      req.ProjectID,
+			ProductID:      req.ProductID,
+			BatchQuantity:  quantity,
+			ServiceMode:    c.DefaultQuery("serviceMode", string(domain.ServiceModePurchase)),
+			SupplyPolicy:   c.DefaultQuery("supply", string(domain.SupplyPolicyPrivateFirst)),
+			EmailSuffix:    req.EmailSuffix,
+			ClientChannel:  domain.ClientChannel(channel),
+			APIKeyID:       apiKeyID,
+			IdempotencyKey: batchOrderIdempotencyKey(baseIdempotencyKey, i),
+			RequestID:      middleware.GetRequestID(c),
+		})
+		if err != nil {
+			platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
+			if quantity > 1 && result != nil && batchOrderItemError(err) != nil {
+				order := orderResponse(*result)
+				batchResults = append(batchResults, CreateOrderBatchItemResponse{
+					Index: i, Status: "failed", Order: order, Error: batchOrderItemError(err),
+				})
+				created = created || result.Created
+				failed = true
+				continue
+			}
+			writeTradeError(c, err)
+			return
+		}
+		created = created || result.Created
+		order := orderResponse(*result)
+		if quantity == 1 {
+			singleResult = &order
+		} else {
+			batchResults = append(batchResults, CreateOrderBatchItemResponse{Index: i, Status: "succeeded", Order: order})
+		}
 	}
-	platform.RecordBusinessEvent("checkout", "succeeded")
+	if failed {
+		platform.RecordBusinessEvent("checkout", "partial")
+	} else {
+		platform.RecordBusinessEvent("checkout", "succeeded")
+	}
 	status := http.StatusOK
-	if result.Created {
+	if failed {
+		status = http.StatusMultiStatus
+	} else if created {
 		status = http.StatusCreated
 	}
-	c.JSON(status, orderResponse(*result))
+	if quantity == 1 {
+		c.JSON(status, singleResult)
+		return
+	}
+	c.JSON(status, batchResults)
+}
+
+func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
+	switch {
+	case errors.Is(err, domain.ErrInsufficientBalance):
+		return &OrderBatchItemErrorResponse{Code: "insufficient_balance", Message: "Insufficient balance."}
+	case errors.Is(err, domain.ErrInsufficientInventory):
+		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
+	default:
+		return nil
+	}
+}
+
+func batchOrderIdempotencyKey(base string, index int) string {
+	base = strings.TrimSpace(base)
+	if index == 0 {
+		return base
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(base+"\x00"+strconv.Itoa(index))))
+}
+
+func bindOrderJSON(c *gin.Context, destination any) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxOrderRequestBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func writeOrderBodyError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	message := "Invalid request body."
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		status = http.StatusRequestEntityTooLarge
+		message = "Request body is too large."
+	}
+	c.JSON(status, gin.H{"message": message, "requestId": middleware.GetRequestID(c)})
 }
 
 func checkoutMetricResult(err error) string {

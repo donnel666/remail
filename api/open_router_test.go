@@ -151,7 +151,7 @@ func assertSchemaEnum(t *testing.T, spec map[string]any, schemaName string, prop
 }
 
 func isPublicOpenAPIRoute(path string) bool {
-	return strings.HasPrefix(path, "/v1/open/") || path == "/v1/pickup"
+	return strings.HasPrefix(path, "/v1/open/") || path == "/v1/pickup" || strings.HasPrefix(path, "/v1/pickup/")
 }
 
 func normalizeGinOpenAPIPath(path string) string {

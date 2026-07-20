@@ -41,9 +41,68 @@ type matchResultStub struct {
 	results []MatchResult
 }
 
+type pickupBatchRepoStub struct {
+	Repository
+	scopes   map[string]OrderScope
+	messages map[uint][]domain.Message
+	state    *domain.FetchState
+}
+
+func (r *pickupBatchRepoStub) LoadPickupScope(_ context.Context, token string, email string) (*OrderScope, error) {
+	scope, ok := r.scopes[token+"|"+email]
+	if !ok {
+		return nil, domain.ErrPickupCredentialInvalid
+	}
+	return &scope, nil
+}
+
+func (r *pickupBatchRepoStub) FindOrderDelivery(context.Context, uint) (*OrderDelivery, error) {
+	return nil, nil
+}
+
+func (r *pickupBatchRepoStub) FindFetchStateForUpdate(context.Context, uint) (*domain.FetchState, error) {
+	return r.state, nil
+}
+
+func (r *pickupBatchRepoStub) ListOrderMessages(_ context.Context, scope OrderScope, _ int) ([]domain.Message, error) {
+	return r.messages[scope.OrderID], nil
+}
+
 func (s *matchResultStub) NotifyMatchedCode(_ context.Context, result MatchResult) error {
 	s.results = append(s.results, result)
 	return nil
+}
+
+func TestListPickupMailBatchPreservesRequestOrderAndContinuesAfterFailure(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	cooldown := now.Add(time.Minute)
+	repo := &pickupBatchRepoStub{
+		scopes: map[string]OrderScope{
+			"token-a|a@example.com": {OrderID: 1, OrderNo: "ORDER-A", EmailResourceID: 11, Recipient: "a@example.com", ServiceMode: "purchase", OrderStatus: "active"},
+			"token-b|b@example.com": {OrderID: 2, OrderNo: "ORDER-B", EmailResourceID: 12, Recipient: "b@example.com", ServiceMode: "purchase", OrderStatus: "active"},
+		},
+		messages: map[uint][]domain.Message{
+			1: {{ID: 101, Recipient: "a@example.com", ReceivedAt: now}},
+			2: {{ID: 202, Recipient: "b@example.com", ReceivedAt: now}},
+		},
+		state: &domain.FetchState{CooldownUntil: &cooldown},
+	}
+	uc := NewUseCase(repo, nil, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	results := uc.ListPickupMailBatch(context.Background(), []PickupCredential{
+		{Email: "b@example.com", Token: "token-b"},
+		{Email: "missing@example.com", Token: "missing-token"},
+		{Email: "a@example.com", Token: "token-a"},
+	})
+
+	require.Len(t, results, 3)
+	require.NoError(t, results[0].Err)
+	require.Equal(t, uint(202), results[0].Items[0].ID)
+	require.ErrorIs(t, results[1].Err, domain.ErrPickupCredentialInvalid)
+	require.Empty(t, results[1].Items)
+	require.NoError(t, results[2].Err)
+	require.Equal(t, uint(101), results[2].Items[0].ID)
 }
 
 func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {

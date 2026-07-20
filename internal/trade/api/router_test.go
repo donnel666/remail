@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
@@ -35,5 +36,33 @@ func TestConsoleOrderRoutesIgnoreAPIKey(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", w.Code)
+	}
+}
+
+func TestSingleOrderBodyRejectsBatchQuantityField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(response)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/orders",
+		strings.NewReader(`{"projectId":10,"productId":20,"quantity":2}`),
+	)
+	var request CreateOrderRequest
+
+	err := bindOrderJSON(ctx, &request)
+
+	if err == nil || !strings.Contains(err.Error(), `unknown field "quantity"`) {
+		t.Fatalf("expected unknown quantity field error, got %v", err)
+	}
+}
+
+func TestBatchOrderIdempotencyKeysNormalizeHeaderWhitespace(t *testing.T) {
+	for index := 0; index < 3; index++ {
+		plain := batchOrderIdempotencyKey("batch-key", index)
+		spaced := batchOrderIdempotencyKey("  batch-key  ", index)
+		if plain != spaced {
+			t.Fatalf("expected normalized key at index %d, got %q and %q", index, plain, spaced)
+		}
 	}
 }

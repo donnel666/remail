@@ -248,6 +248,43 @@ const schemas = {
     },
     required: ["projectId", "productId"],
   },
+  CreateOrderBatchRequest: {
+    type: "object",
+    properties: {
+      projectId: { type: "integer", example: 1001 },
+      productId: { type: "integer", example: 2001 },
+      emailSuffix: { type: "string", example: "outlook.com" },
+      quantity: { type: "integer", minimum: 2, maximum: 100, example: 5 },
+    },
+    required: ["projectId", "productId", "quantity"],
+    additionalProperties: false,
+  },
+  OrderBatchItemErrorResponse: {
+    type: "object",
+    properties: {
+      code: stringEnum(["insufficient_balance", "insufficient_inventory"]),
+      message: { type: "string" },
+    },
+    required: ["code", "message"],
+    additionalProperties: false,
+  },
+  CreateOrderBatchItemResponse: {
+    type: "object",
+    properties: {
+      index: { type: "integer", minimum: 0 },
+      status: stringEnum(["succeeded", "failed"]),
+      order: ref("Order"),
+      error: ref("OrderBatchItemErrorResponse"),
+    },
+    required: ["index", "order", "status"],
+    additionalProperties: false,
+  },
+  CreateOrderBatchResponse: {
+    type: "array",
+    minItems: 2,
+    maxItems: 100,
+    items: ref("CreateOrderBatchItemResponse"),
+  },
   OrderListResponse: {
     type: "object",
     properties: {
@@ -325,6 +362,61 @@ const schemas = {
       fetch: ref("FetchState"),
     },
     required: ["items"],
+  },
+  PickupCredentialRequest: {
+    type: "object",
+    properties: {
+      email: { type: "string", format: "email", minLength: 1, maxLength: 254 },
+      token: { type: "string", minLength: 1, maxLength: 255 },
+    },
+    required: ["email", "token"],
+    additionalProperties: false,
+  },
+  PickupBatchRequest: {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        minItems: 2,
+        maxItems: 200,
+        items: ref("PickupCredentialRequest"),
+      },
+    },
+    required: ["items"],
+    additionalProperties: false,
+  },
+  PickupBatchItemErrorResponse: {
+    type: "object",
+    properties: {
+      code: stringEnum([
+        "invalid_request",
+        "rate_limited",
+        "credential_invalid",
+        "order_unavailable",
+        "service_unavailable",
+        "internal_error",
+      ]),
+      message: { type: "string" },
+    },
+    required: ["code", "message"],
+    additionalProperties: false,
+  },
+  PickupBatchItemResponse: {
+    type: "object",
+    properties: {
+      index: { type: "integer", minimum: 0 },
+      status: stringEnum(["succeeded", "failed"]),
+      data: ref("PickupMailResponse"),
+      error: ref("PickupBatchItemErrorResponse"),
+    },
+    required: ["index", "status"],
+    additionalProperties: false,
+  },
+  PickupBatchResponse: {
+    type: "array",
+    minItems: 2,
+    maxItems: 200,
+    items: ref("PickupBatchItemResponse"),
   },
   MailMessage: {
     type: "object",
@@ -672,6 +764,7 @@ const spec = {
       NotFound: { description: "资源不存在。", ...json(ref("ErrorResponse")) },
       Conflict: { description: "请求与已有业务事实冲突。", ...json(ref("ErrorResponse")) },
       UnprocessableEntity: { description: "业务校验未通过。", ...json(ref("ErrorResponse")) },
+      PayloadTooLarge: { description: "请求体过大。", ...json(ref("ErrorResponse")) },
       TooManyRequests: { description: "请求超过 API Key 限制。", ...json(ref("ErrorResponse")) },
       ServiceUnavailable: { description: "邮件服务暂时不可用。", ...json(ref("ErrorResponse")) },
       InternalError: { description: "服务端异常。", ...json(ref("ErrorResponse")) },
@@ -743,6 +836,7 @@ const spec = {
           "200": ok(ref("Order")),
           "201": created(ref("Order")),
           ...errorResponses,
+          "413": { $ref: "#/components/responses/PayloadTooLarge" },
         },
       },
       get: {
@@ -759,6 +853,28 @@ const spec = {
         responses: {
           "200": ok(ref("OrderListResponse")),
           ...errorResponses,
+        },
+      },
+    },
+    "/v1/open/orders/batch": {
+      post: {
+        tags: ["Core"],
+        operationId: "createOrderBatch",
+        summary: "批量下单",
+        description: "创建 2 到 100 个相互独立的订单，并按输入索引返回逐项成功或失败结果；相同幂等键重试会收敛到相同的完整批次结果。",
+        security: apiKeySecurity,
+        parameters: [
+          idempotencyHeader,
+          { name: "serviceMode", in: "query", schema: stringEnum(["purchase", "code"]), description: "purchase 为长效购买，code 为短效接码。" },
+          { name: "supply", in: "query", schema: stringEnum(["private_first", "public_only"]), description: "默认 private_first。" },
+        ],
+        requestBody: json(ref("CreateOrderBatchRequest")),
+        responses: {
+          "200": ok(ref("CreateOrderBatchResponse")),
+          "201": created(ref("CreateOrderBatchResponse")),
+          "207": { description: "批次完成，但一个或多个订单项失败。", ...json(ref("CreateOrderBatchResponse")) },
+          ...errorResponses,
+          "413": { $ref: "#/components/responses/PayloadTooLarge" },
         },
       },
     },
@@ -790,6 +906,24 @@ const spec = {
           "200": ok(ref("PickupMailResponse")),
           ...errorResponses,
           "503": { $ref: "#/components/responses/ServiceUnavailable" },
+        },
+      },
+    },
+    "/v1/pickup/batch": {
+      post: {
+        tags: ["Core"],
+        operationId: "pickupMessagesBatch",
+        summary: "批量取件读取邮件",
+        description: "一次读取 2 到 200 组邮箱和服务凭证，响应数组与请求 items 顺序一致。单项失败不丢弃其他成功项；整批请求按客户端 IP 限流，每个服务 Token 仍受逐 Token 限流。请求体中的服务凭证不得记录到日志。",
+        security: [],
+        requestBody: json(ref("PickupBatchRequest")),
+        responses: {
+          "200": ok(ref("PickupBatchResponse")),
+          "207": { description: "批次完成，但一个或多个取件项失败。", ...json(ref("PickupBatchResponse")) },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "413": { $ref: "#/components/responses/PayloadTooLarge" },
+          "429": { description: "客户端 IP 的批量取件请求超过限制。", ...json(ref("ErrorResponse")) },
+          "500": { $ref: "#/components/responses/InternalError" },
         },
       },
     },

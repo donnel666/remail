@@ -4463,6 +4463,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Authentication required
           content:
@@ -4556,6 +4562,86 @@ paths:
                 $ref: "#/components/schemas/Error"
         "401":
           description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/orders/batch:
+    post:
+      operationId: postOrderBatch
+      summary: Create multiple independent orders through console or API key
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/OptionalCsrfToken"
+        - name: serviceMode
+          in: query
+          schema:
+            type: string
+            enum: [purchase, code]
+            default: purchase
+        - name: supply
+          in: query
+          schema:
+            type: string
+            enum: [private_first, public_only]
+            default: private_first
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderBatchRequest"
+      responses:
+        "201":
+          description: Independent orders created and activated with their own allocations and service tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderBatchResponse"
+        "200":
+          description: Idempotent replay of an existing order batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderBatchResponse"
+        "207":
+          description: Batch completed with one or more failed order items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateOrderBatchResponse"
+        "400":
+          description: Invalid request body or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Project, product, service mode, supply policy, or another batch-wide business validation failed
           content:
             application/json:
               schema:
@@ -5010,6 +5096,55 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           description: Mail service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/pickup/batch:
+    post:
+      operationId: postPickupMessagesBatch
+      summary: Read mail messages for multiple service credentials
+      description: Returns one result per input item in the same order. The anonymous endpoint is limited by client IP and service token. The request body contains service credentials and must not be logged.
+      tags:
+        - MailMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickupBatchRequest"
+      responses:
+        "200":
+          description: Token scoped mail messages aligned with the input items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupBatchResponse"
+        "207":
+          description: Batch completed with one or more failed pickup items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupBatchResponse"
+        "400":
+          description: Invalid JSON body or batch item count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Batch Pickup request rate limit for the client IP was exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -9719,6 +9854,66 @@ components:
           description: Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
       additionalProperties: false
 
+    CreateOrderBatchRequest:
+      type: object
+      required:
+        - projectId
+        - productId
+        - quantity
+      properties:
+        projectId:
+          type: integer
+        productId:
+          type: integer
+        emailSuffix:
+          type: string
+          description: Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source.
+        quantity:
+          type: integer
+          minimum: 2
+          maximum: 100
+          description: Number of independent orders to create.
+      additionalProperties: false
+
+    CreateOrderBatchResponse:
+      type: array
+      minItems: 2
+      maxItems: 100
+      items:
+        $ref: "#/components/schemas/CreateOrderBatchItemResponse"
+
+    OrderBatchItemErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum: [insufficient_balance, insufficient_inventory]
+        message:
+          type: string
+      additionalProperties: false
+
+    CreateOrderBatchItemResponse:
+      type: object
+      required:
+        - index
+        - order
+        - status
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [succeeded, failed]
+        order:
+          $ref: "#/components/schemas/OrderResponse"
+        error:
+          $ref: "#/components/schemas/OrderBatchItemErrorResponse"
+      additionalProperties: false
+
     AdminOrderCommandRequest:
       type: object
       required:
@@ -10149,6 +10344,74 @@ components:
             $ref: "#/components/schemas/MailContentResponse"
         fetch:
           $ref: "#/components/schemas/FetchStateResponse"
+      additionalProperties: false
+
+    PickupCredentialRequest:
+      type: object
+      required:
+        - email
+        - token
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        token:
+          type: string
+          minLength: 1
+          maxLength: 255
+      additionalProperties: false
+
+    PickupBatchRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 2
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/PickupCredentialRequest"
+      additionalProperties: false
+
+    PickupBatchResponse:
+      type: array
+      minItems: 2
+      maxItems: 200
+      items:
+        $ref: "#/components/schemas/PickupBatchItemResponse"
+
+    PickupBatchItemErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum: [invalid_request, rate_limited, credential_invalid, order_unavailable, service_unavailable, internal_error]
+        message:
+          type: string
+      additionalProperties: false
+
+    PickupBatchItemResponse:
+      type: object
+      required:
+        - index
+        - status
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [succeeded, failed]
+        data:
+          $ref: "#/components/schemas/OrderMailResponse"
+        error:
+          $ref: "#/components/schemas/PickupBatchItemErrorResponse"
       additionalProperties: false
 
     WalletResponse:

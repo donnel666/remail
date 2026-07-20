@@ -32,6 +32,7 @@ func registerOpenRoutes(
 	open.GET("/projects/:projectId", coreHandler.GetProject)
 
 	open.POST("/orders", tradeHandler.PostOrder)
+	open.POST("/orders/batch", tradeHandler.PostOrderBatch)
 	open.GET("/orders", tradeHandler.GetOrders)
 	open.GET("/orders/:orderNo", tradeHandler.GetOrder)
 

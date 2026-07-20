@@ -13,6 +13,7 @@
 | 2026-07-12 | V1.6 | Codex | 收敛资源 Fetch 凭据边界：MailMatch 继续拥有 Fetch/Message 事实，但内部凭据 scope、rotated RT、credential revision 和 root version 统一通过 Core `MicrosoftCredentialPort` 处理；repository 不再直读/直写 Core 表。 |
 | 2026-07-15 | V1.7 | Codex | 明确宽松模式按 `sender + recipient` 两元素唯一匹配；购买订单匹配到邮件即可写交付头并通知 Trade 激活，验证码提取允许为空。严格模式仍要求 `sender + recipient + subject + body` 四元素全部命中。 |
 | 2026-07-16 | V1.8 | Codex | 管理员 Domain/Microsoft 邮件摘要统一要求服务端搜索和 `(receivedAt,id)` 稳定游标；首屏计算后端 `total`，续页跳过重复 `COUNT`，前端按全局页大小无限滚动，禁止全量加载后本地搜索或推算邮件总数。 |
+| 2026-07-20 | V1.9 | Codex | 新增批量 Pickup，一次提交 2 到 200 组资源钥匙并按输入顺序返回逐项结果；增加请求体/凭证长度校验、客户端 IP 限流，并保留逐 Token 限流。 |
 
 > 核心域。BC-MAILMATCH 保存邮件事实，按项目规则识别订单服务结果。协议收发不在本上下文内。
 
@@ -194,6 +195,7 @@ flowchart TD
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `GET` | `/v1/pickup?email={email}&token={token}` | 返回过滤后的邮件 6 元素；读取接口内部可提交异步拉取任务，但不暴露额外开关参数。 |
+| `POST` | `/v1/pickup/batch` | 批量读取 2 到 200 组 `email + token`，按请求顺序返回逐项结果；单项失败不丢弃其他成功项并返回 `207 Multi-Status`。接口按客户端 IP 限流（突发 2 次，平均每 10 秒恢复 1 次），每个 Token 仍受原取件限流；请求体中的服务凭证不得进入日志。 |
 
 后台诊断接口属于后续补充设计，不属于 P1-I8 交付范围：
 

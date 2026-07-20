@@ -92,6 +92,16 @@
           }
         }
       },
+      "PayloadTooLarge": {
+        "description": "请求体过大。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
       "TooManyRequests": {
         "description": "请求超过 API Key 限制。",
         "content": {
@@ -580,6 +590,91 @@
           "productId"
         ]
       },
+      "CreateOrderBatchRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "example": 1001
+          },
+          "productId": {
+            "type": "integer",
+            "example": 2001
+          },
+          "emailSuffix": {
+            "type": "string",
+            "example": "outlook.com"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 100,
+            "example": 5
+          }
+        },
+        "required": [
+          "projectId",
+          "productId",
+          "quantity"
+        ],
+        "additionalProperties": false
+      },
+      "OrderBatchItemErrorResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "insufficient_balance",
+              "insufficient_inventory"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "CreateOrderBatchItemResponse": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed"
+            ]
+          },
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "error": {
+            "$ref": "#/components/schemas/OrderBatchItemErrorResponse"
+          }
+        },
+        "required": [
+          "index",
+          "order",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "CreateOrderBatchResponse": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 100,
+        "items": {
+          "$ref": "#/components/schemas/CreateOrderBatchItemResponse"
+        }
+      },
       "OrderListResponse": {
         "type": "object",
         "properties": {
@@ -807,6 +902,103 @@
         "required": [
           "items"
         ]
+      },
+      "PickupCredentialRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "minLength": 1,
+            "maxLength": 254
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "email",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "PickupBatchRequest": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/PickupCredentialRequest"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "PickupBatchItemErrorResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "rate_limited",
+              "credential_invalid",
+              "order_unavailable",
+              "service_unavailable",
+              "internal_error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "PickupBatchItemResponse": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/PickupMailResponse"
+          },
+          "error": {
+            "$ref": "#/components/schemas/PickupBatchItemErrorResponse"
+          }
+        },
+        "required": [
+          "index",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "PickupBatchResponse": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 200,
+        "items": {
+          "$ref": "#/components/schemas/PickupBatchItemResponse"
+        }
       },
       "MailMessage": {
         "type": "object",
@@ -1956,6 +2148,9 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
           },
@@ -2050,6 +2245,126 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/v1/open/orders/batch": {
+      "post": {
+        "tags": [
+          "Core"
+        ],
+        "operationId": "createOrderBatch",
+        "summary": "批量下单",
+        "description": "创建 2 到 100 个相互独立的订单，并按输入索引返回逐项成功或失败结果；相同幂等键重试会收敛到相同的完整批次结果。",
+        "security": [
+          {
+            "remailApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "幂等键。相同 API Key 下，相同幂等键不会重复创建业务事实。"
+          },
+          {
+            "name": "serviceMode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "purchase",
+                "code"
+              ]
+            },
+            "description": "purchase 为长效购买，code 为短效接码。"
+          },
+          {
+            "name": "supply",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "private_first",
+                "public_only"
+              ]
+            },
+            "description": "默认 private_first。"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrderBatchResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "资源已创建。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrderBatchResponse"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "批次完成，但一个或多个订单项失败。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrderBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
@@ -2188,6 +2503,67 @@
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/pickup/batch": {
+      "post": {
+        "tags": [
+          "Core"
+        ],
+        "operationId": "pickupMessagesBatch",
+        "summary": "批量取件读取邮件",
+        "description": "一次读取 2 到 200 组邮箱和服务凭证，响应数组与请求 items 顺序一致。单项失败不丢弃其他成功项；整批请求按客户端 IP 限流，每个服务 Token 仍受逐 Token 限流。请求体中的服务凭证不得记录到日志。",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupBatchResponse"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "批次完成，但一个或多个取件项失败。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "description": "客户端 IP 的批量取件请求超过限制。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }

@@ -8,6 +8,25 @@ type CreateOrderRequest struct {
 	EmailSuffix string `json:"emailSuffix,omitempty"`
 }
 
+type CreateOrderBatchRequest struct {
+	CreateOrderRequest
+	Quantity int `json:"quantity"`
+}
+
+type OrderBatchItemErrorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type CreateOrderBatchItemResponse struct {
+	Index  int                          `json:"index"`
+	Status string                       `json:"status"`
+	Order  OrderResponse                `json:"order"`
+	Error  *OrderBatchItemErrorResponse `json:"error,omitempty"`
+}
+
+type CreateOrderBatchResponse []CreateOrderBatchItemResponse
+
 type AdminOrderCommandRequest struct {
 	Reason string `json:"reason"`
 }

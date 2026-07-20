@@ -22,6 +22,29 @@ type OrderMailResponse struct {
 	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
 }
 
+type PickupCredentialRequest struct {
+	Email string `json:"email"`
+	Token string `json:"token"`
+}
+
+type PickupBatchRequest struct {
+	Items []PickupCredentialRequest `json:"items"`
+}
+
+type PickupBatchItemErrorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type PickupBatchItemResponse struct {
+	Index  int                           `json:"index"`
+	Status string                        `json:"status"`
+	Data   *OrderMailResponse            `json:"data,omitempty"`
+	Error  *PickupBatchItemErrorResponse `json:"error,omitempty"`
+}
+
+type PickupBatchResponse []PickupBatchItemResponse
+
 type FetchStateResponse struct {
 	LastJobID          *uint      `json:"lastJobId,omitempty"`
 	LastStatus         string     `json:"lastStatus"`

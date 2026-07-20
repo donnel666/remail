@@ -3,15 +3,16 @@ import { Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 
 import { IamApiError } from "@/lib/api-client";
-import { generateIdempotencyKey } from "@/lib/idempotency";
 import {
   createOrder,
+  createOrderBatch,
   getOrder,
   listOrders,
   type OrderResponse,
 } from "@/lib/orders-api";
 import {
   readPickupMail,
+  readPickupMailBatch,
   readPickupMessage,
   type OrderMailResponse,
 } from "@/lib/mailmatch-api";
@@ -25,6 +26,12 @@ import {
 
 import { MailboxClientModal } from "./workbench/mailbox-client";
 import { ApplyProjectModal } from "./apply-project-modal";
+import {
+  clearCheckoutAttempt,
+  loadCheckoutAttempt,
+  saveCheckoutAttempt,
+  type CheckoutAttempt,
+} from "./workbench/checkout-attempt";
 import {
   mergeOrderRuntimeState,
   shouldAutoFetchOrderMail,
@@ -87,8 +94,7 @@ function filterProducts(
 
 type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
 
-const checkoutBatchStorageKey = "remail.workbench.checkoutBatch";
-const checkoutBatchConcurrency = 5;
+const maxCreateOrderQuantity = 100;
 const inventoryFetchConcurrency = 6;
 const orderPageLimit = 100;
 const initialOrderCursors: Record<ServiceMode, number | undefined> = {
@@ -99,13 +105,6 @@ const initialOrderHasMore: Record<ServiceMode, boolean> = {
   code: false,
   purchase: false,
 };
-
-interface CheckoutBatchState {
-  batchId: string;
-  quantity: number;
-  signature: string;
-  succeededIndexes: number[];
-}
 
 function toWorkbenchProject(
   project: ProjectItem,
@@ -331,11 +330,10 @@ function getProductInventory(
 function clampQuantity(value: number, inventory: number) {
   if (inventory <= 0) return 0;
   if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(Math.trunc(value), inventory));
-}
-
-function nextIdempotencyKey() {
-  return generateIdempotencyKey();
+  return Math.max(
+    1,
+    Math.min(Math.trunc(value), inventory, maxCreateOrderQuantity),
+  );
 }
 
 function checkoutBatchSignature(input: {
@@ -354,78 +352,6 @@ function checkoutBatchSignature(input: {
     input.suffix,
     input.quantity,
   ].join("|");
-}
-
-function sanitizeSucceededIndexes(value: unknown, quantity: number) {
-  if (!Array.isArray(value)) return [];
-  return Array.from(
-    new Set(
-      value.filter(
-        (item): item is number =>
-          Number.isInteger(item) && item >= 0 && item < quantity,
-      ),
-    ),
-  ).sort((a, b) => a - b);
-}
-
-function loadCheckoutBatchState(
-  signature: string,
-  quantity: number,
-): CheckoutBatchState {
-  const fresh = {
-    batchId: nextIdempotencyKey(),
-    quantity,
-    signature,
-    succeededIndexes: [],
-  };
-  try {
-    const raw = globalThis.sessionStorage?.getItem(checkoutBatchStorageKey);
-    if (!raw) return fresh;
-    const parsed = JSON.parse(raw) as Partial<CheckoutBatchState>;
-    if (
-      parsed.signature !== signature ||
-      parsed.quantity !== quantity ||
-      typeof parsed.batchId !== "string" ||
-      parsed.batchId.trim() === ""
-    ) {
-      return fresh;
-    }
-    return {
-      batchId: parsed.batchId,
-      quantity,
-      signature,
-      succeededIndexes: sanitizeSucceededIndexes(
-        parsed.succeededIndexes,
-        quantity,
-      ),
-    };
-  } catch {
-    return fresh;
-  }
-}
-
-function saveCheckoutBatchState(state: CheckoutBatchState) {
-  try {
-    globalThis.sessionStorage?.setItem(
-      checkoutBatchStorageKey,
-      JSON.stringify(state),
-    );
-  } catch {
-    // The batch is still protected by per-request idempotency keys in memory.
-  }
-}
-
-function clearCheckoutBatchState(batchId: string) {
-  try {
-    const raw = globalThis.sessionStorage?.getItem(checkoutBatchStorageKey);
-    if (!raw) return;
-    const parsed = JSON.parse(raw) as Partial<CheckoutBatchState>;
-    if (parsed.batchId === batchId) {
-      globalThis.sessionStorage?.removeItem(checkoutBatchStorageKey);
-    }
-  } catch {
-    globalThis.sessionStorage?.removeItem(checkoutBatchStorageKey);
-  }
 }
 
 function apiErrorMessage(err: unknown, fallback: string) {
@@ -464,6 +390,7 @@ export default function Dashboard() {
   const fetchSeqRef = useRef(new Map<string, number>());
   const refreshOrdersSeqRef = useRef(new Map<ServiceMode, number>());
   const loadingMoreOrdersRef = useRef(false);
+  const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
 
   const projectsById = useMemo(() => {
     return new Map(projects.map((project) => [project.id, project]));
@@ -742,7 +669,6 @@ export default function Dashboard() {
     const requestedQuantity = clampQuantity(quantity, selectedInventory);
     if (requestedQuantity <= 0) return;
     setCreating(true);
-    const createdOrders: OrderResponse[] = [];
     const signature = checkoutBatchSignature({
       inventoryScope,
       productId: selectedProduct.id,
@@ -751,88 +677,61 @@ export default function Dashboard() {
       serviceMode,
       suffix: selectedProduct.emailSuffix,
     });
-    const batch = loadCheckoutBatchState(signature, requestedQuantity);
-    const succeededIndexes = new Set(batch.succeededIndexes);
-    saveCheckoutBatchState(batch);
-    let createdOrdersMerged = false;
-    const mergeCreatedOrders = () => {
-      if (createdOrdersMerged || createdOrders.length === 0) return;
-      createdOrdersMerged = true;
+    const attempt =
+      checkoutAttemptRef.current?.signature === signature
+        ? checkoutAttemptRef.current
+        : loadCheckoutAttempt(signature);
+    checkoutAttemptRef.current = attempt;
+    saveCheckoutAttempt(attempt);
+    try {
+      const payload = {
+        emailSuffix: selectedProduct.emailSuffix || undefined,
+        productId: Number(selectedProduct.productId),
+        projectId: Number(selectedProject.id),
+      };
+      const options = {
+        idempotencyKey: attempt.key,
+        serviceMode,
+        supply: inventoryScope,
+      };
+      let createdOrders: OrderResponse[];
+      let failedItems: Array<{ error?: { message: string } }> = [];
+      if (requestedQuantity === 1) {
+        createdOrders = [await createOrder(payload, options)];
+      } else {
+        const results = await createOrderBatch(
+          { ...payload, quantity: requestedQuantity },
+          options,
+        );
+        createdOrders = results.flatMap((item) =>
+          item.status === "succeeded" && item.order ? [item.order] : [],
+        );
+        failedItems = results.filter((item) => item.status === "failed");
+      }
       const nextOrders = createdOrders.map(toWorkbenchOrder);
       const nextOrderNos = new Set(nextOrders.map((order) => order.orderNo));
       setOrders((prev) => [
         ...nextOrders,
         ...prev.filter((item) => !nextOrderNos.has(item.orderNo)),
       ]);
-      setSelectedOrderNo(nextOrders[0]?.orderNo ?? "");
-    };
-    try {
-      const missingIndexes = Array.from(
-        { length: requestedQuantity },
-        (_, index) => index,
-      ).filter((index) => !succeededIndexes.has(index));
-      const failures: unknown[] = [];
-      for (
-        let start = 0;
-        start < missingIndexes.length && failures.length === 0;
-        start += checkoutBatchConcurrency
-      ) {
-        const chunk = missingIndexes.slice(
-          start,
-          start + checkoutBatchConcurrency,
-        );
-        const settled = await Promise.allSettled(
-          chunk.map(async (index) => ({
-            index,
-            order: await createOrder(
-              {
-                emailSuffix: selectedProduct.emailSuffix || undefined,
-                projectId: Number(selectedProject.id),
-                productId: Number(selectedProduct.productId),
-              },
-              {
-                idempotencyKey: `${batch.batchId}:${index}`,
-                serviceMode,
-                supply: inventoryScope,
-              },
-            ),
-          })),
-        );
-        for (const item of settled) {
-          if (item.status === "fulfilled") {
-            createdOrders.push(item.value.order);
-            succeededIndexes.add(item.value.index);
-            batch.succeededIndexes = [...succeededIndexes].sort(
-              (a, b) => a - b,
-            );
-            saveCheckoutBatchState(batch);
-          } else {
-            failures.push(item.reason);
-          }
-        }
-      }
-      if (succeededIndexes.size >= requestedQuantity) {
-        clearCheckoutBatchState(batch.batchId);
-        mergeCreatedOrders();
+      if (nextOrders[0]) setSelectedOrderNo(nextOrders[0].orderNo);
+      clearCheckoutAttempt(attempt);
+      checkoutAttemptRef.current = null;
+      if (failedItems.length === 0) {
         Toast.success(t("Order created."));
-        void refreshOrders();
-        void loadProjectInventory(selectedProject.id);
-        return;
+      } else {
+        Toast.error(
+          `${failedItems[0]?.error?.message ?? t("An unexpected error occurred.")} (${createdOrders.length}/${requestedQuantity})`,
+        );
       }
-      mergeCreatedOrders();
+      if (requestedQuantity > 1 && nextOrders.length > 0) {
+        void handleFetchOrderMailBatch(nextOrders);
+      }
       void refreshOrders();
       void loadProjectInventory(selectedProject.id);
-      const firstFailure = failures[0];
-      Toast.error(
-        `${apiErrorMessage(firstFailure, t("An unexpected error occurred."))} (${succeededIndexes.size}/${requestedQuantity})`,
-      );
-      return;
     } catch (err) {
-      if (createdOrders.length > 0) {
-        mergeCreatedOrders();
-        void refreshOrders();
-        void loadProjectInventory(selectedProject.id);
-      }
+      void refreshOrders();
+      void loadProjectInventory(selectedProject.id);
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
     } finally {
       setCreating(false);
@@ -925,6 +824,94 @@ export default function Dashboard() {
       }
     })();
     fetchInFlightRef.current.set(order.orderNo, request);
+    return request;
+  }
+
+  function handleFetchOrderMailBatch(batchOrders: WorkbenchOrder[]) {
+    const targets = batchOrders.filter(
+      (order) =>
+        order.deliveryEmail &&
+        order.token &&
+        shouldAutoFetchOrderMail(order) &&
+        !fetchInFlightRef.current.has(order.orderNo),
+    );
+    if (targets.length < 2) {
+      if (targets[0]) return handleFetchOrderMail(targets[0], "auto");
+      return;
+    }
+    const sequences = new Map(
+      targets.map((order) => {
+        const seq = (fetchSeqRef.current.get(order.orderNo) ?? 0) + 1;
+        fetchSeqRef.current.set(order.orderNo, seq);
+        return [order.orderNo, seq] as const;
+      }),
+    );
+    const requestRef: { current?: Promise<void> } = {};
+    const request = (async () => {
+      try {
+        const results = await readPickupMailBatch(
+          targets.map((order) => ({
+            email: order.deliveryEmail,
+            token: order.token,
+          })),
+        );
+        const byOrderNo = new Map(
+          results.flatMap((item) => {
+            const order = targets[item.index];
+            return item.status === "succeeded" && item.data && order
+              ? [[order.orderNo, item.data] as const]
+              : [];
+          }),
+        );
+        setOrders((prev) =>
+          prev.map((order) => {
+            const result = byOrderNo.get(order.orderNo);
+            if (
+              !result ||
+              fetchSeqRef.current.get(order.orderNo) !==
+                sequences.get(order.orderNo)
+            ) {
+              return order;
+            }
+            const messages = toWorkbenchMessages(result.items);
+            const latestDelivery = latestVerificationMessage(messages);
+            const latestCode = latestDelivery?.verificationCode;
+            return {
+              ...order,
+              messages,
+              hasDelivery: Boolean(latestCode) || order.hasDelivery,
+              lastFetchedAt:
+                result.fetch?.lastReceivedAt ??
+                result.fetch?.lastSuccessAt ??
+                result.fetch?.lastSubmittedAt ??
+                new Date().toISOString(),
+              lastMailReceivedAt:
+                latestDelivery?.receivedAt ?? order.lastMailReceivedAt,
+              verificationCode: latestCode ?? order.verificationCode,
+              serviceState: latestCode
+                ? order.serviceMode === "code"
+                  ? "code_received"
+                  : "in_warranty"
+                : order.serviceState,
+            };
+          }),
+        );
+      } catch {
+        // Individual order controls remain available when the whole request fails.
+      } finally {
+        for (const order of targets) {
+          if (
+            fetchInFlightRef.current.get(order.orderNo) === requestRef.current
+          ) {
+            fetchInFlightRef.current.delete(order.orderNo);
+          }
+        }
+      }
+    })();
+    requestRef.current = request;
+    for (const order of targets) {
+      fetchInFlightRef.current.set(order.orderNo, request);
+    }
     return request;
   }
 
@@ -1032,6 +1019,7 @@ export default function Dashboard() {
             productsById={productsById}
             projectsById={projectsById}
             quantity={quantity}
+            maxQuantity={Math.min(selectedInventory, maxCreateOrderQuantity)}
             selectedOrder={selectedOrder}
             selectedProduct={selectedProduct}
             selectedProject={selectedProject}

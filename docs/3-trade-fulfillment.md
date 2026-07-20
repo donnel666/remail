@@ -11,6 +11,7 @@
 | 2026-07-10 | V1.4 | Codex | 订单列表读模型支持交付域名/创建时间筛选、offset+total 分页与自排除 facets 聚合，并附带项目名称冗余展示。 |
 | 2026-07-12 | V1.5 | Codex | 补充管理员 Microsoft 订单 Tab 的批量 `OrderSummaryQueryPort`；只发布 Trade 自有订单事实，不让 Alloc/Core 直接读订单表或复制订单状态。 |
 | 2026-07-12 | V1.6 | Codex | 将管理员订单 Tab 收敛为共享数据库内直接源表的单页有界只读查询组合；Trade 继续拥有订单事实，查询只返回安全展示字段且不形成写入口或投影表。 |
+| 2026-07-20 | V1.7 | Codex | 新增独立批量下单接口，创建 2 到 100 个互相独立的订单并按输入索引返回逐项结果；原单笔接口契约不变。 |
 
 > 支撑域。BC-TRADE 负责一次“钱 -> 单个邮箱使用权 + 服务凭证”的履约编排。
 
@@ -127,7 +128,7 @@ stateDiagram-v2
 | INV-T3 | 进入 `active/completed` 时必须已有一个分配外键；`failed/refunded` 若发生在分配前可以无分配，但已扣款必须有退款流水。 |
 | INV-T4 | 进入 `paid` 必须绑定扣款流水；公开库存流水金额为商品价格的负数，私有库存流水金额为 `0.00`，不得因 0 元跳过流水。 |
 | INV-T5 | 每次状态变化和关键服务生命周期事件必须追加订单事件。 |
-| INV-T6 | 同一用户/渠道/API Key/幂等键不得创建第二个订单。 |
+| INV-T6 | 同一用户/渠道/API Key/幂等键和同一请求内容重试不得额外创建订单；批量请求只创建 `quantity` 个各自独立的订单。 |
 | INV-T7 | 接码订单超时无验证码必须自动退款。 |
 | INV-T8 | 购买订单激活超时不自动退款，只结束激活/售后窗口。 |
 | INV-T9 | 订单进入 active 必须签发 OrderToken，并返回交付结果。 |
@@ -164,7 +165,8 @@ stateDiagram-v2
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `POST` | `/v1/orders` | 创建订单，必须带 `Idempotency-Key`；成功 `201 Created` 返回交付结果。 |
+| `POST` | `/v1/orders` | 创建单个订单，必须带 `Idempotency-Key`；成功返回单个订单对象。 |
+| `POST` | `/v1/orders/batch` | 创建 2 到 100 个独立订单，必须带 `Idempotency-Key`；按输入索引返回逐项成功/失败结果，存在失败项时返回 `207 Multi-Status`，同一幂等键重试会收敛到相同的完整结果。 |
 | `GET` | `/v1/orders` | 订单列表；支持 `scope=mine/all`（普通用户只能 `mine`）、`status/serviceMode/domain/createdFrom/createdTo/search` 筛选与 `offset/afterId` 分页，响应含 `total` 和自排除维度的 `facets`（状态/服务模式/交付域名）。 |
 | `GET` | `/v1/orders/{orderNo}` | 订单详情。 |
 | `GET` | `/v1/orders/{orderNo}/events` | 订单事件。 |

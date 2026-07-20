@@ -10,6 +10,8 @@
 | 2026-07-09 | V1.3 | Codex | 补充公开 API 入口策略：API Key 调用统一收敛到 `/v1/open/**`，文档分组只作为展示标签，不绑定 URI。 |
 | 2026-07-09 | V1.4 | Codex | 按接口命名清洁度要求规范 OpenAPI URI：API Key 当前信息使用 `/v1/open/apikey/profile`，公开资源导入/检测使用 `/v1/open/resources/imports`、`/v1/open/resources/validations`；只调整 URI 命名，不改变 `/v1/open/**` 鉴权和展示分组策略。 |
 | 2026-07-17 | V1.5 | Codex | 补充管理员按用户管理 API Key 的后台接口：`GET/POST /v1/admin/users/{userId}/apikeys` 与 `PATCH/DELETE /v1/admin/users/{userId}/apikeys/{keyId}`，供用户管理页 API Key 页签使用，复用现有凭证用例并按 `iam:user/operate` 授权；不改变 `/v1/open/**` 鉴权与展示分组策略。 |
+| 2026-07-20 | V1.6 | Codex | 稳定 API 新增独立批量下单入口；原单笔下单契约不变，批量入口按索引返回独立订单的逐项结果。 |
+| 2026-07-20 | V1.7 | Codex | 公开取件 API 新增批量入口，一次读取 2 到 200 组 `email + token` 并按输入顺序返回逐项结果，同时增加客户端 IP 限流并保留逐 Token 限流。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -79,7 +81,7 @@ API Key 限制补充设计：
 |------|------|
 | INV-O1 | API Key 只能代表所属用户，不授予管理员特权。 |
 | INV-O2 | API Key 能调用哪些接口由 `/v1/open/**` 路由注册表和中间件控制，不能默认开放全部接口。 |
-| INV-O3 | API Key 下单必须带幂等键，同 Key + 同幂等键不产生第二个订单。 |
+| INV-O3 | API Key 下单必须带幂等键；相同 Key、幂等键和请求内容重试不产生批次数量之外的新订单。 |
 | INV-O4 | OrderToken 只能通过 pickup handler 校验；校验成功后只读取绑定 `orderNo` 且与 `email` 匹配的服务结果。 |
 | INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
 | INV-O6 | 购买邮箱正常服务长期有效，Token 不因质保到期自动过期。 |
@@ -137,7 +139,8 @@ SDK 可调用接口示例：
 | `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的额度、RPM、过期时间和使用状态。 |
 | `GET` | `/v1/open/projects` | API Key 查询可见项目。 |
 | `GET` | `/v1/open/projects/{projectId}` | API Key 查询可见项目详情。 |
-| `POST` | `/v1/open/orders` | API Key 下单。 |
+| `POST` | `/v1/open/orders` | API Key 单笔下单。 |
+| `POST` | `/v1/open/orders/batch` | API Key 批量创建 2 到 100 个独立订单，按索引返回逐项结果；存在失败项时返回 `207 Multi-Status`。 |
 | `GET` | `/v1/open/orders` | API Key 查询自己的订单。 |
 | `GET` | `/v1/open/orders/{orderNo}` | API Key 查询自己的订单详情。 |
 | `GET` | `/v1/open/wallet` | API Key 查询自己的钱包。 |
@@ -162,6 +165,7 @@ SDK 可调用接口示例：
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `GET` | `/v1/pickup?email={email}&token={token}` | 资源钥匙读取邮件 6 元素；内部按 singleflight 提交异步收件任务。 |
+| `POST` | `/v1/pickup/batch` | 批量读取 2 到 200 组资源钥匙，响应顺序与请求一致；单项错误通过 `207 Multi-Status` 返回，整批请求受客户端 IP 限流，每个 Token 仍受原取件限流。 |
 
 ---
 

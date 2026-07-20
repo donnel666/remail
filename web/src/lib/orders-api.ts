@@ -4,6 +4,8 @@ import { generateIdempotencyKey } from "./idempotency";
 import { notifyWalletUpdated } from "./wallet-events";
 
 export type CreateOrderRequest = components["schemas"]["CreateOrderRequest"];
+export type CreateOrderBatchRequest = components["schemas"]["CreateOrderBatchRequest"];
+export type CreateOrderBatchResponse = components["schemas"]["CreateOrderBatchResponse"];
 export type OrderResponse = components["schemas"]["OrderResponse"];
 export type OrderOwnerSummary = components["schemas"]["OrderOwnerSummary"];
 export type OrderListResponse = components["schemas"]["OrderListResponse"];
@@ -32,10 +34,39 @@ export async function createOrder(
           supply: options.supply,
         },
       },
-    })
+    }),
   );
   notifyWalletUpdated();
   return response;
+}
+
+export async function createOrderBatch(
+  payload: CreateOrderBatchRequest,
+  options: {
+    idempotencyKey: string;
+    serviceMode: "purchase" | "code";
+    supply: "private_first" | "public_only";
+  },
+) {
+  try {
+    return await unwrap<CreateOrderBatchResponse>(
+      await client.POST("/v1/orders/batch", {
+        body: payload,
+        params: {
+          header: {
+            ...csrfHeader(),
+            "Idempotency-Key": options.idempotencyKey,
+          },
+          query: {
+            serviceMode: options.serviceMode,
+            supply: options.supply,
+          },
+        },
+      }),
+    );
+  } finally {
+    notifyWalletUpdated();
+  }
 }
 
 export interface OrderListFilter {

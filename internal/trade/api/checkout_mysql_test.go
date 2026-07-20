@@ -1007,6 +1007,148 @@ func TestOrderRouteAcceptsAPIKeyWithoutCSRFMySQL(t *testing.T) {
 	require.Empty(t, listResp.Items[0].ServiceToken)
 }
 
+func TestOrderRouteCreatesIndependentBatchWithStableIdempotencyMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 2, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	openapiMod := openapiapi.NewModule(db)
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:         2,
+		Name:           "batch-sdk",
+		IdempotencyKey: "apikey-idem-trade-batch",
+		RequestID:      "req-apikey-trade-batch",
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
+
+	quantity := 2
+	body, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20},
+		Quantity:           quantity,
+	})
+	require.NoError(t, err)
+	request := func(body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
+		req.Header.Set("Idempotency-Key", "route-order-batch")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	created := request(body)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var orders CreateOrderBatchResponse
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &orders))
+	require.Len(t, orders, quantity)
+	require.Equal(t, "succeeded", orders[0].Status)
+	require.Equal(t, "succeeded", orders[1].Status)
+	require.NotEqual(t, orders[0].Order.OrderNo, orders[1].Order.OrderNo)
+
+	replayed := request(body)
+	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
+	var replayedOrders CreateOrderBatchResponse
+	require.NoError(t, json.Unmarshal(replayed.Body.Bytes(), &replayedOrders))
+	require.Equal(t,
+		[]string{orders[0].Order.OrderNo, orders[1].Order.OrderNo},
+		[]string{replayedOrders[0].Order.OrderNo, replayedOrders[1].Order.OrderNo},
+	)
+
+	changedBody, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20},
+		Quantity:           3,
+	})
+	require.NoError(t, err)
+	conflict := request(changedBody)
+	require.Equal(t, http.StatusConflict, conflict.Code, conflict.Body.String())
+
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
+	require.EqualValues(t, quantity, orderCount)
+}
+
+func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	creditBuyer(t, db, 2, "10.00")
+
+	openapiMod := openapiapi.NewModule(db)
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:         2,
+		Name:           "partial-batch-sdk",
+		IdempotencyKey: "apikey-idem-trade-partial-batch",
+		RequestID:      "req-apikey-trade-partial-batch",
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
+	body, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20},
+		Quantity:           3,
+	})
+	require.NoError(t, err)
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
+		req.Header.Set("Idempotency-Key", "route-order-partial-batch")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	first := request()
+	require.Equal(t, http.StatusMultiStatus, first.Code, first.Body.String())
+	var firstResults CreateOrderBatchResponse
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResults))
+	require.Len(t, firstResults, 3)
+	require.Equal(t, "succeeded", firstResults[0].Status)
+	for i := 1; i < len(firstResults); i++ {
+		require.Equal(t, "failed", firstResults[i].Status)
+		require.NotNil(t, firstResults[i].Error)
+		require.Equal(t, "insufficient_inventory", firstResults[i].Error.Code)
+	}
+
+	replay := request()
+	require.Equal(t, http.StatusMultiStatus, replay.Code, replay.Body.String())
+	var replayResults CreateOrderBatchResponse
+	require.NoError(t, json.Unmarshal(replay.Body.Bytes(), &replayResults))
+	require.Len(t, replayResults, 3)
+	for i := range firstResults {
+		require.Equal(t, firstResults[i].Index, replayResults[i].Index)
+		require.Equal(t, firstResults[i].Status, replayResults[i].Status)
+		require.Equal(t, firstResults[i].Order.OrderNo, replayResults[i].Order.OrderNo)
+		if firstResults[i].Error == nil {
+			require.Nil(t, replayResults[i].Error)
+		} else {
+			require.Equal(t, firstResults[i].Error.Code, replayResults[i].Error.Code)
+		}
+	}
+
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
+	require.EqualValues(t, 3, orderCount)
+	var activeCount int64
+	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "active").Count(&activeCount).Error)
+	require.EqualValues(t, 1, activeCount)
+	var failedCount int64
+	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "failed").Count(&failedCount).Error)
+	require.EqualValues(t, 2, failedCount)
+	var debitCount int64
+	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = ?", 2, "debit").Count(&debitCount).Error)
+	require.EqualValues(t, 1, debitCount)
+	var allocationCount int64
+	require.NoError(t, db.Table("microsoft_allocations").Where("status = ?", "allocated").Count(&allocationCount).Error)
+	require.EqualValues(t, 1, allocationCount)
+}
+
 func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
@@ -1465,6 +1607,7 @@ func registerOpenOrderRoute(router *gin.Engine, mod *Module, openapiMod *openapi
 	open.Use(openapiapi.KeyRequired())
 	h := NewHandler(mod)
 	open.POST("/orders", h.PostOrder)
+	open.POST("/orders/batch", h.PostOrderBatch)
 	open.GET("/orders", h.GetOrders)
 	open.GET("/orders/:orderNo", h.GetOrder)
 }

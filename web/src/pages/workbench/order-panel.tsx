@@ -279,6 +279,7 @@ export function OrderPanel({
   hasMoreOrders = false,
   inventoryScope,
   loadingMoreOrders = false,
+  maxQuantity,
   onCreateOrder,
   onFetchOrderMail,
   onLoadMoreOrders,
@@ -301,6 +302,7 @@ export function OrderPanel({
   hasMoreOrders?: boolean;
   inventoryScope: InventoryScope;
   loadingMoreOrders?: boolean;
+  maxQuantity: number;
   onCreateOrder: () => void;
   onFetchOrderMail: (
     order: WorkbenchOrder,
@@ -328,8 +330,8 @@ export function OrderPanel({
 }) {
   const { t } = useTranslation();
   const safeQuantity =
-    selectedProductInventory > 0
-      ? Math.min(Math.max(1, quantity), selectedProductInventory)
+    maxQuantity > 0
+      ? Math.min(Math.max(1, quantity), maxQuantity)
       : 0;
   const totalPrice = selectedProduct
     ? getPrice(selectedProduct, serviceMode, safeQuantity)
@@ -385,7 +387,7 @@ export function OrderPanel({
               aria-label={t("Quantity")}
               className="workbench-quantity-input"
               disabled={!selectedProduct || inventory <= 0 || creating}
-              max={inventory}
+              max={maxQuantity}
               min={minQuantity}
               onChange={(value) => {
                 const parsed = Number(value);

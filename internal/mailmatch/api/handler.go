@@ -3,14 +3,19 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
+	stdmail "net/mail"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
@@ -43,6 +48,75 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, orderMailResponse(items, state))
 }
 
+func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
+	if !globalPickupBatchIPLimiter.allow(normalizePickupClientIP(c.ClientIP())) {
+		c.Header("Retry-After", "10")
+		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	var req PickupBatchRequest
+	if err := bindPickupBatchJSON(c, &req); err != nil {
+		writePickupBatchBodyError(c, err)
+		return
+	}
+	if len(req.Items) < 2 || len(req.Items) > maxPickupBatchSize {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Pickup batch must contain between 2 and 200 items.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	resp := make(PickupBatchResponse, len(req.Items))
+	credentials := make([]mailmatchapp.PickupCredential, 0, len(req.Items))
+	credentialIndexes := make([]int, 0, len(req.Items))
+	failed := false
+	for i := range req.Items {
+		resp[i].Index = i
+		credential := mailmatchapp.PickupCredential{
+			Email: strings.ToLower(strings.TrimSpace(req.Items[i].Email)),
+			Token: strings.TrimSpace(req.Items[i].Token),
+		}
+		if !validPickupCredential(credential) {
+			resp[i].Status = "failed"
+			resp[i].Error = &PickupBatchItemErrorResponse{Code: "invalid_request", Message: "Invalid pickup credential."}
+			failed = true
+			continue
+		}
+		if !globalPickupListLimiter.allow(credential.Token) {
+			c.Header("Retry-After", "1")
+			resp[i].Status = "failed"
+			resp[i].Error = &PickupBatchItemErrorResponse{Code: "rate_limited", Message: "Too many requests."}
+			failed = true
+			continue
+		}
+		credentials = append(credentials, credential)
+		credentialIndexes = append(credentialIndexes, i)
+	}
+	results := h.mod.UseCase.ListPickupMailBatch(c.Request.Context(), credentials)
+	for i := range results {
+		index := credentialIndexes[i]
+		if results[i].Err != nil {
+			resp[index].Status = "failed"
+			resp[index].Error = pickupBatchItemError(results[i].Err)
+			failed = true
+			continue
+		}
+		data := orderMailResponse(results[i].Items, results[i].Fetch)
+		resp[index].Status = "succeeded"
+		resp[index].Data = &data
+	}
+	status := http.StatusOK
+	if failed {
+		status = http.StatusMultiStatus
+	}
+	c.JSON(status, resp)
+}
+
+func normalizePickupClientIP(value string) string {
+	value = strings.TrimSpace(value)
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return value
+}
+
 func (h *Handler) GetPickupMessage(c *gin.Context) {
 	email, tokenPlain, ok := pickupCredential(c)
 	if !ok {
@@ -70,11 +144,16 @@ func (h *Handler) GetPickupMessage(c *gin.Context) {
 	})
 }
 
-const maxPickupLimiterKeys = 100000
+const (
+	maxPickupBatchSize   = 200
+	maxPickupBatchBytes  = 128 << 10
+	maxPickupLimiterKeys = 100000
+)
 
 var (
-	globalPickupListLimiter   = newPickupLimiter(rate.Limit(1), 3)
-	globalPickupDetailLimiter = newPickupLimiter(rate.Limit(10), 20)
+	globalPickupListLimiter    = newPickupLimiter(rate.Limit(1), 3)
+	globalPickupDetailLimiter  = newPickupLimiter(rate.Limit(10), 20)
+	globalPickupBatchIPLimiter = newPickupLimiter(rate.Every(10*time.Second), 2)
 )
 
 type pickupLimiter struct {
@@ -143,6 +222,55 @@ func pickupLimitKey(token string) string {
 	}
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func validPickupCredential(credential mailmatchapp.PickupCredential) bool {
+	if credential.Email == "" || len(credential.Email) > 254 || credential.Token == "" || len(credential.Token) > 255 {
+		return false
+	}
+	address, err := stdmail.ParseAddress(credential.Email)
+	return err == nil && strings.EqualFold(address.Address, credential.Email)
+}
+
+func pickupBatchItemError(err error) *PickupBatchItemErrorResponse {
+	switch {
+	case errors.Is(err, domain.ErrPickupCredentialInvalid):
+		return &PickupBatchItemErrorResponse{Code: "credential_invalid", Message: "Credential is invalid or expired."}
+	case errors.Is(err, domain.ErrOrderUnavailable):
+		return &PickupBatchItemErrorResponse{Code: "order_unavailable", Message: "Order is not available for mail reading."}
+	case errors.Is(err, domain.ErrFetchQueueUnavailable), errors.Is(err, domain.ErrMailServiceUnavailable):
+		return &PickupBatchItemErrorResponse{Code: "service_unavailable", Message: "Mail service is temporarily unavailable."}
+	default:
+		return &PickupBatchItemErrorResponse{Code: "internal_error", Message: "An unexpected error occurred."}
+	}
+}
+
+func bindPickupBatchJSON(c *gin.Context, destination any) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPickupBatchBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func writePickupBatchBodyError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	message := "Invalid request body."
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		status = http.StatusRequestEntityTooLarge
+		message = "Request body is too large."
+	}
+	c.JSON(status, gin.H{"message": message, "requestId": middleware.GetRequestID(c)})
 }
 
 func pickupCredential(c *gin.Context) (email string, token string, ok bool) {

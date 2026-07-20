@@ -9,6 +9,7 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module) {
 	h := NewHandler(mod)
 
 	rg.GET("/pickup", h.GetPickupMessages)
+	rg.POST("/pickup/batch", h.PostPickupMessagesBatch)
 	rg.GET("/pickup/messages/:messageId", h.GetPickupMessage)
 }
 

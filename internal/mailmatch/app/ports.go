@@ -189,6 +189,17 @@ type FetchSubmitResult struct {
 	NextFetchAllowedAt *time.Time
 }
 
+type PickupCredential struct {
+	Email string
+	Token string
+}
+
+type PickupMailResult struct {
+	Items []domain.MailContent
+	Fetch *domain.FetchState
+	Err   error
+}
+
 type UseCase struct {
 	repo        Repository
 	queue       FetchQueue
@@ -252,6 +263,26 @@ func (uc *UseCase) ListPickupMail(ctx context.Context, token string, email strin
 		})
 	}
 	return items, state, nil
+}
+
+func (uc *UseCase) ListPickupMailBatch(ctx context.Context, credentials []PickupCredential) []PickupMailResult {
+	results := make([]PickupMailResult, len(credentials))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	// ponytail: eight concurrent single-pickup flows bound database pressure;
+	// replace them with bulk repository reads only if profiles still require it.
+	for i := range credentials {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			items, state, err := uc.ListPickupMail(ctx, credentials[index].Token, credentials[index].Email)
+			results[index] = PickupMailResult{Items: items, Fetch: state, Err: err}
+		}(i)
+	}
+	wg.Wait()
+	return results
 }
 
 func (uc *UseCase) GetPickupMessage(ctx context.Context, token string, email string, messageID uint) (*domain.MailContent, error) {

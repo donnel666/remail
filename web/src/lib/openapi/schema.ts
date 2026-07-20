@@ -1323,6 +1323,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orders/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create multiple independent orders through console or API key */
+        post: operations["postOrderBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orders/{orderNo}": {
         parameters: {
             query?: never;
@@ -1470,6 +1487,26 @@ export interface paths {
         get: operations["getPickupMessages"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pickup/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read mail messages for multiple service credentials
+         * @description Returns one result per input item in the same order. The anonymous endpoint is limited by client IP and service token. The request body contains service credentials and must not be logged.
+         */
+        post: operations["postPickupMessagesBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3252,6 +3289,27 @@ export interface components {
             /** @description Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source. */
             emailSuffix?: string;
         };
+        CreateOrderBatchRequest: {
+            projectId: number;
+            productId: number;
+            /** @description Optional email domain suffix filter used by BC-ALLOC when selecting an allocation source. */
+            emailSuffix?: string;
+            /** @description Number of independent orders to create. */
+            quantity: number;
+        };
+        CreateOrderBatchResponse: components["schemas"]["CreateOrderBatchItemResponse"][];
+        OrderBatchItemErrorResponse: {
+            /** @enum {string} */
+            code: "insufficient_balance" | "insufficient_inventory";
+            message: string;
+        };
+        CreateOrderBatchItemResponse: {
+            index: number;
+            /** @enum {string} */
+            status: "succeeded" | "failed";
+            order: components["schemas"]["OrderResponse"];
+            error?: components["schemas"]["OrderBatchItemErrorResponse"];
+        };
         AdminOrderCommandRequest: {
             reason: string;
         };
@@ -3430,6 +3488,27 @@ export interface components {
         OrderMailResponse: {
             items: components["schemas"]["MailContentResponse"][];
             fetch?: components["schemas"]["FetchStateResponse"];
+        };
+        PickupCredentialRequest: {
+            /** Format: email */
+            email: string;
+            token: string;
+        };
+        PickupBatchRequest: {
+            items: components["schemas"]["PickupCredentialRequest"][];
+        };
+        PickupBatchResponse: components["schemas"]["PickupBatchItemResponse"][];
+        PickupBatchItemErrorResponse: {
+            /** @enum {string} */
+            code: "invalid_request" | "rate_limited" | "credential_invalid" | "order_unavailable" | "service_unavailable" | "internal_error";
+            message: string;
+        };
+        PickupBatchItemResponse: {
+            index: number;
+            /** @enum {string} */
+            status: "succeeded" | "failed";
+            data?: components["schemas"]["OrderMailResponse"];
+            error?: components["schemas"]["PickupBatchItemErrorResponse"];
         };
         WalletResponse: {
             userId: number;
@@ -11119,7 +11198,111 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Request body is too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Insufficient balance, insufficient inventory, or unavailable project */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postOrderBatch: {
+        parameters: {
+            query?: {
+                serviceMode?: "purchase" | "code";
+                supply?: "private_first" | "public_only";
+            };
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
+                "X-CSRF-Token"?: components["parameters"]["OptionalCsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrderBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of an existing order batch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateOrderBatchResponse"];
+                };
+            };
+            /** @description Independent orders created and activated with their own allocations and service tokens. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateOrderBatchResponse"];
+                };
+            };
+            /** @description Batch completed with one or more failed order items. */
+            207: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateOrderBatchResponse"];
+                };
+            };
+            /** @description Invalid request body or missing idempotency key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Idempotency key conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project, product, service mode, supply policy, or another batch-wide business validation failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11683,6 +11866,67 @@ export interface operations {
             /** @description Mail service is temporarily unavailable */
             503: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postPickupMessagesBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PickupBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Token scoped mail messages aligned with the input items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupBatchResponse"];
+                };
+            };
+            /** @description Batch completed with one or more failed pickup items */
+            207: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PickupBatchResponse"];
+                };
+            };
+            /** @description Invalid JSON body or batch item count */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Batch Pickup request rate limit for the client IP was exceeded */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

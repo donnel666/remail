@@ -24,6 +24,7 @@ const authRequiredIgnoredPaths = new Set([
   "/v1/password/reset",
   "/v1/password/reset/request",
   "/v1/pickup",
+  "/v1/pickup/batch",
   "/v1/turnstile/config",
   "/v1/users",
 ]);

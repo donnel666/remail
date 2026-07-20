@@ -17,6 +17,7 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 		auth.GET("/orders/:orderNo", h.GetOrder)
 		auth.GET("/orders/:orderNo/events", h.GetOrderEvents)
 		auth.POST("/orders", h.PostOrder)
+		auth.POST("/orders/batch", h.PostOrderBatch)
 		auth.POST("/orders/:orderNo/archive", h.PostOrderArchive)
 	}
 

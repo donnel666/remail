@@ -327,6 +327,7 @@ type CheckoutRequest struct {
 	UserID         uint
 	ProjectID      uint
 	ProductID      uint
+	BatchQuantity  int
 	ServiceMode    string
 	SupplyPolicy   string
 	EmailSuffix    string
@@ -555,7 +556,11 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 	}
 
 	emailSuffix := normalizeEmailSuffix(req.EmailSuffix)
-	fingerprint := checkoutFingerprint(req.UserID, req.ProjectID, req.ProductID, mode, policy, emailSuffix, req.ClientChannel, apiKeyFingerprint(req.APIKeyID))
+	fingerprintParts := []any{req.UserID, req.ProjectID, req.ProductID, mode, policy, emailSuffix, req.ClientChannel, apiKeyFingerprint(req.APIKeyID)}
+	if req.BatchQuantity > 1 {
+		fingerprintParts = append(fingerprintParts, req.BatchQuantity)
+	}
+	fingerprint := checkoutFingerprint(fingerprintParts...)
 	existing, err := uc.repo.FindOrderByIdempotency(ctx, req.ClientChannel, req.UserID, req.APIKeyID, idempotencyKey, fingerprint)
 	if err != nil {
 		return nil, err
@@ -606,6 +611,9 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 		result, err = uc.resumeCheckout(txCtx, *order, orderQuote, emailSuffix, strings.TrimSpace(req.RequestID))
 		if err != nil {
 			if shouldCommitCheckoutError(err) {
+				if result != nil {
+					result.Created = created
+				}
 				checkoutErr = err
 				return nil
 			}
@@ -618,7 +626,7 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 		return nil, err
 	}
 	if checkoutErr != nil {
-		return nil, checkoutErr
+		return result, checkoutErr
 	}
 	return result, nil
 }
@@ -653,7 +661,7 @@ func (uc *UseCase) resumeExistingCheckout(ctx context.Context, orderNo, emailSuf
 		return nil, err
 	}
 	if checkoutErr != nil {
-		return nil, checkoutErr
+		return result, checkoutErr
 	}
 	return result, nil
 }
@@ -1268,14 +1276,19 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 			allocation, err := uc.allocate(ctx, order, emailSuffix)
 			if err != nil {
 				if errors.Is(err, domain.ErrInsufficientInventory) {
-					if _, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
+					failed, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
 						OrderNo:     order.OrderNo,
 						FailureCode: domain.OrderFailureInsufficientInventory,
 						Reason:      "Allocation failed.",
 						Now:         uc.now(),
-					}); markErr != nil {
+					})
+					if markErr != nil {
 						return nil, markErr
 					}
+					if failed == nil {
+						return nil, errors.New("mark failed returned no order")
+					}
+					return &CheckoutResult{Order: *failed}, err
 				}
 				return nil, err
 			}
@@ -1292,14 +1305,19 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 					if releaseErr := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); releaseErr != nil {
 						return nil, releaseErr
 					}
-					if _, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
+					failed, markErr := uc.repo.MarkFailed(ctx, MarkFailedCommand{
 						OrderNo:     order.OrderNo,
 						FailureCode: domain.OrderFailureInsufficientBalance,
 						Reason:      "Payment failed.",
 						Now:         uc.now(),
-					}); markErr != nil {
+					})
+					if markErr != nil {
 						return nil, markErr
 					}
+					if failed == nil {
+						return nil, errors.New("mark failed returned no order")
+					}
+					return &CheckoutResult{Order: *failed}, err
 				}
 				return nil, err
 			}
@@ -1328,10 +1346,14 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				if errors.Is(err, domain.ErrInsufficientInventory) {
 					failureCode = domain.OrderFailureInsufficientInventory
 				}
-				if _, refundErr := uc.refundPaidOrder(ctx, order, failureCode, "Allocation failed."); refundErr != nil {
+				failed, refundErr := uc.refundPaidOrder(ctx, order, failureCode, "Allocation failed.")
+				if refundErr != nil {
 					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
 				}
-				return nil, err
+				if failed == nil {
+					return nil, errors.New("refund failed order returned no order")
+				}
+				return &CheckoutResult{Order: *failed}, err
 			}
 			receiveStartedAt := uc.now()
 			receiveUntil := serviceReceiveUntil(receiveStartedAt, quote, order.ServiceMode)
@@ -1391,7 +1413,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 			return &CheckoutResult{Order: order, ServiceToken: token.TokenPlain}, nil
 
 		case domain.OrderStatusFailed:
-			return nil, checkoutErrorForFailedOrder(order)
+			return &CheckoutResult{Order: order}, checkoutErrorForFailedOrder(order)
 
 		default:
 			return &CheckoutResult{Order: order}, nil
