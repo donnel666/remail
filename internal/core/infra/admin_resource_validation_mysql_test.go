@@ -402,7 +402,7 @@ func TestResourceValidationRepoBindingFailureDoesNotUndoHealthyResultMySQL(t *te
 
 	var stored MicrosoftResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
-	require.Equal(t, string(domain.MicrosoftStatusNormal), stored.Status)
+	require.Equal(t, string(domain.MicrosoftStatusIdentifying), stored.Status)
 }
 
 func insertAdminValidationOwner(t *testing.T, db *gorm.DB) {

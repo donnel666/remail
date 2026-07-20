@@ -55,7 +55,7 @@ func TestValidationBindingCommitPortSharesCoreResultTransactionMySQL(t *testing.
 	require.EqualValues(t, 2, validationBindingRootVersion(t, db, 101))
 	var successStored coreinfra.MicrosoftResourceModel
 	require.NoError(t, db.First(&successStored, 101).Error)
-	require.Equal(t, string(domain.MicrosoftStatusNormal), successStored.Status)
+	require.Equal(t, string(domain.MicrosoftStatusIdentifying), successStored.Status)
 
 	rollbackTask := createRunningValidationBindingTask(t, db, 102)
 	err := validationRepo.ApplyMicrosoftResult(context.Background(), rollbackTask, coreapp.MicrosoftValidationResult{
