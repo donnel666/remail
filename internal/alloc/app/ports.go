@@ -10,6 +10,7 @@ import (
 const (
 	BucketCount                 = 64
 	DotAliasCapacityPerResource = 10
+	InventoryRefreshInterval    = 60 * time.Second
 	candidateWindowSize         = 4
 	globalCandidateWindow       = 8
 	bucketProbeCount            = 4
@@ -100,6 +101,42 @@ type ProjectProductInventoryTotals struct {
 	ProjectID      uint
 	TotalAvailable int64
 	Items          []ProductInventoryTotal
+}
+
+type InventoryCacheKind string
+
+const (
+	InventoryCacheStats    InventoryCacheKind = "stats"
+	InventoryCacheProducts InventoryCacheKind = "products"
+)
+
+type InventoryCacheEntry struct {
+	Kind        InventoryCacheKind
+	ProjectID   uint
+	BuyerUserID uint
+}
+
+type InventoryCache interface {
+	GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error)
+	SetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *InventoryStats, ttl time.Duration) error
+	RefreshInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *InventoryStats, ttl time.Duration) error
+	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error)
+	SetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
+	RefreshProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
+	ClaimActiveInventory(ctx context.Context, since time.Time, limit int) ([]InventoryCacheEntry, error)
+	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
+	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error
+	AcquireInventoryRefresh(ctx context.Context, entry InventoryCacheEntry, ttl time.Duration) (token string, acquired bool, err error)
+	ReleaseInventoryRefresh(ctx context.Context, entry InventoryCacheEntry, token string) error
+}
+
+type InventoryRefreshResult struct {
+	Attempted int
+	Updated   int
+	Removed   int
+	Skipped   int
+	Failed    int
+	LastError error
 }
 
 type MicrosoftInventoryStats struct {
@@ -250,6 +287,7 @@ type CandidateListResult struct {
 type CandidateRefreshQueue interface {
 	EnqueueCandidateRefresh(ctx context.Context, task CandidateRefreshTask) (bool, error)
 	EnqueueCandidateRefreshDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueInventoryRefresh(ctx context.Context) error
 }
 
 type Repository interface {
@@ -292,6 +330,7 @@ type Repository interface {
 	FindAllocationByOrder(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error)
 	ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error)
 
+	AssertProjectInventoryAccess(ctx context.Context, projectID uint, buyerUserID uint) error
 	GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error)
 	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error)
 	RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error)

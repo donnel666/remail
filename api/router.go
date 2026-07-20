@@ -146,8 +146,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailapi.RegisterMailTransportRoutes(v1, mailMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// Allocation module (admin diagnostics and Trade-facing application port)
-		allocMod := allocapi.NewModule(p.DB, p.Asynq)
+		allocMod := allocapi.NewModule(p.DB, p.Redis, p.Asynq)
 		allocMod.UseCase.SetHistoricalMicrosoftAliasPort(mailMod.MicrosoftAliases)
+		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		cleanupFuncs = append(cleanupFuncs, allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod))
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,
 			mailMod.BindingQuery,

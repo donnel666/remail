@@ -767,6 +767,19 @@ func TestInventoryStatsAreScopedToProjectProductsMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrProjectNotAllocatable)
 }
 
+func TestProjectInventoryAccessIsCheckedLiveMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	require.NoError(t, db.Exec("UPDATE projects SET access_type = 'private' WHERE id = 10").Error)
+	repo := NewRepo(db)
+
+	require.ErrorIs(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2), domain.ErrProjectNotAllocatable)
+	require.NoError(t, db.Exec("INSERT INTO project_accesses(project_id, user_id, granted_by) VALUES (10, 2, 1)").Error)
+	require.NoError(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2))
+	require.NoError(t, db.Exec("DELETE FROM project_accesses WHERE project_id = 10 AND user_id = 2").Error)
+	require.ErrorIs(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2), domain.ErrProjectNotAllocatable)
+}
+
 func TestInventoryStatsIncludeBuyerPrivateMicrosoftMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)

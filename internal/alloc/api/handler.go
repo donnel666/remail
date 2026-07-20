@@ -357,6 +357,9 @@ func writeAllocError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid allocation request.", "requestId": rid})
 	case errors.Is(err, domain.ErrProjectNotAllocatable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Project is not available for allocation.", "requestId": rid})
+	case errors.Is(err, domain.ErrInventoryRefreshInProgress):
+		c.Header("Retry-After", "1")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Inventory is being prepared, please retry.", "requestId": rid})
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		c.JSON(http.StatusConflict, gin.H{"message": "Insufficient inventory.", "requestId": rid})
 	case errors.Is(err, domain.ErrAllocationConflict):

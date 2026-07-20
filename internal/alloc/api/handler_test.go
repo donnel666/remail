@@ -11,12 +11,22 @@ import (
 	"testing"
 
 	"github.com/donnel666/remail/api/middleware"
+	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestInventoryRefreshInProgressReturnsRetryableServiceUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	writeAllocError(c, allocdomain.ErrInventoryRefreshInProgress)
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.Equal(t, "1", response.Header().Get("Retry-After"))
+}
 
 var allocAPIMySQLTestServer = testmysql.New("remail_alloc_api_test")
 
@@ -45,25 +55,25 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 	seedAdminAllocationReadComposition(t, db)
 
 	t.Run("unauthenticated", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations", false)
 		require.Equal(t, http.StatusUnauthorized, resp.Code)
 	})
 
 	t.Run("non admin forbidden", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations", true)
 		require.Equal(t, http.StatusForbidden, resp.Code)
 	})
 
 	t.Run("permission denied", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: false})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: false})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations", true)
 		require.Equal(t, http.StatusForbidden, resp.Code)
 	})
 
 	t.Run("user inventory exposes only total", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleUser}, fakePermissionChecker{allowed: false})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/projects/10/inventory", true)
 		require.Equal(t, http.StatusOK, resp.Code)
 		require.Contains(t, resp.Body.String(), `"totalAvailable"`)
@@ -74,13 +84,13 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 	})
 
 	t.Run("invalid filter", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?type=invalid", true)
 		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
 	})
 
 	t.Run("enriched allocation list matches openapi", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?type=microsoft&resourceId=1000&limit=20", true)
 		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 		var payload map[string]any
@@ -107,13 +117,13 @@ func TestAllocationAdminRoutesAuthAndContract(t *testing.T) {
 	})
 
 	t.Run("allocation list rejects limit above contract", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/allocations?limit=101", true)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	t.Run("inventory rejects unavailable project", func(t *testing.T) {
-		router := newAllocationAPITestRouter(NewModule(db, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
+		router := newAllocationAPITestRouter(NewModule(db, nil, nil), fakeSessionFetcher{ok: true, role: iamdomain.RoleAdmin}, fakePermissionChecker{allowed: true})
 		resp := performAllocAPIRequest(router, http.MethodGet, "/v1/admin/projects/999/inventory", true)
 		require.Equal(t, http.StatusUnprocessableEntity, resp.Code)
 	})

@@ -67,6 +67,10 @@ func (q *candidateRefreshQueueStub) EnqueueCandidateRefreshDispatcher(context.Co
 	return nil
 }
 
+func (q *candidateRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
+	return nil
+}
+
 func TestCandidateRefreshMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	tests := []struct {
 		name             string

@@ -14,10 +14,17 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
-	"github.com/donnel666/remail/internal/platform"
 )
 
-const inventoryStatsCacheTTL = 30 * time.Second
+const (
+	inventoryCacheActivityTTL    = 2 * InventoryRefreshInterval
+	inventoryCacheHardTTL        = 5 * InventoryRefreshInterval
+	inventoryRefreshLockTTL      = 10 * time.Minute
+	inventoryRefreshWaitTimeout  = 10 * time.Second
+	inventoryRefreshWaitInterval = 100 * time.Millisecond
+	// ponytail: fixed batch bounds the DB burst; shard into per-key tasks if 100 keys cannot finish within one interval.
+	inventoryRefreshBatchSize = 100
+)
 
 var pinyinMailboxNameParts = [...]string{
 	"an", "ao", "bai", "bao", "bei", "bo", "cai", "chang", "chao", "chen",
@@ -50,8 +57,13 @@ type UseCase struct {
 	queue                      CandidateRefreshQueue
 	adminAllocationEnrichment  AdminAllocationEnrichmentPort
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
-	inventoryStatsCache        *platform.TTLCache[string, InventoryStats]
-	productInventoryCache      *platform.TTLCache[string, ProjectProductInventoryTotals]
+	inventoryCache             InventoryCache
+}
+
+func (uc *UseCase) SetInventoryCache(cache InventoryCache) {
+	if uc != nil {
+		uc.inventoryCache = cache
+	}
 }
 
 func (uc *UseCase) SetHistoricalMicrosoftAliasPort(port HistoricalMicrosoftAliasPort) {
@@ -72,10 +84,8 @@ func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
 		queue = queues[0]
 	}
 	return &UseCase{
-		repo:                  repo,
-		queue:                 queue,
-		inventoryStatsCache:   platform.NewTTLCache[string, InventoryStats](),
-		productInventoryCache: platform.NewTTLCache[string, ProjectProductInventoryTotals](),
+		repo:  repo,
+		queue: queue,
 	}
 }
 
@@ -415,32 +425,105 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint, buyerU
 	if projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	key := inventoryCacheKey(projectID, buyerUserID)
-	if cached, ok := uc.inventoryStatsCache.Get(key); ok {
-		return cloneInventoryStats(cached), nil
+	if uc.inventoryCache == nil {
+		return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
 	}
-	stats, err := uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
-	if err != nil || stats == nil {
-		return stats, err
-	}
-	uc.inventoryStatsCache.Set(key, *stats, inventoryStatsCacheTTL)
-	return cloneInventoryStats(*stats), nil
+	entry := InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID, BuyerUserID: buyerUserID}
+	return loadInventoryWithLock(
+		ctx,
+		uc.inventoryCache,
+		entry,
+		func(ctx context.Context) (*InventoryStats, error) {
+			return uc.inventoryCache.GetInventoryStats(ctx, projectID, buyerUserID)
+		},
+		func(ctx context.Context) (*InventoryStats, error) {
+			return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
+		},
+		func(ctx context.Context, stats *InventoryStats) error {
+			return uc.inventoryCache.SetInventoryStats(ctx, projectID, buyerUserID, stats, inventoryCacheHardTTL)
+		},
+	)
 }
 
 func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error) {
 	if projectID == 0 || buyerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	key := inventoryCacheKey(projectID, buyerUserID)
-	if cached, ok := uc.productInventoryCache.Get(key); ok {
-		return cloneProductInventoryTotals(cached), nil
+	if err := uc.repo.AssertProjectInventoryAccess(ctx, projectID, buyerUserID); err != nil {
+		return nil, err
 	}
-	totals, err := uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
-	if err != nil || totals == nil {
-		return totals, err
+	if uc.inventoryCache == nil {
+		return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
 	}
-	uc.productInventoryCache.Set(key, *totals, inventoryStatsCacheTTL)
-	return cloneProductInventoryTotals(*totals), nil
+	entry := InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID, BuyerUserID: buyerUserID}
+	return loadInventoryWithLock(
+		ctx,
+		uc.inventoryCache,
+		entry,
+		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
+			return uc.inventoryCache.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+		},
+		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
+			return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+		},
+		func(ctx context.Context, totals *ProjectProductInventoryTotals) error {
+			return uc.inventoryCache.SetProductInventoryTotals(ctx, projectID, buyerUserID, totals, inventoryCacheHardTTL)
+		},
+	)
+}
+
+func loadInventoryWithLock[T any](
+	ctx context.Context,
+	cache InventoryCache,
+	entry InventoryCacheEntry,
+	load func(context.Context) (*T, error),
+	compute func(context.Context) (*T, error),
+	store func(context.Context, *T) error,
+) (*T, error) {
+	if cached, err := load(ctx); err != nil || cached != nil {
+		return cached, err
+	}
+	timer := time.NewTimer(inventoryRefreshWaitTimeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(inventoryRefreshWaitInterval)
+	defer ticker.Stop()
+	for {
+		token, acquired, err := cache.AcquireInventoryRefresh(ctx, entry, inventoryRefreshLockTTL)
+		if err != nil {
+			return nil, fmt.Errorf("acquire inventory refresh lock: %w", err)
+		}
+		if acquired {
+			value, loadErr := load(ctx)
+			if loadErr == nil && value == nil {
+				value, loadErr = compute(ctx)
+				if loadErr == nil && value != nil {
+					loadErr = store(ctx, value)
+				} else if loadErr == nil {
+					loadErr = domain.ErrProjectNotAllocatable
+				}
+			}
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			releaseErr := cache.ReleaseInventoryRefresh(cleanupCtx, entry, token)
+			cancel()
+			if loadErr != nil {
+				return value, loadErr
+			}
+			if releaseErr != nil {
+				return nil, fmt.Errorf("release inventory refresh lock: %w", releaseErr)
+			}
+			return value, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+			return nil, domain.ErrInventoryRefreshInProgress
+		case <-ticker.C:
+			if cached, err := load(ctx); err != nil || cached != nil {
+				return cached, err
+			}
+		}
+	}
 }
 
 func (uc *UseCase) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {
@@ -480,23 +563,87 @@ func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID u
 	}, nil
 }
 
-func inventoryCacheKey(projectID uint, buyerUserID uint) string {
-	return strconv.FormatUint(uint64(projectID), 10) + "|" + strconv.FormatUint(uint64(buyerUserID), 10)
-}
-
-func cloneInventoryStats(stats InventoryStats) *InventoryStats {
-	cloned := stats
-	return &cloned
-}
-
-func cloneProductInventoryTotals(totals ProjectProductInventoryTotals) *ProjectProductInventoryTotals {
-	cloned := totals
-	cloned.Items = make([]ProductInventoryTotal, len(totals.Items))
-	for i := range totals.Items {
-		cloned.Items[i] = totals.Items[i]
-		cloned.Items[i].Suffixes = append([]ProductInventorySuffixTotal(nil), totals.Items[i].Suffixes...)
+func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefreshResult, error) {
+	if uc == nil || uc.inventoryCache == nil {
+		return &InventoryRefreshResult{}, nil
 	}
-	return &cloned
+	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, time.Now().Add(-inventoryCacheActivityTTL), inventoryRefreshBatchSize)
+	if err != nil {
+		return nil, fmt.Errorf("claim active inventory cache entries: %w", err)
+	}
+	result := &InventoryRefreshResult{Attempted: len(entries)}
+	for i, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			_ = requeueInventory(uc.inventoryCache, entries[i:])
+			return result, err
+		}
+		token, acquired, err := uc.inventoryCache.AcquireInventoryRefresh(ctx, entry, inventoryRefreshLockTTL)
+		if err != nil {
+			if requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); requeueErr != nil {
+				return result, errors.Join(err, requeueErr)
+			}
+			result.Failed++
+			result.LastError = err
+			continue
+		}
+		if !acquired {
+			if err := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); err != nil {
+				return result, err
+			}
+			result.Skipped++
+			continue
+		}
+		removed := false
+		switch entry.Kind {
+		case InventoryCacheStats:
+			stats, refreshErr := uc.repo.GetInventoryStats(ctx, entry.ProjectID, entry.BuyerUserID)
+			err = refreshErr
+			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && stats == nil) {
+				err = uc.inventoryCache.DeleteInventory(ctx, entry)
+				removed = err == nil
+			} else if err == nil {
+				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, entry.BuyerUserID, stats, inventoryCacheHardTTL)
+			}
+		case InventoryCacheProducts:
+			totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID, entry.BuyerUserID)
+			err = refreshErr
+			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && totals == nil) {
+				err = uc.inventoryCache.DeleteInventory(ctx, entry)
+				removed = err == nil
+			} else if err == nil {
+				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, entry.BuyerUserID, totals, inventoryCacheHardTTL)
+			}
+		default:
+			err = uc.inventoryCache.DeleteInventory(ctx, entry)
+			removed = err == nil
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		releaseErr := uc.inventoryCache.ReleaseInventoryRefresh(cleanupCtx, entry, token)
+		cancel()
+		if err == nil {
+			err = releaseErr
+		}
+		if err != nil {
+			if requeueErr := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); requeueErr != nil {
+				return result, errors.Join(err, requeueErr)
+			}
+			result.Failed++
+			result.LastError = err
+			continue
+		}
+		if removed {
+			result.Removed++
+		} else {
+			result.Updated++
+		}
+	}
+	return result, nil
+}
+
+func requeueInventory(cache InventoryCache, entries []InventoryCacheEntry) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return cache.RequeueInventory(cleanupCtx, entries)
 }
 
 func (uc *UseCase) ProcessCandidateRefresh(ctx context.Context, task CandidateRefreshTask) error {
@@ -565,6 +712,13 @@ func (uc *UseCase) ScheduleCandidateRefreshDispatcher(ctx context.Context, delay
 		return
 	}
 	_ = uc.queue.EnqueueCandidateRefreshDispatcher(ctx, delay)
+}
+
+func (uc *UseCase) ScheduleInventoryRefresh(ctx context.Context) error {
+	if uc == nil || uc.queue == nil {
+		return nil
+	}
+	return uc.queue.EnqueueInventoryRefresh(ctx)
 }
 
 func (uc *UseCase) enqueueCandidateRefresh(ctx context.Context, state domain.CandidateRefresh) (bool, error) {

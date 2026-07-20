@@ -15,14 +15,38 @@ import (
 const (
 	TypeCandidateRefresh           = "alloc:candidate_refresh"
 	TypeCandidateRefreshDispatcher = "alloc:candidate_refresh_dispatcher"
+	TypeInventoryRefresh           = "alloc:inventory_refresh"
 
 	allocationQueueName                   = platform.QueueDefault
 	candidateRefreshTaskTimeout           = 5 * time.Minute
 	candidateRefreshDispatcherTaskTimeout = 30 * time.Second
+	inventoryRefreshTaskTimeout           = 10 * time.Minute
 )
 
 type CandidateRefreshQueue struct {
 	client *asynq.Client
+}
+
+func (q *CandidateRefreshQueue) EnqueueInventoryRefresh(ctx context.Context) error {
+	if q == nil || q.client == nil {
+		return fmt.Errorf("inventory refresh queue is unavailable")
+	}
+	_, err := q.client.EnqueueContext(
+		ctx,
+		asynq.NewTask(TypeInventoryRefresh, nil),
+		asynq.Queue(platform.QueueBackgroundInventory),
+		asynq.Unique(inventoryRefreshTaskTimeout),
+		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
+		asynq.Timeout(inventoryRefreshTaskTimeout),
+		asynq.Retention(0),
+	)
+	if err != nil {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			return nil
+		}
+		return fmt.Errorf("enqueue inventory refresh task: %w", err)
+	}
+	return nil
 }
 
 func NewCandidateRefreshQueue(client *asynq.Client) *CandidateRefreshQueue {

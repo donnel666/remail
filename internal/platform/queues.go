@@ -59,6 +59,8 @@ const (
 	QueueResource = "resource"
 	// QueueBackgroundProjectHistory pulls mailbox history for newly listed projects.
 	QueueBackgroundProjectHistory = "background_project_history"
+	// QueueBackgroundInventory refreshes Redis inventory read models.
+	QueueBackgroundInventory = "background_inventory"
 )
 
 // AllQueueNames is every queue some module enqueues tasks to. The topology test
@@ -72,4 +74,5 @@ var AllQueueNames = []string{
 	QueueBackgroundTokenRefresh,
 	QueueResource,
 	QueueBackgroundProjectHistory,
+	QueueBackgroundInventory,
 }

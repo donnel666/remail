@@ -55,6 +55,7 @@ func backgroundQueueConfig() map[string]int {
 		QueueBackgroundAlias:          1,
 		QueueBackgroundTokenRefresh:   1,
 		QueueBackgroundProjectHistory: 1,
+		QueueBackgroundInventory:      1,
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
 		// and every bulk command sits queued forever.

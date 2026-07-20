@@ -46,3 +46,23 @@ func TestCandidateRefreshQueueReportsOnlyNewlyAcceptedTask(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, accepted, "the duplicate-suppression key must have a finite TTL")
 }
+
+func TestInventoryRefreshQueueUsesBackgroundWorker(t *testing.T) {
+	server := miniredis.RunT(t)
+	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}
+	client := asynq.NewClient(redisOptions)
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	queue := NewCandidateRefreshQueue(client)
+
+	require.NoError(t, queue.EnqueueInventoryRefresh(context.Background()))
+	require.NoError(t, queue.EnqueueInventoryRefresh(context.Background()))
+
+	inspector := asynq.NewInspector(redisOptions)
+	t.Cleanup(func() { require.NoError(t, inspector.Close()) })
+	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundInventory)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, TypeInventoryRefresh, pending[0].Type)
+	require.Equal(t, platform.BackgroundTaskMaxRetry, pending[0].MaxRetry)
+	require.Equal(t, inventoryRefreshTaskTimeout, pending[0].Timeout)
+}

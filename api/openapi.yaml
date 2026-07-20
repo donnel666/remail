@@ -2235,6 +2235,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "503":
+          description: Inventory cache is being prepared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/projects/{projectId}/resubmit:
     post:
@@ -4166,6 +4172,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: Project is not available for allocation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Inventory cache is being prepared
           content:
             application/json:
               schema:

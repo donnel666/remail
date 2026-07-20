@@ -1375,6 +1375,36 @@ WHERE adu.usage_date = ?
 	return stats, nil
 }
 
+func (r *Repo) AssertProjectInventoryAccess(ctx context.Context, projectID uint, buyerUserID uint) error {
+	var visible bool
+	if err := r.dbFor(ctx).Raw(`
+SELECT EXISTS (
+    SELECT 1
+    FROM projects p
+    WHERE p.id = ?
+      AND p.status = 'listed'
+      AND (
+          p.access_type = 'public'
+          OR EXISTS (
+              SELECT 1
+              FROM project_accesses pa
+              WHERE pa.project_id = p.id AND pa.user_id = ?
+          )
+      )
+      AND EXISTS (
+          SELECT 1
+          FROM project_products pp
+          WHERE pp.project_id = p.id AND pp.status = 'enabled'
+      )
+)`, projectID, buyerUserID).Scan(&visible).Error; err != nil {
+		return fmt.Errorf("check project inventory access: %w", err)
+	}
+	if !visible {
+		return domain.ErrProjectNotAllocatable
+	}
+	return nil
+}
+
 type productInventoryRow struct {
 	ProductID  uint
 	Type       string

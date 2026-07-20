@@ -11,12 +11,13 @@ import (
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/alloc/domain"
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 )
 
 const candidateRefreshDispatcherInterval = 30 * time.Second
 
-func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) {
+func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Context) {
 	mux.HandleFunc(allocinfra.TypeCandidateRefreshDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.UseCase == nil {
 			return nil
@@ -36,12 +37,10 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		return nil
 	})
-	if module != nil && module.UseCase != nil {
-		module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), 0)
-		startCandidateRefreshDispatcherSeeder(module)
-	}
-
 	mux.HandleFunc(allocinfra.TypeCandidateRefresh, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.UseCase == nil {
+			return nil
+		}
 		var payload allocapp.CandidateRefreshTask
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode candidate refresh task: %w: %w", err, asynq.SkipRetry)
@@ -57,17 +56,84 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		slog.Info("candidate refresh task finished", "project_id", payload.ProjectID, "generation", payload.Generation, "request_id", payload.RequestID)
 		return nil
 	})
+
+	mux.HandleFunc(allocinfra.TypeInventoryRefresh, func(ctx context.Context, _ *asynq.Task) error {
+		if module == nil || module.UseCase == nil {
+			return nil
+		}
+		release, admitted := acquireInventoryRefreshCapacity(module)
+		if !admitted {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		result, err := module.UseCase.RefreshInventoryCache(ctx)
+		if err != nil {
+			slog.Warn("inventory cache refresh failed", "error", err)
+			return err
+		}
+		if result != nil && result.Failed > 0 {
+			slog.Warn(
+				"inventory cache refresh finished with failures",
+				"attempted", result.Attempted,
+				"updated", result.Updated,
+				"removed", result.Removed,
+				"skipped", result.Skipped,
+				"failed", result.Failed,
+				"error", result.LastError,
+			)
+		} else if result != nil && result.Attempted > 0 {
+			slog.Info("inventory cache refresh finished", "attempted", result.Attempted, "updated", result.Updated, "removed", result.Removed, "skipped", result.Skipped)
+		}
+		return nil
+	})
+	if module == nil || module.UseCase == nil {
+		return func(context.Context) {}
+	}
+	module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), 0)
+	return startAllocationTaskSeeders(module, candidateRefreshDispatcherInterval, allocapp.InventoryRefreshInterval)
 }
 
-func startCandidateRefreshDispatcherSeeder(module *Module) {
+func startAllocationTaskSeeders(module *Module, candidateInterval time.Duration, inventoryInterval time.Duration) func(context.Context) {
 	if module == nil || module.UseCase == nil {
-		return
+		return func(context.Context) {}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(candidateRefreshDispatcherInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), 0)
+		defer close(done)
+		candidateTicker := time.NewTicker(candidateInterval)
+		inventoryTicker := time.NewTicker(inventoryInterval)
+		defer candidateTicker.Stop()
+		defer inventoryTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-candidateTicker.C:
+				module.UseCase.ScheduleCandidateRefreshDispatcher(ctx, 0)
+			case <-inventoryTicker.C:
+				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+					slog.Warn("enqueue inventory cache refresh failed", "error", err)
+				}
+			}
 		}
 	}()
+	return func(shutdownCtx context.Context) {
+		cancel()
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+		}
+	}
+}
+
+func acquireInventoryRefreshCapacity(module *Module) (func(), bool) {
+	if module == nil || module.BackgroundExecution == nil {
+		return func() {}, true
+	}
+	release, admitted := module.BackgroundExecution.TryAcquire()
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted
 }
