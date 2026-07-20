@@ -224,10 +224,21 @@ func TestAdminViewRepoMySQL(t *testing.T) {
 
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role, created_at, last_login_at) VALUES
-    (1, 'base@test.local', 'h', 'Base', 'active', 'user', ?, NULL),
-    (2, 'buyer@test.local', 'h', 'Buyer', 'active', 'user', ?, ?),
-    (3, 'fresh@test.local', 'h', 'Fresh', 'active', 'user', ?, NULL)`,
-		beforeRange, ref, ref, ref).Error)
+	    (1, 'base@test.local', 'h', 'Base', 'active', 'user', ?, NULL),
+	    (2, 'buyer@test.local', 'h', 'Buyer', 'active', 'user', ?, ?),
+	    (3, 'fresh@test.local', 'h', 'Fresh', 'active', 'user', ?, NULL),
+	    (4, 'deleted@test.local', 'h', 'Deleted', 'deleted', 'user', ?, ?)`,
+		beforeRange, ref, ref, ref, beforeRange, ref).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO api_keys(id, user_id, name, key_prefix, key_plain, last_used_at, created_at, updated_at) VALUES
+	    (1, 1, 'outside', 'rk-outside', 'rk-outside-plain', ?, ?, ?),
+	    (2, 2, 'login-and-key', 'rk-buyer', 'rk-buyer-plain', ?, ?, ?),
+	    (3, 3, 'key-only', 'rk-fresh', 'rk-fresh-plain', ?, ?, ?),
+	    (4, 4, 'deleted-user', 'rk-deleted', 'rk-deleted-plain', ?, ?, ?)`,
+		beforeRange, beforeRange, beforeRange,
+		ref, ref, ref,
+		ref, ref, ref,
+		ref, beforeRange, beforeRange).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match)
 VALUES (10, 'Microsoft', 'trade', '', 'listed', 'public', TRUE)`).Error)
@@ -253,6 +264,10 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 2, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
+	// A valid paid/code fact outside the selected range must not affect any
+	// range-scoped order, receipt or ranking metric.
+	seedTypedOrder(t, db, 5, 2, 10, 20, "microsoft", "code", "9.00", beforeRange, beforeRange)
+	seedDashboardReceipt(t, db, 5, 104, beforeRange)
 
 	// Microsoft inventory: normal+for_sale+graph (available), normal not-for-sale
 	// (total only), deleted (excluded from total).
@@ -306,11 +321,13 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 
 	activeUsers, err := repo.ActiveUserTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
-	require.Equal(t, 1, sumCountBuckets(activeUsers)) // only user 2 has a last_login in range
+	// User 2 is counted once despite both login and key activity; user 3 is
+	// active via key only. User 1 is outside the range and user 4 is deleted.
+	require.Equal(t, 2, sumCountBuckets(activeUsers))
 
-	base, err := repo.UsersCreatedBefore(ctx, from)
+	totalUsers, err := repo.TotalUsers(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, base) // user 1
+	require.Equal(t, 3, totalUsers) // deleted user 4 is excluded
 
 	snap, err := repo.InventorySnapshot(ctx)
 	require.NoError(t, err)

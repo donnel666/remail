@@ -27,9 +27,7 @@ export function createDefaultDashboardDateRange(
   now = new Date(),
 ): DateRangeValue {
   const end = new Date(now.getTime());
-  const start = new Date(end.getTime());
-  start.setDate(start.getDate() - 29);
-  start.setHours(0, 0, 0, 0);
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
   return [start, end];
 }
 

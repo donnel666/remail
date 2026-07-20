@@ -17,7 +17,7 @@ import (
 // trend labels and hourly/daily granularity match the finance summary exactly.
 const (
 	maxTrendBuckets    = 2000
-	defaultSummaryDays = 30
+	defaultSummaryDays = 1
 	// projectSeriesLimit caps how many top projects get a spend series, matching
 	// the mock's featured = ranks.slice(0, 6).
 	projectSeriesLimit = 6

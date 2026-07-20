@@ -22,11 +22,9 @@ describe("dashboard date range", () => {
     vi.useRealTimers();
   });
 
-  it("uses the same bounded 30-day default for every dashboard", () => {
+  it("uses the same 24-hour default for every dashboard", () => {
     const [from, to] = createDefaultDashboardDateRange(now);
-    const expectedFrom = new Date(now);
-    expectedFrom.setDate(expectedFrom.getDate() - 29);
-    expectedFrom.setHours(0, 0, 0, 0);
+    const expectedFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     expect(from).toEqual(expectedFrom);
     expect(to).toEqual(now);

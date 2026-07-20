@@ -86,29 +86,38 @@ func (r *AdminViewRepo) NewUserTrend(ctx context.Context, sqlFormat string, from
 	return rows, nil
 }
 
-// ActiveUserTrend counts users by the bucket of their most recent login, the
-// best "active" signal available (there is no per-day activity log). It sums to
-// the number of users whose last login fell in the range.
+// ActiveUserTrend counts each non-deleted user once, in the bucket of their
+// latest login or API-key use that falls inside the selected range.
 func (r *AdminViewRepo) ActiveUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.CountBucket, error) {
-	sel := fmt.Sprintf("DATE_FORMAT(last_login_at, '%s') AS bucket, COUNT(*) AS count", sqlFormat)
+	sel := fmt.Sprintf("DATE_FORMAT(activity.last_active_at, '%s') AS bucket, COUNT(*) AS count", sqlFormat)
 	var rows []dashboardapp.CountBucket
-	if err := r.db.WithContext(ctx).
-		Table("users").
-		Select(sel).
-		Where("last_login_at IS NOT NULL AND last_login_at >= ? AND last_login_at <= ?", from.UTC(), to.UTC()).
-		Group("bucket").
-		Order("bucket ASC").
-		Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(`
+SELECT `+sel+`
+FROM (
+    SELECT
+        u.id,
+        GREATEST(
+            COALESCE(CASE WHEN u.last_login_at >= ? AND u.last_login_at <= ? THEN u.last_login_at END, '1970-01-01 00:00:00'),
+            COALESCE(MAX(CASE WHEN ak.last_used_at >= ? AND ak.last_used_at <= ? THEN ak.last_used_at END), '1970-01-01 00:00:00')
+        ) AS last_active_at
+    FROM users u
+    LEFT JOIN api_keys ak ON ak.user_id = u.id
+    WHERE u.status <> 'deleted'
+    GROUP BY u.id, u.last_login_at
+) activity
+WHERE activity.last_active_at <> '1970-01-01 00:00:00'
+GROUP BY bucket
+ORDER BY bucket ASC`, from.UTC(), to.UTC(), from.UTC(), to.UTC()).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-func (r *AdminViewRepo) UsersCreatedBefore(ctx context.Context, before time.Time) (int, error) {
+func (r *AdminViewRepo) TotalUsers(ctx context.Context) (int, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Where("created_at < ?", before.UTC()).
+		Where("status <> ?", "deleted").
 		Count(&count).Error; err != nil {
 		return 0, err
 	}

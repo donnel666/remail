@@ -7,14 +7,14 @@ import (
 )
 
 type fakeAdminView struct {
-	orders    []CountBucket
-	codeOrder []TypeCountBucket
-	receipts  []TypeReceiptBucket
-	newUsers  []CountBucket
-	active    []CountBucket
-	base      int
-	snapshot  InventorySnapshot
-	ranking   []ProjectCountRow
+	orders     []CountBucket
+	codeOrder  []TypeCountBucket
+	receipts   []TypeReceiptBucket
+	newUsers   []CountBucket
+	active     []CountBucket
+	totalUsers int
+	snapshot   InventorySnapshot
+	ranking    []ProjectCountRow
 }
 
 func (f *fakeAdminView) OrderTrend(context.Context, string, time.Time, time.Time) ([]CountBucket, error) {
@@ -32,8 +32,8 @@ func (f *fakeAdminView) NewUserTrend(context.Context, string, time.Time, time.Ti
 func (f *fakeAdminView) ActiveUserTrend(context.Context, string, time.Time, time.Time) ([]CountBucket, error) {
 	return f.active, nil
 }
-func (f *fakeAdminView) UsersCreatedBefore(context.Context, time.Time) (int, error) {
-	return f.base, nil
+func (f *fakeAdminView) TotalUsers(context.Context) (int, error) {
+	return f.totalUsers, nil
 }
 func (f *fakeAdminView) InventorySnapshot(context.Context) (InventorySnapshot, error) {
 	return f.snapshot, nil
@@ -79,11 +79,11 @@ func TestAdminDashboardAssembly(t *testing.T) {
 			{Bucket: keys[0], ProductType: "microsoft", Received: 5, AvgSeconds: 20},
 			{Bucket: keys[0], ProductType: "domain", Received: 2, AvgSeconds: 40},
 		},
-		newUsers: []CountBucket{{Bucket: keys[0], Count: 3}, {Bucket: keys[1], Count: 2}},
-		active:   []CountBucket{{Bucket: keys[0], Count: 7}, {Bucket: keys[2], Count: 5}},
-		base:     100,
-		snapshot: InventorySnapshot{MicrosoftTotal: 500, MicrosoftAvailable: 300, DomainTotal: 200, DomainAvailable: 120},
-		ranking:  []ProjectCountRow{{ProjectID: 1, Name: "Microsoft", Count: 5}, {ProjectID: 2, Name: "", Count: 2}},
+		newUsers:   []CountBucket{{Bucket: keys[0], Count: 3}, {Bucket: keys[1], Count: 2}},
+		active:     []CountBucket{{Bucket: keys[0], Count: 7}, {Bucket: keys[2], Count: 5}},
+		totalUsers: 105,
+		snapshot:   InventorySnapshot{MicrosoftTotal: 500, MicrosoftAvailable: 300, DomainTotal: 200, DomainAvailable: 120},
+		ranking:    []ProjectCountRow{{ProjectID: 1, Name: "Microsoft", Count: 5}, {ProjectID: 2, Name: "", Count: 2}},
 	}
 	finance := fakeFinance{fin: AdminFinance{
 		RechargeAmount: 1000, SpendAmount: 800, RefundAmount: 20, WithdrawAmount: 60, PlatformRevenue: 120,
@@ -113,9 +113,9 @@ func TestAdminDashboardAssembly(t *testing.T) {
 			t.Errorf("bucket %d inventory not flat-lined: %+v", i, p)
 		}
 	}
-	// user totals: cumulative from base 100; bucket0 +3=103, bucket1 +2=105, bucket2 +0=105.
-	if got.Trend[0].TotalUsers != 103 || got.Trend[2].TotalUsers != 105 {
-		t.Errorf("cumulative users wrong: %d / %d", got.Trend[0].TotalUsers, got.Trend[2].TotalUsers)
+	// Total users is a current snapshot; only new/active users follow the range.
+	if got.Trend[0].TotalUsers != 105 || got.Trend[2].TotalUsers != 105 {
+		t.Errorf("total users snapshot wrong: %d / %d", got.Trend[0].TotalUsers, got.Trend[2].TotalUsers)
 	}
 	if got.Trend[0].ActiveUsers != 7 || got.Trend[0].NewUsers != 3 {
 		t.Errorf("bucket0 users: active %d new %d", got.Trend[0].ActiveUsers, got.Trend[0].NewUsers)

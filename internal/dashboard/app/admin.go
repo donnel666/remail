@@ -55,7 +55,7 @@ type AdminView interface {
 	CodeReceiptTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]TypeReceiptBucket, error)
 	NewUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]CountBucket, error)
 	ActiveUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]CountBucket, error)
-	UsersCreatedBefore(ctx context.Context, before time.Time) (int, error)
+	TotalUsers(ctx context.Context) (int, error)
 	InventorySnapshot(ctx context.Context) (InventorySnapshot, error)
 	ProjectCodeRanking(ctx context.Context, from, to time.Time, limit int) ([]ProjectCountRow, error)
 }
@@ -193,7 +193,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	if err != nil {
 		return nil, err
 	}
-	baseUsers, err := s.view.UsersCreatedBefore(ctx, fromT)
+	totalUsers, err := s.view.TotalUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,6 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	var msRecvTotal, msOrdersTotal, domainRecvTotal, domainOrdersTotal int
 	var msSecondsWeighted, domainSecondsWeighted int
 	var newUsersTotal, activeUsersTotal int
-	cumulativeUsers := baseUsers
 	for t := bucketStart(fromT, gran); !t.After(bucketStart(toT, gran)) && len(trend) < maxTrendBuckets; t = nextBucket(t, gran) {
 		key := t.Format(layout)
 		label := trendLabel(t, gran, sameYear)
@@ -236,8 +235,6 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		dCO := domainCodeOrders[key]
 		newUsers := newUserByKey[key]
 		activeUsers := activeUserByKey[key]
-		cumulativeUsers += newUsers
-
 		trend = append(trend, AdminTrendPoint{
 			Label:                              label,
 			RechargeAmount:                     f.Recharge,
@@ -247,7 +244,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			PlatformRevenue:                    f.PlatformRevenue,
 			Orders:                             orderByKey[key],
 			SuccessfulCodeReceipts:             msR.Received + dR.Received,
-			TotalUsers:                         cumulativeUsers,
+			TotalUsers:                         totalUsers,
 			ActiveUsers:                        activeUsers,
 			NewUsers:                           newUsers,
 			MicrosoftTotalEmails:               snapshot.MicrosoftTotal,
@@ -289,7 +286,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			PlatformRevenue:                    finance.PlatformRevenue,
 			TotalOrders:                        totalOrders,
 			SuccessfulCodeReceipts:             totalReceipts,
-			TotalUsers:                         cumulativeUsers,
+			TotalUsers:                         totalUsers,
 			ActiveUsers:                        activeUsersTotal,
 			NewUsers:                           newUsersTotal,
 			MicrosoftTotalEmails:               snapshot.MicrosoftTotal,
