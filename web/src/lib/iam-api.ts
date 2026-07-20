@@ -11,7 +11,8 @@ export type { ApiErrorBody } from "./api-client";
 export { IamApiError };
 export type UserResponse = components["schemas"]["UserResponse"];
 export type ActivationResponse = components["schemas"]["ActivationResponse"];
-export type CaptchaResponse = components["schemas"]["CaptchaResponse"];
+export type TurnstileConfigResponse =
+  components["schemas"]["TurnstileConfigResponse"];
 export type ActivationRequest = components["schemas"]["ActivationRequest"];
 export type LoginRequest = components["schemas"]["LoginRequest"];
 export type EmailCodeRequest = components["schemas"]["EmailCodeRequest"];
@@ -49,8 +50,10 @@ export async function activateSystem(payload: ActivationRequest) {
   );
 }
 
-export async function createCaptcha() {
-  return unwrap<CaptchaResponse>(await client.POST("/v1/captchas"));
+export async function getTurnstileConfig() {
+  return unwrap<TurnstileConfigResponse>(
+    await client.GET("/v1/turnstile/config")
+  );
 }
 
 export async function sendEmailCode(payload: EmailCodeRequest) {

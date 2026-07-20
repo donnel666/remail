@@ -21,6 +21,7 @@ type Config struct {
 	SMTP        SMTPConfig
 	Migrations  MigrationsConfig
 	Session     SessionConfig
+	Turnstile   TurnstileConfig
 	Log         LogConfig
 	Diagnostics DiagnosticsConfig
 }
@@ -99,6 +100,13 @@ type SessionConfig struct {
 	Secure bool
 }
 
+// TurnstileConfig holds Cloudflare Turnstile credentials. The site key is
+// public; the secret key must remain server-side.
+type TurnstileConfig struct {
+	SiteKey   string
+	SecretKey string
+}
+
 // LogConfig holds logging settings.
 type LogConfig struct {
 	Level  string
@@ -159,6 +167,10 @@ func Load() (*Config, error) {
 			Secret: getEnv("SESSION_SECRET", ""),
 			MaxAge: getInt("SESSION_MAX_AGE", 86400),
 			Secure: getBool("SESSION_SECURE", false),
+		},
+		Turnstile: TurnstileConfig{
+			SiteKey:   strings.TrimSpace(getEnv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")),
+			SecretKey: strings.TrimSpace(getEnv("TURNSTILE_SECRET_KEY", "1x0000000000000000000000000000000AA")),
 		},
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
@@ -235,6 +247,18 @@ func (c *Config) validate() error {
 	if c.Session.Secret == "" {
 		return fmt.Errorf("SESSION_SECRET is required")
 	}
+	if c.Turnstile.SiteKey == "" {
+		return fmt.Errorf("TURNSTILE_SITE_KEY is required")
+	}
+	if c.Turnstile.SecretKey == "" {
+		return fmt.Errorf("TURNSTILE_SECRET_KEY is required")
+	}
+	if c.Environment == "production" && isTurnstileTestKey(c.Turnstile.SiteKey) {
+		return fmt.Errorf("TURNSTILE_SITE_KEY is required in production")
+	}
+	if c.Environment == "production" && isTurnstileTestKey(c.Turnstile.SecretKey) {
+		return fmt.Errorf("TURNSTILE_SECRET_KEY is required in production")
+	}
 	if c.SMTP.Mode != "direct" && c.SMTP.Mode != "relay" {
 		return fmt.Errorf("SMTP_MODE must be direct or relay")
 	}
@@ -263,6 +287,12 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func isTurnstileTestKey(value string) bool {
+	return strings.HasPrefix(value, "1x00000000000000000000") ||
+		strings.HasPrefix(value, "2x00000000000000000000") ||
+		strings.HasPrefix(value, "3x00000000000000000000")
 }
 
 func splitCSV(value string) []string {

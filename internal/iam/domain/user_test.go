@@ -65,14 +65,3 @@ func TestIsActivationNeeded(t *testing.T) {
 		})
 	}
 }
-
-func TestCaptcha_IsExpired(t *testing.T) {
-	c := &Captcha{
-		ID:     "test",
-		Answer: "1234",
-	}
-	// Without setting ExpiresAt, IsExpired should be true (zero time)
-	if !c.IsExpired() {
-		t.Error("captcha with zero ExpiresAt should be expired")
-	}
-}

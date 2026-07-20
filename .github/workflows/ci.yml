@@ -430,6 +430,8 @@ jobs:
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           TRUSTED_PROXIES: ${{ secrets.TRUSTED_PROXIES }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           SMTP_DKIM_PRIVATE_KEY: ${{ secrets.SMTP_DKIM_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -442,6 +444,10 @@ jobs:
           fi
           if [ -z "$TRUSTED_PROXIES" ]; then
             echo "TRUSTED_PROXIES GitHub secret is required (exact reverse proxy/Docker gateway IP or CIDR)" >&2
+            exit 1
+          fi
+          if [ -z "$TURNSTILE_SITE_KEY" ] || [ -z "$TURNSTILE_SECRET_KEY" ]; then
+            echo "TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY GitHub secrets are required" >&2
             exit 1
           fi
           printf '%s\n' "$SMTP_DKIM_PRIVATE_KEY" > /opt/remail/secrets/smtp-dkim-private-key.pem
@@ -460,6 +466,8 @@ jobs:
           SESSION_SECRET=${SESSION_SECRET}
           SESSION_SECURE=true
           TRUSTED_PROXIES=${TRUSTED_PROXIES}
+          TURNSTILE_SITE_KEY=${TURNSTILE_SITE_KEY}
+          TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
           SMTP_MODE=direct
           SMTP_ADDR=
           SMTP_USERNAME=

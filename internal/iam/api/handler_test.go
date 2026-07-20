@@ -1015,46 +1015,20 @@ func (s *mockSessionStore) DeleteByUserID(_ context.Context, userID uint) error 
 	return nil
 }
 
-type mockCaptchaStore struct {
-	mu       sync.Mutex
-	captchas map[string]string
+type mockTurnstileVerifier struct {
+	actions []string
 }
 
-func newMockCaptchaStore() *mockCaptchaStore {
-	return &mockCaptchaStore{
-		captchas: make(map[string]string),
+func (v *mockTurnstileVerifier) Verify(_ context.Context, token, _, action string) error {
+	v.actions = append(v.actions, action)
+	switch token {
+	case "invalid-turnstile":
+		return domain.ErrTurnstileInvalid
+	case "unavailable-turnstile":
+		return domain.ErrTurnstileUnavailable
+	default:
+		return nil
 	}
-}
-
-func (c *mockCaptchaStore) Create(_ context.Context, captchaID, answer string, _ int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.captchas[captchaID] = answer
-	return nil
-}
-
-func (c *mockCaptchaStore) Get(_ context.Context, captchaID string) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if answer, ok := c.captchas[captchaID]; ok {
-		return answer, nil
-	}
-	return "", nil
-}
-
-func (c *mockCaptchaStore) GetDel(_ context.Context, captchaID string) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	answer := c.captchas[captchaID]
-	delete(c.captchas, captchaID)
-	return answer, nil
-}
-
-func (c *mockCaptchaStore) Delete(_ context.Context, captchaID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.captchas, captchaID)
-	return nil
 }
 
 type allowPermissionChecker struct{}
@@ -1210,28 +1184,27 @@ func (s mockMailDelivery) Send(_ context.Context, _ maildomain.OutboundMessage) 
 func newTestHandler() *IAMHandler {
 	userRepo := newMockUserRepo()
 	sessionStore := newMockSessionStore()
-	captchaStore := newMockCaptchaStore()
 	emailCodeStore := newMockEmailCodeStore()
 	hasher := infra.NewHasher()
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockMailDelivery{}, captchaStore)
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mockMailDelivery{})
 
 	mod := &IAMModule{
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
+		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore),
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
 		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, userRepo, hasher, userRepo.operationLogs),
 		InviteUseCase:              app.NewInviteUseCase(userRepo),
 		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(userRepo, userRepo),
-		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
 		EmailCodeUseCase:           emailCodeUseCase,
 		PermissionChecker:          allowPermissionChecker{},
 		UserRepo:                   userRepo,
 		SessionStore:               sessionStore,
-		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,
+		TurnstileVerifier:          &mockTurnstileVerifier{},
+		TurnstileSiteKey:           "test-site-key",
 	}
 
 	return NewIAMHandler(mod, 3600, false)
@@ -1246,23 +1219,12 @@ func setupTestRouterWithHandler(h *IAMHandler) *gin.Engine {
 	return r
 }
 
-// Helper: pre-seed a captcha with a known answer and return its ID.
-func seedCaptcha(t *testing.T, h *IAMHandler, answer string) string {
+func requestEmailCode(t *testing.T, h *IAMHandler, r *gin.Engine, email, turnstileToken string) string {
 	t.Helper()
-	ctx := context.Background()
-	id := "test-captcha-" + answer
-	require.NoError(t, h.module.CaptchaStore.Create(ctx, id, answer, 300))
-	return id
-}
-
-func requestEmailCode(t *testing.T, h *IAMHandler, r *gin.Engine, email, captchaAnswer string) string {
-	t.Helper()
-	captchaID := seedCaptcha(t, h, captchaAnswer)
 	body := fmt.Sprintf(
-		`{"email":%q,"captchaId":%q,"captchaAnswer":%q}`,
+		`{"email":%q,"turnstileToken":%q}`,
 		email,
-		captchaID,
-		captchaAnswer,
+		turnstileToken,
 	)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
@@ -1379,27 +1341,51 @@ func TestPostActivation_AlreadyDone(t *testing.T) {
 	assert.Contains(t, w2.Body.String(), "already been completed")
 }
 
-// --- Captcha Tests ---
+// --- Turnstile Tests ---
 
-func TestPostCaptcha_ReturnsImage(t *testing.T) {
+func TestGetTurnstileConfig_ReturnsPublicSiteKey(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/captchas", nil)
+	req, _ := http.NewRequest("GET", "/v1/turnstile/config", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"captchaId"`)
-	assert.Contains(t, w.Body.String(), `"image"`)
+	assert.JSONEq(t, `{"siteKey":"test-site-key"}`, w.Body.String())
+}
+
+func TestTurnstileActionsAreBoundToProtectedEndpoints(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+
+	requests := []struct {
+		path string
+		body string
+	}{
+		{"/v1/email/code", `{"email":"register@test.com","turnstileToken":"valid-turnstile"}`},
+		{"/v1/password/reset/request", `{"email":"reset@test.com","turnstileToken":"valid-turnstile"}`},
+		{"/v1/login", `{"email":"login@test.com","password":"wrong","turnstileToken":"valid-turnstile"}`},
+	}
+	for _, request := range requests {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, request.path, strings.NewReader(request.body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+	}
+
+	require.Equal(t, []string{
+		turnstileActionRegister,
+		turnstileActionPasswordReset,
+		turnstileActionLogin,
+	}, h.module.TurnstileVerifier.(*mockTurnstileVerifier).actions)
 }
 
 func TestPostEmailCode_ReturnsNoContent(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	captchaID := seedCaptcha(t, h, "1234")
-	body := `{"email":"user@test.com","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+	body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1414,8 +1400,7 @@ func TestPostEmailCode_ThrottlesResendWithRetryAfter(t *testing.T) {
 	r := setupTestRouterWithHandler(h)
 
 	send := func() *httptest.ResponseRecorder {
-		captchaID := seedCaptcha(t, h, "1234")
-		body := `{"email":"user@test.com","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+		body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1436,12 +1421,10 @@ func TestPostEmailCode_ThrottlesResendWithRetryAfter(t *testing.T) {
 func TestPasswordResetRequestThrottlesUnknownEmailIdentically(t *testing.T) {
 	h := newTestHandler()
 
-	cap1 := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap1, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com")
 	require.NoError(t, err)
 
-	cap2 := seedCaptcha(t, h, "1234")
-	_, err = h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com", cap2, "1234")
+	_, err = h.module.PasswordResetUseCase.Request(context.Background(), "ghost@test.com")
 	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
 }
 
@@ -1566,11 +1549,11 @@ func TestPostRegister_RestoreFailureReturnsServerError(t *testing.T) {
 
 // --- Login Tests ---
 
-func TestPostLogin_WithoutCaptcha(t *testing.T) {
+func TestPostLogin_WithoutTurnstileToken(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	// Login without captcha should fail binding validation (400)
+	// Login without a Turnstile token should fail binding validation (400).
 	body := `{"email":"admin@test.com","password":"Admin123!"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
@@ -1592,11 +1575,7 @@ func TestPostLogin_WrongPassword(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	// Pre-seed a captcha
-	captchaID := seedCaptcha(t, h, "4321")
-
-	// Login with wrong password (correct captcha)
-	loginBody := `{"email":"admin@test.com","password":"wrong","captchaId":"` + captchaID + `","captchaAnswer":"4321"}`
+	loginBody := `{"email":"admin@test.com","password":"wrong","turnstileToken":"valid-turnstile"}`
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
@@ -1606,7 +1585,7 @@ func TestPostLogin_WrongPassword(t *testing.T) {
 	assert.Contains(t, w2.Body.String(), "Account or password is incorrect")
 }
 
-func TestPostLogin_WrongCaptcha(t *testing.T) {
+func TestPostLogin_InvalidTurnstile(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
@@ -1618,16 +1597,14 @@ func TestPostLogin_WrongCaptcha(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	// Pre-seed a captcha with answer "1234", but submit "wrong"
-	captchaID := seedCaptcha(t, h, "1234")
-	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"wrong"}`
+	loginBody := `{"email":"admin@test.com","password":"Admin123!","turnstileToken":"invalid-turnstile"}`
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
 	assert.Equal(t, http.StatusUnprocessableEntity, w2.Code)
-	assert.Contains(t, w2.Body.String(), "Captcha is incorrect or expired")
+	assert.Contains(t, w2.Body.String(), "Human verification failed")
 }
 
 func TestPostLogin_NormalizesEmail(t *testing.T) {
@@ -1641,8 +1618,7 @@ func TestPostLogin_NormalizesEmail(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	captchaID := seedCaptcha(t, h, "1234")
-	loginBody := `{"email":"ADMIN@TEST.COM","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+	loginBody := `{"email":"ADMIN@TEST.COM","password":"Admin123!","turnstileToken":"valid-turnstile"}`
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
@@ -1664,11 +1640,7 @@ func TestPostLogin_Success(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	// Pre-seed a known captcha
-	captchaID := seedCaptcha(t, h, "1234")
-
-	// Login with correct password and known captcha
-	loginBody := `{"email":"admin@test.com","password":"Admin123!","captchaId":"` + captchaID + `","captchaAnswer":"1234"}`
+	loginBody := `{"email":"admin@test.com","password":"Admin123!","turnstileToken":"valid-turnstile"}`
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(loginBody))
 	req2.Header.Set("Content-Type", "application/json")
@@ -2502,8 +2474,7 @@ func TestPostPasswordResetIgnoresSessionCleanupFailureAfterPasswordUpdate(t *tes
 	r := setupTestRouterWithHandler(h)
 	user := seedUser(t, h, "user@test.com")
 
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "USER@Test.COM", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "USER@Test.COM")
 	require.NoError(t, err)
 	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
 	require.NotEmpty(t, code)
@@ -2661,7 +2632,7 @@ func TestPostRegister_MalformedJSONDoesNotExposeParserError(t *testing.T) {
 }
 
 type fakeAbuseLimiter struct {
-	captchaRetry      int
+	turnstileRetry    int
 	loginRetry        int
 	resetRetry        int
 	loginTaken        int
@@ -2678,8 +2649,8 @@ type fakeAbuseLimiter struct {
 	resetClearErr     error
 }
 
-func (l *fakeAbuseLimiter) HitCaptcha(context.Context, string) (int, error) {
-	return l.captchaRetry, nil
+func (l *fakeAbuseLimiter) HitTurnstile(context.Context, string) (int, error) {
+	return l.turnstileRetry, nil
 }
 
 func (l *fakeAbuseLimiter) TakeLogin(context.Context, string, string) (int, error) {
@@ -2745,9 +2716,8 @@ func TestPostLoginAbuseLimiterCountsOnlyCredentialFailuresAndClearsOnSuccess(t *
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	login := func(email, password, captchaAnswer, submittedAnswer string) *httptest.ResponseRecorder {
-		captchaID := seedCaptcha(t, h, captchaAnswer)
-		body := fmt.Sprintf(`{"email":%q,"password":%q,"captchaId":%q,"captchaAnswer":%q}`, email, password, captchaID, submittedAnswer)
+	login := func(email, password, turnstileToken string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"email":%q,"password":%q,"turnstileToken":%q}`, email, password, turnstileToken)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -2755,37 +2725,38 @@ func TestPostLoginAbuseLimiterCountsOnlyCredentialFailuresAndClearsOnSuccess(t *
 		return w
 	}
 
-	require.Equal(t, http.StatusUnprocessableEntity, login("admin@test.com", "Admin123!", "1234", "wrong").Code)
-	require.Zero(t, limiter.loginTaken, "captcha failures must not consume the account failure budget")
+	require.Equal(t, http.StatusUnprocessableEntity, login("admin@test.com", "Admin123!", "invalid-turnstile").Code)
+	require.Zero(t, limiter.loginTaken, "Turnstile failures must not consume the account failure budget")
 
-	wrongPassword := login("admin@test.com", "wrong", "1234", "1234")
+	wrongPassword := login("admin@test.com", "wrong", "valid-turnstile")
 	require.Equal(t, http.StatusUnprocessableEntity, wrongPassword.Code)
 	require.Contains(t, wrongPassword.Body.String(), "Account or password is incorrect")
 
-	unknownAccount := login("ghost@test.com", "wrong", "1234", "1234")
+	unknownAccount := login("ghost@test.com", "wrong", "valid-turnstile")
 	require.Equal(t, http.StatusUnprocessableEntity, unknownAccount.Code)
 	require.Contains(t, unknownAccount.Body.String(), "Account or password is incorrect")
 	require.Equal(t, 2, limiter.loginTaken)
 
-	require.Equal(t, http.StatusOK, login("admin@test.com", "Admin123!", "1234", "1234").Code)
+	require.Equal(t, http.StatusOK, login("admin@test.com", "Admin123!", "valid-turnstile").Code)
 	require.Equal(t, 3, limiter.loginTaken)
 	require.Equal(t, 1, limiter.loginCompleted)
 }
 
 func TestIAMAbuseLimiterReturnsRetryAfter(t *testing.T) {
 	h := newTestHandler()
-	limiter := &fakeAbuseLimiter{captchaRetry: 17, loginRetry: 42, registerRetry: 58, resetRetry: 73}
+	limiter := &fakeAbuseLimiter{turnstileRetry: 17, loginRetry: 42, registerRetry: 58, resetRetry: 73}
 	h.module.AbuseLimiter = limiter
 	r := setupTestRouterWithHandler(h)
 
+	body := `{"email":"user@test.com","password":"wrong","turnstileToken":"valid-turnstile"}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/captchas", nil)
+	req, _ := http.NewRequest("POST", "/v1/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 	require.Equal(t, "17", w.Header().Get("Retry-After"))
 
-	captchaID := seedCaptcha(t, h, "1234")
-	body := fmt.Sprintf(`{"email":"user@test.com","password":"wrong","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	limiter.turnstileRetry = 0
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/v1/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2841,8 +2812,7 @@ func TestPostPasswordResetAbuseLimiterCountsInvalidCodeAndClearsOnSuccess(t *tes
 	r := setupTestRouterWithHandler(h)
 	seedUser(t, h, "user@test.com")
 
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com")
 	require.NoError(t, err)
 	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
 	require.NotEmpty(t, code)
@@ -2871,8 +2841,7 @@ func TestPasswordResetRequestClearsFailuresOnlyForNewCodeGeneration(t *testing.T
 	seedUser(t, h, "user@test.com")
 
 	request := func() *httptest.ResponseRecorder {
-		captchaID := seedCaptcha(t, h, "1234")
-		body := fmt.Sprintf(`{"email":"user@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+		body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -2896,8 +2865,7 @@ func TestUnknownPasswordResetRequestCreatesDummyGeneration(t *testing.T) {
 	limiter := &fakeAbuseLimiter{}
 	h.module.AbuseLimiter = limiter
 	r := setupTestRouterWithHandler(h)
-	captchaID := seedCaptcha(t, h, "1234")
-	body := fmt.Sprintf(`{"email":"ghost@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	body := `{"email":"ghost@test.com","turnstileToken":"valid-turnstile"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2913,8 +2881,7 @@ func TestPasswordResetRestoresClaimAfterDatabaseFailure(t *testing.T) {
 	r := setupTestRouterWithHandler(h)
 	seedUser(t, h, "user@test.com")
 
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com")
 	require.NoError(t, err)
 	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
 	code := store.firstCode()
@@ -2942,8 +2909,7 @@ func TestPasswordReset_RestoreFailureReturnsServerError(t *testing.T) {
 	r := setupTestRouterWithHandler(h)
 	user := seedUser(t, h, "user@test.com")
 
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com")
 	require.NoError(t, err)
 	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
 	code := store.firstCode()
@@ -2963,8 +2929,7 @@ func TestPasswordReset_RestoreFailureReturnsServerError(t *testing.T) {
 func TestPasswordResetConcurrentCorrectCodeSucceedsOnce(t *testing.T) {
 	h := newTestHandler()
 	seedUser(t, h, "user@test.com")
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com")
 	require.NoError(t, err)
 	code := h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode()
 
@@ -2994,8 +2959,7 @@ func TestPasswordResetConcurrentCorrectCodeSucceedsOnce(t *testing.T) {
 func TestPasswordResetRestoresAmbiguousClaim(t *testing.T) {
 	h := newTestHandler()
 	seedUser(t, h, "user@test.com")
-	captchaID := seedCaptcha(t, h, "1234")
-	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com", captchaID, "1234")
+	_, err := h.module.PasswordResetUseCase.Request(context.Background(), "user@test.com")
 	require.NoError(t, err)
 	store := h.module.EmailCodeStore.(*mockEmailCodeStore)
 	code := store.firstCode()
@@ -3012,8 +2976,7 @@ func TestPasswordResetRequestDoesNotFailAfterCodeWasCreated(t *testing.T) {
 	h.module.AbuseLimiter = limiter
 	r := setupTestRouterWithHandler(h)
 	seedUser(t, h, "user@test.com")
-	captchaID := seedCaptcha(t, h, "1234")
-	body := fmt.Sprintf(`{"email":"user@test.com","captchaId":%q,"captchaAnswer":"1234"}`, captchaID)
+	body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/password/reset/request", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

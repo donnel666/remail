@@ -92,6 +92,7 @@ export default function Register() {
             code={emailCode}
             onCodeChange={setEmailCode}
             send={sendEmailCode}
+            turnstileAction="register_email_code"
             disabled={submitting}
             onNotice={setNotice}
             onError={setError}

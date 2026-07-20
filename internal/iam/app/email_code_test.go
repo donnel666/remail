@@ -116,7 +116,7 @@ func (s *mailDeliveryStub) callCount() int {
 func TestEmailCodeUseCaseSendThrottlesWithinCooldown(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
-	uc := NewEmailCodeUseCase(store, sender, nil)
+	uc := NewEmailCodeUseCase(store, sender)
 
 	require.NoError(t, uc.Send(context.Background(), "User@Test.COM"))
 
@@ -133,7 +133,7 @@ func TestEmailCodeUseCaseSendThrottlesWithinCooldown(t *testing.T) {
 func TestEmailCodeUseCaseResendsSameCodeAfterCooldown(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
-	uc := NewEmailCodeUseCase(store, sender, nil)
+	uc := NewEmailCodeUseCase(store, sender)
 
 	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
 	first, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
@@ -154,7 +154,7 @@ func TestEmailCodeUseCaseResendsSameCodeAfterCooldown(t *testing.T) {
 func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{err: maildomain.ErrDeliveryUnavailable}
-	uc := NewEmailCodeUseCase(store, sender, nil)
+	uc := NewEmailCodeUseCase(store, sender)
 
 	err := uc.Send(context.Background(), "user@test.com")
 	require.Error(t, err)
@@ -171,7 +171,7 @@ func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 func TestEmailCodeUseCaseFailedResendKeepsExistingCode(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
-	uc := NewEmailCodeUseCase(store, sender, nil)
+	uc := NewEmailCodeUseCase(store, sender)
 	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
 	code, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
 	require.NoError(t, err)

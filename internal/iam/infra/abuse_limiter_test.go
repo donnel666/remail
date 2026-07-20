@@ -18,14 +18,14 @@ func TestAbuseLimiterThresholdsAndClear(t *testing.T) {
 	limiter := NewAbuseLimiter(client)
 	ctx := context.Background()
 
-	for range captchaLimit {
-		retry, err := limiter.HitCaptcha(ctx, "203.0.113.7")
+	for range turnstileLimit {
+		retry, err := limiter.HitTurnstile(ctx, "203.0.113.7")
 		require.NoError(t, err)
 		require.Zero(t, retry)
 	}
-	retry, err := limiter.HitCaptcha(ctx, "203.0.113.7")
+	retry, err := limiter.HitTurnstile(ctx, "203.0.113.7")
 	require.NoError(t, err)
-	require.Equal(t, captchaWindow, retry)
+	require.Equal(t, turnstileWindow, retry)
 
 	for range loginEmailLimit {
 		retry, err = limiter.TakeLogin(ctx, " User@Test.COM ", "203.0.113.8")

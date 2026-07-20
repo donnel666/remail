@@ -13,12 +13,11 @@ type LoginUseCase struct {
 	repo     UserRepository
 	hasher   Hasher
 	sessions SessionStore
-	captcha  CaptchaStore
 }
 
 // NewLoginUseCase creates a new LoginUseCase.
-func NewLoginUseCase(repo UserRepository, hasher Hasher, sessions SessionStore, captcha CaptchaStore) *LoginUseCase {
-	return &LoginUseCase{repo: repo, hasher: hasher, sessions: sessions, captcha: captcha}
+func NewLoginUseCase(repo UserRepository, hasher Hasher, sessions SessionStore) *LoginUseCase {
+	return &LoginUseCase{repo: repo, hasher: hasher, sessions: sessions}
 }
 
 // LoginResult contains the outcome of a successful login.
@@ -27,20 +26,11 @@ type LoginResult struct {
 	User    *domain.User
 }
 
-// Login authenticates a user by email and password.
-// Requires a valid captcha to prevent brute-force attacks.
-// Returns ErrCaptchaIncorrect or ErrAccountOrPasswordIncorrect.
+// Login authenticates a user by email and password after the API boundary has
+// validated the request's Turnstile token.
 // Disabled accounts return the same error to prevent account enumeration
 // (docs/8-iam.md:109 — only "Account or password is incorrect" is safe to expose).
-func (uc *LoginUseCase) Login(ctx context.Context, email, password, captchaID, captchaAnswer string, sessionTTL int) (*LoginResult, error) {
-	if err := VerifyCaptcha(ctx, uc.captcha, captchaID, captchaAnswer); err != nil {
-		return nil, err
-	}
-	return uc.LoginVerified(ctx, email, password, sessionTTL)
-}
-
-// LoginVerified authenticates after the caller has consumed a valid captcha.
-func (uc *LoginUseCase) LoginVerified(ctx context.Context, email, password string, sessionTTL int) (*LoginResult, error) {
+func (uc *LoginUseCase) Login(ctx context.Context, email, password string, sessionTTL int) (*LoginResult, error) {
 	user, err := uc.repo.FindByEmail(ctx, normalizeEmail(email))
 	if err != nil {
 		return nil, fmt.Errorf("login find user: %w", err)

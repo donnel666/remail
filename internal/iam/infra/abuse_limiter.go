@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	captchaLimit        = 30
-	captchaWindow       = 60
+	turnstileLimit      = 30
+	turnstileWindow     = 60
 	loginEmailLimit     = 10
 	loginIPLimit        = 60
 	loginWindow         = 15 * 60
@@ -87,12 +87,11 @@ func NewAbuseLimiter(rdb redis.UniversalClient) *AbuseLimiter {
 	return &AbuseLimiter{rdb: rdb}
 }
 
-// HitCaptcha counts a captcha-generation request and returns seconds until the
-// caller may retry, or zero while the request is allowed.
-func (l *AbuseLimiter) HitCaptcha(ctx context.Context, ip string) (int, error) {
-	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("captcha", ip)}, captchaLimit, captchaWindow).Int()
+// HitTurnstile limits outbound Siteverify calls by client IP.
+func (l *AbuseLimiter) HitTurnstile(ctx context.Context, ip string) (int, error) {
+	retry, err := abuseHitScript.Run(ctx, l.rdb, []string{abuseIPKey("turnstile", ip)}, turnstileLimit, turnstileWindow).Int()
 	if err != nil {
-		return 0, fmt.Errorf("redis captcha abuse limit: %w", err)
+		return 0, fmt.Errorf("redis turnstile abuse limit: %w", err)
 	}
 	return retry, nil
 }

@@ -23,11 +23,7 @@ func NewPasswordResetUseCase(repo UserRepository, hasher Hasher, sessions Sessio
 	return &PasswordResetUseCase{repo: repo, hasher: hasher, sessions: sessions, codeStore: codeStore, emailCode: emailCode}
 }
 
-func (uc *PasswordResetUseCase) Request(ctx context.Context, email, captchaID, captchaAnswer string) (bool, error) {
-	if err := uc.emailCode.VerifyCaptcha(ctx, captchaID, captchaAnswer); err != nil {
-		return false, err
-	}
-
+func (uc *PasswordResetUseCase) Request(ctx context.Context, email string) (bool, error) {
 	normalized := normalizeEmail(email)
 
 	// Acquire the resend cooldown before the user lookup so a registered and an

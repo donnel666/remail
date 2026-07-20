@@ -100,26 +100,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  # --- Captcha ---
-  /v1/captchas:
-    post:
-      operationId: postCaptcha
-      summary: Create a captcha challenge
+  # --- Human verification ---
+  /v1/turnstile/config:
+    get:
+      operationId: getTurnstileConfig
+      summary: Get the public Cloudflare Turnstile site key
       tags:
         - IAM
       responses:
         "200":
-          description: Captcha created (answer is never in the response)
+          description: Turnstile widget configuration
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CaptchaResponse"
-        "429":
-          description: Captcha request rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
+                $ref: "#/components/schemas/TurnstileConfigResponse"
+        "503":
+          description: Human verification is temporarily unavailable
           content:
             application/json:
               schema:
@@ -147,7 +143,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Captcha incorrect or expired
+          description: Human verification failed
           content:
             application/json:
               schema:
@@ -163,7 +159,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
-          description: Mail service is temporarily unavailable
+          description: Human verification or mail service is temporarily unavailable
           content:
             application/json:
               schema:
@@ -250,7 +246,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Account or password is incorrect
+          description: Human verification failed, or account or password is incorrect
           content:
             application/json:
               schema:
@@ -261,6 +257,12 @@ paths:
             Retry-After:
               schema:
                 type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Human verification is temporarily unavailable
           content:
             application/json:
               schema:
@@ -526,7 +528,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Captcha incorrect or expired
+          description: Human verification failed
           content:
             application/json:
               schema:
@@ -542,7 +544,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
-          description: Mail service is temporarily unavailable
+          description: Human verification or mail service is temporarily unavailable
           content:
             application/json:
               schema:
@@ -11259,18 +11261,14 @@ components:
           maxLength: 100
       additionalProperties: false
 
-    CaptchaResponse:
+    TurnstileConfigResponse:
       type: object
       required:
-        - captchaId
-        - image
+        - siteKey
       properties:
-        captchaId:
+        siteKey:
           type: string
-          description: Captcha identifier (must be submitted with answer)
-        image:
-          type: string
-          description: Base64-encoded PNG data URI of the captcha image
+          description: Public Cloudflare Turnstile widget site key
       additionalProperties: false
 
     RegisterRequest:
@@ -11300,16 +11298,14 @@ components:
       type: object
       required:
         - email
-        - captchaId
-        - captchaAnswer
+        - turnstileToken
       properties:
         email:
           type: string
           format: email
-        captchaId:
+        turnstileToken:
           type: string
-        captchaAnswer:
-          type: string
+          maxLength: 2048
       additionalProperties: false
 
     LoginRequest:
@@ -11317,18 +11313,16 @@ components:
       required:
         - email
         - password
-        - captchaId
-        - captchaAnswer
+        - turnstileToken
       properties:
         email:
           type: string
           format: email
         password:
           type: string
-        captchaId:
+        turnstileToken:
           type: string
-        captchaAnswer:
-          type: string
+          maxLength: 2048
       additionalProperties: false
 
     LoginResponse:
@@ -11357,16 +11351,14 @@ components:
       type: object
       required:
         - email
-        - captchaId
-        - captchaAnswer
+        - turnstileToken
       properties:
         email:
           type: string
           format: email
-        captchaId:
+        turnstileToken:
           type: string
-        captchaAnswer:
-          type: string
+          maxLength: 2048
       additionalProperties: false
 
     PasswordResetRequest:

@@ -75,7 +75,8 @@
 | 场景 | HTTP | message | 原因 |
 |------|------|---------|------|
 | 账号不存在或密码错误 | `422` | `Account or password is incorrect.` | 不枚举账号是否存在或密码是否正确。 |
-| 图形验证码错误/过期 | `422` | `Captcha is incorrect or expired.` | 验证码错误不涉及账号枚举，可明确提示。 |
+| Turnstile token 无效/过期/重复使用/action 不匹配 | `422` | `Human verification failed.` | 不暴露 Cloudflare 内部错误码。 |
+| Turnstile 服务不可用或密钥错误 | `503` | `Human verification is temporarily unavailable.` | 详细原因只进禁敏日志。 |
 | 邮箱验证码错误/过期 | `422` | `Verification code is incorrect or expired.` | 可明确提示。 |
 | 未登录/API Key 无效/Token 无效 | `401` | `Authentication is required.` 或 `Credential is invalid or expired.` | 不暴露凭据状态细节。 |
 | 权限不足 | `403` | `Permission denied.` | 清楚但不暴露策略细节。 |
@@ -90,9 +91,9 @@
 
 | 类型 | 要求 | 示例 |
 |------|------|------|
-| 不能太笼统 | 可预期业务错误必须说明业务语义，不能让前端只能看到参数错误。 | 验证码错返回 `Captcha is incorrect or expired.`，余额不足返回 `Insufficient balance.` |
+| 不能太笼统 | 可预期业务错误必须说明业务语义，不能让前端只能看到参数错误。 | 人机验证失败返回 `Human verification failed.`，余额不足返回 `Insufficient balance.` |
 | 不能过度暴露 | 会导致枚举、凭据判断、内部结构泄露的细节必须合并。 | 登录失败返回 `Account or password is incorrect.`，不分别提示账号不存在或密码错误。 |
-| 可直接提示 | 不涉及账号枚举、权限策略、凭据状态的输入错误可以明确。 | 图形验证码、邮箱验证码、幂等键冲突。 |
+| 可直接提示 | 不涉及账号枚举、权限策略、凭据状态的输入错误可以明确。 | 人机验证、邮箱验证码、幂等键冲突。 |
 | 内外分离 | 对外 `message` 给用户看；内部分类、SQL、上游原文、堆栈只进禁敏日志/诊断字段。 | Microsoft `password` 映射为安全 message，原分类写 SystemLog。 |
 
 禁止：

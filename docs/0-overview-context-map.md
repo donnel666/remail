@@ -249,7 +249,7 @@ POST /v1/admin/resources/{resourceId}/validate
 
 ```json
 {
-  "message": "Captcha is incorrect or expired.",
+  "message": "Human verification failed.",
   "requestId": "req_..."
 }
 ```

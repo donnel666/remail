@@ -78,6 +78,7 @@ type Platform struct {
 	TrustedProxies        []string
 	SessionMaxAge         int
 	SessionSecure         bool
+	Turnstile             TurnstileConfig
 	Diagnostics           DiagnosticsConfig
 	workersReady          atomic.Bool
 	workerStop            sync.Once
@@ -127,6 +128,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 
 	p.SessionMaxAge = cfg.Session.MaxAge
 	p.SessionSecure = cfg.Session.Secure
+	p.Turnstile = cfg.Turnstile
 	p.Diagnostics = cfg.Diagnostics
 
 	return p, cleanup, nil

@@ -80,6 +80,7 @@ export default function PasswordReset() {
             code={code}
             onCodeChange={setCode}
             send={requestPasswordReset}
+            turnstileAction="password_reset_code"
             disabled={submitting}
             onNotice={setNotice}
             onError={setError}

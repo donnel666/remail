@@ -28,6 +28,8 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "testsecret", cfg.MinIO.SecretKey)
 	assert.Equal(t, "remail", cfg.MinIO.Bucket)
 	assert.Equal(t, "", cfg.Migrations.Dir)
+	assert.Equal(t, "1x00000000000000000000AA", cfg.Turnstile.SiteKey)
+	assert.Equal(t, "1x0000000000000000000000000000000AA", cfg.Turnstile.SecretKey)
 	assert.Equal(t, "info", cfg.Log.Level)
 	assert.Equal(t, "json", cfg.Log.Format)
 	assert.Equal(t, "direct", cfg.SMTP.Mode)
@@ -111,6 +113,38 @@ func TestConfigLoadsTrustedProxyList(t *testing.T) {
 	assert.Equal(t, []string{"172.20.0.1", "127.0.0.1/32"}, cfg.Server.TrustedProxies)
 }
 
+func TestConfigRequiresTurnstileKeysInProduction(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("SESSION_SECURE", "true")
+	t.Setenv("TRUSTED_PROXIES", "127.0.0.1")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TURNSTILE_SITE_KEY")
+
+	t.Setenv("TURNSTILE_SITE_KEY", " ")
+	_, err = Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TURNSTILE_SITE_KEY")
+
+	t.Setenv("TURNSTILE_SITE_KEY", " real-site-key ")
+	_, err = Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TURNSTILE_SECRET_KEY")
+
+	t.Setenv("TURNSTILE_SECRET_KEY", " real-secret-key ")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "real-site-key", cfg.Turnstile.SiteKey)
+	assert.Equal(t, "real-secret-key", cfg.Turnstile.SecretKey)
+}
+
 func TestConfigRejectsPublicPprofAddress(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
@@ -186,6 +220,8 @@ func clearConfigEnv(t *testing.T) {
 		"SESSION_SECRET",
 		"SESSION_MAX_AGE",
 		"SESSION_SECURE",
+		"TURNSTILE_SITE_KEY",
+		"TURNSTILE_SECRET_KEY",
 		"LOG_LEVEL",
 		"LOG_FORMAT",
 		"SMTP_MODE",

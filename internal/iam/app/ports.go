@@ -157,22 +157,6 @@ type SessionStore interface {
 	DeleteByUserID(ctx context.Context, userID uint) error
 }
 
-// CaptchaStore defines the persistence contract for captchas.
-// Implemented by the infra layer (Redis).
-type CaptchaStore interface {
-	// Create stores a captcha with a TTL (typically 5 minutes).
-	Create(ctx context.Context, captchaID, answer string, ttlSeconds int) error
-
-	// Get retrieves a captcha answer. Returns "", nil if not found.
-	Get(ctx context.Context, captchaID string) (string, error)
-
-	// GetDel atomically retrieves and removes a captcha answer.
-	GetDel(ctx context.Context, captchaID string) (string, error)
-
-	// Delete removes a captcha (prevents replay).
-	Delete(ctx context.Context, captchaID string) error
-}
-
 // EmailCodeStore defines storage for email verification codes.
 type EmailCodeStore interface {
 	// StartCooldown records a send for the key and reports whether a new

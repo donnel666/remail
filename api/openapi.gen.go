@@ -4838,15 +4838,6 @@ type AllocationItemSupplyScope string
 // AllocationItemType defines model for AllocationItem.Type.
 type AllocationItemType string
 
-// CaptchaResponse defines model for CaptchaResponse.
-type CaptchaResponse struct {
-	// CaptchaId Captcha identifier (must be submitted with answer)
-	CaptchaId string `json:"captchaId"`
-
-	// Image Base64-encoded PNG data URI of the captcha image
-	Image string `json:"image"`
-}
-
 // CardBulkFilter defines model for CardBulkFilter.
 type CardBulkFilter struct {
 	OwnerGroupId *int                     `json:"ownerGroupId,omitempty"`
@@ -5237,9 +5228,8 @@ type DomainResourceDetailPurpose string
 
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
-	CaptchaAnswer string              `json:"captchaAnswer"`
-	CaptchaId     string              `json:"captchaId"`
-	Email         openapi_types.Email `json:"email"`
+	Email          openapi_types.Email `json:"email"`
+	TurnstileToken string              `json:"turnstileToken"`
 }
 
 // Error defines model for Error.
@@ -5460,10 +5450,9 @@ type LedgerAmount = string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
-	CaptchaAnswer string              `json:"captchaAnswer"`
-	CaptchaId     string              `json:"captchaId"`
-	Email         openapi_types.Email `json:"email"`
-	Password      string              `json:"password"`
+	Email          openapi_types.Email `json:"email"`
+	Password       string              `json:"password"`
+	TurnstileToken string              `json:"turnstileToken"`
 }
 
 // LoginResponse defines model for LoginResponse.
@@ -5706,9 +5695,8 @@ type OrderStatusFacets struct {
 
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
-	CaptchaAnswer string              `json:"captchaAnswer"`
-	CaptchaId     string              `json:"captchaId"`
-	Email         openapi_types.Email `json:"email"`
+	Email          openapi_types.Email `json:"email"`
+	TurnstileToken string              `json:"turnstileToken"`
 }
 
 // PasswordResetRequest defines model for PasswordResetRequest.
@@ -6613,6 +6601,12 @@ type TransactionListResponse struct {
 	Items       []TransactionItem `json:"items"`
 	Limit       int               `json:"limit"`
 	NextAfterId *int              `json:"nextAfterId,omitempty"`
+}
+
+// TurnstileConfigResponse defines model for TurnstileConfigResponse.
+type TurnstileConfigResponse struct {
+	// SiteKey Public Cloudflare Turnstile widget site key
+	SiteKey string `json:"siteKey"`
 }
 
 // UpdateCardRequest defines model for UpdateCardRequest.
@@ -9647,9 +9641,6 @@ type ServerInterface interface {
 	// Update one API key
 	// (PATCH /v1/apikeys/{keyId})
 	PatchApiKey(c *gin.Context, keyId int, params PatchApiKeyParams)
-	// Create a captcha challenge
-	// (POST /v1/captchas)
-	PostCaptcha(c *gin.Context)
 	// Redeem a card key into consumer balance
 	// (POST /v1/cards/redeem)
 	PostCardRedeem(c *gin.Context, params PostCardRedeemParams)
@@ -9794,6 +9785,9 @@ type ServerInterface interface {
 	// Mark the caller's ticket as read
 	// (POST /v1/tickets/{ticketNo}/read)
 	PostTicketRead(c *gin.Context, ticketNo TicketNoPath, params PostTicketReadParams)
+	// Get the public Cloudflare Turnstile site key
+	// (GET /v1/turnstile/config)
+	GetTurnstileConfig(c *gin.Context)
 	// Register a new user
 	// (POST /v1/users)
 	PostRegister(c *gin.Context)
@@ -18203,19 +18197,6 @@ func (siw *ServerInterfaceWrapper) PatchApiKey(c *gin.Context) {
 	siw.Handler.PatchApiKey(c, keyId, params)
 }
 
-// PostCaptcha operation middleware
-func (siw *ServerInterfaceWrapper) PostCaptcha(c *gin.Context) {
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostCaptcha(c)
-}
-
 // PostCardRedeem operation middleware
 func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
 
@@ -20410,6 +20391,19 @@ func (siw *ServerInterfaceWrapper) PostTicketRead(c *gin.Context) {
 	siw.Handler.PostTicketRead(c, ticketNo, params)
 }
 
+// GetTurnstileConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetTurnstileConfig(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetTurnstileConfig(c)
+}
+
 // PostRegister operation middleware
 func (siw *ServerInterfaceWrapper) PostRegister(c *gin.Context) {
 
@@ -20747,7 +20741,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
-	router.POST(options.BaseURL+"/v1/captchas", wrapper.PostCaptcha)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.GET(options.BaseURL+"/v1/dashboard", wrapper.GetDashboard)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
@@ -20796,6 +20789,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/close", wrapper.PostTicketClose)
 	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/messages", wrapper.PostTicketMessage)
 	router.POST(options.BaseURL+"/v1/tickets/:ticketNo/read", wrapper.PostTicketRead)
+	router.GET(options.BaseURL+"/v1/turnstile/config", wrapper.GetTurnstileConfig)
 	router.POST(options.BaseURL+"/v1/users", wrapper.PostRegister)
 	router.GET(options.BaseURL+"/v1/wallet", wrapper.GetWallet)
 	router.GET(options.BaseURL+"/v1/wallet/referrals", wrapper.GetWalletReferrals)

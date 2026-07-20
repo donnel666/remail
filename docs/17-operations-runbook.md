@@ -6,10 +6,19 @@
 - 雷池 WAF 独立部署，业务站点反代到宿主机 `http://127.0.0.1:8080`；应用 Compose 不监听 80/443。
 - 首次切换由运维人员手动停止并删除旧 Nginx 容器，CI 不清理 Compose orphan。
 - 生产必须设置 `APP_ENV=production`、`SESSION_SECURE=true`。
+- 生产必须设置 Cloudflare Turnstile 的 `TURNSTILE_SITE_KEY`、`TURNSTILE_SECRET_KEY`；测试环境默认使用 Cloudflare 官方 always-pass 测试密钥，生产拒绝使用测试密钥启动。
 - 生产必须把 `TRUSTED_PROXIES` 设置为应用容器实际看到的反向代理精确 IP/CIDR；反向代理必须覆盖客户端自带的 `X-Forwarded-For`，只传递规范客户端地址。
 - `PPROF_ADDR` 只能绑定 `localhost` 或回环 IP，禁止公网监听。
 - 雷池对 `/pickup`、`/v1/pickup` 关闭或脱敏 query 日志，并禁用验证码、JS Challenge 等会改变 API 响应的挑战。
 - 雷池必须阻止公网访问 `/metrics`，上传限制不得低于 100 MB，并传递 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`。
+
+## Cloudflare Turnstile
+
+1. Cloudflare 控制台进入 **Turnstile**，创建 widget，hostname 只填写 `remail.aishop6.com`。
+2. Widget mode 选择 **Managed**；前端分别使用 `login`、`register_email_code`、`password_reset_code` action。
+3. 把 Site Key 和 Secret Key 分别写入 GitHub Actions secrets：`TURNSTILE_SITE_KEY`、`TURNSTILE_SECRET_KEY`。
+4. 后端只返回公开 Site Key；Secret Key 只存在于生产环境变量，不进入前端、响应或日志。
+5. 发布后验证登录、注册发码、找回密码发码；重复提交同一 token 必须返回 `422`。
 
 ## 监控与告警
 

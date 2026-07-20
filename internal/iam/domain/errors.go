@@ -8,7 +8,8 @@ import "errors"
 var (
 	ErrEmailAlreadyExists                  = errors.New("email already exists")
 	ErrAccountOrPasswordIncorrect          = errors.New("account or password is incorrect")
-	ErrCaptchaIncorrect                    = errors.New("captcha is incorrect or expired")
+	ErrTurnstileInvalid                    = errors.New("human verification failed")
+	ErrTurnstileUnavailable                = errors.New("human verification is temporarily unavailable")
 	ErrAuthenticationRequired              = errors.New("authentication is required")
 	ErrPermissionDenied                    = errors.New("permission denied")
 	ErrActivationAlreadyDone               = errors.New("activation has already been completed")

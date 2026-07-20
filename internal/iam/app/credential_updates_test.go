@@ -68,8 +68,8 @@ func TestLoginUsesCurrentAuthorizationStateAfterCredentialCheck(t *testing.T) {
 		recorded: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive, Role: domain.RoleSupplier, TokenVersion: 4},
 	}
 	sessions := &credentialSessionStoreStub{}
-	result, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions, nil).
-		LoginVerified(context.Background(), "user@test.com", "correct", 86400)
+	result, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions).
+		Login(context.Background(), "user@test.com", "correct", 86400)
 
 	require.NoError(t, err)
 	require.Equal(t, domain.RoleSupplier, result.User.Role)
@@ -82,8 +82,8 @@ func TestLoginDoesNotCreateSessionWhenCredentialSnapshotBecameStale(t *testing.T
 		byEmail: &domain.User{ID: 7, Email: "user@test.com", PasswordHash: "old-hash", Status: domain.UserStatusActive},
 	}
 	sessions := &credentialSessionStoreStub{}
-	_, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions, nil).
-		LoginVerified(context.Background(), "user@test.com", "correct", 86400)
+	_, err := NewLoginUseCase(repo, credentialHasherStub{}, sessions).
+		Login(context.Background(), "user@test.com", "correct", 86400)
 
 	require.ErrorIs(t, err, domain.ErrAccountOrPasswordIncorrect)
 	require.Nil(t, sessions.created)

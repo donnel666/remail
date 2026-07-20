@@ -132,7 +132,7 @@ eft = allow/deny
 | 当前用户 | `GET /v1/me`。 |
 | 改密码 | 成功后递增 `tokenVersion`，清理旧 Session。 |
 | 禁用用户 | 递增 `tokenVersion`，清理旧 Session 和 API Key 缓存。 |
-| 图形验证码 | `POST /v1/captchas` 创建，答案不进响应和日志。 |
+| 人机验证 | 登录、注册发码、找回密码发码提交 Cloudflare Turnstile token；服务端调用 Siteverify 并校验对应 `action`。 |
 | 邮箱验证码 | `POST /v1/email/code` 发送，发送幂等，验证码不进日志。 |
 
 认证错误：
@@ -141,7 +141,8 @@ eft = allow/deny
 |------|------|---------|
 | 未登录 | `401` | `Authentication is required.` |
 | 账号或密码错误 | `422` | `Account or password is incorrect.` |
-| 图形验证码错误 | `422` | `Captcha is incorrect or expired.` |
+| 人机验证失败 | `422` | `Human verification failed.` |
+| 人机验证服务不可用 | `503` | `Human verification is temporarily unavailable.` |
 | 邮箱验证码错误 | `422` | `Verification code is incorrect or expired.` |
 | 权限不足 | `403` | `Permission denied.` |
 
@@ -186,7 +187,7 @@ eft = allow/deny
 | `POST` | `/v1/login` | 登录。 |
 | `DELETE` | `/v1/sessions/current` | 登出。 |
 | `GET` | `/v1/me` | 当前用户。 |
-| `POST` | `/v1/captchas` | 创建图形验证码。 |
+| `GET` | `/v1/turnstile/config` | 返回公开的 Turnstile site key，不返回 secret key。 |
 | `POST` | `/v1/email/code` | 发送邮箱验证码。 |
 | `POST` | `/v1/users` | 注册用户。 |
 | `POST` | `/v1/password/reset/request` | 创建找回密码请求。 |
@@ -211,15 +212,16 @@ eft = allow/deny
 | 注册入口 | 前端使用 `aff` URL 参数，但后端注册仍提交 `inviteCode`，不把外部 URL 命名扩散到领域模型。 |
 | 并发约束 | 每个用户最多一个 `referral` 邀请码，由数据库唯一约束兜底；邀请码消费仍按 INV-I6 原子递增。 |
 
-验证码补充设计：
+人机与邮箱验证码补充设计：
 
 | 场景 | 规则 |
 |------|------|
-| 发送注册邮箱验证码 | `POST /v1/email/code` 必须提交图形验证码，图形验证码只控制发邮件动作。 |
+| 登录 | `POST /v1/login` 必须提交 `action=login` 的 Turnstile token。 |
+| 发送注册邮箱验证码 | `POST /v1/email/code` 必须提交 `action=register_email_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
 | 注册用户 | `POST /v1/users` 必须提交邮箱验证码，邮箱验证码控制最终注册动作。 |
-| 发送找回密码邮箱验证码 | `POST /v1/password/reset/request` 必须提交图形验证码，图形验证码只控制发邮件动作。 |
+| 发送找回密码邮箱验证码 | `POST /v1/password/reset/request` 必须提交 `action=password_reset_code` 的 Turnstile token，Turnstile 只控制发邮件动作。 |
 | 执行找回密码 | `POST /v1/password/reset` 必须提交邮箱验证码，邮箱验证码控制最终重置动作。 |
-| 图形验证码题目 | 使用九九乘法表范围内的简单四则运算，运算符使用数学符号 `+`、`−`、`×`、`÷`。 |
+| Token 规则 | token 只使用一次、最长有效 5 分钟；前端每次提交后重置组件，后端始终执行 Siteverify，不信任客户端结果。 |
 
 供应商申请补充设计：
 

@@ -2,9 +2,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { CaptchaField } from "@/components/auth/CaptchaField";
+import { TurnstileField } from "@/components/auth/TurnstileField";
 import { useAuth } from "@/context/auth-provider";
-import { useCaptcha } from "@/hooks/use-captcha";
 import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
@@ -12,10 +11,10 @@ export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { login } = useAuth();
-  const captcha = useCaptcha();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -30,8 +29,8 @@ export default function Login() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!captcha.captcha?.captchaId) {
-      setError(t("Captcha is not ready."));
+    if (!turnstileToken) {
+      setError(t("Please complete human verification."));
       return;
     }
 
@@ -43,14 +42,13 @@ export default function Login() {
       await login({
         email: email.trim(),
         password,
-        captchaId: captcha.captcha.captchaId,
-        captchaAnswer: captchaAnswer.trim(),
+        turnstileToken,
       });
       void navigate({ to: consumeLoginReturnTo() as never, replace: true });
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "Login failed."));
-      setCaptchaAnswer("");
-      void captcha.refresh();
+      setTurnstileToken("");
+      setTurnstileResetKey((key) => key + 1);
     } finally {
       setSubmitting(false);
     }
@@ -93,17 +91,14 @@ export default function Login() {
             autoComplete="current-password"
             required
           />
-          <CaptchaField
-            captcha={captcha.captcha}
-            loading={captcha.loading}
-            value={captchaAnswer}
-            disabled={submitting}
-            onChange={setCaptchaAnswer}
-            onRefresh={() => void captcha.refresh()}
+          <TurnstileField
+            action="login"
+            resetKey={turnstileResetKey}
+            onTokenChange={setTurnstileToken}
           />
           <button
             className="flex h-10 w-full items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-start)] to-[var(--brand-end)] text-[14px] font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={submitting || captcha.loading}
+            disabled={submitting || !turnstileToken}
           >
             {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
             {t("Login")}

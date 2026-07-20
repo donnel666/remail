@@ -117,7 +117,13 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		mailapi.RegisterMailTransportTaskHandlers(taskMux, mailMod)
 
-		iamMod, err := iamapi.NewIAMModule(p.DB, p.Redis, mailMod.DeliveryUseCase)
+		iamMod, err := iamapi.NewIAMModule(
+			p.DB,
+			p.Redis,
+			mailMod.DeliveryUseCase,
+			p.Turnstile.SiteKey,
+			p.Turnstile.SecretKey,
+		)
 		if err != nil {
 			return nil, cleanup, err
 		}

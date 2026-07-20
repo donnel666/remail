@@ -18,12 +18,10 @@ type ActivationRequest struct {
 }
 
 // LoginRequest is the request body for POST /v1/login.
-// Captcha is required to prevent brute-force attacks.
 type LoginRequest struct {
-	Email         string `json:"email" binding:"required,email"`
-	Password      string `json:"password" binding:"required"`
-	CaptchaID     string `json:"captchaId" binding:"required"`
-	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
+	Email          string `json:"email" binding:"required,email"`
+	Password       string `json:"password" binding:"required"`
+	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
 }
 
 // RegisterRequest is the request body for POST /v1/users.
@@ -37,9 +35,8 @@ type RegisterRequest struct {
 
 // EmailCodeRequest is the request body for POST /v1/email/code.
 type EmailCodeRequest struct {
-	Email         string `json:"email" binding:"required,email"`
-	CaptchaID     string `json:"captchaId" binding:"required"`
-	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
 }
 
 // ChangePasswordRequest is the request body for PATCH /v1/password.
@@ -49,9 +46,8 @@ type ChangePasswordRequest struct {
 }
 
 type PasswordResetCodeRequest struct {
-	Email         string `json:"email" binding:"required,email"`
-	CaptchaID     string `json:"captchaId" binding:"required"`
-	CaptchaAnswer string `json:"captchaAnswer" binding:"required"`
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstileToken" binding:"required,max=2048"`
 }
 
 type PasswordResetRequest struct {
@@ -182,10 +178,9 @@ type LoginResponse struct {
 	User UserResponse `json:"user"`
 }
 
-// CaptchaResponse is the response for POST /v1/captchas.
-type CaptchaResponse struct {
-	CaptchaID string `json:"captchaId"`
-	Image     string `json:"image"`
+// TurnstileConfigResponse exposes only the public widget site key.
+type TurnstileConfigResponse struct {
+	SiteKey string `json:"siteKey"`
 }
 
 // AdminUserListResponse is the response for GET /v1/admin/users.

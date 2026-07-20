@@ -24,25 +24,11 @@ const EmailCodeResendGapSeconds = emailCodeResendGap
 type EmailCodeUseCase struct {
 	store    EmailCodeStore
 	delivery mailapp.DeliveryPort
-	captcha  CaptchaStore
 }
 
 // NewEmailCodeUseCase creates an EmailCodeUseCase.
-func NewEmailCodeUseCase(store EmailCodeStore, delivery mailapp.DeliveryPort, captcha CaptchaStore) *EmailCodeUseCase {
-	return &EmailCodeUseCase{store: store, delivery: delivery, captcha: captcha}
-}
-
-// VerifyCaptcha validates the image captcha attached to an email-code request.
-func (uc *EmailCodeUseCase) VerifyCaptcha(ctx context.Context, captchaID, captchaAnswer string) error {
-	return VerifyCaptcha(ctx, uc.captcha, captchaID, captchaAnswer)
-}
-
-// SendWithCaptcha validates the image captcha before sending an email code.
-func (uc *EmailCodeUseCase) SendWithCaptcha(ctx context.Context, email, captchaID, captchaAnswer string) (bool, error) {
-	if err := uc.VerifyCaptcha(ctx, captchaID, captchaAnswer); err != nil {
-		return false, err
-	}
-	return uc.send(ctx, email)
+func NewEmailCodeUseCase(store EmailCodeStore, delivery mailapp.DeliveryPort) *EmailCodeUseCase {
+	return &EmailCodeUseCase{store: store, delivery: delivery}
 }
 
 // Send delivers an email verification code, enforcing a per-address resend
@@ -50,11 +36,13 @@ func (uc *EmailCodeUseCase) SendWithCaptcha(ctx context.Context, email, captchaI
 // of silently dropping the mail; once it lapses, a still-valid code is
 // re-delivered so a lost first email can be resent.
 func (uc *EmailCodeUseCase) Send(ctx context.Context, email string) error {
-	_, err := uc.send(ctx, email)
+	_, err := uc.Request(ctx, email)
 	return err
 }
 
-func (uc *EmailCodeUseCase) send(ctx context.Context, email string) (bool, error) {
+// Request sends a code and reports whether a new code was generated. The API
+// uses that fact to preserve the existing verification-failure budget.
+func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, error) {
 	normalized := normalizeEmail(email)
 
 	started, retryAfter, err := uc.store.StartCooldown(ctx, emailCodeKey(normalized), emailCodeResendGap)

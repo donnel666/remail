@@ -56,17 +56,17 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/captchas": {
+    "/v1/turnstile/config": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get the public Cloudflare Turnstile site key */
+        get: operations["getTurnstileConfig"];
         put?: never;
-        /** Create a captcha challenge */
-        post: operations["postCaptcha"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3811,11 +3811,9 @@ export interface components {
             password: string;
             nickname?: string;
         };
-        CaptchaResponse: {
-            /** @description Captcha identifier (must be submitted with answer) */
-            captchaId: string;
-            /** @description Base64-encoded PNG data URI of the captcha image */
-            image: string;
+        TurnstileConfigResponse: {
+            /** @description Public Cloudflare Turnstile widget site key */
+            siteKey: string;
         };
         RegisterRequest: {
             /** Format: email */
@@ -3828,15 +3826,13 @@ export interface components {
         EmailCodeRequest: {
             /** Format: email */
             email: string;
-            captchaId: string;
-            captchaAnswer: string;
+            turnstileToken: string;
         };
         LoginRequest: {
             /** Format: email */
             email: string;
             password: string;
-            captchaId: string;
-            captchaAnswer: string;
+            turnstileToken: string;
         };
         LoginResponse: {
             user: components["schemas"]["UserResponse"];
@@ -3848,8 +3844,7 @@ export interface components {
         PasswordResetCodeRequest: {
             /** Format: email */
             email: string;
-            captchaId: string;
-            captchaAnswer: string;
+            turnstileToken: string;
         };
         PasswordResetRequest: {
             /** Format: email */
@@ -5855,7 +5850,7 @@ export interface operations {
             };
         };
     };
-    postCaptcha: {
+    getTurnstileConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5864,19 +5859,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Captcha created (answer is never in the response) */
+            /** @description Turnstile widget configuration */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaptchaResponse"];
+                    "application/json": components["schemas"]["TurnstileConfigResponse"];
                 };
             };
-            /** @description Captcha request rate limit exceeded */
-            429: {
+            /** @description Human verification is temporarily unavailable */
+            503: {
                 headers: {
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5914,7 +5908,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Captcha incorrect or expired */
+            /** @description Human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5933,7 +5927,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Mail service is temporarily unavailable */
+            /** @description Human verification or mail service is temporarily unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -6030,7 +6024,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Account or password is incorrect */
+            /** @description Human verification failed, or account or password is incorrect */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6043,6 +6037,15 @@ export interface operations {
             429: {
                 headers: {
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Human verification is temporarily unavailable */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
@@ -6393,7 +6396,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Captcha incorrect or expired */
+            /** @description Human verification failed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6412,7 +6415,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Mail service is temporarily unavailable */
+            /** @description Human verification or mail service is temporarily unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

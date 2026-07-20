@@ -70,31 +70,19 @@ func (h *IAMHandler) PostActivation(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"user": h.userResponseWithPermissions(c.Request.Context(), user)})
 }
 
-// --- Captcha ---
+const (
+	turnstileActionLogin         = "login"
+	turnstileActionRegister      = "register_email_code"
+	turnstileActionPasswordReset = "password_reset_code"
+)
 
-// POST /v1/captchas
-func (h *IAMHandler) PostCaptcha(c *gin.Context) {
-	if h.module.AbuseLimiter != nil {
-		retryAfter, err := h.module.AbuseLimiter.HitCaptcha(c.Request.Context(), c.ClientIP())
-		if err != nil {
-			writeError(c, err)
-			return
-		}
-		if retryAfter > 0 {
-			writeTooManyRequests(c, retryAfter)
-			return
-		}
-	}
-
-	result, err := h.module.CaptchaUseCase.Create(c.Request.Context())
-	if err != nil {
-		writeError(c, err)
+// GET /v1/turnstile/config
+func (h *IAMHandler) GetTurnstileConfig(c *gin.Context) {
+	if strings.TrimSpace(h.module.TurnstileSiteKey) == "" {
+		writeError(c, domain.ErrTurnstileUnavailable)
 		return
 	}
-	c.JSON(http.StatusOK, CaptchaResponse{
-		CaptchaID: result.CaptchaID,
-		Image:     result.Image,
-	})
+	c.JSON(http.StatusOK, TurnstileConfigResponse{SiteKey: h.module.TurnstileSiteKey})
 }
 
 // POST /v1/email/code
@@ -109,7 +97,11 @@ func (h *IAMHandler) PostEmailCode(c *gin.Context) {
 		return
 	}
 
-	created, err := h.module.EmailCodeUseCase.SendWithCaptcha(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer)
+	if !h.verifyTurnstile(c, req.TurnstileToken, turnstileActionRegister) {
+		return
+	}
+
+	created, err := h.module.EmailCodeUseCase.Request(c.Request.Context(), req.Email)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -183,7 +175,11 @@ func (h *IAMHandler) PostPasswordResetRequest(c *gin.Context) {
 		})
 		return
 	}
-	created, err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email, req.CaptchaID, req.CaptchaAnswer)
+	if !h.verifyTurnstile(c, req.TurnstileToken, turnstileActionPasswordReset) {
+		return
+	}
+
+	created, err := h.module.PasswordResetUseCase.Request(c.Request.Context(), req.Email)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -253,13 +249,12 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		return
 	}
 
-	csrfToken, err := newCSRFToken()
-	if err != nil {
-		writeError(c, err)
+	if !h.verifyTurnstile(c, req.TurnstileToken, turnstileActionLogin) {
 		return
 	}
 
-	if err := app.VerifyCaptcha(c.Request.Context(), h.module.CaptchaStore, req.CaptchaID, req.CaptchaAnswer); err != nil {
+	csrfToken, err := newCSRFToken()
+	if err != nil {
 		writeError(c, err)
 		return
 	}
@@ -277,7 +272,7 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 		}
 	}
 
-	result, err := h.module.LoginUseCase.LoginVerified(c.Request.Context(), req.Email, req.Password, h.sessionMaxAge)
+	result, err := h.module.LoginUseCase.Login(c.Request.Context(), req.Email, req.Password, h.sessionMaxAge)
 	if err != nil {
 		if !errors.Is(err, domain.ErrAccountOrPasswordIncorrect) && h.module.AbuseLimiter != nil {
 			if limitErr := h.module.AbuseLimiter.CancelLogin(c.Request.Context(), req.Email, clientIP); limitErr != nil {
@@ -297,6 +292,29 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 	setAuthCookies(c, result.Session.ID, csrfToken, h.sessionMaxAge, h.sessionSecure)
 
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
+}
+
+func (h *IAMHandler) verifyTurnstile(c *gin.Context, token, action string) bool {
+	if h.module.AbuseLimiter != nil {
+		retryAfter, err := h.module.AbuseLimiter.HitTurnstile(c.Request.Context(), c.ClientIP())
+		if err != nil {
+			writeError(c, err)
+			return false
+		}
+		if retryAfter > 0 {
+			writeTooManyRequests(c, retryAfter)
+			return false
+		}
+	}
+	if h.module.TurnstileVerifier == nil {
+		writeError(c, domain.ErrTurnstileUnavailable)
+		return false
+	}
+	if err := h.module.TurnstileVerifier.Verify(c.Request.Context(), token, c.ClientIP(), action); err != nil {
+		writeError(c, err)
+		return false
+	}
+	return true
 }
 
 func writeTooManyRequests(c *gin.Context, retryAfter int) {
@@ -1456,9 +1474,15 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Account or password is incorrect.",
 			"requestId": rid,
 		})
-	case errors.Is(err, domain.ErrCaptchaIncorrect):
+	case errors.Is(err, domain.ErrTurnstileInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message":   "Captcha is incorrect or expired.",
+			"message":   "Human verification failed.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrTurnstileUnavailable):
+		slog.Warn("turnstile unavailable", "request_id", rid, "error", err.Error())
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"message":   "Human verification is temporarily unavailable.",
 			"requestId": rid,
 		})
 	case errors.Is(err, domain.ErrEmailCodeThrottled):

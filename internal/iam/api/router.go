@@ -61,7 +61,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionMaxAge int, s
 	// Public routes (no authentication required)
 	rg.GET("/activation", h.GetActivation)
 	rg.POST("/activation", h.PostActivation)
-	rg.POST("/captchas", h.PostCaptcha)
+	rg.GET("/turnstile/config", h.GetTurnstileConfig)
 	rg.POST("/email/code", h.PostEmailCode)
 	rg.POST("/users", h.PostRegister)
 	rg.POST("/login", h.PostLogin)

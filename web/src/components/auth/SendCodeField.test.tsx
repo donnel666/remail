@@ -10,28 +10,13 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock("@/hooks/use-captcha", () => ({
-  useCaptcha: () => ({
-    captcha: { captchaId: "cap-1", image: "img" },
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
-
-vi.mock("@/components/auth/CaptchaField", () => ({
-  CaptchaField: ({
-    value,
-    onChange,
+vi.mock("@/components/auth/TurnstileField", () => ({
+  TurnstileField: ({
+    onTokenChange,
   }: {
-    value: string;
-    onChange: (v: string) => void;
+    onTokenChange: (token: string) => void;
   }) => (
-    <input
-      aria-label="captcha"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    />
+    <button type="button" aria-label="complete turnstile" onClick={() => onTokenChange("token-1")} />
   ),
 }));
 
@@ -39,8 +24,7 @@ afterEach(() => cleanup());
 
 type Send = (payload: {
   email: string;
-  captchaId: string;
-  captchaAnswer: string;
+  turnstileToken: string;
 }) => Promise<unknown>;
 
 function renderField(send: Send) {
@@ -52,19 +36,18 @@ function renderField(send: Send) {
       code=""
       onCodeChange={vi.fn()}
       send={send}
+      turnstileAction="register_email_code"
       onNotice={onNotice}
       onError={onError}
     />
   );
-  fireEvent.change(screen.getByLabelText("captcha"), {
-    target: { value: "1234" },
-  });
+  fireEvent.click(screen.getByLabelText("complete turnstile"));
   return { onNotice, onError };
 }
 
 // Countdown value shown on the send button, or null when it reads "Send code".
 function countdown() {
-  const text = (screen.getByRole("button") as HTMLButtonElement).textContent ?? "";
+  const text = (screen.getByRole("button", { name: /Send code|\d+s/ }) as HTMLButtonElement).textContent ?? "";
   const match = text.match(/^(\d+)s$/);
   return match ? Number(match[1]) : null;
 }
@@ -74,12 +57,12 @@ describe("SendCodeField", () => {
     const send = vi.fn<Send>().mockResolvedValue(undefined);
     const { onNotice } = renderField(send);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
     await waitFor(() => expect(countdown()).not.toBeNull());
     // Default 60s cooldown; tolerate one tick to avoid a timer race.
     expect(countdown()).toBeGreaterThanOrEqual(59);
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /\d+s/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(onNotice).toHaveBeenCalledWith("Verification code sent.");
   });
 
@@ -91,19 +74,19 @@ describe("SendCodeField", () => {
     const send = vi.fn<Send>().mockRejectedValue(throttled);
     const { onError } = renderField(send);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
     await waitFor(() => expect(countdown()).not.toBeNull());
     // Reflects the server's 45s, not the default 60s.
     const value = countdown();
     expect(value).toBeLessThanOrEqual(45);
     expect(value).toBeGreaterThanOrEqual(44);
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /\d+s/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(onError).toHaveBeenCalled();
   });
 
-  // Reproduces the reported flow: send → 60s countdown → wait it out → re-solve
-  // captcha → send again. The countdown must restart on the second success.
+  // Reproduces the reported flow: send → 60s countdown → wait it out → solve
+  // Turnstile again → send again. The countdown must restart.
   it("restarts the countdown on a second successful send", async () => {
     vi.useFakeTimers();
     try {
@@ -111,7 +94,7 @@ describe("SendCodeField", () => {
       renderField(send);
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button"));
+        fireEvent.click(screen.getByRole("button", { name: "Send code" }));
       });
       expect(countdown()).toBe(60);
 
@@ -120,11 +103,11 @@ describe("SendCodeField", () => {
       });
       expect(countdown()).toBeNull(); // back to "Send code"
 
-      // The finally block cleared the captcha; the user re-solves it.
-      fireEvent.change(screen.getByLabelText("captcha"), { target: { value: "1234" } });
+      // The finally block consumed the single-use token; the user verifies again.
+      fireEvent.click(screen.getByLabelText("complete turnstile"));
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button"));
+        fireEvent.click(screen.getByRole("button", { name: "Send code" }));
       });
       expect(countdown()).toBe(60);
       expect(send).toHaveBeenCalledTimes(2);

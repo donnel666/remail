@@ -20,7 +20,7 @@ type UserFinder interface {
 }
 
 type abuseLimiter interface {
-	HitCaptcha(ctx context.Context, ip string) (int, error)
+	HitTurnstile(ctx context.Context, ip string) (int, error)
 	TakeLogin(ctx context.Context, email, ip string) (int, error)
 	CancelLogin(ctx context.Context, email, ip string) error
 	CompleteLogin(ctx context.Context, email, ip string) error
@@ -31,6 +31,10 @@ type abuseLimiter interface {
 	CancelPasswordReset(ctx context.Context, email, ip string) error
 	CompletePasswordReset(ctx context.Context, email, ip string) error
 	ClearEmailCodeFailures(ctx context.Context, email string) error
+}
+
+type turnstileVerifier interface {
+	Verify(ctx context.Context, token, remoteIP, expectedAction string) error
 }
 
 // IAMModule holds all wired dependencies for the IAM module.
@@ -44,7 +48,6 @@ type IAMModule struct {
 	AdminUseCase               *app.AdminUseCase
 	InviteUseCase              *app.InviteUseCase
 	SupplierApplicationUseCase *app.SupplierApplicationUseCase
-	CaptchaUseCase             *app.CaptchaUseCase
 	EmailCodeUseCase           *app.EmailCodeUseCase
 	PermissionChecker          app.PermissionChecker
 	Hasher                     *infra.Hasher
@@ -53,15 +56,16 @@ type IAMModule struct {
 	// the batch user-summary lookups (e.g. billing's wallet directory).
 	Users                      *infra.UserRepo
 	SessionStore               app.SessionStore
-	CaptchaStore               app.CaptchaStore
 	EmailCodeStore             app.EmailCodeStore
 	AbuseLimiter               abuseLimiter
+	TurnstileVerifier          turnstileVerifier
+	TurnstileSiteKey           string
 	AdminResourceOwners        coreapp.OwnerQueryPort
 	AdminUserSelectionResolver *AdminUserSelectionResolver
 }
 
 // NewIAMModule wires up all IAM dependencies.
-func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.DeliveryPort) (*IAMModule, error) {
+func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.DeliveryPort, turnstileSiteKey, turnstileSecretKey string) (*IAMModule, error) {
 	if mailDelivery == nil {
 		return nil, errors.New("mail delivery is required")
 	}
@@ -69,7 +73,6 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	hasher := infra.NewHasher()
 	userRepo := infra.NewUserRepo(db)
 	sessionStore := infra.NewSessionStore(rdb)
-	captchaStore := infra.NewCaptchaStore(rdb)
 	emailCodeStore := infra.NewEmailCodeStore(rdb)
 	operationLogRepo := governanceinfra.NewOperationLogRepo(db)
 	permissionService, err := infra.NewPermissionService(db)
@@ -78,28 +81,28 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	}
 	supplierApplicationRepo := infra.NewSupplierApplicationRepo(db)
 
-	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery, captchaStore)
+	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery)
 
 	return &IAMModule{
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
-		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore, captchaStore),
+		LoginUseCase:               app.NewLoginUseCase(userRepo, hasher, sessionStore),
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
 		AdminUseCase:               app.NewAdminUseCase(userRepo, sessionStore, userRepo, permissionService, hasher, operationLogRepo),
 		InviteUseCase:              app.NewInviteUseCase(userRepo),
 		SupplierApplicationUseCase: app.NewSupplierApplicationUseCase(supplierApplicationRepo, userRepo),
-		CaptchaUseCase:             app.NewCaptchaUseCase(captchaStore),
 		EmailCodeUseCase:           emailCodeUseCase,
 		PermissionChecker:          permissionService,
 		Hasher:                     hasher,
 		UserRepo:                   userRepo,
 		Users:                      userRepo,
 		SessionStore:               sessionStore,
-		CaptchaStore:               captchaStore,
 		EmailCodeStore:             emailCodeStore,
 		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
+		TurnstileVerifier:          infra.NewTurnstileVerifier(turnstileSecretKey),
+		TurnstileSiteKey:           turnstileSiteKey,
 		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
 		AdminUserSelectionResolver: NewAdminUserSelectionResolver(userRepo),
 	}, nil

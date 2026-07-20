@@ -1,8 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CaptchaField } from "@/components/auth/CaptchaField";
-import { useCaptcha } from "@/hooks/use-captcha";
+import { TurnstileField } from "@/components/auth/TurnstileField";
 import { IamApiError } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 
@@ -10,8 +9,7 @@ const RESEND_COOLDOWN_SECONDS = 60;
 
 interface SendCodePayload {
   email: string;
-  captchaId: string;
-  captchaAnswer: string;
+  turnstileToken: string;
 }
 
 interface SendCodeFieldProps {
@@ -19,13 +17,14 @@ interface SendCodeFieldProps {
   code: string;
   onCodeChange: (value: string) => void;
   send: (payload: SendCodePayload) => Promise<unknown>;
+  turnstileAction: string;
   disabled?: boolean;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 }
 
 /**
- * Captcha + verification-code input + send button, with a resend countdown.
+ * Turnstile + verification-code input + send button, with a resend countdown.
  * The countdown starts on a successful send, and is seeded from the server's
  * Retry-After when a request is throttled (HTTP 429), so the button reflects
  * the real backend cooldown instead of letting repeat clicks fail silently.
@@ -35,13 +34,14 @@ export function SendCodeField({
   code,
   onCodeChange,
   send,
+  turnstileAction,
   disabled,
   onNotice,
   onError,
 }: SendCodeFieldProps) {
   const { t } = useTranslation();
-  const captcha = useCaptcha();
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [requesting, setRequesting] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
@@ -63,12 +63,8 @@ export function SendCodeField({
       onError(t("Please enter your email."));
       return;
     }
-    if (!captcha.captcha?.captchaId) {
-      onError(t("Captcha is not ready."));
-      return;
-    }
-    if (!captchaAnswer.trim()) {
-      onError(t("Please enter captcha."));
+    if (!turnstileToken) {
+      onError(t("Please complete human verification."));
       return;
     }
 
@@ -77,8 +73,7 @@ export function SendCodeField({
     try {
       await send({
         email: email.trim(),
-        captchaId: captcha.captcha.captchaId,
-        captchaAnswer: captchaAnswer.trim(),
+        turnstileToken,
       });
       onNotice(t("Verification code sent."));
       setCooldown(RESEND_COOLDOWN_SECONDS);
@@ -88,21 +83,18 @@ export function SendCodeField({
         setCooldown(nextError.retryAfterSeconds);
       }
     } finally {
-      setCaptchaAnswer("");
-      void captcha.refresh();
+      setTurnstileToken("");
+      setTurnstileResetKey((key) => key + 1);
       setRequesting(false);
     }
   };
 
   return (
     <>
-      <CaptchaField
-        captcha={captcha.captcha}
-        loading={captcha.loading}
-        value={captchaAnswer}
-        disabled={disabled || requesting}
-        onChange={setCaptchaAnswer}
-        onRefresh={() => void captcha.refresh()}
+      <TurnstileField
+        action={turnstileAction}
+        resetKey={turnstileResetKey}
+        onTokenChange={setTurnstileToken}
       />
       <div className="grid grid-cols-[1fr_112px] gap-2">
         <input
@@ -117,7 +109,7 @@ export function SendCodeField({
         <button
           type="button"
           onClick={() => void handleRequestCode()}
-          disabled={disabled || requesting || captcha.loading || cooldown > 0}
+          disabled={disabled || requesting || !turnstileToken || cooldown > 0}
           className="flex h-9 w-28 items-center justify-center rounded-lg border border-[var(--divider)] px-3 text-sm font-medium text-[var(--ink-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
         >
           {requesting ? (
