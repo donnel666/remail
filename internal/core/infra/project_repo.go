@@ -513,7 +513,7 @@ func (r *ProjectRepo) DeleteWithLog(ctx context.Context, projectID uint, log *go
 	})
 }
 
-func (r *ProjectRepo) BulkTransitionWithLog(ctx context.Context, filter coreapp.ProjectListFilter, from domain.ProjectStatus, to domain.ProjectStatus, log *governancedomain.OperationLog) (int, error) {
+func (r *ProjectRepo) BulkTransitionWithLog(ctx context.Context, filter coreapp.ProjectListFilter, from domain.ProjectStatus, to domain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (int, error) {
 	var affected int64
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := r.projectListQueryWithDB(ctx, tx, filter).Where("projects.status = ?", string(from))
@@ -522,7 +522,7 @@ func (r *ProjectRepo) BulkTransitionWithLog(ctx context.Context, filter coreapp.
 		}
 		result := query.Updates(map[string]any{
 			"status":        string(to),
-			"review_reason": "",
+			"review_reason": reviewReason,
 			"updated_at":    time.Now(),
 		})
 		if result.Error != nil {

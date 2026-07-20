@@ -212,14 +212,14 @@ func (r *mockProjectRepo) DeleteWithLog(_ context.Context, projectID uint, log *
 	return nil
 }
 
-func (r *mockProjectRepo) BulkTransitionWithLog(_ context.Context, filter coreapp.ProjectListFilter, from coredomain.ProjectStatus, to coredomain.ProjectStatus, log *governancedomain.OperationLog) (int, error) {
+func (r *mockProjectRepo) BulkTransitionWithLog(_ context.Context, filter coreapp.ProjectListFilter, from coredomain.ProjectStatus, to coredomain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (int, error) {
 	affected := 0
 	for _, detail := range r.details {
 		if !mockProjectMatchesFilter(detail.Project, filter) || detail.Project.Status != from {
 			continue
 		}
 		detail.Project.Status = to
-		detail.Project.ReviewReason = ""
+		detail.Project.ReviewReason = reviewReason
 		r.upsertSummary(detail)
 		affected++
 	}
@@ -3985,6 +3985,35 @@ func TestCoreHandler_AdminProjectBulkSelectionShapeValidation(t *testing.T) {
 	h.PostAdminProjectsDelete(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestCoreHandler_AdminProjectsReject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockProjectRepo()
+	detail := projectDetailForAPITest()
+	detail.Project.ID = 10
+	detail.Project.Status = coredomain.ProjectStatusReviewing
+	repo.details[10] = detail
+	repo.upsertSummary(detail)
+	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	h := NewCoreHandler(mod)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		"POST",
+		"/v1/admin/projects/reject",
+		strings.NewReader(`{"selection":{"mode":"ids","projectIds":[10]},"reviewReason":"资料不完整"}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
+
+	h.PostAdminProjectsReject(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, coredomain.ProjectStatusDelisted, repo.details[10].Project.Status)
+	require.Equal(t, "资料不完整", repo.details[10].Project.ReviewReason)
 }
 
 func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {

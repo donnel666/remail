@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ type ProjectRepository interface {
 	ApproveWithConfigAndLog(ctx context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error
 	TransitionWithLog(ctx context.Context, projectID uint, from domain.ProjectStatus, to domain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (*domain.ProjectDetail, error)
 	DeleteWithLog(ctx context.Context, projectID uint, log *governancedomain.OperationLog) error
-	BulkTransitionWithLog(ctx context.Context, filter ProjectListFilter, from domain.ProjectStatus, to domain.ProjectStatus, log *governancedomain.OperationLog) (int, error)
+	BulkTransitionWithLog(ctx context.Context, filter ProjectListFilter, from domain.ProjectStatus, to domain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (int, error)
 	BulkDeleteWithLog(ctx context.Context, filter ProjectListFilter, log *governancedomain.OperationLog) (int, error)
 	ListAccesses(ctx context.Context, projectID uint) ([]domain.ProjectAccess, error)
 	GrantAccessWithLog(ctx context.Context, projectID, userID, grantedBy uint, log *governancedomain.OperationLog) (*domain.ProjectAccess, error)
@@ -113,6 +114,7 @@ type ProjectBulkResult struct {
 
 type ProjectSummary struct {
 	Project       domain.Project
+	Owner         *AdminOwnerSummary
 	Products      []domain.Product
 	ProductCount  int
 	MailRuleCount int
@@ -175,6 +177,7 @@ type ProjectMailRuleRequest struct {
 // ProjectUseCase handles project/product/rule commands.
 type ProjectUseCase struct {
 	projects    ProjectRepository
+	owners      OwnerQueryPort
 	historyScan func(context.Context, uint, string) error
 }
 
@@ -184,6 +187,10 @@ func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
 
 func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string) error) {
 	uc.historyScan = scan
+}
+
+func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
+	uc.owners = owners
 }
 
 func (uc *ProjectUseCase) List(ctx context.Context, filter ProjectListFilter, offset, limit int) (*ProjectListResult, error) {
@@ -205,6 +212,27 @@ func (uc *ProjectUseCase) List(ctx context.Context, filter ProjectListFilter, of
 	items, err := uc.projects.List(ctx, normalized, offset, limit)
 	if err != nil {
 		return nil, err
+	}
+	if normalized.IsAdmin && uc.owners != nil {
+		ownerIDs := make([]uint, 0, len(items))
+		for i := range items {
+			if items[i].Project.ApplicantUserID != nil {
+				ownerIDs = append(ownerIDs, *items[i].Project.ApplicantUserID)
+			}
+		}
+		owners, err := uc.owners.GetByIDs(ctx, uniqueProjectIDs(ownerIDs))
+		if err != nil {
+			return nil, fmt.Errorf("load project owners: %w", err)
+		}
+		for i := range items {
+			if items[i].Project.ApplicantUserID == nil {
+				continue
+			}
+			if owner, ok := owners[*items[i].Project.ApplicantUserID]; ok {
+				ownerCopy := owner
+				items[i].Owner = &ownerCopy
+			}
+		}
 	}
 	facets, err := uc.projects.Facets(ctx, projectListFacetBaseFilter(normalized))
 	if err != nil {
@@ -519,7 +547,7 @@ func (uc *ProjectUseCase) AdminBulkRelist(ctx context.Context, operatorUserID ui
 		return nil, err
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.bulk_relist", "project", "bulk", "success", "Projects relisted.")
-	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusDelisted, domain.ProjectStatusListed, log)
+	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusDelisted, domain.ProjectStatusListed, "", log)
 	if err != nil {
 		return nil, err
 	}
@@ -532,7 +560,24 @@ func (uc *ProjectUseCase) AdminBulkDelist(ctx context.Context, operatorUserID ui
 		return nil, err
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.bulk_delist", "project", "bulk", "success", "Projects delisted.")
-	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusListed, domain.ProjectStatusDelisted, log)
+	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusListed, domain.ProjectStatusDelisted, "", log)
+	if err != nil {
+		return nil, err
+	}
+	return &ProjectBulkResult{Affected: affected}, nil
+}
+
+func (uc *ProjectUseCase) AdminBulkReject(ctx context.Context, operatorUserID uint, selection ProjectBulkSelection, reviewReason, requestID, path string) (*ProjectBulkResult, error) {
+	reason := strings.TrimSpace(reviewReason)
+	if reason == "" || len([]rune(reason)) > 500 {
+		return nil, domain.ErrInvalidProject
+	}
+	filter, err := uc.normalizeBulkSelection(selection)
+	if err != nil {
+		return nil, err
+	}
+	log := projectOperationLog(operatorUserID, requestID, path, "core.project.bulk_reject", "project", "bulk", "success", "Projects rejected.")
+	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusReviewing, domain.ProjectStatusDelisted, reason, log)
 	if err != nil {
 		return nil, err
 	}

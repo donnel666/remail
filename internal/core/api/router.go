@@ -96,6 +96,7 @@ func RegisterCoreRoutes(rg *gin.RouterGroup, mod *CoreModule, fetcher middleware
 		admin.POST("/projects", middleware.PermissionRequired(checker, "core:project", "write"), h.PostAdminProject)
 		admin.POST("/projects/relist", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsRelist)
 		admin.POST("/projects/delist", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsDelist)
+		admin.POST("/projects/reject", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsReject)
 		admin.POST("/projects/delete", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectsDelete)
 		admin.PUT("/projects/:projectId", middleware.PermissionRequired(checker, "core:project", "write"), h.PutAdminProject)
 		admin.POST("/projects/:projectId/approve", middleware.PermissionRequired(checker, "core:project", "operate"), h.PostAdminProjectApprove)

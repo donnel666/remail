@@ -63,6 +63,9 @@ func (m *CoreModule) SetAdminResourcePorts(
 	if m.AdminDomainCommands != nil {
 		m.AdminDomainCommands.SetPorts(owners, allocations)
 	}
+	if m.ProjectUseCase != nil {
+		m.ProjectUseCase.SetOwnerQueryPort(owners)
+	}
 }
 
 func (m *CoreModule) SetAdminProxyBindingQueryPort(port coreapp.AdminProxyBindingQueryPort) {

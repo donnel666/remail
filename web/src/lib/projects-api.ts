@@ -278,6 +278,30 @@ export async function deleteAdminProjectsByFilter(filter: ProjectListFilter) {
   );
 }
 
+export async function rejectAdminProjectsByIds(
+  projectIds: number[],
+  reviewReason: string
+) {
+  return unwrap<ProjectBulkCommandResponse>(
+    await client.POST("/v1/admin/projects/reject", {
+      body: { reviewReason, selection: projectIdSelection(projectIds) },
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
+export async function rejectAdminProjectsByFilter(
+  filter: ProjectListFilter,
+  reviewReason: string
+) {
+  return unwrap<ProjectBulkCommandResponse>(
+    await client.POST("/v1/admin/projects/reject", {
+      body: { reviewReason, selection: filterSelection(filter) },
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
 export async function listAdminProjectAccess(projectId: number) {
   return unwrap<ProjectAccessListResponse>(
     await client.GET("/v1/admin/projects/{projectId}/access", {

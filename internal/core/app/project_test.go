@@ -11,8 +11,36 @@ import (
 )
 
 type fakeProjectRepo struct {
-	detail *domain.ProjectDetail
-	log    *governancedomain.OperationLog
+	detail           *domain.ProjectDetail
+	bulkReviewReason string
+	items            []ProjectSummary
+	log              *governancedomain.OperationLog
+}
+
+type projectOwnerQueryStub struct {
+	owner AdminOwnerSummary
+}
+
+func (s projectOwnerQueryStub) GetByIDs(_ context.Context, ids []uint) (map[uint]AdminOwnerSummary, error) {
+	result := make(map[uint]AdminOwnerSummary, len(ids))
+	for _, id := range ids {
+		if id == s.owner.ID {
+			result[id] = s.owner
+		}
+	}
+	return result, nil
+}
+
+func (projectOwnerQueryStub) SearchAdminOwners(context.Context, string, int) ([]AdminOwnerSummary, error) {
+	return nil, nil
+}
+
+func (s projectOwnerQueryStub) ValidateTargetOwner(_ context.Context, id uint) (*AdminOwnerSummary, error) {
+	if id != s.owner.ID {
+		return nil, nil
+	}
+	owner := s.owner
+	return &owner, nil
 }
 
 func (r *fakeProjectRepo) CreateWithLog(_ context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error {
@@ -75,7 +103,8 @@ func (r *fakeProjectRepo) DeleteWithLog(_ context.Context, _ uint, log *governan
 	return nil
 }
 
-func (r *fakeProjectRepo) BulkTransitionWithLog(_ context.Context, _ ProjectListFilter, _ domain.ProjectStatus, _ domain.ProjectStatus, log *governancedomain.OperationLog) (int, error) {
+func (r *fakeProjectRepo) BulkTransitionWithLog(_ context.Context, _ ProjectListFilter, _ domain.ProjectStatus, _ domain.ProjectStatus, reviewReason string, log *governancedomain.OperationLog) (int, error) {
+	r.bulkReviewReason = reviewReason
 	r.log = log
 	return 2, nil
 }
@@ -100,7 +129,7 @@ func (r *fakeProjectRepo) RevokeAccessWithLog(_ context.Context, _ uint, _ uint,
 }
 
 func (r *fakeProjectRepo) List(_ context.Context, _ ProjectListFilter, _, _ int) ([]ProjectSummary, error) {
-	return nil, nil
+	return r.items, nil
 }
 
 func (r *fakeProjectRepo) Count(_ context.Context, _ ProjectListFilter) (int64, error) {
@@ -138,6 +167,24 @@ func TestProjectUseCaseAdminCreateListedRejectsInvalidEnums(t *testing.T) {
 	req.Products[0].Status = "archived"
 	_, err = uc.AdminCreateListed(context.Background(), 1, req, "req-2", "/v1/admin/projects")
 	require.ErrorIs(t, err, domain.ErrInvalidProduct)
+}
+
+func TestProjectUseCaseListEnrichesAdminProjectOwners(t *testing.T) {
+	ownerID := uint(7)
+	repo := &fakeProjectRepo{items: []ProjectSummary{{
+		Project: domain.Project{ApplicantUserID: &ownerID},
+	}}}
+	uc := NewProjectUseCase(repo)
+	uc.SetOwnerQueryPort(projectOwnerQueryStub{owner: AdminOwnerSummary{
+		ID:       ownerID,
+		Email:    "owner@example.com",
+		Nickname: "Owner",
+	}})
+
+	result, err := uc.List(context.Background(), ProjectListFilter{Scope: ProjectListScopeAll, IsAdmin: true}, 0, 20)
+
+	require.NoError(t, err)
+	require.Equal(t, "owner@example.com", result.Items[0].Owner.Email)
 }
 
 func TestNormalizeOrderingAmountPreservesLedgerPrecision(t *testing.T) {
@@ -328,6 +375,25 @@ func TestProjectUseCaseAdminReviewTransitions(t *testing.T) {
 	require.Equal(t, domain.ProjectStatusDelisted, rejected.Project.Status)
 	require.Equal(t, "规则不清晰", rejected.Project.ReviewReason)
 	require.Equal(t, "core.project.reject", repo.log.OperationType)
+}
+
+func TestProjectUseCaseAdminBulkReject(t *testing.T) {
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+
+	result, err := uc.AdminBulkReject(
+		context.Background(),
+		9,
+		ProjectBulkSelection{Mode: ProjectSelectionModeIDs, ProjectIDs: []uint{5, 6}},
+		"  资料不完整  ",
+		"req-bulk-reject",
+		"/v1/admin/projects/reject",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Affected)
+	require.Equal(t, "资料不完整", repo.bulkReviewReason)
+	require.Equal(t, "core.project.bulk_reject", repo.log.OperationType)
 }
 
 func TestProjectUseCaseAdminApproveWithConfig(t *testing.T) {

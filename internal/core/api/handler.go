@@ -1014,28 +1014,35 @@ func (h *CoreHandler) adminProjectTransition(
 
 // POST /v1/admin/projects/relist
 func (h *CoreHandler) PostAdminProjectsRelist(c *gin.Context) {
-	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection, _ string) (*coreapp.ProjectBulkResult, error) {
 		return h.module.ProjectUseCase.AdminBulkRelist(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
 	})
 }
 
 // POST /v1/admin/projects/delist
 func (h *CoreHandler) PostAdminProjectsDelist(c *gin.Context) {
-	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection, _ string) (*coreapp.ProjectBulkResult, error) {
 		return h.module.ProjectUseCase.AdminBulkDelist(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
+	})
+}
+
+// POST /v1/admin/projects/reject
+func (h *CoreHandler) PostAdminProjectsReject(c *gin.Context) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection, reviewReason string) (*coreapp.ProjectBulkResult, error) {
+		return h.module.ProjectUseCase.AdminBulkReject(c.Request.Context(), userID, selection, reviewReason, middleware.GetRequestID(c), c.FullPath())
 	})
 }
 
 // POST /v1/admin/projects/delete
 func (h *CoreHandler) PostAdminProjectsDelete(c *gin.Context) {
-	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error) {
+	h.adminProjectBulkCommand(c, func(userID uint, selection coreapp.ProjectBulkSelection, _ string) (*coreapp.ProjectBulkResult, error) {
 		return h.module.ProjectUseCase.AdminBulkDelete(c.Request.Context(), userID, selection, middleware.GetRequestID(c), c.FullPath())
 	})
 }
 
 func (h *CoreHandler) adminProjectBulkCommand(
 	c *gin.Context,
-	action func(userID uint, selection coreapp.ProjectBulkSelection) (*coreapp.ProjectBulkResult, error),
+	action func(userID uint, selection coreapp.ProjectBulkSelection, reviewReason string) (*coreapp.ProjectBulkResult, error),
 ) {
 	userID, ok := requireCurrentUserID(c)
 	if !ok {
@@ -1059,7 +1066,7 @@ func (h *CoreHandler) adminProjectBulkCommand(
 		return
 	}
 	selection := toAppProjectBulkSelection(req.Selection)
-	result, err := action(userID, selection)
+	result, err := action(userID, selection, req.ReviewReason)
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -1418,6 +1425,16 @@ func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool,
 		UpdatedAt:      project.UpdatedAt,
 	}
 	if includeInternal || isOwnProjectApplication(project, viewerUserID) {
+		if summary.Owner != nil {
+			item.Owner = &adminMicrosoftOwnerResponse{
+				ID:        summary.Owner.ID,
+				Email:     summary.Owner.Email,
+				Nickname:  summary.Owner.Nickname,
+				GroupName: summary.Owner.GroupName,
+				Role:      summary.Owner.Role,
+				Enabled:   summary.Owner.Enabled,
+			}
+		}
 		item.ApplicantUserID = project.ApplicantUserID
 		item.ReviewReason = project.ReviewReason
 	}

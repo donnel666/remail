@@ -54,6 +54,8 @@ import {
   getProject,
   listProjects,
   rejectAdminProject,
+  rejectAdminProjectsByFilter,
+  rejectAdminProjectsByIds,
   relistAdminProject,
   relistAdminProjectsByFilter,
   relistAdminProjectsByIds,
@@ -68,6 +70,7 @@ import {
   updateAdminProject,
 } from "@/lib/projects-api";
 
+import { OwnerIdentity } from "./admin-microsoft/microsoft-meta";
 import {
   DATE_RANGE_DROPDOWN_CLASS,
   createDateRangePresets,
@@ -1417,7 +1420,9 @@ export default function AdminProjects() {
   const [editorDetail, setEditorDetail] = useState<ProjectDetailResponse | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [operatingProjectID, setOperatingProjectID] = useState<number | null>(null);
-  const [bulkOperating, setBulkOperating] = useState<"relist" | "delist" | "delete" | null>(null);
+  const [bulkOperating, setBulkOperating] = useState<
+    "relist" | "delist" | "reject" | "delete" | null
+  >(null);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
 
@@ -1732,6 +1737,62 @@ export default function AdminProjects() {
     });
   };
 
+  const confirmBulkReject = useCallback(
+    (
+      content: ReactNode,
+      action: (reviewReason: string) => Promise<{ affected: number }>,
+      resetPage = false
+    ) => {
+      let reviewReason = "";
+      Modal.confirm({
+        cancelText: t("Cancel"),
+        content: (
+          <div className="space-y-3">
+            <div>{content}</div>
+            <TextArea
+              autosize
+              maxCount={500}
+              onChange={(value) => {
+                reviewReason = String(value);
+              }}
+              placeholder={t("Please enter review reason")}
+              rows={4}
+            />
+          </div>
+        ),
+        okText: t("Reject"),
+        okButtonProps: { type: "danger" },
+        onOk: async () => {
+          const reason = reviewReason.trim();
+          if (!reason) {
+            Toast.error(t("Review reason is required."));
+            throw new Error("review reason required");
+          }
+          setBulkOperating("reject");
+          try {
+            let response: { affected: number };
+            try {
+              response = await action(reason);
+            } catch (error) {
+              Toast.error(getIamErrorMessage(t, error, "Project operation failed."));
+              throw error;
+            }
+            Toast.success(
+              t("Projects bulk operation completed.", { count: response.affected })
+            );
+            setSelectedKeys([]);
+            if (resetPage) setActivePage(1);
+            await refresh();
+          } finally {
+            setBulkOperating(null);
+          }
+        },
+        title: t("Reject project"),
+      });
+    },
+    [refresh, t]
+  );
+
   const selectedIDSet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const selectedListedProjectIDs = useMemo(
     () =>
@@ -1744,6 +1805,13 @@ export default function AdminProjects() {
     () =>
       items
         .filter((item) => selectedIDSet.has(item.id) && item.status === "delisted")
+        .map((item) => item.id),
+    [items, selectedIDSet]
+  );
+  const selectedReviewingProjectIDs = useMemo(
+    () =>
+      items
+        .filter((item) => selectedIDSet.has(item.id) && item.status === "reviewing")
         .map((item) => item.id),
     [items, selectedIDSet]
   );
@@ -1852,6 +1920,36 @@ export default function AdminProjects() {
     });
   }, [refresh, selectedDeletableProjectIDs, t]);
 
+  const confirmRejectSelected = useCallback(() => {
+    if (selectedReviewingProjectIDs.length === 0) {
+      Toast.info(t("No selected projects to reject."));
+      return;
+    }
+    confirmBulkReject(
+      t("Confirm reject selected projects content", {
+        count: selectedReviewingProjectIDs.length,
+      }),
+      (reviewReason) =>
+        rejectAdminProjectsByIds(selectedReviewingProjectIDs, reviewReason)
+    );
+  }, [confirmBulkReject, selectedReviewingProjectIDs, t]);
+
+  const selectionExtraActions = useMemo(
+    () =>
+      selectedReviewingProjectIDs.length > 0
+        ? [
+            {
+              key: "reject",
+              labelKey: "Reject",
+              loading: bulkOperating === "reject",
+              onClick: confirmRejectSelected,
+              type: "danger" as const,
+            },
+          ]
+        : [],
+    [bulkOperating, confirmRejectSelected, selectedReviewingProjectIDs.length]
+  );
+
   useSelectionNotification({
     selectedCount: selectedKeys.length,
     onCheck: confirmRelistSelected,
@@ -1860,6 +1958,7 @@ export default function AdminProjects() {
     onSell: confirmDelistSelected,
     checkLabelKey: "Relist",
     deleteLabelKey: "Delete",
+    extraActions: selectionExtraActions,
     sellLabelKey: "Delist",
     checkLoading: bulkOperating === "relist",
     deleteLoading: bulkOperating === "delete",
@@ -1927,6 +2026,22 @@ export default function AdminProjects() {
               </div>
             </div>
           ),
+        },
+        {
+          dataIndex: "applicantUserId",
+          key: "owner",
+          title: t("Owner"),
+          width: 310,
+          render: (_: unknown, record: ProjectItem) => {
+            const owner = record.owner;
+            return owner ? (
+              <OwnerIdentity owner={owner} t={t} />
+            ) : (
+              <span className="text-[var(--semi-color-text-3)]">
+                {record.applicantUserId ? `#${record.applicantUserId}` : "-"}
+              </span>
+            );
+          },
         },
         {
           dataIndex: "status",
@@ -2138,6 +2253,29 @@ export default function AdminProjects() {
             type="tertiary"
           >
             {t("Delist")}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={t("Reject all")}
+          mouseEnterDelay={0}
+          mouseLeaveDelay={0.05}
+          position="top"
+        >
+          <Button
+            className="flex-1 md:flex-initial"
+            loading={bulkOperating === "reject"}
+            onClick={() =>
+              confirmBulkReject(
+                t("Confirm reject all matching projects content"),
+                (reviewReason) =>
+                  rejectAdminProjectsByFilter(listFilter, reviewReason),
+                true
+              )
+            }
+            size="small"
+            type="danger"
+          >
+            {t("Reject")}
           </Button>
         </Tooltip>
         {statusFilter !== "reviewing" ? (
@@ -2403,7 +2541,7 @@ export default function AdminProjects() {
           pagination={false}
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={{ x: "max(100%, 1268px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1578px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

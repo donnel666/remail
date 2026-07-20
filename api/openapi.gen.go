@@ -6010,6 +6010,12 @@ type ProjectBulkFilterProductType string
 // ProjectBulkFilterStatus defines model for ProjectBulkFilter.Status.
 type ProjectBulkFilterStatus string
 
+// ProjectBulkRejectRequest defines model for ProjectBulkRejectRequest.
+type ProjectBulkRejectRequest struct {
+	ReviewReason string               `json:"reviewReason"`
+	Selection    ProjectBulkSelection `json:"selection"`
+}
+
 // ProjectBulkSelection defines model for ProjectBulkSelection.
 type ProjectBulkSelection struct {
 	Filter     *ProjectBulkFilter       `json:"filter,omitempty"`
@@ -6049,16 +6055,17 @@ type ProjectInventoryTotalResponse struct {
 
 // ProjectItem defines model for ProjectItem.
 type ProjectItem struct {
-	AccessType      ProjectItemAccessType `json:"accessType"`
-	ApplicantUserId *int                  `json:"applicantUserId,omitempty"`
-	CreatedAt       time.Time             `json:"createdAt"`
-	Description     *string               `json:"description,omitempty"`
-	Id              int                   `json:"id"`
-	LogoUrl         *string               `json:"logoUrl,omitempty"`
-	LooseMatch      bool                  `json:"looseMatch"`
-	MailRuleCount   int                   `json:"mailRuleCount"`
-	Name            string                `json:"name"`
-	ProductCount    int                   `json:"productCount"`
+	AccessType      ProjectItemAccessType       `json:"accessType"`
+	ApplicantUserId *int                        `json:"applicantUserId,omitempty"`
+	CreatedAt       time.Time                   `json:"createdAt"`
+	Description     *string                     `json:"description,omitempty"`
+	Id              int                         `json:"id"`
+	LogoUrl         *string                     `json:"logoUrl,omitempty"`
+	LooseMatch      bool                        `json:"looseMatch"`
+	MailRuleCount   int                         `json:"mailRuleCount"`
+	Name            string                      `json:"name"`
+	Owner           *AdminMicrosoftOwnerSummary `json:"owner,omitempty"`
+	ProductCount    int                         `json:"productCount"`
 
 	// Products Safe product price summaries for project square cards. Supplier prices, rules and weights are intentionally omitted.
 	Products       *[]ProjectProductSummary `json:"products,omitempty"`
@@ -7436,6 +7443,12 @@ type PostAdminProjectLogoParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminProjectsRejectParams defines parameters for PostAdminProjectsReject.
+type PostAdminProjectsRejectParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminProjectsRelistParams defines parameters for PostAdminProjectsRelist.
 type PostAdminProjectsRelistParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -8614,6 +8627,9 @@ type PostAdminProjectsDelistJSONRequestBody = ProjectBulkCommandRequest
 // PostAdminProjectLogoMultipartRequestBody defines body for PostAdminProjectLogo for multipart/form-data ContentType.
 type PostAdminProjectLogoMultipartRequestBody PostAdminProjectLogoMultipartBody
 
+// PostAdminProjectsRejectJSONRequestBody defines body for PostAdminProjectsReject for application/json ContentType.
+type PostAdminProjectsRejectJSONRequestBody = ProjectBulkRejectRequest
+
 // PostAdminProjectsRelistJSONRequestBody defines body for PostAdminProjectsRelist for application/json ContentType.
 type PostAdminProjectsRelistJSONRequestBody = ProjectBulkCommandRequest
 
@@ -9582,6 +9598,9 @@ type ServerInterface interface {
 	// Upload a project logo
 	// (POST /v1/admin/projects/logos)
 	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
+	// Reject reviewing projects in bulk
+	// (POST /v1/admin/projects/reject)
+	PostAdminProjectsReject(c *gin.Context, params PostAdminProjectsRejectParams)
 	// Relist projects in bulk
 	// (POST /v1/admin/projects/relist)
 	PostAdminProjectsRelist(c *gin.Context, params PostAdminProjectsRelistParams)
@@ -13132,6 +13151,51 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectLogo(c *gin.Context) {
 	}
 
 	siw.Handler.PostAdminProjectLogo(c, params)
+}
+
+// PostAdminProjectsReject operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProjectsReject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProjectsRejectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProjectsReject(c, params)
 }
 
 // PostAdminProjectsRelist operation middleware
@@ -20967,6 +21031,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/projects/delete", wrapper.PostAdminProjectsDelete)
 	router.POST(options.BaseURL+"/v1/admin/projects/delist", wrapper.PostAdminProjectsDelist)
 	router.POST(options.BaseURL+"/v1/admin/projects/logos", wrapper.PostAdminProjectLogo)
+	router.POST(options.BaseURL+"/v1/admin/projects/reject", wrapper.PostAdminProjectsReject)
 	router.POST(options.BaseURL+"/v1/admin/projects/relist", wrapper.PostAdminProjectsRelist)
 	router.DELETE(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.DeleteAdminProject)
 	router.PUT(options.BaseURL+"/v1/admin/projects/:projectId", wrapper.PutAdminProject)

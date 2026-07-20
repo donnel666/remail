@@ -2498,6 +2498,54 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/projects/reject:
+    post:
+      operationId: postAdminProjectsReject
+      summary: Reject reviewing projects in bulk
+      tags:
+        - Projects
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectBulkRejectRequest"
+      responses:
+        "200":
+          description: Bulk reject result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBulkCommandResponse"
+        "400":
+          description: Invalid request body or selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid project selection or review reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/projects/delete:
     post:
       operationId: postAdminProjectsDelete
@@ -12815,6 +12863,20 @@ components:
           $ref: "#/components/schemas/ProjectBulkSelection"
       additionalProperties: false
 
+    ProjectBulkRejectRequest:
+      type: object
+      required:
+        - selection
+        - reviewReason
+      properties:
+        selection:
+          $ref: "#/components/schemas/ProjectBulkSelection"
+        reviewReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      additionalProperties: false
+
     ProjectBulkCommandResponse:
       type: object
       required:
@@ -13028,6 +13090,8 @@ components:
         accessType:
           type: string
           enum: [public, private]
+        owner:
+          $ref: "#/components/schemas/AdminMicrosoftOwnerSummary"
         applicantUserId:
           type: integer
         reviewReason:

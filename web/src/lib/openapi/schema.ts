@@ -790,6 +790,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/projects/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject reviewing projects in bulk */
+        post: operations["postAdminProjectsReject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/projects/delete": {
         parameters: {
             query?: never;
@@ -4365,6 +4382,10 @@ export interface components {
         ProjectBulkCommandRequest: {
             selection: components["schemas"]["ProjectBulkSelection"];
         };
+        ProjectBulkRejectRequest: {
+            selection: components["schemas"]["ProjectBulkSelection"];
+            reviewReason: string;
+        };
         ProjectBulkCommandResponse: {
             affected: number;
         };
@@ -4446,6 +4467,7 @@ export interface components {
             status: "reviewing" | "listed" | "delisted";
             /** @enum {string} */
             accessType: "public" | "private";
+            owner?: components["schemas"]["AdminMicrosoftOwnerSummary"];
             applicantUserId?: number;
             reviewReason?: string;
             looseMatch: boolean;
@@ -8795,6 +8817,69 @@ export interface operations {
                 };
             };
             /** @description Invalid project status */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminProjectsReject: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectBulkRejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk reject result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBulkCommandResponse"];
+                };
+            };
+            /** @description Invalid request body or selection */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid project selection or review reason */
             422: {
                 headers: {
                     [name: string]: unknown;

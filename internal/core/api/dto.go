@@ -109,7 +109,8 @@ type ProjectBulkSelectionRequest struct {
 
 // ProjectBulkCommandRequest is the request body for admin project bulk commands.
 type ProjectBulkCommandRequest struct {
-	Selection ProjectBulkSelectionRequest `json:"selection" binding:"required"`
+	Selection    ProjectBulkSelectionRequest `json:"selection" binding:"required"`
+	ReviewReason string                      `json:"reviewReason,omitempty"`
 }
 
 // GrantProjectAccessRequest grants a user access to a private project.
@@ -319,6 +320,7 @@ type ProjectItemResponse struct {
 	Description     string                          `json:"description,omitempty"`
 	Status          string                          `json:"status"`
 	AccessType      string                          `json:"accessType"`
+	Owner           *adminMicrosoftOwnerResponse    `json:"owner,omitempty"`
 	ApplicantUserID *uint                           `json:"applicantUserId,omitempty"`
 	ReviewReason    string                          `json:"reviewReason,omitempty"`
 	LooseMatch      bool                            `json:"looseMatch"`
