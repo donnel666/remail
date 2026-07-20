@@ -961,7 +961,7 @@ func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *te
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
 		UserID:           2,
 		Name:             "delete-keeps-facts",
-		ConcurrencyLimit: 5,
+		ConcurrencyLimit: intPointer(5),
 		IdempotencyKey:   "apikey-idem-delete-keeps-facts",
 		RequestID:        "req-apikey-delete-keeps-facts",
 	})
@@ -1107,7 +1107,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 		UserID:             2,
 		Name:               "limited",
 		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   1,
+		ConcurrencyLimit:   intPointer(1),
 		IdempotencyKey:     "apikey-idem-limited",
 		RequestID:          "req-apikey-limited",
 	})
@@ -1125,6 +1125,32 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 
 }
 
+func TestAPIKeyDefaultConcurrencyIsNullMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
+    (2, 'default-concurrency@test.local', 'hash', 'default-concurrency', 'active', 'user')`).Error)
+
+	openapiMod := openapiapi.NewModule(db)
+	defaultKey, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:         2,
+		Name:           "default-concurrency",
+		IdempotencyKey: "apikey-idem-default-concurrency",
+	})
+	require.NoError(t, err)
+	require.Nil(t, defaultKey.ConcurrencyLimit)
+	replayedDefaultKey, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:         2,
+		Name:           "default-concurrency",
+		IdempotencyKey: "apikey-idem-default-concurrency",
+	})
+	require.NoError(t, err)
+	require.Equal(t, defaultKey.ID, replayedDefaultKey.ID)
+	var storedDefault struct{ ConcurrencyLimit *int }
+	require.NoError(t, db.Table("api_keys").Select("concurrency_limit").Where("id = ?", defaultKey.ID).Take(&storedDefault).Error)
+	require.Nil(t, storedDefault.ConcurrencyLimit)
+}
+
 func TestAPIKeyQuotaAndNullableLimitsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
@@ -1138,7 +1164,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 		UserID:             2,
 		Name:               "quota-limited",
 		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   5,
+		ConcurrencyLimit:   intPointer(5),
 		QuotaLimit:         &quotaLimit,
 		IdempotencyKey:     "apikey-idem-quota-limited",
 		RequestID:          "req-apikey-quota-limited",
@@ -1158,22 +1184,27 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 		KeyID:              key.ID,
 		RateLimitSet:       true,
 		RateLimitPerMinute: nil,
+		ConcurrencySet:     true,
+		ConcurrencyLimit:   nil,
 		QuotaSet:           true,
 		QuotaLimit:         nil,
 	})
 	require.NoError(t, err)
 	require.Nil(t, updated.RateLimitPerMinute)
+	require.Nil(t, updated.ConcurrencyLimit)
 	require.Nil(t, updated.QuotaLimit)
 
 	var nullable struct {
 		RateLimitPerMinute *int
+		ConcurrencyLimit   *int
 		QuotaLimit         *int64
 	}
 	require.NoError(t, db.Table("api_keys").
-		Select("rate_limit_per_minute, quota_limit").
+		Select("rate_limit_per_minute, concurrency_limit, quota_limit").
 		Where("id = ?", key.ID).
 		Take(&nullable).Error)
 	require.Nil(t, nullable.RateLimitPerMinute)
+	require.Nil(t, nullable.ConcurrencyLimit)
 	require.Nil(t, nullable.QuotaLimit)
 
 	acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
@@ -1184,7 +1215,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	concurrentKey, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
 		UserID:           2,
 		Name:             "quota-concurrent",
-		ConcurrencyLimit: 20,
+		ConcurrencyLimit: intPointer(20),
 		QuotaLimit:       &oneShotQuota,
 		IdempotencyKey:   "apikey-idem-quota-concurrent",
 		RequestID:        "req-apikey-quota-concurrent",
@@ -1318,7 +1349,7 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 		UserID:             2,
 		Name:               "sdk-concurrent",
 		RateLimitPerMinute: &rateLimit,
-		ConcurrencyLimit:   50,
+		ConcurrencyLimit:   intPointer(50),
 		IdempotencyKey:     "apikey-idem-concurrent",
 		RequestID:          "req-apikey-concurrent",
 	})
@@ -1417,6 +1448,8 @@ func creditBuyer(t *testing.T, db *gorm.DB, userID uint, amount string) {
 	})
 	require.NoError(t, err)
 }
+
+func intPointer(value int) *int { return &value }
 
 func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()

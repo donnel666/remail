@@ -90,7 +90,7 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string) (*domain.APIKe
 	if meta.ExpireAt != nil && !meta.ExpireAt.After(now) {
 		return nil, domain.ErrAPIKeyExpired
 	}
-	if state.active >= meta.ConcurrencyLimit {
+	if state.active >= effectiveAPIKeyConcurrency(meta.ConcurrencyLimit) {
 		return nil, domain.ErrAPIKeyConcurrencyLimit
 	}
 	if meta.RateLimitPerMinute != nil && !state.window.allow(now, *meta.RateLimitPerMinute) {

@@ -161,6 +161,7 @@ func (h *Handler) PatchAPIKey(c *gin.Context) {
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		RateLimitSet:       req.RateLimitSet,
 		ConcurrencyLimit:   req.ConcurrencyLimit,
+		ConcurrencySet:     req.ConcurrencySet,
 		QuotaLimit:         req.QuotaLimit,
 		QuotaSet:           req.QuotaSet,
 	})
@@ -194,6 +195,9 @@ func decodeKeyPatchRequest(c *gin.Context) (KeyPatchRequest, bool) {
 	}
 	if _, exists := raw["rateLimitPerMinute"]; exists {
 		req.RateLimitSet = true
+	}
+	if _, exists := raw["concurrencyLimit"]; exists {
+		req.ConcurrencySet = true
 	}
 	if _, exists := raw["quotaLimit"]; exists {
 		req.QuotaSet = true
@@ -283,6 +287,7 @@ func (h *Handler) PatchAdminUserAPIKey(c *gin.Context) {
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		RateLimitSet:       req.RateLimitSet,
 		ConcurrencyLimit:   req.ConcurrencyLimit,
+		ConcurrencySet:     req.ConcurrencySet,
 		QuotaLimit:         req.QuotaLimit,
 		QuotaSet:           req.QuotaSet,
 	})

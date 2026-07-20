@@ -3534,7 +3534,7 @@ func (e GetWalletTransactionsParamsScope) Valid() bool {
 
 // APIKeyCreateRequest defines model for APIKeyCreateRequest.
 type APIKeyCreateRequest struct {
-	// ConcurrencyLimit Defaults to 5 when omitted.
+	// ConcurrencyLimit Empty uses the system default of 500 concurrent requests.
 	ConcurrencyLimit *int       `json:"concurrencyLimit,omitempty"`
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Name             *string    `json:"name,omitempty"`
@@ -3567,7 +3567,7 @@ type APIKeyPatchRequest struct {
 // APIKeyResponse defines model for APIKeyResponse.
 type APIKeyResponse struct {
 	ActiveRequests   int        `json:"activeRequests"`
-	ConcurrencyLimit int        `json:"concurrencyLimit"`
+	ConcurrencyLimit *int       `json:"concurrencyLimit"`
 	CreatedAt        time.Time  `json:"createdAt"`
 	Enabled          bool       `json:"enabled"`
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`

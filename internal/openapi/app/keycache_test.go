@@ -10,16 +10,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAPIKeyDefaultConcurrency(t *testing.T) {
+	_, concurrency, err := normalizeAPIKeyLimits(nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, concurrency)
+	require.Equal(t, 500, effectiveAPIKeyConcurrency(concurrency))
+
+	zero := 0
+	_, _, err = normalizeAPIKeyLimits(nil, &zero)
+	require.ErrorIs(t, err, domain.ErrInvalidAPIKey)
+}
+
+func TestAPIKeyRuntimeUsesDefaultConcurrency(t *testing.T) {
+	ctx := context.Background()
+	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{ID: 1, UserID: 2, KeyPlain: "rk-test", Enabled: true})
+	rt := newAPIKeyRuntime(repo, time.Now)
+	defer func() { require.NoError(t, rt.close(ctx)) }()
+
+	for range 500 {
+		_, err := rt.begin(ctx, "rk-test")
+		require.NoError(t, err)
+	}
+	_, err := rt.begin(ctx, "rk-test")
+	require.ErrorIs(t, err, domain.ErrAPIKeyConcurrencyLimit)
+	for range 500 {
+		rt.finish(1)
+	}
+}
+
 func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	concurrency := 1
 	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
 		ID:               1,
 		UserID:           2,
 		OwnerRole:        "user",
 		KeyPlain:         "rk-test",
 		Enabled:          true,
-		ConcurrencyLimit: 1,
+		ConcurrencyLimit: &concurrency,
 	})
 	rt := newAPIKeyRuntime(repo, func() time.Time { return now })
 	defer func() {
@@ -50,13 +79,14 @@ func TestAPIKeyRuntimeRateLimitAndQuota(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	rateLimit := 1
 	quotaLimit := int64(2)
+	concurrency := 5
 	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
 		ID:                 1,
 		UserID:             2,
 		OwnerRole:          "user",
 		KeyPlain:           "rk-test",
 		Enabled:            true,
-		ConcurrencyLimit:   5,
+		ConcurrencyLimit:   &concurrency,
 		RateLimitPerMinute: &rateLimit,
 		QuotaLimit:         &quotaLimit,
 	})
@@ -84,12 +114,13 @@ func TestAPIKeyRuntimeRateLimitAndQuota(t *testing.T) {
 
 func TestAPIKeyRuntimeRejectsCachedKeyAfterOwnerDeletion(t *testing.T) {
 	ctx := context.Background()
+	concurrency := 1
 	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
 		ID:               1,
 		UserID:           2,
 		KeyPlain:         "rk-test",
 		Enabled:          true,
-		ConcurrencyLimit: 1,
+		ConcurrencyLimit: &concurrency,
 	})
 	rt := newAPIKeyRuntime(repo, time.Now)
 	defer func() { require.NoError(t, rt.close(ctx)) }()
@@ -105,13 +136,14 @@ func TestAPIKeyRuntimeRejectsCachedKeyAfterOwnerDeletion(t *testing.T) {
 
 func TestAPIKeyRuntimeUsesCurrentOwnerRoleForCachedKey(t *testing.T) {
 	ctx := context.Background()
+	concurrency := 1
 	repo := newAPIKeyRuntimeRepoStub(domain.APIKey{
 		ID:               1,
 		UserID:           2,
 		OwnerRole:        "supplier",
 		KeyPlain:         "rk-test",
 		Enabled:          true,
-		ConcurrencyLimit: 1,
+		ConcurrencyLimit: &concurrency,
 	})
 	rt := newAPIKeyRuntime(repo, time.Now)
 	defer func() { require.NoError(t, rt.close(ctx)) }()

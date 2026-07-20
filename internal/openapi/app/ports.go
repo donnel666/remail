@@ -15,9 +15,9 @@ import (
 const (
 	apiKeyPrefix             = "rk-"
 	orderTokenPrefix         = "st_"
-	defaultAPIKeyConcurrency = 5
+	defaultAPIKeyConcurrency = 500
 	maxRateLimitPerMinute    = 10000
-	maxAPIKeyConcurrency     = 100
+	maxAPIKeyConcurrency     = 500
 )
 
 type Repository interface {
@@ -43,7 +43,7 @@ type CreateAPIKeyRequest struct {
 	Name               string
 	ExpireAt           *time.Time
 	RateLimitPerMinute *int
-	ConcurrencyLimit   int
+	ConcurrencyLimit   *int
 	QuotaLimit         *int64
 	IdempotencyKey     string
 	RequestID          string
@@ -56,7 +56,7 @@ type CreateAPIKeyCommand struct {
 	KeyPrefix          string
 	ExpireAt           *time.Time
 	RateLimitPerMinute *int
-	ConcurrencyLimit   int
+	ConcurrencyLimit   *int
 	QuotaLimit         *int64
 	IdempotencyKey     string
 	RequestFingerprint string
@@ -74,6 +74,7 @@ type UpdateAPIKeyRequest struct {
 	RateLimitPerMinute *int
 	RateLimitSet       bool
 	ConcurrencyLimit   *int
+	ConcurrencySet     bool
 	QuotaLimit         *int64
 	QuotaSet           bool
 }
@@ -88,6 +89,7 @@ type UpdateAPIKeyCommand struct {
 	RateLimitPerMinute *int
 	RateLimitSet       bool
 	ConcurrencyLimit   *int
+	ConcurrencySet     bool
 	QuotaLimit         *int64
 	QuotaSet           bool
 }
@@ -144,7 +146,7 @@ func (uc *UseCase) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (*
 	if req.QuotaLimit != nil && *req.QuotaLimit <= 0 {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	fingerprint := fingerprint("apikey.create", req.UserID, name, timeFingerprint(req.ExpireAt), intFingerprint(rateLimit), concurrency, int64Fingerprint(req.QuotaLimit))
+	fingerprint := fingerprint("apikey.create", req.UserID, name, timeFingerprint(req.ExpireAt), intFingerprint(rateLimit), intFingerprint(concurrency), int64Fingerprint(req.QuotaLimit))
 	key, _, err := uc.repo.CreateAPIKey(ctx, CreateAPIKeyCommand{
 		UserID:             req.UserID,
 		Name:               name,
@@ -210,7 +212,10 @@ func (uc *UseCase) UpdateAPIKey(ctx context.Context, req UpdateAPIKeyRequest) (*
 	if req.RateLimitSet && req.RateLimitPerMinute != nil && !validRateLimitPerMinute(*req.RateLimitPerMinute) {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	if req.ConcurrencyLimit != nil && !validAPIKeyConcurrency(*req.ConcurrencyLimit) {
+	if req.ConcurrencyLimit != nil {
+		req.ConcurrencySet = true
+	}
+	if req.ConcurrencySet && req.ConcurrencyLimit != nil && !validAPIKeyConcurrency(*req.ConcurrencyLimit) {
 		return nil, domain.ErrInvalidAPIKey
 	}
 	if req.QuotaSet && req.QuotaLimit != nil && *req.QuotaLimit <= 0 {
@@ -370,17 +375,24 @@ func intFingerprint(value *int) string {
 	return fmt.Sprintf("%d", *value)
 }
 
-func normalizeAPIKeyLimits(rateLimitPerMinute *int, concurrencyLimit int) (*int, int, error) {
-	if concurrencyLimit == 0 {
-		concurrencyLimit = defaultAPIKeyConcurrency
-	}
+func normalizeAPIKeyLimits(rateLimitPerMinute *int, concurrencyLimit *int) (*int, *int, error) {
 	if rateLimitPerMinute != nil && !validRateLimitPerMinute(*rateLimitPerMinute) {
-		return nil, 0, domain.ErrInvalidAPIKey
+		return nil, nil, domain.ErrInvalidAPIKey
 	}
-	if !validAPIKeyConcurrency(concurrencyLimit) {
-		return nil, 0, domain.ErrInvalidAPIKey
+	if concurrencyLimit == nil {
+		return rateLimitPerMinute, nil, nil
+	}
+	if !validAPIKeyConcurrency(*concurrencyLimit) {
+		return nil, nil, domain.ErrInvalidAPIKey
 	}
 	return rateLimitPerMinute, concurrencyLimit, nil
+}
+
+func effectiveAPIKeyConcurrency(value *int) int {
+	if value == nil {
+		return defaultAPIKeyConcurrency
+	}
+	return *value
 }
 
 func validRateLimitPerMinute(value int) bool {

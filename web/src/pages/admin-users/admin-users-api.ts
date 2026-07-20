@@ -117,7 +117,7 @@ export interface AdminApiKey {
   keyPlain?: string;
   enabled: boolean;
   rateLimitPerMinute: number | null;
-  concurrencyLimit: number;
+  concurrencyLimit: number | null;
   quotaLimit?: number | null;
   quotaUsed: number;
   remainingQuota?: number | null;
@@ -194,7 +194,7 @@ export interface AdminApiKeyInput {
   enabled?: boolean;
   expireAt?: string | null;
   rateLimitPerMinute?: number | null;
-  concurrencyLimit?: number;
+  concurrencyLimit?: number | null;
   quotaLimit?: number | null;
 }
 

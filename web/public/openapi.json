@@ -192,8 +192,10 @@
             ]
           },
           "concurrencyLimit": {
-            "type": "integer",
-            "example": 5
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "quotaLimit": {
             "type": [

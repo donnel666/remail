@@ -3185,8 +3185,8 @@ export interface components {
             expireAt?: string | null;
             /** @description Empty means unlimited requests per minute. */
             rateLimitPerMinute?: number | null;
-            /** @description Defaults to 5 when omitted. */
-            concurrencyLimit?: number;
+            /** @description Empty uses the system default of 500 concurrent requests. */
+            concurrencyLimit?: number | null;
             /**
              * Format: int64
              * @description Empty means unlimited total requests.
@@ -3199,7 +3199,7 @@ export interface components {
             /** Format: date-time */
             expireAt?: string | null;
             rateLimitPerMinute?: number | null;
-            concurrencyLimit?: number;
+            concurrencyLimit?: number | null;
             /** Format: int64 */
             quotaLimit?: number | null;
         };
@@ -3211,7 +3211,7 @@ export interface components {
             keyPlain?: string;
             enabled: boolean;
             rateLimitPerMinute: number | null;
-            concurrencyLimit: number;
+            concurrencyLimit: number | null;
             /** Format: int64 */
             quotaLimit?: number | null;
             /** Format: int64 */

@@ -15,7 +15,7 @@ type APIKey struct {
 	KeyPlain           string
 	Enabled            bool
 	RateLimitPerMinute *int
-	ConcurrencyLimit   int
+	ConcurrencyLimit   *int
 	QuotaLimit         *int64
 	QuotaUsed          int64
 	ActiveRequests     int

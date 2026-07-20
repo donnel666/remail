@@ -6,7 +6,7 @@ type KeyCreateRequest struct {
 	Name               string     `json:"name"`
 	ExpireAt           *time.Time `json:"expireAt"`
 	RateLimitPerMinute *int       `json:"rateLimitPerMinute"`
-	ConcurrencyLimit   int        `json:"concurrencyLimit"`
+	ConcurrencyLimit   *int       `json:"concurrencyLimit"`
 	QuotaLimit         *int64     `json:"quotaLimit"`
 }
 
@@ -18,6 +18,7 @@ type KeyPatchRequest struct {
 	RateLimitPerMinute *int       `json:"rateLimitPerMinute"`
 	RateLimitSet       bool       `json:"-"`
 	ConcurrencyLimit   *int       `json:"concurrencyLimit"`
+	ConcurrencySet     bool       `json:"-"`
 	QuotaLimit         *int64     `json:"quotaLimit"`
 	QuotaSet           bool       `json:"-"`
 }
@@ -29,7 +30,7 @@ type KeyResponse struct {
 	KeyPlain           string     `json:"keyPlain,omitempty"`
 	Enabled            bool       `json:"enabled"`
 	RateLimitPerMinute *int       `json:"rateLimitPerMinute"`
-	ConcurrencyLimit   int        `json:"concurrencyLimit"`
+	ConcurrencyLimit   *int       `json:"concurrencyLimit"`
 	QuotaLimit         *int64     `json:"quotaLimit,omitempty"`
 	QuotaUsed          int64      `json:"quotaUsed"`
 	RemainingQuota     *int64     `json:"remainingQuota,omitempty"`

@@ -26,7 +26,7 @@ type APIKeyModel struct {
 	Enabled            bool       `gorm:"not null;default:true"`
 	DeletedAt          *time.Time `gorm:"column:deleted_at"`
 	RateLimitPerMinute *int       `gorm:"column:rate_limit_per_minute"`
-	ConcurrencyLimit   int        `gorm:"not null;column:concurrency_limit"`
+	ConcurrencyLimit   *int       `gorm:"column:concurrency_limit"`
 	QuotaLimit         *int64     `gorm:"column:quota_limit"`
 	QuotaUsed          int64      `gorm:"not null;column:quota_used"`
 	ExpireAt           *time.Time `gorm:"column:expire_at"`
@@ -250,8 +250,12 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 			updates["rate_limit_per_minute"] = *cmd.RateLimitPerMinute
 		}
 	}
-	if cmd.ConcurrencyLimit != nil {
-		updates["concurrency_limit"] = *cmd.ConcurrencyLimit
+	if cmd.ConcurrencySet {
+		if cmd.ConcurrencyLimit == nil {
+			updates["concurrency_limit"] = nil
+		} else {
+			updates["concurrency_limit"] = *cmd.ConcurrencyLimit
+		}
 	}
 	if cmd.QuotaSet {
 		updates["quota_limit"] = cmd.QuotaLimit

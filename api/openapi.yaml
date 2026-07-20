@@ -9567,9 +9567,10 @@ components:
           description: Empty means unlimited requests per minute.
         concurrencyLimit:
           type: integer
+          nullable: true
           minimum: 1
-          maximum: 100
-          description: Defaults to 5 when omitted.
+          maximum: 500
+          description: Empty uses the system default of 500 concurrent requests.
         quotaLimit:
           type: integer
           format: int64
@@ -9597,8 +9598,9 @@ components:
           nullable: true
         concurrencyLimit:
           type: integer
+          nullable: true
           minimum: 1
-          maximum: 100
+          maximum: 500
         quotaLimit:
           type: integer
           format: int64
@@ -9636,6 +9638,7 @@ components:
           nullable: true
         concurrencyLimit:
           type: integer
+          nullable: true
         quotaLimit:
           type: integer
           format: int64

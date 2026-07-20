@@ -106,7 +106,7 @@ const schemas = {
       keyPrefix: { type: "string", example: "rk-550e8400-e2" },
       enabled: { type: "boolean", example: true },
       rateLimitPerMinute: nullable("integer"),
-      concurrencyLimit: { type: "integer", example: 5 },
+      concurrencyLimit: nullable("integer"),
       quotaLimit: nullable("integer"),
       quotaUsed: { type: "integer", example: 372 },
       remainingQuota: nullable("integer"),
