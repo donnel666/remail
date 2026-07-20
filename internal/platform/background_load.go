@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	backgroundOverloadPercent    = 70.0
-	backgroundRecoveryPercent    = 60.0
+	backgroundOverloadPercent    = 50.0
+	backgroundRecoveryPercent    = 40.0
 	backgroundLoadSampleInterval = 2 * time.Second
 
 	// The Asynq server owns the hard ceiling. The adaptive window starts
@@ -142,11 +142,11 @@ type BackgroundLoadSnapshot struct {
 // BackgroundLoadController applies an AIMD-style feedback loop to one global
 // background execution window. CPU and memory are the only pressure signals:
 //
-//   - below 60% for both signals while the current window is saturated: after
+//   - below 40% for both signals while the current window is saturated: after
 //     two confirming samples, double up to the remembered slow-start threshold,
 //     then grow additively without increasing by more than half the window;
-//   - from 60% up to 70%: hold the current window;
-//   - at or above 70% for either signal: halve the window.
+//   - from 40% up to 50%: hold the current window;
+//   - at or above 50% for either signal: halve the window.
 //
 // The 10-point hysteresis band prevents boundary chatter. Multiplicative
 // decrease gives foreground work capacity quickly. Startup doubles only to

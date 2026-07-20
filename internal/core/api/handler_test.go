@@ -1440,6 +1440,24 @@ func (r *mockValidationRepo) MarkValidationBatchPending(_ context.Context, task 
 	return &coreapp.ResourceValidationBatchPageResult{Processed: len(task.Selection.ResourceIDs), Done: true}, nil
 }
 
+func (r *mockValidationRepo) CountAssignedValidations(context.Context) (int, error) {
+	if r.resources == nil {
+		return 0, nil
+	}
+	assigned := 0
+	for _, resource := range r.resources.microsoft {
+		if resource.Status == coredomain.MicrosoftStatusValidating {
+			assigned++
+		}
+	}
+	for _, resource := range r.resources.domains {
+		if resource.Status == coredomain.DomainStatusValidating {
+			assigned++
+		}
+	}
+	return assigned, nil
+}
+
 func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit int) ([]coreapp.ResourceValidationTask, error) {
 	result := make([]coreapp.ResourceValidationTask, 0)
 	if r.resources == nil {
@@ -2320,6 +2338,36 @@ func TestResourceValidationUseCase_DispatchClaimsOnlyPendingResources(t *testing
 	require.Equal(t, 1, result.Queued)
 	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
 	require.Equal(t, uint64(7), queue.tasks[0].ExpectedCredentialRevision)
+}
+
+func TestResourceValidationUseCase_DispatchSubtractsAlreadyAssignedResources(t *testing.T) {
+	resourceRepo := newMockResourceRepo()
+	validationRepo := newMockValidationRepo(resourceRepo)
+	queue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resourceRepo, validationRepo, queue, mockResourceValidator{})
+
+	for index, status := range []coredomain.MicrosoftResourceStatus{
+		coredomain.MicrosoftStatusValidating,
+		coredomain.MicrosoftStatusValidating,
+		coredomain.MicrosoftStatusPending,
+		coredomain.MicrosoftStatusPending,
+	} {
+		root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("assignment-window-%d@example.com", index), Password: "secret", Status: status,
+		}))
+	}
+
+	result, err := uc.DispatchPending(context.Background(), 3)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Attempted)
+	require.Equal(t, 1, result.Queued)
+	require.Len(t, queue.tasks, 1)
+
+	result, err = uc.DispatchPending(context.Background(), 3)
+	require.NoError(t, err)
+	require.Zero(t, result.Attempted)
+	require.Len(t, queue.tasks, 1)
 }
 
 func TestResourceValidationUseCase_DispatchFailureReturnsResourcePending(t *testing.T) {

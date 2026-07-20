@@ -16,12 +16,36 @@ import (
 )
 
 type coreBackgroundExecutionGateStub struct {
-	admitted bool
-	released atomic.Bool
+	admitted  bool
+	available int
+	limit     int
+	released  atomic.Bool
 }
 
 func (s *coreBackgroundExecutionGateStub) TryAcquire() (func(), bool) {
 	return func() { s.released.Store(true) }, s.admitted
+}
+
+func (s *coreBackgroundExecutionGateStub) Available() int {
+	return s.available
+}
+
+func (s *coreBackgroundExecutionGateStub) Snapshot() platform.BackgroundLoadSnapshot {
+	return platform.BackgroundLoadSnapshot{Limit: s.limit}
+}
+
+func TestBackgroundDispatchLimitUsesOnlyUnusedCapacity(t *testing.T) {
+	gate := &coreBackgroundExecutionGateStub{available: 7}
+
+	require.Equal(t, 7, backgroundDispatchLimit(gate, resourceValidationDispatchMaximum))
+	gate.available = 0
+	require.Zero(t, backgroundDispatchLimit(gate, resourceValidationDispatchMaximum))
+}
+
+func TestBackgroundValidationWindowLimitUsesTotalWindow(t *testing.T) {
+	gate := &coreBackgroundExecutionGateStub{available: 7, limit: 32}
+
+	require.Equal(t, 32, backgroundValidationWindowLimit(gate, resourceValidationDispatchMaximum))
 }
 
 func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t *testing.T) {

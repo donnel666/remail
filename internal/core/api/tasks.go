@@ -75,7 +75,7 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
 		}
-		limit := backgroundValidationAssignmentLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
+		limit := backgroundValidationWindowLimit(module.BackgroundExecution, resourceValidationDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
@@ -368,7 +368,7 @@ func backgroundDispatchLimit(gate BackgroundExecutionGate, maximum int) int {
 	return min(maximum, max(0, capacity.Available()))
 }
 
-func backgroundValidationAssignmentLimit(gate BackgroundExecutionGate, maximum int) int {
+func backgroundValidationWindowLimit(gate BackgroundExecutionGate, maximum int) int {
 	if maximum <= 0 {
 		return 0
 	}

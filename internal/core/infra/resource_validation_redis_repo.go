@@ -165,6 +165,23 @@ func captureValidationBatchThroughID(ctx context.Context, tx *gorm.DB, ownerUser
 	return throughID, nil
 }
 
+func (r *ResourceValidationRepo) CountAssignedValidations(ctx context.Context) (int, error) {
+	if r == nil || r.db == nil {
+		return 0, coreapp.ErrValidationTemporaryUnavailable
+	}
+	var assigned int
+	if err := r.db.WithContext(ctx).Raw(`
+SELECT
+    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ?) +
+    (SELECT COUNT(*) FROM domain_resources WHERE status = ?) AS assigned`,
+		string(domain.MicrosoftStatusValidating),
+		string(domain.DomainStatusValidating),
+	).Scan(&assigned).Error; err != nil {
+		return 0, fmt.Errorf("count assigned resource validations: %w", err)
+	}
+	return assigned, nil
+}
+
 func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, limit int) ([]coreapp.ResourceValidationTask, error) {
 	if r == nil || r.db == nil || limit <= 0 {
 		return nil, nil

@@ -156,7 +156,7 @@ func TestBackgroundLoadControllerCapsAdditiveRecoveryAtLowWindow(t *testing.T) {
 }
 
 func TestBackgroundLoadControllerDoesNotSlowStartPastMeasuredCongestionPoint(t *testing.T) {
-	controller, load := newBackgroundLoadControllerTestHarness(70, 20)
+	controller, load := newBackgroundLoadControllerTestHarness(50, 20)
 	controller.gate.Resize(128)
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 64, controller.Snapshot().Limit)
@@ -171,7 +171,7 @@ func TestBackgroundLoadControllerDoesNotSlowStartPastMeasuredCongestionPoint(t *
 }
 
 func TestBackgroundLoadControllerMultiplicativelyBacksOffAtCPULine(t *testing.T) {
-	controller, _ := newBackgroundLoadControllerTestHarness(70, 20)
+	controller, _ := newBackgroundLoadControllerTestHarness(50, 20)
 	controller.gate.Resize(128)
 
 	want := []int{64, 32, 16, backgroundWorkerMinimum, backgroundWorkerMinimum}
@@ -182,7 +182,7 @@ func TestBackgroundLoadControllerMultiplicativelyBacksOffAtCPULine(t *testing.T)
 }
 
 func TestBackgroundLoadControllerMultiplicativelyBacksOffAtMemoryLine(t *testing.T) {
-	controller, _ := newBackgroundLoadControllerTestHarness(20, 70)
+	controller, _ := newBackgroundLoadControllerTestHarness(20, 50)
 	controller.gate.Resize(96)
 
 	controller.sampleAndTune(context.Background())
@@ -190,14 +190,14 @@ func TestBackgroundLoadControllerMultiplicativelyBacksOffAtMemoryLine(t *testing
 	require.Equal(t, 48, controller.Snapshot().Limit)
 }
 
-func TestBackgroundLoadControllerUsesSixtyToSeventyPercentHysteresisBand(t *testing.T) {
-	controller, load := newBackgroundLoadControllerTestHarness(65, 50)
+func TestBackgroundLoadControllerUsesFortyToFiftyPercentHysteresisBand(t *testing.T) {
+	controller, load := newBackgroundLoadControllerTestHarness(45, 35)
 	controller.gate.Resize(64)
 
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 64, controller.Snapshot().Limit, "the hysteresis band must hold the current P-state")
 
-	load.set(59.9, 59.9)
+	load.set(39.9, 39.9)
 	releases := saturateBackgroundWindow(t, controller)
 	defer releaseBackgroundPermits(releases)
 	controller.sampleAndTune(context.Background())
@@ -205,11 +205,11 @@ func TestBackgroundLoadControllerUsesSixtyToSeventyPercentHysteresisBand(t *test
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 64+backgroundWorkerMinimumIncreaseStep, controller.Snapshot().Limit)
 
-	load.set(69.9, 69.9)
+	load.set(49.9, 49.9)
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 64+backgroundWorkerMinimumIncreaseStep, controller.Snapshot().Limit)
 
-	load.set(70, 30)
+	load.set(50, 30)
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 36, controller.Snapshot().Limit)
 }

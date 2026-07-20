@@ -18,6 +18,7 @@ import (
 type ResourceValidationRepository interface {
 	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
+	CountAssignedValidations(ctx context.Context) (int, error)
 	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
 	MarkValidationDispatched(ctx context.Context, task ResourceValidationTask) (bool, error)
 	ReleaseValidation(ctx context.Context, task ResourceValidationTask) error
@@ -432,6 +433,14 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 	}
 	if limit <= 0 {
 		limit = 100
+	}
+	assigned, err := uc.validations.CountAssignedValidations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit = max(0, limit-assigned)
+	if limit == 0 {
+		return &DispatchResourceValidationsResult{}, nil
 	}
 	tasks, err := uc.validations.ClaimPendingValidations(ctx, limit)
 	if err != nil {
