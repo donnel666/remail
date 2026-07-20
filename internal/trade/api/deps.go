@@ -254,7 +254,13 @@ func (a allocationAdapter) ImportHistoricalMicrosoftAllocation(ctx context.Conte
 		CreatedAt: cmd.CreatedAt, ReleasedAt: cmd.ReleasedAt,
 	})
 	if err != nil {
+		if errors.Is(err, allocdomain.ErrHistoricalAllocationOwnerRequired) {
+			return nil, tradeapp.ErrHistoricalAllocationOwnerRequired
+		}
 		return nil, mapAllocationError(err)
+	}
+	if result == nil {
+		return nil, nil
 	}
 	return &tradeapp.AllocationResult{
 		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID, Email: result.Email,

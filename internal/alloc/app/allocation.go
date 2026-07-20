@@ -165,22 +165,38 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 	if uc == nil || uc.repo == nil || cmd.ProjectID == 0 || cmd.ProductID == 0 ||
 		cmd.ResourceID == 0 || cmd.Email == "" || !domain.IsValidMicrosoftMailbox(cmd.Mailbox) ||
 		cmd.CreatedAt.IsZero() || cmd.ReleasedAt.IsZero() || cmd.ReleasedAt.Before(cmd.CreatedAt) ||
-		(cmd.Mailbox == domain.MicrosoftMailboxAlias && (cmd.AliasOwnerID == 0 || uc.historicalMicrosoftAliases == nil)) {
+		(cmd.Mailbox == domain.MicrosoftMailboxAlias && uc.historicalMicrosoftAliases == nil) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	var result *domain.UnifiedAllocation
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		lockedRoot, err := uc.repo.LockResourceRoot(txCtx, cmd.ResourceID, domain.AllocationTypeMicrosoft)
+		if err != nil {
+			return err
+		}
+		if !lockedRoot {
+			return domain.ErrInvalidAllocationRequest
+		}
 		var explicitAliasID, dotAliasID, plusAliasID *uint
 		mailboxID := cmd.ResourceID
 		switch cmd.Mailbox {
 		case domain.MicrosoftMailboxMain:
 		case domain.MicrosoftMailboxAlias:
-			if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, cmd.AliasOwnerID, []string{cmd.Email}); err != nil {
-				return err
-			}
 			alias, err := uc.repo.FindExplicitAlias(txCtx, cmd.ResourceID, cmd.Email)
 			if err != nil {
 				return err
+			}
+			if alias == nil {
+				if cmd.AliasOwnerID == 0 {
+					return domain.ErrHistoricalAllocationOwnerRequired
+				}
+				if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, cmd.AliasOwnerID, []string{cmd.Email}); err != nil {
+					return err
+				}
+				alias, err = uc.repo.FindExplicitAlias(txCtx, cmd.ResourceID, cmd.Email)
+				if err != nil {
+					return err
+				}
 			}
 			if alias == nil || alias.ID == 0 {
 				return domain.ErrInvalidAllocationRequest
@@ -207,6 +223,16 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			}
 			plusAliasID = &alias.ID
 			mailboxID = alias.ID
+		}
+		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(txCtx, cmd.ProjectID, cmd.Mailbox, mailboxID)
+		if err != nil {
+			return err
+		}
+		if matched {
+			return nil
+		}
+		if cmd.Mailbox == domain.MicrosoftMailboxAlias && cmd.AliasOwnerID == 0 {
+			return domain.ErrHistoricalAllocationOwnerRequired
 		}
 		orderNo := historicalMicrosoftAllocationOrderNo(cmd, mailboxID)
 		existing, err := uc.repo.FindExistingAllocation(txCtx, orderNo)

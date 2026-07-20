@@ -239,6 +239,62 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 	require.Zero(t, rolledBackAliases)
 }
 
+func TestImportHistoricalMicrosoftUsageOnlyBackfillsMissingAllocationRelationsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	first := time.Now().UTC().Add(-24 * time.Hour)
+	last := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (1000, 1, 'existing-alias@example.com', 'normal')`).Error)
+	var existingAliasID uint
+	require.NoError(t, db.Table("explicit_aliases").Select("id").Where("email = ?", "existing-alias@example.com").Scan(&existingAliasID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES
+    ('existing-main-allocation', 'microsoft'),
+    ('existing-alias-allocation', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox,
+    explicit_alias_id, email, status, created_at, released_at
+) VALUES
+    (?, ?, ?, ?, 'public', 'main', NULL, ?, 'released', ?, ?),
+    (?, ?, ?, ?, 'public', 'alias', ?, ?, 'released', ?, ?)`,
+		"existing-main-allocation", 10, 20, 1000, "ms1000@example.com", first, last,
+		"existing-alias-allocation", 10, 20, 1000, existingAliasID, "existing-alias@example.com", first, last,
+	).Error)
+
+	uc := newTradeUseCase(db)
+	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "existing-alias@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+	}))
+	var historicalOrders int64
+	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
+	require.Zero(t, historicalOrders)
+
+	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
+	err := uc.ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "existing-alias@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "missing-alias@outlook.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
+	require.Equal(t, int64(1), historicalOrders)
+	var historicalAllocations []struct {
+		Mailbox string `gorm:"column:mailbox"`
+	}
+	require.NoError(t, db.Table("microsoft_allocations").
+		Select("mailbox").Where("order_no LIKE 'HIST-%'").Find(&historicalAllocations).Error)
+	require.Equal(t, []struct {
+		Mailbox string `gorm:"column:mailbox"`
+	}{{Mailbox: "alias"}}, historicalAllocations)
+}
+
 func TestCheckoutPurchaseOrderContinuesAfterProductDelistedMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")

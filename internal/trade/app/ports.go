@@ -93,6 +93,8 @@ type HistoricalMicrosoftAllocationPort interface {
 	ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*AllocationResult, error)
 }
 
+var ErrHistoricalAllocationOwnerRequired = errors.New("historical allocation owner is required")
+
 type OrderToken struct {
 	TokenPlain string
 	ExpireAt   *time.Time
@@ -424,10 +426,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 		return domain.ErrInvalidOrderRequest
 	}
 	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		ownerID, err := uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
-		if err != nil {
-			return err
-		}
+		var ownerID uint
 		now := uc.now()
 		expiryCutoff := now.Add(-time.Second).Truncate(time.Second)
 		for _, match := range matches {
@@ -448,16 +447,34 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 			if createdAt.After(expiredAt) {
 				createdAt = expiredAt
 			}
-			allocation, err := uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, HistoricalMicrosoftAllocationCommand{
+			command := HistoricalMicrosoftAllocationCommand{
 				AliasOwnerID: ownerID, ProjectID: match.ProjectID, ProductID: match.ProductID,
 				ResourceID: match.ResourceID, Mailbox: match.Mailbox, Email: match.Email,
 				CreatedAt: createdAt, ReleasedAt: expiredAt,
-			})
+			}
+			allocation, err := uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, command)
+			if errors.Is(err, ErrHistoricalAllocationOwnerRequired) {
+				ownerID, err = uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
+				if err != nil {
+					return err
+				}
+				command.AliasOwnerID = ownerID
+				allocation, err = uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, command)
+			}
 			if err != nil {
 				return err
 			}
-			if allocation == nil || strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
+			if allocation == nil {
+				continue
+			}
+			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
 				return domain.ErrInvalidOrderRequest
+			}
+			if ownerID == 0 {
+				ownerID, err = uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
+				if err != nil {
+					return err
+				}
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
 			existing, err := uc.repo.FindOrder(txCtx, orderNo)
