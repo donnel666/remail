@@ -70,6 +70,7 @@ const pageLoaders = {
   adminFinance: () => import("./pages/AdminFinance"),
   adminTickets: () => import("./pages/AdminTickets"),
   adminOrders: () => import("./pages/AdminOrders"),
+  adminSystemLogs: () => import("./pages/AdminSystemLogs"),
   proxyManagement: () => import("./pages/ProxyManagement"),
   invite: () => import("./pages/Invite"),
   recharge: () => import("./pages/Recharge"),
@@ -100,6 +101,7 @@ const AdminUsers = lazy(pageLoaders.adminUsers);
 const AdminFinance = lazy(pageLoaders.adminFinance);
 const AdminTickets = lazy(pageLoaders.adminTickets);
 const AdminOrders = lazy(pageLoaders.adminOrders);
+const AdminSystemLogs = lazy(pageLoaders.adminSystemLogs);
 const ProxyManagement = lazy(pageLoaders.proxyManagement);
 const Invite = lazy(pageLoaders.invite);
 const Recharge = lazy(pageLoaders.recharge);
@@ -517,6 +519,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/users", component: AdminUsers }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/finance", component: AdminFinance }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/orders", component: AdminOrders }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/logs", component: AdminSystemLogs }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/admin/tickets",

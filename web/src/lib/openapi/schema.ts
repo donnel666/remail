@@ -2894,6 +2894,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/logs/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List safe system event logs
+         * @description Requires `governance:log/read`. Returns administrator-facing system diagnostics only; credentials, upstream payloads, message bodies, object keys, task tokens, and raw secret-bearing errors are never exposed.
+         */
+        get: operations["getAdminSystemLogs"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete system event logs before a cutoff
+         * @description Requires `governance:log/operate` and the `super_admin` role. Cleanup only affects system logs. Future cutoffs are accepted intentionally. The completed command is recorded in the separate operation-audit stream.
+         */
+        delete: operations["deleteAdminSystemLogs"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/logs/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List safe administrator operation audit logs
+         * @description Requires `governance:log/read`. Returns who performed each high-risk command, the affected resource, result, safe summary, route, and request ID without returning request bodies or sensitive values.
+         */
+        get: operations["getAdminOperationLogs"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete operation audit logs before a cutoff
+         * @description Requires `governance:log/operate` and the `super_admin` role. Cleanup only affects operation logs. Future cutoffs are accepted intentionally, and a new audit record for this cleanup is written after deletion so the action remains visible.
+         */
+        delete: operations["deleteAdminOperationLogs"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/tasks": {
         parameters: {
             query?: never;
@@ -5387,6 +5435,69 @@ export interface components {
             /** @description Present only for bounded ids mode. */
             skippedResourceIds?: number[];
             reasonCounts: components["schemas"]["AdminReasonCount"][];
+        };
+        /** @enum {string} */
+        AdminLogLevel: "info" | "warning" | "error";
+        /** @enum {string} */
+        AdminOperationLogResult: "success" | "failure";
+        AdminLogFacets: {
+            /** Format: int64 */
+            system: number;
+            /** Format: int64 */
+            operation: number;
+        };
+        AdminSystemLogItem: {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            category: "system";
+            requestId: string;
+            level: components["schemas"]["AdminLogLevel"];
+            module: string;
+            eventType: string;
+            bizType: string;
+            bizId: string;
+            message: string;
+            detail: string;
+        };
+        AdminOperationLogItem: {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            category: "operation";
+            requestId: string;
+            operatorUserId: number;
+            operator: string;
+            operationType: string;
+            resourceType: string;
+            resourceId: string;
+            path: string;
+            result: components["schemas"]["AdminOperationLogResult"];
+            safeSummary: string;
+        };
+        AdminSystemLogListResponse: {
+            items: components["schemas"]["AdminSystemLogItem"][];
+            /** Format: int64 */
+            total: number;
+            facets: components["schemas"]["AdminLogFacets"];
+            offset: number;
+            limit: number;
+        };
+        AdminOperationLogListResponse: {
+            items: components["schemas"]["AdminOperationLogItem"][];
+            /** Format: int64 */
+            total: number;
+            facets: components["schemas"]["AdminLogFacets"];
+            offset: number;
+            limit: number;
+        };
+        AdminLogCleanupResponse: {
+            /** Format: int64 */
+            removed: number;
         };
         /** @enum {string} */
         AdminTaskKind: "import" | "alias" | "token" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
@@ -15732,6 +15843,126 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminSystemLogs: {
+        parameters: {
+            query?: {
+                level?: components["schemas"]["AdminLogLevel"];
+                search?: string;
+                from?: string;
+                to?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated safe system event logs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSystemLogListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminSystemLogs: {
+        parameters: {
+            query: {
+                before: string;
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of removed system log entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLogCleanupResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminOperationLogs: {
+        parameters: {
+            query?: {
+                result?: components["schemas"]["AdminOperationLogResult"];
+                search?: string;
+                from?: string;
+                to?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated safe operation audit logs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOperationLogListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAdminOperationLogs: {
+        parameters: {
+            query: {
+                before: string;
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of removed operation log entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLogCleanupResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

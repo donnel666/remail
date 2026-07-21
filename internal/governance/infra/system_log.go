@@ -3,6 +3,8 @@ package infra
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/governance/domain"
@@ -52,13 +54,43 @@ func (r *SystemLogRepo) CreateInTx(ctx context.Context, tx *gorm.DB, log *domain
 
 func systemLogModel(log *domain.SystemLog) *SystemLogModel {
 	return &SystemLogModel{
-		Level:     log.Level,
-		Module:    log.Module,
-		EventType: log.EventType,
-		RequestID: log.RequestID,
-		BizType:   log.BizType,
-		BizID:     log.BizID,
-		Message:   log.Message,
-		Detail:    log.Detail,
+		Level:     truncateSystemLogText(log.Level, 32),
+		Module:    truncateSystemLogText(log.Module, 100),
+		EventType: truncateSystemLogText(log.EventType, 100),
+		RequestID: truncateSystemLogText(log.RequestID, 64),
+		BizType:   truncateSystemLogText(log.BizType, 100),
+		BizID:     truncateSystemLogText(log.BizID, 100),
+		Message:   sanitizeSystemLogText(log.Message, 500),
+		Detail:    sanitizeSystemLogText(log.Detail, 1000),
 	}
+}
+
+var (
+	systemLogSecretPattern    = regexp.MustCompile(`(?i)(["']?(?:password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?id|cookie|set-cookie|ppft|canary|flowtoken)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^,\s;&}]+)`)
+	systemLogBearerPattern    = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
+	systemLogURLUserPattern   = regexp.MustCompile(`(?i)\b((?:https?|socks5h?)://)[^/@\s]+@`)
+	systemLogDSNPattern       = regexp.MustCompile(`(?i)\b([a-z0-9._-]+):[^@\s]+@(tcp|unix)\(`)
+	systemLogObjectKeyPattern = regexp.MustCompile(`\bmailtransport/inbound/[^\s,;]+`)
+)
+
+func sanitizeSystemLogText(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	value = systemLogURLUserPattern.ReplaceAllString(value, `${1}***@`)
+	value = systemLogDSNPattern.ReplaceAllString(value, `${1}:***@${2}(`)
+	value = systemLogSecretPattern.ReplaceAllString(value, `${1}***`)
+	value = systemLogBearerPattern.ReplaceAllString(value, "Bearer ***")
+	value = systemLogObjectKeyPattern.ReplaceAllString(value, "mailtransport/inbound/***")
+	return truncateSystemLogText(value, maxRunes)
+}
+
+func truncateSystemLogText(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return value
 }

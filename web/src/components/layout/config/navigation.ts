@@ -6,6 +6,7 @@ import {
   Headphones,
   Network,
   PackageOpen,
+  ScrollText,
   Settings,
   Users,
   Wallet,
@@ -103,6 +104,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         labelKey: "Finance Center",
         icon: Wallet,
         requiredPermission: permissionKey("billing:wallet", "read"),
+      },
+      {
+        path: "/admin/logs",
+        labelKey: "Admin System Logs",
+        icon: ScrollText,
+        requiredPermission: permissionKey("governance:log", "read"),
       },
       {
         path: "/admin/settings",

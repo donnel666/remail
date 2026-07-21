@@ -118,6 +118,7 @@ var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "mailmatch:message", Actions: []string{"read", "operate"}},
 	{Resource: "mailtransport:binding", Actions: []string{"read", "write"}},
 	{Resource: "governance:task", Actions: []string{"read"}},
+	{Resource: "governance:log", Actions: []string{"read", "operate"}},
 }
 
 // ListUsers returns a paginated list of all users.

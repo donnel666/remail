@@ -14,6 +14,7 @@
 | 2026-07-12 | V1.7 | Codex | 补充管理员 Microsoft 资源管理的 owner 批量查询、安全显示、转移/公开供给资格和组合权限规则；IAM 只提供身份与资格，不接管资源事实。 |
 | 2026-07-17 | V1.8 | Codex | 补充管理员用户管理落地：`GET /v1/admin/users` 增加 `role/enabled/userGroupId/created*` 过滤与 `facets`；新增管理员建号 `POST /v1/admin/users`、资料/邮箱/密码编辑扩展 `PATCH`、单条 `DELETE`、`selection`(ids/filter) 批量启停/删除/强退，以及 `GET .../{userId}/invitations` 邀请关系总览。批量恒排除 `super_admin`、`filter` 模式必须携带 `filter` 对象、无条数上限（大量匹配由服务端分块执行）；沿用既有 `iam:user` read/write/operate 权限，不新增权限或改变 RBAC/Casbin 语义。 |
 | 2026-07-19 | V1.9 | Codex | 用户生命周期统一为 `active/disabled/deleted`，`status` 是唯一状态源；管理员删除改为逻辑删除并保留订单、钱包、资源和供应商申请等跨 BC 历史。现有 API `enabled` 字段和筛选保持兼容，由 `status=active` 派生。 |
+| 2026-07-20 | V1.10 | Codex | 新增 `governance:log(read/operate)` 权限目录与角色基线；admin/super_admin 可读，operate 仅默认授予 super_admin，日志清理仍额外校验 super_admin 角色。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -104,6 +105,7 @@ eft = allow/deny
 | `billing:wallet/operate` | 管理员调账、提现和冲正。 |
 | `billing:card/read|write` | 卡密查看、创建和状态修改。 |
 | `trade:order/read|operate` | 管理员工单、订单查看、退款和终止。 |
+| `governance:log/read|operate` | 管理员读取系统/审计日志；operate 仅用于 super_admin 手动清理，且不能绕过角色校验。 |
 | `iam:permission/sensitive` | 提升普通用户为 `super_admin`，或增删任何 `sensitive` 用户权限覆盖。只默认授予 `super_admin`。 |
 
 已有 `super_admin` 是受保护身份：用户资料、角色、权限覆盖和强制退出均不能通过普通管理员命令修改。提升新 `super_admin` 必须具备 `iam:permission/sensitive`；相关角色检查和写入必须在同一数据库并发保护边界内完成，不能只依赖前端禁用按钮。
@@ -287,7 +289,7 @@ canceled
 | 编辑、导入、转移、发布 | 导入和基础字段编辑检查 `core:resource/write`；发布/下架/凭据等命令检查 `core:resource/operate`；同一原子 PATCH 同时包含基础字段与 `forSale/credentials` 时两项都必须具备，再由 IAM 校验目标 owner 资格。因为没有修改 IAM 用户，不额外要求 `iam:user/write`。 |
 | 订单、邮件、任务等详情 Tab | 各所属 API 继续检查自身权限，例如 `alloc:allocation/read`、`mailmatch:message/read`；`core:resource/read` 不传递成其他 BC 的通配权限。 |
 
-管理员 Microsoft 真实 API 落地时，permission catalog 必须确保存在 `mailmatch:message(read/operate)`、`mailtransport:binding(read/write)` 和 `governance:task(read)`；默认 admin/super_admin 策略应同时具备已确认页面所需权限。辅助邮箱地址修改仍从 Core 原子 PATCH 编排，但当请求包含 binding 输入时必须同时检查 `mailtransport:binding/write`；资源级手工 Fetch 检查 `mailmatch:message/operate`。新增权限必须进入 IAM 权限目录、Casbin middleware/组合校验、OpenAPI 说明和专项权限测试，不能只写在前端按钮条件中。
+管理员 Microsoft 和运维 API 落地时，permission catalog 必须确保存在 `mailmatch:message(read/operate)`、`mailtransport:binding(read/write)`、`governance:task(read)` 和 `governance:log(read/operate)`；默认 admin/super_admin 策略应同时具备已确认页面所需只读权限，`governance:log/operate` 仅默认授予 super_admin。辅助邮箱地址修改仍从 Core 原子 PATCH 编排，但当请求包含 binding 输入时必须同时检查 `mailtransport:binding/write`；资源级手工 Fetch 检查 `mailmatch:message/operate`。新增权限必须进入 IAM 权限目录、Casbin middleware/组合校验、OpenAPI 说明和专项权限测试，不能只写在前端按钮条件中。
 
 资格失败使用安全业务错误，不暴露 Casbin policy 或目标用户内部状态组合；不存在或不可见的资源仍由资源 API 统一返回 `404 Resource not found.`。
 

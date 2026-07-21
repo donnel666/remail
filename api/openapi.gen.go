@@ -421,6 +421,27 @@ func (e AdminDomainItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminLogLevel.
+const (
+	AdminLogLevelError   AdminLogLevel = "error"
+	AdminLogLevelInfo    AdminLogLevel = "info"
+	AdminLogLevelWarning AdminLogLevel = "warning"
+)
+
+// Valid indicates whether the value is a known member of the AdminLogLevel enum.
+func (e AdminLogLevel) Valid() bool {
+	switch e {
+	case AdminLogLevelError:
+		return true
+	case AdminLogLevelInfo:
+		return true
+	case AdminLogLevelWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminMailServerItemStatus.
 const (
 	AdminMailServerItemStatusDisabled AdminMailServerItemStatus = "disabled"
@@ -790,6 +811,54 @@ func (e AdminMicrosoftTokenHealth) Valid() bool {
 	case AdminMicrosoftTokenHealthMissing:
 		return true
 	case AdminMicrosoftTokenHealthValid:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminOperationLogItemCategory.
+const (
+	Operation AdminOperationLogItemCategory = "operation"
+)
+
+// Valid indicates whether the value is a known member of the AdminOperationLogItemCategory enum.
+func (e AdminOperationLogItemCategory) Valid() bool {
+	switch e {
+	case Operation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminOperationLogResult.
+const (
+	Failure AdminOperationLogResult = "failure"
+	Success AdminOperationLogResult = "success"
+)
+
+// Valid indicates whether the value is a known member of the AdminOperationLogResult enum.
+func (e AdminOperationLogResult) Valid() bool {
+	switch e {
+	case Failure:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminSystemLogItemCategory.
+const (
+	AdminSystemLogItemCategorySystem AdminSystemLogItemCategory = "system"
+)
+
+// Valid indicates whether the value is a known member of the AdminSystemLogItemCategory enum.
+func (e AdminSystemLogItemCategory) Valid() bool {
+	switch e {
+	case AdminSystemLogItemCategorySystem:
 		return true
 	default:
 		return false
@@ -3252,22 +3321,22 @@ func (e GetAdminTransactionsParamsDirection) Valid() bool {
 
 // Defines values for GetAdminUsersParamsRole.
 const (
-	Admin      GetAdminUsersParamsRole = "admin"
-	SuperAdmin GetAdminUsersParamsRole = "super_admin"
-	Supplier   GetAdminUsersParamsRole = "supplier"
-	User       GetAdminUsersParamsRole = "user"
+	GetAdminUsersParamsRoleAdmin      GetAdminUsersParamsRole = "admin"
+	GetAdminUsersParamsRoleSuperAdmin GetAdminUsersParamsRole = "super_admin"
+	GetAdminUsersParamsRoleSupplier   GetAdminUsersParamsRole = "supplier"
+	GetAdminUsersParamsRoleUser       GetAdminUsersParamsRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminUsersParamsRole enum.
 func (e GetAdminUsersParamsRole) Valid() bool {
 	switch e {
-	case Admin:
+	case GetAdminUsersParamsRoleAdmin:
 		return true
-	case SuperAdmin:
+	case GetAdminUsersParamsRoleSuperAdmin:
 		return true
-	case Supplier:
+	case GetAdminUsersParamsRoleSupplier:
 		return true
-	case User:
+	case GetAdminUsersParamsRoleUser:
 		return true
 	default:
 		return false
@@ -4144,6 +4213,20 @@ type AdminInviteUsesResponse struct {
 	Uses []InviteUseResponse `json:"uses"`
 }
 
+// AdminLogCleanupResponse defines model for AdminLogCleanupResponse.
+type AdminLogCleanupResponse struct {
+	Removed int64 `json:"removed"`
+}
+
+// AdminLogFacets defines model for AdminLogFacets.
+type AdminLogFacets struct {
+	Operation int64 `json:"operation"`
+	System    int64 `json:"system"`
+}
+
+// AdminLogLevel defines model for AdminLogLevel.
+type AdminLogLevel string
+
 // AdminMailServerItem defines model for AdminMailServerItem.
 type AdminMailServerItem struct {
 	CreatedAt     time.Time                 `json:"createdAt"`
@@ -4634,6 +4717,37 @@ type AdminMicrosoftUpdateRequest struct {
 	Version int `json:"version"`
 }
 
+// AdminOperationLogItem defines model for AdminOperationLogItem.
+type AdminOperationLogItem struct {
+	Category       AdminOperationLogItemCategory `json:"category"`
+	CreatedAt      time.Time                     `json:"createdAt"`
+	Id             int64                         `json:"id"`
+	OperationType  string                        `json:"operationType"`
+	Operator       string                        `json:"operator"`
+	OperatorUserId int                           `json:"operatorUserId"`
+	Path           string                        `json:"path"`
+	RequestId      string                        `json:"requestId"`
+	ResourceId     string                        `json:"resourceId"`
+	ResourceType   string                        `json:"resourceType"`
+	Result         AdminOperationLogResult       `json:"result"`
+	SafeSummary    string                        `json:"safeSummary"`
+}
+
+// AdminOperationLogItemCategory defines model for AdminOperationLogItem.Category.
+type AdminOperationLogItemCategory string
+
+// AdminOperationLogListResponse defines model for AdminOperationLogListResponse.
+type AdminOperationLogListResponse struct {
+	Facets AdminLogFacets          `json:"facets"`
+	Items  []AdminOperationLogItem `json:"items"`
+	Limit  int                     `json:"limit"`
+	Offset int                     `json:"offset"`
+	Total  int64                   `json:"total"`
+}
+
+// AdminOperationLogResult defines model for AdminOperationLogResult.
+type AdminOperationLogResult string
+
 // AdminOrderCommandRequest defines model for AdminOrderCommandRequest.
 type AdminOrderCommandRequest struct {
 	Reason string `json:"reason"`
@@ -4661,6 +4775,33 @@ type AdminRejectSupplierApplicationRequest struct {
 type AdminReverseTransactionResponse struct {
 	Original AdminTransactionItem `json:"original"`
 	Reversal AdminTransactionItem `json:"reversal"`
+}
+
+// AdminSystemLogItem defines model for AdminSystemLogItem.
+type AdminSystemLogItem struct {
+	BizId     string                     `json:"bizId"`
+	BizType   string                     `json:"bizType"`
+	Category  AdminSystemLogItemCategory `json:"category"`
+	CreatedAt time.Time                  `json:"createdAt"`
+	Detail    string                     `json:"detail"`
+	EventType string                     `json:"eventType"`
+	Id        int64                      `json:"id"`
+	Level     AdminLogLevel              `json:"level"`
+	Message   string                     `json:"message"`
+	Module    string                     `json:"module"`
+	RequestId string                     `json:"requestId"`
+}
+
+// AdminSystemLogItemCategory defines model for AdminSystemLogItem.Category.
+type AdminSystemLogItemCategory string
+
+// AdminSystemLogListResponse defines model for AdminSystemLogListResponse.
+type AdminSystemLogListResponse struct {
+	Facets AdminLogFacets       `json:"facets"`
+	Items  []AdminSystemLogItem `json:"items"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+	Total  int64                `json:"total"`
 }
 
 // AdminTaskAcceptedResponse defines model for AdminTaskAcceptedResponse.
@@ -7342,6 +7483,42 @@ type PatchAdminInviteParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// DeleteAdminOperationLogsParams defines parameters for DeleteAdminOperationLogs.
+type DeleteAdminOperationLogsParams struct {
+	Before time.Time `form:"before" json:"before"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminOperationLogsParams defines parameters for GetAdminOperationLogs.
+type GetAdminOperationLogsParams struct {
+	Result *AdminOperationLogResult `form:"result,omitempty" json:"result,omitempty"`
+	Search *string                  `form:"search,omitempty" json:"search,omitempty"`
+	From   *time.Time               `form:"from,omitempty" json:"from,omitempty"`
+	To     *time.Time               `form:"to,omitempty" json:"to,omitempty"`
+	Offset *int                     `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int                     `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteAdminSystemLogsParams defines parameters for DeleteAdminSystemLogs.
+type DeleteAdminSystemLogsParams struct {
+	Before time.Time `form:"before" json:"before"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminSystemLogsParams defines parameters for GetAdminSystemLogs.
+type GetAdminSystemLogsParams struct {
+	Level  *AdminLogLevel `form:"level,omitempty" json:"level,omitempty"`
+	Search *string        `form:"search,omitempty" json:"search,omitempty"`
+	From   *time.Time     `form:"from,omitempty" json:"from,omitempty"`
+	To     *time.Time     `form:"to,omitempty" json:"to,omitempty"`
+	Offset *int           `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int           `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetAdminMessagesParams defines parameters for GetAdminMessages.
 type GetAdminMessagesParams struct {
 	// Type Resource type; defaults to microsoft for backward compatibility.
@@ -9559,6 +9736,18 @@ type ServerInterface interface {
 	// List invite redemptions
 	// (GET /v1/admin/invites/{code}/uses)
 	GetAdminInviteUses(c *gin.Context, code string)
+	// Delete operation audit logs before a cutoff
+	// (DELETE /v1/admin/logs/operations)
+	DeleteAdminOperationLogs(c *gin.Context, params DeleteAdminOperationLogsParams)
+	// List safe administrator operation audit logs
+	// (GET /v1/admin/logs/operations)
+	GetAdminOperationLogs(c *gin.Context, params GetAdminOperationLogsParams)
+	// Delete system event logs before a cutoff
+	// (DELETE /v1/admin/logs/system)
+	DeleteAdminSystemLogs(c *gin.Context, params DeleteAdminSystemLogsParams)
+	// List safe system event logs
+	// (GET /v1/admin/logs/system)
+	GetAdminSystemLogs(c *gin.Context, params GetAdminSystemLogsParams)
 	// List primary-mailbox message summaries for a resource
 	// (GET /v1/admin/messages)
 	GetAdminMessages(c *gin.Context, params GetAdminMessagesParams)
@@ -12471,6 +12660,250 @@ func (siw *ServerInterfaceWrapper) GetAdminInviteUses(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminInviteUses(c, code)
+}
+
+// DeleteAdminOperationLogs operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminOperationLogs(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminOperationLogsParams
+
+	// ------------- Required query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminOperationLogs(c, params)
+}
+
+// GetAdminOperationLogs operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminOperationLogs(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminOperationLogsParams
+
+	// ------------- Optional query parameter "result" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "result", c.Request.URL.Query(), &params.Result, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter result: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", c.Request.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter from: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", c.Request.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter to: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminOperationLogs(c, params)
+}
+
+// DeleteAdminSystemLogs operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminSystemLogs(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminSystemLogsParams
+
+	// ------------- Required query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminSystemLogs(c, params)
+}
+
+// GetAdminSystemLogs operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSystemLogs(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminSystemLogsParams
+
+	// ------------- Optional query parameter "level" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "level", c.Request.URL.Query(), &params.Level, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter level: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", c.Request.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter from: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", c.Request.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter to: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSystemLogs(c, params)
 }
 
 // GetAdminMessages operation middleware
@@ -21018,6 +21451,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/invites/enable", wrapper.PostAdminInvitesEnable)
 	router.PATCH(options.BaseURL+"/v1/admin/invites/:code", wrapper.PatchAdminInvite)
 	router.GET(options.BaseURL+"/v1/admin/invites/:code/uses", wrapper.GetAdminInviteUses)
+	router.DELETE(options.BaseURL+"/v1/admin/logs/operations", wrapper.DeleteAdminOperationLogs)
+	router.GET(options.BaseURL+"/v1/admin/logs/operations", wrapper.GetAdminOperationLogs)
+	router.DELETE(options.BaseURL+"/v1/admin/logs/system", wrapper.DeleteAdminSystemLogs)
+	router.GET(options.BaseURL+"/v1/admin/logs/system", wrapper.GetAdminSystemLogs)
 	router.GET(options.BaseURL+"/v1/admin/messages", wrapper.GetAdminMessages)
 	router.GET(options.BaseURL+"/v1/admin/messages/:messageId", wrapper.GetAdminMessage)
 	router.POST(options.BaseURL+"/v1/admin/orders/timeouts/scan", wrapper.PostAdminOrderTimeoutScan)

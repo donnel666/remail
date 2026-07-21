@@ -8830,6 +8830,182 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/logs/system:
+    get:
+      operationId: getAdminSystemLogs
+      summary: List safe system event logs
+      description: Requires `governance:log/read`. Returns administrator-facing system diagnostics only; credentials, upstream payloads, message bodies, object keys, task tokens, and raw secret-bearing errors are never exposed.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: level
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminLogLevel"
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated safe system event logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemLogListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      operationId: deleteAdminSystemLogs
+      summary: Delete system event logs before a cutoff
+      description: Requires `governance:log/operate` and the `super_admin` role. Cleanup only affects system logs. Future cutoffs are accepted intentionally. The completed command is recorded in the separate operation-audit stream.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: before
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Number of removed system log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLogCleanupResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/admin/logs/operations:
+    get:
+      operationId: getAdminOperationLogs
+      summary: List safe administrator operation audit logs
+      description: Requires `governance:log/read`. Returns who performed each high-risk command, the affected resource, result, safe summary, route, and request ID without returning request bodies or sensitive values.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: result
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminOperationLogResult"
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated safe operation audit logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOperationLogListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      operationId: deleteAdminOperationLogs
+      summary: Delete operation audit logs before a cutoff
+      description: Requires `governance:log/operate` and the `super_admin` role. Cleanup only affects operation logs. Future cutoffs are accepted intentionally, and a new audit record for this cleanup is written after deletion so the action remains visible.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: before
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Number of removed operation log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLogCleanupResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/admin/tasks:
     get:
       operationId: getAdminTasks
@@ -15306,6 +15482,174 @@ components:
           items:
             $ref: "#/components/schemas/AdminReasonCount"
       additionalProperties: false
+    AdminLogLevel:
+      type: string
+      enum: [info, warning, error]
+
+    AdminOperationLogResult:
+      type: string
+      enum: [success, failure]
+
+    AdminLogFacets:
+      type: object
+      required: [system, operation]
+      properties:
+        system:
+          type: integer
+          format: int64
+          minimum: 0
+        operation:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
+    AdminSystemLogItem:
+      type: object
+      required:
+        - id
+        - createdAt
+        - category
+        - requestId
+        - level
+        - module
+        - eventType
+        - bizType
+        - bizId
+        - message
+        - detail
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [system]
+        requestId:
+          type: string
+        level:
+          $ref: "#/components/schemas/AdminLogLevel"
+        module:
+          type: string
+        eventType:
+          type: string
+        bizType:
+          type: string
+        bizId:
+          type: string
+        message:
+          type: string
+        detail:
+          type: string
+      additionalProperties: false
+
+    AdminOperationLogItem:
+      type: object
+      required:
+        - id
+        - createdAt
+        - category
+        - requestId
+        - operatorUserId
+        - operator
+        - operationType
+        - resourceType
+        - resourceId
+        - path
+        - result
+        - safeSummary
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [operation]
+        requestId:
+          type: string
+        operatorUserId:
+          type: integer
+          minimum: 1
+        operator:
+          type: string
+        operationType:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        path:
+          type: string
+        result:
+          $ref: "#/components/schemas/AdminOperationLogResult"
+        safeSummary:
+          type: string
+      additionalProperties: false
+
+    AdminSystemLogListResponse:
+      type: object
+      required: [items, total, facets, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSystemLogItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        facets:
+          $ref: "#/components/schemas/AdminLogFacets"
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+
+    AdminOperationLogListResponse:
+      type: object
+      required: [items, total, facets, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminOperationLogItem"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        facets:
+          $ref: "#/components/schemas/AdminLogFacets"
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+
+    AdminLogCleanupResponse:
+      type: object
+      required: [removed]
+      properties:
+        removed:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+
     AdminTaskKind:
       type: string
       enum:

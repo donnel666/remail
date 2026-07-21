@@ -34,6 +34,8 @@ func TestPermissionCatalogCoversAdminFrontendContract(t *testing.T) {
 		"billing:card:write",
 		"billing:card:operate",
 		"billing:card:sensitive",
+		"governance:log:read",
+		"governance:log:operate",
 	}
 	for _, permission := range required {
 		require.Contains(t, actual, permission)
