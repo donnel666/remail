@@ -47,8 +47,8 @@ func (s *apiLogRepoStub) CleanupLogs(_ context.Context, category string, _ time.
 	s.cleanupCalls++
 	s.cleanupCategory = category
 	if audit != nil {
-		copy := *audit
-		s.cleanupAudit = &copy
+		copied := *audit
+		s.cleanupAudit = &copied
 	}
 	if category == governanceapp.AdminLogCategorySystem {
 		return 2, nil

@@ -50,8 +50,8 @@ func (s *adminLogRepoStub) CleanupLogs(_ context.Context, category string, befor
 	s.cleanupCategory = category
 	s.cleanupBefore = before
 	if audit != nil {
-		copy := *audit
-		s.cleanupAudit = &copy
+		copied := *audit
+		s.cleanupAudit = &copied
 	}
 	return s.cleanupRemoved, s.cleanupErr
 }
