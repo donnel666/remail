@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { Menu, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/auth-provider";
@@ -12,7 +13,17 @@ import { TOP_NAV_ITEMS } from "../config/navigation";
 import type { TopNavItem } from "../types";
 import { HeaderLogo } from "./header-logo";
 
-export function AppHeader() {
+interface AppHeaderProps {
+  hasSidebar: boolean;
+  mobileSidebarOpen: boolean;
+  onMobileSidebarToggle: () => void;
+}
+
+export function AppHeader({
+  hasSidebar,
+  mobileSidebarOpen,
+  onMobileSidebarToggle,
+}: AppHeaderProps) {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const routerState = useRouterState();
@@ -28,6 +39,23 @@ export function AppHeader() {
   return (
     <header className="sticky inset-x-0 top-0 z-50 h-16 bg-white/75 text-foreground backdrop-blur-lg transition-colors duration-300 dark:bg-zinc-900/75">
       <nav className="flex h-full w-full items-center px-2 lg:pl-0 lg:pr-2">
+        {hasSidebar ? (
+          <button
+            type="button"
+            aria-controls="app-sidebar"
+            aria-expanded={mobileSidebarOpen}
+            aria-label={t(mobileSidebarOpen ? "Collapse sidebar" : "Expand sidebar")}
+            onClick={onMobileSidebarToggle}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+          >
+            {mobileSidebarOpen ? (
+              <X className="size-5" aria-hidden="true" />
+            ) : (
+              <Menu className="size-5" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
+
         <Link
           to="/"
           className="group flex shrink-0 items-center gap-2 lg:h-full lg:w-[180px] lg:px-2"
