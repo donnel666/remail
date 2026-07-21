@@ -659,6 +659,47 @@ func TestBillingRepoConcurrentDebitBalanceNonNegativeMySQL(t *testing.T) {
 	require.EqualValues(t, 10, debitTransactions)
 }
 
+func TestBillingRepoConcurrentFirstCreditsCreateOneWalletMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	ctx := context.Background()
+	userID := createBillingTestUser(t, db, "credit-first-concurrent@example.com")
+	repo := NewBillingRepo(db)
+
+	const workers = 16
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+				UserID:             userID,
+				Amount:             "1.00",
+				Reason:             "concurrent first credit",
+				TransactionType:    domain.TransactionTypeCredit,
+				Direction:          domain.TransactionDirectionIn,
+				IdempotencyKey:     "idem-credit-first-concurrent-" + strconv.Itoa(index),
+				RequestFingerprint: "fingerprint-credit-first-concurrent-" + strconv.Itoa(index),
+				RequestID:          "req-credit-first-concurrent-" + strconv.Itoa(index),
+				Now:                time.Now().UTC(),
+			})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	summary, err := repo.GetOrCreateWalletSummary(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "16.00", summary.Wallet.ConsumerBalance)
+	var walletCount int64
+	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", userID).Count(&walletCount).Error)
+	require.EqualValues(t, 1, walletCount)
+}
+
 func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {
 	db := newBillingMySQLTestDB(t)
 	ctx := context.Background()

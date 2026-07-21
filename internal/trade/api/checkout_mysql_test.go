@@ -1149,6 +1149,59 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.EqualValues(t, 1, allocationCount)
 }
 
+func TestOrderRouteConcurrentBatchesDoNotDeadlockMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
+
+	openapiMod := openapiapi.NewModule(db)
+	rateLimit := 1000
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID:             2,
+		Name:               "concurrent-batch-sdk",
+		RateLimitPerMinute: &rateLimit,
+		ConcurrencyLimit:   intPointer(10),
+		IdempotencyKey:     "apikey-idem-concurrent-batch",
+		RequestID:          "req-apikey-concurrent-batch",
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
+	body, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20},
+		Quantity:           25,
+	})
+	require.NoError(t, err)
+
+	const batches = 4
+	results := make(chan *httptest.ResponseRecorder, batches)
+	var wg sync.WaitGroup
+	for i := 0; i < batches; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=private_first", bytes.NewReader(body))
+			req.Header.Set("X-API-Key", key.KeyPlain)
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("route-order-concurrent-batch-%d", i))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			results <- rec
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	for result := range results {
+		require.Equal(t, http.StatusCreated, result.Code, result.Body.String())
+	}
+
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
+	require.EqualValues(t, 100, orderCount)
+}
+
 func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")

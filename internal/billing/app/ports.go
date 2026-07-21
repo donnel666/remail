@@ -15,6 +15,7 @@ import (
 )
 
 type WalletRepository interface {
+	LockConsumerWallet(ctx context.Context, userID uint) error
 	GetOrCreateWalletSummary(ctx context.Context, userID uint) (*domain.WalletSummary, error)
 	ListConsumerBalances(ctx context.Context, userIDs []uint) (map[uint]string, error)
 	GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error)
@@ -304,6 +305,13 @@ func (uc *WalletUseCase) CreditConsumer(ctx context.Context, req AdjustConsumerB
 func (uc *WalletUseCase) DebitConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeDebit
 	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut)
+}
+
+func (uc *WalletUseCase) LockConsumer(ctx context.Context, userID uint) error {
+	if userID == 0 {
+		return domain.ErrInvalidFilter
+	}
+	return uc.repo.LockConsumerWallet(ctx, userID)
 }
 
 func (uc *WalletUseCase) RefundConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {

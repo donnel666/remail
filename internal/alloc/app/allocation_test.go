@@ -217,7 +217,7 @@ func TestDomainAllocationTriesAnotherAddressAfterDisabledMailboxConflict(t *test
 	}}
 	result, err := NewUseCase(repo).tryDomainCandidate(
 		context.Background(),
-		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned},
+		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
 		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
 		repo.candidate,
 		time.Now().UTC(),

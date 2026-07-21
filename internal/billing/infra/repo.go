@@ -190,6 +190,25 @@ func (r *BillingRepo) GetOrCreateWalletSummary(ctx context.Context, userID uint)
 	}, nil
 }
 
+func (r *BillingRepo) LockConsumerWallet(ctx context.Context, userID uint) error {
+	if userID == 0 {
+		return domain.ErrInvalidFilter
+	}
+	return r.withTx(ctx, func(ctx context.Context, tx *gorm.DB) error {
+		model := defaultWalletModel(userID)
+		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+			return fmt.Errorf("ensure wallet: %w", err)
+		}
+		var wallet WalletModel
+		if err := tx.WithContext(ctx).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&wallet, "user_id = ?", userID).Error; err != nil {
+			return fmt.Errorf("lock wallet: %w", err)
+		}
+		return nil
+	})
+}
+
 func (r *BillingRepo) GetReferralSummary(ctx context.Context, userID uint) (*domain.ReferralSummary, error) {
 	if userID == 0 {
 		return nil, domain.ErrInvalidFilter
@@ -781,7 +800,26 @@ func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID
 	if userID == 0 {
 		return WalletModel{}, domain.ErrInvalidFilter
 	}
-	model := WalletModel{
+	var wallet WalletModel
+	if err := tx.WithContext(ctx).First(&wallet, "user_id = ?", userID).Error; err == nil {
+		return wallet, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return WalletModel{}, fmt.Errorf("find wallet: %w", err)
+	}
+	model := defaultWalletModel(userID)
+	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return WalletModel{}, fmt.Errorf("ensure wallet: %w", err)
+	}
+	if err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&wallet, "user_id = ?", userID).Error; err != nil {
+		return WalletModel{}, fmt.Errorf("find wallet: %w", err)
+	}
+	return wallet, nil
+}
+
+func defaultWalletModel(userID uint) WalletModel {
+	return WalletModel{
 		UserID:            userID,
 		ConsumerBalance:   "0.00",
 		SupplierAvailable: "0.00",
@@ -789,14 +827,6 @@ func (r *BillingRepo) getOrCreateWallet(ctx context.Context, tx *gorm.DB, userID
 		TotalSpend:        "0.00",
 		SpendCount:        0,
 	}
-	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
-		return WalletModel{}, fmt.Errorf("ensure wallet: %w", err)
-	}
-	var wallet WalletModel
-	if err := tx.WithContext(ctx).First(&wallet, "user_id = ?", userID).Error; err != nil {
-		return WalletModel{}, fmt.Errorf("find wallet: %w", err)
-	}
-	return wallet, nil
 }
 
 func (r *BillingRepo) lockWalletInTx(ctx context.Context, tx *gorm.DB, userID uint) (*WalletModel, error) {

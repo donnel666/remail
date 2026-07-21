@@ -190,6 +190,10 @@ type billingWalletAdapter struct {
 	wallet *billingapp.WalletUseCase
 }
 
+func (a billingWalletAdapter) LockConsumer(ctx context.Context, userID uint) error {
+	return a.wallet.LockConsumer(ctx, userID)
+}
+
 func (a billingWalletAdapter) DebitConsumer(ctx context.Context, cmd tradeapp.WalletCommand) (*tradeapp.WalletTransaction, error) {
 	result, err := a.wallet.DebitConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
 		UserID:         cmd.UserID,
@@ -227,11 +231,19 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 	if cmd.SupplyScope == tradeapp.SupplyScopeOwned {
 		scope = allocdomain.SupplyScopeOwned
 	}
+	scopes := make([]allocdomain.SupplyScope, len(cmd.SupplyScopes))
+	for i, item := range cmd.SupplyScopes {
+		scopes[i] = allocdomain.SupplyScopePublic
+		if item == tradeapp.SupplyScopeOwned {
+			scopes[i] = allocdomain.SupplyScopeOwned
+		}
+	}
 	result, err := a.alloc.Allocate(ctx, allocapp.AllocateCommand{
 		OrderNo:              cmd.OrderNo,
 		BuyerUserID:          cmd.BuyerUserID,
 		ProjectProductID:     cmd.ProjectProductID,
 		SupplyScope:          scope,
+		SupplyScopes:         scopes,
 		EmailSuffix:          cmd.EmailSuffix,
 		FulfillExistingOrder: cmd.FulfillExistingOrder,
 	})

@@ -42,6 +42,7 @@ type WalletTransaction struct {
 }
 
 type WalletPort interface {
+	LockConsumer(ctx context.Context, userID uint) error
 	DebitConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
 	RefundConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error)
 }
@@ -58,6 +59,7 @@ type AllocationCommand struct {
 	BuyerUserID      uint
 	ProjectProductID uint
 	SupplyScope      SupplyScope
+	SupplyScopes     []SupplyScope
 	EmailSuffix      string
 	// FulfillExistingOrder permits allocation after the product has been
 	// delisted. Trade sets it only after an order has been durably created;
@@ -350,6 +352,11 @@ type CheckoutResult struct {
 	Owner *OrderOwnerSummary
 }
 
+type CheckoutBatchItem struct {
+	Result *CheckoutResult
+	Err    error
+}
+
 type MatchCodeResultRequest struct {
 	OrderNo   string
 	MatchedAt time.Time
@@ -530,6 +537,10 @@ func sameHistoricalMicrosoftOrder(order domain.Order, ownerID uint, allocationID
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*CheckoutResult, error) {
+	return uc.checkout(ctx, req, false)
+}
+
+func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLocked bool) (*CheckoutResult, error) {
 	mode, ok := domain.NormalizeServiceMode(req.ServiceMode)
 	if !ok {
 		return nil, domain.ErrInvalidOrderRequest
@@ -566,7 +577,7 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 		return nil, err
 	}
 	if existing != nil {
-		return uc.resumeExistingCheckout(ctx, existing.OrderNo, emailSuffix, strings.TrimSpace(req.RequestID))
+		return uc.resumeExistingCheckout(ctx, req.UserID, existing.OrderNo, emailSuffix, strings.TrimSpace(req.RequestID), walletLocked)
 	}
 
 	// This is the only path that evaluates current product sale status. Once an
@@ -579,6 +590,11 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 	var result *CheckoutResult
 	var checkoutErr error
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if !walletLocked {
+			if err := uc.wallet.LockConsumer(txCtx, req.UserID); err != nil {
+				return err
+			}
+		}
 		order, created, err := uc.repo.LoadOrCreatePendingOrder(txCtx, CreatePendingOrderCommand{
 			OrderNo:                 nextOrderNo(),
 			UserID:                  req.UserID,
@@ -631,13 +647,54 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*Checkout
 	return result, nil
 }
 
+func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest) ([]CheckoutBatchItem, error) {
+	if len(requests) == 0 {
+		return []CheckoutBatchItem{}, nil
+	}
+	userID := requests[0].UserID
+	if userID == 0 {
+		return nil, domain.ErrInvalidOrderRequest
+	}
+	for _, req := range requests[1:] {
+		if req.UserID != userID {
+			return nil, domain.ErrInvalidOrderRequest
+		}
+	}
+	var items []CheckoutBatchItem
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		// Establish wallet -> allocation lock order before REPEATABLE READ creates
+		// a snapshot, so concurrent checkouts for one buyer serialize on fresh data.
+		if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
+			return err
+		}
+		items = make([]CheckoutBatchItem, 0, len(requests))
+		for _, req := range requests {
+			result, err := uc.checkout(txCtx, req, true)
+			if err != nil && !shouldCommitCheckoutError(err) {
+				return err
+			}
+			items = append(items, CheckoutBatchItem{Result: result, Err: err})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // resumeExistingCheckout retries a persisted order without consulting current
 // project-product sale state. This keeps idempotent checkout retries usable
 // after a product is delisted while preserving the original order terms.
-func (uc *UseCase) resumeExistingCheckout(ctx context.Context, orderNo, emailSuffix, requestID string) (*CheckoutResult, error) {
+func (uc *UseCase) resumeExistingCheckout(ctx context.Context, userID uint, orderNo, emailSuffix, requestID string, walletLocked bool) (*CheckoutResult, error) {
 	var result *CheckoutResult
 	var checkoutErr error
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if !walletLocked {
+			if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
+				return err
+			}
+		}
 		order, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
 		if err != nil {
 			return err
@@ -1426,28 +1483,14 @@ func (uc *UseCase) allocate(ctx context.Context, order domain.Order, emailSuffix
 	if order.SupplyPolicy == domain.SupplyPolicyPrivateFirst {
 		scopes = []SupplyScope{SupplyScopeOwned, SupplyScopePublic}
 	}
-	var lastErr error
-	for _, scope := range scopes {
-		result, err := uc.allocation.Allocate(ctx, AllocationCommand{
-			OrderNo:              order.OrderNo,
-			BuyerUserID:          order.UserID,
-			ProjectProductID:     order.ProjectProductID,
-			SupplyScope:          scope,
-			EmailSuffix:          emailSuffix,
-			FulfillExistingOrder: true,
-		})
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		if err != domain.ErrInsufficientInventory {
-			return nil, err
-		}
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, domain.ErrInsufficientInventory
+	return uc.allocation.Allocate(ctx, AllocationCommand{
+		OrderNo:              order.OrderNo,
+		BuyerUserID:          order.UserID,
+		ProjectProductID:     order.ProjectProductID,
+		SupplyScopes:         scopes,
+		EmailSuffix:          emailSuffix,
+		FulfillExistingOrder: true,
+	})
 }
 
 func checkoutPayAmount(listedAmount string, scope SupplyScope) string {

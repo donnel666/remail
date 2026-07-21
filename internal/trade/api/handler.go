@@ -78,10 +78,8 @@ func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest
 	created := false
 	failed := false
 	baseIdempotencyKey := c.GetHeader("Idempotency-Key")
-	// ponytail: batches are capped at 100 and processed sequentially; add
-	// bounded parallelism only if measured checkout latency requires it.
-	for i := 0; i < quantity; i++ {
-		result, err := h.mod.UseCase.Checkout(c.Request.Context(), tradeapp.CheckoutRequest{
+	checkoutRequest := func(i int) tradeapp.CheckoutRequest {
+		return tradeapp.CheckoutRequest{
 			UserID:         userID,
 			ProjectID:      req.ProjectID,
 			ProductID:      req.ProductID,
@@ -93,7 +91,27 @@ func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest
 			APIKeyID:       apiKeyID,
 			IdempotencyKey: batchOrderIdempotencyKey(baseIdempotencyKey, i),
 			RequestID:      middleware.GetRequestID(c),
-		})
+		}
+	}
+	results := []tradeapp.CheckoutBatchItem{{}}
+	if quantity == 1 {
+		result, err := h.mod.UseCase.Checkout(c.Request.Context(), checkoutRequest(0))
+		results[0] = tradeapp.CheckoutBatchItem{Result: result, Err: err}
+	} else {
+		requests := make([]tradeapp.CheckoutRequest, quantity)
+		for i := range requests {
+			requests[i] = checkoutRequest(i)
+		}
+		var err error
+		results, err = h.mod.UseCase.CheckoutBatch(c.Request.Context(), requests)
+		if err != nil {
+			platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
+			writeTradeError(c, err)
+			return
+		}
+	}
+	for i, item := range results {
+		result, err := item.Result, item.Err
 		if err != nil {
 			platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
 			if quantity > 1 && result != nil && batchOrderItemError(err) != nil {
