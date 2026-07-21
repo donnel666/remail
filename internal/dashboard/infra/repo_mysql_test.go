@@ -81,6 +81,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
     (4, 'four@test.local', 'hash', 'Four', 'active', 'user')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, logo_url, status, access_type, loose_match) VALUES
+    (1, 'Test', 'trade', '', 'listed', 'public', TRUE),
     (10, 'Microsoft', 'trade', '', 'listed', 'public', TRUE),
     (11, 'Telegram', 'trade', '', 'listed', 'public', TRUE)`).Error)
 	require.NoError(t, db.Exec(`
@@ -89,6 +90,7 @@ INSERT INTO project_products(
     code_price, purchase_price, code_supplier_price, purchase_supplier_price,
     code_window_minutes, activation_window_minutes, warranty_minutes,
     main_weight, dot_weight, plus_weight) VALUES
+    (22, 1, 'microsoft', 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, 1, 0, 0),
     (20, 10, 'microsoft', 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, 1, 0, 0),
     (21, 11, 'microsoft', 'enabled', TRUE, TRUE, 1.00, 2.00, 0.50, 1.00, 10, 60, 1440, 1, 0, 0)`).Error)
 	require.NoError(t, db.Exec(`
@@ -119,11 +121,16 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	// but stays excluded from code-receipt metrics.
 	seedDashboardOrder(t, db, 5, 2, 10, 20, "purchase", "10.00", ref, ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 5).Update("activated_at", ref).Error)
+	// Project 1 (Test) orders succeed but must not affect the public leaderboard.
+	seedDashboardOrder(t, db, 7, 2, 1, 22, "code", "1.00", receiveStart, ref)
+	seedDashboardOrder(t, db, 8, 3, 1, 22, "code", "1.00", receiveStart, ref)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 3, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
 	seedDashboardReceipt(t, db, 5, 104, ref)
 	seedDashboardReceipt(t, db, 6, 105, ref)
+	seedDashboardReceipt(t, db, 7, 106, ref)
+	seedDashboardReceipt(t, db, 8, 107, ref)
 
 	repo := NewViewRepo(db, nil)
 	from := ref.Add(-6 * time.Hour)
@@ -145,9 +152,9 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 		codeOrders += r.CodeOrders
 		spend += r.Spend
 	}
-	require.Equal(t, 4, orders)
-	require.Equal(t, 2, codeOrders)
-	require.InDelta(t, 35.00, spend, 0.001)
+	require.Equal(t, 5, orders)     // includes one project 1 (Test) code order
+	require.Equal(t, 3, codeOrders) // personal metrics still count that project
+	require.InDelta(t, 36.00, spend, 0.001)
 
 	receiptRows, err := repo.ReceiptBuckets(ctx, 2, dayFmt, from, to)
 	require.NoError(t, err)
@@ -156,14 +163,16 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 		received += r.Received
 		require.Equal(t, 30, r.AvgSeconds)
 	}
-	require.Equal(t, 2, received) // order 5 is a purchase delivery and must not count
+	require.Equal(t, 3, received) // order 5 purchase excluded; order 7 project 1 included
 
 	ranking, err := repo.ProjectCodeRanking(ctx, 2, from, to)
 	require.NoError(t, err)
-	require.Len(t, ranking, 2)
-	require.Equal(t, "Microsoft", ranking[0].Name)
+	require.Len(t, ranking, 3)
+	// All three tie at 1; order by project_id ASC.
+	require.Equal(t, "Test", ranking[0].Name)
 	require.Equal(t, 1, ranking[0].Count)
-	require.Equal(t, "Telegram", ranking[1].Name)
+	require.Equal(t, "Microsoft", ranking[1].Name)
+	require.Equal(t, "Telegram", ranking[2].Name)
 
 	spendRows, err := repo.ProjectSpendBuckets(ctx, 2, []uint{10, 11}, dayFmt, from, to)
 	require.NoError(t, err)
@@ -176,8 +185,8 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 
 	todayOrders, todayReceipts, err := repo.TodayCounts(ctx, 2, since)
 	require.NoError(t, err)
-	require.Equal(t, 4, todayOrders)
-	require.Equal(t, 2, todayReceipts)
+	require.Equal(t, 5, todayOrders)
+	require.Equal(t, 3, todayReceipts)
 
 	avg, err := repo.RangeAvgReceiptSeconds(ctx, 2, from, to)
 	require.NoError(t, err)
