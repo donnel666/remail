@@ -224,11 +224,12 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Dashboard module (read-only console analytics; self-contained raw-SQL
 		// aggregates over orders, code receipts, wallets, projects and users).
 		// Admin dashboard adds finance (billing) and per-project inventory (alloc).
-		dashboardMod := dashboardapi.NewModule(p.DB)
+		dashboardMod := dashboardapi.NewModule(p.DB, p.Redis, p.Asynq)
 		dashboardMod.SetAdminPorts(
 			dashboardFinanceDirectory{wallet: billingMod.WalletUseCase},
 			dashboardInventoryDirectory{db: p.DB, alloc: allocMod.UseCase},
 		)
+		cleanupFuncs = append(cleanupFuncs, dashboardapi.RegisterTaskHandlers(taskMux, dashboardMod))
 		dashboardapi.RegisterRoutes(v1, dashboardMod, iamSessionFetcher)
 		dashboardapi.RegisterAdminRoutes(v1, dashboardMod, iamSessionFetcher, iamMod.PermissionChecker)
 

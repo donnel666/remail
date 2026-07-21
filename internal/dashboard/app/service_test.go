@@ -170,3 +170,22 @@ func TestDisplayName(t *testing.T) {
 		}
 	}
 }
+
+func TestTodayStartUsesShanghaiDay(t *testing.T) {
+	now := time.Date(2026, 7, 21, 0, 42, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 20, 16, 0, 0, 0, time.UTC)
+	if got := TodayStart(now); !got.Equal(want) {
+		t.Fatalf("TodayStart(%s) = %s, want %s", now, got, want)
+	}
+}
+
+func TestDashboardBucketsUseShanghaiDay(t *testing.T) {
+	now := time.Date(2026, 7, 21, 15, 42, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 21, 0, 0, 0, 0, dashboardLocation)
+	if got := bucketStart(now, "day"); !got.Equal(want) {
+		t.Fatalf("bucketStart(%s) = %s, want %s", now, got, want)
+	}
+	if got := granularity(now, now); got != "hour" {
+		t.Fatalf("granularity(%s,%s) = %q, want hour", now, now, got)
+	}
+}

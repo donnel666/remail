@@ -26,6 +26,8 @@ const (
 	leaderboardLimit = 10
 )
 
+var dashboardLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
 // ---- raw aggregate rows returned by the ViewRepo -------------------------
 
 type OrderBucketRow struct {
@@ -148,8 +150,8 @@ func (s *QueryService) ConsoleDashboard(ctx context.Context, userID uint, from, 
 	gran := granularity(fromT, toT)
 	sqlFmt := sqlFormat(gran)
 	layout := bucketLayout(gran)
-	sameYear := fromT.In(time.Local).Year() == toT.In(time.Local).Year()
-	today := startOfToday(now)
+	sameYear := fromT.In(dashboardLocation).Year() == toT.In(dashboardLocation).Year()
+	today := TodayStart(now)
 
 	orderRows, err := s.view.OrderBuckets(ctx, userID, sqlFmt, fromT, toT)
 	if err != nil {
@@ -336,7 +338,7 @@ func displayName(nickname, email string, userID uint) string {
 // ---- bucketing helpers (mirrors internal/billing/app/finance.go) ---------
 
 func resolveRange(from, to *time.Time, now time.Time) (time.Time, time.Time) {
-	toT := now.UTC()
+	toT := now.In(dashboardLocation)
 	if to != nil {
 		toT = to.UTC()
 	}
@@ -358,7 +360,7 @@ func resolveRange(from, to *time.Time, now time.Time) (time.Time, time.Time) {
 }
 
 func granularity(from, to time.Time) string {
-	fl, tl := from.In(time.Local), to.In(time.Local)
+	fl, tl := from.In(dashboardLocation), to.In(dashboardLocation)
 	if fl.Year() == tl.Year() && fl.YearDay() == tl.YearDay() {
 		return "hour"
 	}
@@ -380,11 +382,11 @@ func bucketLayout(gran string) string {
 }
 
 func bucketStart(t time.Time, gran string) time.Time {
-	t = t.In(time.Local)
+	t = t.In(dashboardLocation)
 	if gran == "hour" {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.Local)
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, dashboardLocation)
 	}
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, dashboardLocation)
 }
 
 func nextBucket(t time.Time, gran string) time.Time {
@@ -404,9 +406,10 @@ func trendLabel(t time.Time, gran string, sameYear bool) string {
 	return fmt.Sprintf("%d/%d/%d", t.Year(), int(t.Month()), t.Day())
 }
 
-func startOfToday(now time.Time) time.Time {
-	l := now.In(time.Local)
-	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, time.Local)
+// TodayStart returns midnight in the dashboard's business timezone.
+func TodayStart(now time.Time) time.Time {
+	l := now.In(dashboardLocation)
+	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, dashboardLocation)
 }
 
 // ---- numeric helpers -----------------------------------------------------

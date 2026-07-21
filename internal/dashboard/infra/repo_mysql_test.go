@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -103,7 +105,8 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	ref := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour) // today, noon UTC
 	receiveStart := ref.Add(-30 * time.Second)
 
-	// user 2: two code orders (each with a receipt) + one purchase order.
+	// user 2: two code orders with receipts, one unactivated purchase and one
+	// activated purchase seeded below.
 	seedDashboardOrder(t, db, 1, 2, 10, 20, "code", "12.00", receiveStart, ref)
 	seedDashboardOrder(t, db, 2, 2, 10, 20, "purchase", "8.00", ref, ref)
 	seedDashboardOrder(t, db, 3, 2, 11, 21, "code", "5.00", receiveStart, ref)
@@ -112,16 +115,17 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	// user 4: one code order with a receipt — tied with user 3 (both 1) to exercise
 	// the leaderboard's ordinal tie-break (user 3 ranks ahead of user 4 by id).
 	seedDashboardOrder(t, db, 6, 4, 10, 20, "code", "3.00", receiveStart, ref)
-	// A purchase order that ALSO has a delivery head — must be excluded from every
-	// "code receipt" metric (收码量/leaderboard/ranking/success rate).
+	// A successfully activated purchase order also counts in the user leaderboard,
+	// but stays excluded from code-receipt metrics.
 	seedDashboardOrder(t, db, 5, 2, 10, 20, "purchase", "10.00", ref, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 5).Update("activated_at", ref).Error)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 3, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
 	seedDashboardReceipt(t, db, 5, 104, ref)
 	seedDashboardReceipt(t, db, 6, 105, ref)
 
-	repo := NewViewRepo(db)
+	repo := NewViewRepo(db, nil)
 	from := ref.Add(-6 * time.Hour)
 	to := ref.Add(6 * time.Hour)
 	since := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, time.UTC)
@@ -184,7 +188,7 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 		require.NoError(t, err)
 		require.Len(t, leaders, 3)
 		require.Equal(t, uint(2), leaders[0].UserID)
-		require.Equal(t, 2, leaders[0].Count)
+		require.Equal(t, 3, leaders[0].Count)
 		require.Equal(t, "Buyer", leaders[0].Nickname)
 		// users 3 and 4 tie at 1; ordered by user_id ASC.
 		require.Equal(t, uint(3), leaders[1].UserID)
@@ -195,7 +199,7 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 
 	standing2, err := repo.UserStanding(ctx, 2, nil)
 	require.NoError(t, err)
-	require.Equal(t, 2, standing2.Count)
+	require.Equal(t, 3, standing2.Count)
 	require.Equal(t, 1, standing2.Rank)
 
 	// Tied users get distinct ordinal ranks matching the leaderboard order, not a
@@ -209,6 +213,21 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	require.NoError(t, err)
 	require.Equal(t, 1, standing4.Count)
 	require.Equal(t, 3, standing4.Rank)
+
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+	cachedRepo := NewViewRepo(db, redisClient)
+	todayStart := dashboardapp.TodayStart(ref)
+	require.NoError(t, cachedRepo.RefreshLeaderboardCache(ctx, todayStart))
+	cachedLeaders, err := cachedRepo.Leaderboard(ctx, &todayStart, 10)
+	require.NoError(t, err)
+	require.Len(t, cachedLeaders, 3)
+	require.Equal(t, uint(2), cachedLeaders[0].UserID)
+	require.Equal(t, 3, cachedLeaders[0].Count)
+	cachedStanding, err := cachedRepo.UserStanding(ctx, 2, &todayStart)
+	require.NoError(t, err)
+	require.Equal(t, 3, cachedStanding.Count)
 }
 
 // TestAdminViewRepoMySQL drives the platform-wide admin aggregates against real

@@ -96,14 +96,14 @@ export default function ConsoleOverview() {
           items={data?.todayCodeRanking ?? []}
           kind="today"
           loading={loading}
-          title={t("Today code receipt ranking")}
+          title={t("Today successful order ranking")}
         />
         <RankingPanel
           currentUserRank={data?.historicalCurrentUserRank}
           items={data?.historicalCodeRanking ?? []}
           kind="history"
           loading={loading}
-          title={t("All-time code receipt ranking")}
+          title={t("All-time successful order ranking")}
         />
       </section>
 

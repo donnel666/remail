@@ -3,6 +3,8 @@ package api
 import (
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
 	"github.com/donnel666/remail/internal/dashboard/infra"
+	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -14,12 +16,17 @@ type Module struct {
 	Query      *dashboardapp.QueryService
 	AdminQuery *dashboardapp.AdminQueryService
 	adminView  dashboardapp.AdminView
+	view       *infra.ViewRepo
+	asynq      *asynq.Client
 }
 
-func NewModule(db *gorm.DB) *Module {
+func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asynq.Client) *Module {
+	view := infra.NewViewRepo(db, redisClient)
 	return &Module{
-		Query:     dashboardapp.NewQueryService(infra.NewViewRepo(db)),
+		Query:     dashboardapp.NewQueryService(view),
 		adminView: infra.NewAdminViewRepo(db),
+		view:      view,
+		asynq:     asynqClient,
 	}
 }
 

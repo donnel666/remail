@@ -1645,6 +1645,8 @@
   "Average code receipt time": "Average code receipt time",
   "Today code receipt ranking": "Today code receipt ranking",
   "All-time code receipt ranking": "Historical code receipt ranking",
+  "Today successful order ranking": "Today successful order ranking",
+  "All-time successful order ranking": "All-time successful order ranking",
   "Ranked by successful code receipts": "Ranked by successful code receipts",
   "Data analysis": "Code receipt analytics",
   "Spend distribution": "Spend distribution",

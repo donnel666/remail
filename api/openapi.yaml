@@ -5270,9 +5270,10 @@ paths:
       description: |
         Aggregated analytics for the signed-in user's console overview — orders,
         code receipts, spend, project spend series, project code-receipt ranking,
-        and today/all-time cross-user code-receipt leaderboards — over the
-        selected date range. Available to any authenticated user; scoped to the
-        caller. Buckets are hourly when the range is a single day, else daily.
+        and today/all-time cross-user successful-order leaderboards (delivered
+        code orders plus activated purchase orders) — over the selected date
+        range. Available to any authenticated user; scoped to the caller. Buckets
+        are hourly when the range is a single day, else daily.
       tags:
         - Dashboard
       security:
@@ -11172,10 +11173,12 @@ components:
           type: number
         todayCodeRanking:
           type: array
+          description: Successful-order ranking for the current business day; includes delivered code orders and activated purchase orders.
           items:
             $ref: "#/components/schemas/DashboardRankItem"
         historicalCodeRanking:
           type: array
+          description: All-time successful-order ranking; includes delivered code orders and activated purchase orders.
           items:
             $ref: "#/components/schemas/DashboardRankItem"
         todayCurrentUserRank:

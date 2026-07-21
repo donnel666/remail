@@ -1558,9 +1558,10 @@ export interface paths {
          * Current user's console data dashboard
          * @description Aggregated analytics for the signed-in user's console overview — orders,
          *     code receipts, spend, project spend series, project code-receipt ranking,
-         *     and today/all-time cross-user code-receipt leaderboards — over the
-         *     selected date range. Available to any authenticated user; scoped to the
-         *     caller. Buckets are hourly when the range is a single day, else daily.
+         *     and today/all-time cross-user successful-order leaderboards (delivered
+         *     code orders plus activated purchase orders) — over the selected date
+         *     range. Available to any authenticated user; scoped to the caller. Buckets
+         *     are hourly when the range is a single day, else daily.
          */
         get: operations["getDashboard"];
         put?: never;
@@ -3752,7 +3753,9 @@ export interface components {
             projectCodeRanking: components["schemas"]["DashboardRankItem"][];
             codeRatio: number;
             purchaseRatio: number;
+            /** @description Successful-order ranking for the current business day; includes delivered code orders and activated purchase orders. */
             todayCodeRanking: components["schemas"]["DashboardRankItem"][];
+            /** @description All-time successful-order ranking; includes delivered code orders and activated purchase orders. */
             historicalCodeRanking: components["schemas"]["DashboardRankItem"][];
             todayCurrentUserRank: components["schemas"]["DashboardRankItem"];
             historicalCurrentUserRank: components["schemas"]["DashboardRankItem"];

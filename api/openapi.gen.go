@@ -5387,16 +5387,20 @@ type DashboardRankItem struct {
 
 // DashboardResponse Aggregated analytics for the signed-in user's console overview.
 type DashboardResponse struct {
-	CodeRatio                 float32                  `json:"codeRatio"`
+	CodeRatio float32 `json:"codeRatio"`
+
+	// HistoricalCodeRanking All-time successful-order ranking; includes delivered code orders and activated purchase orders.
 	HistoricalCodeRanking     []DashboardRankItem      `json:"historicalCodeRanking"`
 	HistoricalCurrentUserRank DashboardRankItem        `json:"historicalCurrentUserRank"`
 	ProjectCodeRanking        []DashboardRankItem      `json:"projectCodeRanking"`
 	ProjectSeries             []DashboardProjectSeries `json:"projectSeries"`
 	PurchaseRatio             float32                  `json:"purchaseRatio"`
 	Stats                     DashboardStats           `json:"stats"`
-	TodayCodeRanking          []DashboardRankItem      `json:"todayCodeRanking"`
-	TodayCurrentUserRank      DashboardRankItem        `json:"todayCurrentUserRank"`
-	Trend                     []DashboardTrendPoint    `json:"trend"`
+
+	// TodayCodeRanking Successful-order ranking for the current business day; includes delivered code orders and activated purchase orders.
+	TodayCodeRanking     []DashboardRankItem   `json:"todayCodeRanking"`
+	TodayCurrentUserRank DashboardRankItem     `json:"todayCurrentUserRank"`
+	Trend                []DashboardTrendPoint `json:"trend"`
 }
 
 // DashboardStats defines model for DashboardStats.

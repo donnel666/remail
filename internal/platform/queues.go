@@ -59,7 +59,7 @@ const (
 	QueueResource = "resource"
 	// QueueBackgroundProjectHistory pulls mailbox history for newly listed projects.
 	QueueBackgroundProjectHistory = "background_project_history"
-	// QueueBackgroundInventory refreshes Redis inventory read models.
+	// QueueBackgroundInventory refreshes Redis read models such as inventory and dashboard rankings.
 	QueueBackgroundInventory = "background_inventory"
 )
 

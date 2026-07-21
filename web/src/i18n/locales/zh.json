@@ -1645,6 +1645,8 @@
   "Average code receipt time": "平均接码耗时",
   "Today code receipt ranking": "今日接码排行榜",
   "All-time code receipt ranking": "历史接码排行榜",
+  "Today successful order ranking": "今日成功订单排行榜",
+  "All-time successful order ranking": "历史成功订单排行榜",
   "Ranked by successful code receipts": "按成功接收验证码数量排序",
   "Data analysis": "接码数据分析",
   "Spend distribution": "消费分布",
