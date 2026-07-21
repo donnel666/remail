@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
-	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -139,6 +139,232 @@ func (r *Repo) LoadPickupScope(ctx context.Context, token string, email string) 
 	return row.toScope(nil), nil
 }
 
+func (r *Repo) ReadPickupBatch(
+	ctx context.Context,
+	credentials []app.PickupCredential,
+	now time.Time,
+	limit int,
+) ([]app.PickupBatchRead, error) {
+	reads := make([]app.PickupBatchRead, len(credentials))
+	if len(credentials) == 0 {
+		return reads, nil
+	}
+	if limit <= 0 {
+		limit = 40
+	}
+
+	tokens := make([]string, 0, len(credentials))
+	seenTokens := make(map[string]struct{}, len(credentials))
+	for _, credential := range credentials {
+		token := strings.TrimSpace(credential.Token)
+		if token == "" {
+			continue
+		}
+		if _, ok := seenTokens[token]; ok {
+			continue
+		}
+		seenTokens[token] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	if len(tokens) == 0 {
+		for i := range reads {
+			reads[i].Err = domain.ErrPickupCredentialInvalid
+		}
+		return reads, nil
+	}
+
+	for i := range reads {
+		reads[i].Err = domain.ErrPickupCredentialInvalid
+	}
+	return reads, r.WithTx(ctx, func(txCtx context.Context) error {
+		db := r.dbFor(txCtx)
+		var scopeRows []orderScopeRow
+		if err := db.Raw(pickupBatchScopeSQL, tokens).Scan(&scopeRows).Error; err != nil {
+			return fmt.Errorf("load pickup batch scopes: %w", err)
+		}
+
+		scopesByToken := make(map[string]app.OrderScope, len(scopeRows))
+		rowsByToken := make(map[string]orderScopeRow, len(scopeRows))
+		orderIDs := make([]uint, 0, len(scopeRows))
+		resourceIDs := make([]uint, 0, len(scopeRows))
+		seenOrders := make(map[uint]struct{}, len(scopeRows))
+		seenResources := make(map[uint]struct{}, len(scopeRows))
+		for _, row := range scopeRows {
+			scope := *row.toScope(nil)
+			scopesByToken[row.TokenPlain] = scope
+			rowsByToken[row.TokenPlain] = row
+		}
+		validScopeRows := make([]orderScopeRow, 0, len(scopeRows))
+
+		for i, credential := range credentials {
+			scope, ok := scopesByToken[strings.TrimSpace(credential.Token)]
+			if !ok || !strings.EqualFold(strings.TrimSpace(credential.Email), strings.TrimSpace(scope.Recipient)) {
+				continue
+			}
+			reads[i].Scope = &scope
+			reads[i].Err = nil
+			validScopeRows = append(validScopeRows, rowsByToken[strings.TrimSpace(credential.Token)])
+			if _, ok := seenOrders[scope.OrderID]; !ok {
+				seenOrders[scope.OrderID] = struct{}{}
+				orderIDs = append(orderIDs, scope.OrderID)
+			}
+			if _, ok := seenResources[scope.EmailResourceID]; !ok {
+				seenResources[scope.EmailResourceID] = struct{}{}
+				resourceIDs = append(resourceIDs, scope.EmailResourceID)
+			}
+		}
+
+		if len(orderIDs) == 0 {
+			return nil
+		}
+
+		deliveries, err := r.readPickupDeliveries(txCtx, orderIDs)
+		if err != nil {
+			return err
+		}
+		states, err := r.readPickupFetchStates(txCtx, resourceIDs)
+		if err != nil {
+			return err
+		}
+		messages, err := r.readPickupMessages(txCtx, orderIDs, validScopeRows, now, limit)
+		if err != nil {
+			return err
+		}
+
+		for i := range reads {
+			if reads[i].Scope == nil {
+				continue
+			}
+			reads[i].Delivery = deliveries[reads[i].Scope.OrderID]
+			reads[i].Fetch = states[reads[i].Scope.EmailResourceID]
+			reads[i].Messages = messages[reads[i].Scope.OrderID]
+		}
+		return nil
+	})
+}
+
+func (r *Repo) readPickupDeliveries(ctx context.Context, orderIDs []uint) (map[uint]*app.OrderDelivery, error) {
+	result := make(map[uint]*app.OrderDelivery, len(orderIDs))
+	var heads []OrderDeliveryHeadModel
+	if err := r.dbFor(ctx).Where("order_id IN ?", orderIDs).Find(&heads).Error; err != nil {
+		return nil, fmt.Errorf("read pickup deliveries: %w", err)
+	}
+	messageIDs := make([]uint, 0, len(heads))
+	for _, head := range heads {
+		result[head.OrderID] = &app.OrderDelivery{ReceivedAt: head.MessageReceivedAt}
+		if head.MessageID != nil {
+			messageIDs = append(messageIDs, *head.MessageID)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	var models []MessageModel
+	if err := r.dbFor(ctx).
+		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
+		Where("id IN ?", messageIDs).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("read pickup delivery messages: %w", err)
+	}
+	byID := make(map[uint]domain.Message, len(models))
+	for _, model := range models {
+		byID[model.ID] = messageModelToDomain(model)
+	}
+	for _, head := range heads {
+		if head.MessageID == nil {
+			continue
+		}
+		message, ok := byID[*head.MessageID]
+		if !ok {
+			continue
+		}
+		delivery := result[head.OrderID]
+		delivery.Message = &message
+	}
+	return result, nil
+}
+
+func (r *Repo) readPickupFetchStates(ctx context.Context, resourceIDs []uint) (map[uint]*domain.FetchState, error) {
+	result := make(map[uint]*domain.FetchState, len(resourceIDs))
+	if len(resourceIDs) == 0 {
+		return result, nil
+	}
+	var models []FetchStateModel
+	if err := r.dbFor(ctx).Where("email_resource_id IN ?", resourceIDs).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("read pickup fetch states: %w", err)
+	}
+	for _, model := range models {
+		state := fetchStateModelToDomain(model)
+		result[model.EmailResourceID] = &state
+	}
+	return result, nil
+}
+
+func (r *Repo) readPickupMessages(
+	ctx context.Context,
+	orderIDs []uint,
+	scopeRows []orderScopeRow,
+	now time.Time,
+	limit int,
+) (map[uint][]domain.Message, error) {
+	result := make(map[uint][]domain.Message, len(orderIDs))
+	start := now
+	end := now
+	for _, row := range scopeRows {
+		candidate := now.Add(-30 * 24 * time.Hour)
+		if domain.ResourceType(row.AllocationType) == domain.ResourceTypeMicrosoft {
+			candidate = now.Add(-3 * 24 * time.Hour)
+		}
+		if row.ReceiveStartedAt != nil {
+			serviceStart := row.ReceiveStartedAt.Add(-2 * time.Minute)
+			if serviceStart.After(candidate) {
+				candidate = serviceStart
+			}
+		}
+		if candidate.Before(start) {
+			start = candidate
+		}
+		if row.ServiceMode == "code" && row.ReceiveUntil != nil && row.ReceiveUntil.After(end) {
+			end = *row.ReceiveUntil
+		}
+	}
+	var models []MessageModel
+	err := r.dbFor(ctx).Raw(`
+SELECT id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json,
+       sender, subject, body_preview, verification_code, message_id_header,
+       provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic,
+       received_at, created_at, updated_at
+FROM (
+    SELECT m.id, m.email_resource_id, m.resource_type, m.matched_order_id,
+           m.recipient, m.recipients_json, m.sender, m.subject, m.body_preview,
+           m.verification_code, m.message_id_header, m.provider_message_id,
+           m.dedupe_key, m.protocol, m.folder, m.status, m.match_diagnostic,
+           m.received_at, m.created_at, m.updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY m.matched_order_id
+               ORDER BY m.received_at DESC, m.id DESC
+           ) AS rn
+    FROM mailmatch_messages AS m
+    WHERE m.matched_order_id IN ?
+      AND m.received_at >= ?
+      AND m.received_at <= ?
+) AS ranked
+WHERE ranked.rn <= ?
+ORDER BY ranked.matched_order_id ASC, ranked.received_at DESC, ranked.id DESC`,
+		orderIDs, start, end, limit).Scan(&models).Error
+	if err != nil {
+		return nil, fmt.Errorf("read pickup messages: %w", err)
+	}
+	for _, model := range models {
+		if model.MatchedOrderID == nil {
+			continue
+		}
+		orderID := *model.MatchedOrderID
+		result[orderID] = append(result[orderID], messageModelToDomain(model))
+	}
+	return result, nil
+}
+
 func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderScope, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
@@ -160,6 +386,7 @@ func (r *Repo) loadOrderScope(ctx context.Context, orderNo string) (*app.OrderSc
 }
 
 type orderScopeRow struct {
+	TokenPlain         string
 	OrderID            uint
 	OrderNo            string
 	UserID             uint
@@ -251,9 +478,13 @@ FROM order_tokens t
 JOIN orders o ON o.order_no = t.order_no
 JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma
-  ON ma.id = o.microsoft_alloc_id AND o.allocation_type = 'microsoft'
+  ON ma.id = o.microsoft_alloc_id
+ AND o.allocation_type = 'microsoft'
+ AND ma.order_no = o.order_no
 LEFT JOIN domain_allocations da
-  ON da.id = o.domain_alloc_id AND o.allocation_type = 'domain'
+  ON da.id = o.domain_alloc_id
+ AND o.allocation_type = 'domain'
+ AND da.order_no = o.order_no
 WHERE t.token_plain = ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
@@ -263,6 +494,49 @@ WHERE t.token_plain = ?
     (o.allocation_type = 'domain' AND da.order_no = o.order_no AND da.email = ?)
   )
 LIMIT 1`
+
+const pickupBatchScopeSQL = `
+SELECT
+    t.token_plain,
+    o.id AS order_id,
+    o.order_no,
+    o.user_id,
+    o.project_id,
+    o.project_product_id AS product_id,
+    o.service_mode,
+    o.status AS order_status,
+    o.allocation_type,
+    COALESCE(o.microsoft_alloc_id, o.domain_alloc_id, 0) AS allocation_id,
+    CASE
+      WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
+      ELSE 'exact'
+    END AS recipient_kind,
+    CASE WHEN o.allocation_type = 'microsoft' THEN ma.resource_id ELSE da.resource_id END AS email_resource_id,
+    CASE WHEN o.allocation_type = 'microsoft' THEN ma.email ELSE da.email END AS recipient,
+    o.receive_started_at,
+    o.receive_until,
+    o.activated_at,
+    o.after_sale_until,
+    p.loose_match,
+    '' AS microsoft_email,
+    '' AS microsoft_client_id,
+    '' AS microsoft_rt,
+    COALESCE(mr.credential_revision, 0) AS credential_revision
+FROM order_tokens t
+JOIN orders o ON o.order_no = t.order_no
+JOIN projects p ON p.id = o.project_id
+LEFT JOIN microsoft_allocations ma
+  ON ma.id = o.microsoft_alloc_id
+ AND o.allocation_type = 'microsoft'
+ AND ma.order_no = o.order_no
+LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
+LEFT JOIN domain_allocations da
+  ON da.id = o.domain_alloc_id
+ AND o.allocation_type = 'domain'
+ AND da.order_no = o.order_no
+WHERE t.token_plain IN ?
+  AND t.enabled = 1
+  AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())`
 
 const microsoftMatchingScopesSQL = `
 SELECT
@@ -629,55 +903,146 @@ func (r *Repo) FindFetchStateForUpdate(ctx context.Context, emailResourceID uint
 	return &item, nil
 }
 
+func (r *Repo) EnsureFetchStates(ctx context.Context, emailResourceIDs []uint) error {
+	ids := sortedUniqueResourceIDs(emailResourceIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	models := make([]FetchStateModel, len(ids))
+	for i, id := range ids {
+		models[i].EmailResourceID = id
+	}
+	if err := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&models).Error; err != nil {
+		return fmt.Errorf("ensure fetch states: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) FindFetchStatesForUpdate(ctx context.Context, emailResourceIDs []uint) (map[uint]*domain.FetchState, error) {
+	ids := sortedUniqueResourceIDs(emailResourceIDs)
+	result := make(map[uint]*domain.FetchState, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	var models []FetchStateModel
+	if err := r.dbFor(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("email_resource_id IN ?", ids).
+		Order("email_resource_id ASC").
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("lock fetch states: %w", err)
+	}
+	for _, model := range models {
+		state := fetchStateModelToDomain(model)
+		result[model.EmailResourceID] = &state
+	}
+	return result, nil
+}
+
 func (r *Repo) RequestFetch(ctx context.Context, job *domain.FetchJob, cooldownUntil time.Time, now time.Time) error {
 	if job == nil || job.EmailResourceID == 0 {
 		return domain.ErrInvalidRequest
 	}
-	model := FetchStateModel{
-		EmailResourceID: job.EmailResourceID, Status: string(domain.FetchJobPending), Generation: 1,
-		OperationKind: "order_fetch", OrderNo: strings.TrimSpace(job.OrderNo), Purpose: string(job.Purpose),
-		SinceAt: job.SinceAt, UntilAt: job.UntilAt, RequestID: strings.TrimSpace(job.RequestID),
-		RequestedAt: &now, CooldownUntil: &cooldownUntil,
+	return r.RequestFetchBatch(ctx, []*domain.FetchJob{job}, cooldownUntil, now)
+}
+
+func (r *Repo) RequestFetchBatch(ctx context.Context, jobs []*domain.FetchJob, cooldownUntil time.Time, now time.Time) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	for _, job := range jobs {
+		if job == nil || job.EmailResourceID == 0 {
+			return domain.ErrInvalidRequest
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].EmailResourceID < jobs[j].EmailResourceID
+	})
+	models := make([]FetchStateModel, len(jobs))
+	ids := make([]uint, len(jobs))
+	for i, job := range jobs {
+		if i > 0 && jobs[i-1].EmailResourceID == job.EmailResourceID {
+			return domain.ErrInvalidRequest
+		}
+		ids[i] = job.EmailResourceID
+		models[i] = FetchStateModel{
+			EmailResourceID:            job.EmailResourceID,
+			Status:                     string(domain.FetchJobPending),
+			Generation:                 1,
+			OperationKind:              "order_fetch",
+			OrderNo:                    strings.TrimSpace(job.OrderNo),
+			Purpose:                    string(job.Purpose),
+			ExpectedCredentialRevision: job.ExpectedCredentialRevision,
+			SinceAt:                    job.SinceAt,
+			UntilAt:                    job.UntilAt,
+			RequestID:                  strings.TrimSpace(job.RequestID),
+			RequestedAt:                &now,
+			CooldownUntil:              &cooldownUntil,
+		}
 	}
 	db := r.dbFor(ctx)
-	err := db.Create(&model).Error
-	if err != nil && !isDuplicateKeyError(err) {
-		return fmt.Errorf("create fetch state: %w", err)
-	}
-	if isDuplicateKeyError(err) {
-		result := db.Model(&FetchStateModel{}).Where("email_resource_id = ?", job.EmailResourceID).Updates(map[string]any{
-			"status":                       string(domain.FetchJobPending),
+	err := db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "email_resource_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"status":                       gorm.Expr("VALUES(status)"),
 			"generation":                   gorm.Expr("generation + 1"),
 			"failures":                     0,
-			"operation_kind":               "order_fetch",
-			"order_no":                     strings.TrimSpace(job.OrderNo),
-			"purpose":                      string(job.Purpose),
+			"operation_kind":               gorm.Expr("VALUES(operation_kind)"),
+			"order_no":                     gorm.Expr("VALUES(order_no)"),
+			"purpose":                      gorm.Expr("VALUES(purpose)"),
 			"operator_user_id":             nil,
-			"expected_credential_revision": job.ExpectedCredentialRevision,
-			"since_at":                     job.SinceAt,
-			"until_at":                     job.UntilAt,
+			"expected_credential_revision": gorm.Expr("VALUES(expected_credential_revision)"),
+			"since_at":                     gorm.Expr("VALUES(since_at)"),
+			"until_at":                     gorm.Expr("VALUES(until_at)"),
 			"fetched_count":                0,
 			"stored_count":                 0,
 			"matched_count":                0,
-			"request_id":                   strings.TrimSpace(job.RequestID),
+			"request_id":                   gorm.Expr("VALUES(request_id)"),
 			"path":                         "",
 			"idempotency_key":              "",
-			"requested_at":                 now,
+			"requested_at":                 gorm.Expr("VALUES(requested_at)"),
 			"started_at":                   nil,
 			"finished_at":                  nil,
-			"cooldown_until":               cooldownUntil,
+			"cooldown_until":               gorm.Expr("VALUES(cooldown_until)"),
 			"last_safe_error":              "",
-		})
-		if result.Error != nil {
-			return fmt.Errorf("replace fetch state: %w", result.Error)
+		}),
+	}).Create(&models).Error
+	if err != nil {
+		return fmt.Errorf("request fetch batch: %w", err)
+	}
+	var saved []FetchStateModel
+	if err := db.Where("email_resource_id IN ?", ids).Order("email_resource_id ASC").Find(&saved).Error; err != nil {
+		return fmt.Errorf("read requested fetch states: %w", err)
+	}
+	if len(saved) != len(jobs) {
+		return fmt.Errorf("read requested fetch states: expected %d rows, got %d", len(jobs), len(saved))
+	}
+	byID := make(map[uint]domain.FetchJob, len(saved))
+	for _, model := range saved {
+		byID[model.EmailResourceID] = fetchStateModelToJob(model)
+	}
+	for _, job := range jobs {
+		savedJob, ok := byID[job.EmailResourceID]
+		if !ok {
+			return fmt.Errorf("read requested fetch state %d: %w", job.EmailResourceID, domain.ErrFetchJobConflict)
 		}
+		*job = savedJob
 	}
-	var saved FetchStateModel
-	if err := db.First(&saved, "email_resource_id = ?", job.EmailResourceID).Error; err != nil {
-		return fmt.Errorf("read requested fetch state: %w", err)
-	}
-	*job = fetchStateModelToJob(saved)
 	return nil
+}
+
+func sortedUniqueResourceIDs(ids []uint) []uint {
+	result := append([]uint(nil), ids...)
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	write := 0
+	for _, id := range result {
+		if id == 0 || (write > 0 && result[write-1] == id) {
+			continue
+		}
+		result[write] = id
+		write++
+	}
+	return result[:write]
 }
 
 func (r *Repo) ListPendingFetches(ctx context.Context, limit int) ([]domain.FetchJob, error) {
@@ -1042,12 +1407,4 @@ func truncateUTF8Bytes(value string, limit int) string {
 		return value
 	}
 	return strings.ToValidUTF8(value[:limit], "")
-}
-
-func isDuplicateKeyError(err error) bool {
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return true
-	}
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

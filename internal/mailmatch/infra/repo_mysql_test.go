@@ -2,9 +2,11 @@ package infra
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,6 +193,156 @@ func TestListOrderMessagesOnlyReturnsPersistedOwnershipMySQL(t *testing.T) {
 	detail, err := repo.FindOrderMessage(context.Background(), orderID, items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, "Owned code 123456", detail.RawBody)
+}
+
+func TestReadPickupBatchLoadsOneSnapshotMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_PICKUP_BATCH")
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Table("microsoft_resources").Where("id = ?", 100).Update("credential_revision", 7).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_PICKUP_BATCH', 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', 'OR_PICKUP_BATCH', 'TX_PICKUP_BATCH')`).Error)
+	var debitID uint
+	require.NoError(t, db.Table("wallet_transactions").Select("id").Where("transaction_no = ?", "TX_PICKUP_BATCH").Scan(&debitID).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO allocation_order_guards(order_no, type)
+VALUES ('OR_PICKUP_BATCH', 'microsoft')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_allocations(
+    order_no, project_id, product_id, resource_id, supply_scope, mailbox, email
+) VALUES ('OR_PICKUP_BATCH', 10, 20, 100, 'public', 'main', 'main@example.com')`).Error)
+	var allocationID uint
+	require.NoError(t, db.Table("microsoft_allocations").Select("id").Where("order_no = ?", "OR_PICKUP_BATCH").Scan(&allocationID).Error)
+	require.NoError(t, db.Table("orders").Where("id = ?", orderID).Updates(map[string]any{
+		"status":             "active",
+		"debit_tx_id":        debitID,
+		"allocation_type":    "microsoft",
+		"microsoft_alloc_id": allocationID,
+		"delivery_email":     "main@example.com",
+		"receive_started_at": now.Add(-time.Minute),
+		"receive_until":      now.Add(10 * time.Minute),
+	}).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO order_tokens(token_prefix, token_plain, order_no, enabled)
+VALUES ('bulk-prefix', 'bulk-token', 'OR_PICKUP_BATCH', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(email_resource_id, status, cooldown_until)
+VALUES (100, 'normal', ?)`, now.Add(time.Minute)).Error)
+	repo := NewRepo(db, nil)
+	message := domain.Message{
+		EmailResourceID:  100,
+		ResourceType:     domain.ResourceTypeMicrosoft,
+		MatchedOrderID:   &orderID,
+		Recipient:        "main@example.com",
+		RawBody:          "Your code is 123456",
+		VerificationCode: "123456",
+		DedupeKey:        "4444444444444444444444444444444444444444444444444444444444444444",
+		Status:           domain.MessageStatusMatched,
+		ReceivedAt:       now,
+	}
+	stored, err := repo.UpsertMessages(context.Background(), []domain.Message{message})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
+VALUES (?, ?, ?)`, orderID, stored[0].ID, now).Error)
+
+	reads, err := repo.ReadPickupBatch(context.Background(), []app.PickupCredential{
+		{Email: "main@example.com", Token: "bulk-token"},
+		{Email: "wrong@example.com", Token: "bulk-token"},
+	}, now, 40)
+	require.NoError(t, err)
+	require.Len(t, reads, 2)
+	require.NoError(t, reads[0].Err)
+	require.Equal(t, orderID, reads[0].Scope.OrderID)
+	require.Equal(t, uint64(7), reads[0].Scope.CredentialRevision)
+	require.NotNil(t, reads[0].Delivery)
+	require.Equal(t, stored[0].ID, reads[0].Delivery.Message.ID)
+	require.Len(t, reads[0].Messages, 1)
+	require.Equal(t, stored[0].ID, reads[0].Messages[0].ID)
+	require.ErrorIs(t, reads[1].Err, domain.ErrPickupCredentialInvalid)
+}
+
+func TestFirstFetchStateCreationAvoidsGapDeadlockMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchFetchResource(t, db)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (101, 'microsoft', 1)`).Error)
+	repo := NewRepo(db, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	errorsByResource := make(map[uint]error)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, resourceID := range []uint{100, 101} {
+		wg.Add(1)
+		go func(id uint) {
+			defer wg.Done()
+			err := repo.WithTx(ctx, func(txCtx context.Context) error {
+				if err := repo.EnsureFetchStates(txCtx, []uint{id}); err != nil {
+					return err
+				}
+				ready <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if _, err := repo.FindFetchStatesForUpdate(txCtx, []uint{id}); err != nil {
+					return err
+				}
+				now := time.Now().UTC()
+				job := &domain.FetchJob{
+					ID: id, EmailResourceID: id, OrderNo: fmt.Sprintf("ORDER-%d", id),
+					Purpose: domain.FetchPurposeAutoRefresh, Status: domain.FetchJobPending,
+				}
+				return repo.RequestFetchBatch(txCtx, []*domain.FetchJob{job}, now.Add(time.Minute), now)
+			})
+			mu.Lock()
+			errorsByResource[id] = err
+			mu.Unlock()
+		}(resourceID)
+	}
+	for range 2 {
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			t.Fatal("timed out while creating concurrent fetch states")
+		}
+	}
+	close(release)
+	wg.Wait()
+	require.NoError(t, errorsByResource[100])
+	require.NoError(t, errorsByResource[101])
+	now := time.Now().UTC()
+	jobs := []*domain.FetchJob{
+		{ID: 101, EmailResourceID: 101, OrderNo: "ORDER-BATCH-101", Purpose: domain.FetchPurposeAutoRefresh, ExpectedCredentialRevision: 11},
+		{ID: 100, EmailResourceID: 100, OrderNo: "ORDER-BATCH-100", Purpose: domain.FetchPurposeAutoRefresh, ExpectedCredentialRevision: 10},
+	}
+	require.NoError(t, repo.WithTx(ctx, func(txCtx context.Context) error {
+		if err := repo.EnsureFetchStates(txCtx, []uint{101, 100}); err != nil {
+			return err
+		}
+		if _, err := repo.FindFetchStatesForUpdate(txCtx, []uint{101, 100}); err != nil {
+			return err
+		}
+		return repo.RequestFetchBatch(txCtx, jobs, now.Add(time.Minute), now)
+	}))
+	require.Equal(t, uint64(2), jobs[0].Generation)
+	require.Equal(t, uint64(2), jobs[1].Generation)
+	var states []FetchStateModel
+	require.NoError(t, db.Where("email_resource_id IN ?", []uint{100, 101}).Order("email_resource_id").Find(&states).Error)
+	require.Len(t, states, 2)
+	for i, state := range states {
+		require.Equal(t, uint64(2), state.Generation)
+		require.Equal(t, string(domain.FetchJobPending), state.Status)
+		require.Equal(t, uint64(10+i), state.ExpectedCredentialRevision)
+	}
 }
 
 func TestListMatchingScopesByRecipientNormalizesMicrosoftAliasesMySQL(t *testing.T) {

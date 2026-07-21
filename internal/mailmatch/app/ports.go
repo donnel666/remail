@@ -14,6 +14,7 @@ import (
 	"mime/quotedprintable"
 	stdmail "net/mail"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -139,7 +140,10 @@ type Repository interface {
 	AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
 	FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
+	EnsureFetchStates(ctx context.Context, emailResourceIDs []uint) error
+	FindFetchStatesForUpdate(ctx context.Context, emailResourceIDs []uint) (map[uint]*domain.FetchState, error)
 	RequestFetch(ctx context.Context, job *domain.FetchJob, cooldownUntil time.Time, now time.Time) error
+	RequestFetchBatch(ctx context.Context, jobs []*domain.FetchJob, cooldownUntil time.Time, now time.Time) error
 	ListPendingFetches(ctx context.Context, limit int) ([]domain.FetchJob, error)
 	MarkFetchProcessing(ctx context.Context, emailResourceID uint, generation uint64, now time.Time) (bool, error)
 	FindFetch(ctx context.Context, emailResourceID uint, generation uint64) (*domain.FetchJob, error)
@@ -198,6 +202,22 @@ type PickupMailResult struct {
 	Items []domain.MailContent
 	Fetch *domain.FetchState
 	Err   error
+}
+
+// PickupBatchRead contains the database snapshot needed to render one pickup
+// item. Repositories that implement PickupBatchReader can load all items in a
+// single transaction; older repository implementations use the single-item
+// fallback below.
+type PickupBatchRead struct {
+	Scope    *OrderScope
+	Delivery *OrderDelivery
+	Fetch    *domain.FetchState
+	Messages []domain.Message
+	Err      error
+}
+
+type PickupBatchReader interface {
+	ReadPickupBatch(ctx context.Context, credentials []PickupCredential, now time.Time, limit int) ([]PickupBatchRead, error)
 }
 
 type UseCase struct {
@@ -266,6 +286,10 @@ func (uc *UseCase) ListPickupMail(ctx context.Context, token string, email strin
 }
 
 func (uc *UseCase) ListPickupMailBatch(ctx context.Context, credentials []PickupCredential) []PickupMailResult {
+	if reader, ok := uc.repo.(PickupBatchReader); ok {
+		return uc.listPickupMailBatchBulk(ctx, credentials, reader)
+	}
+
 	results := make([]PickupMailResult, len(credentials))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
@@ -283,6 +307,189 @@ func (uc *UseCase) ListPickupMailBatch(ctx context.Context, credentials []Pickup
 	}
 	wg.Wait()
 	return results
+}
+
+func (uc *UseCase) listPickupMailBatchBulk(
+	ctx context.Context,
+	credentials []PickupCredential,
+	reader PickupBatchReader,
+) []PickupMailResult {
+	results := make([]PickupMailResult, len(credentials))
+	if len(credentials) == 0 {
+		return results
+	}
+
+	now := uc.now()
+	reads, err := reader.ReadPickupBatch(ctx, credentials, now, messageScanLimit)
+	if err != nil {
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
+	if len(reads) != len(results) {
+		err := fmt.Errorf("pickup batch repository returned %d items for %d credentials", len(reads), len(results))
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
+
+	fetchScopes := make([]OrderScope, 0, len(reads))
+	seenResources := make(map[uint]struct{}, len(reads))
+	for i := range reads {
+		read := reads[i]
+		if read.Err != nil {
+			results[i].Err = read.Err
+			continue
+		}
+		if read.Scope == nil {
+			results[i].Err = domain.ErrPickupCredentialInvalid
+			continue
+		}
+		items, state, hasDelivery, err := uc.listOrderMailFromBatch(read, now)
+		if err != nil {
+			results[i].Err = err
+			continue
+		}
+		results[i] = PickupMailResult{Items: items, Fetch: state}
+		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft &&
+			shouldScheduleReadFetch(*read.Scope, hasDelivery) && fetchDue(state, now) {
+			if _, exists := seenResources[read.Scope.EmailResourceID]; exists {
+				continue
+			}
+			seenResources[read.Scope.EmailResourceID] = struct{}{}
+			fetchScopes = append(fetchScopes, *read.Scope)
+		}
+	}
+	uc.scheduleReadFetchBatch(ctx, fetchScopes)
+	return results
+}
+
+func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderScope) {
+	if uc == nil || uc.queue == nil || len(scopes) == 0 {
+		return
+	}
+	sort.Slice(scopes, func(i, j int) bool {
+		return scopes[i].EmailResourceID < scopes[j].EmailResourceID
+	})
+	now := uc.now()
+	accepted := 0
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		resourceIDs := make([]uint, len(scopes))
+		for i := range scopes {
+			resourceIDs[i] = scopes[i].EmailResourceID
+		}
+		if err := uc.repo.EnsureFetchStates(txCtx, resourceIDs); err != nil {
+			return err
+		}
+		states, err := uc.repo.FindFetchStatesForUpdate(txCtx, resourceIDs)
+		if err != nil {
+			return err
+		}
+		jobs := make([]*domain.FetchJob, 0, len(scopes))
+		for i := range scopes {
+			scope := scopes[i]
+			if scope.AllocationType != domain.ResourceTypeMicrosoft || !scopeFetchable(scope, func() time.Time { return now }) {
+				continue
+			}
+			state := states[scope.EmailResourceID]
+			if state != nil && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
+				continue
+			}
+			sinceAt := fetchSinceAt(scope, state, now)
+			untilAt := now
+			if readUntil := scopeReadUntil(scope); readUntil != nil && readUntil.Before(untilAt) {
+				untilAt = *readUntil
+			}
+			jobs = append(jobs, &domain.FetchJob{
+				ID:                         scope.EmailResourceID,
+				ExpectedCredentialRevision: scope.CredentialRevision,
+				OrderNo:                    scope.OrderNo,
+				Purpose:                    domain.FetchPurposeAutoRefresh,
+				AllocationType:             scope.AllocationType,
+				AllocationID:               scope.AllocationID,
+				ProjectID:                  scope.ProjectID,
+				EmailResourceID:            scope.EmailResourceID,
+				Recipient:                  scope.Recipient,
+				Status:                     domain.FetchJobPending,
+				MaxAttempts:                defaultFetchMaxAttempts,
+				SinceAt:                    &sinceAt,
+				UntilAt:                    &untilAt,
+			})
+		}
+		if len(jobs) == 0 {
+			return nil
+		}
+		if err := uc.repo.RequestFetchBatch(txCtx, jobs, now.Add(autoFetchCooldown), now); err != nil {
+			return err
+		}
+		accepted = len(jobs)
+		return nil
+	})
+	if err == nil && accepted > 0 {
+		uc.ScheduleFetchDispatcher(ctx, 0)
+	}
+}
+
+func (uc *UseCase) listOrderMailFromBatch(
+	read PickupBatchRead,
+	now time.Time,
+) ([]domain.MailContent, *domain.FetchState, bool, error) {
+	scope := *read.Scope
+	if !scopeReadable(scope, func() time.Time { return now }) {
+		return nil, nil, false, domain.ErrOrderUnavailable
+	}
+	limit := purchaseReadLimit
+	if scope.ServiceMode == "code" {
+		limit = codeReadLimit
+	}
+	messages := filterPickupMessages(scope, read.Messages, now)
+	if len(messages) > messageScanLimit {
+		messages = messages[:messageScanLimit]
+	}
+	if len(messages) > limit {
+		messages = messages[:limit]
+	}
+	items := make([]domain.MailContent, len(messages))
+	for i := range messages {
+		items[i] = mailContentFromMessage(messages[i])
+	}
+	if read.Delivery != nil && scope.ServiceMode == "code" {
+		if read.Delivery.Message == nil {
+			return nil, read.Fetch, true, nil
+		}
+		return []domain.MailContent{mailContentFromMessage(*read.Delivery.Message)}, read.Fetch, true, nil
+	}
+	if read.Delivery != nil && read.Delivery.Message != nil {
+		items = prependDeliveryMail(items, mailContentFromMessage(*read.Delivery.Message), limit)
+	}
+	return items, read.Fetch, read.Delivery != nil, nil
+}
+
+func filterPickupMessages(scope OrderScope, messages []domain.Message, now time.Time) []domain.Message {
+	start := now.Add(-30 * 24 * time.Hour)
+	if scope.AllocationType == domain.ResourceTypeMicrosoft {
+		start = now.Add(-3 * 24 * time.Hour)
+	}
+	if scope.ReceiveStartedAt != nil {
+		serviceStart := scope.ReceiveStartedAt.Add(-readWindowSkew)
+		if serviceStart.After(start) {
+			start = serviceStart
+		}
+	}
+	end := now
+	if scope.ServiceMode == "code" && scope.ReceiveUntil != nil {
+		end = *scope.ReceiveUntil
+	}
+	filtered := make([]domain.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.ReceivedAt.Before(start) || message.ReceivedAt.After(end) {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return filtered
 }
 
 func (uc *UseCase) GetPickupMessage(ctx context.Context, token string, email string, messageID uint) (*domain.MailContent, error) {
@@ -424,6 +631,9 @@ func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*Fe
 				Status:   "push_only",
 			}
 			return nil
+		}
+		if err := uc.repo.EnsureFetchStates(txCtx, []uint{scope.EmailResourceID}); err != nil {
+			return err
 		}
 		state, err := uc.repo.FindFetchStateForUpdate(txCtx, scope.EmailResourceID)
 		if err != nil {

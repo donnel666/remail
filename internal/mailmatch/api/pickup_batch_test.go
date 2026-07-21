@@ -36,7 +36,7 @@ func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 	var body PickupBatchResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Len(t, body, maxPickupBatchSize)
-	require.Equal(t, int64(maxPickupBatchSize), repo.loadCalls.Load())
+	require.Equal(t, int64(1), repo.loadCalls.Load())
 	for i := range body {
 		require.Equal(t, i, body[i].Index)
 		require.Equal(t, "succeeded", body[i].Status)
@@ -73,7 +73,7 @@ func TestPickupBatchRateLimitsByClientIPBeforeDatabaseWork(t *testing.T) {
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 	require.Equal(t, http.StatusTooManyRequests, third.Code, third.Body.String())
 	require.Equal(t, "10", third.Header().Get("Retry-After"))
-	require.Equal(t, int64(4), repo.loadCalls.Load())
+	require.Equal(t, int64(2), repo.loadCalls.Load())
 }
 
 func TestPickupBatchRejectsOversizedBody(t *testing.T) {
@@ -116,6 +116,22 @@ func TestNormalizePickupClientIPCanonicalizesEquivalentAddresses(t *testing.T) {
 type pickupBatchRepoStub struct {
 	mailmatchapp.Repository
 	loadCalls atomic.Int64
+}
+
+func (r *pickupBatchRepoStub) ReadPickupBatch(_ context.Context, credentials []mailmatchapp.PickupCredential, _ time.Time, _ int) ([]mailmatchapp.PickupBatchRead, error) {
+	r.loadCalls.Add(1)
+	cooldown := time.Now().Add(time.Minute)
+	reads := make([]mailmatchapp.PickupBatchRead, len(credentials))
+	for i, credential := range credentials {
+		reads[i] = mailmatchapp.PickupBatchRead{
+			Scope: &mailmatchapp.OrderScope{
+				OrderID: 1, OrderNo: "ORDER-" + credential.Token, EmailResourceID: 1,
+				Recipient: credential.Email, ServiceMode: "purchase", OrderStatus: "active",
+			},
+			Fetch: &mailmatchdomain.FetchState{CooldownUntil: &cooldown},
+		}
+	}
+	return reads, nil
 }
 
 func (r *pickupBatchRepoStub) LoadPickupScope(_ context.Context, token string, email string) (*mailmatchapp.OrderScope, error) {

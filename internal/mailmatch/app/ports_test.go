@@ -105,6 +105,110 @@ func TestListPickupMailBatchPreservesRequestOrderAndContinuesAfterFailure(t *tes
 	require.Equal(t, uint(101), results[2].Items[0].ID)
 }
 
+type pickupBatchReaderStub struct {
+	Repository
+	reads         []PickupBatchRead
+	calls         int
+	txCalls       int
+	ensuredIDs    []uint
+	lockCalls     int
+	requestedJobs []*domain.FetchJob
+}
+
+func (r *pickupBatchReaderStub) ReadPickupBatch(context.Context, []PickupCredential, time.Time, int) ([]PickupBatchRead, error) {
+	r.calls++
+	return r.reads, nil
+}
+
+func (r *pickupBatchReaderStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	r.txCalls++
+	return fn(ctx)
+}
+
+func (r *pickupBatchReaderStub) EnsureFetchStates(_ context.Context, ids []uint) error {
+	r.ensuredIDs = append([]uint(nil), ids...)
+	return nil
+}
+
+func (r *pickupBatchReaderStub) FindFetchStatesForUpdate(_ context.Context, ids []uint) (map[uint]*domain.FetchState, error) {
+	r.lockCalls++
+	return make(map[uint]*domain.FetchState, len(ids)), nil
+}
+
+func (r *pickupBatchReaderStub) RequestFetchBatch(_ context.Context, jobs []*domain.FetchJob, _ time.Time, _ time.Time) error {
+	r.requestedJobs = append([]*domain.FetchJob(nil), jobs...)
+	return nil
+}
+
+type pickupBatchQueueStub struct {
+	dispatches int
+}
+
+func (*pickupBatchQueueStub) EnqueueFetch(context.Context, FetchTask) (bool, error) {
+	return true, nil
+}
+
+func (q *pickupBatchQueueStub) EnqueueFetchDispatcher(context.Context, time.Duration) error {
+	q.dispatches++
+	return nil
+}
+
+func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	repo := &pickupBatchReaderStub{reads: []PickupBatchRead{
+		{
+			Scope: &OrderScope{
+				OrderID: 1, OrderNo: "ORDER-A", ProjectID: 1, ServiceMode: "purchase", OrderStatus: "active",
+				AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 21, EmailResourceID: 11, Recipient: "a@example.com",
+				CredentialRevision: 31,
+			},
+			Messages: []domain.Message{{ID: 101, Recipient: "a@example.com", ReceivedAt: now}},
+		},
+		{
+			Scope: &OrderScope{
+				OrderID: 2, OrderNo: "ORDER-B", ProjectID: 1, ServiceMode: "purchase", OrderStatus: "active",
+				AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 22, EmailResourceID: 12, Recipient: "b@example.com",
+				CredentialRevision: 32,
+			},
+			Messages: []domain.Message{{ID: 202, Recipient: "b@example.com", ReceivedAt: now}},
+		},
+		{
+			Scope: &OrderScope{
+				OrderID: 3, OrderNo: "ORDER-C", ProjectID: 1, ServiceMode: "purchase", OrderStatus: "active",
+				AllocationType: domain.ResourceTypeDomain, AllocationID: 23, EmailResourceID: 13, Recipient: "c@example.com",
+			},
+			Messages: []domain.Message{{ID: 303, Recipient: "c@example.com", ReceivedAt: now}},
+		},
+		{Err: domain.ErrPickupCredentialInvalid},
+	}}
+	queue := &pickupBatchQueueStub{}
+	uc := NewUseCase(repo, queue, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	results := uc.ListPickupMailBatch(context.Background(), []PickupCredential{
+		{Email: "a@example.com", Token: "token-a"},
+		{Email: "b@example.com", Token: "token-b"},
+		{Email: "c@example.com", Token: "token-c"},
+		{Email: "missing@example.com", Token: "missing-token"},
+	})
+
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, 1, repo.txCalls)
+	require.Equal(t, []uint{11, 12}, repo.ensuredIDs)
+	require.Equal(t, 1, repo.lockCalls)
+	require.Len(t, repo.requestedJobs, 2)
+	require.Equal(t, uint64(31), repo.requestedJobs[0].ExpectedCredentialRevision)
+	require.Equal(t, uint64(32), repo.requestedJobs[1].ExpectedCredentialRevision)
+	require.Equal(t, 1, queue.dispatches)
+	require.NoError(t, results[0].Err)
+	require.Equal(t, uint(101), results[0].Items[0].ID)
+	require.NoError(t, results[1].Err)
+	require.Equal(t, uint(202), results[1].Items[0].ID)
+	require.NoError(t, results[2].Err)
+	require.Equal(t, uint(303), results[2].Items[0].ID)
+	require.ErrorIs(t, results[3].Err, domain.ErrPickupCredentialInvalid)
+}
+
 func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
 	scope := OrderScope{
 		Recipient:     "alias+login@example.com",
