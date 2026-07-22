@@ -186,9 +186,7 @@ func (r *Repo) ReadPickupBatch(
 		scopesByToken := make(map[string]app.OrderScope, len(scopeRows))
 		rowsByToken := make(map[string]orderScopeRow, len(scopeRows))
 		orderIDs := make([]uint, 0, len(scopeRows))
-		resourceIDs := make([]uint, 0, len(scopeRows))
 		seenOrders := make(map[uint]struct{}, len(scopeRows))
-		seenResources := make(map[uint]struct{}, len(scopeRows))
 		for _, row := range scopeRows {
 			scope := *row.toScope(nil)
 			scopesByToken[row.TokenPlain] = scope
@@ -208,10 +206,6 @@ func (r *Repo) ReadPickupBatch(
 				seenOrders[scope.OrderID] = struct{}{}
 				orderIDs = append(orderIDs, scope.OrderID)
 			}
-			if _, ok := seenResources[scope.EmailResourceID]; !ok {
-				seenResources[scope.EmailResourceID] = struct{}{}
-				resourceIDs = append(resourceIDs, scope.EmailResourceID)
-			}
 		}
 
 		if len(orderIDs) == 0 {
@@ -219,10 +213,6 @@ func (r *Repo) ReadPickupBatch(
 		}
 
 		deliveries, err := r.readPickupDeliveries(txCtx, orderIDs)
-		if err != nil {
-			return err
-		}
-		states, err := r.readPickupFetchStates(txCtx, resourceIDs)
 		if err != nil {
 			return err
 		}
@@ -236,7 +226,6 @@ func (r *Repo) ReadPickupBatch(
 				continue
 			}
 			reads[i].Delivery = deliveries[reads[i].Scope.OrderID]
-			reads[i].Fetch = states[reads[i].Scope.EmailResourceID]
 			reads[i].Messages = messages[reads[i].Scope.OrderID]
 		}
 		return nil
@@ -280,22 +269,6 @@ func (r *Repo) readPickupDeliveries(ctx context.Context, orderIDs []uint) (map[u
 		}
 		delivery := result[head.OrderID]
 		delivery.Message = &message
-	}
-	return result, nil
-}
-
-func (r *Repo) readPickupFetchStates(ctx context.Context, resourceIDs []uint) (map[uint]*domain.FetchState, error) {
-	result := make(map[uint]*domain.FetchState, len(resourceIDs))
-	if len(resourceIDs) == 0 {
-		return result, nil
-	}
-	var models []FetchStateModel
-	if err := r.dbFor(ctx).Where("email_resource_id IN ?", resourceIDs).Find(&models).Error; err != nil {
-		return nil, fmt.Errorf("read pickup fetch states: %w", err)
-	}
-	for _, model := range models {
-		state := fetchStateModelToDomain(model)
-		result[model.EmailResourceID] = &state
 	}
 	return result, nil
 }

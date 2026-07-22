@@ -13,7 +13,7 @@ import (
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 )
 
-const maxFetchProxyAttempts = 3
+const maxFetchProxyAttempts = 2
 
 type microsoftMessageFetchClient interface {
 	FetchAll(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)

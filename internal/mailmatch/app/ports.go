@@ -3,12 +3,14 @@ package app
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -25,16 +27,20 @@ import (
 )
 
 const (
-	defaultFetchCooldown    = 5 * time.Second
-	autoFetchCooldown       = 5 * time.Second
-	fetchLookbackWindow     = 90 * 24 * time.Hour
-	fetchOverlapWindow      = 5 * time.Minute
-	readWindowSkew          = 2 * time.Minute
-	codeReadLimit           = 1
-	purchaseReadLimit       = 30
-	messageScanLimit        = 40
-	defaultFetchMaxAttempts = 3
+	fetchLookbackWindow    = 90 * 24 * time.Hour
+	pickupFetchLookback    = 3 * 24 * time.Hour
+	readWindowSkew         = 2 * time.Minute
+	codeReadLimit          = 1
+	purchaseReadLimit      = 30
+	messageScanLimit       = 40
+	pickupFetchReserveTTL  = 2 * time.Minute
+	pickupFetchLeaseTTL    = 2 * time.Minute
+	pickupFetchHeartbeat   = 30 * time.Second
+	pickupScheduleTimeout  = 30 * time.Second
+	pickupScheduleCapacity = 1024
 )
+
+var pickupScheduleSlots = make(chan struct{}, pickupScheduleCapacity)
 
 type MailRuleType string
 
@@ -139,25 +145,18 @@ type Repository interface {
 	CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
-	FindFetchStateForUpdate(ctx context.Context, emailResourceID uint) (*domain.FetchState, error)
-	EnsureFetchStates(ctx context.Context, emailResourceIDs []uint) error
-	FindFetchStatesForUpdate(ctx context.Context, emailResourceIDs []uint) (map[uint]*domain.FetchState, error)
-	RequestFetch(ctx context.Context, job *domain.FetchJob, cooldownUntil time.Time, now time.Time) error
-	RequestFetchBatch(ctx context.Context, jobs []*domain.FetchJob, cooldownUntil time.Time, now time.Time) error
-	ListPendingFetches(ctx context.Context, limit int) ([]domain.FetchJob, error)
-	MarkFetchProcessing(ctx context.Context, emailResourceID uint, generation uint64, now time.Time) (bool, error)
-	FindFetch(ctx context.Context, emailResourceID uint, generation uint64) (*domain.FetchJob, error)
-	AssertFetchFence(ctx context.Context, emailResourceID uint, generation uint64) error
-	CompleteFetch(ctx context.Context, emailResourceID uint, generation uint64, fetched int, stored int, matched int, lastReceivedAt *time.Time, now time.Time) (bool, error)
-	SkipFetch(ctx context.Context, emailResourceID uint, generation uint64, safeError string, now time.Time) (bool, error)
-	ReleaseFetchInfrastructureFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string) (bool, error)
-	RecordFetchFailure(ctx context.Context, emailResourceID uint, generation uint64, safeError string, retryable bool, now time.Time) (recorded bool, abnormal bool, err error)
 	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
 }
 
 type FetchQueue interface {
 	EnqueueFetch(ctx context.Context, task FetchTask) (bool, error)
-	EnqueueFetchDispatcher(ctx context.Context, delay time.Duration) error
+}
+
+type PickupFetchStatePort interface {
+	Acquire(ctx context.Context, emailResourceID uint, token string, ttl time.Duration) (bool, error)
+	Owns(ctx context.Context, emailResourceID uint, token string) (bool, error)
+	Extend(ctx context.Context, emailResourceID uint, token string, ttl time.Duration) (bool, error)
+	Release(ctx context.Context, emailResourceID uint, token string) error
 }
 
 type MatchResultPort interface {
@@ -171,26 +170,13 @@ type MatchResult struct {
 }
 
 type FetchTask struct {
-	EmailResourceID uint   `json:"emailResourceId"`
-	Generation      uint64 `json:"generation"`
-}
-
-type FetchSubmitRequest struct {
-	OrderNo      string
-	UserID       uint
-	IsAdmin      bool
-	Purpose      domain.FetchPurpose
-	RequestID    string
-	ServiceToken bool
-	ServiceEmail string
-}
-
-type FetchSubmitResult struct {
-	Accepted           bool
-	Reason             string
-	JobID              uint
-	Status             string
-	NextFetchAllowedAt *time.Time
+	OrderNo         string    `json:"orderNo"`
+	EmailResourceID uint      `json:"emailResourceId"`
+	Generation      uint64    `json:"generation,omitempty"`
+	LeaseToken      string    `json:"leaseToken"`
+	SinceAt         time.Time `json:"sinceAt"`
+	UntilAt         time.Time `json:"untilAt"`
+	RequestedAt     time.Time `json:"requestedAt"`
 }
 
 type PickupCredential struct {
@@ -226,7 +212,14 @@ type UseCase struct {
 	transport   MailTransportFetchPort
 	matches     MatchResultPort
 	credentials coreapp.MicrosoftCredentialPort
+	pickupFetch PickupFetchStatePort
 	now         func() time.Time
+}
+
+func (uc *UseCase) SetPickupFetchStatePort(state PickupFetchStatePort) {
+	if uc != nil {
+		uc.pickupFetch = state
+	}
 }
 
 func NewUseCase(repo Repository, queue FetchQueue, transport MailTransportFetchPort, matches MatchResultPort) *UseCase {
@@ -254,13 +247,8 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasDelivery) && fetchDue(state, uc.now()) {
-		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
-			OrderNo: scope.OrderNo,
-			UserID:  userID,
-			IsAdmin: isAdmin,
-			Purpose: domain.FetchPurposeAutoRefresh,
-		})
+	if shouldScheduleReadFetch(*scope, hasDelivery) {
+		uc.scheduleScopeFetch(ctx, *scope)
 	}
 	return items, state, nil
 }
@@ -274,13 +262,8 @@ func (uc *UseCase) ListPickupMail(ctx context.Context, token string, email strin
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasDelivery) && fetchDue(state, uc.now()) {
-		uc.scheduleReadFetch(ctx, FetchSubmitRequest{
-			OrderNo:      scope.OrderNo,
-			Purpose:      domain.FetchPurposeAutoRefresh,
-			ServiceToken: true,
-			ServiceEmail: email,
-		})
+	if shouldScheduleReadFetch(*scope, hasDelivery) {
+		uc.scheduleScopeFetch(ctx, *scope)
 	}
 	return items, state, nil
 }
@@ -353,8 +336,7 @@ func (uc *UseCase) listPickupMailBatchBulk(
 			continue
 		}
 		results[i] = PickupMailResult{Items: items, Fetch: state}
-		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft &&
-			shouldScheduleReadFetch(*read.Scope, hasDelivery) && fetchDue(state, now) {
+		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
 			if _, exists := seenResources[read.Scope.EmailResourceID]; exists {
 				continue
 			}
@@ -366,73 +348,8 @@ func (uc *UseCase) listPickupMailBatchBulk(
 	return results
 }
 
-func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderScope) {
-	if uc == nil || uc.queue == nil || len(scopes) == 0 {
-		return
-	}
-	sort.Slice(scopes, func(i, j int) bool {
-		return scopes[i].EmailResourceID < scopes[j].EmailResourceID
-	})
-	now := uc.now()
-	accepted := 0
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		resourceIDs := make([]uint, len(scopes))
-		for i := range scopes {
-			resourceIDs[i] = scopes[i].EmailResourceID
-		}
-		if err := uc.repo.EnsureFetchStates(txCtx, resourceIDs); err != nil {
-			return err
-		}
-		states, err := uc.repo.FindFetchStatesForUpdate(txCtx, resourceIDs)
-		if err != nil {
-			return err
-		}
-		jobs := make([]*domain.FetchJob, 0, len(scopes))
-		for i := range scopes {
-			scope := scopes[i]
-			if scope.AllocationType != domain.ResourceTypeMicrosoft || !scopeFetchable(scope, func() time.Time { return now }) {
-				continue
-			}
-			state := states[scope.EmailResourceID]
-			if !fetchDue(state, now) {
-				continue
-			}
-			sinceAt := fetchSinceAt(scope, state, now)
-			untilAt := now
-			if readUntil := scopeReadUntil(scope); readUntil != nil && readUntil.Before(untilAt) {
-				untilAt = *readUntil
-			}
-			jobs = append(jobs, &domain.FetchJob{
-				ID:                         scope.EmailResourceID,
-				ExpectedCredentialRevision: scope.CredentialRevision,
-				OrderNo:                    scope.OrderNo,
-				Purpose:                    domain.FetchPurposeAutoRefresh,
-				AllocationType:             scope.AllocationType,
-				AllocationID:               scope.AllocationID,
-				ProjectID:                  scope.ProjectID,
-				EmailResourceID:            scope.EmailResourceID,
-				Recipient:                  scope.Recipient,
-				Status:                     domain.FetchJobPending,
-				MaxAttempts:                defaultFetchMaxAttempts,
-				SinceAt:                    &sinceAt,
-				UntilAt:                    &untilAt,
-			})
-		}
-		if len(jobs) == 0 {
-			return nil
-		}
-		if err := uc.repo.RequestFetchBatch(txCtx, jobs, now.Add(autoFetchCooldown), now); err != nil {
-			return err
-		}
-		accepted = len(jobs)
-		return nil
-	})
-	if err != nil {
-		return
-	}
-	if accepted > 0 {
-		uc.ScheduleFetchDispatcher(ctx, 0)
-	}
+func (uc *UseCase) scheduleReadFetchBatch(_ context.Context, scopes []OrderScope) {
+	uc.scheduleScopeFetches(scopes)
 }
 
 func (uc *UseCase) listOrderMailFromBatch(
@@ -460,14 +377,14 @@ func (uc *UseCase) listOrderMailFromBatch(
 	}
 	if read.Delivery != nil && scope.ServiceMode == "code" {
 		if read.Delivery.Message == nil {
-			return nil, read.Fetch, true, nil
+			return nil, nil, true, nil
 		}
-		return []domain.MailContent{mailContentFromMessage(*read.Delivery.Message)}, read.Fetch, true, nil
+		return []domain.MailContent{mailContentFromMessage(*read.Delivery.Message)}, nil, true, nil
 	}
 	if read.Delivery != nil && read.Delivery.Message != nil {
 		items = prependDeliveryMail(items, mailContentFromMessage(*read.Delivery.Message), limit)
 	}
-	return items, read.Fetch, read.Delivery != nil, nil
+	return items, nil, read.Delivery != nil, nil
 }
 
 func filterPickupMessages(scope OrderScope, messages []domain.Message, now time.Time) []domain.Message {
@@ -518,19 +435,6 @@ func shouldScheduleReadFetch(scope OrderScope, hasDelivery bool) bool {
 	return scope.ServiceMode != "code" || !hasDelivery
 }
 
-func fetchDue(state *domain.FetchState, now time.Time) bool {
-	if state == nil {
-		return true
-	}
-	if state.LastStatus == string(domain.FetchJobPending) || state.LastStatus == string(domain.FetchJobRunning) {
-		return false
-	}
-	if state.CooldownUntil == nil {
-		return true
-	}
-	return !state.CooldownUntil.After(now)
-}
-
 func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, bool, error) {
 	if !scopeReadable(scope, uc.now) {
 		return nil, nil, false, domain.ErrOrderUnavailable
@@ -539,15 +443,11 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	state, err := uc.repo.FindFetchStateForUpdate(ctx, scope.EmailResourceID)
-	if err != nil {
-		return nil, nil, false, err
-	}
 	if delivery != nil && scope.ServiceMode == "code" {
 		if delivery.Message == nil {
-			return nil, state, true, nil
+			return nil, nil, true, nil
 		}
-		return []domain.MailContent{mailContentFromMessage(*delivery.Message)}, state, true, nil
+		return []domain.MailContent{mailContentFromMessage(*delivery.Message)}, nil, true, nil
 	}
 	limit := purchaseReadLimit
 	if scope.ServiceMode == "code" {
@@ -567,7 +467,7 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if delivery != nil && delivery.Message != nil {
 		items = prependDeliveryMail(items, mailContentFromMessage(*delivery.Message), limit)
 	}
-	return items, state, delivery != nil, nil
+	return items, nil, delivery != nil, nil
 }
 
 func (uc *UseCase) saveOrderDelivery(ctx context.Context, scope OrderScope, message domain.Message) error {
@@ -619,138 +519,150 @@ func sameMailContent(a, b domain.MailContent) bool {
 		a.ReceivedAt.Equal(b.ReceivedAt)
 }
 
-func (uc *UseCase) SubmitFetch(ctx context.Context, req FetchSubmitRequest) (*FetchSubmitResult, error) {
-	orderNo := strings.TrimSpace(req.OrderNo)
-	if orderNo == "" {
-		return nil, domain.ErrInvalidRequest
-	}
-	var result *FetchSubmitResult
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		scope, err := uc.loadScopeForSubmit(txCtx, req)
-		if err != nil {
-			return err
-		}
-		if !scopeFetchable(*scope, uc.now) {
-			return domain.ErrOrderUnavailable
-		}
-		if scope.AllocationType == domain.ResourceTypeDomain {
-			result = &FetchSubmitResult{
-				Accepted: false,
-				Reason:   "push_only",
-				Status:   "push_only",
-			}
-			return nil
-		}
-		if err := uc.repo.EnsureFetchStates(txCtx, []uint{scope.EmailResourceID}); err != nil {
-			return err
-		}
-		state, err := uc.repo.FindFetchStateForUpdate(txCtx, scope.EmailResourceID)
-		if err != nil {
-			return err
-		}
-		now := uc.now()
-		if state != nil && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
-			result = &FetchSubmitResult{
-				Accepted:           false,
-				Reason:             "cooldown",
-				Status:             "cooldown",
-				NextFetchAllowedAt: state.CooldownUntil,
-			}
-			return nil
-		}
-		sinceAt := fetchSinceAt(*scope, state, now)
-		untilAt := now
-		if readUntil := scopeReadUntil(*scope); readUntil != nil && readUntil.Before(untilAt) {
-			untilAt = *readUntil
-		}
-		purpose := req.Purpose
-		if purpose == "" {
-			purpose = domain.FetchPurposeOrder
-		}
-		job := &domain.FetchJob{
-			ID:                         scope.EmailResourceID,
-			ExpectedCredentialRevision: scope.CredentialRevision,
-			OrderNo:                    scope.OrderNo,
-			Purpose:                    purpose,
-			AllocationType:             scope.AllocationType,
-			AllocationID:               scope.AllocationID,
-			ProjectID:                  scope.ProjectID,
-			EmailResourceID:            scope.EmailResourceID,
-			Recipient:                  scope.Recipient,
-			Status:                     domain.FetchJobPending,
-			MaxAttempts:                defaultFetchMaxAttempts,
-			SinceAt:                    &sinceAt,
-			UntilAt:                    &untilAt,
-			RequestID:                  strings.TrimSpace(req.RequestID),
-		}
-		cooldownUntil := now.Add(fetchCooldown(purpose))
-		if err := uc.repo.RequestFetch(txCtx, job, cooldownUntil, now); err != nil {
-			return err
-		}
-		result = &FetchSubmitResult{
-			Accepted:           true,
-			Reason:             "created",
-			JobID:              scope.EmailResourceID,
-			Status:             string(job.Status),
-			NextFetchAllowedAt: &cooldownUntil,
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result != nil && result.Accepted {
-		uc.ScheduleFetchDispatcher(ctx, 0)
-	}
-	return result, nil
+func (uc *UseCase) scheduleScopeFetch(_ context.Context, scope OrderScope) {
+	uc.scheduleScopeFetches([]OrderScope{scope})
 }
 
-func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
-	if task.EmailResourceID == 0 || task.Generation == 0 {
-		return domain.ErrInvalidRequest
+func (uc *UseCase) scheduleScopeFetches(scopes []OrderScope) {
+	if uc == nil || uc.queue == nil || uc.pickupFetch == nil {
+		return
 	}
-	now := uc.now()
-	claimed, err := uc.repo.MarkFetchProcessing(ctx, task.EmailResourceID, task.Generation, now)
+	scopes = append([]OrderScope(nil), scopes...)
+	select {
+	case pickupScheduleSlots <- struct{}{}:
+	default:
+		return
+	}
+	go func() {
+		defer func() { <-pickupScheduleSlots }()
+		ctx, cancel := context.WithTimeout(context.Background(), pickupScheduleTimeout)
+		defer cancel()
+		sort.Slice(scopes, func(i, j int) bool {
+			return scopes[i].EmailResourceID < scopes[j].EmailResourceID
+		})
+		for i := range scopes {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := uc.submitScopeFetch(ctx, scopes[i]); err != nil {
+				slog.Warn(
+					"pickup fetch scheduling failed",
+					"resource_id", scopes[i].EmailResourceID,
+					"order_no", scopes[i].OrderNo,
+					"error", err,
+				)
+			}
+		}
+	}()
+}
+
+func (uc *UseCase) submitScopeFetch(ctx context.Context, scope OrderScope) error {
+	if uc == nil || uc.queue == nil || uc.pickupFetch == nil {
+		return domain.ErrFetchQueueUnavailable
+	}
+	if !scopeFetchable(scope, uc.now) {
+		return domain.ErrOrderUnavailable
+	}
+	if scope.AllocationType == domain.ResourceTypeDomain {
+		return nil
+	}
+	token, err := newPickupFetchToken()
 	if err != nil {
 		return err
 	}
-	if !claimed {
+	acquired, err := uc.pickupFetch.Acquire(ctx, scope.EmailResourceID, token, pickupFetchReserveTTL)
+	if err != nil {
+		return err
+	}
+	now := uc.now()
+	if !acquired {
 		return nil
 	}
+	sinceAt := now.Add(-pickupFetchLookback)
+	untilAt := now
+	if readUntil := scopeReadUntil(scope); readUntil != nil && readUntil.Before(untilAt) {
+		untilAt = *readUntil
+	}
+	task := FetchTask{
+		OrderNo: scope.OrderNo, EmailResourceID: scope.EmailResourceID, LeaseToken: token,
+		SinceAt: sinceAt, UntilAt: untilAt, RequestedAt: now,
+	}
+	accepted, err := uc.queue.EnqueueFetch(ctx, task)
+	if err != nil || !accepted {
+		releaseErr := uc.pickupFetch.Release(context.WithoutCancel(ctx), scope.EmailResourceID, token)
+		if err != nil {
+			return errors.Join(err, releaseErr)
+		}
+		return releaseErr
+	}
+	return nil
+}
+
+func newPickupFetchToken() (string, error) {
+	var value [16]byte
+	if _, err := cryptorand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("create pickup fetch lease token: %w", err)
+	}
+	return hex.EncodeToString(value[:]), nil
+}
+
+func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr error) {
+	if task.Generation > 0 && strings.TrimSpace(task.OrderNo) == "" && strings.TrimSpace(task.LeaseToken) == "" {
+		return nil
+	}
+	if uc == nil || uc.pickupFetch == nil || task.EmailResourceID == 0 || strings.TrimSpace(task.OrderNo) == "" || strings.TrimSpace(task.LeaseToken) == "" {
+		return domain.ErrInvalidRequest
+	}
+	if task.RequestedAt.IsZero() || uc.now().After(task.RequestedAt.Add(pickupFetchReserveTTL)) {
+		return uc.pickupFetch.Release(context.WithoutCancel(ctx), task.EmailResourceID, task.LeaseToken)
+	}
+	extended, err := uc.pickupFetch.Extend(ctx, task.EmailResourceID, task.LeaseToken, pickupFetchLeaseTTL)
+	if err != nil {
+		return err
+	}
+	if !extended {
+		return nil
+	}
+	stopLease := uc.keepPickupFetchLease(ctx, task)
+	defer func() {
+		stopLease()
+		resultErr = errors.Join(resultErr, uc.pickupFetch.Release(
+			context.WithoutCancel(ctx), task.EmailResourceID, task.LeaseToken,
+		))
+	}()
 	serviceStarted := time.Now()
 	defer platform.ObserveTaskService("mailmatch_fetch", serviceStarted)
-	job, err := uc.repo.FindFetch(ctx, task.EmailResourceID, task.Generation)
-	if err != nil {
-		return uc.releaseFetchInfrastructure(ctx, task, err)
-	}
-	if job == nil {
-		return nil
-	}
-	platform.ObserveQueueWait("mailmatch_fetch", job.CreatedAt)
-	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, job.OrderNo)
+	platform.ObserveQueueWait("mailmatch_fetch", task.RequestedAt)
+	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, task.OrderNo)
 	if err != nil {
 		if errors.Is(err, domain.ErrOrderNotFound) || errors.Is(err, domain.ErrOrderUnavailable) || errors.Is(err, domain.ErrOrderForbidden) {
-			_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Order is not available for mail fetch.", uc.now())
 			return nil
 		}
-		return uc.releaseFetchInfrastructure(ctx, task, err)
+		return err
 	}
-	if !scopeFetchable(*scope, uc.now) {
-		_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Order is not available for mail fetch.", uc.now())
+	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
 	}
-	fetched, fetchErr := uc.fetchMessages(ctx, *scope, *job)
+	job := domain.FetchJob{SinceAt: &task.SinceAt, UntilAt: &task.UntilAt}
+	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job)
 	if fetchErr != nil {
-		return uc.finishFetchFailure(ctx, task, "Mail service is temporarily unavailable.", true, fetchErr)
+		return fetchErr
 	}
 	if fetched == nil {
-		return uc.finishFetchFailure(ctx, task, "Mail service is temporarily unavailable.", true, domain.ErrMailServiceUnavailable)
+		return domain.ErrMailServiceUnavailable
+	}
+	current, err := uc.pickupFetch.Extend(ctx, task.EmailResourceID, task.LeaseToken, pickupFetchLeaseTTL)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return nil
 	}
 	if strings.TrimSpace(fetched.RefreshToken) != "" &&
 		strings.TrimSpace(fetched.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT) &&
 		scope.AllocationType == domain.ResourceTypeMicrosoft {
 		if uc.credentials == nil {
-			return uc.releaseFetchInfrastructure(ctx, task, errors.New("microsoft credential service is unavailable"))
+			return errors.New("microsoft credential service is unavailable")
 		}
 		err := uc.credentials.ApplyMicrosoftFetchRefreshToken(ctx, coreapp.MicrosoftFetchRefreshTokenRotation{
 			ResourceID:                 scope.EmailResourceID,
@@ -759,66 +671,61 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 			Now:                        uc.now(),
 		})
 		if errors.Is(err, coreapp.ErrMicrosoftCredentialChanged) || errors.Is(err, coreapp.ErrMicrosoftCredentialDeleted) || errors.Is(err, coreapp.ErrMicrosoftCredentialNotFound) {
-			_, _ = uc.repo.SkipFetch(ctx, task.EmailResourceID, task.Generation, "Microsoft credentials changed while mail was being fetched.", uc.now())
 			return nil
 		}
 		if err != nil {
-			return uc.releaseFetchInfrastructure(ctx, task, err)
+			return err
 		}
 	}
 	stored, matched, lastReceivedAt, err := uc.ingestFetchedMessagesWithFence(ctx, fetched.Messages, func(txCtx context.Context) error {
-		return uc.repo.AssertFetchFence(txCtx, task.EmailResourceID, task.Generation)
+		current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return domain.ErrFetchJobConflict
+		}
+		return nil
 	})
 	if err != nil {
-		safeError := "Mail message ingestion failed."
-		if stageErr := (*mailIngestError)(nil); errors.As(err, &stageErr) {
-			safeError = stageErr.safe
-		}
-		if safeError == "Mail match result notification failed." {
-			return uc.finishFetchFailure(ctx, task, safeError, true, err)
-		}
-		return uc.releaseFetchInfrastructure(ctx, task, err)
+		return err
 	}
-	if _, err := uc.repo.CompleteFetch(ctx, task.EmailResourceID, task.Generation, len(fetched.Messages), stored, matched, lastReceivedAt, uc.now()); err != nil {
-		return uc.releaseFetchInfrastructure(ctx, task, err)
-	}
+	_ = lastReceivedAt
+	platform.AddWorkUnits("mailmatch_fetch", "all", "fetched", len(fetched.Messages))
+	platform.AddWorkUnits("mailmatch_fetch", "all", "stored", stored)
+	platform.AddWorkUnits("mailmatch_fetch", "all", "matched", matched)
 	return nil
 }
 
-func (uc *UseCase) finishFetchFailure(ctx context.Context, task FetchTask, safeError string, retryable bool, cause error) error {
-	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
-		return uc.releaseFetchInfrastructure(ctx, task, cause)
-	}
-	var failure *MailFetchFailure
-	if errors.As(cause, &failure) && failure != nil {
-		retryable = failure.Retryable
-		if strings.TrimSpace(failure.SafeMessage) != "" {
-			safeError = failure.SafeMessage
+func (uc *UseCase) keepPickupFetchLease(ctx context.Context, task FetchTask) func() {
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(pickupFetchHeartbeat)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				extended, err := uc.pickupFetch.Extend(heartbeatCtx, task.EmailResourceID, task.LeaseToken, pickupFetchLeaseTTL)
+				if err != nil {
+					continue
+				}
+				if !extended {
+					return
+				}
+			}
 		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
 	}
-	recorded, abnormal, err := uc.repo.RecordFetchFailure(
-		context.WithoutCancel(ctx), task.EmailResourceID, task.Generation, safeError, retryable, uc.now(),
-	)
-	if err != nil {
-		return errors.Join(cause, err)
-	}
-	if recorded && !abnormal {
-		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), time.Second)
-	}
-	return nil
-}
-
-func (uc *UseCase) releaseFetchInfrastructure(ctx context.Context, task FetchTask, cause error) error {
-	released, err := uc.repo.ReleaseFetchInfrastructureFailure(
-		context.WithoutCancel(ctx), task.EmailResourceID, task.Generation, "Mail fetch infrastructure is temporarily unavailable.",
-	)
-	if err != nil {
-		return errors.Join(cause, err)
-	}
-	if released {
-		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), time.Second)
-	}
-	return nil
 }
 
 func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
@@ -952,53 +859,6 @@ func latestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 	return result
 }
 
-func (uc *UseCase) DispatchFetchJobs(ctx context.Context, limit int) (int, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	jobs, err := uc.repo.ListPendingFetches(ctx, limit)
-	if err != nil {
-		return 0, err
-	}
-	queued := 0
-	for _, job := range jobs {
-		accepted, err := uc.enqueueFetch(ctx, FetchTask{EmailResourceID: job.EmailResourceID, Generation: job.Generation})
-		if err != nil || !accepted {
-			continue
-		}
-		queued++
-	}
-	return queued, nil
-}
-
-func (uc *UseCase) ScheduleFetchDispatcher(ctx context.Context, delay time.Duration) {
-	if uc == nil || uc.queue == nil {
-		return
-	}
-	_ = uc.queue.EnqueueFetchDispatcher(ctx, delay)
-}
-
-func (uc *UseCase) scheduleReadFetch(ctx context.Context, req FetchSubmitRequest) {
-	if uc == nil || uc.queue == nil {
-		return
-	}
-	_, _ = uc.SubmitFetch(ctx, req)
-}
-
-func (uc *UseCase) loadScopeForSubmit(ctx context.Context, req FetchSubmitRequest) (*OrderScope, error) {
-	if req.ServiceToken {
-		scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, strings.TrimSpace(req.OrderNo))
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(req.ServiceEmail) != "" && normalizeEmail(req.ServiceEmail) != normalizeEmail(scope.Recipient) {
-			return nil, domain.ErrOrderForbidden
-		}
-		return scope, nil
-	}
-	return uc.repo.LoadOrderScope(ctx, strings.TrimSpace(req.OrderNo), req.UserID, req.IsAdmin)
-}
-
 func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob) (*FetchMessagesResult, error) {
 	sinceAt := time.Now().UTC().Add(-fetchLookbackWindow)
 	if job.SinceAt != nil {
@@ -1019,21 +879,6 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 	default:
 		return nil, domain.ErrInvalidRequest
 	}
-}
-
-func (uc *UseCase) enqueueFetch(ctx context.Context, task FetchTask) (bool, error) {
-	if uc.queue == nil {
-		return false, domain.ErrFetchQueueUnavailable
-	}
-	accepted, err := uc.queue.EnqueueFetch(ctx, task)
-	if err != nil || !accepted {
-		return false, err
-	}
-	processing, err := uc.repo.MarkFetchProcessing(ctx, task.EmailResourceID, task.Generation, uc.now())
-	if err != nil {
-		return false, err
-	}
-	return processing, nil
 }
 
 func scopeReadable(scope OrderScope, now func() time.Time) bool {
@@ -1061,30 +906,6 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 		return false
 	}
 	return scope.AllocationID > 0 && scope.EmailResourceID > 0
-}
-
-func fetchSinceAt(scope OrderScope, state *domain.FetchState, now time.Time) time.Time {
-	candidates := []time.Time{now.Add(-fetchLookbackWindow)}
-	if scope.ReceiveStartedAt != nil {
-		candidates = append(candidates, scope.ReceiveStartedAt.Add(-readWindowSkew))
-	}
-	if state != nil && state.LastReceivedAt != nil {
-		candidates = append(candidates, state.LastReceivedAt.Add(-fetchOverlapWindow))
-	}
-	result := candidates[0]
-	for _, candidate := range candidates[1:] {
-		if candidate.After(result) {
-			result = candidate
-		}
-	}
-	return result
-}
-
-func fetchCooldown(purpose domain.FetchPurpose) time.Duration {
-	if purpose == domain.FetchPurposeAutoRefresh {
-		return autoFetchCooldown
-	}
-	return defaultFetchCooldown
 }
 
 func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, error) {

@@ -29,15 +29,6 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 			return nil
 		}
 		var dispatchErrors []error
-		if module.UseCase != nil {
-			queued, err := module.UseCase.DispatchFetchJobs(ctx, 0)
-			if err != nil {
-				slog.Warn("mailmatch fetch dispatcher failed", "error", err)
-				dispatchErrors = append(dispatchErrors, err)
-			} else if queued > 0 {
-				slog.Info("mailmatch fetch dispatcher finished", "queued", queued)
-			}
-		}
 		if module.ResourceFetch != nil {
 			result, err := module.ResourceFetch.DispatchPending(ctx, 0)
 			if err != nil {
@@ -64,7 +55,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		startFetchDispatcherSeeder(module)
 	}
 
-	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetch, func(ctx context.Context, task *asynq.Task) error {
+	pickupFetchHandler := func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.UseCase == nil {
 			return nil
 		}
@@ -73,12 +64,16 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 			return fmt.Errorf("decode mailmatch fetch task: %w: %w", err, asynq.SkipRetry)
 		}
 		if err := module.UseCase.ProcessFetch(ctx, payload); err != nil {
-			slog.Warn("mailmatch fetch task failed", "resource_id", payload.EmailResourceID, "generation", payload.Generation, "error", err)
+			slog.Warn("mailmatch fetch task failed", "resource_id", payload.EmailResourceID, "order_no", payload.OrderNo, "error", err)
 			return err
 		}
-		slog.Info("mailmatch fetch task finished", "resource_id", payload.EmailResourceID, "generation", payload.Generation)
+		slog.Info("mailmatch fetch task finished", "resource_id", payload.EmailResourceID, "order_no", payload.OrderNo)
 		return nil
-	})
+	}
+	// The legacy type is retained only so tasks queued by the previous release
+	// can be acknowledged without touching persistent resource fetch state.
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetch, pickupFetchHandler)
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchPickupFetch, pickupFetchHandler)
 
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceFetch, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ResourceFetch == nil {
@@ -225,14 +220,8 @@ func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
 }
 
 func scheduleMailmatchFetchDispatcher(ctx context.Context, module *Module, delay time.Duration) {
-	if module == nil {
+	if module == nil || module.ResourceFetch == nil {
 		return
 	}
-	if module.ResourceFetch != nil {
-		module.ResourceFetch.ScheduleDispatcher(ctx, delay)
-		return
-	}
-	if module.UseCase != nil {
-		module.UseCase.ScheduleFetchDispatcher(ctx, delay)
-	}
+	module.ResourceFetch.ScheduleDispatcher(ctx, delay)
 }

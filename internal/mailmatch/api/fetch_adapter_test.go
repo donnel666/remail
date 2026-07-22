@@ -56,6 +56,24 @@ func TestMicrosoftFetchAdapterRetriesWithLatestRotatedRefreshToken(t *testing.T)
 	require.Equal(t, "rotated-after-first-attempt", client.requests[1].RefreshToken)
 }
 
+func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
+		{Category: "request", ProxyFailure: true},
+		{Category: "request", ProxyFailure: true},
+		{Valid: true},
+	}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+	})
+
+	require.Error(t, err)
+	require.Len(t, client.requests, 2)
+}
+
 func TestMicrosoftFetchAdapterFullHistoryHasNoMessageLimit(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}

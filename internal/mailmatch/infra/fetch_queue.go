@@ -14,6 +14,7 @@ import (
 
 const (
 	TypeMailmatchFetch                = "mailmatch:fetch"
+	TypeMailmatchPickupFetch          = "mailmatch:pickup_fetch"
 	TypeMailmatchResourceFetch        = "mailmatch:resource_fetch"
 	TypeMailmatchFetchDispatcher      = "mailmatch:fetch_dispatcher"
 	TypeProjectHistoryScan            = "mailmatch:project_history_scan"
@@ -21,7 +22,8 @@ const (
 	TypeProjectHistoryDispatcher      = "mailmatch:project_history_dispatcher"
 
 	mailmatchQueueName            = platform.QueueMailfetch
-	mailmatchFetchTaskMaxRetry    = 3
+	pickupFetchTaskMaxRetry       = 0
+	resourceFetchTaskMaxRetry     = 3
 	mailmatchFetchTaskTimeout     = 20 * time.Minute
 	mailmatchDispatchTaskTimeout  = 30 * time.Second
 	projectHistoryTaskMaxRetry    = platform.BackgroundTaskMaxRetry
@@ -46,13 +48,13 @@ func (q *FetchQueue) EnqueueFetch(ctx context.Context, task app.FetchTask) (bool
 	if err != nil {
 		return false, fmt.Errorf("marshal mailmatch fetch task: %w", err)
 	}
-	asynqTask := asynq.NewTask(TypeMailmatchFetch, payload)
+	asynqTask := asynq.NewTask(TypeMailmatchPickupFetch, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(mailmatchQueueName),
 		asynq.Unique(mailmatchFetchTaskTimeout),
-		asynq.MaxRetry(mailmatchFetchTaskMaxRetry),
+		asynq.MaxRetry(pickupFetchTaskMaxRetry),
 		asynq.Timeout(mailmatchFetchTaskTimeout),
 		asynq.Retention(0),
 	)
@@ -79,7 +81,7 @@ func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.Resource
 		asynqTask,
 		asynq.Queue(mailmatchQueueName),
 		asynq.Unique(mailmatchFetchTaskTimeout),
-		asynq.MaxRetry(mailmatchFetchTaskMaxRetry),
+		asynq.MaxRetry(resourceFetchTaskMaxRetry),
 		asynq.Timeout(mailmatchFetchTaskTimeout),
 		asynq.Retention(0),
 	)

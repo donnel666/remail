@@ -194,7 +194,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
-		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
+		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase)
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		coreMod.SetAdminResourceMaintenancePort(adminMicrosoftMaintenanceAdapter{

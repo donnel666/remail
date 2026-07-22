@@ -2,17 +2,13 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	stdmail "net/mail"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
@@ -20,7 +16,6 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/time/rate"
 )
 
 type Handler struct {
@@ -35,11 +30,6 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 	email, tokenPlain, ok := pickupCredential(c)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	if !globalPickupListLimiter.allow(tokenPlain) {
-		c.Header("Retry-After", "1")
-		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
 	ctx := c.Request.Context()
@@ -66,11 +56,6 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 }
 
 func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
-	if !globalPickupBatchIPLimiter.allow(normalizePickupClientIP(c.ClientIP())) {
-		c.Header("Retry-After", "10")
-		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
 	var req PickupBatchRequest
 	if err := bindPickupBatchJSON(c, &req); err != nil {
 		writePickupBatchBodyError(c, err)
@@ -93,13 +78,6 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 		if !validPickupCredential(credential) {
 			resp[i].Status = "failed"
 			resp[i].Error = &PickupBatchItemErrorResponse{Code: "invalid_request", Message: "Invalid pickup credential."}
-			failed = true
-			continue
-		}
-		if !globalPickupListLimiter.allow(credential.Token) {
-			c.Header("Retry-After", "1")
-			resp[i].Status = "failed"
-			resp[i].Error = &PickupBatchItemErrorResponse{Code: "rate_limited", Message: "Too many requests."}
 			failed = true
 			continue
 		}
@@ -140,14 +118,6 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 	c.JSON(status, resp)
 }
 
-func normalizePickupClientIP(value string) string {
-	value = strings.TrimSpace(value)
-	if ip := net.ParseIP(value); ip != nil {
-		return ip.String()
-	}
-	return value
-}
-
 func (h *Handler) GetPickupMessage(c *gin.Context) {
 	email, tokenPlain, ok := pickupCredential(c)
 	if !ok {
@@ -157,11 +127,6 @@ func (h *Handler) GetPickupMessage(c *gin.Context) {
 	messageID, err := strconv.ParseUint(strings.TrimSpace(c.Param("messageId")), 10, 64)
 	if err != nil || messageID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
-		return
-	}
-	if !globalPickupDetailLimiter.allow(tokenPlain) {
-		c.Header("Retry-After", "1")
-		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
 	item, err := h.mod.UseCase.GetPickupMessage(c.Request.Context(), tokenPlain, email, uint(messageID))
@@ -176,17 +141,13 @@ func (h *Handler) GetPickupMessage(c *gin.Context) {
 }
 
 const (
-	maxPickupBatchSize   = 200
-	maxPickupBatchBytes  = 128 << 10
-	maxPickupLimiterKeys = 100000
-	pickupMaxActive      = 1024
-	pickupMaxTotal       = 1024
+	maxPickupBatchSize  = 200
+	maxPickupBatchBytes = 128 << 10
+	pickupMaxActive     = 1024
+	pickupMaxTotal      = 1024
 )
 
 var (
-	globalPickupListLimiter    = newPickupLimiter(rate.Limit(1), 3)
-	globalPickupDetailLimiter  = newPickupLimiter(rate.Limit(10), 20)
-	globalPickupBatchIPLimiter = newPickupLimiter(rate.Every(10*time.Second), 2)
 	// ponytail: process-local limits match the current single app replica;
 	// move these permits to Redis only when the app is horizontally scaled.
 	globalPickupOutstanding = make(chan struct{}, pickupMaxTotal)
@@ -227,82 +188,6 @@ func observePickupState() {
 func writePickupUnavailable(c *gin.Context) {
 	c.Header("Retry-After", "1")
 	c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Mail service is temporarily unavailable.", "requestId": middleware.GetRequestID(c)})
-}
-
-type pickupLimiter struct {
-	mu         sync.Mutex
-	items      map[string]*pickupLimiterEntry
-	limit      rate.Limit
-	burst      int
-	maxKeys    int
-	lastPruned time.Time
-}
-
-type pickupLimiterEntry struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
-
-func newPickupLimiter(limit rate.Limit, burst int) *pickupLimiter {
-	return &pickupLimiter{
-		items:   make(map[string]*pickupLimiterEntry),
-		limit:   limit,
-		burst:   burst,
-		maxKeys: maxPickupLimiterKeys,
-	}
-}
-
-func (l *pickupLimiter) allow(token string) bool {
-	key := pickupLimitKey(token)
-	if key == "" {
-		return false
-	}
-	now := time.Now()
-	l.mu.Lock()
-	if len(l.items) >= l.maxKeys && (l.lastPruned.IsZero() || now.Sub(l.lastPruned) >= time.Minute) {
-		l.pruneLocked(now)
-		l.lastPruned = now
-	}
-	entry := l.items[key]
-	if entry == nil {
-		if len(l.items) >= l.maxKeys {
-			l.mu.Unlock()
-			return false
-		}
-		entry = &pickupLimiterEntry{limiter: rate.NewLimiter(l.limit, l.burst)}
-		l.items[key] = entry
-	}
-	entry.lastSeen = now
-	limiter := entry.limiter
-	l.mu.Unlock()
-	return limiter.Allow()
-}
-
-func (l *pickupLimiter) pruneLocked(now time.Time) {
-	cutoff := now.Add(-10 * time.Minute)
-	for key, entry := range l.items {
-		if entry.lastSeen.Before(cutoff) {
-			delete(l.items, key)
-		}
-	}
-	if len(l.items) <= maxPickupLimiterKeys {
-		return
-	}
-	for key := range l.items {
-		delete(l.items, key)
-		if len(l.items) <= maxPickupLimiterKeys {
-			return
-		}
-	}
-}
-
-func pickupLimitKey(token string) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
 }
 
 func validPickupCredential(credential mailmatchapp.PickupCredential) bool {

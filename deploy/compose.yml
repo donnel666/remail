@@ -25,7 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["sh", "-c", "redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
+    command: ["sh", "-c", "redis-server --appendonly yes --maxmemory 6gb --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
     volumes:
