@@ -42,8 +42,7 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), pickupTimeout)
-	defer cancel()
+	ctx := c.Request.Context()
 	queuedAt := time.Now()
 	release, admitted := acquirePickup(ctx)
 	if !admitted {
@@ -107,8 +106,7 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 		credentials = append(credentials, credential)
 		credentialIndexes = append(credentialIndexes, i)
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), pickupTimeout)
-	defer cancel()
+	ctx := c.Request.Context()
 	queuedAt := time.Now()
 	release, admitted := acquirePickup(ctx)
 	if !admitted {
@@ -181,9 +179,8 @@ const (
 	maxPickupBatchSize   = 200
 	maxPickupBatchBytes  = 128 << 10
 	maxPickupLimiterKeys = 100000
-	pickupTimeout        = 9 * time.Second
-	pickupMaxActive      = 16
-	pickupMaxTotal       = 32
+	pickupMaxActive      = 1024
+	pickupMaxTotal       = 1024
 )
 
 var (

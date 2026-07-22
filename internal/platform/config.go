@@ -45,6 +45,7 @@ type RedisConfig struct {
 	Addr     string
 	Password string
 	DB       int
+	PoolSize int
 }
 
 // MinIOConfig holds MinIO object storage settings.
@@ -144,13 +145,14 @@ func Load() (*Config, error) {
 		},
 		MySQL: MySQLConfig{
 			DSN:          getEnv("MYSQL_DSN", ""),
-			MaxOpenConns: getInt("MYSQL_MAX_OPEN_CONNS", 64),
-			MaxIdleConns: getInt("MYSQL_MAX_IDLE_CONNS", 16),
+			MaxOpenConns: getInt("MYSQL_MAX_OPEN_CONNS", 500),
+			MaxIdleConns: getInt("MYSQL_MAX_IDLE_CONNS", 500),
 		},
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "127.0.0.1:6379"),
 			Password: getEnv("REDIS_PASSWORD", ""),
 			DB:       getInt("REDIS_DB", 0),
+			PoolSize: getInt("REDIS_POOL_SIZE", 1024),
 		},
 		MinIO: MinIOConfig{
 			Endpoint:  getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
@@ -237,6 +239,9 @@ func (c *Config) validate() error {
 	}
 	if c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
 		return fmt.Errorf("MYSQL_MAX_IDLE_CONNS cannot exceed MYSQL_MAX_OPEN_CONNS")
+	}
+	if c.Redis.PoolSize <= 0 {
+		return fmt.Errorf("REDIS_POOL_SIZE must be positive")
 	}
 	if c.MinIO.AccessKey == "" {
 		return fmt.Errorf("MINIO_ACCESS_KEY is required")

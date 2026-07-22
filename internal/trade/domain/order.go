@@ -136,7 +136,6 @@ var (
 	ErrOrderCompensationError = errors.New("trade: order compensation failed")
 	ErrCheckoutBusy           = errors.New("trade: checkout already queued for user")
 	ErrCheckoutOverloaded     = errors.New("trade: checkout queue is full")
-	ErrCheckoutTimeBudget     = errors.New("trade: checkout time budget exhausted")
 )
 
 func NormalizeServiceMode(value string) (ServiceMode, bool) {

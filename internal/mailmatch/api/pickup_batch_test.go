@@ -22,7 +22,8 @@ import (
 
 func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t, rate.Inf, 1000)
-	require.Less(t, pickupTimeout, 10*time.Second)
+	require.Equal(t, 1024, pickupMaxActive)
+	require.Equal(t, 1024, pickupMaxTotal)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize)
 	for i := range items {
 		items[i] = PickupCredentialRequest{
@@ -31,11 +32,9 @@ func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 		}
 	}
 
-	started := time.Now()
 	response := performPickupBatchRequest(router, "192.0.2.10:1234", PickupBatchRequest{Items: items})
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Less(t, time.Since(started), pickupTimeout)
 	var body PickupBatchResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Len(t, body, maxPickupBatchSize)

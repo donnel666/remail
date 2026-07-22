@@ -675,14 +675,9 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 			return nil, domain.ErrInvalidOrderRequest
 		}
 	}
-	batchCtx, cancel := context.WithTimeout(ctx, 9*time.Second)
-	defer cancel()
 	queuedAt := time.Now()
-	release, err := uc.checkoutBatches.acquire(batchCtx, userID, len(requests))
+	release, err := uc.checkoutBatches.acquire(ctx, userID, len(requests))
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return nil, domain.ErrCheckoutOverloaded
-		}
 		return nil, err
 	}
 	defer release()
@@ -710,25 +705,17 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 		)
 	}()
 	for index, req := range requests {
-		if batchCtx.Err() != nil {
-			if ctx.Err() == nil {
-				items = append(items, CheckoutBatchItem{Err: domain.ErrCheckoutTimeBudget})
-				failed++
-			}
-			break
+		if err := ctx.Err(); err != nil {
+			return items, err
 		}
-		result, itemErr := uc.checkout(batchCtx, req, false, quotes)
+		result, itemErr := uc.checkout(ctx, req, false, quotes)
 		if itemErr == nil {
 			succeeded++
 		} else if !errors.Is(itemErr, context.Canceled) && !errors.Is(itemErr, context.DeadlineExceeded) {
 			failed++
 		}
 		if errors.Is(itemErr, context.Canceled) || errors.Is(itemErr, context.DeadlineExceeded) {
-			if ctx.Err() == nil {
-				items = append(items, CheckoutBatchItem{Err: domain.ErrCheckoutTimeBudget})
-				failed++
-			}
-			break
+			return items, itemErr
 		}
 		if index == 0 && errors.Is(itemErr, domain.ErrIdempotencyConflict) {
 			return nil, itemErr

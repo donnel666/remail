@@ -164,8 +164,6 @@ func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
 		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return &OrderBatchItemErrorResponse{Code: "idempotency_conflict", Message: "Idempotency-Key conflicts with a different request."}
-	case errors.Is(err, domain.ErrCheckoutTimeBudget):
-		return &OrderBatchItemErrorResponse{Code: "time_budget_exhausted", Message: "Batch time budget was exhausted; retry with the same Idempotency-Key."}
 	default:
 		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order processing stopped temporarily."}
 	}

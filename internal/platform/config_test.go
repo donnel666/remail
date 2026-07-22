@@ -22,10 +22,11 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, []string{"127.0.0.1", "::1"}, cfg.Server.TrustedProxies)
 	assert.Equal(t, "development", cfg.Environment)
 	assert.Equal(t, "test:test@tcp(127.0.0.1:3306)/test", cfg.MySQL.DSN)
-	assert.Equal(t, 64, cfg.MySQL.MaxOpenConns)
-	assert.Equal(t, 16, cfg.MySQL.MaxIdleConns)
+	assert.Equal(t, 500, cfg.MySQL.MaxOpenConns)
+	assert.Equal(t, 500, cfg.MySQL.MaxIdleConns)
 	assert.Equal(t, "127.0.0.1:6379", cfg.Redis.Addr)
 	assert.Equal(t, 0, cfg.Redis.DB)
+	assert.Equal(t, 1024, cfg.Redis.PoolSize)
 	assert.Equal(t, "testkey", cfg.MinIO.AccessKey)
 	assert.Equal(t, "testsecret", cfg.MinIO.SecretKey)
 	assert.Equal(t, "remail", cfg.MinIO.Bucket)
@@ -216,9 +217,12 @@ func clearConfigEnv(t *testing.T) {
 		"SERVER_TIMEOUT",
 		"TRUSTED_PROXIES",
 		"MYSQL_DSN",
+		"MYSQL_MAX_OPEN_CONNS",
+		"MYSQL_MAX_IDLE_CONNS",
 		"REDIS_ADDR",
 		"REDIS_PASSWORD",
 		"REDIS_DB",
+		"REDIS_POOL_SIZE",
 		"MINIO_ENDPOINT",
 		"MINIO_ACCESS_KEY",
 		"MINIO_SECRET_KEY",

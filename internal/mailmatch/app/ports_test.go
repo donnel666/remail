@@ -45,9 +45,11 @@ type matchResultStub struct {
 
 type pickupBatchRepoStub struct {
 	Repository
-	scopes   map[string]OrderScope
-	messages map[uint][]domain.Message
-	state    *domain.FetchState
+	scopes          map[string]OrderScope
+	messages        map[uint][]domain.Message
+	state           *domain.FetchState
+	fetchRequestErr error
+	fetchRequests   int
 }
 
 func (r *pickupBatchRepoStub) LoadPickupScope(_ context.Context, token string, email string) (*OrderScope, error) {
@@ -64,6 +66,28 @@ func (r *pickupBatchRepoStub) FindOrderDelivery(context.Context, uint) (*OrderDe
 
 func (r *pickupBatchRepoStub) FindFetchStateForUpdate(context.Context, uint) (*domain.FetchState, error) {
 	return r.state, nil
+}
+
+func (r *pickupBatchRepoStub) LoadOrderScopeForServiceToken(_ context.Context, orderNo string) (*OrderScope, error) {
+	for _, scope := range r.scopes {
+		if scope.OrderNo == orderNo {
+			return &scope, nil
+		}
+	}
+	return nil, domain.ErrOrderNotFound
+}
+
+func (r *pickupBatchRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (r *pickupBatchRepoStub) EnsureFetchStates(context.Context, []uint) error {
+	return nil
+}
+
+func (r *pickupBatchRepoStub) RequestFetch(context.Context, *domain.FetchJob, time.Time, time.Time) error {
+	r.fetchRequests++
+	return r.fetchRequestErr
 }
 
 func (r *pickupBatchRepoStub) ListOrderMessages(_ context.Context, scope OrderScope, _ int) ([]domain.Message, error) {
@@ -105,6 +129,27 @@ func TestListPickupMailBatchPreservesRequestOrderAndContinuesAfterFailure(t *tes
 	require.Empty(t, results[1].Items)
 	require.NoError(t, results[2].Err)
 	require.Equal(t, uint(101), results[2].Items[0].ID)
+}
+
+func TestListPickupMailReturnsEmptyWhenFetchSchedulingFails(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	repo := &pickupBatchRepoStub{
+		scopes: map[string]OrderScope{
+			"token-a|a@example.com": {
+				OrderID: 1, OrderNo: "ORDER-A", ProjectID: 1, ServiceMode: "purchase", OrderStatus: "active",
+				AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 1, EmailResourceID: 1, Recipient: "a@example.com",
+			},
+		},
+		fetchRequestErr: domain.ErrFetchQueueUnavailable,
+	}
+	uc := NewUseCase(repo, &pickupBatchQueueStub{}, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	items, _, err := uc.ListPickupMail(context.Background(), "token-a", "a@example.com")
+
+	require.NoError(t, err)
+	require.Empty(t, items)
+	require.Equal(t, 1, repo.fetchRequests)
 }
 
 type pickupBatchReaderStub struct {
@@ -266,7 +311,7 @@ func TestListPickupMailBatchHundredItemsUsesOneBulkReadAndWriteUnderBudget(t *te
 	require.Equal(t, 1, queue.dispatches)
 }
 
-func TestListPickupMailBatchDoesNotWaitOnContendedFetchScheduling(t *testing.T) {
+func TestListPickupMailBatchReturnsCachedResultWhenFetchSchedulingIsCanceled(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	repo := &pickupBatchReaderStub{
 		blockRequest: true,
@@ -277,13 +322,17 @@ func TestListPickupMailBatchDoesNotWaitOnContendedFetchScheduling(t *testing.T) 
 	}
 	uc := NewUseCase(repo, &pickupBatchQueueStub{}, nil, nil)
 	uc.now = func() time.Time { return now }
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
 
 	started := time.Now()
-	results := uc.ListPickupMailBatch(context.Background(), []PickupCredential{{Email: "a@example.com", Token: "token-a"}})
+	results := uc.ListPickupMailBatch(ctx, []PickupCredential{{Email: "a@example.com", Token: "token-a"}})
 
 	require.Less(t, time.Since(started), time.Second)
 	require.Len(t, results, 1)
 	require.NoError(t, results[0].Err)
+	require.Empty(t, results[0].Items)
+	require.Equal(t, 1, repo.requestCalls)
 }
 
 func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {

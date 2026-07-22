@@ -25,16 +25,15 @@ import (
 )
 
 const (
-	defaultFetchCooldown     = 5 * time.Second
-	autoFetchCooldown        = 5 * time.Second
-	fetchLookbackWindow      = 90 * 24 * time.Hour
-	fetchOverlapWindow       = 5 * time.Minute
-	readWindowSkew           = 2 * time.Minute
-	codeReadLimit            = 1
-	purchaseReadLimit        = 30
-	messageScanLimit         = 40
-	defaultFetchMaxAttempts  = 3
-	readFetchScheduleTimeout = 500 * time.Millisecond
+	defaultFetchCooldown    = 5 * time.Second
+	autoFetchCooldown       = 5 * time.Second
+	fetchLookbackWindow     = 90 * 24 * time.Hour
+	fetchOverlapWindow      = 5 * time.Minute
+	readWindowSkew          = 2 * time.Minute
+	codeReadLimit           = 1
+	purchaseReadLimit       = 30
+	messageScanLimit        = 40
+	defaultFetchMaxAttempts = 3
 )
 
 type MailRuleType string
@@ -371,14 +370,12 @@ func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderSco
 	if uc == nil || uc.queue == nil || len(scopes) == 0 {
 		return
 	}
-	scheduleCtx, cancel := context.WithTimeout(ctx, readFetchScheduleTimeout)
-	defer cancel()
 	sort.Slice(scopes, func(i, j int) bool {
 		return scopes[i].EmailResourceID < scopes[j].EmailResourceID
 	})
 	now := uc.now()
 	accepted := 0
-	err := uc.repo.WithTx(scheduleCtx, func(txCtx context.Context) error {
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		resourceIDs := make([]uint, len(scopes))
 		for i := range scopes {
 			resourceIDs[i] = scopes[i].EmailResourceID
@@ -430,8 +427,11 @@ func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderSco
 		accepted = len(jobs)
 		return nil
 	})
-	if err == nil && accepted > 0 {
-		uc.ScheduleFetchDispatcher(scheduleCtx, 0)
+	if err != nil {
+		return
+	}
+	if accepted > 0 {
+		uc.ScheduleFetchDispatcher(ctx, 0)
 	}
 }
 
@@ -982,9 +982,7 @@ func (uc *UseCase) scheduleReadFetch(ctx context.Context, req FetchSubmitRequest
 	if uc == nil || uc.queue == nil {
 		return
 	}
-	scheduleCtx, cancel := context.WithTimeout(ctx, readFetchScheduleTimeout)
-	defer cancel()
-	_, _ = uc.SubmitFetch(scheduleCtx, req)
+	_, _ = uc.SubmitFetch(ctx, req)
 }
 
 func (uc *UseCase) loadScopeForSubmit(ctx context.Context, req FetchSubmitRequest) (*OrderScope, error) {

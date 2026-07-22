@@ -85,6 +85,17 @@ func (batchTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*
 	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
 }
 
+type batchCancelTokenSpy struct {
+	OrderTokenPort
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (s *batchCancelTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
+	s.once.Do(s.cancel)
+	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
+}
+
 type checkoutAllocationErrorSpy struct {
 	AllocationPort
 	err error
@@ -170,6 +181,24 @@ func TestCheckoutBatchHandlesOneHundredItemsInOneBoundedCall(t *testing.T) {
 	require.Equal(t, 100, repo.committed)
 }
 
+func TestCheckoutBatchReturnsCancellationWithCompletedPrefix(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{
+		"first":  batchOrder("first", domain.OrderStatusActive, ""),
+		"second": batchOrder("second", domain.OrderStatusActive, ""),
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	uc := NewUseCase(repo, nil, &batchWalletSpy{}, nil, &batchCancelTokenSpy{cancel: cancel})
+
+	items, err := uc.CheckoutBatch(ctx, []CheckoutRequest{
+		batchRequest("first", 2), batchRequest("second", 2),
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, items, 1)
+	require.Equal(t, "order-first", items[0].Result.Order.OrderNo)
+	require.Equal(t, 1, repo.topTx)
+}
+
 func TestCheckoutBatchContinuesAfterItemIdempotencyConflict(t *testing.T) {
 	repo := &batchRepoSpy{
 		orders: map[string]domain.Order{
@@ -209,6 +238,9 @@ func TestCheckoutBatchStopsWhenBaseIdempotencyKeyConflicts(t *testing.T) {
 }
 
 func TestCheckoutBatchGateIsFIFOAndBounded(t *testing.T) {
+	require.Equal(t, 1024, checkoutBatchConcurrency)
+	require.Equal(t, 1024, checkoutBatchMaxWaiting)
+	require.Equal(t, 1024, checkoutBatchMaxUnits)
 	gate := newCheckoutBatchGate()
 	releases := make([]func(), 0, checkoutBatchConcurrency)
 	for userID := uint(1); userID <= checkoutBatchConcurrency; userID++ {
@@ -223,7 +255,8 @@ func TestCheckoutBatchGateIsFIFOAndBounded(t *testing.T) {
 		err     error
 	}
 	admitted := make(chan admission, 2)
-	for _, userID := range []uint{10, 11} {
+	firstWaiterID := uint(checkoutBatchConcurrency + 1)
+	for index, userID := range []uint{firstWaiterID, firstWaiterID + 1} {
 		go func(userID uint) {
 			release, err := gate.acquire(context.Background(), userID, 100)
 			admitted <- admission{userID: userID, release: release, err: err}
@@ -231,23 +264,25 @@ func TestCheckoutBatchGateIsFIFOAndBounded(t *testing.T) {
 		require.Eventually(t, func() bool {
 			gate.mu.Lock()
 			defer gate.mu.Unlock()
-			return len(gate.waiting) == int(userID-9)
+			return len(gate.waiting) == index+1
 		}, time.Second, time.Millisecond)
 	}
 
-	_, err := gate.acquire(context.Background(), 12, 1)
+	queuedUnits := 2 * ((100 + checkoutBatchUnitSize - 1) / checkoutBatchUnitSize)
+	overloadQuantity := (checkoutBatchMaxUnits-queuedUnits)*checkoutBatchUnitSize + 1
+	_, err := gate.acquire(context.Background(), firstWaiterID+2, overloadQuantity)
 	require.ErrorIs(t, err, domain.ErrCheckoutOverloaded)
-	_, err = gate.acquire(context.Background(), 10, 1)
+	_, err = gate.acquire(context.Background(), firstWaiterID, 1)
 	require.ErrorIs(t, err, domain.ErrCheckoutBusy)
 
 	releases[0]()
 	first := <-admitted
 	require.NoError(t, first.err)
-	require.Equal(t, uint(10), first.userID)
+	require.Equal(t, firstWaiterID, first.userID)
 	first.release()
 	second := <-admitted
 	require.NoError(t, second.err)
-	require.Equal(t, uint(11), second.userID)
+	require.Equal(t, firstWaiterID+1, second.userID)
 	second.release()
 	for _, release := range releases[1:] {
 		release()
@@ -264,8 +299,9 @@ func TestCheckoutBatchGateCancellationRemovesWaiter(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+	waiterID := uint(checkoutBatchConcurrency + 1)
 	go func() {
-		_, err := gate.acquire(ctx, 10, 1)
+		_, err := gate.acquire(ctx, waiterID, 1)
 		done <- err
 	}()
 	require.Eventually(t, func() bool {
@@ -279,7 +315,7 @@ func TestCheckoutBatchGateCancellationRemovesWaiter(t *testing.T) {
 	gate.mu.Lock()
 	require.Empty(t, gate.waiting)
 	require.Zero(t, gate.queuedUnits)
-	_, exists := gate.users[10]
+	_, exists := gate.users[waiterID]
 	gate.mu.Unlock()
 	require.False(t, exists)
 	for _, release := range releases {

@@ -40,14 +40,14 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 }
 
 func TestWorkerTierConcurrencyBudget(t *testing.T) {
-	if asynqRealtimeWorkerConcurrency != 16 || asynqWorkerConcurrency != 8 {
-		t.Fatalf("foreground ceilings must be realtime=16 and general=8, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
+	if asynqRealtimeWorkerConcurrency != 256 || asynqWorkerConcurrency != 768 {
+		t.Fatalf("foreground ceilings must be realtime=256 and general=768, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
 	}
-	if asynqRealtimeWorkerConcurrency+asynqWorkerConcurrency != 24 {
-		t.Fatalf("foreground worker capacity must total 24, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
+	if asynqRealtimeWorkerConcurrency+asynqWorkerConcurrency != 1024 {
+		t.Fatalf("foreground worker capacity must total 1024, got realtime=%d general=%d", asynqRealtimeWorkerConcurrency, asynqWorkerConcurrency)
 	}
-	if asynqBackgroundWorkerConcurrency != 4 {
-		t.Fatalf("background worker ceiling must be 4, got %d", asynqBackgroundWorkerConcurrency)
+	if asynqBackgroundWorkerConcurrency != 512 {
+		t.Fatalf("background worker ceiling must be 512, got %d", asynqBackgroundWorkerConcurrency)
 	}
 }
 

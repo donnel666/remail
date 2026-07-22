@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	checkoutBatchConcurrency = 5
-	checkoutBatchMaxWaiting  = 20
+	checkoutBatchConcurrency = 1024
+	checkoutBatchMaxWaiting  = 1024
 	checkoutBatchUnitSize    = 20
-	checkoutBatchMaxUnits    = 10
+	checkoutBatchMaxUnits    = 1024
 )
 
 type checkoutBatchWaiter struct {

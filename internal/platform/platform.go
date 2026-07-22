@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	asynqWorkerConcurrency           = 8
-	asynqRealtimeWorkerConcurrency   = 16
-	asynqBackgroundWorkerConcurrency = 4
+	asynqWorkerConcurrency           = 768
+	asynqRealtimeWorkerConcurrency   = 256
+	asynqBackgroundWorkerConcurrency = 512
 	asynqShutdownTimeout             = 30 * time.Second
 	backgroundRetryDelayMinimum      = 5 * time.Second
 	backgroundRetryDelayJitter       = 5 * time.Second
@@ -245,6 +245,7 @@ func initRedis(ctx context.Context, cfg RedisConfig) (*redis.Client, error) {
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
 		DB:       cfg.DB,
+		PoolSize: cfg.PoolSize,
 	})
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -267,21 +268,11 @@ func initMinIO(cfg MinIOConfig) (*minio.Client, error) {
 }
 
 func initAsynq(cfg RedisConfig) *asynq.Client {
-	redisOpt := asynq.RedisClientOpt{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	}
-	return asynq.NewClient(redisOpt)
+	return asynq.NewClient(asynqRedisOptions(cfg))
 }
 
 func initAsynqServer(cfg RedisConfig) *asynq.Server {
-	redisOpt := asynq.RedisClientOpt{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	}
-	return asynq.NewServer(redisOpt, asynq.Config{
+	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
 		Concurrency:     asynqWorkerConcurrency,
 		Queues:          foregroundQueueConfig(),
 		StrictPriority:  false, // weighted polling prevents a large queue from starving another queue
@@ -294,12 +285,7 @@ func initAsynqServer(cfg RedisConfig) *asynq.Server {
 // verification-code fetches always have capacity even when the shared pool is
 // saturated by long-running bulk tasks.
 func initRealtimeAsynqServer(cfg RedisConfig) *asynq.Server {
-	redisOpt := asynq.RedisClientOpt{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	}
-	return asynq.NewServer(redisOpt, asynq.Config{
+	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
 		Concurrency:     asynqRealtimeWorkerConcurrency,
 		Queues:          realtimeQueueConfig(),
 		StrictPriority:  false,
@@ -308,12 +294,7 @@ func initRealtimeAsynqServer(cfg RedisConfig) *asynq.Server {
 }
 
 func initBackgroundAsynqServer(cfg RedisConfig) *asynq.Server {
-	redisOpt := asynq.RedisClientOpt{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	}
-	return asynq.NewServer(redisOpt, asynq.Config{
+	return asynq.NewServer(asynqRedisOptions(cfg), asynq.Config{
 		Concurrency:     asynqBackgroundWorkerConcurrency,
 		Queues:          backgroundQueueConfig(),
 		StrictPriority:  false, // every non-empty background queue keeps a weighted share
@@ -321,6 +302,15 @@ func initBackgroundAsynqServer(cfg RedisConfig) *asynq.Server {
 		IsFailure:       backgroundIsFailure,
 		ShutdownTimeout: asynqShutdownTimeout,
 	})
+}
+
+func asynqRedisOptions(cfg RedisConfig) asynq.RedisClientOpt {
+	return asynq.RedisClientOpt{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
+		PoolSize: cfg.PoolSize,
+	}
 }
 
 func backgroundRetryDelay(retried int, err error, task *asynq.Task) time.Duration {
