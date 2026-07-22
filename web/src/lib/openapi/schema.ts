@@ -11286,6 +11286,7 @@ export interface operations {
                 scope?: "mine" | "all";
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
+                /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
                 /** @description Delivery email domain filter; the "@" prefix is optional. */
                 domain?: string;
