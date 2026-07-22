@@ -33,6 +33,16 @@ func newAllocMySQLTestDB(t *testing.T) *gorm.DB {
 	return allocMySQLTestServer.Database(t, allocMigrationsDir(t))
 }
 
+func innodbMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
+	t.Helper()
+	var count uint64
+	require.NoError(t, db.Raw(`
+SELECT COUNT
+FROM information_schema.innodb_metrics
+WHERE NAME = ?`, name).Scan(&count).Error)
+	return count
+}
+
 func allocMigrationsDir(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -44,6 +54,8 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	seedMicrosoftResources(t, db, 1, 1000, 150, true, "normal")
+	deadlocksBefore := innodbMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := innodbMetricCount(t, db, "lock_timeouts")
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	const workers = 100
@@ -84,6 +96,42 @@ func TestMicrosoftMainAllocationConcurrentMySQL(t *testing.T) {
 	var active int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM microsoft_allocations WHERE status = 'allocated'").Scan(&active).Error)
 	require.Equal(t, int64(workers), active)
+	require.Equal(t, deadlocksBefore, innodbMetricCount(t, db, "lock_deadlocks"), "allocation must not rely on deadlock retries")
+	require.Equal(t, timeoutsBefore, innodbMetricCount(t, db, "lock_timeouts"), "allocation must not rely on lock-timeout retries")
+}
+
+func TestMicrosoftMainUsesAliasWhenMainIsActiveInAnotherProjectMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (1000, 4, 'alias1000@example.com', 'normal')`).Error)
+
+	uc := allocapp.NewUseCase(NewRepo(db))
+	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-main-project-10", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "main", mainAllocation.Mailbox)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO projects(id, name, target_platform, status, access_type)
+VALUES (11, 'Other Project', 'alloc', 'listed', 'public')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 11, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+
+	aliasAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-alias-project-11", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", aliasAllocation.Mailbox)
+	require.Equal(t, "alias1000@example.com", aliasAllocation.Email)
 }
 
 func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) {
@@ -336,6 +384,8 @@ func TestDomainAllocationConcurrentMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedDomainResources(t, db, 1, 2000, 120)
+	deadlocksBefore := innodbMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := innodbMetricCount(t, db, "lock_timeouts")
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	const workers = 80
@@ -372,6 +422,8 @@ func TestDomainAllocationConcurrentMySQL(t *testing.T) {
 		seen[email] = struct{}{}
 	}
 	require.Len(t, seen, workers)
+	require.Equal(t, deadlocksBefore, innodbMetricCount(t, db, "lock_deadlocks"), "allocation must not rely on deadlock retries")
+	require.Equal(t, timeoutsBefore, innodbMetricCount(t, db, "lock_timeouts"), "allocation must not rely on lock-timeout retries")
 }
 
 func TestSameOrderConcurrentIsIdempotentMySQL(t *testing.T) {
@@ -661,8 +713,28 @@ INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status)
 VALUES (?, ?, ?, ?)`, 2000, 2, "disabled@d2000.example.com", "disabled").Error)
 
 	mailbox, err := NewRepo(db).FindOrCreateGeneratedMailbox(context.Background(), 2000, 2, "disabled@d2000.example.com")
-	require.ErrorIs(t, err, domain.ErrAllocationConflict)
+	require.NoError(t, err)
 	require.Nil(t, mailbox)
+}
+
+func TestFindOrCreateMicrosoftAliasesDoNotReuseDisabledRowsMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 0, 1, 1)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Exec(`
+INSERT INTO dot_aliases(resource_id, email, status)
+VALUES (1000, 'm.s1000@example.com', 'disabled')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO plus_aliases(resource_id, email, status)
+VALUES (1000, 'ms1000+disabled@example.com', 'disabled')`).Error)
+
+	repo := NewRepo(db)
+	dot, err := repo.FindOrCreateDotAlias(context.Background(), 1000, "m.s1000@example.com")
+	require.NoError(t, err)
+	require.Nil(t, dot)
+	plus, err := repo.FindOrCreatePlusAlias(context.Background(), 1000, "ms1000+disabled@example.com")
+	require.NoError(t, err)
+	require.Nil(t, plus)
 }
 
 func TestAllocationSQLConstraintsMySQL(t *testing.T) {

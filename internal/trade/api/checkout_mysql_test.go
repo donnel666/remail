@@ -239,6 +239,45 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 	require.Zero(t, rolledBackAliases)
 }
 
+func TestCreateHistoricalOrderConflictStopsOuterTransactionMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
+	createdAt := time.Now().UTC().Add(-24 * time.Hour)
+	expiredAt := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, newTradeUseCase(db).ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{{
+		ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com",
+		FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 1,
+	}}))
+
+	var existing struct {
+		OrderNo             string `gorm:"column:order_no"`
+		DebitTxID           uint   `gorm:"column:debit_tx_id"`
+		MicrosoftAllocation uint   `gorm:"column:microsoft_alloc_id"`
+	}
+	require.NoError(t, db.Table("orders").
+		Select("order_no, debit_tx_id, microsoft_alloc_id").
+		Where("order_no LIKE 'HIST-%'").Take(&existing).Error)
+
+	repo := tradeinfra.NewRepo(db)
+	continued := false
+	err := repo.WithTx(context.Background(), func(txCtx context.Context) error {
+		if err := repo.CreateHistoricalOrder(txCtx, tradeapp.CreateHistoricalOrderCommand{
+			OrderNo: existing.OrderNo, UserID: 3, ProjectID: 10, ProjectProductID: 20,
+			DebitTxID: existing.DebitTxID, MicrosoftAllocationID: existing.MicrosoftAllocation,
+			DeliveryEmail: "ms1000@example.com", CreatedAt: createdAt, ExpiredAt: expiredAt, Now: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		continued = true
+		return nil
+	})
+
+	require.ErrorIs(t, err, tradedomain.ErrIdempotencyConflict)
+	require.False(t, continued)
+}
+
 func TestImportHistoricalMicrosoftUsageOnlyBackfillsMissingAllocationRelationsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")

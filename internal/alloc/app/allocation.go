@@ -25,6 +25,8 @@ const (
 	inventoryRefreshBatchSize = 5
 )
 
+var errCandidateUnavailable = errors.New("allocation candidate unavailable")
+
 var pinyinMailboxNameParts = [...]string{
 	"an", "ao", "bai", "bao", "bei", "bo", "cai", "chang", "chao", "chen",
 	"cheng", "chun", "da", "dan", "de", "dong", "fan", "fang", "fei", "feng",
@@ -51,6 +53,7 @@ type AllocateCommand struct {
 	// allocatable for an already accepted order.
 	FulfillExistingOrder bool
 	ensureOrderGuard     func(context.Context, domain.AllocationType) error
+	lockResourceRoot     func(context.Context, uint, domain.AllocationType) (bool, error)
 }
 
 type UseCase struct {
@@ -136,6 +139,15 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 				}
 				guardCreated = true
 				return nil
+			}
+			rootLocked := false
+			cmd.lockResourceRoot = func(lockCtx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
+				if rootLocked {
+					return uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
+				}
+				locked, err := uc.repo.LockResourceRoot(lockCtx, resourceID, allocationType)
+				rootLocked = locked
+				return locked, err
 			}
 			for _, scope := range scopes {
 				attemptCmd := cmd
@@ -273,16 +285,6 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			return nil
 		}
 		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, domain.AllocationTypeMicrosoft); err != nil {
-			if errors.Is(err, domain.ErrAllocationConflict) {
-				existing, findErr := uc.repo.FindExistingAllocation(txCtx, orderNo)
-				if findErr != nil {
-					return findErr
-				}
-				if existing != nil && sameHistoricalMicrosoftAllocation(*existing, orderNo, cmd) {
-					result = existing
-					return nil
-				}
-			}
 			return err
 		}
 		releasedAt := cmd.ReleasedAt
@@ -814,21 +816,27 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 		if err == nil && result != nil {
 			return result, false, nil
 		}
-		if err == domain.ErrAllocationConflict || err == domain.ErrInsufficientInventory {
+		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
 			continue
 		}
+		// A failed allocation INSERT retains index locks until this transaction
+		// rolls back, so conflicts must never advance to another candidate.
 		return nil, false, err
 	}
 	return nil, false, nil
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedRoot, err := uc.repo.LockResourceRoot(ctx, candidate.ResourceID, domain.AllocationTypeMicrosoft)
+	lockRoot := uc.repo.LockResourceRoot
+	if cmd.lockResourceRoot != nil {
+		lockRoot = cmd.lockResourceRoot
+	}
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeMicrosoft)
 	if err != nil {
 		return nil, err
 	}
 	if !lockedRoot {
-		return nil, domain.ErrAllocationConflict
+		return nil, errCandidateUnavailable
 	}
 
 	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, cmd.EmailSuffix)
@@ -836,7 +844,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		return nil, err
 	}
 	if lockedCandidate == nil {
-		return nil, domain.ErrAllocationConflict
+		return nil, errCandidateUnavailable
 	}
 	candidate = *lockedCandidate
 
@@ -846,21 +854,15 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		if err != nil {
 			return nil, err
 		}
-		if !matched {
-			result, err := uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
-			if err == nil {
-				return result, nil
-			}
-			if err != domain.ErrAllocationConflict {
-				return nil, err
-			}
+		if !matched && !candidate.MainAllocated {
+			return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
 		}
 		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, config.ProjectID, candidate.ResourceID)
 		if aliasErr != nil {
 			return nil, aliasErr
 		}
 		if alias == nil {
-			return nil, domain.ErrAllocationConflict
+			return nil, errCandidateUnavailable
 		}
 		return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxAlias, &alias.ID, nil, nil, alias.Email, now, nil)
 	case domain.MicrosoftMailboxDot:
@@ -876,13 +878,17 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 			if err != nil {
 				return nil, err
 			}
-			result, err := uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
-			if err == nil {
-				return result, nil
+			if alias == nil {
+				continue
 			}
-			if err != domain.ErrAllocationConflict {
+			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxDot, alias.ID)
+			if err != nil {
 				return nil, err
 			}
+			if matched {
+				continue
+			}
+			return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxDot, nil, &alias.ID, nil, alias.Email, now, nil)
 		}
 		return nil, domain.ErrInsufficientInventory
 	case domain.MicrosoftMailboxPlus:
@@ -908,13 +914,17 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 			if err != nil {
 				return nil, err
 			}
-			result, err := uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
-			if err == nil {
-				return result, nil
+			if alias == nil {
+				continue
 			}
-			if err != domain.ErrAllocationConflict {
+			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxPlus, alias.ID)
+			if err != nil {
 				return nil, err
 			}
+			if matched {
+				continue
+			}
+			return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxPlus, nil, nil, &alias.ID, alias.Email, now, &dailyUsage)
 		}
 		return nil, domain.ErrInsufficientInventory
 	default:
@@ -925,9 +935,6 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, resourceID uint, mailbox domain.MicrosoftMailbox, explicitAliasID, dotAliasID, plusAliasID *uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
-	}
-	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeMicrosoft); err != nil {
-		return nil, err
 	}
 	allocation := &domain.MicrosoftAllocation{
 		OrderNo:         cmd.OrderNo,
@@ -945,13 +952,16 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCo
 	if allocation.Email == "" {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	if err := uc.repo.CreateMicrosoftAllocation(ctx, allocation); err != nil {
-		return nil, err
-	}
 	if dailyUsage != nil {
 		if err := uc.repo.ConsumeDailyUsage(ctx, dailyUsage.UsageDate, dailyUsage.AllocationType, dailyUsage.ResourceID, dailyUsage.Kind, dailyUsage.Limit); err != nil {
 			return nil, err
 		}
+	}
+	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeMicrosoft); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.CreateMicrosoftAllocation(ctx, allocation); err != nil {
+		return nil, err
 	}
 	if err := uc.repo.TouchMicrosoftAllocated(ctx, resourceID, now); err != nil {
 		return nil, err
@@ -1014,21 +1024,26 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 		if err == nil && result != nil {
 			return result, false, nil
 		}
-		if err == domain.ErrAllocationConflict || err == domain.ErrInsufficientInventory {
+		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
 			continue
 		}
+		// Domain allocation conflicts have the same failed-INSERT lock lifetime.
 		return nil, false, err
 	}
 	return nil, false, nil
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockedRoot, err := uc.repo.LockResourceRoot(ctx, candidate.ResourceID, domain.AllocationTypeDomain)
+	lockRoot := uc.repo.LockResourceRoot
+	if cmd.lockResourceRoot != nil {
+		lockRoot = cmd.lockResourceRoot
+	}
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeDomain)
 	if err != nil {
 		return nil, err
 	}
 	if !lockedRoot {
-		return nil, domain.ErrAllocationConflict
+		return nil, errCandidateUnavailable
 	}
 
 	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
@@ -1036,7 +1051,7 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 		return nil, err
 	}
 	if lockedCandidate == nil {
-		return nil, domain.ErrAllocationConflict
+		return nil, errCandidateUnavailable
 	}
 	candidate = *lockedCandidate
 
@@ -1061,18 +1076,19 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 	for _, email := range generatedMailboxVariants(candidate.Domain) {
 		mailbox, err = uc.repo.FindOrCreateGeneratedMailbox(ctx, candidate.ResourceID, candidate.OwnerUserID, email)
 		if err != nil {
-			if errors.Is(err, domain.ErrAllocationConflict) {
-				continue
-			}
 			return nil, err
 		}
-		result, err := uc.createDomainAllocation(ctx, cmd, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
-		if err == nil {
-			return result, nil
+		if mailbox == nil {
+			continue
 		}
-		if err != domain.ErrAllocationConflict {
+		allocated, err := uc.repo.IsDomainMailboxAllocated(ctx, config.ProjectID, mailbox.ID)
+		if err != nil {
 			return nil, err
 		}
+		if allocated {
+			continue
+		}
+		return uc.createDomainAllocation(ctx, cmd, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
 	}
 	return nil, domain.ErrInsufficientInventory
 }
@@ -1080,9 +1096,6 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, resourceID uint, mailboxID uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
-	}
-	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeDomain); err != nil {
-		return nil, err
 	}
 	allocation := &domain.GeneratedMailboxAllocation{
 		OrderNo:     cmd.OrderNo,
@@ -1097,13 +1110,16 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateComma
 	if allocation.Email == "" {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	if err := uc.repo.CreateDomainAllocation(ctx, allocation); err != nil {
-		return nil, err
-	}
 	if dailyUsage != nil {
 		if err := uc.repo.ConsumeDailyUsage(ctx, dailyUsage.UsageDate, dailyUsage.AllocationType, dailyUsage.ResourceID, dailyUsage.Kind, dailyUsage.Limit); err != nil {
 			return nil, err
 		}
+	}
+	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeDomain); err != nil {
+		return nil, err
+	}
+	if err := uc.repo.CreateDomainAllocation(ctx, allocation); err != nil {
+		return nil, err
 	}
 	if err := uc.repo.TouchDomainAllocated(ctx, resourceID, mailboxID, now); err != nil {
 		return nil, err

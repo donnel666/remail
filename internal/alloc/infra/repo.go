@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -55,9 +56,11 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 	}
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
+		// Candidate rechecks must see commits made while waiting for a resource
+		// root; READ COMMITTED also avoids RR gap locks on missing history rows.
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return fn(platform.WithGormTx(ctx, tx))
-		})
+		}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
@@ -436,12 +439,21 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 	}
 	if mailbox == domain.MicrosoftMailboxMain {
 		where = append(where, `(
-			NOT EXISTS (
-				SELECT 1
-				FROM microsoft_allocations history_main
-				WHERE history_main.resource_id = ms.id
-				  AND history_main.project_id = ?
-				  AND history_main.mailbox = 'main'
+			(
+				NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations history_main
+					WHERE history_main.resource_id = ms.id
+					  AND history_main.project_id = ?
+					  AND history_main.mailbox = 'main'
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations active_main
+					WHERE active_main.active_kind = 1
+					  AND active_main.active_project_id = 0
+					  AND active_main.active_entity_id = ms.id
+				)
 			)
 			OR EXISTS (
 				SELECT 1
@@ -537,10 +549,18 @@ LIMIT ?`
 
 // LockResourceRoot establishes the cross-context lock order shared with Core:
 // email_resources first, then the resource subtype and allocation-owned rows.
-// The root row is already a selected candidate, so wait for the short
-// administrator transaction instead of treating a temporarily locked resource
-// as missing inventory. Candidate-pool scans may still use SKIP LOCKED.
+// The first selected candidate may wait for a short administrator transaction;
+// later candidates use TryLockResourceRoot so a transaction never waits while
+// retaining locks from an earlier candidate.
 func (r *Repo) LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
+	return r.lockResourceRoot(ctx, resourceID, allocationType, false)
+}
+
+func (r *Repo) TryLockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
+	return r.lockResourceRoot(ctx, resourceID, allocationType, true)
+}
+
+func (r *Repo) lockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType, skipLocked bool) (bool, error) {
 	if resourceID == 0 || !domain.IsValidAllocationType(allocationType) {
 		return false, domain.ErrInvalidAllocationRequest
 	}
@@ -550,12 +570,16 @@ func (r *Repo) LockResourceRoot(ctx context.Context, resourceID uint, allocation
 	var row struct {
 		ID uint `gorm:"column:id"`
 	}
-	if err := r.dbFor(ctx).Raw(`
+	query := `
 SELECT id
 FROM email_resources
 WHERE id = ? AND type = ?
 LIMIT 1
-FOR UPDATE`, resourceID, string(allocationType)).Scan(&row).Error; err != nil {
+FOR UPDATE`
+	if skipLocked {
+		query += " SKIP LOCKED"
+	}
+	if err := r.dbFor(ctx).Raw(query, resourceID, string(allocationType)).Scan(&row).Error; err != nil {
 		return false, fmt.Errorf("lock allocation resource root: %w", err)
 	}
 	return row.ID != 0, nil
@@ -573,12 +597,21 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, proj
 	}
 	if mailbox == domain.MicrosoftMailboxMain {
 		where = append(where, `(
-			NOT EXISTS (
-				SELECT 1
-				FROM microsoft_allocations history_main
-				WHERE history_main.resource_id = ms.id
-				  AND history_main.project_id = ?
-				  AND history_main.mailbox = 'main'
+			(
+				NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations history_main
+					WHERE history_main.resource_id = ms.id
+					  AND history_main.project_id = ?
+					  AND history_main.mailbox = 'main'
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations active_main
+					WHERE active_main.active_kind = 1
+					  AND active_main.active_project_id = 0
+					  AND active_main.active_entity_id = ms.id
+				)
 			)
 			OR EXISTS (
 				SELECT 1
@@ -633,7 +666,17 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, proj
 		)
 	}
 	query := `
-SELECT ms.id AS resource_id, ms.email_address AS email_address, ms.quality_score AS quality_score, ms.plus_daily_limit AS plus_daily_limit
+SELECT ms.id AS resource_id,
+       ms.email_address AS email_address,
+       ms.quality_score AS quality_score,
+       ms.plus_daily_limit AS plus_daily_limit,
+       EXISTS (
+           SELECT 1
+           FROM microsoft_allocations active_main
+           WHERE active_main.active_kind = 1
+             AND active_main.active_project_id = 0
+             AND active_main.active_entity_id = ms.id
+       ) AS main_allocated
 FROM microsoft_resources ms
 WHERE ` + strings.Join(where, " AND ") + `
 LIMIT 1
@@ -741,22 +784,44 @@ func (r *Repo) IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projec
 	if projectID == 0 || mailboxID == 0 || !domain.IsValidMicrosoftMailbox(mailbox) {
 		return false, domain.ErrInvalidAllocationRequest
 	}
-	var count int64
-	query := r.dbFor(ctx).Table("microsoft_allocations").Where("project_id = ? AND mailbox = ?", projectID, string(mailbox))
+	column := "resource_id"
 	switch mailbox {
-	case domain.MicrosoftMailboxMain:
-		query = query.Where("resource_id = ?", mailboxID)
 	case domain.MicrosoftMailboxAlias:
-		query = query.Where("explicit_alias_id = ?", mailboxID)
+		column = "explicit_alias_id"
 	case domain.MicrosoftMailboxDot:
-		query = query.Where("dot_alias_id = ?", mailboxID)
+		column = "dot_alias_id"
 	case domain.MicrosoftMailboxPlus:
-		query = query.Where("plus_alias_id = ?", mailboxID)
+		column = "plus_alias_id"
 	}
-	if err := query.Count(&count).Error; err != nil {
+	var matched bool
+	query := fmt.Sprintf(`
+SELECT EXISTS (
+    SELECT 1
+    FROM microsoft_allocations
+    WHERE project_id = ? AND mailbox = ? AND %s = ?
+    LIMIT 1
+)`, column)
+	if err := r.dbFor(ctx).Raw(query, projectID, string(mailbox), mailboxID).Scan(&matched).Error; err != nil {
 		return false, fmt.Errorf("check microsoft mailbox project history: %w", err)
 	}
-	return count > 0, nil
+	return matched, nil
+}
+
+func (r *Repo) IsDomainMailboxAllocated(ctx context.Context, projectID uint, mailboxID uint) (bool, error) {
+	if projectID == 0 || mailboxID == 0 {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	var allocated bool
+	if err := r.dbFor(ctx).Raw(`
+SELECT EXISTS (
+    SELECT 1
+    FROM domain_allocations
+    WHERE active_project_id = ? AND active_mailbox_id = ?
+    LIMIT 1
+)`, projectID, mailboxID).Scan(&allocated).Error; err != nil {
+		return false, fmt.Errorf("check domain mailbox allocation: %w", err)
+	}
+	return allocated, nil
 }
 
 func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
@@ -888,28 +953,30 @@ FOR UPDATE SKIP LOCKED`, table)
 
 func (r *Repo) FindOrCreateDotAlias(ctx context.Context, resourceID uint, email string) (*allocapp.AliasCandidate, error) {
 	model := DotAliasModel{ResourceID: resourceID, Email: strings.ToLower(strings.TrimSpace(email)), Status: "normal"}
-	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
-		if !isDuplicateKeyError(err) {
-			return nil, fmt.Errorf("create dot alias: %w", err)
-		}
+	if err := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return nil, fmt.Errorf("create dot alias: %w", err)
 	}
 	var found DotAliasModel
 	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ?", resourceID, model.Email).First(&found).Error; err != nil {
 		return nil, fmt.Errorf("find dot alias: %w", err)
+	}
+	if found.Status != "normal" {
+		return nil, nil
 	}
 	return &allocapp.AliasCandidate{ID: found.ID, Email: found.Email}, nil
 }
 
 func (r *Repo) FindOrCreatePlusAlias(ctx context.Context, resourceID uint, email string) (*allocapp.AliasCandidate, error) {
 	model := PlusAliasModel{ResourceID: resourceID, Email: strings.ToLower(strings.TrimSpace(email)), Status: "normal"}
-	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
-		if !isDuplicateKeyError(err) {
-			return nil, fmt.Errorf("create plus alias: %w", err)
-		}
+	if err := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return nil, fmt.Errorf("create plus alias: %w", err)
 	}
 	var found PlusAliasModel
 	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ?", resourceID, model.Email).First(&found).Error; err != nil {
 		return nil, fmt.Errorf("find plus alias: %w", err)
+	}
+	if found.Status != "normal" {
+		return nil, nil
 	}
 	return &allocapp.AliasCandidate{ID: found.ID, Email: found.Email}, nil
 }
@@ -960,17 +1027,15 @@ func (r *Repo) FindOrCreateGeneratedMailbox(ctx context.Context, resourceID uint
 		Email:       strings.ToLower(strings.TrimSpace(email)),
 		Status:      "normal",
 	}
-	if err := r.dbFor(ctx).Create(&model).Error; err != nil {
-		if !isDuplicateKeyError(err) {
-			return nil, fmt.Errorf("create generated mailbox: %w", err)
-		}
+	if err := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return nil, fmt.Errorf("create generated mailbox: %w", err)
 	}
 	var found GeneratedMailboxModel
-	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ? AND status = 'normal'", resourceID, model.Email).First(&found).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrAllocationConflict
-		}
+	if err := r.dbFor(ctx).Where("resource_id = ? AND email = ?", resourceID, model.Email).First(&found).Error; err != nil {
 		return nil, fmt.Errorf("find generated mailbox: %w", err)
+	}
+	if found.Status != "normal" {
+		return nil, nil
 	}
 	return &allocapp.GeneratedMailboxCandidate{ID: found.ID, Email: found.Email}, nil
 }

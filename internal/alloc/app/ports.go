@@ -33,6 +33,7 @@ type MicrosoftCandidate struct {
 	EmailAddress   string
 	QualityScore   int
 	PlusDailyLimit int
+	MainAllocated  bool
 }
 
 type DomainCandidate struct {
@@ -301,11 +302,13 @@ type Repository interface {
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
 	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
+	TryLockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*MicrosoftCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
+	IsDomainMailboxAllocated(ctx context.Context, projectID uint, mailboxID uint) (bool, error)
 	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusablePlusAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)

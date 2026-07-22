@@ -437,7 +437,17 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 		return domain.ErrInvalidOrderRequest
 	}
 	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		var ownerID uint
+		ownerID, err := uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
+		if err != nil {
+			return err
+		}
+		if ownerID != 0 {
+			// Checkout takes the wallet before Allocation's resource root. Historical
+			// imports use the same order so the two flows cannot wait on each other.
+			if err := uc.wallet.LockConsumer(txCtx, ownerID); err != nil {
+				return err
+			}
+		}
 		now := uc.now()
 		expiryCutoff := now.Add(-time.Second).Truncate(time.Second)
 		for _, match := range matches {
@@ -464,28 +474,17 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 				CreatedAt: createdAt, ReleasedAt: expiredAt,
 			}
 			allocation, err := uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, command)
-			if errors.Is(err, ErrHistoricalAllocationOwnerRequired) {
-				ownerID, err = uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
-				if err != nil {
-					return err
-				}
-				command.AliasOwnerID = ownerID
-				allocation, err = uc.historicalAllocations.ImportHistoricalMicrosoftAllocation(txCtx, command)
-			}
 			if err != nil {
 				return err
 			}
 			if allocation == nil {
 				continue
 			}
+			if ownerID == 0 {
+				return ErrHistoricalAllocationOwnerRequired
+			}
 			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
 				return domain.ErrInvalidOrderRequest
-			}
-			if ownerID == 0 {
-				ownerID, err = uc.historicalOrders.FindHistoricalOrderOwner(txCtx)
-				if err != nil {
-					return err
-				}
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
 			existing, err := uc.repo.FindOrder(txCtx, orderNo)
@@ -1474,11 +1473,10 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 		case domain.OrderStatusPaid:
 			allocation, err := uc.allocate(ctx, order, emailSuffix)
 			if err != nil {
-				failureCode := domain.OrderFailureAllocation
-				if errors.Is(err, domain.ErrInsufficientInventory) {
-					failureCode = domain.OrderFailureInsufficientInventory
+				if !errors.Is(err, domain.ErrInsufficientInventory) {
+					return nil, err
 				}
-				failed, refundErr := uc.refundPaidOrder(ctx, order, failureCode, "Allocation failed.")
+				failed, refundErr := uc.refundPaidOrder(ctx, order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
 				if refundErr != nil {
 					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
 				}

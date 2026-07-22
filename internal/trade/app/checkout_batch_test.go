@@ -56,8 +56,8 @@ func (r *batchRepoSpy) FindOrderByIdempotency(_ context.Context, _ domain.Client
 func (r *batchRepoSpy) LockOrderForUpdate(_ context.Context, orderNo string) (*domain.Order, error) {
 	for _, order := range r.orders {
 		if order.OrderNo == orderNo {
-			copy := order
-			return &copy, nil
+			orderCopy := order
+			return &orderCopy, nil
 		}
 	}
 	return nil, domain.ErrOrderNotFound
@@ -85,6 +85,15 @@ func (batchTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*
 	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
 }
 
+type checkoutAllocationErrorSpy struct {
+	AllocationPort
+	err error
+}
+
+func (s checkoutAllocationErrorSpy) Allocate(context.Context, AllocationCommand) (*AllocationResult, error) {
+	return nil, s.err
+}
+
 func batchOrder(key string, status domain.OrderStatus, failure domain.OrderFailureCode) domain.Order {
 	return domain.Order{
 		ID: 1, OrderNo: "order-" + key, UserID: 7, ProjectID: 8, ProjectProductID: 9,
@@ -101,6 +110,19 @@ func batchRequest(key string, quantity int) CheckoutRequest {
 		ServiceMode: string(domain.ServiceModePurchase), SupplyPolicy: string(domain.SupplyPolicyPrivateFirst),
 		ClientChannel: domain.ClientChannelConsole, IdempotencyKey: key,
 	}
+}
+
+func TestPaidCheckoutStopsImmediatelyOnAllocationWriteError(t *testing.T) {
+	wantErr := errors.New("allocation write conflict")
+	uc := &UseCase{allocation: checkoutAllocationErrorSpy{err: wantErr}}
+
+	result, err := uc.resumeCheckout(context.Background(), domain.Order{
+		OrderNo: "order-1", UserID: 7, ProjectProductID: 9,
+		SupplyPolicy: domain.SupplyPolicyPublicOnly, Status: domain.OrderStatusPaid,
+	}, OrderingQuote{}, "", "")
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestCheckoutBatchUsesOneCommittedTransactionPerItemAndKeepsPartialSuccess(t *testing.T) {

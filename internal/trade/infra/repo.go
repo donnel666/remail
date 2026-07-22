@@ -87,9 +87,11 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 	}
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
+		// Allocation runs inside this parent transaction, so it needs the same
+		// statement-level snapshots as Allocation's own top-level transaction.
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return fn(platform.WithGormTx(ctx, tx))
-		})
+		}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
@@ -129,7 +131,7 @@ FOR SHARE`).Scan(&owner).Error; err != nil {
 		return 0, fmt.Errorf("find historical order owner: %w", err)
 	}
 	if owner.ID == 0 {
-		return 0, fmt.Errorf("find historical order owner: unavailable")
+		return 0, nil
 	}
 	return owner.ID, nil
 }
@@ -164,17 +166,10 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 	}
 	tx := r.dbFor(ctx)
 	if err := tx.Create(&model).Error; err != nil {
-		if !isDuplicateKeyError(err) {
-			return fmt.Errorf("create historical order: %w", err)
-		}
-		var existing OrderModel
-		if findErr := tx.Where("order_no = ?", orderNo).First(&existing).Error; findErr != nil {
-			return fmt.Errorf("find historical order after conflict: %w", findErr)
-		}
-		if !sameHistoricalOrderModel(existing, model) {
+		if isDuplicateKeyError(err) {
 			return domain.ErrIdempotencyConflict
 		}
-		return nil
+		return fmt.Errorf("create historical order: %w", err)
 	}
 	return r.appendEvent(
 		ctx,
@@ -186,14 +181,6 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 		domain.OperatorTypeSystem,
 		"Historical Microsoft mailbox usage identified.",
 	)
-}
-
-func sameHistoricalOrderModel(left, right OrderModel) bool {
-	return left.OrderNo == right.OrderNo && left.UserID == right.UserID && left.ProjectID == right.ProjectID &&
-		left.ProjectProductID == right.ProjectProductID && left.ProductType == right.ProductType &&
-		left.ServiceMode == right.ServiceMode && left.Status == right.Status && left.DeliveryEmail == right.DeliveryEmail &&
-		left.DebitTxID != nil && right.DebitTxID != nil && *left.DebitTxID == *right.DebitTxID &&
-		left.MicrosoftAllocID != nil && right.MicrosoftAllocID != nil && *left.MicrosoftAllocID == *right.MicrosoftAllocID
 }
 
 func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.CreatePendingOrderCommand) (*domain.Order, bool, error) {

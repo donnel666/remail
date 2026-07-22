@@ -146,6 +146,206 @@ type generatedMailboxRetryRepo struct {
 	calls     int
 }
 
+type allocationLockRepo struct {
+	Repository
+	config               ProductAllocationConfig
+	candidates           []MicrosoftCandidate
+	rootUnavailable      map[uint]bool
+	candidateUnavailable map[uint]bool
+	explicitAlias        *AliasCandidate
+	writeConflict        bool
+	guardConflict        bool
+	finds                int
+	lists                int
+	waiting              int
+	skipping             int
+	creates              int
+	createdResource      uint
+	createdMailbox       domain.MicrosoftMailbox
+}
+
+func (*allocationLockRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (*allocationLockRepo) HasParentTx(context.Context) bool { return true }
+
+func (r *allocationLockRepo) FindExistingAllocation(context.Context, string) (*domain.UnifiedAllocation, error) {
+	r.finds++
+	return nil, nil
+}
+
+func (r *allocationLockRepo) LoadProductConfig(context.Context, uint, uint, bool) (*ProductAllocationConfig, error) {
+	if r.config.ProductID == 0 {
+		r.config = ProductAllocationConfig{ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, PlusWeight: 1}
+	}
+	return &r.config, nil
+}
+
+func (r *allocationLockRepo) ListMicrosoftSourceCandidates(context.Context, uint, uint, domain.SupplyScope, domain.MicrosoftMailbox, *uint8, int, string) ([]MicrosoftCandidate, error) {
+	r.lists++
+	if len(r.candidates) == 0 {
+		return []MicrosoftCandidate{{ResourceID: 1}, {ResourceID: 2}}, nil
+	}
+	return r.candidates, nil
+}
+
+func (r *allocationLockRepo) LockResourceRoot(context.Context, uint, domain.AllocationType) (bool, error) {
+	r.waiting++
+	return true, nil
+}
+
+func (r *allocationLockRepo) TryLockResourceRoot(_ context.Context, resourceID uint, _ domain.AllocationType) (bool, error) {
+	r.skipping++
+	return !r.rootUnavailable[resourceID], nil
+}
+
+func (r *allocationLockRepo) LockMicrosoftCandidate(_ context.Context, resourceID uint, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, _ string) (*MicrosoftCandidate, error) {
+	if r.candidateUnavailable[resourceID] {
+		return nil, nil
+	}
+	candidate := MicrosoftCandidate{ResourceID: resourceID, EmailAddress: fmt.Sprintf("ms%d@example.com", resourceID), PlusDailyLimit: 1}
+	for _, item := range r.candidates {
+		if item.ResourceID == resourceID {
+			candidate = item
+			break
+		}
+	}
+	if candidate.EmailAddress == "" {
+		candidate.EmailAddress = fmt.Sprintf("ms%d@example.com", resourceID)
+	}
+	if candidate.PlusDailyLimit == 0 {
+		candidate.PlusDailyLimit = 1
+	}
+	return &candidate, nil
+}
+
+func (*allocationLockRepo) EnsureDailyUsageAvailable(_ context.Context, _ string, _ domain.AllocationType, resourceID uint, _ domain.DailyUsageKind, _ int) error {
+	if resourceID == 1 {
+		return domain.ErrInsufficientInventory
+	}
+	return nil
+}
+
+func (*allocationLockRepo) ConsumeDailyUsage(context.Context, string, domain.AllocationType, uint, domain.DailyUsageKind, int) error {
+	return nil
+}
+
+func (*allocationLockRepo) FindReusablePlusAlias(_ context.Context, _ uint, resourceID uint) (*AliasCandidate, error) {
+	return &AliasCandidate{ID: resourceID, Email: fmt.Sprintf("ms%d+1@example.com", resourceID)}, nil
+}
+
+func (r *allocationLockRepo) FindReusableExplicitAlias(context.Context, uint, uint) (*AliasCandidate, error) {
+	return r.explicitAlias, nil
+}
+
+func (*allocationLockRepo) IsMicrosoftMailboxHistoricallyMatched(context.Context, uint, domain.MicrosoftMailbox, uint) (bool, error) {
+	return false, nil
+}
+
+func (r *allocationLockRepo) CreateOrderGuard(context.Context, string, domain.AllocationType) error {
+	if r.guardConflict {
+		return domain.ErrAllocationConflict
+	}
+	return nil
+}
+
+func (r *allocationLockRepo) CreateMicrosoftAllocation(_ context.Context, allocation *domain.MicrosoftAllocation) error {
+	r.creates++
+	r.createdResource = allocation.ResourceID
+	r.createdMailbox = allocation.Mailbox
+	if r.writeConflict {
+		return domain.ErrAllocationConflict
+	}
+	allocation.ID = uint(r.creates)
+	allocation.CreatedAt = time.Now().UTC()
+	return nil
+}
+
+func (*allocationLockRepo) TouchMicrosoftAllocated(context.Context, uint, time.Time) error {
+	return nil
+}
+
+func TestAllocationNeverWaitsForAnotherRootOrContinuesAfterWriteConflict(t *testing.T) {
+	repo := &allocationLockRepo{writeConflict: true}
+	_, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+	})
+
+	if !errors.Is(err, domain.ErrAllocationConflict) {
+		t.Fatalf("Allocate() error = %v, want allocation conflict", err)
+	}
+	if repo.lists != 1 || repo.waiting != 1 || repo.skipping != 1 || repo.creates != 1 {
+		t.Fatalf("calls list/wait/skip/create = %d/%d/%d/%d, want 1/1/1/1", repo.lists, repo.waiting, repo.skipping, repo.creates)
+	}
+}
+
+func TestHistoricalAllocationStopsAfterOrderGuardConflict(t *testing.T) {
+	repo := &allocationLockRepo{guardConflict: true}
+	_, err := NewUseCase(repo).ImportHistoricalMicrosoftAllocation(context.Background(), HistoricalMicrosoftAllocationCommand{
+		ProjectID: 4, ProductID: 5, ResourceID: 1,
+		Mailbox: domain.MicrosoftMailboxMain, Email: "main@example.com",
+		CreatedAt: time.Now().Add(-time.Hour), ReleasedAt: time.Now(),
+	})
+
+	if !errors.Is(err, domain.ErrAllocationConflict) {
+		t.Fatalf("ImportHistoricalMicrosoftAllocation() error = %v, want allocation conflict", err)
+	}
+	if repo.finds != 1 || repo.creates != 0 {
+		t.Fatalf("find/create calls = %d/%d, want 1/0", repo.finds, repo.creates)
+	}
+}
+
+func TestAllocationSkipsSafeCandidateMissesInsideParentTransaction(t *testing.T) {
+	tests := []struct {
+		name                 string
+		rootUnavailable      map[uint]bool
+		candidateUnavailable map[uint]bool
+	}{
+		{name: "busy root", rootUnavailable: map[uint]bool{2: true}},
+		{name: "stale candidate", candidateUnavailable: map[uint]bool{2: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &allocationLockRepo{
+				candidates:           []MicrosoftCandidate{{ResourceID: 1}, {ResourceID: 2}, {ResourceID: 3}},
+				rootUnavailable:      tt.rootUnavailable,
+				candidateUnavailable: tt.candidateUnavailable,
+			}
+			result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+				OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+			})
+
+			if err != nil || result == nil || result.ResourceID != 3 {
+				t.Fatalf("Allocate() result = %#v, error = %v; want resource 3", result, err)
+			}
+			if repo.waiting != 1 || repo.skipping != 2 || repo.creates != 1 {
+				t.Fatalf("calls wait/skip/create = %d/%d/%d, want 1/2/1", repo.waiting, repo.skipping, repo.creates)
+			}
+		})
+	}
+}
+
+func TestMicrosoftMainUsesAliasWhenMainIsAlreadyAllocated(t *testing.T) {
+	repo := &allocationLockRepo{
+		config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, MainWeight: 1,
+		},
+		candidates:    []MicrosoftCandidate{{ResourceID: 1, EmailAddress: "main@example.com", MainAllocated: true}},
+		explicitAlias: &AliasCandidate{ID: 9, Email: "alias@example.com"},
+	}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+	})
+
+	if err != nil || result == nil || result.Email != "alias@example.com" {
+		t.Fatalf("Allocate() result = %#v, error = %v; want explicit alias", result, err)
+	}
+	if repo.createdMailbox != domain.MicrosoftMailboxAlias || repo.createdResource != 1 {
+		t.Fatalf("created mailbox/resource = %s/%d, want alias/1", repo.createdMailbox, repo.createdResource)
+	}
+}
+
 func (*generatedMailboxRetryRepo) LockResourceRoot(context.Context, uint, domain.AllocationType) (bool, error) {
 	return true, nil
 }
@@ -158,6 +358,10 @@ func (*generatedMailboxRetryRepo) EnsureDailyUsageAvailable(context.Context, str
 	return nil
 }
 
+func (*generatedMailboxRetryRepo) IsDomainMailboxAllocated(context.Context, uint, uint) (bool, error) {
+	return false, nil
+}
+
 func (*generatedMailboxRetryRepo) FindReusableGeneratedMailbox(context.Context, uint, uint) (*GeneratedMailboxCandidate, error) {
 	return nil, nil
 }
@@ -165,7 +369,7 @@ func (*generatedMailboxRetryRepo) FindReusableGeneratedMailbox(context.Context, 
 func (r *generatedMailboxRetryRepo) FindOrCreateGeneratedMailbox(_ context.Context, _ uint, _ uint, email string) (*GeneratedMailboxCandidate, error) {
 	r.calls++
 	if r.calls == 1 {
-		return nil, domain.ErrAllocationConflict
+		return nil, nil
 	}
 	return &GeneratedMailboxCandidate{ID: 7, Email: email}, nil
 }
@@ -213,7 +417,7 @@ func TestGeneratedMailboxVariantsUseHumanNamesAndUpToSixDigits(t *testing.T) {
 	}
 }
 
-func TestDomainAllocationTriesAnotherAddressAfterDisabledMailboxConflict(t *testing.T) {
+func TestDomainAllocationTriesAnotherAddressAfterDisabledMailbox(t *testing.T) {
 	repo := &generatedMailboxRetryRepo{candidate: DomainCandidate{
 		ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10,
 	}}

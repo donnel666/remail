@@ -89,9 +89,15 @@ func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context
 	return nil
 }
 
-type projectHistoryUsageStub struct{ matches []HistoricalProjectMatch }
+type projectHistoryUsageStub struct {
+	matches []HistoricalProjectMatch
+	events  *[]string
+}
 
 func (s *projectHistoryUsageStub) ImportHistoricalMicrosoftUsage(_ context.Context, matches []HistoricalProjectMatch) error {
+	if s.events != nil {
+		*s.events = append(*s.events, "history")
+	}
 	s.matches = append([]HistoricalProjectMatch(nil), matches...)
 	return nil
 }
@@ -122,6 +128,7 @@ type projectHistoryCredentialsStub struct {
 	rotation    coreapp.MicrosoftFetchRefreshTokenRotation
 	history     coreapp.MicrosoftHistoryScanResult
 	rotationErr error
+	events      *[]string
 }
 
 func (s *projectHistoryCredentialsStub) LockMicrosoftCredentialScope(_ context.Context, resourceID uint) (*coreapp.MicrosoftCredentialScope, error) {
@@ -150,6 +157,9 @@ func (*projectHistoryCredentialsStub) ApplyMicrosoftTokenRefreshFailure(context.
 	return nil
 }
 func (s *projectHistoryCredentialsStub) ApplyMicrosoftFetchRefreshToken(_ context.Context, update coreapp.MicrosoftFetchRefreshTokenRotation) error {
+	if s.events != nil {
+		*s.events = append(*s.events, "credential")
+	}
 	s.rotation = update
 	return s.rotationErr
 }
@@ -205,17 +215,18 @@ func TestProjectHistoryDispatchMarksProcessingOnlyAfterAcceptedEnqueue(t *testin
 
 func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	now := time.Now().UTC()
+	events := []string{}
 	jobs := &projectHistoryJobsStub{}
 	matches := &projectHistoryMatchesStub{scope: projectHistoryScope()}
 	credentials := &projectHistoryCredentialsStub{maxID: 10, resources: []*coreapp.MicrosoftCredentialScope{
 		{ResourceID: 5},
 		{ResourceID: 10, EmailAddress: "main@example.com", ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4},
-	}}
+	}, events: &events}
 	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{RefreshToken: "rotated"}, pages: [][]FetchedMessage{{{
 		EmailResourceID: 10, ResourceType: domain.ResourceTypeMicrosoft, Folder: "Inbox",
 		Recipients: []string{"main@example.com"}, Sender: "noreply@github.com", ReceivedAt: now,
 	}}}}
-	history := &projectHistoryUsageStub{}
+	history := &projectHistoryUsageStub{events: &events}
 	queue := &projectHistoryQueueStub{accepted: true}
 	uc := NewProjectHistoryScanUseCase(jobs, matches, queue, transport)
 	uc.SetMicrosoftCredentialPort(credentials)
@@ -234,6 +245,7 @@ func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	require.Equal(t, 1, jobs.completedMatched)
 	require.Equal(t, 1, jobs.completedSkipped)
 	require.Equal(t, "rotated", credentials.rotation.RefreshToken)
+	require.Equal(t, []string{"history", "credential"}, events)
 }
 
 func TestProjectHistoryRetryableBusinessFailureIsRecorded(t *testing.T) {

@@ -425,12 +425,6 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		if lockedScope == nil || !sameHistoricalProjectScope(&scope, lockedScope) {
 			return errProjectHistoryScopeChanged
 		}
-		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
-			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
-			RefreshToken: refreshToken, Now: uc.now(),
-		}); err != nil {
-			return err
-		}
 		if len(matches) > 0 {
 			if uc.history == nil {
 				return errors.New("historical microsoft usage service is unavailable")
@@ -438,6 +432,12 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 			if err := uc.history.ImportHistoricalMicrosoftUsage(txCtx, matches); err != nil {
 				return err
 			}
+		}
+		if err := uc.credentials.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
+			ResourceID: resource.ResourceID, ExpectedCredentialRevision: resource.CredentialRevision,
+			RefreshToken: refreshToken, Now: uc.now(),
+		}); err != nil {
+			return err
 		}
 		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, task.ProjectID)
 	})
