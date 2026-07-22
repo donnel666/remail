@@ -25,7 +25,8 @@ const (
 	leaderboardCacheKey       = "dashboard:leaderboards:v3"
 	leaderboardCacheTTL       = 15 * time.Minute
 	successfulOrderPredicate  = "((o.service_mode = 'code' AND h.order_id IS NOT NULL) OR (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL))"
-	leaderboardHistoryExclude = "o.order_no NOT LIKE 'HIST-%'"
+	historyOrderExclude       = "order_no NOT LIKE 'HIST-%'"
+	leaderboardHistoryExclude = "o." + historyOrderExclude
 )
 
 // ponytail: one JSON value keeps the two rankings atomic; use ZSETs only if the
@@ -77,6 +78,7 @@ func (r *ViewRepo) OrderBuckets(ctx context.Context, userID uint, sqlFormat stri
 		// never-paid (pending_payment) rows don't inflate spend or counts. Refunds
 		// net out via pay_amount - refund_amount.
 		Where("user_id = ? AND debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", userID, from.UTC(), to.UTC()).
+		Where(historyOrderExclude).
 		Group("bucket").
 		Order("bucket ASC").
 		Scan(&rows).Error; err != nil {
@@ -186,6 +188,7 @@ func (r *ViewRepo) TodayCounts(ctx context.Context, userID uint, since time.Time
 	if err := r.db.WithContext(ctx).
 		Table("orders").
 		Where("user_id = ? AND debit_tx_id IS NOT NULL AND created_at >= ?", userID, since.UTC()).
+		Where(historyOrderExclude).
 		Count(&orderCount).Error; err != nil {
 		return 0, 0, err
 	}

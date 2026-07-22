@@ -126,6 +126,10 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	seedDashboardOrder(t, db, 7, 2, 1, 22, "code", "1.00", receiveStart, ref)
 	seedDashboardOrder(t, db, 8, 3, 10, 20, "code", "1.00", receiveStart, ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 8).Update("order_no", "HIST-TEST").Error)
+	// Historical scan orders are internal records and must not inflate the user's
+	// selected-range or today order counts.
+	seedDashboardOrder(t, db, 9, 2, 10, 20, "purchase", "0.00", receiveStart, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 9).Update("order_no", "HIST-COUNT-TEST").Error)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 3, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
@@ -291,6 +295,9 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	seedTypedOrder(t, db, 2, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
 	seedTypedOrder(t, db, 3, 2, 10, 20, "microsoft", "purchase", "8.00", ref, ref)
 	seedTypedOrder(t, db, 4, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
+	// Historical purchases are charged records but not platform orders.
+	seedTypedOrder(t, db, 6, 2, 10, 20, "microsoft", "purchase", "0.00", ref, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 6).Update("order_no", "HIST-ADMIN-COUNT-TEST").Error)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 2, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)

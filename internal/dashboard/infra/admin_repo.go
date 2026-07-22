@@ -29,6 +29,7 @@ func (r *AdminViewRepo) OrderTrend(ctx context.Context, sqlFormat string, from, 
 		Table("orders").
 		Select(sel).
 		Where("debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
+		Where(historyOrderExclude).
 		Group("bucket").
 		Order("bucket ASC").
 		Scan(&rows).Error; err != nil {
