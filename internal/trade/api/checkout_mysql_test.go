@@ -172,7 +172,6 @@ func TestCheckoutZeroPricedPublicPurchaseMySQL(t *testing.T) {
 func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFactsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
-	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
 	first := time.Now().UTC().Add(-24 * time.Hour)
 	last := time.Now().UTC()
@@ -207,7 +206,7 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 		Select("user_id, status, service_mode, pay_amount, after_sale_until").
 		Where("order_no LIKE 'HIST-%'").Find(&historicalRows).Error)
 	for _, row := range historicalRows {
-		require.Equal(t, uint(3), row.UserID)
+		require.Equal(t, uint(1), row.UserID)
 		require.Equal(t, "completed", row.Status)
 		require.Equal(t, "purchase", row.ServiceMode)
 		require.Equal(t, "0.000000", row.PayAmount)
@@ -223,7 +222,7 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 		require.Equal(t, int64(1), count, table)
 	}
 	var debitCount int64
-	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = 'debit' AND amount = 0", 3).Count(&debitCount).Error)
+	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = 'debit' AND amount = 0", 1).Count(&debitCount).Error)
 	require.Equal(t, int64(4), debitCount)
 	var tokenCount int64
 	require.NoError(t, db.Table("order_tokens").Where("order_no LIKE 'HIST-%'").Count(&tokenCount).Error)
@@ -242,7 +241,6 @@ func TestImportHistoricalMicrosoftUsageUsesExistingOrderAllocationAndWalletFacts
 func TestCreateHistoricalOrderConflictStopsOuterTransactionMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
-	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
 	createdAt := time.Now().UTC().Add(-24 * time.Hour)
 	expiredAt := time.Now().UTC().Add(-time.Hour)
@@ -314,7 +312,6 @@ INSERT INTO microsoft_allocations(
 	require.NoError(t, db.Table("orders").Where("order_no LIKE 'HIST-%'").Count(&historicalOrders).Error)
 	require.Zero(t, historicalOrders)
 
-	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("role", "super_admin").Error)
 	err := uc.ImportHistoricalMicrosoftUsage(context.Background(), []tradeapp.HistoricalMicrosoftUsage{
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "ms1000@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
 		{ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "alias", Email: "existing-alias@example.com", FirstMatchedAt: first, LastMatchedAt: last, EvidenceCount: 1},
@@ -1792,7 +1789,7 @@ func seedTradeBase(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+    (1, 'super-admin@test.local', 'hash', 'super-admin', 'active', 'super_admin'),
     (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
     (3, 'regular@test.local', 'hash', 'regular', 'active', 'user')`).Error)
 	seedTradeBaseFacts(t, db, productType)
@@ -1802,7 +1799,7 @@ func seedTradeBaseLegacyEnabled(t *testing.T, db *gorm.DB, productType string) {
 	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, enabled, role) VALUES
-    (1, 'supplier@test.local', 'hash', 'supplier', TRUE, 'supplier'),
+    (1, 'super-admin@test.local', 'hash', 'super-admin', TRUE, 'super_admin'),
     (2, 'buyer@test.local', 'hash', 'buyer', TRUE, 'user'),
     (3, 'regular@test.local', 'hash', 'regular', TRUE, 'user')`).Error)
 	seedTradeBaseFacts(t, db, productType)

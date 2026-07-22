@@ -53,6 +53,9 @@ type fakeMicrosoftAliasStore struct {
 	adminCommandReuse   bool
 	savedBindingAddress string
 	saveBindingErr      error
+	backfillResourceID  uint
+	backfillAliases     []string
+	backfillErr         error
 }
 
 func (f *fakeMicrosoftAliasStore) EnsureSchedules(context.Context, time.Time) (int64, error) {
@@ -166,8 +169,10 @@ func (f *fakeMicrosoftAliasStore) MarkDispatchFailed(context.Context, MicrosoftA
 	return f.markDispatchErr
 }
 
-func (f *fakeMicrosoftAliasStore) BackfillExistingAliases(_ context.Context, _ uint, _ uint, _ []string) error {
-	return nil
+func (f *fakeMicrosoftAliasStore) BackfillExistingAliases(_ context.Context, resourceID uint, aliases []string) error {
+	f.backfillResourceID = resourceID
+	f.backfillAliases = append([]string(nil), aliases...)
+	return f.backfillErr
 }
 
 func (f *fakeMicrosoftAliasStore) GetAdminSchedule(context.Context, uint, time.Time, time.Time, time.Time, time.Time) (*MicrosoftAliasAdminSchedule, error) {
@@ -484,6 +489,33 @@ func TestMicrosoftAliasProcessCreatesTwoAndWaitsForNextCalendarWeek(t *testing.T
 	assert.Equal(t, now, store.completedAt)
 	assert.Equal(t, weekEnd, store.deferredAt)
 	assert.Empty(t, store.deferredSafe)
+}
+
+func TestMicrosoftAliasProcessBackfillsExistingAliasesAndPropagatesFailure(t *testing.T) {
+	backfillErr := errors.New("database unavailable")
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{
+			ResourceID:     42,
+			EmailAddress:   "owner@example.com",
+			Password:       "secret",
+			ResourceStatus: "normal",
+		},
+		reserveAttempts: []MicrosoftAliasAttempt{{
+			ID: 1, Alias: "candidate123456@outlook.com", Status: MicrosoftAliasAttemptRunning,
+		}},
+		backfillErr: backfillErr,
+	}
+	creator := &fakeMicrosoftAliasCreator{result: MicrosoftAliasCreationResult{
+		ExistingAliases: []string{"existing@outlook.com"},
+	}}
+
+	err := NewMicrosoftAliasService(store, nil, creator).Process(context.Background(), microsoftAliasTestTask(42))
+
+	require.ErrorIs(t, err, backfillErr)
+	assert.Equal(t, uint(42), store.backfillResourceID)
+	assert.Equal(t, []string{"existing@outlook.com"}, store.backfillAliases)
+	assert.True(t, store.deferredAt.IsZero(), "a failed backfill must not be reported as a finished schedule")
 }
 
 func TestMicrosoftAliasProcessPersistsPreparedBindingBeforeQuota(t *testing.T) {

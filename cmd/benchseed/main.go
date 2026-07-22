@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	benchSuperAdminID = int64(900_000_000)
+	// Explicit aliases are always platform inventory owned by users.id=1.
+	benchSuperAdminID = int64(1)
 	benchUserID       = int64(900_000_001)
 	benchProjectID    = int64(900_000_001)
 	benchProductID    = int64(900_000_001)
@@ -80,7 +81,7 @@ func main() {
 func seedFoundation(ctx context.Context, db *sql.DB) error {
 	statements := []string{
 		`INSERT IGNORE INTO users(id,email,password_hash,nickname,status,role) VALUES
-			 (900000000,'bench-super-admin@remail.local','bench','bench-super-admin','active','super_admin'),
+			 (1,'bench-fixed-super-admin@remail.local','bench','bench-super-admin','active','super_admin'),
 			 (900000001,'bench@remail.local','bench','bench','active','supplier')`,
 		`INSERT IGNORE INTO projects(id,name,target_platform,status,access_type,loose_match)
 		 VALUES (900000001,'Benchmark Project','benchmark','listed','public',TRUE)`,
@@ -101,6 +102,13 @@ func seedFoundation(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
+	}
+	var role string
+	if err := db.QueryRowContext(ctx, "SELECT role FROM users WHERE id = ?", benchSuperAdminID).Scan(&role); err != nil {
+		return fmt.Errorf("load benchmark explicit-alias owner: %w", err)
+	}
+	if role != "super_admin" {
+		return fmt.Errorf("benchmark explicit-alias owner users.id=1 must be super_admin")
 	}
 	return nil
 }

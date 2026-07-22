@@ -86,6 +86,12 @@ const (
 	microsoftAliasDispatchEligibilityScanMax      = 512
 	microsoftAliasNegativeConfirmationMinInterval = time.Hour
 	legacyMicrosoftAliasPublicOnlyMessage         = "Microsoft resource is not publicly available for alias creation."
+
+	// microsoftExplicitAliasOwnerUserID must remain 1. The first activated
+	// account is the platform super administrator, and every explicit alias is
+	// platform inventory owned by that account, not by a resource owner or by a
+	// caller-selected user. Migration 00039 enforces the same invariant in MySQL.
+	microsoftExplicitAliasOwnerUserID uint = 1
 )
 
 var errMicrosoftAliasGenerationStillRunning = errors.New("microsoft alias generation is still running")
@@ -1206,7 +1212,7 @@ func (s *MicrosoftAliasStore) Complete(ctx context.Context, resourceID uint, cla
 		for _, outcome := range outcomes {
 			if normalizeMicrosoftAliasAttemptStatus(outcome.Status) == mailapp.MicrosoftAliasAttemptSucceeded {
 				var err error
-				ownerUserID, err = lockDeterministicMicrosoftAliasOwner(tx)
+				ownerUserID, err = lockMicrosoftExplicitAliasOwner(tx)
 				if err != nil {
 					return err
 				}
@@ -1294,20 +1300,20 @@ func (s *MicrosoftAliasStore) Complete(ctx context.Context, resourceID uint, cla
 	})
 }
 
-func lockDeterministicMicrosoftAliasOwner(tx *gorm.DB) (uint, error) {
+func lockMicrosoftExplicitAliasOwner(tx *gorm.DB) (uint, error) {
 	var owner struct {
 		ID uint `gorm:"column:id"`
 	}
 	if err := tx.Raw(`
 SELECT id
 FROM users
-WHERE role = 'super_admin'
-ORDER BY id ASC
+WHERE id = ?
+  AND role = 'super_admin'
 LIMIT 1
-FOR SHARE`).Scan(&owner).Error; err != nil {
+FOR SHARE`, microsoftExplicitAliasOwnerUserID).Scan(&owner).Error; err != nil {
 		return 0, fmt.Errorf("lock microsoft alias super administrator owner: %w", err)
 	}
-	if owner.ID == 0 {
+	if owner.ID != microsoftExplicitAliasOwnerUserID {
 		return 0, mailapp.ErrMicrosoftAliasOwnerUnavailable
 	}
 	return owner.ID, nil
@@ -1569,20 +1575,29 @@ func minAliasQuota(left, right int) int {
 }
 
 // BackfillExistingAliases upserts aliases found on the Microsoft side into the
-// local explicit_aliases table. It uses DoNothing on conflict (resource_id,email)
-// so existing records (e.g. previously created aliases) are not overwritten.
-// The created_at timestamp is set to a historical value so it never counts
-// toward the weekly quota window.
-func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error {
+// local explicit_aliases table. Ownership is deliberately not caller input:
+// every row must belong to users.id=1, and conflicts are converged to that
+// fixed owner. The historical timestamp keeps these rows outside quota windows.
+func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error {
 	aliases = normalizeExistingAliasRows(aliases)
 	if len(aliases) == 0 {
 		return nil
 	}
-	historicalTime := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 	db := s.db.WithContext(ctx)
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		db = tx.WithContext(ctx)
+		return backfillExistingAliasesTx(tx.WithContext(ctx), resourceID, aliases)
 	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return backfillExistingAliasesTx(tx, resourceID, aliases)
+	})
+}
+
+func backfillExistingAliasesTx(db *gorm.DB, resourceID uint, aliases []string) error {
+	ownerUserID, err := lockMicrosoftExplicitAliasOwner(db)
+	if err != nil {
+		return err
+	}
+	historicalTime := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, alias := range aliases {
 		record := MicrosoftExplicitAliasModel{
 			ResourceID:  resourceID,
@@ -1593,8 +1608,10 @@ func (s *MicrosoftAliasStore) BackfillExistingAliases(ctx context.Context, resou
 			UpdatedAt:   historicalTime,
 		}
 		if err := db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "resource_id"}, {Name: "email"}},
-			DoNothing: true,
+			Columns: []clause.Column{{Name: "resource_id"}, {Name: "email"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"owner_user_id": ownerUserID,
+			}),
 		}).Create(&record).Error; err != nil {
 			return fmt.Errorf("backfill explicit alias %s: %w", alias, err)
 		}

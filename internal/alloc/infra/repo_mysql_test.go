@@ -106,7 +106,7 @@ func TestMicrosoftMainUsesAliasWhenMainIsActiveInAnotherProjectMySQL(t *testing.
 	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
 	require.NoError(t, db.Exec(`
 INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
-VALUES (1000, 4, 'alias1000@example.com', 'normal')`).Error)
+VALUES (1000, 1, 'alias1000@example.com', 'normal')`).Error)
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
@@ -353,8 +353,8 @@ func TestMicrosoftAllocationSkipsOnlyHistoricalMailboxEntityMySQL(t *testing.T) 
 	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
 	require.NoError(t, db.Exec(`
 INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
-    (1000, 4, 'used-alias@example.com', 'normal'),
-    (1000, 4, 'free-alias@example.com', 'normal')`).Error)
+    (1000, 1, 'used-alias@example.com', 'normal'),
+    (1000, 1, 'free-alias@example.com', 'normal')`).Error)
 	var usedAliasID uint
 	require.NoError(t, db.Table("explicit_aliases").Select("id").Where("email = ?", "used-alias@example.com").Scan(&usedAliasID).Error)
 	require.NoError(t, db.Exec(`
@@ -747,7 +747,7 @@ func TestAllocationSQLConstraintsMySQL(t *testing.T) {
 	VALUES (2001, 1, 'wrong@d2001.example.com', 'normal')`).Error)
 	require.NoError(t, db.Exec(`
 		INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
-		VALUES (1001, 4, 'alias1001@example.com', 'normal')`).Error)
+		VALUES (1001, 1, 'alias1001@example.com', 'normal')`).Error)
 	var explicitAliasID uint
 	require.NoError(t, db.Raw("SELECT id FROM explicit_aliases WHERE resource_id = 1001").Scan(&explicitAliasID).Error)
 	var mailboxID uint
@@ -1139,10 +1139,10 @@ func seedAllocBase(t *testing.T, db *gorm.DB, productType string, mainWeight, do
 	t.Helper()
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
-	    (1, 'supplier@test.local', 'hash', 'supplier', 'active', 'supplier'),
+	    (1, 'super-admin@test.local', 'hash', 'super-admin', 'active', 'super_admin'),
 	    (2, 'buyer@test.local', 'hash', 'buyer', 'active', 'user'),
 	    (3, 'regular@test.local', 'hash', 'regular', 'active', 'user'),
-	    (4, 'alias-owner@test.local', 'hash', 'alias-owner', 'active', 'super_admin')`).Error)
+	    (4, 'operator@test.local', 'hash', 'operator', 'active', 'admin')`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type, loose_match)
 VALUES (10, 'Alloc Project', 'alloc', 'listed', 'public', TRUE)`).Error)

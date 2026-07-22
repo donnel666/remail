@@ -125,7 +125,7 @@ type MicrosoftAliasScheduleStore interface {
 	Defer(ctx context.Context, resourceID uint, claimToken string, nextRunAt time.Time, safeError string, failed bool) error
 	Pause(ctx context.Context, resourceID uint, claimToken string, safeError string) error
 	MarkDispatchFailed(ctx context.Context, task MicrosoftAliasTask, nextRunAt time.Time, safeError string) error
-	BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error
+	BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error
 }
 
 // EnsureScheduleForResource records or wakes an eligible resource's durable
@@ -188,11 +188,11 @@ type MicrosoftAliasService struct {
 	lastEnsureAt time.Time
 }
 
-func (s *MicrosoftAliasService) BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error {
+func (s *MicrosoftAliasService) BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error {
 	if s == nil || s.store == nil {
 		return errors.New("microsoft alias store is unavailable")
 	}
-	return s.store.BackfillExistingAliases(ctx, resourceID, ownerUserID, aliases)
+	return s.store.BackfillExistingAliases(ctx, resourceID, aliases)
 }
 
 func NewMicrosoftAliasService(store MicrosoftAliasScheduleStore, queue MicrosoftAliasQueue, creator MicrosoftAliasCreator) *MicrosoftAliasService {
@@ -518,12 +518,13 @@ func (s *MicrosoftAliasService) completeAliasResult(
 		return fmt.Errorf("complete microsoft alias attempts: %w", err)
 	}
 
-	// Backfill externally-listed aliases into the local DB. This brings in
-	// any existing Microsoft-side aliases that are not yet recorded in
-	// explicit_aliases. Since it uses DoNothing on conflict, it never
-	// overwrites locally created records.
+	// Backfill externally-listed aliases into the local DB. The store owns the
+	// fixed platform-owner invariant; resource IDs and resource owners must
+	// never be accepted as explicit-alias owners here.
 	if len(result.ExistingAliases) > 0 {
-		_ = s.store.BackfillExistingAliases(ctx, task.ResourceID, account.ResourceID, result.ExistingAliases)
+		if err := s.store.BackfillExistingAliases(ctx, task.ResourceID, result.ExistingAliases); err != nil {
+			return fmt.Errorf("backfill existing microsoft aliases: %w", err)
+		}
 	}
 
 	yearStart, yearEnd, weekStart, weekEnd := microsoftAliasQuotaWindows(completedAt)

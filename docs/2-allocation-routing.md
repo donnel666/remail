@@ -16,6 +16,7 @@
 | 2026-07-09 | V1.9 | Codex | 补充 Domain 私有候选与分配事实 `supplyScope`：Domain 与 Microsoft 一样区分公开供给和 owner 私有供给；此为实现一致性补充，不改变分配状态机。 |
 | 2026-07-12 | V1.10 | Codex | 补充管理员 Microsoft 资源维度的分配/订单读模型和 `ResourceAllocationGuardPort`：Alloc 通过各事实所有者的批量 Query Port 丰富当前订单 Tab，危险身份变更和删除通过 active allocation guard 保护。 |
 | 2026-07-12 | V1.11 | Codex | 对齐简单实现：管理员订单 Tab 按当前页 orderNo 直接从源表执行有界只读查询组合补齐展示字段；不建设投影表或多组空转 Port，不改变 Trade/Core/MailMatch 的事实所有权或任何写边界。 |
+| 2026-07-22 | V1.12 | Codex | 明确 `explicit_aliases.owner_user_id` 固定为首个超级管理员 `users.id=1`，并由数据库约束拒绝其他 owner；供给范围仍由主资源决定。 |
 
 > 核心域。BC-ALLOC 只负责把订单绑定到一个邮箱使用权，不拥有资源验证、订单状态或钱包。
 
@@ -245,7 +246,7 @@ MySQL 没有 partial unique index，P1-I5 使用 generated column 表达 active 
 | `microsoft_allocations` | active main 对 `resourceId` 唯一；active explicit alias 对 `explicitAliasId` 唯一；active dot 对 `projectId + dotAliasId` 唯一；active plus 对 `projectId + plusAliasId` 唯一。 |
 | `domain_allocations` | active domain 对 `projectId + mailboxId` 唯一。 |
 
-补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。`explicit_aliases.owner_user_id` 固定记录平台 `super_admin` 库存 owner，但显式别名的创建资格与供给范围解耦：`status=normal` 的私有主资源也会预创建别名，BC-ALLOC 仍按 alias 所属 `resource_id`、主资源的 `forSale + owner/buyer` 规则和 allocation 占用状态决定 `owned/public` 可用性，不把 alias owner 字段改造成新的供给过滤条件，也不因 alias 归超级管理员而把私有主资源变成公开供给。以上是数据库兜底，不替代领域层校验。
+补充约束：`microsoft_allocations/domain_allocations` 必须写入 `supplyScope=owned/public`，作为 Trade 计算订单实际应付金额的分配事实；`microsoft_allocations` 的显式别名、点别名和加号别名必须通过 `(aliasId, resourceId)` 复合外键确认归属同一个 Microsoft 主资源；`domain_allocations` 的生成邮箱必须通过 `(mailboxId, resourceId)` 复合外键确认归属同一个 Domain 资源；`productId + projectId` 也必须有复合外键确认商品属于该项目。`explicit_aliases.owner_user_id` 固定为首个超级管理员 `users.id=1`，且数据库拒绝任何非 1 的 owner；但显式别名的创建资格与供给范围解耦：`status=normal` 的私有主资源也会预创建别名，BC-ALLOC 仍按 alias 所属 `resource_id`、主资源的 `forSale + owner/buyer` 规则和 allocation 占用状态决定 `owned/public` 可用性，不把 alias owner 字段改造成新的供给过滤条件，也不因 alias 归超级管理员而把私有主资源变成公开供给。以上是数据库兜底，不替代领域层校验。
 
 别名和自建生成邮箱复用查询必须有明确索引：
 

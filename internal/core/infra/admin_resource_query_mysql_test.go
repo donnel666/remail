@@ -336,7 +336,9 @@ func seedAdminResourceQueryPlanFacts(t *testing.T, db *gorm.DB, count int) uint 
 	require.GreaterOrEqual(t, count, 32)
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, role, status)
-VALUES (9901, 'admin-query-plan-owner@test.local', 'hash', 'Query Plan Owner', 'supplier', 'active')`).Error)
+VALUES
+    (1, 'super-admin@test.local', 'hash', 'Super Admin', 'super_admin', 'active'),
+    (9901, 'admin-query-plan-owner@test.local', 'hash', 'Query Plan Owner', 'supplier', 'active')`).Error)
 
 	rootValues := make([]string, 0, count)
 	rootArgs := make([]any, 0, count*5)
@@ -388,7 +390,7 @@ VALUES `+strings.Join(microsoftValues, ","), microsoftArgs...).Error)
 	plusArgs := make([]any, 0, 32*3)
 	for i := 0; i < 32; i++ {
 		createdAt := base.Add(time.Duration(i) * time.Minute)
-		explicitValues = append(explicitValues, "(?, 9901, ?, 'normal', ?)")
+		explicitValues = append(explicitValues, "(?, 1, ?, 'normal', ?)")
 		explicitArgs = append(explicitArgs, rareResourceID, fmt.Sprintf("explicit-%02d@rare-admin-plan.example", i), createdAt)
 		dotValues = append(dotValues, "(?, ?, 'normal', ?)")
 		dotArgs = append(dotArgs, rareResourceID, fmt.Sprintf("dot-%02d@rare-admin-plan.example", i), createdAt)
@@ -401,7 +403,7 @@ VALUES `+strings.Join(microsoftValues, ","), microsoftArgs...).Error)
 			continue
 		}
 		createdAt := base.Add(time.Duration(i) * time.Second)
-		explicitValues = append(explicitValues, "(?, 9901, ?, 'normal', ?)")
+		explicitValues = append(explicitValues, "(?, 1, ?, 'normal', ?)")
 		explicitArgs = append(explicitArgs, resourceID, fmt.Sprintf("explicit-decoy-%d@example.test", resourceID), createdAt)
 		dotValues = append(dotValues, "(?, ?, 'normal', ?)")
 		dotArgs = append(dotArgs, resourceID, fmt.Sprintf("dot-decoy-%d@example.test", resourceID), createdAt)

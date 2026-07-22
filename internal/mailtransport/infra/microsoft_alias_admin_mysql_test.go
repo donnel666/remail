@@ -63,7 +63,7 @@ func TestMicrosoftAliasAdminScheduleReadsUsageAndCommandAdvancesWithoutBypassing
 	}).Error)
 	require.NoError(t, db.Create(&MicrosoftExplicitAliasModel{
 		ResourceID:  9220,
-		OwnerUserID: 9220,
+		OwnerUserID: 1,
 		Email:       "existing9220@outlook.com",
 		Status:      "normal",
 		CreatedAt:   now.Add(-2 * time.Hour),

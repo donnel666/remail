@@ -843,7 +843,7 @@ func TestMicrosoftAliasStoreRuntimeBindingPauseCapturesCurrentSignatureMySQL(t *
 	require.Equal(t, "pending", loadAliasAdminSchedule(t, db, 1034).Status)
 }
 
-func TestMicrosoftAliasStoreAssignsDeterministicSuperAdminOwnerMySQL(t *testing.T) {
+func TestMicrosoftAliasStoreAssignsFixedSuperAdminOwnerMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1010, "normal")
 	require.NoError(t, db.Exec(
@@ -865,16 +865,6 @@ func TestMicrosoftAliasStoreAssignsDeterministicSuperAdminOwnerMySQL(t *testing.
 		QuotaAt:    now,
 	}
 	require.NoError(t, db.Create(attempt).Error)
-	require.NoError(t, db.Create(&MicrosoftExplicitAliasModel{
-		ResourceID:  1010,
-		OwnerUserID: 2,
-		Email:       attempt.Candidate,
-		Status:      "normal",
-		CreatedAt:   now.Add(-time.Hour),
-		UpdatedAt:   now.Add(-time.Hour),
-	}).Error)
-	require.NoError(t, db.Exec("UPDATE users SET role = 'admin' WHERE id = 2").Error)
-
 	store := NewMicrosoftAliasStore(db)
 	require.NoError(t, store.Complete(context.Background(), 1010, claimToken, []mailapp.MicrosoftAliasAttemptOutcome{{
 		AttemptID: attempt.ID,
@@ -886,6 +876,48 @@ func TestMicrosoftAliasStoreAssignsDeterministicSuperAdminOwnerMySQL(t *testing.
 	var alias MicrosoftExplicitAliasModel
 	require.NoError(t, db.Where("resource_id = ?", 1010).First(&alias).Error)
 	assert.Equal(t, uint(1), alias.OwnerUserID)
+}
+
+func TestMicrosoftAliasStoreBackfillsOnlyToFixedSuperAdminOwnerMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1012, "normal")
+	require.NoError(t, db.Exec(
+		"INSERT INTO users(id, email, password_hash, role) VALUES (2, 'other-super-admin@test.local', 'hash', 'super_admin')",
+	).Error)
+	existingCreatedAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&MicrosoftExplicitAliasModel{
+		ResourceID: 1012, OwnerUserID: 1, Email: "existing@outlook.com", Status: "normal",
+		CreatedAt: existingCreatedAt, UpdatedAt: existingCreatedAt,
+	}).Error)
+	store := NewMicrosoftAliasStore(db)
+
+	require.NoError(t, store.BackfillExistingAliases(context.Background(), 1012, []string{
+		"Existing@Outlook.com", "existing@outlook.com", "second@hotmail.com",
+	}))
+
+	var aliases []MicrosoftExplicitAliasModel
+	require.NoError(t, db.Where("resource_id = ?", 1012).Order("email ASC").Find(&aliases).Error)
+	require.Len(t, aliases, 2)
+	assert.Equal(t, uint(1), aliases[0].OwnerUserID)
+	assert.Equal(t, existingCreatedAt, aliases[0].CreatedAt.UTC(), "conflict repair must preserve quota history")
+	assert.Equal(t, uint(1), aliases[1].OwnerUserID)
+	assert.Equal(t, time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), aliases[1].CreatedAt.UTC())
+}
+
+func TestMicrosoftAliasStoreBackfillRequiresUserOneToRemainSuperAdminMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftAliasTestResource(t, db, 1013, "normal")
+	require.NoError(t, db.Exec("UPDATE users SET role = 'admin' WHERE id = 1").Error)
+	store := NewMicrosoftAliasStore(db)
+
+	err := store.BackfillExistingAliases(context.Background(), 1013, []string{
+		"first@outlook.com", "second@hotmail.com",
+	})
+
+	require.ErrorIs(t, err, mailapp.ErrMicrosoftAliasOwnerUnavailable)
+	var aliases int64
+	require.NoError(t, db.Model(&MicrosoftExplicitAliasModel{}).Where("resource_id = ?", 1013).Count(&aliases).Error)
+	assert.Zero(t, aliases)
 }
 
 func TestMicrosoftAliasStoreRefusesUnownedSuccessMySQL(t *testing.T) {

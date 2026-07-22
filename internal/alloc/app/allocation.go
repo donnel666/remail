@@ -228,7 +228,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 				if cmd.AliasOwnerID == 0 {
 					return domain.ErrHistoricalAllocationOwnerRequired
 				}
-				if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, cmd.AliasOwnerID, []string{cmd.Email}); err != nil {
+				if err := uc.historicalMicrosoftAliases.BackfillExistingAliases(txCtx, cmd.ResourceID, []string{cmd.Email}); err != nil {
 					return err
 				}
 				alias, err = uc.repo.FindExplicitAlias(txCtx, cmd.ResourceID, cmd.Email)

@@ -73,7 +73,7 @@ type HistoricalMicrosoftAllocationCommand struct {
 }
 
 type HistoricalMicrosoftAliasPort interface {
-	BackfillExistingAliases(ctx context.Context, resourceID uint, ownerUserID uint, aliases []string) error
+	BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error
 }
 
 type InventoryStats struct {

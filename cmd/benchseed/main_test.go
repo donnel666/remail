@@ -29,6 +29,11 @@ func TestSmallBenchmarkProfiles(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
+	// Legacy bench versions used this email on a high-ID super administrator.
+	// The fixed users.id=1 seed must remain idempotent when that row is present.
+	require.NoError(t, gormDB.Exec(`
+INSERT INTO users(id,email,password_hash,nickname,status,role)
+VALUES (900000000,'bench-super-admin@remail.local','bench','legacy-bench-super-admin','active','super_admin')`).Error)
 	require.NoError(t, seedFoundation(ctx, db))
 	require.NoError(t, seedResources(ctx, db, 3, 2))
 	require.NoError(t, seedAliases(ctx, db, 6, 3, 2))
@@ -62,6 +67,10 @@ FROM explicit_aliases AS alias_row
 JOIN users AS owner ON owner.id = alias_row.owner_user_id
 WHERE owner.role <> 'super_admin'`).Scan(&nonSuperAdminOwnedAliases).Error)
 	require.Zero(t, nonSuperAdminOwnedAliases)
+	var nonFixedOwnerAliases int64
+	require.NoError(t, gormDB.Table("explicit_aliases").Where("owner_user_id <> ?", 1).
+		Count(&nonFixedOwnerAliases).Error)
+	require.Zero(t, nonFixedOwnerAliases)
 }
 
 func TestMigrationsReset(t *testing.T) {
