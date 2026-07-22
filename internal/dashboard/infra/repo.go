@@ -22,11 +22,10 @@ type ViewRepo struct {
 }
 
 const (
-	leaderboardCacheKey      = "dashboard:leaderboards:v2"
-	leaderboardCacheTTL      = 15 * time.Minute
-	successfulOrderPredicate = "((o.service_mode = 'code' AND h.order_id IS NOT NULL) OR (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL))"
-	// Local smoke-test project; omit from public rankings so real traffic ranks.
-	leaderboardProjectExclude = "o.project_id <> 1"
+	leaderboardCacheKey       = "dashboard:leaderboards:v3"
+	leaderboardCacheTTL       = 15 * time.Minute
+	successfulOrderPredicate  = "((o.service_mode = 'code' AND h.order_id IS NOT NULL) OR (o.service_mode = 'purchase' AND o.activated_at IS NOT NULL))"
+	leaderboardHistoryExclude = "o.order_no NOT LIKE 'HIST-%'"
 )
 
 // ponytail: one JSON value keeps the two rankings atomic; use ZSETs only if the
@@ -241,7 +240,7 @@ func (r *ViewRepo) queryLeaderboard(ctx context.Context, since *time.Time, limit
 		Joins("JOIN users AS u ON u.id = o.user_id").
 		Select("o.user_id AS user_id, COALESCE(u.nickname, '') AS nickname, COALESCE(u.email, '') AS email, COUNT(*) AS count").
 		Where(successfulOrderPredicate).
-		Where(leaderboardProjectExclude).
+		Where(leaderboardHistoryExclude).
 		Group("o.user_id, u.nickname, u.email").
 		Order("count DESC, o.user_id ASC")
 	if limit > 0 {
@@ -289,7 +288,7 @@ func (r *ViewRepo) UserStanding(ctx context.Context, userID uint, since *time.Ti
 		Table("orders AS o").
 		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
 		Where("o.user_id = ? AND "+successfulOrderPredicate, userID).
-		Where(leaderboardProjectExclude)
+		Where(leaderboardHistoryExclude)
 	if since != nil {
 		countQuery = countQuery.Where("o.created_at >= ?", since.UTC())
 	}
@@ -311,7 +310,7 @@ func (r *ViewRepo) UserStanding(ctx context.Context, userID uint, since *time.Ti
 		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
 		Select("o.user_id").
 		Where(successfulOrderPredicate).
-		Where(leaderboardProjectExclude).
+		Where(leaderboardHistoryExclude).
 		Group("o.user_id").
 		Having("COUNT(*) > ? OR (COUNT(*) = ? AND o.user_id < ?)", count, count, userID)
 	if since != nil {

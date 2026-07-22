@@ -121,9 +121,11 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	// but stays excluded from code-receipt metrics.
 	seedDashboardOrder(t, db, 5, 2, 10, 20, "purchase", "10.00", ref, ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 5).Update("activated_at", ref).Error)
-	// Project 1 (Test) orders succeed but must not affect the public leaderboard.
+	// A normal project 1 order still counts; leaderboard exclusion is based on
+	// the HIST- order prefix, not a project ID.
 	seedDashboardOrder(t, db, 7, 2, 1, 22, "code", "1.00", receiveStart, ref)
-	seedDashboardOrder(t, db, 8, 3, 1, 22, "code", "1.00", receiveStart, ref)
+	seedDashboardOrder(t, db, 8, 3, 10, 20, "code", "1.00", receiveStart, ref)
+	require.NoError(t, db.Table("orders").Where("id = ?", 8).Update("order_no", "HIST-TEST").Error)
 	seedDashboardReceipt(t, db, 1, 101, ref)
 	seedDashboardReceipt(t, db, 3, 102, ref)
 	seedDashboardReceipt(t, db, 4, 103, ref)
@@ -197,7 +199,7 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 		require.NoError(t, err)
 		require.Len(t, leaders, 3)
 		require.Equal(t, uint(2), leaders[0].UserID)
-		require.Equal(t, 3, leaders[0].Count)
+		require.Equal(t, 4, leaders[0].Count)
 		require.Equal(t, "Buyer", leaders[0].Nickname)
 		// users 3 and 4 tie at 1; ordered by user_id ASC.
 		require.Equal(t, uint(3), leaders[1].UserID)
@@ -208,7 +210,7 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 
 	standing2, err := repo.UserStanding(ctx, 2, nil)
 	require.NoError(t, err)
-	require.Equal(t, 3, standing2.Count)
+	require.Equal(t, 4, standing2.Count)
 	require.Equal(t, 1, standing2.Rank)
 
 	// Tied users get distinct ordinal ranks matching the leaderboard order, not a
@@ -233,10 +235,10 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	require.NoError(t, err)
 	require.Len(t, cachedLeaders, 3)
 	require.Equal(t, uint(2), cachedLeaders[0].UserID)
-	require.Equal(t, 3, cachedLeaders[0].Count)
+	require.Equal(t, 4, cachedLeaders[0].Count)
 	cachedStanding, err := cachedRepo.UserStanding(ctx, 2, &todayStart)
 	require.NoError(t, err)
-	require.Equal(t, 3, cachedStanding.Count)
+	require.Equal(t, 4, cachedStanding.Count)
 }
 
 // TestAdminViewRepoMySQL drives the platform-wide admin aggregates against real
