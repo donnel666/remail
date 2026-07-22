@@ -45,6 +45,7 @@ func setOrderCreatedAt(t *testing.T, db *gorm.DB, orderNo string, createdAt time
 func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("users").Where("id = ?", 3).Update("nickname", "Regular Customer").Error)
 	creditBuyer(t, db, 2, "50.00")
 	creditBuyer(t, db, 3, "50.00")
 
@@ -188,11 +189,30 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	)
 	require.Nil(t, viaOffset.NextAfterID)
 
-	// Search stays a prefix match on order number or delivery email.
+	// Search covers order number, delivery email, user email/nickname/ID and
+	// project name/platform/ID.
 	searched, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Search: "b1@hotmail"}, 0, 0, 20)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, searched.Total)
 	require.Equal(t, third.Order.OrderNo, searched.Items[0].Order.OrderNo)
+	byOrderNo, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Search: first.Order.OrderNo}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byOrderNo.Total)
+	require.Equal(t, first.Order.OrderNo, byOrderNo.Items[0].Order.OrderNo)
+	byUser, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 1, IsAdmin: true, Scope: "all", Search: "Customer"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byUser.Total)
+	require.Equal(t, other.Order.OrderNo, byUser.Items[0].Order.OrderNo)
+	byUserID, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 1, IsAdmin: true, Scope: "all", Search: "3"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byUserID.Total)
+	require.Equal(t, other.Order.OrderNo, byUserID.Items[0].Order.OrderNo)
+	byProject, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Search: "Project"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, byProject.Total)
+	byProjectID, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Search: "10"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, byProjectID.Total)
 
 	// User isolation stays intact.
 	otherList, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 3}, 0, 0, 20)

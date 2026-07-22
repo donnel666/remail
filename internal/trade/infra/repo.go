@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
@@ -646,6 +648,7 @@ func (r *Repo) ListOrders(ctx context.Context, filter tradeapp.OrderListFilter, 
 	}
 	var models []OrderModel
 	if err := query.
+		Select("orders.*").
 		Order("id DESC").
 		Limit(limit + 1).
 		Find(&models).Error; err != nil {
@@ -1038,10 +1041,52 @@ func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB 
 		query = query.Where("created_at <= ?", filter.CreatedTo.UTC())
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		like := search + "%"
-		query = query.Where("order_no LIKE ? OR delivery_email LIKE ?", like, like)
+		query = applyOrderSearch(query, search)
 	}
 	return query
+}
+
+func applyOrderSearch(query *gorm.DB, search string) *gorm.DB {
+	like := escapeLikePattern(search) + "%"
+	parts := []string{
+		"SELECT id AS order_id FROM orders WHERE order_no LIKE ?",
+		"SELECT id FROM orders WHERE delivery_email LIKE ?",
+		"SELECT o.id FROM users u JOIN orders o ON o.user_id = u.id WHERE u.email = ?",
+	}
+	args := []any{like, like, strings.ToLower(search)}
+	if userSearch := orderSearchBooleanQuery(search, 3); userSearch != "" {
+		parts = append(parts, "SELECT o.id FROM users u JOIN orders o ON o.user_id = u.id WHERE MATCH(u.email, u.nickname) AGAINST (? IN BOOLEAN MODE)")
+		args = append(args, userSearch)
+	}
+	if projectSearch := orderSearchBooleanQuery(search, 1); projectSearch != "" {
+		parts = append(parts, "SELECT o.id FROM projects p JOIN orders o ON o.project_id = p.id WHERE MATCH(p.name, p.target_platform) AGAINST (? IN BOOLEAN MODE)")
+		args = append(args, projectSearch)
+	}
+	if id, err := strconv.ParseUint(search, 10, 64); err == nil && id > 0 {
+		parts = append(parts,
+			"SELECT id FROM orders WHERE user_id = ?",
+			"SELECT id FROM orders WHERE project_id = ?",
+		)
+		args = append(args, id, id)
+	}
+	// ponytail: UNION materializes broad matches; add a persisted order search index only if profiles require it.
+	return query.Table(
+		"("+strings.Join(parts, " UNION ")+") AS order_search STRAIGHT_JOIN orders FORCE INDEX (PRIMARY) ON orders.id = order_search.order_id",
+		args...,
+	)
+}
+
+func orderSearchBooleanQuery(search string, minRunes int) string {
+	parts := strings.FieldsFunc(strings.ToLower(search), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len([]rune(part)) >= minRunes {
+			terms = append(terms, "+"+part+"*")
+		}
+	}
+	return strings.Join(terms, " ")
 }
 
 func orderModelToDomain(model OrderModel) domain.Order {

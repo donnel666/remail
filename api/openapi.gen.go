@@ -8390,7 +8390,9 @@ type GetOrdersParams struct {
 	Scope       *GetOrdersParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
 	Status      *GetOrdersParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
 	ServiceMode *GetOrdersParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
-	Search      *string                     `form:"search,omitempty" json:"search,omitempty"`
+
+	// Search Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search.
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
 
 	// Domain Delivery email domain filter; the "@" prefix is optional.
 	Domain      *string    `form:"domain,omitempty" json:"domain,omitempty"`

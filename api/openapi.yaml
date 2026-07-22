@@ -4564,6 +4564,7 @@ paths:
           in: query
           schema:
             type: string
+          description: Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search.
         - name: domain
           in: query
           description: Delivery email domain filter; the "@" prefix is optional.
