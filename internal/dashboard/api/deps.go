@@ -16,6 +16,7 @@ type Module struct {
 	Query      *dashboardapp.QueryService
 	AdminQuery *dashboardapp.AdminQueryService
 	adminView  dashboardapp.AdminView
+	adminCache *adminDashboardCache
 	view       *infra.ViewRepo
 	asynq      *asynq.Client
 }
@@ -23,10 +24,11 @@ type Module struct {
 func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asynq.Client) *Module {
 	view := infra.NewViewRepo(db, redisClient)
 	return &Module{
-		Query:     dashboardapp.NewQueryService(view),
-		adminView: infra.NewAdminViewRepo(db),
-		view:      view,
-		asynq:     asynqClient,
+		Query:      dashboardapp.NewQueryService(view),
+		adminView:  infra.NewAdminViewRepo(db),
+		adminCache: newAdminDashboardCache(redisClient),
+		view:       view,
+		asynq:      asynqClient,
 	}
 }
 

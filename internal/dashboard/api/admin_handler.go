@@ -24,7 +24,7 @@ func (h *Handler) GetAdminDashboard(c *gin.Context) {
 		badRequest(c)
 		return
 	}
-	result, err := h.mod.AdminQuery.AdminDashboard(c.Request.Context(), from, to)
+	result, err := h.mod.loadAdminDashboard(c.Request.Context(), from, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to load dashboard.", "requestId": middleware.GetRequestID(c)})
 		return
