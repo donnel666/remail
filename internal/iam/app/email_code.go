@@ -44,6 +44,9 @@ func (uc *EmailCodeUseCase) Send(ctx context.Context, email string) error {
 // uses that fact to preserve the existing verification-failure budget.
 func (uc *EmailCodeUseCase) Request(ctx context.Context, email string) (bool, error) {
 	normalized := normalizeEmail(email)
+	if err := validateRegistrationEmail(normalized); err != nil {
+		return false, err
+	}
 
 	started, retryAfter, err := uc.store.StartCooldown(ctx, emailCodeKey(normalized), emailCodeResendGap)
 	if err != nil {

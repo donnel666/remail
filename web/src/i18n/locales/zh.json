@@ -162,6 +162,8 @@
   "Verification code is incorrect or expired.": "邮箱验证码错误或已过期。",
   "Permission denied.": "权限不足。",
   "Invalid request body.": "请求参数无效。",
+  "Email local part must contain only letters and digits.": "邮箱前缀只能包含字母和数字。",
+  "Registration with this email domain is not allowed.": "不支持使用该邮箱域名注册。",
   "Email already exists.": "邮箱已存在。",
   "Activation has already been completed.": "系统已完成首次激活。",
   "Account has been disabled.": "账号已被禁用。",

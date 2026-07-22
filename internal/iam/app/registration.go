@@ -27,6 +27,9 @@ func NewRegistrationUseCase(repo UserRepository, hasher Hasher, codeStore EmailC
 // It requires a valid email verification code for the submitted email.
 func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, nickname, code, inviteCode string) (*domain.User, error) {
 	normalizedEmail := normalizeEmail(email)
+	if err := validateRegistrationEmail(normalizedEmail); err != nil {
+		return nil, err
+	}
 	key := emailCodeKey(normalizedEmail)
 	code = strings.TrimSpace(code)
 	claimToken, err := newCryptoID()

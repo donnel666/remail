@@ -6,6 +6,7 @@ import { SendCodeField } from "@/components/auth/SendCodeField";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { registerUser, sendEmailCode } from "@/lib/iam-api";
+import { validateRegistrationEmail } from "@/lib/registration-email";
 
 export default function Register() {
   const { t } = useTranslation();
@@ -34,6 +35,11 @@ export default function Register() {
     event.preventDefault();
     if (password !== confirmPassword) {
       setError(t("Passwords do not match."));
+      return;
+    }
+    const emailError = validateRegistrationEmail(email);
+    if (emailError) {
+      setError(t(emailError));
       return;
     }
 

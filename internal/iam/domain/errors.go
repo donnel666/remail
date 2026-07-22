@@ -7,6 +7,8 @@ import "errors"
 // that the API layer maps to HTTP status codes.
 var (
 	ErrEmailAlreadyExists                  = errors.New("email already exists")
+	ErrRegistrationEmailLocalInvalid       = errors.New("email local part must contain only letters and digits")
+	ErrRegistrationEmailDomainBlocked      = errors.New("registration with this email domain is not allowed")
 	ErrAccountOrPasswordIncorrect          = errors.New("account or password is incorrect")
 	ErrTurnstileInvalid                    = errors.New("human verification failed")
 	ErrTurnstileUnavailable                = errors.New("human verification is temporarily unavailable")

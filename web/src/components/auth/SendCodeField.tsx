@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { TurnstileField } from "@/components/auth/TurnstileField";
 import { IamApiError } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { validateRegistrationEmail } from "@/lib/registration-email";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -62,6 +63,13 @@ export function SendCodeField({
     if (!email.trim()) {
       onError(t("Please enter your email."));
       return;
+    }
+    if (turnstileAction === "register_email_code") {
+      const emailError = validateRegistrationEmail(email);
+      if (emailError) {
+        onError(t(emailError));
+        return;
+      }
     }
     if (!turnstileToken) {
       onError(t("Please complete human verification."));

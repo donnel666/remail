@@ -1469,6 +1469,16 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Email already exists.",
 			"requestId": rid,
 		})
+	case errors.Is(err, domain.ErrRegistrationEmailLocalInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Email local part must contain only letters and digits.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrRegistrationEmailDomainBlocked):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "Registration with this email domain is not allowed.",
+			"requestId": rid,
+		})
 	case errors.Is(err, domain.ErrAccountOrPasswordIncorrect):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message":   "Account or password is incorrect.",

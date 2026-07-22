@@ -162,6 +162,8 @@
   "Verification code is incorrect or expired.": "Verification code is incorrect or expired.",
   "Permission denied.": "Permission denied.",
   "Invalid request body.": "Invalid request body.",
+  "Email local part must contain only letters and digits.": "Email local part must contain only letters and digits.",
+  "Registration with this email domain is not allowed.": "Registration with this email domain is not allowed.",
   "Email already exists.": "Email already exists.",
   "Activation has already been completed.": "Activation has already been completed.",
   "Account has been disabled.": "Account has been disabled.",
