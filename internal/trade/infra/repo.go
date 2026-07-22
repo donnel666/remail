@@ -1018,6 +1018,7 @@ func escapeLikePattern(value string) string {
 }
 
 func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB {
+	query = query.Where("order_no NOT LIKE 'HIST-%'")
 	if !filter.IsAdmin || filter.Scope != "all" {
 		query = query.Where("user_id = ?", filter.UserID)
 	}

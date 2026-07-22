@@ -64,6 +64,16 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	fourth := checkoutListOrder(t, uc, 2, "purchase", "order-list-4")
 	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
 	other := checkoutListOrder(t, uc, 3, "code", "order-list-other")
+	seedTradeMicrosoftResource(t, db, 1, 1006, "history@history.test", "history.test", 95, true)
+	matchedAt := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(ctx, []tradeapp.HistoricalMicrosoftUsage{{
+		ResourceID: 1006, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "history@history.test",
+		FirstMatchedAt: matchedAt.Add(-time.Hour), LastMatchedAt: matchedAt, EvidenceCount: 1,
+	}}))
+	var historicalOrder struct {
+		OrderNo string `gorm:"column:order_no"`
+	}
+	require.NoError(t, db.Table("orders").Select("order_no").Where("order_no LIKE 'HIST-%'").Take(&historicalOrder).Error)
 
 	require.Equal(t, "a1@outlook.test", first.Order.DeliveryEmail)
 	require.Equal(t, "a2@outlook.test", second.Order.DeliveryEmail)
@@ -189,6 +199,34 @@ func TestListOrdersFiltersFacetsAndPagingMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, otherList.Total)
 	require.Equal(t, other.Order.OrderNo, otherList.Items[0].Order.OrderNo)
+
+	// Historical imports belong to the super administrator but stay out of
+	// that administrator's personal order records and facets.
+	adminMine, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 1, IsAdmin: true, Scope: "mine"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.Zero(t, adminMine.Total)
+	require.Empty(t, adminMine.Items)
+	require.NotNil(t, adminMine.Facets)
+	require.Zero(t, adminMine.Facets.Status.All)
+	require.Zero(t, adminMine.Facets.ServiceMode.All)
+	require.Empty(t, adminMine.Facets.Domains)
+
+	// The site-wide admin list uses the same historical-order exclusion.
+	adminList, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 1, IsAdmin: true, Scope: "all"}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, adminList.Total)
+	require.Len(t, adminList.Items, 5)
+	for _, item := range adminList.Items {
+		require.NotEqual(t, historicalOrder.OrderNo, item.Order.OrderNo)
+	}
+	require.NotNil(t, adminList.Facets)
+	require.EqualValues(t, 5, adminList.Facets.Status.All)
+	require.EqualValues(t, 5, adminList.Facets.ServiceMode.All)
+	require.Len(t, adminList.Facets.Domains, 2)
+	require.Equal(t, "outlook.test", adminList.Facets.Domains[0].Key)
+	require.EqualValues(t, 3, adminList.Facets.Domains[0].Count)
+	require.Equal(t, "hotmail.test", adminList.Facets.Domains[1].Key)
+	require.EqualValues(t, 2, adminList.Facets.Domains[1].Count)
 }
 
 func TestParseOrderDomainAndOptionalTime(t *testing.T) {
