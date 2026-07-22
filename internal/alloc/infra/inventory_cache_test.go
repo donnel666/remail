@@ -112,8 +112,8 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	result, err = useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Updated)
-	require.Equal(t, 15*time.Minute, server.TTL(inventoryCacheKey(allocapp.InventoryCacheStats, 10, 7)))
-	require.Equal(t, 15*time.Minute, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10, 7)))
+	require.Equal(t, 24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheStats, 10, 7)))
+	require.Equal(t, 24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10, 7)))
 
 	stats, err = useCase.GetInventoryStats(context.Background(), 10, 7)
 	require.NoError(t, err)

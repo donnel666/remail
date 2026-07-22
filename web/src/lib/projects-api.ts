@@ -1,5 +1,16 @@
 import type { components } from "./openapi/schema";
-import { apiClient as client, csrfHeader, unwrap } from "./api-client";
+import {
+  apiClient as client,
+  csrfHeader,
+  IamApiError,
+  unwrap,
+} from "./api-client";
+
+// ponytail: bounded cold-cache polling; prewarm project batches if 61 seconds
+// no longer covers refresh p99.
+const inventoryPrepareRetryDelaysMs = [
+  1_000, 2_000, 4_000, 8_000, 16_000, 30_000,
+];
 
 export type AdminCreateProjectRequest =
   components["schemas"]["AdminCreateProjectRequest"];
@@ -95,11 +106,30 @@ export async function getProject(projectId: number) {
 }
 
 export async function getProjectInventory(projectId: number) {
-  return unwrap<ProjectInventoryTotalResponse>(
-    await client.GET("/v1/projects/{projectId}/inventory", {
-      params: { path: { projectId } },
-    })
-  );
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await unwrap<ProjectInventoryTotalResponse>(
+        await client.GET("/v1/projects/{projectId}/inventory", {
+          params: { path: { projectId } },
+        })
+      );
+    } catch (error) {
+      const retryDelay = inventoryPrepareRetryDelaysMs[attempt];
+      if (
+        !(error instanceof IamApiError) ||
+        error.status !== 503 ||
+        retryDelay === undefined
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        globalThis.setTimeout(
+          resolve,
+          Math.max(retryDelay, (error.retryAfterSeconds ?? 0) * 1_000)
+        )
+      );
+    }
+  }
 }
 
 export async function createProjectApplication(

@@ -532,7 +532,7 @@ export default function Dashboard() {
 
   async function loadAllProjectInventory(projectIds: string[]) {
     // ponytail: capped per-project fan-out; add a bulk inventory endpoint if
-    // project counts grow past a couple hundred. Backend caches per project (30s TTL).
+    // project counts grow past a couple hundred. Backend caches each project inventory.
     for (
       let start = 0;
       start < projectIds.length;

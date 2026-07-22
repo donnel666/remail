@@ -40,11 +40,13 @@ type allocationBackgroundGateStub struct {
 
 type failingInventoryTaskRepo struct {
 	allocapp.Repository
-	calls atomic.Int32
+	calls    atomic.Int32
+	deadline time.Time
 }
 
-func (r *failingInventoryTaskRepo) GetInventoryStats(context.Context, uint, uint) (*allocapp.InventoryStats, error) {
+func (r *failingInventoryTaskRepo) GetInventoryStats(ctx context.Context, _ uint, _ uint) (*allocapp.InventoryStats, error) {
 	r.calls.Add(1)
+	r.deadline, _ = ctx.Deadline()
 	return nil, errors.New("aggregate unavailable")
 }
 
@@ -92,14 +94,18 @@ func TestInventoryRefreshTaskDefersAfterOneFailedAttempt(t *testing.T) {
 	repo := &failingInventoryTaskRepo{}
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(&failingInventoryTaskCache{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	t.Cleanup(cancel)
+	wantDeadline, _ := ctx.Deadline()
 
-	result, deferred, err := refreshInventoryTask(context.Background(), useCase)
+	result, deferred, err := refreshInventoryTask(ctx, useCase)
 
 	require.NoError(t, err)
 	require.True(t, deferred)
 	require.Equal(t, 1, result.Attempted)
 	require.Equal(t, 1, result.Failed)
 	require.EqualValues(t, 1, repo.calls.Load())
+	require.Equal(t, wantDeadline, repo.deadline, "the Asynq task deadline is the refresh budget")
 }
 
 func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {

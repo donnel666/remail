@@ -17,7 +17,6 @@ import (
 
 const (
 	candidateRefreshDispatcherInterval = 30 * time.Second
-	inventoryRefreshWorkBudget         = 5 * time.Second
 	inventoryRefreshMaxEntriesPerTask  = 50
 )
 
@@ -101,15 +100,10 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 }
 
 func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allocapp.InventoryRefreshResult, bool, error) {
-	workCtx, cancel := context.WithTimeout(ctx, inventoryRefreshWorkBudget)
-	defer cancel()
 	total := &allocapp.InventoryRefreshResult{}
 	for total.Attempted < inventoryRefreshMaxEntriesPerTask {
-		batch, err := useCase.RefreshInventoryCache(workCtx)
+		batch, err := useCase.RefreshInventoryCache(ctx)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-				return total, true, nil
-			}
 			return total, false, err
 		}
 		if batch == nil || batch.Attempted == 0 {
@@ -124,9 +118,6 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 			total.LastError = batch.LastError
 		}
 		if batch.Failed > 0 || batch.Skipped > 0 {
-			return total, true, nil
-		}
-		if workCtx.Err() != nil {
 			return total, true, nil
 		}
 	}

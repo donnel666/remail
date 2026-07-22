@@ -18,7 +18,7 @@ import (
 
 const (
 	inventoryCacheActivityTTL = 2 * InventoryRefreshInterval
-	inventoryCacheHardTTL     = 15 * time.Minute
+	inventoryCacheHardTTL     = 24 * time.Hour
 	inventoryRefreshLockTTL   = 10 * time.Minute
 	// ponytail: five cold keys bound each aggregate burst; raise only when the
 	// refresh p99 stays below one interval without affecting checkout/pickup.
