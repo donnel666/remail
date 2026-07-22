@@ -25,15 +25,16 @@ import (
 )
 
 const (
-	defaultFetchCooldown    = 5 * time.Second
-	autoFetchCooldown       = 5 * time.Second
-	fetchLookbackWindow     = 90 * 24 * time.Hour
-	fetchOverlapWindow      = 5 * time.Minute
-	readWindowSkew          = 2 * time.Minute
-	codeReadLimit           = 1
-	purchaseReadLimit       = 30
-	messageScanLimit        = 40
-	defaultFetchMaxAttempts = 3
+	defaultFetchCooldown     = 5 * time.Second
+	autoFetchCooldown        = 5 * time.Second
+	fetchLookbackWindow      = 90 * 24 * time.Hour
+	fetchOverlapWindow       = 5 * time.Minute
+	readWindowSkew           = 2 * time.Minute
+	codeReadLimit            = 1
+	purchaseReadLimit        = 30
+	messageScanLimit         = 40
+	defaultFetchMaxAttempts  = 3
+	readFetchScheduleTimeout = 500 * time.Millisecond
 )
 
 type MailRuleType string
@@ -370,12 +371,14 @@ func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderSco
 	if uc == nil || uc.queue == nil || len(scopes) == 0 {
 		return
 	}
+	scheduleCtx, cancel := context.WithTimeout(ctx, readFetchScheduleTimeout)
+	defer cancel()
 	sort.Slice(scopes, func(i, j int) bool {
 		return scopes[i].EmailResourceID < scopes[j].EmailResourceID
 	})
 	now := uc.now()
 	accepted := 0
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+	err := uc.repo.WithTx(scheduleCtx, func(txCtx context.Context) error {
 		resourceIDs := make([]uint, len(scopes))
 		for i := range scopes {
 			resourceIDs[i] = scopes[i].EmailResourceID
@@ -394,7 +397,7 @@ func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderSco
 				continue
 			}
 			state := states[scope.EmailResourceID]
-			if state != nil && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
+			if !fetchDue(state, now) {
 				continue
 			}
 			sinceAt := fetchSinceAt(scope, state, now)
@@ -428,7 +431,7 @@ func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderSco
 		return nil
 	})
 	if err == nil && accepted > 0 {
-		uc.ScheduleFetchDispatcher(ctx, 0)
+		uc.ScheduleFetchDispatcher(scheduleCtx, 0)
 	}
 }
 
@@ -516,7 +519,13 @@ func shouldScheduleReadFetch(scope OrderScope, hasDelivery bool) bool {
 }
 
 func fetchDue(state *domain.FetchState, now time.Time) bool {
-	if state == nil || state.CooldownUntil == nil {
+	if state == nil {
+		return true
+	}
+	if state.LastStatus == string(domain.FetchJobPending) || state.LastStatus == string(domain.FetchJobRunning) {
+		return false
+	}
+	if state.CooldownUntil == nil {
 		return true
 	}
 	return !state.CooldownUntil.After(now)
@@ -708,6 +717,8 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) error {
 	if !claimed {
 		return nil
 	}
+	serviceStarted := time.Now()
+	defer platform.ObserveTaskService("mailmatch_fetch", serviceStarted)
 	job, err := uc.repo.FindFetch(ctx, task.EmailResourceID, task.Generation)
 	if err != nil {
 		return uc.releaseFetchInfrastructure(ctx, task, err)
@@ -801,10 +812,13 @@ func (uc *UseCase) releaseFetchInfrastructure(ctx context.Context, task FetchTas
 	released, err := uc.repo.ReleaseFetchInfrastructureFailure(
 		context.WithoutCancel(ctx), task.EmailResourceID, task.Generation, "Mail fetch infrastructure is temporarily unavailable.",
 	)
-	if released {
-		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), 0)
+	if err != nil {
+		return errors.Join(cause, err)
 	}
-	return errors.Join(cause, err)
+	if released {
+		uc.ScheduleFetchDispatcher(context.WithoutCancel(ctx), time.Second)
+	}
+	return nil
 }
 
 func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
@@ -932,6 +946,9 @@ func latestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 	for _, delivery := range latestByOrder {
 		result = append(result, delivery)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].scope.OrderID < result[j].scope.OrderID
+	})
 	return result
 }
 
@@ -965,7 +982,9 @@ func (uc *UseCase) scheduleReadFetch(ctx context.Context, req FetchSubmitRequest
 	if uc == nil || uc.queue == nil {
 		return
 	}
-	_, _ = uc.SubmitFetch(ctx, req)
+	scheduleCtx, cancel := context.WithTimeout(ctx, readFetchScheduleTimeout)
+	defer cancel()
+	_, _ = uc.SubmitFetch(scheduleCtx, req)
 }
 
 func (uc *UseCase) loadScopeForSubmit(ctx context.Context, req FetchSubmitRequest) (*OrderScope, error) {

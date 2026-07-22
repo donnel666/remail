@@ -134,6 +134,9 @@ var (
 	ErrInsufficientBalance    = errors.New("trade: insufficient balance")
 	ErrProjectUnavailable     = errors.New("trade: project is not available")
 	ErrOrderCompensationError = errors.New("trade: order compensation failed")
+	ErrCheckoutBusy           = errors.New("trade: checkout already queued for user")
+	ErrCheckoutOverloaded     = errors.New("trade: checkout queue is full")
+	ErrCheckoutTimeBudget     = errors.New("trade: checkout time budget exhausted")
 )
 
 func NormalizeServiceMode(value string) (ServiceMode, bool) {

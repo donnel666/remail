@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,6 +38,36 @@ type allocationBackgroundGateStub struct {
 	released atomic.Bool
 }
 
+type failingInventoryTaskRepo struct {
+	allocapp.Repository
+	calls atomic.Int32
+}
+
+func (r *failingInventoryTaskRepo) GetInventoryStats(context.Context, uint, uint) (*allocapp.InventoryStats, error) {
+	r.calls.Add(1)
+	return nil, errors.New("aggregate unavailable")
+}
+
+type failingInventoryTaskCache struct {
+	allocapp.InventoryCache
+}
+
+func (*failingInventoryTaskCache) ClaimActiveInventory(context.Context, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
+	return []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 1}}, nil
+}
+
+func (*failingInventoryTaskCache) AcquireInventoryRefresh(context.Context, allocapp.InventoryCacheEntry, time.Duration) (string, bool, error) {
+	return "token", true, nil
+}
+
+func (*failingInventoryTaskCache) ReleaseInventoryRefresh(context.Context, allocapp.InventoryCacheEntry, string) error {
+	return nil
+}
+
+func (*failingInventoryTaskCache) RequeueInventory(context.Context, []allocapp.InventoryCacheEntry) error {
+	return nil
+}
+
 func (g *allocationBackgroundGateStub) TryAcquire() (func(), bool) {
 	return func() { g.released.Store(true) }, g.admitted
 }
@@ -55,6 +86,20 @@ func TestInventoryRefreshAdmissionDenialDefersTask(t *testing.T) {
 
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 	require.False(t, gate.released.Load())
+}
+
+func TestInventoryRefreshTaskDefersAfterOneFailedAttempt(t *testing.T) {
+	repo := &failingInventoryTaskRepo{}
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(&failingInventoryTaskCache{})
+
+	result, deferred, err := refreshInventoryTask(context.Background(), useCase)
+
+	require.NoError(t, err)
+	require.True(t, deferred)
+	require.Equal(t, 1, result.Attempted)
+	require.Equal(t, 1, result.Failed)
+	require.EqualValues(t, 1, repo.calls.Load())
 }
 
 func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {

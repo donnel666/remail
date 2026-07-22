@@ -399,10 +399,13 @@ func (uc *ResourceFetchUseCase) releaseResourceFetchInfrastructure(ctx context.C
 		context.WithoutCancel(ctx), resourceID, generation,
 		"Microsoft resource fetch infrastructure is temporarily unavailable.", nil,
 	)
-	if released {
-		uc.ScheduleDispatcher(context.WithoutCancel(ctx), 0)
+	if err != nil {
+		return errors.Join(cause, err)
 	}
-	return errors.Join(cause, err)
+	if released {
+		uc.ScheduleDispatcher(context.WithoutCancel(ctx), time.Second)
+	}
+	return nil
 }
 
 func (uc *ResourceFetchUseCase) cancelResourceFetch(ctx context.Context, job domain.ResourceFetchJob, safe string, category string) error {

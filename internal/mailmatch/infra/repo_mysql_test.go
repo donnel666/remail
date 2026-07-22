@@ -249,12 +249,18 @@ VALUES (100, 'normal', ?)`, now.Add(time.Minute)).Error)
 INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
 VALUES (?, ?, ?)`, orderID, stored[0].ID, now).Error)
 
-	reads, err := repo.ReadPickupBatch(context.Background(), []app.PickupCredential{
-		{Email: "main@example.com", Token: "bulk-token"},
-		{Email: "wrong@example.com", Token: "bulk-token"},
-	}, now, 40)
+	credentials := make([]app.PickupCredential, 100)
+	for i := range credentials {
+		credentials[i] = app.PickupCredential{Email: "main@example.com", Token: "bulk-token"}
+	}
+	credentials[1].Email = "wrong@example.com"
+	started := time.Now()
+	reads, err := repo.ReadPickupBatch(context.Background(), credentials, now, 40)
+	elapsed := time.Since(started)
+	t.Logf("100-item pickup database read completed in %s", elapsed)
 	require.NoError(t, err)
-	require.Len(t, reads, 2)
+	require.Less(t, elapsed, 10*time.Second)
+	require.Len(t, reads, 100)
 	require.NoError(t, reads[0].Err)
 	require.Equal(t, orderID, reads[0].Scope.OrderID)
 	require.Equal(t, uint64(7), reads[0].Scope.CredentialRevision)
@@ -263,6 +269,10 @@ VALUES (?, ?, ?)`, orderID, stored[0].ID, now).Error)
 	require.Len(t, reads[0].Messages, 1)
 	require.Equal(t, stored[0].ID, reads[0].Messages[0].ID)
 	require.ErrorIs(t, reads[1].Err, domain.ErrPickupCredentialInvalid)
+	for i := 2; i < len(reads); i++ {
+		require.NoError(t, reads[i].Err)
+		require.Equal(t, orderID, reads[i].Scope.OrderID)
+	}
 }
 
 func TestFirstFetchStateCreationAvoidsGapDeadlockMySQL(t *testing.T) {

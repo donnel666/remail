@@ -527,9 +527,10 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	}
 	result.Retryable = !result.Valid && isRetryableValidationCategory(result.Category)
 	if result.Valid && uc.historyTrigger != nil {
-		// The task carries only resource identity, so enqueue it before committing
-		// the healthy resource state. Its worker rechecks status and credentials;
-		// this closes the otherwise permanent "normal but no history task" gap.
+		// Create the durable history task before committing the healthy state.
+		// The worker treats validating as a capacity deferral and retries after
+		// this short transaction commits, so Redis failure cannot strand an
+		// identifying resource without a recovery owner.
 		triggerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		triggerErr := uc.historyTrigger.ScheduleValidatedMicrosoftHistory(triggerCtx, task.ResourceID, task.RequestID)
 		cancel()

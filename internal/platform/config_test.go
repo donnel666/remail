@@ -22,6 +22,8 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, []string{"127.0.0.1", "::1"}, cfg.Server.TrustedProxies)
 	assert.Equal(t, "development", cfg.Environment)
 	assert.Equal(t, "test:test@tcp(127.0.0.1:3306)/test", cfg.MySQL.DSN)
+	assert.Equal(t, 64, cfg.MySQL.MaxOpenConns)
+	assert.Equal(t, 16, cfg.MySQL.MaxIdleConns)
 	assert.Equal(t, "127.0.0.1:6379", cfg.Redis.Addr)
 	assert.Equal(t, 0, cfg.Redis.DB)
 	assert.Equal(t, "testkey", cfg.MinIO.AccessKey)
@@ -47,6 +49,12 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "mx.aishop6.com", cfg.SMTP.InboundDomain)
 	assert.Equal(t, int64(10<<20), cfg.SMTP.InboundMaxMessageBytes)
 	assert.Equal(t, "", cfg.Diagnostics.PprofAddr)
+}
+
+func TestMySQLDSNUsesDriverInterpolationWithoutPreparedStatementCache(t *testing.T) {
+	formatted, err := mysqlDSN("test:test@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=true")
+	require.NoError(t, err)
+	assert.Contains(t, formatted, "interpolateParams=true")
 }
 
 func TestConfigValidateMissingFields(t *testing.T) {

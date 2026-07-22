@@ -53,6 +53,7 @@ type candidateRefreshQueueStub struct {
 	err             error
 	events          *[]string
 	dispatcherCalls int
+	inventoryCalls  int
 }
 
 func (q *candidateRefreshQueueStub) EnqueueCandidateRefresh(context.Context, CandidateRefreshTask) (bool, error) {
@@ -68,6 +69,7 @@ func (q *candidateRefreshQueueStub) EnqueueCandidateRefreshDispatcher(context.Co
 }
 
 func (q *candidateRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
+	q.inventoryCalls++
 	return nil
 }
 

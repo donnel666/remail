@@ -40,6 +40,12 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 			return fmt.Errorf("create allocation savepoint: %w", err)
 		}
 		if err := fn(ctx); err != nil {
+			// MySQL 1213 has already rolled back the whole transaction, so its
+			// savepoint is gone. A 1205 only rolls back the timed-out statement
+			// by default and must still roll back this nested operation.
+			if isWholeTransactionRollbackError(err) {
+				return err
+			}
 			if rollbackErr := tx.WithContext(ctx).RollbackTo(name).Error; rollbackErr != nil {
 				return fmt.Errorf("rollback allocation savepoint: %w: %v", err, rollbackErr)
 			}
@@ -48,14 +54,24 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 		return nil
 	}
 	var err error
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 2; attempt++ {
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return fn(platform.WithGormTx(ctx, tx))
 		})
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
-		time.Sleep(deadlockBackoff(attempt))
+		platform.RecordMySQLTransactionEvent("alloc", mysqlRetryEvent(err))
+		if attempt == 1 {
+			platform.RecordMySQLTransactionEvent("alloc", "retry_exhausted")
+			return err
+		}
+		platform.RecordMySQLTransactionEvent("alloc", "retry")
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deadlockBackoff(attempt)):
+		}
 	}
 	return err
 }
@@ -2459,6 +2475,19 @@ func isForeignKeyError(err error) bool {
 func isDeadlockError(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205)
+}
+
+func isWholeTransactionRollbackError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
+}
+
+func mysqlRetryEvent(err error) string {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1205 {
+		return "lock_timeout"
+	}
+	return "deadlock"
 }
 
 func deadlockBackoff(attempt int) time.Duration {

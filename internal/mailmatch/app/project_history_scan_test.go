@@ -8,6 +8,7 @@ import (
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/stretchr/testify/require"
 )
 
@@ -256,6 +257,17 @@ func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
 	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
 	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
 	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
+}
+
+func TestValidatedMicrosoftHistoryDefersPreCommitDelivery(t *testing.T) {
+	resource := &coreapp.MicrosoftCredentialScope{ResourceID: 10, Status: "validating"}
+	credentials := &projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}}
+	transport := &projectHistoryTransportStub{}
+	uc := NewProjectHistoryScanUseCase(nil, &projectHistoryMatchesStub{}, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(credentials)
+
+	require.ErrorIs(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}), platform.ErrBackgroundExecutionDeferred)
+	require.Empty(t, transport.request)
 }
 
 func TestValidatedMicrosoftHistoryPromotesIdentifyingResourceAfterImport(t *testing.T) {

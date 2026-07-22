@@ -43,10 +43,38 @@ var (
 	queueWaitDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "remail_task_queue_wait_seconds",
-			Help:    "Time from durable task creation to worker processing.",
+			Help:    "Time from enqueue or admission request until work begins.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60},
 		},
 		[]string{"task_type"},
+	)
+	taskServiceDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remail_task_service_duration_seconds",
+			Help:    "Execution time after a task has obtained its concurrency slot.",
+			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 9, 15, 30, 60},
+		},
+		[]string{"task_type"},
+	)
+	workUnits = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_work_units_total", Help: "Completed workload units by bounded workload, size class, and result."},
+		[]string{"workload", "size", "result"},
+	)
+	workloadState = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "remail_workload_state", Help: "Current bounded-workload state (active requests, queued requests, or queued work units)."},
+		[]string{"workload", "state"},
+	)
+	mysqlTransactionEvents = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_mysql_transaction_events_total", Help: "MySQL transaction contention events by component and event."},
+		[]string{"component", "event"},
+	)
+	externalServiceDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remail_external_service_duration_seconds",
+			Help:    "External service call latency by provider, operation, and result.",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 900},
+		},
+		[]string{"provider", "operation", "result"},
 	)
 )
 
@@ -57,6 +85,11 @@ func init() {
 		businessEvents,
 		mailVisibleDuration,
 		queueWaitDuration,
+		taskServiceDuration,
+		workUnits,
+		workloadState,
+		mysqlTransactionEvents,
+		externalServiceDuration,
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{Name: "remail_db_open_connections", Help: "Current open database connections."},
 			func() float64 {
@@ -80,6 +113,15 @@ func init() {
 			func() float64 {
 				if db := metricsDB.Load(); db != nil {
 					return float64(db.Stats().WaitCount)
+				}
+				return 0
+			},
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{Name: "remail_db_wait_duration_seconds_total", Help: "Total time spent waiting for a database pool connection."},
+			func() float64 {
+				if db := metricsDB.Load(); db != nil {
+					return db.Stats().WaitDuration.Seconds()
 				}
 				return 0
 			},
@@ -191,4 +233,35 @@ func ObserveQueueWait(taskType string, createdAt time.Time) {
 		seconds = 0
 	}
 	queueWaitDuration.WithLabelValues(taskType).Observe(seconds)
+}
+
+func ObserveTaskService(taskType string, startedAt time.Time) {
+	if startedAt.IsZero() {
+		return
+	}
+	taskServiceDuration.WithLabelValues(taskType).Observe(time.Since(startedAt).Seconds())
+}
+
+func AddWorkUnits(workload, size, result string, units int) {
+	if units <= 0 {
+		return
+	}
+	workUnits.WithLabelValues(workload, size, result).Add(float64(units))
+}
+
+func SetWorkloadState(workload string, active, queued, queuedUnits int) {
+	workloadState.WithLabelValues(workload, "active").Set(float64(max(active, 0)))
+	workloadState.WithLabelValues(workload, "queued").Set(float64(max(queued, 0)))
+	workloadState.WithLabelValues(workload, "queued_units").Set(float64(max(queuedUnits, 0)))
+}
+
+func RecordMySQLTransactionEvent(component, event string) {
+	mysqlTransactionEvents.WithLabelValues(component, event).Inc()
+}
+
+func ObserveExternalService(provider, operation, result string, startedAt time.Time) {
+	if startedAt.IsZero() {
+		return
+	}
+	externalServiceDuration.WithLabelValues(provider, operation, result).Observe(time.Since(startedAt).Seconds())
 }

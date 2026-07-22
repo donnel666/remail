@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/stretchr/testify/require"
 )
@@ -47,4 +49,20 @@ func TestResourceFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Queued)
 	require.Equal(t, 1, repo.processing)
+}
+
+type resourceFetchReleaseRepoStub struct {
+	ResourceFetchRepository
+}
+
+func (*resourceFetchReleaseRepoStub) ReleaseResourceFetchInfrastructureFailure(context.Context, uint, uint64, string, *governancedomain.SystemLog) (bool, error) {
+	return true, nil
+}
+
+func TestResourceFetchInfrastructureReleaseDoesNotAlsoRetryAsynqTask(t *testing.T) {
+	uc := NewResourceFetchUseCase(&resourceFetchReleaseRepoStub{}, resourceFetchDispatchQueueStub{}, nil, nil, nil)
+
+	err := uc.releaseResourceFetchInfrastructure(context.Background(), 1, 2, errors.New("database timeout"))
+
+	require.NoError(t, err)
 }

@@ -21,10 +21,11 @@ const (
 	TypeProjectHistoryDispatcher      = "mailmatch:project_history_dispatcher"
 
 	mailmatchQueueName            = platform.QueueMailfetch
-	mailmatchFetchTaskMaxRetry    = platform.BackgroundTaskMaxRetry
+	mailmatchFetchTaskMaxRetry    = 3
 	mailmatchFetchTaskTimeout     = 20 * time.Minute
 	mailmatchDispatchTaskTimeout  = 30 * time.Second
 	projectHistoryTaskMaxRetry    = platform.BackgroundTaskMaxRetry
+	validatedHistoryTaskMaxRetry  = 20
 	projectHistoryTaskTimeout     = 20 * time.Minute
 	projectHistoryDispatchTimeout = 30 * time.Second
 )
@@ -130,7 +131,7 @@ func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, t
 		asynq.NewTask(TypeValidatedMicrosoftHistoryScan, payload),
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
 		asynq.Unique(projectHistoryTaskTimeout),
-		asynq.MaxRetry(projectHistoryTaskMaxRetry),
+		asynq.MaxRetry(validatedHistoryTaskMaxRetry),
 		asynq.Timeout(projectHistoryTaskTimeout),
 		asynq.Retention(0),
 	)

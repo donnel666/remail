@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -394,16 +395,18 @@ type UseCase struct {
 	historicalAllocations      HistoricalMicrosoftAllocationPort
 	now                        func() time.Time
 	deliveryNotificationCursor atomic.Uint64
+	checkoutBatches            *checkoutBatchGate
 }
 
 func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, allocation AllocationPort, tokens OrderTokenPort) *UseCase {
 	uc := &UseCase{
-		repo:       repo,
-		ordering:   ordering,
-		wallet:     wallet,
-		allocation: allocation,
-		tokens:     tokens,
-		now:        func() time.Time { return time.Now().UTC() },
+		repo:            repo,
+		ordering:        ordering,
+		wallet:          wallet,
+		allocation:      allocation,
+		tokens:          tokens,
+		now:             func() time.Time { return time.Now().UTC() },
+		checkoutBatches: newCheckoutBatchGate(),
 	}
 	uc.historicalOrders, _ = repo.(HistoricalOrderRepository)
 	uc.historicalAllocations, _ = allocation.(HistoricalMicrosoftAllocationPort)
@@ -537,10 +540,16 @@ func sameHistoricalMicrosoftOrder(order domain.Order, ownerID uint, allocationID
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*CheckoutResult, error) {
-	return uc.checkout(ctx, req, false)
+	return uc.checkout(ctx, req, false, nil)
 }
 
-func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLocked bool) (*CheckoutResult, error) {
+type checkoutQuoteKey struct {
+	projectID uint
+	productID uint
+	mode      domain.ServiceMode
+}
+
+func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLocked bool, quotes map[checkoutQuoteKey]*OrderingQuote) (*CheckoutResult, error) {
 	mode, ok := domain.NormalizeServiceMode(req.ServiceMode)
 	if !ok {
 		return nil, domain.ErrInvalidOrderRequest
@@ -583,9 +592,16 @@ func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLock
 	// This is the only path that evaluates current product sale status. Once an
 	// order has been persisted, subsequent fulfilment must use that order's
 	// immutable service-window snapshot instead.
-	quote, err := uc.ordering.GetOrderingQuote(ctx, req.ProjectID, req.ProductID, req.UserID, mode)
-	if err != nil {
-		return nil, err
+	quoteKey := checkoutQuoteKey{projectID: req.ProjectID, productID: req.ProductID, mode: mode}
+	quote := quotes[quoteKey]
+	if quote == nil {
+		quote, err = uc.ordering.GetOrderingQuote(ctx, req.ProjectID, req.ProductID, req.UserID, mode)
+		if err != nil {
+			return nil, err
+		}
+		if quotes != nil {
+			quotes[quoteKey] = quote
+		}
 	}
 	var result *CheckoutResult
 	var checkoutErr error
@@ -660,27 +676,86 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 			return nil, domain.ErrInvalidOrderRequest
 		}
 	}
-	var items []CheckoutBatchItem
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		// Establish wallet -> allocation lock order before REPEATABLE READ creates
-		// a snapshot, so concurrent checkouts for one buyer serialize on fresh data.
-		if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
-			return err
-		}
-		items = make([]CheckoutBatchItem, 0, len(requests))
-		for _, req := range requests {
-			result, err := uc.checkout(txCtx, req, true)
-			if err != nil && !shouldCommitCheckoutError(err) {
-				return err
-			}
-			items = append(items, CheckoutBatchItem{Result: result, Err: err})
-		}
-		return nil
-	})
+	batchCtx, cancel := context.WithTimeout(ctx, 9*time.Second)
+	defer cancel()
+	queuedAt := time.Now()
+	release, err := uc.checkoutBatches.acquire(batchCtx, userID, len(requests))
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return nil, domain.ErrCheckoutOverloaded
+		}
 		return nil, err
 	}
+	defer release()
+	metricType, metricSize := checkoutBatchMetric(len(requests))
+	platform.ObserveQueueWait(metricType, queuedAt)
+	queueWait := time.Since(queuedAt)
+	serviceStarted := time.Now()
+	defer platform.ObserveTaskService(metricType, serviceStarted)
+
+	items := make([]CheckoutBatchItem, 0, len(requests))
+	quotes := make(map[checkoutQuoteKey]*OrderingQuote, 1)
+	succeeded, failed := 0, 0
+	defer func() {
+		platform.AddWorkUnits("checkout_batch", metricSize, "succeeded", succeeded)
+		platform.AddWorkUnits("checkout_batch", metricSize, "failed", failed)
+		slog.Info(
+			"checkout batch capacity sample",
+			"quantity", len(requests),
+			"size", metricSize,
+			"slot_limit", checkoutBatchConcurrency,
+			"queue_wait_ms", queueWait.Milliseconds(),
+			"service_ms", time.Since(serviceStarted).Milliseconds(),
+			"succeeded", succeeded,
+			"failed", failed,
+		)
+	}()
+	for index, req := range requests {
+		if batchCtx.Err() != nil {
+			if ctx.Err() == nil {
+				items = append(items, CheckoutBatchItem{Err: domain.ErrCheckoutTimeBudget})
+				failed++
+			}
+			break
+		}
+		result, itemErr := uc.checkout(batchCtx, req, false, quotes)
+		if itemErr == nil {
+			succeeded++
+		} else if !errors.Is(itemErr, context.Canceled) && !errors.Is(itemErr, context.DeadlineExceeded) {
+			failed++
+		}
+		if errors.Is(itemErr, context.Canceled) || errors.Is(itemErr, context.DeadlineExceeded) {
+			if ctx.Err() == nil {
+				items = append(items, CheckoutBatchItem{Err: domain.ErrCheckoutTimeBudget})
+				failed++
+			}
+			break
+		}
+		if index == 0 && errors.Is(itemErr, domain.ErrIdempotencyConflict) {
+			return nil, itemErr
+		}
+		items = append(items, CheckoutBatchItem{Result: result, Err: itemErr})
+		if itemErr != nil && !errors.Is(itemErr, domain.ErrIdempotencyConflict) {
+			break
+		}
+	}
 	return items, nil
+}
+
+func checkoutBatchMetric(quantity int) (taskType, size string) {
+	switch {
+	case quantity <= 20:
+		size = "001_020"
+	case quantity <= 40:
+		size = "021_040"
+	case quantity <= 60:
+		size = "041_060"
+	case quantity <= 80:
+		size = "061_080"
+	default:
+		size = "081_100"
+	}
+	return "checkout_batch_" + size, size
 }
 
 // resumeExistingCheckout retries a persisted order without consulting current

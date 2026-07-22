@@ -6,9 +6,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// BackgroundTaskMaxRetry leaves ample Asynq retry headroom for rare
-// infrastructure errors. Capacity deferrals do not increment this counter.
-const BackgroundTaskMaxRetry = 100
+// BackgroundTaskMaxRetry bounds infrastructure amplification. Durable jobs
+// release their generation back to the dispatcher; capacity deferrals are not
+// failures and therefore do not consume this budget.
+const BackgroundTaskMaxRetry = 5
 
 // BackgroundTaskHasRetryHeadroom reports whether a handler error can still be
 // moved to Asynq's retry set. Messages queued by older releases used

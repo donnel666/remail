@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +114,8 @@ type pickupBatchReaderStub struct {
 	txCalls       int
 	ensuredIDs    []uint
 	lockCalls     int
+	requestCalls  int
+	blockRequest  bool
 	requestedJobs []*domain.FetchJob
 }
 
@@ -135,7 +139,12 @@ func (r *pickupBatchReaderStub) FindFetchStatesForUpdate(_ context.Context, ids 
 	return make(map[uint]*domain.FetchState, len(ids)), nil
 }
 
-func (r *pickupBatchReaderStub) RequestFetchBatch(_ context.Context, jobs []*domain.FetchJob, _ time.Time, _ time.Time) error {
+func (r *pickupBatchReaderStub) RequestFetchBatch(ctx context.Context, jobs []*domain.FetchJob, _ time.Time, _ time.Time) error {
+	r.requestCalls++
+	if r.blockRequest {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	r.requestedJobs = append([]*domain.FetchJob(nil), jobs...)
 	return nil
 }
@@ -151,6 +160,25 @@ func (*pickupBatchQueueStub) EnqueueFetch(context.Context, FetchTask) (bool, err
 func (q *pickupBatchQueueStub) EnqueueFetchDispatcher(context.Context, time.Duration) error {
 	q.dispatches++
 	return nil
+}
+
+type fetchReleaseRepoStub struct {
+	Repository
+	released bool
+}
+
+func (r *fetchReleaseRepoStub) ReleaseFetchInfrastructureFailure(context.Context, uint, uint64, string) (bool, error) {
+	return r.released, nil
+}
+
+func TestFetchInfrastructureReleaseIsAcknowledgedAfterDurableReschedule(t *testing.T) {
+	queue := &pickupBatchQueueStub{}
+	uc := NewUseCase(&fetchReleaseRepoStub{released: true}, queue, nil, nil)
+
+	err := uc.releaseFetchInfrastructure(context.Background(), FetchTask{EmailResourceID: 1, Generation: 2}, errors.New("database timeout"))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, queue.dispatches)
 }
 
 func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
@@ -207,6 +235,55 @@ func TestListPickupMailBatchUsesBulkReader(t *testing.T) {
 	require.NoError(t, results[2].Err)
 	require.Equal(t, uint(303), results[2].Items[0].ID)
 	require.ErrorIs(t, results[3].Err, domain.ErrPickupCredentialInvalid)
+}
+
+func TestListPickupMailBatchHundredItemsUsesOneBulkReadAndWriteUnderBudget(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	reads := make([]PickupBatchRead, 100)
+	credentials := make([]PickupCredential, len(reads))
+	for i := range reads {
+		resourceID := uint(i + 1)
+		reads[i].Scope = &OrderScope{
+			OrderID: resourceID, OrderNo: fmt.Sprintf("ORDER-%d", resourceID), ProjectID: 1,
+			ServiceMode: "purchase", OrderStatus: "active", AllocationType: domain.ResourceTypeMicrosoft,
+			AllocationID: resourceID, EmailResourceID: resourceID, Recipient: fmt.Sprintf("user-%d@example.com", i),
+		}
+		credentials[i] = PickupCredential{Email: reads[i].Scope.Recipient, Token: fmt.Sprintf("token-%d", i)}
+	}
+	repo := &pickupBatchReaderStub{reads: reads}
+	queue := &pickupBatchQueueStub{}
+	uc := NewUseCase(repo, queue, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	started := time.Now()
+	results := uc.ListPickupMailBatch(context.Background(), credentials)
+
+	require.Less(t, time.Since(started), 10*time.Second)
+	require.Len(t, results, 100)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, 1, repo.requestCalls)
+	require.Len(t, repo.requestedJobs, 100)
+	require.Equal(t, 1, queue.dispatches)
+}
+
+func TestListPickupMailBatchDoesNotWaitOnContendedFetchScheduling(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	repo := &pickupBatchReaderStub{
+		blockRequest: true,
+		reads: []PickupBatchRead{{Scope: &OrderScope{
+			OrderID: 1, OrderNo: "ORDER-A", ProjectID: 1, ServiceMode: "purchase", OrderStatus: "active",
+			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 1, EmailResourceID: 1, Recipient: "a@example.com",
+		}}},
+	}
+	uc := NewUseCase(repo, &pickupBatchQueueStub{}, nil, nil)
+	uc.now = func() time.Time { return now }
+
+	started := time.Now()
+	results := uc.ListPickupMailBatch(context.Background(), []PickupCredential{{Email: "a@example.com", Token: "token-a"}})
+
+	require.Less(t, time.Since(started), time.Second)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Err)
 }
 
 func TestMatchAndExtractAnyRecipientUsesAliasCandidate(t *testing.T) {
@@ -486,6 +563,8 @@ func TestFetchDueUsesServerCooldown(t *testing.T) {
 	past := now.Add(-time.Second)
 	require.False(t, fetchDue(&domain.FetchState{CooldownUntil: &future}, now))
 	require.True(t, fetchDue(&domain.FetchState{CooldownUntil: &past}, now))
+	require.False(t, fetchDue(&domain.FetchState{LastStatus: string(domain.FetchJobPending)}, now))
+	require.False(t, fetchDue(&domain.FetchState{LastStatus: string(domain.FetchJobRunning)}, now))
 	require.True(t, fetchDue(nil, now))
 }
 
@@ -543,6 +622,8 @@ func TestLatestOrderDeliveriesKeepsNewestMessagePerOrder(t *testing.T) {
 		{scope: OrderScope{OrderID: 1}, message: domain.Message{DedupeKey: "newer", ReceivedAt: base.Add(time.Minute)}},
 	})
 	require.Len(t, deliveries, 2)
+	require.Equal(t, uint(1), deliveries[0].scope.OrderID)
+	require.Equal(t, uint(2), deliveries[1].scope.OrderID)
 	byOrder := make(map[uint]matchedDelivery, len(deliveries))
 	for _, delivery := range deliveries {
 		byOrder[delivery.scope.OrderID] = delivery

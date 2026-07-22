@@ -1072,6 +1072,41 @@ func TestOrderRouteCreatesIndependentBatchWithStableIdempotencyMySQL(t *testing.
 	require.EqualValues(t, quantity, orderCount)
 }
 
+func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
+
+	openapiMod := openapiapi.NewModule(db)
+	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+		UserID: 2, Name: "hundred-batch-sdk", IdempotencyKey: "apikey-idem-hundred-batch", RequestID: "req-hundred-batch",
+	})
+	require.NoError(t, err)
+	router := gin.New()
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
+	body, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20}, Quantity: 100,
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
+	req.Header.Set("Idempotency-Key", "route-order-hundred-batch")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	started := time.Now()
+	router.ServeHTTP(rec, req)
+	elapsed := time.Since(started)
+	t.Logf("100-item checkout request completed in %s", elapsed)
+
+	require.Less(t, elapsed, 10*time.Second)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var items CreateOrderBatchResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
+	require.Len(t, items, 100)
+}
+
 func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
@@ -1108,7 +1143,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.Equal(t, http.StatusMultiStatus, first.Code, first.Body.String())
 	var firstResults CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResults))
-	require.Len(t, firstResults, 3)
+	require.Len(t, firstResults, 2)
 	require.Equal(t, "succeeded", firstResults[0].Status)
 	for i := 1; i < len(firstResults); i++ {
 		require.Equal(t, "failed", firstResults[i].Status)
@@ -1120,7 +1155,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.Equal(t, http.StatusMultiStatus, replay.Code, replay.Body.String())
 	var replayResults CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(replay.Body.Bytes(), &replayResults))
-	require.Len(t, replayResults, 3)
+	require.Len(t, replayResults, 2)
 	for i := range firstResults {
 		require.Equal(t, firstResults[i].Index, replayResults[i].Index)
 		require.Equal(t, firstResults[i].Status, replayResults[i].Status)
@@ -1134,13 +1169,13 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 
 	var orderCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
-	require.EqualValues(t, 3, orderCount)
+	require.EqualValues(t, 2, orderCount)
 	var activeCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "active").Count(&activeCount).Error)
 	require.EqualValues(t, 1, activeCount)
 	var failedCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "failed").Count(&failedCount).Error)
-	require.EqualValues(t, 2, failedCount)
+	require.EqualValues(t, 1, failedCount)
 	var debitCount int64
 	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = ?", 2, "debit").Count(&debitCount).Error)
 	require.EqualValues(t, 1, debitCount)
@@ -1149,7 +1184,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.EqualValues(t, 1, allocationCount)
 }
 
-func TestOrderRouteConcurrentBatchesDoNotDeadlockMySQL(t *testing.T) {
+func TestOrderRouteConcurrentBatchesThrottleSameUserWithoutDeadlockMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
@@ -1193,13 +1228,24 @@ func TestOrderRouteConcurrentBatchesDoNotDeadlockMySQL(t *testing.T) {
 	}
 	wg.Wait()
 	close(results)
+	createdBatches := 0
+	throttledBatches := 0
 	for result := range results {
-		require.Equal(t, http.StatusCreated, result.Code, result.Body.String())
+		switch result.Code {
+		case http.StatusCreated:
+			createdBatches++
+		case http.StatusTooManyRequests:
+			throttledBatches++
+		default:
+			require.Failf(t, "unexpected batch response", "status=%d body=%s", result.Code, result.Body.String())
+		}
 	}
+	require.Positive(t, createdBatches)
+	require.Positive(t, throttledBatches)
 
 	var orderCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
-	require.EqualValues(t, 100, orderCount)
+	require.EqualValues(t, createdBatches*25, orderCount)
 }
 
 func TestDeletedAPIKeyIsHiddenAndCannotAuthenticateButKeepsOrderFactsMySQL(t *testing.T) {

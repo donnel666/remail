@@ -160,12 +160,14 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		defer release()
 		if err := module.ProjectHistory.ProcessValidatedMicrosoftHistory(ctx, payload); err != nil {
-			slog.Warn(
-				"validated microsoft history scan task failed",
-				"resource_id", payload.ResourceID,
-				"request_id", payload.RequestID,
-				"error", err,
-			)
+			if !errors.Is(err, platform.ErrBackgroundExecutionDeferred) {
+				slog.Warn(
+					"validated microsoft history scan task failed",
+					"resource_id", payload.ResourceID,
+					"request_id", payload.RequestID,
+					"error", err,
+				)
+			}
 			return err
 		}
 		return nil

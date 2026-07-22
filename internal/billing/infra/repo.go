@@ -157,6 +157,9 @@ func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm
 			return fmt.Errorf("create billing savepoint: %w", err)
 		}
 		if err := fn(ctx, db); err != nil {
+			if isWholeTransactionRollbackError(err) {
+				return err
+			}
 			if rollbackErr := db.RollbackTo(name).Error; rollbackErr != nil {
 				return fmt.Errorf("rollback billing savepoint: %w: %v", err, rollbackErr)
 			}
@@ -1122,4 +1125,9 @@ func isDuplicateKeyError(err error) bool {
 	}
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+func isWholeTransactionRollbackError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
 }

@@ -21,7 +21,7 @@ type OrderBatchItemErrorResponse struct {
 type CreateOrderBatchItemResponse struct {
 	Index  int                          `json:"index"`
 	Status string                       `json:"status"`
-	Order  OrderResponse                `json:"order"`
+	Order  *OrderResponse               `json:"order,omitempty"`
 	Error  *OrderBatchItemErrorResponse `json:"error,omitempty"`
 }
 

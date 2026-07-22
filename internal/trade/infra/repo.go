@@ -86,14 +86,24 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 		return fn(ctx)
 	}
 	var err error
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 2; attempt++ {
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return fn(platform.WithGormTx(ctx, tx))
 		})
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
-		time.Sleep(deadlockBackoff(attempt))
+		platform.RecordMySQLTransactionEvent("trade", mysqlRetryEvent(err))
+		if attempt == 1 {
+			platform.RecordMySQLTransactionEvent("trade", "retry_exhausted")
+			return err
+		}
+		platform.RecordMySQLTransactionEvent("trade", "retry")
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deadlockBackoff(attempt)):
+		}
 	}
 	return err
 }
@@ -1173,6 +1183,14 @@ func isDuplicateKeyError(err error) bool {
 func isDeadlockError(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205)
+}
+
+func mysqlRetryEvent(err error) string {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1205 {
+		return "lock_timeout"
+	}
+	return "deadlock"
 }
 
 func deadlockBackoff(attempt int) time.Duration {

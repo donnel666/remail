@@ -9,6 +9,7 @@ import (
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
@@ -225,7 +226,10 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	switch strings.ToLower(strings.TrimSpace(resource.Status)) {
 	case "identifying", "normal":
 	case "pending", "validating":
-		return domain.ErrInvalidRequest
+		// Validation deliberately creates this durable task before committing
+		// identifying. Retry as a non-failure deferral instead of treating the
+		// expected commit race as an invalid request.
+		return platform.ErrBackgroundExecutionDeferred
 	default:
 		return nil
 	}

@@ -11,19 +11,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/hibiken/asynq"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
 const (
-	asynqWorkerConcurrency           = 768
-	asynqRealtimeWorkerConcurrency   = 256
-	asynqBackgroundWorkerConcurrency = 512
+	asynqWorkerConcurrency           = 8
+	asynqRealtimeWorkerConcurrency   = 16
+	asynqBackgroundWorkerConcurrency = 4
 	asynqShutdownTimeout             = 30 * time.Second
 	backgroundRetryDelayMinimum      = 5 * time.Second
 	backgroundRetryDelayJitter       = 5 * time.Second
@@ -195,12 +196,16 @@ func (p *Platform) Close() {
 }
 
 func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Duration) (*gorm.DB, *sql.DB, error) {
+	formattedDSN, err := mysqlDSN(cfg.DSN)
+	if err != nil {
+		return nil, nil, err
+	}
 	gormCfg := &gorm.Config{
 		Logger:         NewGormLogger(slowSQLThreshold).LogMode(gormlogger.Warn),
 		TranslateError: true, // Map MySQL errors (e.g. 1062 duplicate) to gorm sentinels
 	}
 
-	db, err := gorm.Open(mysql.Open(cfg.DSN), gormCfg)
+	db, err := gorm.Open(gormmysql.Open(formattedDSN), gormCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("gorm open: %w", err)
 	}
@@ -221,6 +226,18 @@ func initMySQL(ctx context.Context, cfg MySQLConfig, slowSQLThreshold time.Durat
 	}
 
 	return db, sqlDB, nil
+}
+
+func mysqlDSN(raw string) (string, error) {
+	dsn, err := mysqldriver.ParseDSN(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse mysql dsn: %w", err)
+	}
+	// The production workload previously prepared almost every parameterized
+	// statement exactly once. Driver-side interpolation removes that extra
+	// round trip without an unbounded prepared-statement cache.
+	dsn.InterpolateParams = true
+	return dsn.FormatDSN(), nil
 }
 
 func initRedis(ctx context.Context, cfg RedisConfig) (*redis.Client, error) {

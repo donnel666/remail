@@ -114,12 +114,16 @@ func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest
 		result, err := item.Result, item.Err
 		if err != nil {
 			platform.RecordBusinessEvent("checkout", checkoutMetricResult(err))
-			if quantity > 1 && result != nil && batchOrderItemError(err) != nil {
-				order := orderResponse(*result)
+			if quantity > 1 {
+				var order *OrderResponse
+				if result != nil {
+					value := orderResponse(*result)
+					order = &value
+				}
 				batchResults = append(batchResults, CreateOrderBatchItemResponse{
 					Index: i, Status: "failed", Order: order, Error: batchOrderItemError(err),
 				})
-				created = created || result.Created
+				created = created || result != nil && result.Created
 				failed = true
 				continue
 			}
@@ -131,7 +135,7 @@ func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest
 		if quantity == 1 {
 			singleResult = &order
 		} else {
-			batchResults = append(batchResults, CreateOrderBatchItemResponse{Index: i, Status: "succeeded", Order: order})
+			batchResults = append(batchResults, CreateOrderBatchItemResponse{Index: i, Status: "succeeded", Order: &order})
 		}
 	}
 	if failed {
@@ -158,8 +162,12 @@ func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
 		return &OrderBatchItemErrorResponse{Code: "insufficient_balance", Message: "Insufficient balance."}
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
+	case errors.Is(err, domain.ErrIdempotencyConflict):
+		return &OrderBatchItemErrorResponse{Code: "idempotency_conflict", Message: "Idempotency-Key conflicts with a different request."}
+	case errors.Is(err, domain.ErrCheckoutTimeBudget):
+		return &OrderBatchItemErrorResponse{Code: "time_budget_exhausted", Message: "Batch time budget was exhausted; retry with the same Idempotency-Key."}
 	default:
-		return nil
+		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order processing stopped temporarily."}
 	}
 }
 
@@ -697,6 +705,12 @@ func writeTradeError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient inventory.", "requestId": requestID})
 	case errors.Is(err, domain.ErrProjectUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Project is not available for ordering.", "requestId": requestID})
+	case errors.Is(err, domain.ErrCheckoutBusy):
+		c.Header("Retry-After", "2")
+		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Another checkout is already queued for this user.", "requestId": requestID})
+	case errors.Is(err, domain.ErrCheckoutOverloaded):
+		c.Header("Retry-After", "2")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Checkout is busy. Retry shortly.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidOrderRequest), errors.Is(err, domain.ErrOrderStateConflict):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Invalid order request.", "requestId": requestID})
 	default:

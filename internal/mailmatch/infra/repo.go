@@ -1197,6 +1197,14 @@ func (r *Repo) UpsertMessages(ctx context.Context, messages []domain.Message) ([
 	for i := range messages {
 		models[i] = messageModelFromDomain(messages[i])
 	}
+	// Keep unique-key locks deterministic across concurrent resource fetches.
+	// Results are rebuilt from message identity below, so input order is kept.
+	sort.SliceStable(models, func(i, j int) bool {
+		if models[i].EmailResourceID != models[j].EmailResourceID {
+			return models[i].EmailResourceID < models[j].EmailResourceID
+		}
+		return models[i].DedupeKey < models[j].DedupeKey
+	})
 	err := r.dbFor(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "email_resource_id"}, {Name: "dedupe_key"}},
 		DoUpdates: clause.Assignments(map[string]any{

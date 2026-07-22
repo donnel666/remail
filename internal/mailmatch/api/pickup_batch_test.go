@@ -22,6 +22,7 @@ import (
 
 func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t, rate.Inf, 1000)
+	require.Less(t, pickupTimeout, 10*time.Second)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize)
 	for i := range items {
 		items[i] = PickupCredentialRequest{
@@ -30,9 +31,11 @@ func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 		}
 	}
 
+	started := time.Now()
 	response := performPickupBatchRequest(router, "192.0.2.10:1234", PickupBatchRequest{Items: items})
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Less(t, time.Since(started), pickupTimeout)
 	var body PickupBatchResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Len(t, body, maxPickupBatchSize)
@@ -42,6 +45,43 @@ func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 		require.Equal(t, "succeeded", body[i].Status)
 		require.NotNil(t, body[i].Data)
 		require.Nil(t, body[i].Error)
+	}
+}
+
+func TestPickupBatchReturnsOneHundredItemBodyWhenRequestBudgetExpires(t *testing.T) {
+	repo, router := newPickupBatchTestRouter(t, rate.Inf, 1000)
+	repo.blockRead = true
+	items := make([]PickupCredentialRequest, 100)
+	for i := range items {
+		items[i] = PickupCredentialRequest{
+			Email: fmt.Sprintf("user-%d@example.com", i),
+			Token: fmt.Sprintf("token-%d", i),
+		}
+	}
+	payload, err := json.Marshal(PickupBatchRequest{Items: items})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/pickup/batch", bytes.NewReader(payload)).WithContext(ctx)
+	req.RemoteAddr = "192.0.2.20:1234"
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	started := time.Now()
+	router.ServeHTTP(response, req)
+
+	require.Less(t, time.Since(started), time.Second)
+	require.Equal(t, http.StatusMultiStatus, response.Code, response.Body.String())
+	require.Equal(t, "1", response.Header().Get("Retry-After"))
+	var body PickupBatchResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Len(t, body, 100)
+	require.Equal(t, int64(1), repo.loadCalls.Load())
+	for i := range body {
+		require.Equal(t, i, body[i].Index)
+		require.Equal(t, "failed", body[i].Status)
+		require.NotNil(t, body[i].Error)
+		require.Equal(t, "service_unavailable", body[i].Error.Code)
 	}
 }
 
@@ -74,6 +114,41 @@ func TestPickupBatchRateLimitsByClientIPBeforeDatabaseWork(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, third.Code, third.Body.String())
 	require.Equal(t, "10", third.Header().Get("Retry-After"))
 	require.Equal(t, int64(2), repo.loadCalls.Load())
+}
+
+func TestPickupBatchRejectsBeforeDatabaseWhenGlobalQueueIsFull(t *testing.T) {
+	repo, router := newPickupBatchTestRouter(t, rate.Inf, 1000)
+	globalPickupOutstanding = make(chan struct{}, 1)
+	globalPickupExecution = make(chan struct{}, 1)
+	globalPickupOutstanding <- struct{}{}
+
+	response := performPickupBatchRequest(router, "192.0.2.21:1234", PickupBatchRequest{Items: []PickupCredentialRequest{
+		{Email: "a@example.com", Token: "token-a"},
+		{Email: "b@example.com", Token: "token-b"},
+	}})
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	require.Equal(t, "1", response.Header().Get("Retry-After"))
+	require.Zero(t, repo.loadCalls.Load())
+}
+
+func TestPickupBatchQueueCancellationReleasesOutstandingPermit(t *testing.T) {
+	oldOutstanding := globalPickupOutstanding
+	oldExecution := globalPickupExecution
+	globalPickupOutstanding = make(chan struct{}, 1)
+	globalPickupExecution = make(chan struct{}, 1)
+	globalPickupExecution <- struct{}{}
+	t.Cleanup(func() {
+		globalPickupOutstanding = oldOutstanding
+		globalPickupExecution = oldExecution
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, admitted := acquirePickup(ctx)
+
+	require.False(t, admitted)
+	require.Empty(t, globalPickupOutstanding)
 }
 
 func TestPickupBatchRejectsOversizedBody(t *testing.T) {
@@ -113,13 +188,27 @@ func TestNormalizePickupClientIPCanonicalizesEquivalentAddresses(t *testing.T) {
 	require.Equal(t, "not-an-ip", normalizePickupClientIP("  not-an-ip  "))
 }
 
+func TestPickupLimiterRejectsNewKeysAtCapacityWithoutGrowing(t *testing.T) {
+	limiter := newPickupLimiter(rate.Inf, 1)
+	limiter.maxKeys = 2
+	require.True(t, limiter.allow("token-a"))
+	require.True(t, limiter.allow("token-b"))
+	require.False(t, limiter.allow("token-c"))
+	require.Len(t, limiter.items, 2)
+}
+
 type pickupBatchRepoStub struct {
 	mailmatchapp.Repository
 	loadCalls atomic.Int64
+	blockRead bool
 }
 
-func (r *pickupBatchRepoStub) ReadPickupBatch(_ context.Context, credentials []mailmatchapp.PickupCredential, _ time.Time, _ int) ([]mailmatchapp.PickupBatchRead, error) {
+func (r *pickupBatchRepoStub) ReadPickupBatch(ctx context.Context, credentials []mailmatchapp.PickupCredential, _ time.Time, _ int) ([]mailmatchapp.PickupBatchRead, error) {
 	r.loadCalls.Add(1)
+	if r.blockRead {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	cooldown := time.Now().Add(time.Minute)
 	reads := make([]mailmatchapp.PickupBatchRead, len(credentials))
 	for i, credential := range credentials {
@@ -163,11 +252,17 @@ func newPickupBatchTestRouter(t *testing.T, ipLimit rate.Limit, ipBurst int) (*p
 	t.Helper()
 	oldListLimiter := globalPickupListLimiter
 	oldIPLimiter := globalPickupBatchIPLimiter
+	oldOutstanding := globalPickupOutstanding
+	oldExecution := globalPickupExecution
 	globalPickupListLimiter = newPickupLimiter(rate.Inf, 1000)
 	globalPickupBatchIPLimiter = newPickupLimiter(ipLimit, ipBurst)
+	globalPickupOutstanding = make(chan struct{}, pickupMaxTotal)
+	globalPickupExecution = make(chan struct{}, pickupMaxActive)
 	t.Cleanup(func() {
 		globalPickupListLimiter = oldListLimiter
 		globalPickupBatchIPLimiter = oldIPLimiter
+		globalPickupOutstanding = oldOutstanding
+		globalPickupExecution = oldExecution
 	})
 
 	repo := &pickupBatchRepoStub{}

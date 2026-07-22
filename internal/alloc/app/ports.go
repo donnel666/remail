@@ -10,7 +10,7 @@ import (
 const (
 	BucketCount                 = 64
 	DotAliasCapacityPerResource = 10
-	InventoryRefreshInterval    = 60 * time.Second
+	InventoryRefreshInterval    = 2 * time.Minute
 	candidateWindowSize         = 4
 	globalCandidateWindow       = 8
 	bucketProbeCount            = 4

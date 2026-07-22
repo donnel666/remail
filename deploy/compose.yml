@@ -6,7 +6,9 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --max-connections=300
+      - --max-connections=120
+      - --innodb-buffer-pool-size=4G
+      - --innodb-lock-wait-timeout=3
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"
@@ -23,7 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    command: ["sh", "-c", "redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
     volumes:
@@ -52,8 +54,8 @@ services:
       SERVER_ADDR: ":8080"
       TRUSTED_PROXIES: "${TRUSTED_PROXIES}"
       MYSQL_DSN: "${MYSQL_DSN}"
-      MYSQL_MAX_OPEN_CONNS: "${MYSQL_MAX_OPEN_CONNS:-200}"
-      MYSQL_MAX_IDLE_CONNS: "${MYSQL_MAX_IDLE_CONNS:-50}"
+      MYSQL_MAX_OPEN_CONNS: "${MYSQL_MAX_OPEN_CONNS:-64}"
+      MYSQL_MAX_IDLE_CONNS: "${MYSQL_MAX_IDLE_CONNS:-16}"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       MINIO_ENDPOINT: minio:9000

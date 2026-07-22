@@ -17,13 +17,12 @@ import (
 )
 
 const (
-	inventoryCacheActivityTTL    = 2 * InventoryRefreshInterval
-	inventoryCacheHardTTL        = 5 * InventoryRefreshInterval
-	inventoryRefreshLockTTL      = 10 * time.Minute
-	inventoryRefreshWaitTimeout  = 10 * time.Second
-	inventoryRefreshWaitInterval = 100 * time.Millisecond
-	// ponytail: fixed batch bounds the DB burst; shard into per-key tasks if 100 keys cannot finish within one interval.
-	inventoryRefreshBatchSize = 100
+	inventoryCacheActivityTTL = 2 * InventoryRefreshInterval
+	inventoryCacheHardTTL     = 15 * time.Minute
+	inventoryRefreshLockTTL   = 10 * time.Minute
+	// ponytail: five cold keys bound each aggregate burst; raise only when the
+	// refresh p99 stays below one interval without affecting checkout/pickup.
+	inventoryRefreshBatchSize = 5
 )
 
 var pinyinMailboxNameParts = [...]string{
@@ -482,19 +481,14 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint, buyerU
 		return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
 	}
 	entry := InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID, BuyerUserID: buyerUserID}
-	return loadInventoryWithLock(
+	return loadCachedInventory(
 		ctx,
 		uc.inventoryCache,
 		entry,
 		func(ctx context.Context) (*InventoryStats, error) {
 			return uc.inventoryCache.GetInventoryStats(ctx, projectID, buyerUserID)
 		},
-		func(ctx context.Context) (*InventoryStats, error) {
-			return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
-		},
-		func(ctx context.Context, stats *InventoryStats) error {
-			return uc.inventoryCache.SetInventoryStats(ctx, projectID, buyerUserID, stats, inventoryCacheHardTTL)
-		},
+		uc.ScheduleInventoryRefresh,
 	)
 }
 
@@ -509,74 +503,36 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 		return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
 	}
 	entry := InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID, BuyerUserID: buyerUserID}
-	return loadInventoryWithLock(
+	return loadCachedInventory(
 		ctx,
 		uc.inventoryCache,
 		entry,
 		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
 			return uc.inventoryCache.GetProductInventoryTotals(ctx, projectID, buyerUserID)
 		},
-		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
-			return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
-		},
-		func(ctx context.Context, totals *ProjectProductInventoryTotals) error {
-			return uc.inventoryCache.SetProductInventoryTotals(ctx, projectID, buyerUserID, totals, inventoryCacheHardTTL)
-		},
+		uc.ScheduleInventoryRefresh,
 	)
 }
 
-func loadInventoryWithLock[T any](
+func loadCachedInventory[T any](
 	ctx context.Context,
 	cache InventoryCache,
 	entry InventoryCacheEntry,
 	load func(context.Context) (*T, error),
-	compute func(context.Context) (*T, error),
-	store func(context.Context, *T) error,
+	schedule func(context.Context) error,
 ) (*T, error) {
 	if cached, err := load(ctx); err != nil || cached != nil {
 		return cached, err
 	}
-	timer := time.NewTimer(inventoryRefreshWaitTimeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(inventoryRefreshWaitInterval)
-	defer ticker.Stop()
-	for {
-		token, acquired, err := cache.AcquireInventoryRefresh(ctx, entry, inventoryRefreshLockTTL)
-		if err != nil {
-			return nil, fmt.Errorf("acquire inventory refresh lock: %w", err)
-		}
-		if acquired {
-			value, loadErr := load(ctx)
-			if loadErr == nil && value == nil {
-				value, loadErr = compute(ctx)
-				if loadErr == nil && value != nil {
-					loadErr = store(ctx, value)
-				} else if loadErr == nil {
-					loadErr = domain.ErrProjectNotAllocatable
-				}
-			}
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			releaseErr := cache.ReleaseInventoryRefresh(cleanupCtx, entry, token)
-			cancel()
-			if loadErr != nil {
-				return value, loadErr
-			}
-			if releaseErr != nil {
-				return nil, fmt.Errorf("release inventory refresh lock: %w", releaseErr)
-			}
-			return value, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timer.C:
-			return nil, domain.ErrInventoryRefreshInProgress
-		case <-ticker.C:
-			if cached, err := load(ctx); err != nil || cached != nil {
-				return cached, err
-			}
+	if err := cache.RequeueInventory(ctx, []InventoryCacheEntry{entry}); err != nil {
+		return nil, fmt.Errorf("queue inventory cache refresh: %w", err)
+	}
+	if schedule != nil {
+		if err := schedule(ctx); err != nil {
+			return nil, fmt.Errorf("schedule inventory cache refresh: %w", err)
 		}
 	}
+	return nil, domain.ErrInventoryRefreshInProgress
 }
 
 func (uc *UseCase) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {

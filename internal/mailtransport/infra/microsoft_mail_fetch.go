@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-sasl"
@@ -168,7 +169,17 @@ func NewMicrosoftMailFetchClient() *MicrosoftMailFetchClient {
 	return &MicrosoftMailFetchClient{timeout: 30 * time.Second}
 }
 
-func (c *MicrosoftMailFetchClient) FetchAll(ctx context.Context, req MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+func (c *MicrosoftMailFetchClient) FetchAll(ctx context.Context, req MicrosoftMailFetchRequest) (result MicrosoftMailFetchResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := "failed"
+		if err == nil && result.Valid {
+			outcome = "succeeded"
+		} else if ctx.Err() != nil {
+			outcome = "canceled"
+		}
+		platform.ObserveExternalService("microsoft", "mail_fetch", outcome, startedAt)
+	}()
 	imapFallback := outlookIMAPClient{}
 	return c.fetchAll(ctx, req, imapFallback)
 }

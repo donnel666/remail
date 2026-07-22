@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"github.com/donnel666/remail/api/middleware"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
@@ -40,8 +42,24 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"message": "Too many requests.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	items, state, err := h.mod.UseCase.ListPickupMail(c.Request.Context(), tokenPlain, email)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), pickupTimeout)
+	defer cancel()
+	queuedAt := time.Now()
+	release, admitted := acquirePickup(ctx)
+	if !admitted {
+		writePickupUnavailable(c)
+		return
+	}
+	defer release()
+	platform.ObserveQueueWait("pickup_single", queuedAt)
+	serviceStarted := time.Now()
+	defer platform.ObserveTaskService("pickup_single", serviceStarted)
+	items, state, err := h.mod.UseCase.ListPickupMail(ctx, tokenPlain, email)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			writePickupUnavailable(c)
+			return
+		}
 		writeMailmatchError(c, err)
 		return
 	}
@@ -89,12 +107,27 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 		credentials = append(credentials, credential)
 		credentialIndexes = append(credentialIndexes, i)
 	}
-	results := h.mod.UseCase.ListPickupMailBatch(c.Request.Context(), credentials)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), pickupTimeout)
+	defer cancel()
+	queuedAt := time.Now()
+	release, admitted := acquirePickup(ctx)
+	if !admitted {
+		writePickupUnavailable(c)
+		return
+	}
+	defer release()
+	platform.ObserveQueueWait("pickup_batch", queuedAt)
+	serviceStarted := time.Now()
+	defer platform.ObserveTaskService("pickup_batch", serviceStarted)
+	results := h.mod.UseCase.ListPickupMailBatch(ctx, credentials)
 	for i := range results {
 		index := credentialIndexes[i]
 		if results[i].Err != nil {
 			resp[index].Status = "failed"
 			resp[index].Error = pickupBatchItemError(results[i].Err)
+			if resp[index].Error.Code == "service_unavailable" {
+				c.Header("Retry-After", "1")
+			}
 			failed = true
 			continue
 		}
@@ -148,19 +181,64 @@ const (
 	maxPickupBatchSize   = 200
 	maxPickupBatchBytes  = 128 << 10
 	maxPickupLimiterKeys = 100000
+	pickupTimeout        = 9 * time.Second
+	pickupMaxActive      = 16
+	pickupMaxTotal       = 32
 )
 
 var (
 	globalPickupListLimiter    = newPickupLimiter(rate.Limit(1), 3)
 	globalPickupDetailLimiter  = newPickupLimiter(rate.Limit(10), 20)
 	globalPickupBatchIPLimiter = newPickupLimiter(rate.Every(10*time.Second), 2)
+	// ponytail: process-local limits match the current single app replica;
+	// move these permits to Redis only when the app is horizontally scaled.
+	globalPickupOutstanding = make(chan struct{}, pickupMaxTotal)
+	globalPickupExecution   = make(chan struct{}, pickupMaxActive)
 )
 
+func acquirePickup(ctx context.Context) (func(), bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	select {
+	case globalPickupOutstanding <- struct{}{}:
+		observePickupState()
+	default:
+		return nil, false
+	}
+	select {
+	case globalPickupExecution <- struct{}{}:
+		observePickupState()
+		return func() {
+			<-globalPickupExecution
+			<-globalPickupOutstanding
+			observePickupState()
+		}, true
+	case <-ctx.Done():
+		<-globalPickupOutstanding
+		observePickupState()
+		return nil, false
+	}
+}
+
+func observePickupState() {
+	active := len(globalPickupExecution)
+	queued := max(len(globalPickupOutstanding)-active, 0)
+	platform.SetWorkloadState("pickup", active, queued, queued)
+}
+
+func writePickupUnavailable(c *gin.Context) {
+	c.Header("Retry-After", "1")
+	c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Mail service is temporarily unavailable.", "requestId": middleware.GetRequestID(c)})
+}
+
 type pickupLimiter struct {
-	mu    sync.Mutex
-	items map[string]*pickupLimiterEntry
-	limit rate.Limit
-	burst int
+	mu         sync.Mutex
+	items      map[string]*pickupLimiterEntry
+	limit      rate.Limit
+	burst      int
+	maxKeys    int
+	lastPruned time.Time
 }
 
 type pickupLimiterEntry struct {
@@ -170,9 +248,10 @@ type pickupLimiterEntry struct {
 
 func newPickupLimiter(limit rate.Limit, burst int) *pickupLimiter {
 	return &pickupLimiter{
-		items: make(map[string]*pickupLimiterEntry),
-		limit: limit,
-		burst: burst,
+		items:   make(map[string]*pickupLimiterEntry),
+		limit:   limit,
+		burst:   burst,
+		maxKeys: maxPickupLimiterKeys,
 	}
 }
 
@@ -183,15 +262,20 @@ func (l *pickupLimiter) allow(token string) bool {
 	}
 	now := time.Now()
 	l.mu.Lock()
+	if len(l.items) >= l.maxKeys && (l.lastPruned.IsZero() || now.Sub(l.lastPruned) >= time.Minute) {
+		l.pruneLocked(now)
+		l.lastPruned = now
+	}
 	entry := l.items[key]
 	if entry == nil {
+		if len(l.items) >= l.maxKeys {
+			l.mu.Unlock()
+			return false
+		}
 		entry = &pickupLimiterEntry{limiter: rate.NewLimiter(l.limit, l.burst)}
 		l.items[key] = entry
 	}
 	entry.lastSeen = now
-	if len(l.items) > maxPickupLimiterKeys {
-		l.pruneLocked(now)
-	}
 	limiter := entry.limiter
 	l.mu.Unlock()
 	return limiter.Allow()
@@ -238,7 +322,8 @@ func pickupBatchItemError(err error) *PickupBatchItemErrorResponse {
 		return &PickupBatchItemErrorResponse{Code: "credential_invalid", Message: "Credential is invalid or expired."}
 	case errors.Is(err, domain.ErrOrderUnavailable):
 		return &PickupBatchItemErrorResponse{Code: "order_unavailable", Message: "Order is not available for mail reading."}
-	case errors.Is(err, domain.ErrFetchQueueUnavailable), errors.Is(err, domain.ErrMailServiceUnavailable):
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded),
+		errors.Is(err, domain.ErrFetchQueueUnavailable), errors.Is(err, domain.ErrMailServiceUnavailable):
 		return &PickupBatchItemErrorResponse{Code: "service_unavailable", Message: "Mail service is temporarily unavailable."}
 	default:
 		return &PickupBatchItemErrorResponse{Code: "internal_error", Message: "An unexpected error occurred."}
