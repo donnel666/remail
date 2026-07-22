@@ -6,11 +6,11 @@ import (
 	"github.com/donnel666/remail/internal/iam/domain"
 )
 
-// Domains blocked from self-registration (exact match on the host after @).
-var blockedRegistrationDomains = map[string]struct{}{
+// Domains allowed for self-registration (exact match on the host after @).
+var allowedRegistrationDomains = map[string]struct{}{
 	"qq.com":         {},
 	"foxmail.com":    {},
-	"google.com":     {},
+	"gmail.com":      {},
 	"proton.me":      {},
 	"protonmail.com": {},
 	"pm.me":          {},
@@ -23,14 +23,14 @@ func normalizeEmail(email string) string {
 
 // validateRegistrationEmail enforces self-registration address rules:
 // local part must be ASCII letters/digits only (no punctuation), and the
-// domain must not be on the blocked free-mail list.
+// domain must be on the supported free-mail list.
 func validateRegistrationEmail(email string) error {
 	normalized := normalizeEmail(email)
 	at := strings.LastIndex(normalized, "@")
 	if at <= 0 || at == len(normalized)-1 {
 		return domain.ErrRegistrationEmailLocalInvalid
 	}
-	local, host := normalized[:at], strings.TrimSuffix(normalized[at+1:], ".")
+	local, host := normalized[:at], normalized[at+1:]
 	if local == "" || host == "" || strings.Contains(host, " ") {
 		return domain.ErrRegistrationEmailLocalInvalid
 	}
@@ -41,7 +41,7 @@ func validateRegistrationEmail(email string) error {
 			return domain.ErrRegistrationEmailLocalInvalid
 		}
 	}
-	if _, blocked := blockedRegistrationDomains[host]; blocked {
+	if _, allowed := allowedRegistrationDomains[host]; !allowed {
 		return domain.ErrRegistrationEmailDomainBlocked
 	}
 	return nil

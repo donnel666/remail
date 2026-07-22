@@ -32,7 +32,7 @@ function renderField(send: Send) {
   const onError = vi.fn();
   render(
     <SendCodeField
-      email="user@test.com"
+      email="user@qq.com"
       code=""
       onCodeChange={vi.fn()}
       send={send}

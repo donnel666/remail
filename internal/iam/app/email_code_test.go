@@ -118,11 +118,11 @@ func TestEmailCodeUseCaseSendThrottlesWithinCooldown(t *testing.T) {
 	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender)
 
-	require.NoError(t, uc.Send(context.Background(), "User@Test.COM"))
+	require.NoError(t, uc.Send(context.Background(), "User@QQ.COM"))
 
 	// A second send during the cooldown is rejected, not silently dropped, and
 	// carries the remaining cooldown for the Retry-After header.
-	err := uc.Send(context.Background(), "user@test.com")
+	err := uc.Send(context.Background(), "user@qq.com")
 	require.ErrorIs(t, err, domain.ErrEmailCodeThrottled)
 	var throttled *domain.EmailCodeThrottledError
 	require.True(t, errors.As(err, &throttled))
@@ -135,18 +135,18 @@ func TestEmailCodeUseCaseResendsSameCodeAfterCooldown(t *testing.T) {
 	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender)
 
-	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
-	first, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, uc.Send(context.Background(), "user@qq.com"))
+	first, err := store.Get(context.Background(), emailCodeKey("user@qq.com"))
 	require.NoError(t, err)
 	require.NotEmpty(t, first)
 
 	// Simulate cooldown expiry (the stub ignores TTLs).
-	delete(store.cooldowns, emailCodeKey("user@test.com"))
+	delete(store.cooldowns, emailCodeKey("user@qq.com"))
 
-	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
+	require.NoError(t, uc.Send(context.Background(), "user@qq.com"))
 	require.Equal(t, 2, sender.callCount())
 
-	second, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	second, err := store.Get(context.Background(), emailCodeKey("user@qq.com"))
 	require.NoError(t, err)
 	require.Equal(t, first, second) // the still-valid code is re-delivered
 }
@@ -156,32 +156,32 @@ func TestEmailCodeUseCaseSendDeletesCodeWhenDeliveryFails(t *testing.T) {
 	sender := &mailDeliveryStub{err: maildomain.ErrDeliveryUnavailable}
 	uc := NewEmailCodeUseCase(store, sender)
 
-	err := uc.Send(context.Background(), "user@test.com")
+	err := uc.Send(context.Background(), "user@qq.com")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, maildomain.ErrDeliveryUnavailable))
 
-	code, getErr := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	code, getErr := store.Get(context.Background(), emailCodeKey("user@qq.com"))
 	require.NoError(t, getErr)
 	require.Empty(t, code)
 
 	// The cooldown is released so the user can retry immediately after a failure.
-	require.False(t, store.cooldowns[emailCodeKey("user@test.com")])
+	require.False(t, store.cooldowns[emailCodeKey("user@qq.com")])
 }
 
 func TestEmailCodeUseCaseFailedResendKeepsExistingCode(t *testing.T) {
 	store := newEmailCodeStoreStub()
 	sender := &mailDeliveryStub{}
 	uc := NewEmailCodeUseCase(store, sender)
-	require.NoError(t, uc.Send(context.Background(), "user@test.com"))
-	code, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	require.NoError(t, uc.Send(context.Background(), "user@qq.com"))
+	code, err := store.Get(context.Background(), emailCodeKey("user@qq.com"))
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 
-	delete(store.cooldowns, emailCodeKey("user@test.com"))
+	delete(store.cooldowns, emailCodeKey("user@qq.com"))
 	sender.err = maildomain.ErrDeliveryUnavailable
-	require.Error(t, uc.Send(context.Background(), "user@test.com"))
+	require.Error(t, uc.Send(context.Background(), "user@qq.com"))
 
-	stored, err := store.Get(context.Background(), emailCodeKey("user@test.com"))
+	stored, err := store.Get(context.Background(), emailCodeKey("user@qq.com"))
 	require.NoError(t, err)
 	require.Equal(t, code, stored)
 }

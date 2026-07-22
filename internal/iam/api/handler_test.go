@@ -1363,7 +1363,7 @@ func TestTurnstileActionsAreBoundToProtectedEndpoints(t *testing.T) {
 		path string
 		body string
 	}{
-		{"/v1/email/code", `{"email":"register@test.com","turnstileToken":"valid-turnstile"}`},
+		{"/v1/email/code", `{"email":"register@qq.com","turnstileToken":"valid-turnstile"}`},
 		{"/v1/password/reset/request", `{"email":"reset@test.com","turnstileToken":"valid-turnstile"}`},
 		{"/v1/login", `{"email":"login@test.com","password":"wrong","turnstileToken":"valid-turnstile"}`},
 	}
@@ -1385,7 +1385,7 @@ func TestPostEmailCode_ReturnsNoContent(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
+	body := `{"email":"user@qq.com","turnstileToken":"valid-turnstile"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1400,7 +1400,7 @@ func TestPostEmailCode_ThrottlesResendWithRetryAfter(t *testing.T) {
 	r := setupTestRouterWithHandler(h)
 
 	send := func() *httptest.ResponseRecorder {
-		body := `{"email":"user@test.com","turnstileToken":"valid-turnstile"}`
+		body := `{"email":"user@qq.com","turnstileToken":"valid-turnstile"}`
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/email/code", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1434,7 +1434,7 @@ func TestPostRegister_RequiresEmailCode(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	body := `{"email":"user@test.com","password":"User123!"}`
+	body := `{"email":"user@qq.com","password":"User123!"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1447,10 +1447,10 @@ func TestPostRegister_WithEmailCodeCreatesUserAndConsumesCode(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	code := requestEmailCode(t, h, r, "User@Test.COM", "1234")
+	code := requestEmailCode(t, h, r, "User@QQ.COM", "1234")
 	body := fmt.Sprintf(
 		`{"email":%q,"password":"User123!","nickname":" User ","code":%q}`,
-		"USER@Test.COM",
+		"USER@QQ.COM",
 		code,
 	)
 	w := httptest.NewRecorder()
@@ -1459,10 +1459,10 @@ func TestPostRegister_WithEmailCodeCreatesUserAndConsumesCode(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Code)
-	require.Contains(t, w.Body.String(), `"email":"user@test.com"`)
+	require.Contains(t, w.Body.String(), `"email":"user@qq.com"`)
 	require.Equal(t, 0, h.module.EmailCodeStore.(*mockEmailCodeStore).codeCount())
 
-	user, err := testRepo(h).FindByEmail(context.Background(), "user@test.com")
+	user, err := testRepo(h).FindByEmail(context.Background(), "user@qq.com")
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	require.Equal(t, "User", user.Nickname)
@@ -1472,8 +1472,8 @@ func TestPostRegister_WrongEmailCodeReturnsVerificationError(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
 
-	_ = requestEmailCode(t, h, r, "user@test.com", "1234")
-	body := `{"email":"user@test.com","password":"User123!","code":"000000"}`
+	_ = requestEmailCode(t, h, r, "user@qq.com", "1234")
+	body := `{"email":"user@qq.com","password":"User123!","code":"000000"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1486,9 +1486,9 @@ func TestPostRegister_WrongEmailCodeReturnsVerificationError(t *testing.T) {
 func TestPostRegister_ExistingEmailWithWrongEmailCodeReturnsVerificationError(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
-	seedUser(t, h, "user@test.com")
+	seedUser(t, h, "user@qq.com")
 
-	body := `{"email":"user@test.com","password":"User123!","code":"000000"}`
+	body := `{"email":"user@qq.com","password":"User123!","code":"000000"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1502,11 +1502,11 @@ func TestPostRegister_ExistingEmailWithWrongEmailCodeReturnsVerificationError(t 
 func TestPostRegister_ExistingEmailWithValidEmailCodeDoesNotRevealCode(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
-	seedUser(t, h, "user@test.com")
+	seedUser(t, h, "user@qq.com")
 
-	code := requestEmailCode(t, h, r, "user@test.com", "1234")
+	code := requestEmailCode(t, h, r, "user@qq.com", "1234")
 	register := func(submittedCode string) *httptest.ResponseRecorder {
-		body := fmt.Sprintf(`{"email":"user@test.com","password":"User123!","code":%q}`, submittedCode)
+		body := fmt.Sprintf(`{"email":"user@qq.com","password":"User123!","code":%q}`, submittedCode)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1522,7 +1522,7 @@ func TestPostRegister_ExistingEmailWithValidEmailCodeDoesNotRevealCode(t *testin
 	require.NotContains(t, correct.Body.String(), "Email already exists")
 	require.Equal(t, code, h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode())
 
-	body := fmt.Sprintf(`{"email":"user@test.com","newPassword":"Reset123!","code":%q}`, code)
+	body := fmt.Sprintf(`{"email":"user@qq.com","newPassword":"Reset123!","code":%q}`, code)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/password/reset", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1533,11 +1533,11 @@ func TestPostRegister_ExistingEmailWithValidEmailCodeDoesNotRevealCode(t *testin
 func TestPostRegister_RestoreFailureReturnsServerError(t *testing.T) {
 	h := newTestHandler()
 	r := setupTestRouterWithHandler(h)
-	seedUser(t, h, "user@test.com")
+	seedUser(t, h, "user@qq.com")
 
-	code := requestEmailCode(t, h, r, "user@test.com", "1234")
+	code := requestEmailCode(t, h, r, "user@qq.com", "1234")
 	h.module.EmailCodeStore.(*mockEmailCodeStore).restoreErr = errors.New("redis restore failed")
-	body := fmt.Sprintf(`{"email":"user@test.com","password":"User123!","code":%q}`, code)
+	body := fmt.Sprintf(`{"email":"user@qq.com","password":"User123!","code":%q}`, code)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2764,7 +2764,7 @@ func TestIAMAbuseLimiterReturnsRetryAfter(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 	require.Equal(t, "42", w.Header().Get("Retry-After"))
 
-	body = `{"email":"user@test.com","password":"User123!","code":"123456"}`
+	body = `{"email":"user@qq.com","password":"User123!","code":"123456"}`
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2786,10 +2786,10 @@ func TestPostRegisterAbuseLimiterCountsCodeFailuresAndClearsOnSuccess(t *testing
 	limiter := &fakeAbuseLimiter{}
 	h.module.AbuseLimiter = limiter
 	r := setupTestRouterWithHandler(h)
-	code := requestEmailCode(t, h, r, "new@test.com", "1234")
+	code := requestEmailCode(t, h, r, "new@qq.com", "1234")
 
 	register := func(code string) *httptest.ResponseRecorder {
-		body := fmt.Sprintf(`{"email":"new@test.com","password":"User123!","code":%q}`, code)
+		body := fmt.Sprintf(`{"email":"new@qq.com","password":"User123!","code":%q}`, code)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/users", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
