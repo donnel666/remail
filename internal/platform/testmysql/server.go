@@ -95,6 +95,10 @@ func (s *Server) ensureTemplate(migrationsDir string) error {
 			s.templateErr = err
 			return
 		}
+		if err := execSQL(adminDB, "GRANT PROCESS ON *.* TO 'remail'@'%'"); err != nil {
+			s.templateErr = err
+			return
+		}
 
 		dsn := testDSN(s.host, s.port, s.templateName)
 		sqlDB, err := sql.Open("mysql", dsn)
