@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ type appendFenceRepoStub struct {
 	nextID      uint
 	appended    int
 	projected   int
+	replayTypes []domain.ResourceType
 }
 
 func (r *appendFenceRepoStub) AppendMessages(_ context.Context, messages []domain.Message) ([]domain.Message, int, error) {
@@ -55,13 +57,17 @@ func (r *appendFenceRepoStub) AppendMessages(_ context.Context, messages []domai
 	return stored, inserted, nil
 }
 
-func (r *appendFenceRepoStub) ListUnprojectedMessages(_ context.Context, resourceIDs []uint, limit int) ([]domain.Message, error) {
+func (r *appendFenceRepoStub) ListUnprojectedMessages(_ context.Context, resourceType domain.ResourceType, resourceIDs []uint, limit int) ([]domain.Message, error) {
+	r.replayTypes = append(r.replayTypes, resourceType)
 	resources := make(map[uint]struct{}, len(resourceIDs))
 	for _, resourceID := range resourceIDs {
 		resources[resourceID] = struct{}{}
 	}
 	result := make([]domain.Message, 0)
 	for _, fact := range r.facts {
+		if fact.ResourceType != resourceType {
+			continue
+		}
 		if _, requested := resources[fact.EmailResourceID]; !requested {
 			continue
 		}
@@ -130,11 +136,15 @@ type matchResultStub struct {
 type pickupBatchRepoStub struct {
 	Repository
 	scopes          map[string]OrderScope
+	matchingScopes  []OrderScope
 	messages        map[uint][]domain.Message
+	delivery        *OrderDelivery
 	state           *domain.FetchState
 	stateReads      int
 	fetchRequestErr error
 	fetchRequests   int
+	upsertErr       error
+	upserts         int
 }
 
 func (r *pickupBatchRepoStub) LoadPickupScope(_ context.Context, token string, email string) (*OrderScope, error) {
@@ -146,7 +156,11 @@ func (r *pickupBatchRepoStub) LoadPickupScope(_ context.Context, token string, e
 }
 
 func (r *pickupBatchRepoStub) FindOrderDelivery(context.Context, uint) (*OrderDelivery, error) {
-	return nil, nil
+	return r.delivery, nil
+}
+
+func (r *pickupBatchRepoStub) ListMatchingScopesByRecipient(context.Context, domain.ResourceType, uint, string, time.Time) ([]OrderScope, error) {
+	return r.matchingScopes, nil
 }
 
 func (r *pickupBatchRepoStub) FindFetchStateForUpdate(context.Context, uint) (*domain.FetchState, error) {
@@ -165,6 +179,17 @@ func (r *pickupBatchRepoStub) LoadOrderScopeForServiceToken(_ context.Context, o
 
 func (r *pickupBatchRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
+}
+
+func (r *pickupBatchRepoStub) UpsertMessages(_ context.Context, messages []domain.Message) ([]domain.Message, error) {
+	r.upserts++
+	if r.upsertErr != nil {
+		return nil, r.upsertErr
+	}
+	for i := range messages {
+		messages[i].ID = uint(i + 1)
+	}
+	return messages, nil
 }
 
 func (r *pickupBatchRepoStub) EnsureFetchStates(context.Context, []uint) error {
@@ -221,15 +246,48 @@ func TestAppendOnlyIngestDoesNotProjectBeforeSecondFence(t *testing.T) {
 
 	// A later provider response may no longer contain the first message. The
 	// append-only fact must still be replayed from MySQL and made visible.
-	_, matched, _, err := uc.ingestFetchedMessagesForResourcesWithFence(context.Background(), nil, []uint{1}, func(context.Context) error {
+	_, matched, _, err := uc.ingestFetchedMessagesForResourcesWithFence(context.Background(), nil, domain.ResourceTypeMicrosoft, []uint{1}, func(context.Context) error {
 		fenceCalls++
 		return nil
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, matched)
 	require.Equal(t, 1, repo.projected)
+	require.Equal(t, []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoft}, repo.replayTypes)
 	require.NotNil(t, repo.purchaseDelivery)
 	require.Equal(t, "123456", repo.purchaseDelivery.VerificationCode)
+}
+
+func TestPickupMessageCacheMatchesExplicitAliasOnLaterRequest(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{
+		scopes: []OrderScope{{
+			OrderID: 43, OrderNo: "OR_ALIAS_CACHE", EmailResourceID: 100,
+			AllocationType: domain.ResourceTypeMicrosoft,
+			Recipient:      "alias@outlook.com", RecipientKind: "exact",
+			ServiceMode: "purchase", OrderStatus: "active", LooseMatch: true,
+			Rules: []MailRule{
+				{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+			},
+		}},
+	}}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{{
+		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+		Recipient: "alias@outlook.com", Recipients: []string{"alias@outlook.com"},
+		Sender: "sender@example.net", Subject: "Cached code",
+		Body: "Your code is 654321", ReceivedAt: now,
+	}}}
+	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+	uc.SetPickupMessageCachePort(cache)
+
+	result := uc.applyPickupMessageCache(context.Background(), 100, repo.scopes)
+
+	require.True(t, result.satisfied)
+	require.True(t, result.applied)
+	require.NotNil(t, repo.purchaseDelivery)
+	require.Equal(t, "654321", repo.purchaseDelivery.VerificationCode)
+	require.Equal(t, "alias@outlook.com", repo.purchaseDelivery.Recipient)
 }
 
 func TestAppendOnlyIngestCountsOnlyNewFactsAndMatches(t *testing.T) {
@@ -261,7 +319,25 @@ func TestAppendOnlyIngestCountsOnlyNewFactsAndMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, stored)
 	require.Zero(t, matched)
-	require.Len(t, matches.results, 1)
+	require.Len(t, matches.results, 2, "the idempotent Trade notification must be replayed after its first post-commit attempt could have failed")
+}
+
+func TestMergePickupMessagesKeepsNewestThirty(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	messages := make([]FetchedMessage, 35)
+	for i := range messages {
+		messages[i] = FetchedMessage{
+			EmailResourceID: 1, ResourceType: domain.ResourceTypeMicrosoft,
+			ProviderMessageID: fmt.Sprintf("message-%02d", i),
+			Protocol:          "graph", Folder: "Inbox", ReceivedAt: now.Add(time.Duration(i) * time.Second),
+		}
+	}
+
+	merged := mergePickupMessages(messages[:20], messages[20:])
+
+	require.Len(t, merged, pickupMessageCacheLimit)
+	require.Equal(t, "message-34", merged[0].ProviderMessageID)
+	require.Equal(t, "message-05", merged[len(merged)-1].ProviderMessageID)
 }
 
 func TestListPickupMailBatchPreservesRequestOrderAndContinuesAfterFailure(t *testing.T) {
@@ -323,6 +399,146 @@ func TestListPickupMailReturnsEmptyWhenFetchSchedulingFails(t *testing.T) {
 	require.Zero(t, released)
 }
 
+func TestListPickupMailReturnsEmptyAndSchedulesRefreshWhenCacheDoesNotMatch(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	repo := &pickupBatchRepoStub{
+		scopes: map[string]OrderScope{
+			"token-a|alias@example.com": {
+				OrderID: 1, OrderNo: "ORDER-ALIAS", ProjectID: 1,
+				ServiceMode: "purchase", OrderStatus: "active",
+				AllocationType: domain.ResourceTypeMicrosoft,
+				AllocationID:   1, EmailResourceID: 100, Recipient: "alias@example.com",
+			},
+		},
+	}
+	queue := &pickupBatchQueueStub{}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{}}
+	uc := NewUseCase(repo, queue, nil, nil)
+	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
+
+	items, _, err := uc.ListPickupMail(context.Background(), "token-a", "alias@example.com")
+
+	require.NoError(t, err)
+	require.Empty(t, items)
+	require.Equal(t, 1, cache.loads)
+	require.Len(t, queue.snapshot(), 1)
+}
+
+func TestListPickupMailSchedulesMicrosoftWhenCachedMatchingFails(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	scope := OrderScope{
+		OrderID: 1, OrderNo: "ORDER-ALIAS", ProjectID: 1,
+		ServiceMode: "purchase", OrderStatus: "active", LooseMatch: true,
+		AllocationType: domain.ResourceTypeMicrosoft,
+		AllocationID:   1, EmailResourceID: 100, Recipient: "alias@outlook.com",
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}
+	repo := &pickupBatchRepoStub{
+		scopes:         map[string]OrderScope{"token-a|alias@outlook.com": scope},
+		matchingScopes: []OrderScope{scope},
+		upsertErr:      errors.New("forced cached matching failure"),
+	}
+	queue := &pickupBatchQueueStub{}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{{
+		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+		Recipient: "alias@outlook.com", Sender: "sender@example.net",
+		Body: "Your code is 654321", ReceivedAt: now,
+	}}}
+	uc := NewUseCase(repo, queue, nil, nil)
+	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
+
+	items, _, err := uc.ListPickupMail(context.Background(), "token-a", "alias@outlook.com")
+
+	require.NoError(t, err)
+	require.Empty(t, items)
+	require.Equal(t, 1, repo.upserts)
+	require.Len(t, queue.snapshot(), 1)
+}
+
+func TestListPickupMailWithDeliveryStillUsesMatchingCachedMessages(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	scope := OrderScope{
+		OrderID: 1, OrderNo: "ORDER-ALIAS", ProjectID: 1,
+		ServiceMode: "purchase", OrderStatus: "active", LooseMatch: true,
+		AllocationType: domain.ResourceTypeMicrosoft,
+		AllocationID:   1, EmailResourceID: 100, Recipient: "alias@outlook.com",
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}
+	repo := &pickupBatchRepoStub{
+		scopes:   map[string]OrderScope{"token-a|alias@outlook.com": scope},
+		delivery: &OrderDelivery{Message: &domain.Message{ID: 1, ReceivedAt: now}},
+		messages: map[uint][]domain.Message{1: {{ID: 1, ReceivedAt: now}}},
+	}
+	queue := &pickupBatchQueueStub{}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{{
+		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+		Recipient: "alias@outlook.com", Sender: "sender@example.net",
+		Body: "cached", ReceivedAt: now,
+	}}}
+	uc := NewUseCase(repo, queue, nil, nil)
+	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
+
+	items, _, err := uc.ListPickupMail(context.Background(), "token-a", "alias@outlook.com")
+
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, 1, cache.loads)
+	require.Equal(t, 1, repo.upserts)
+	require.Empty(t, queue.snapshot())
+}
+
+func TestApplyPickupMessageCachesIncludesPurchaseScopesWithDelivery(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	scope := OrderScope{
+		OrderID: 1, OrderNo: "ORDER-ALIAS", ServiceMode: "purchase", OrderStatus: "active", LooseMatch: true,
+		AllocationType: domain.ResourceTypeMicrosoft, EmailResourceID: 100, Recipient: "alias@outlook.com",
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}
+	repo := &pickupBatchRepoStub{}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{{
+		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+		Recipient: "alias@outlook.com", Sender: "sender@example.net", ReceivedAt: now,
+	}}}
+	uc := NewUseCase(repo, nil, nil, nil)
+	uc.SetPickupMessageCachePort(cache)
+
+	hits, applied := uc.applyPickupMessageCaches(context.Background(), []PickupBatchRead{{
+		Scope: &scope, Delivery: &OrderDelivery{Message: &domain.Message{ID: 1, ReceivedAt: now}},
+	}})
+
+	require.True(t, hits[100])
+	require.True(t, applied)
+	require.Equal(t, 1, repo.upserts)
+}
+
+func TestApplyPickupMessageCachesLoadsEachResourceOnceOnMiss(t *testing.T) {
+	cache := &pickupMessageCacheStub{}
+	uc := NewUseCase(nil, nil, nil, nil)
+	uc.SetPickupMessageCachePort(cache)
+	reads := []PickupBatchRead{
+		{Scope: &OrderScope{AllocationType: domain.ResourceTypeMicrosoft, EmailResourceID: 100}},
+		{Scope: &OrderScope{AllocationType: domain.ResourceTypeMicrosoft, EmailResourceID: 100}},
+	}
+
+	hits, applied := uc.applyPickupMessageCaches(context.Background(), reads)
+
+	require.Empty(t, hits)
+	require.False(t, applied)
+	require.Equal(t, 1, cache.loads)
+}
+
 type pickupBatchReaderStub struct {
 	Repository
 	reads         []PickupBatchRead
@@ -379,6 +595,40 @@ type pickupBatchQueueStub struct {
 	mu       sync.Mutex
 	requests []PickupRequestFetchTask
 	fetchErr error
+}
+
+type pickupMessageCacheStub struct {
+	messages      []FetchedMessage
+	found         bool
+	loads         int
+	stores        int
+	storeID       uint
+	storeMessages []FetchedMessage
+	storeTTL      time.Duration
+}
+
+func (c *pickupMessageCacheStub) Load(context.Context, uint) ([]FetchedMessage, bool, error) {
+	c.loads++
+	return c.messages, c.found, nil
+}
+
+func (c *pickupMessageCacheStub) LoadMany(_ context.Context, resourceIDs []uint) (map[uint][]FetchedMessage, error) {
+	c.loads++
+	result := make(map[uint][]FetchedMessage, len(resourceIDs))
+	if c.found {
+		for _, resourceID := range resourceIDs {
+			result[resourceID] = c.messages
+		}
+	}
+	return result, nil
+}
+
+func (c *pickupMessageCacheStub) Store(_ context.Context, resourceID uint, messages []FetchedMessage, ttl time.Duration) error {
+	c.stores++
+	c.storeID = resourceID
+	c.storeMessages = append([]FetchedMessage(nil), messages...)
+	c.storeTTL = ttl
+	return nil
 }
 
 func (q *pickupBatchQueueStub) EnqueuePickupRequest(_ context.Context, task PickupRequestFetchTask) (bool, error) {

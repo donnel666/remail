@@ -10,7 +10,7 @@ import (
 const (
 	BucketCount                 = 64
 	DotAliasCapacityPerResource = 10
-	InventoryRefreshInterval    = 2 * time.Minute
+	InventoryRefreshInterval    = 10 * time.Minute
 	candidateWindowSize         = 4
 	globalCandidateWindow       = 8
 	bucketProbeCount            = 4
@@ -104,6 +104,14 @@ type ProjectProductInventoryTotals struct {
 	Items          []ProductInventoryTotal
 }
 
+type ProductInventoryAvailabilityRequest struct {
+	ProjectID   uint
+	ProductID   uint
+	BuyerUserID uint
+	EmailSuffix string
+	PublicOnly  bool
+}
+
 type InventoryCacheKind string
 
 const (
@@ -124,6 +132,8 @@ type InventoryCache interface {
 	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error)
 	SetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	RefreshProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
+	IsProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
+	MarkProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	ClaimActiveInventory(ctx context.Context, since time.Time, limit int) ([]InventoryCacheEntry, error)
 	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error

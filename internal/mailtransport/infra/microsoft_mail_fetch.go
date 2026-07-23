@@ -54,17 +54,19 @@ type MicrosoftMailFetchClient struct {
 }
 
 type MicrosoftMailFetchRequest struct {
-	EmailAddress   string
-	ClientID       string
-	RefreshToken   string
-	AccessToken    string
-	ProxyURL       string
-	SinceAt        time.Time
-	UntilAt        time.Time
-	MaxMessages    int
-	StopAfterLimit bool
-	OnMessages     func([]MicrosoftFetchedMessage)
-	OnReset        func()
+	EmailAddress    string
+	ClientID        string
+	RefreshToken    string
+	AccessToken     string
+	ProxyURL        string
+	SinceAt         time.Time
+	UntilAt         time.Time
+	MaxMessages     int
+	StopAfterLimit  bool
+	KnownMessageIDs []string
+	MetadataOnly    bool
+	OnMessages      func([]MicrosoftFetchedMessage)
+	OnReset         func()
 }
 
 type MicrosoftMailFetchResult struct {
@@ -201,6 +203,9 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 	}
 	graphResult, graphErr := c.fetchGraphAll(ctx, req)
 	if graphErr == nil && graphResult.Valid {
+		if len(req.KnownMessageIDs) > 0 {
+			applyMicrosoftMessageBoundary(&graphResult, req.KnownMessageIDs, req.MaxMessages)
+		}
 		return graphResult, nil
 	}
 	graphIdentityMismatched := strings.EqualFold(strings.TrimSpace(graphResult.Category), microsoftIdentityMismatch)
@@ -229,6 +234,9 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 				imapResult.GraphSafeError = graphSafeError
 				if imapRefreshToken != "" {
 					imapResult.RefreshToken = imapRefreshToken
+				}
+				if len(req.KnownMessageIDs) > 0 {
+					applyMicrosoftMessageBoundary(&imapResult, req.KnownMessageIDs, req.MaxMessages)
 				}
 				return imapResult, nil
 			}
@@ -349,6 +357,27 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	if c != nil && c.graphFolderFetch != nil {
 		fetchFolder = c.graphFolderFetch
 	}
+	if req.StopAfterLimit && req.MaxMessages > 0 && len(req.KnownMessageIDs) > 0 {
+		headRequest := req
+		headRequest.MaxMessages = 1
+		headRequest.MetadataOnly = true
+		headRequest.OnMessages = nil
+		heads := make([]MicrosoftFetchedMessage, 0, len(defaultMicrosoftMailFolders))
+		for _, folder := range defaultMicrosoftMailFolders {
+			head, err := fetchFolder(ctx, session, accessToken, folder, headRequest)
+			if err != nil {
+				category, message, proxyFailure := classifyMicrosoftGraphFailure(err)
+				failure := microsoftMailFetchFailure(category, message, proxyFailure)
+				failure.RefreshToken = refreshToken
+				return failure, nil
+			}
+			heads = append(heads, head.Messages...)
+		}
+		heads = newestMicrosoftMessages(heads, 1)
+		if len(heads) == 0 || microsoftMessageIdentityKnown(heads[0], req.KnownMessageIDs) {
+			return result, nil
+		}
+	}
 	for _, folder := range defaultMicrosoftMailFolders {
 		folderRequest := req
 		folderResult, err := fetchFolder(ctx, session, accessToken, folder, folderRequest)
@@ -368,6 +397,9 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	if req.OnMessages == nil {
 		result.Messages = newestMicrosoftMessages(result.Messages, req.MaxMessages)
 		result.MessageCount = len(result.Messages)
+	}
+	if req.StopAfterLimit && len(req.KnownMessageIDs) > 0 {
+		applyMicrosoftMessageBoundary(&result, req.KnownMessageIDs, req.MaxMessages)
 	}
 	if req.StopAfterLimit && streamMessages != nil && len(result.Messages) > 0 {
 		streamMessages(result.Messages)
@@ -504,7 +536,11 @@ func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRe
 	}
 	values.Set("$top", strconv.Itoa(top))
 	values.Set("$orderby", "receivedDateTime desc")
-	values.Set("$select", "id,internetMessageId,subject,bodyPreview,body,from,toRecipients,receivedDateTime,hasAttachments")
+	selectFields := "id,internetMessageId,subject,bodyPreview,body,from,toRecipients,receivedDateTime,hasAttachments"
+	if req.MetadataOnly {
+		selectFields = "id,internetMessageId,receivedDateTime"
+	}
+	values.Set("$select", selectFields)
 	filter := microsoftGraphReceivedFilter(req.SinceAt, req.UntilAt)
 	if filter != "" {
 		values.Set("$filter", filter)
@@ -581,8 +617,20 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		RefreshToken: req.RefreshToken,
 		FolderCounts: map[string]int{},
 	}
+	folders := imapCandidateFolders(client)
+	if req.StopAfterLimit && req.MaxMessages > 0 && len(req.KnownMessageIDs) > 0 {
+		heads, complete, err := fetchLatestIMAPFolderHeads(operationCtx, client, folders)
+		if err != nil {
+			return microsoftMailFetchFailure("request", "Microsoft mailbox history could not be read completely.", false), err
+		}
+		newest := newestMicrosoftMessages(heads, 1)
+		if complete && (len(newest) == 0 || microsoftMessageIdentityKnown(newest[0], req.KnownMessageIDs)) {
+			_ = client.Logout().Wait()
+			return result, nil
+		}
+	}
 	completedFolders := map[string]bool{}
-	for _, folder := range imapCandidateFolders(client) {
+	for _, folder := range folders {
 		folderLimit := req.MaxMessages
 		if completedFolders[folder.Label] {
 			continue
@@ -654,11 +702,56 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		result.Messages = newestMicrosoftMessages(result.Messages, req.MaxMessages)
 		result.MessageCount = len(result.Messages)
 	}
+	if req.StopAfterLimit && len(req.KnownMessageIDs) > 0 {
+		applyMicrosoftMessageBoundary(&result, req.KnownMessageIDs, req.MaxMessages)
+	}
 	if req.StopAfterLimit && streamMessages != nil && len(result.Messages) > 0 {
 		streamMessages(result.Messages)
 		result.Messages = nil
 	}
 	return result, nil
+}
+
+func fetchLatestIMAPFolderHeads(
+	ctx context.Context,
+	client *imapclient.Client,
+	folders []MicrosoftMailFolder,
+) ([]MicrosoftFetchedMessage, bool, error) {
+	heads := make([]MicrosoftFetchedMessage, 0, 2)
+	completed := map[string]bool{}
+	for _, folder := range folders {
+		if completed[folder.Label] {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		selected, err := client.Select(folder.ID, &imap.SelectOptions{ReadOnly: true}).Wait()
+		if err != nil {
+			continue
+		}
+		completed[folder.Label] = true
+		if selected.NumMessages == 0 {
+			continue
+		}
+		seqSet, err := recentIMAPSeqSet(ctx, client, selected.NumMessages, time.Time{}, 1)
+		if err != nil || len(seqSet) == 0 {
+			return nil, false, err
+		}
+		command := client.Fetch(seqSet, &imap.FetchOptions{Envelope: true, InternalDate: true, UID: true})
+		for data := command.Next(); data != nil; data = command.Next() {
+			row, collectErr := data.Collect()
+			if collectErr != nil {
+				_ = command.Close()
+				return nil, false, collectErr
+			}
+			heads = append(heads, normalizeIMAPFetchedMessage(row, folder, nil, false))
+		}
+		if err := command.Close(); err != nil {
+			return nil, false, err
+		}
+	}
+	return heads, requiredMicrosoftMailFoldersCompleted(completed), nil
 }
 
 func requiredMicrosoftMailFoldersCompleted(completed map[string]bool) bool {
@@ -1178,6 +1271,57 @@ func newestMicrosoftMessages(messages []MicrosoftFetchedMessage, limit int) []Mi
 		return messages[i].ReceivedAt.After(messages[j].ReceivedAt)
 	})
 	return limitMicrosoftMessages(messages, limit)
+}
+
+func applyMicrosoftMessageBoundary(result *MicrosoftMailFetchResult, knownMessageIDs []string, limit int) {
+	if result == nil {
+		return
+	}
+	messages := newestMicrosoftMessages(result.Messages, 0)
+	if len(knownMessageIDs) > 0 {
+		for index := range messages {
+			if microsoftMessageIdentityKnown(messages[index], knownMessageIDs) {
+				messages = messages[:index]
+				break
+			}
+		}
+	}
+	result.Messages = limitMicrosoftMessages(messages, limit)
+	result.MessageCount = len(result.Messages)
+}
+
+func microsoftMessageIdentityKnown(message MicrosoftFetchedMessage, knownMessageIDs []string) bool {
+	known := make(map[string]struct{}, len(knownMessageIDs))
+	for _, value := range knownMessageIDs {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			known[value] = struct{}{}
+		}
+	}
+	for _, key := range microsoftMessageIdentityKeys(message) {
+		if _, exists := known[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func microsoftMessageIdentityKeys(message MicrosoftFetchedMessage) []string {
+	keys := make([]string, 0, 2)
+	messageID := strings.ToLower(strings.Trim(strings.TrimSpace(message.InternetMessageID), "<>"))
+	if messageID != "" {
+		keys = append(keys, "internet:"+messageID)
+	}
+	providerID := strings.ToLower(strings.TrimSpace(message.ID))
+	if providerID != "" {
+		keys = append(keys, strings.Join([]string{
+			"provider",
+			strings.ToLower(strings.TrimSpace(message.Protocol)),
+			strings.ToLower(strings.TrimSpace(message.FolderLabel)),
+			providerID,
+		}, ":"))
+	}
+	return keys
 }
 
 func bodyPreview(value string) string {

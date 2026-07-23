@@ -29,7 +29,7 @@ func (uncertainAdminAliasCreator) PrepareMicrosoftAliasBinding(_ context.Context
 	return mailapp.MicrosoftAliasBindingPreparationResult{BindingAddress: request.BindingAddress}, nil
 }
 
-func (uncertainAdminAliasCreator) GenerateMicrosoftAliasCandidates(int) ([]string, error) {
+func (uncertainAdminAliasCreator) GenerateMicrosoftAliasCandidates(int, string) ([]string, error) {
 	return []string{"uncertain-admin-task@outlook.com"}, nil
 }
 

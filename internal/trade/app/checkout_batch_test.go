@@ -74,6 +74,41 @@ func (r *batchRepoSpy) LockOrderForUpdate(_ context.Context, orderNo string) (*d
 	return nil, domain.ErrOrderNotFound
 }
 
+func (r *batchRepoSpy) LoadOrCreatePendingOrder(_ context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.orders[cmd.IdempotencyKey]; ok {
+		existingCopy := existing
+		return &existingCopy, false, nil
+	}
+	order := domain.Order{
+		ID: uint(len(r.orders) + 1), OrderNo: cmd.OrderNo, UserID: cmd.UserID,
+		ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
+		ProductType: cmd.ProductType, ServiceMode: cmd.ServiceMode, SupplyPolicy: cmd.SupplyPolicy,
+		Status: domain.OrderStatusPendingPayment, PayAmount: cmd.PayAmount,
+		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
+		WarrantyMinutes: cmd.WarrantyMinutes, ClientChannel: cmd.ClientChannel,
+		APIKeyID: cmd.APIKeyID, IdempotencyKey: cmd.IdempotencyKey,
+	}
+	r.orders[cmd.IdempotencyKey] = order
+	return &order, true, nil
+}
+
+func (r *batchRepoSpy) MarkFailed(_ context.Context, cmd MarkFailedCommand) (*domain.Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, order := range r.orders {
+		if order.OrderNo != cmd.OrderNo {
+			continue
+		}
+		order.Status = domain.OrderStatusFailed
+		order.FailureCode = cmd.FailureCode
+		r.orders[key] = order
+		return &order, nil
+	}
+	return nil, domain.ErrOrderNotFound
+}
+
 type batchWalletSpy struct {
 	WalletPort
 	mu    sync.Mutex
@@ -213,6 +248,32 @@ func (s checkoutAllocationErrorSpy) Allocate(context.Context, AllocationCommand)
 	return nil, s.err
 }
 
+type checkoutInventorySpy struct {
+	AllocationPort
+	available       bool
+	err             error
+	checks          int
+	allocationCalls int
+	marks           int
+	marked          InventoryAvailabilityCommand
+}
+
+func (s *checkoutInventorySpy) MarkInventoryUnavailable(_ context.Context, cmd InventoryAvailabilityCommand) (bool, error) {
+	s.marks++
+	s.marked = cmd
+	return true, nil
+}
+
+func (s *checkoutInventorySpy) HasAvailableInventory(context.Context, InventoryAvailabilityCommand) (bool, error) {
+	s.checks++
+	return s.available, s.err
+}
+
+func (s *checkoutInventorySpy) Allocate(context.Context, AllocationCommand) (*AllocationResult, error) {
+	s.allocationCalls++
+	return nil, domain.ErrInsufficientInventory
+}
+
 func batchOrder(key string, status domain.OrderStatus, failure domain.OrderFailureCode) domain.Order {
 	return domain.Order{
 		ID: 1, OrderNo: "order-" + key, UserID: 7, ProjectID: 8, ProjectProductID: 9,
@@ -242,6 +303,95 @@ func TestPaidCheckoutStopsImmediatelyOnAllocationWriteError(t *testing.T) {
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	inventory := &checkoutInventorySpy{}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+
+	result, err := uc.Checkout(context.Background(), batchRequest("zero-inventory", 1))
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+	require.Equal(t, 1, inventory.checks)
+	require.Zero(t, inventory.allocationCalls)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutBatchChecksSharedZeroInventoryOnceAndReturnsEveryItem(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	inventory := &checkoutInventorySpy{}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+	requests := make([]CheckoutRequest, 100)
+	for i := range requests {
+		requests[i] = batchRequest(fmt.Sprintf("zero-inventory-%03d", i), len(requests))
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+		require.True(t, item.attempted)
+	}
+	require.Equal(t, 1, inventory.checks)
+	require.Zero(t, inventory.allocationCalls)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutInventoryPrecheckFailsOpenAndSkipsIdempotentReplay(t *testing.T) {
+	wantErr := errors.New("inventory cache unavailable")
+	inventory := &checkoutInventorySpy{err: wantErr}
+	uc := &UseCase{allocation: inventory}
+	prepared := []checkoutPreparation{
+		{
+			request: CheckoutRequest{UserID: 7}, policy: domain.SupplyPolicyPublicOnly,
+			quote: &OrderingQuote{ProjectID: 8, ProductID: 9}, emailSuffix: "outlook.com",
+		},
+		{
+			request: CheckoutRequest{UserID: 7}, existing: &domain.Order{ID: 1},
+			quote: &OrderingQuote{ProjectID: 8, ProductID: 9},
+		},
+	}
+
+	uc.precheckCheckoutInventory(context.Background(), prepared)
+
+	require.NoError(t, prepared[0].prepareErr)
+	require.NoError(t, prepared[1].prepareErr)
+	require.Equal(t, 1, inventory.checks)
+}
+
+func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	inventory := &checkoutInventorySpy{available: true}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+	requests := make([]CheckoutRequest, 100)
+	for i := range requests {
+		requests[i] = batchRequest(fmt.Sprintf("stale-inventory-%03d", i), len(requests))
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+		require.True(t, item.attempted)
+	}
+	require.Equal(t, 1, inventory.checks)
+	require.Equal(t, 1, inventory.allocationCalls)
+	require.Equal(t, 1, inventory.marks)
+	require.Equal(t, uint(8), inventory.marked.ProjectID)
+	require.Equal(t, uint(9), inventory.marked.ProductID)
+	require.Equal(t, 1, repo.topTx)
+	require.Equal(t, 1, wallet.locks)
 }
 
 func TestCheckoutBatchUsesIndependentItemTransactionsAndKeepsPartialSuccess(t *testing.T) {

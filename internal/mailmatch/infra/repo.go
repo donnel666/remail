@@ -173,7 +173,11 @@ func (r *Repo) LoadPickupScope(ctx context.Context, token string, email string) 
 	if row.OrderNo == "" {
 		return nil, domain.ErrPickupCredentialInvalid
 	}
-	return row.toScope(nil), nil
+	rules, err := r.loadMailRules(ctx, row.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return row.toScope(rules), nil
 }
 
 func (r *Repo) ReadPickupBatch(
@@ -220,12 +224,26 @@ func (r *Repo) ReadPickupBatch(
 			return fmt.Errorf("load pickup batch scopes: %w", err)
 		}
 
+		projectIDs := make([]uint, 0, len(scopeRows))
+		seenProjects := make(map[uint]struct{}, len(scopeRows))
+		for _, row := range scopeRows {
+			if _, exists := seenProjects[row.ProjectID]; exists {
+				continue
+			}
+			seenProjects[row.ProjectID] = struct{}{}
+			projectIDs = append(projectIDs, row.ProjectID)
+		}
+		rulesByProject, err := r.loadMailRulesByProjects(txCtx, projectIDs)
+		if err != nil {
+			return err
+		}
+
 		scopesByToken := make(map[string]app.OrderScope, len(scopeRows))
 		rowsByToken := make(map[string]orderScopeRow, len(scopeRows))
 		orderIDs := make([]uint, 0, len(scopeRows))
 		seenOrders := make(map[uint]struct{}, len(scopeRows))
 		for _, row := range scopeRows {
-			scope := *row.toScope(nil)
+			scope := *row.toScope(rulesByProject[row.ProjectID])
 			scopesByToken[row.TokenPlain] = scope
 			rowsByToken[row.TokenPlain] = row
 		}
@@ -681,23 +699,40 @@ func (r orderScopeRow) toScope(rules []app.MailRule) *app.OrderScope {
 }
 
 func (r *Repo) loadMailRules(ctx context.Context, projectID uint) ([]app.MailRule, error) {
+	rules, err := r.loadMailRulesByProjects(ctx, []uint{projectID})
+	if err != nil {
+		return nil, err
+	}
+	return rules[projectID], nil
+}
+
+func (r *Repo) loadMailRulesByProjects(ctx context.Context, projectIDs []uint) (map[uint][]app.MailRule, error) {
 	var rows []struct {
-		RuleType string
-		Pattern  string
-		Enabled  bool
+		ProjectID uint
+		RuleType  string
+		Pattern   string
+		Enabled   bool
+	}
+	result := make(map[uint][]app.MailRule, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return result, nil
+	}
+	for _, projectID := range projectIDs {
+		result[projectID] = nil
 	}
 	if err := r.dbFor(ctx).Table("project_mail_rules").
-		Select("rule_type, pattern, enabled").
-		Where("project_id = ? AND enabled = 1", projectID).
-		Order("id ASC").
+		Select("project_id, rule_type, pattern, enabled").
+		Where("project_id IN ? AND enabled = 1", projectIDs).
+		Order("project_id ASC, id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load project mail rules: %w", err)
 	}
-	rules := make([]app.MailRule, len(rows))
-	for i := range rows {
-		rules[i] = app.MailRule{Type: app.MailRuleType(rows[i].RuleType), Pattern: rows[i].Pattern, Enabled: rows[i].Enabled}
+	for _, row := range rows {
+		result[row.ProjectID] = append(result[row.ProjectID], app.MailRule{
+			Type: app.MailRuleType(row.RuleType), Pattern: row.Pattern, Enabled: row.Enabled,
+		})
 	}
-	return rules, nil
+	return result, nil
 }
 
 func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limit int) ([]domain.Message, error) {

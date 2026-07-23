@@ -435,6 +435,18 @@ func TestGeneratedMailboxVariantsUseHumanNamesAndUpToSixDigits(t *testing.T) {
 	}
 }
 
+func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
+	want := []string{
+		"m.s.1000@example.com",
+		"m.s1.000@example.com",
+		"m.s10.00@example.com",
+		"m.s100.0@example.com",
+	}
+	if got := dotAliasVariants("m.s1000@example.com"); !slices.Equal(got, want) {
+		t.Fatalf("dotAliasVariants() = %v, want %v", got, want)
+	}
+}
+
 func TestDomainAllocationTriesAnotherAddressAfterDisabledMailbox(t *testing.T) {
 	repo := &generatedMailboxRetryRepo{candidate: DomainCandidate{
 		ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10,

@@ -125,6 +125,105 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	require.Equal(t, 2, repo.productCalls)
 }
 
+func TestCachedInventoryPrecheckAndAllocatorZeroCorrection(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	repo := &inventoryCacheRepoStub{totals: allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 12,
+		Items: []allocapp.ProductInventoryTotal{{
+			ProductID: 20, TotalAvailable: 12, PublicAvailable: 3,
+			Suffixes: []allocapp.ProductInventorySuffixTotal{
+				{Suffix: "outlook.com", TotalAvailable: 7, PublicAvailable: 0},
+				{Suffix: "hotmail.com", TotalAvailable: 5, PublicAvailable: 3},
+			},
+		}},
+	}}
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+
+	totals := &allocapp.ProjectProductInventoryTotals{
+		ProjectID:      10,
+		TotalAvailable: 12,
+		Items: []allocapp.ProductInventoryTotal{{
+			ProductID: 20, TotalAvailable: 12, PublicAvailable: 9,
+			Suffixes: []allocapp.ProductInventorySuffixTotal{
+				{Suffix: "outlook.com", TotalAvailable: 7, PublicAvailable: 6},
+				{Suffix: "hotmail.com", TotalAvailable: 5, PublicAvailable: 3},
+			},
+		}},
+	}
+	require.NoError(t, cache.SetProductInventoryTotals(context.Background(), 10, 7, totals, 24*time.Hour))
+
+	available, err := useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
+	})
+	require.NoError(t, err)
+	require.True(t, available)
+
+	server.FastForward(time.Hour)
+	ttlBefore := server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10, 7))
+	marked, err := useCase.MarkProductInventoryUnavailable(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7, EmailSuffix: "outlook.com", PublicOnly: true,
+	})
+	require.NoError(t, err)
+	require.True(t, marked)
+	require.Equal(t, ttlBefore, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10, 7)))
+
+	available, err = useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7, EmailSuffix: "outlook.com", PublicOnly: true,
+	})
+	require.NoError(t, err)
+	require.False(t, available)
+	available, err = useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7, EmailSuffix: "outlook.com",
+	})
+	require.NoError(t, err)
+	require.True(t, available, "public-only exhaustion must not hide buyer-owned inventory")
+
+	repo.totals.TotalAvailable = 5
+	repo.totals.Items[0].TotalAvailable = 5
+	repo.totals.Items[0].Suffixes[0].TotalAvailable = 0
+	marked, err = useCase.MarkProductInventoryUnavailable(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7, EmailSuffix: "outlook.com",
+	})
+	require.NoError(t, err)
+	require.True(t, marked)
+	updated, err := cache.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, updated.TotalAvailable)
+	require.EqualValues(t, 5, updated.Items[0].TotalAvailable)
+	require.EqualValues(t, 3, updated.Items[0].PublicAvailable)
+	require.Zero(t, updated.Items[0].Suffixes[0].TotalAvailable)
+	require.Zero(t, updated.Items[0].Suffixes[0].PublicAvailable)
+
+	// A background calculation that started before allocator exhaustion must not
+	// overwrite the immediate zero correction while its 10-minute marker lives.
+	require.NoError(t, cache.RefreshProductInventoryTotals(context.Background(), 10, 7, totals, 24*time.Hour))
+	updated, err = cache.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.Zero(t, updated.Items[0].Suffixes[0].TotalAvailable)
+	server.FastForward(allocapp.InventoryRefreshInterval + time.Second)
+	updated, err = cache.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, updated.Items[0].Suffixes[0].TotalAvailable)
+}
+
+func TestCachedInventoryPrecheckFailsOpenOnColdCache(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	useCase := allocapp.NewUseCase(&inventoryCacheRepoStub{})
+	useCase.SetInventoryCache(NewInventoryCache(client))
+
+	available, err := useCase.HasProductInventory(context.Background(), allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, BuyerUserID: 7,
+	})
+	require.NoError(t, err)
+	require.True(t, available)
+}
+
 func TestInventoryCacheRewarmUpdatesOldActiveMarker(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
@@ -145,6 +244,28 @@ func TestInventoryCacheRewarmUpdatesOldActiveMarker(t *testing.T) {
 	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-2*time.Minute), 10)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 10, BuyerUserID: 7}}, claimed)
+}
+
+func TestInventoryCacheV2DoesNotServeOldInventorySemantics(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	oldKey := "alloc:inventory:products:10:7"
+	require.NoError(t, server.Set(oldKey, `{"ProjectID":10,"TotalAvailable":8678,"Items":[]}`))
+	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheActiveKey, redis.Z{
+		Score: float64(time.Now().UnixMilli()), Member: oldKey,
+	}).Err())
+
+	totals, err := cache.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.Nil(t, totals)
+	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-time.Minute), 10)
+	require.NoError(t, err)
+	require.Empty(t, claimed)
+	active, err := client.ZCard(context.Background(), inventoryCacheActiveKey).Result()
+	require.NoError(t, err)
+	require.Zero(t, active)
 }
 
 func TestInventoryCacheChecksAccessBeforeReturningCachedProducts(t *testing.T) {

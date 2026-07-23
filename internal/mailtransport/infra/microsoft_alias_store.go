@@ -1482,7 +1482,7 @@ func normalizeAliasRows(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if !strings.HasSuffix(value, "@outlook.com") || strings.Count(value, "@") != 1 {
+		if strings.Count(value, "@") != 1 || !coredomain.IsMicrosoftEmailDomain(value) {
 			continue
 		}
 		if _, ok := seen[value]; ok {

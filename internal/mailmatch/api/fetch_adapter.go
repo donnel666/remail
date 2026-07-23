@@ -16,7 +16,7 @@ import (
 
 const (
 	maxFetchProxyAttempts           = 2
-	realtimeMicrosoftMessageMaximum = 6
+	realtimeMicrosoftMessageMaximum = 30
 )
 
 type microsoftMessageFetchClient interface {
@@ -87,16 +87,17 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			proxyID = proxyConfig.ID
 		}
 		result, err := a.client.FetchAll(ctx, mailinfra.MicrosoftMailFetchRequest{
-			EmailAddress:   req.Scope.MicrosoftEmail,
-			ClientID:       req.Scope.MicrosoftClientID,
-			RefreshToken:   req.Scope.MicrosoftRT,
-			ProxyURL:       proxyURL,
-			SinceAt:        sinceAt,
-			UntilAt:        untilAt,
-			MaxMessages:    maxMessages,
-			StopAfterLimit: stopAfterLimit,
-			OnMessages:     onMessages,
-			OnReset:        req.OnReset,
+			EmailAddress:    req.Scope.MicrosoftEmail,
+			ClientID:        req.Scope.MicrosoftClientID,
+			RefreshToken:    req.Scope.MicrosoftRT,
+			ProxyURL:        proxyURL,
+			SinceAt:         sinceAt,
+			UntilAt:         untilAt,
+			MaxMessages:     maxMessages,
+			StopAfterLimit:  stopAfterLimit,
+			KnownMessageIDs: req.KnownMessageIDs,
+			OnMessages:      onMessages,
+			OnReset:         req.OnReset,
 		})
 		if rotated := strings.TrimSpace(result.RefreshToken); rotated != "" {
 			// A mailbox operation can fail after Microsoft has already rotated the
@@ -213,10 +214,6 @@ func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mail
 		}
 		recipients := recipientCandidates(message.To)
 		primaryRecipient := firstNonEmpty(recipients...)
-		if primaryRecipient == "" && strings.TrimSpace(message.To) == "" {
-			primaryRecipient = strings.ToLower(strings.TrimSpace(scope.Recipient))
-			recipients = []string{primaryRecipient}
-		}
 		items = append(items, mailmatchapp.FetchedMessage{
 			EmailResourceID:   scope.EmailResourceID,
 			ResourceType:      domain.ResourceTypeMicrosoft,
@@ -225,8 +222,8 @@ func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mail
 			Sender:            strings.TrimSpace(message.From),
 			Subject:           strings.TrimSpace(message.Subject),
 			Body:              body,
-			RawSource:         strings.TrimSpace(message.RawSource),
-			ProviderPayload:   strings.TrimSpace(message.ProviderPayload),
+			RawSource:         message.RawSource,
+			ProviderPayload:   message.ProviderPayload,
 			BodyPreview:       strings.TrimSpace(message.Preview),
 			MessageIDHeader:   strings.TrimSpace(message.InternetMessageID),
 			ProviderMessageID: strings.TrimSpace(message.ID),

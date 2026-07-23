@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -615,6 +616,187 @@ func TestProxyRepoAcquireSystemDoesNotBindMySQL(t *testing.T) {
 	require.Equal(t, int64(0), bindingCount)
 }
 
+func TestProxyRepoAcquireTouchesProxyAfterSelectionTransactionMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	resource := &domain.Proxy{
+		Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19181", ExpireAt: now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.181", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	system := &domain.Proxy{
+		Pool: domain.ProxyPoolSystem, URL: "http://127.0.0.1:19182", ExpireAt: now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.182", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	require.NoError(t, repo.Create(context.Background(), resource))
+	require.NoError(t, repo.Create(context.Background(), system))
+
+	const callback = "test:observe_proxy_touch_transaction"
+	inTransactions := make(chan int, 2)
+	require.NoError(t, db.Callback().Update().After("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if !isProxyLastUsedTouch(tx) {
+			return
+		}
+		var inTransaction int
+		if err := tx.Statement.ConnPool.QueryRowContext(tx.Statement.Context, `
+SELECT COUNT(*)
+FROM information_schema.innodb_trx
+WHERE trx_mysql_thread_id = CONNECTION_ID()`).Scan(&inTransaction); err != nil {
+			_ = tx.AddError(err)
+			return
+		}
+		inTransactions <- inTransaction
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callback)) })
+
+	selected, err := repo.AcquireResourceProxy(context.Background(), "post-commit@example.com", domain.ProxyIPv4, now, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, resource.ID, selected.ID)
+	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now)
+	require.NoError(t, err)
+	require.Equal(t, system.ID, selected.ID)
+
+	for range 2 {
+		select {
+		case inTransaction := <-inTransactions:
+			require.Zero(t, inTransaction)
+		case <-time.After(2 * time.Second):
+			t.Fatal("proxy fairness touch callback was not observed")
+		}
+	}
+	var touched int64
+	require.NoError(t, db.Model(&ProxyModel{}).
+		Where("id IN ? AND last_used_at IS NOT NULL", []uint{resource.ID, system.ID}).
+		Count(&touched).Error)
+	require.EqualValues(t, 2, touched)
+}
+
+func TestProxyRepoAcquireCommitsBindingWhenFairnessTouchFailsMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	resource := &domain.Proxy{
+		Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19281", ExpireAt: now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.28", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	system := &domain.Proxy{
+		Pool: domain.ProxyPoolSystem, URL: "http://127.0.0.1:19282", ExpireAt: now.Add(time.Hour),
+		IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.29", Country: "US", Status: domain.ProxyStatusNormal,
+	}
+	require.NoError(t, repo.Create(context.Background(), resource))
+	require.NoError(t, repo.Create(context.Background(), system))
+
+	forcedTouchFailure := errors.New("forced fairness touch failure")
+	const callback = "test:fail_proxy_fairness_touch"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if isProxyLastUsedTouch(tx) {
+			_ = tx.AddError(forcedTouchFailure)
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callback)) })
+
+	selected, err := repo.AcquireResourceProxy(context.Background(), "durable-binding@example.com", domain.ProxyIPv4, now, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, resource.ID, selected.ID)
+	selected, err = repo.AcquireSystemProxy(context.Background(), domain.ProxyIPv4, now)
+	require.NoError(t, err)
+	require.Equal(t, system.ID, selected.ID)
+
+	var binding ProxyBindingModel
+	require.NoError(t, db.First(&binding, "bind_key = ?", "durable-binding@example.com").Error)
+	require.Equal(t, resource.ID, binding.ProxyID)
+	var touched int64
+	require.NoError(t, db.Model(&ProxyModel{}).
+		Where("id IN ? AND last_used_at IS NOT NULL", []uint{resource.ID, system.ID}).
+		Count(&touched).Error)
+	require.Zero(t, touched)
+}
+
+func TestProxyRepoConcurrentResourceSelectionAndPostCommitTouchDoNotDeadlockMySQL(t *testing.T) {
+	db := newProxyMySQLTestDB(t)
+	repo := NewProxyRepo(db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	proxies := []*domain.Proxy{
+		{
+			Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19381", ExpireAt: now.Add(time.Hour),
+			IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.193", Country: "US", Status: domain.ProxyStatusNormal,
+		},
+		{
+			Pool: domain.ProxyPoolResource, URL: "http://127.0.0.1:19382", ExpireAt: now.Add(time.Hour),
+			IPVersion: domain.ProxyIPv4, OutboundIP: "198.51.100.194", Country: "US", Status: domain.ProxyStatusNormal,
+		},
+	}
+	for _, proxy := range proxies {
+		require.NoError(t, repo.Create(context.Background(), proxy))
+	}
+	keys := []string{"deadlock-one@example.com", "deadlock-two@example.com"}
+	for _, key := range keys {
+		require.NoError(t, db.Create(&ProxyBindingModel{
+			BindKey: key, ProxyID: proxies[0].ID, IPVersion: string(domain.ProxyIPv4),
+			ExpireAt: now.Add(-time.Minute), LastUsedAt: ptrTime(now.Add(-time.Hour)),
+		}).Error)
+	}
+
+	const callback = "test:align_proxy_fairness_touches"
+	var barrierMu sync.Mutex
+	barrierArrivals := 0
+	barrierRelease := make(chan struct{})
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if !isProxyLastUsedTouch(tx) {
+			return
+		}
+		barrierMu.Lock()
+		barrierArrivals++
+		if barrierArrivals == len(keys) {
+			close(barrierRelease)
+		}
+		barrierMu.Unlock()
+		select {
+		case <-barrierRelease:
+		case <-tx.Statement.Context.Done():
+			_ = tx.AddError(tx.Statement.Context.Err())
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove(callback)) })
+
+	deadlocksBefore := proxyInnoDBMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := proxyInnoDBMetricCount(t, db, "lock_timeouts")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	selectedIDs := make(chan uint, len(keys))
+	errs := make(chan error, len(keys))
+	var wg sync.WaitGroup
+	for _, key := range keys {
+		key := key
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			selected, err := repo.AcquireResourceProxy(ctx, key, domain.ProxyIPv4, now, time.Hour)
+			if err != nil {
+				errs <- err
+				return
+			}
+			selectedIDs <- selected.ID
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(selectedIDs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	selectedSet := make(map[uint]struct{}, len(keys))
+	for id := range selectedIDs {
+		selectedSet[id] = struct{}{}
+	}
+	require.Len(t, selectedSet, len(keys))
+	require.Equal(t, deadlocksBefore, proxyInnoDBMetricCount(t, db, "lock_deadlocks"))
+	require.Equal(t, timeoutsBefore, proxyInnoDBMetricCount(t, db, "lock_timeouts"))
+}
+
 func TestProxyRepoAcquirePrefersLowerErrorCountMySQL(t *testing.T) {
 	db := newProxyMySQLTestDB(t)
 	repo := NewProxyRepo(db)
@@ -887,6 +1069,35 @@ func ptrBool(value bool) *bool {
 
 func ptrTime(value time.Time) *time.Time {
 	return &value
+}
+
+func isProxyLastUsedTouch(tx *gorm.DB) bool {
+	if tx == nil || tx.Statement == nil {
+		return false
+	}
+	table := tx.Statement.Table
+	if table == "" && tx.Statement.Schema != nil {
+		table = tx.Statement.Schema.Table
+	}
+	if table != (ProxyModel{}).TableName() {
+		return false
+	}
+	updates, ok := tx.Statement.Dest.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = updates["last_used_at"]
+	return ok
+}
+
+func proxyInnoDBMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
+	t.Helper()
+	var count uint64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT FROM information_schema.innodb_metrics WHERE NAME = ?",
+		name,
+	).Scan(&count).Error)
+	return count
 }
 
 func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName string) {

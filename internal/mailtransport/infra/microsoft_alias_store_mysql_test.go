@@ -864,6 +864,10 @@ func TestMicrosoftAliasStoreAssignsFixedSuperAdminOwnerMySQL(t *testing.T) {
 		Status:     mailapp.MicrosoftAliasAttemptRunning,
 		QuotaAt:    now,
 	}
+	require.NoError(t, db.Create(&MicrosoftExplicitAliasModel{
+		ResourceID: 1010, OwnerUserID: 1, Email: attempt.Candidate, Status: "disabled",
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}).Error)
 	require.NoError(t, db.Create(attempt).Error)
 	store := NewMicrosoftAliasStore(db)
 	require.NoError(t, store.Complete(context.Background(), 1010, claimToken, []mailapp.MicrosoftAliasAttemptOutcome{{
@@ -876,6 +880,7 @@ func TestMicrosoftAliasStoreAssignsFixedSuperAdminOwnerMySQL(t *testing.T) {
 	var alias MicrosoftExplicitAliasModel
 	require.NoError(t, db.Where("resource_id = ?", 1010).First(&alias).Error)
 	assert.Equal(t, uint(1), alias.OwnerUserID)
+	assert.Equal(t, "disabled", alias.Status, "remote confirmation must not override an operational disable")
 }
 
 func TestMicrosoftAliasStoreBackfillsOnlyToFixedSuperAdminOwnerMySQL(t *testing.T) {
@@ -886,7 +891,7 @@ func TestMicrosoftAliasStoreBackfillsOnlyToFixedSuperAdminOwnerMySQL(t *testing.
 	).Error)
 	existingCreatedAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Create(&MicrosoftExplicitAliasModel{
-		ResourceID: 1012, OwnerUserID: 1, Email: "existing@outlook.com", Status: "normal",
+		ResourceID: 1012, OwnerUserID: 1, Email: "existing@outlook.com", Status: "disabled",
 		CreatedAt: existingCreatedAt, UpdatedAt: existingCreatedAt,
 	}).Error)
 	store := NewMicrosoftAliasStore(db)
@@ -899,6 +904,7 @@ func TestMicrosoftAliasStoreBackfillsOnlyToFixedSuperAdminOwnerMySQL(t *testing.
 	require.NoError(t, db.Where("resource_id = ?", 1012).Order("email ASC").Find(&aliases).Error)
 	require.Len(t, aliases, 2)
 	assert.Equal(t, uint(1), aliases[0].OwnerUserID)
+	assert.Equal(t, "disabled", aliases[0].Status, "list backfill must not reactivate an operational disable")
 	assert.Equal(t, existingCreatedAt, aliases[0].CreatedAt.UTC(), "conflict repair must preserve quota history")
 	assert.Equal(t, uint(1), aliases[1].OwnerUserID)
 	assert.Equal(t, time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), aliases[1].CreatedAt.UTC())

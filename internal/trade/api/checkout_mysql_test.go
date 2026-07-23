@@ -535,7 +535,7 @@ func TestCheckoutOwnedDomainStockCreatesZeroDebitMySQL(t *testing.T) {
 	require.Equal(t, "owned", supplyScope)
 }
 
-func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
+func TestCheckoutAllocatorExhaustionWithoutCacheCreatesNoDebitMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "microsoft")
 	creditBuyer(t, db, 2, "10.00")
@@ -564,23 +564,12 @@ func TestCheckoutAllocationFailureDoesNotDebitMySQL(t *testing.T) {
 	})
 	require.ErrorIs(t, replayErr, tradedomain.ErrInsufficientInventory)
 
-	var order struct {
-		OrderNo      string
-		Status       string
-		FailureCode  string
-		DebitTxID    *uint
-		RefundTxID   *uint
-		RefundAmount string
-	}
-	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-refund").Take(&order).Error)
-	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
-	require.Equal(t, string(tradedomain.OrderFailureInsufficientInventory), order.FailureCode)
-	require.Nil(t, order.DebitTxID)
-	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.000000", order.RefundAmount)
-	var guardCount int64
-	require.NoError(t, db.Table("allocation_order_guards").Where("order_no = ?", order.OrderNo).Count(&guardCount).Error)
-	require.EqualValues(t, 0, guardCount)
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-refund").Count(&orderCount).Error)
+	require.EqualValues(t, 1, orderCount, "a cold cache fails open and lets the authoritative allocator record the first failure")
+	var txCount int64
+	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = 'debit'", 2).Count(&txCount).Error)
+	require.Zero(t, txCount)
 
 	summary, err := billinginfra.NewBillingRepo(db).GetOrCreateWalletSummary(context.Background(), 2)
 	require.NoError(t, err)
@@ -600,7 +589,7 @@ func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
 		&markFailedErrorRepo{Repository: baseRepo},
 		coreOrderingAdapter{projects: projects},
 		billingWalletAdapter{wallet: wallet},
-		allocationAdapter{alloc: alloc},
+		forcedAvailableAllocationAdapter{allocationAdapter{alloc: alloc}},
 		orderTokenAdapter{tokens: tokens},
 	)
 	_, err := uc.Checkout(context.Background(), tradeapp.CheckoutRequest{
@@ -625,6 +614,14 @@ func TestCheckoutMarkFailedErrorRollsBackPendingOrderMySQL(t *testing.T) {
 
 type markFailedErrorRepo struct {
 	tradeapp.Repository
+}
+
+type forcedAvailableAllocationAdapter struct {
+	allocationAdapter
+}
+
+func (forcedAvailableAllocationAdapter) HasAvailableInventory(context.Context, tradeapp.InventoryAvailabilityCommand) (bool, error) {
+	return true, nil
 }
 
 func (r *markFailedErrorRepo) MarkFailed(context.Context, tradeapp.MarkFailedCommand) (*tradedomain.Order, error) {
@@ -1485,21 +1482,12 @@ func TestCheckoutEmailSuffixMismatchDoesNotDebitMySQL(t *testing.T) {
 	})
 	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
 
-	var order struct {
-		OrderNo      string
-		Status       string
-		DebitTxID    *uint
-		RefundTxID   *uint
-		RefundAmount string
-	}
-	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-suffix-missing").Take(&order).Error)
-	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
-	require.Nil(t, order.DebitTxID)
-	require.Nil(t, order.RefundTxID)
-	require.Equal(t, "0.000000", order.RefundAmount)
+	var orderCount int64
+	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-suffix-missing").Count(&orderCount).Error)
+	require.Zero(t, orderCount)
 	var txCount int64
 	require.NoError(t, db.Table("wallet_transactions").
-		Where("biz_id = ?", "order:"+order.OrderNo).
+		Where("user_id = ? AND transaction_type = 'debit'", 2).
 		Count(&txCount).Error)
 	require.EqualValues(t, 0, txCount)
 }

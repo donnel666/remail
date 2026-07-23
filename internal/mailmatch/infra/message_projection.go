@@ -113,8 +113,8 @@ func (r *Repo) resolveAppendedMessages(ctx context.Context, messages []domain.Me
 // ListUnprojectedMessages returns the newest facts whose matching decision was
 // not committed. A later fetch for the same resource replays these rows even
 // when Microsoft no longer includes them in its newest-message response.
-func (r *Repo) ListUnprojectedMessages(ctx context.Context, emailResourceIDs []uint, limit int) ([]domain.Message, error) {
-	if len(emailResourceIDs) == 0 || limit <= 0 {
+func (r *Repo) ListUnprojectedMessages(ctx context.Context, resourceType domain.ResourceType, emailResourceIDs []uint, limit int) ([]domain.Message, error) {
+	if (resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain) || len(emailResourceIDs) == 0 || limit <= 0 {
 		return nil, nil
 	}
 	var rows []MessageModel
@@ -122,7 +122,7 @@ func (r *Repo) ListUnprojectedMessages(ctx context.Context, emailResourceIDs []u
 		Table("mailmatch_messages AS m").
 		Select("m.*").
 		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
-		Where("m.email_resource_id IN ? AND mp.message_id IS NULL", emailResourceIDs).
+		Where("m.email_resource_id IN ? AND m.resource_type = ? AND mp.message_id IS NULL", emailResourceIDs, string(resourceType)).
 		Order("m.received_at DESC, m.id DESC").
 		Limit(limit).
 		Scan(&rows).Error; err != nil {

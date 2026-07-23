@@ -81,6 +81,22 @@ type AllocationPort interface {
 	ReleaseByOrder(ctx context.Context, orderNo string) error
 }
 
+type InventoryAvailabilityCommand struct {
+	ProjectID   uint
+	ProductID   uint
+	BuyerUserID uint
+	EmailSuffix string
+	PublicOnly  bool
+}
+
+type InventoryAvailabilityPort interface {
+	HasAvailableInventory(ctx context.Context, cmd InventoryAvailabilityCommand) (bool, error)
+}
+
+type InventoryUnavailablePort interface {
+	MarkInventoryUnavailable(ctx context.Context, cmd InventoryAvailabilityCommand) (bool, error)
+}
+
 type HistoricalMicrosoftAllocationCommand struct {
 	AliasOwnerID uint
 	ProjectID    uint
@@ -567,7 +583,13 @@ func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *C
 			return nil, err
 		}
 	}
-	return uc.checkoutPrepared(ctx, prepared)
+	preparedItems := []checkoutPreparation{prepared}
+	uc.precheckCheckoutInventory(ctx, preparedItems)
+	result, runErr = uc.checkoutPrepared(ctx, preparedItems[0])
+	if errors.Is(runErr, domain.ErrInsufficientInventory) && result != nil && result.Created {
+		uc.markCheckoutInventoryUnavailable(ctx, preparedItems[0])
+	}
+	return result, runErr
 }
 
 func checkoutServiceOutcome(err error) string {
@@ -814,8 +836,71 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 		items = checkoutBatchFailedItems(len(requests), prepareErr)
 		return items, nil
 	}
+	uc.precheckCheckoutInventory(ctx, prepared)
 	items, runErr = uc.checkoutBatch(ctx, prepared)
 	return items, runErr
+}
+
+func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []checkoutPreparation) {
+	checker, ok := uc.allocation.(InventoryAvailabilityPort)
+	if !ok || checker == nil {
+		return
+	}
+	type inventoryKey struct {
+		projectID   uint
+		productID   uint
+		buyerUserID uint
+		emailSuffix string
+		publicOnly  bool
+	}
+	availability := make(map[inventoryKey]bool)
+	checked := make(map[inventoryKey]bool)
+	for index := range prepared {
+		item := &prepared[index]
+		if item.prepareErr != nil || item.existing != nil || item.quote == nil {
+			continue
+		}
+		key := inventoryKey{
+			projectID: item.quote.ProjectID, productID: item.quote.ProductID,
+			buyerUserID: item.request.UserID, emailSuffix: item.emailSuffix,
+			publicOnly: item.policy == domain.SupplyPolicyPublicOnly,
+		}
+		available, exists := availability[key]
+		if !checked[key] {
+			var err error
+			available, err = checker.HasAvailableInventory(ctx, InventoryAvailabilityCommand{
+				ProjectID: key.projectID, ProductID: key.productID, BuyerUserID: key.buyerUserID,
+				EmailSuffix: key.emailSuffix, PublicOnly: key.publicOnly,
+			})
+			checked[key] = true
+			if err != nil {
+				slog.Debug("checkout inventory precheck skipped", "project_id", key.projectID, "product_id", key.productID, "error", err)
+				continue
+			}
+			availability[key] = available
+			exists = true
+		}
+		if exists && !available {
+			item.prepareErr = domain.ErrInsufficientInventory
+		}
+	}
+}
+
+func (uc *UseCase) markCheckoutInventoryUnavailable(ctx context.Context, prepared checkoutPreparation) bool {
+	marker, ok := uc.allocation.(InventoryUnavailablePort)
+	if !ok || marker == nil || prepared.quote == nil {
+		return false
+	}
+	marked, err := marker.MarkInventoryUnavailable(ctx, InventoryAvailabilityCommand{
+		ProjectID: prepared.quote.ProjectID, ProductID: prepared.quote.ProductID,
+		BuyerUserID: prepared.request.UserID, EmailSuffix: prepared.emailSuffix,
+		PublicOnly: prepared.policy == domain.SupplyPolicyPublicOnly,
+	})
+	if err != nil {
+		slog.Warn("mark checkout inventory unavailable failed", "project_id", prepared.quote.ProjectID, "product_id", prepared.quote.ProductID, "error", err)
+		return false
+	}
+	return marked
 }
 
 func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPreparation) ([]CheckoutBatchItem, error) {
@@ -830,6 +915,14 @@ func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPrepara
 		}
 		result, itemErr := uc.checkoutPrepared(ctx, prepared[index])
 		items[index] = CheckoutBatchItem{Result: result, Err: itemErr, attempted: true}
+		if errors.Is(itemErr, domain.ErrInsufficientInventory) && result != nil && result.Created &&
+			uc.markCheckoutInventoryUnavailable(ctx, prepared[index]) {
+			for tail := index + 1; tail < len(prepared); tail++ {
+				if sameCheckoutInventoryKey(prepared[index], prepared[tail]) && prepared[tail].existing == nil {
+					prepared[tail].prepareErr = domain.ErrInsufficientInventory
+				}
+			}
+		}
 		transactionResult := "committed"
 		if itemErr != nil && !shouldCommitCheckoutError(itemErr) {
 			transactionResult = "rolled_back"
@@ -849,6 +942,17 @@ func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPrepara
 		}
 	}
 	return items, nil
+}
+
+func sameCheckoutInventoryKey(left, right checkoutPreparation) bool {
+	if left.quote == nil || right.quote == nil {
+		return false
+	}
+	return left.quote.ProjectID == right.quote.ProjectID &&
+		left.quote.ProductID == right.quote.ProductID &&
+		left.request.UserID == right.request.UserID &&
+		left.emailSuffix == right.emailSuffix &&
+		left.policy == right.policy
 }
 
 func checkoutBatchFailedItems(quantity int, err error) []CheckoutBatchItem {

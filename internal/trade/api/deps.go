@@ -229,6 +229,20 @@ type allocationAdapter struct {
 	alloc *allocapp.UseCase
 }
 
+func (a allocationAdapter) HasAvailableInventory(ctx context.Context, cmd tradeapp.InventoryAvailabilityCommand) (bool, error) {
+	return a.alloc.HasProductInventory(ctx, allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, BuyerUserID: cmd.BuyerUserID,
+		EmailSuffix: cmd.EmailSuffix, PublicOnly: cmd.PublicOnly,
+	})
+}
+
+func (a allocationAdapter) MarkInventoryUnavailable(ctx context.Context, cmd tradeapp.InventoryAvailabilityCommand) (bool, error) {
+	return a.alloc.MarkProductInventoryUnavailable(ctx, allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, BuyerUserID: cmd.BuyerUserID,
+		EmailSuffix: cmd.EmailSuffix, PublicOnly: cmd.PublicOnly,
+	})
+}
+
 func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.AllocationCommand) (*tradeapp.AllocationResult, error) {
 	scope := allocdomain.SupplyScopePublic
 	if cmd.SupplyScope == tradeapp.SupplyScopeOwned {

@@ -223,14 +223,15 @@ func (q *fakeMicrosoftAliasAdminQueue) EnqueueMicrosoftAliasDispatcher(context.C
 }
 
 type fakeMicrosoftAliasCreator struct {
-	count         int
-	generateCalls int
-	reconcileOnly bool
-	candidates    []string
-	result        MicrosoftAliasCreationResult
-	request       MicrosoftAliasCreationRequest
-	prepareResult *MicrosoftAliasBindingPreparationResult
-	prepareErr    error
+	count                 int
+	generateCalls         int
+	generatedAccountEmail string
+	reconcileOnly         bool
+	candidates            []string
+	result                MicrosoftAliasCreationResult
+	request               MicrosoftAliasCreationRequest
+	prepareResult         *MicrosoftAliasBindingPreparationResult
+	prepareErr            error
 }
 
 func (f *fakeMicrosoftAliasCreator) PrepareMicrosoftAliasBinding(_ context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasBindingPreparationResult, error) {
@@ -247,8 +248,9 @@ func (f *fakeMicrosoftAliasCreator) PrepareMicrosoftAliasBinding(_ context.Conte
 	return MicrosoftAliasBindingPreparationResult{BindingAddress: address}, nil
 }
 
-func (f *fakeMicrosoftAliasCreator) GenerateMicrosoftAliasCandidates(count int) ([]string, error) {
+func (f *fakeMicrosoftAliasCreator) GenerateMicrosoftAliasCandidates(count int, accountEmail string) ([]string, error) {
 	f.generateCalls++
+	f.generatedAccountEmail = accountEmail
 	values := f.candidates
 	if len(values) == 0 {
 		values = []string{"first123456@outlook.com", "second123456@outlook.com"}
@@ -268,6 +270,19 @@ func (f *fakeMicrosoftAliasCreator) CreateMicrosoftAliases(_ context.Context, re
 
 func microsoftAliasTestTask(resourceID uint) MicrosoftAliasTask {
 	return MicrosoftAliasTask{ResourceID: resourceID, Generation: 1}
+}
+
+func TestNormalizeExplicitAliasesUsesMicrosoftWhitelist(t *testing.T) {
+	require.Equal(t, []string{
+		"first@outlook.com",
+		"second@hotmail.com",
+		"third@outlook.fr",
+	}, normalizeExplicitAliases([]string{
+		" First@Outlook.com ",
+		"second@hotmail.com",
+		"third@outlook.fr",
+		"recovery@gmail.com",
+	}))
 }
 
 func TestMicrosoftAliasAdminScheduleReturnsSafeUsageAndLimits(t *testing.T) {
@@ -877,10 +892,36 @@ func TestMicrosoftAliasProcessPreservesPriorUncertainCandidateWhenReconciliation
 	service.now = func() time.Time { return now }
 
 	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	assert.True(t, creator.reconcileOnly)
 	require.Len(t, store.outcomes, 1)
 	assert.Equal(t, MicrosoftAliasAttemptUncertain, store.outcomes[0].Status)
 	assert.Equal(t, now.Add(microsoftAliasTransientDelay(42, 1)), store.deferredAt)
 	assert.True(t, store.deferredFailed)
+}
+
+func TestMicrosoftAliasProcessConfirmsPriorUncertainCandidateByReadOnlyReconciliation(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	alias := "david123456@outlook.com"
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{
+			ResourceID: 42, EmailAddress: "owner@example.com", Password: "secret", ResourceStatus: "normal",
+		},
+		reserveAttempts: []MicrosoftAliasAttempt{{
+			ID: 1, Alias: alias, Status: MicrosoftAliasAttemptRunning, WasUncertain: true,
+		}},
+		reserveUsage:      MicrosoftAliasUsage{YearCount: 1, WeekCount: 1},
+		postCompleteUsage: &MicrosoftAliasUsage{YearCount: 2, WeekCount: 2},
+	}
+	creator := &fakeMicrosoftAliasCreator{result: MicrosoftAliasCreationResult{Aliases: []string{alias}}}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.True(t, creator.reconcileOnly)
+	require.Len(t, store.outcomes, 1)
+	assert.Equal(t, MicrosoftAliasAttemptSucceeded, store.outcomes[0].Status)
+	assert.False(t, store.outcomes[0].Attempted)
 }
 
 func TestMicrosoftAliasProcessHonorsExplicitUncertainCandidateAcrossProxyAttempts(t *testing.T) {
@@ -1049,6 +1090,7 @@ func TestMicrosoftAliasProcessRechecksEligibilityImmediatelyBeforeRemoteCall(t *
 	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
 	assert.Equal(t, 2, store.eligibilityChecks)
 	assert.Equal(t, 1, creator.generateCalls)
+	assert.Equal(t, "owner@example.com", creator.generatedAccountEmail)
 	assert.Equal(t, 1, store.reserveCalls)
 	assert.Zero(t, creator.count, "the remote creator must not run after the second eligibility check fails")
 	assert.Equal(t, MicrosoftAliasBindingUnresolvedMessage, store.pausedSafe)

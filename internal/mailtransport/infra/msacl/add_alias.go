@@ -65,11 +65,11 @@ type ExplicitAliasResult struct {
 	ProxyFailure bool
 }
 
-// AddExplicitAliases creates at most two Outlook aliases in one authenticated
+// AddExplicitAliases creates at most two Microsoft aliases in one authenticated
 // account.live.com session. Microsoft applies the authoritative service quota;
 // the caller is still responsible for durable weekly and yearly scheduling.
 func AddExplicitAliases(ctx context.Context, email, password, proxy, preferredBindingAddress string, count int) (ExplicitAliasResult, error) {
-	candidates, err := GenerateExplicitAliasCandidates(count)
+	candidates, err := GenerateExplicitAliasCandidates(count, email)
 	if err != nil {
 		return ExplicitAliasResult{
 			Category:    "request",
@@ -81,10 +81,16 @@ func AddExplicitAliases(ctx context.Context, email, password, proxy, preferredBi
 
 // GenerateExplicitAliasCandidates reserves stable candidates before any remote
 // side effect so retries can reconcile the same addresses.
-func GenerateExplicitAliasCandidates(count int) ([]string, error) {
+func GenerateExplicitAliasCandidates(count int, accountEmail string) ([]string, error) {
 	if count <= 0 {
 		return nil, nil
 	}
+	accountEmail = strings.ToLower(strings.TrimSpace(accountEmail))
+	at := strings.LastIndex(accountEmail, "@")
+	if at <= 0 || strings.Count(accountEmail, "@") != 1 || !coredomain.IsMicrosoftEmailDomain(accountEmail) {
+		return nil, fmt.Errorf("unsupported Microsoft account email")
+	}
+	domain := strings.TrimSuffix(accountEmail[at+1:], ".")
 	if count > 2 {
 		count = 2
 	}
@@ -95,7 +101,7 @@ func GenerateExplicitAliasCandidates(count int) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		alias := prefix + "@outlook.com"
+		alias := prefix + "@" + domain
 		if _, ok := seen[alias]; ok {
 			continue
 		}
@@ -137,6 +143,14 @@ func AddExplicitAliasCandidates(ctx context.Context, email, password, proxy, pre
 // submitting AddAssocId again. A confirmed absence is therefore a negative
 // observation of the original POST rather than a new side effect.
 func ReconcileExplicitAliasCandidates(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string) (ExplicitAliasResult, error) {
+	return reconcileExplicitAliasCandidates(ctx, email, password, proxy, preferredBindingAddress, candidates, false)
+}
+
+func ReconcileExplicitAliasCandidatesWithPasswordBinding(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string) (ExplicitAliasResult, error) {
+	return reconcileExplicitAliasCandidates(ctx, email, password, proxy, preferredBindingAddress, candidates, true)
+}
+
+func reconcileExplicitAliasCandidates(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string, forcePasswordBinding bool) (ExplicitAliasResult, error) {
 	if err := contextOrBackground(ctx).Err(); err != nil {
 		return ExplicitAliasResult{
 			Category:    "request",
@@ -151,7 +165,7 @@ func ReconcileExplicitAliasCandidates(ctx context.Context, email, password, prox
 		candidates = candidates[:2]
 	}
 
-	result, err := reconcileExplicitAliases(ctx, email, password, proxy, preferredBindingAddress, candidates)
+	result, err := reconcileExplicitAliases(ctx, email, password, proxy, preferredBindingAddress, candidates, forcePasswordBinding)
 	if err == nil {
 		return result, nil
 	}
@@ -161,7 +175,7 @@ func ReconcileExplicitAliasCandidates(ctx context.Context, email, password, prox
 	return failure, nil
 }
 
-func reconcileExplicitAliases(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string) (ExplicitAliasResult, error) {
+func reconcileExplicitAliases(ctx context.Context, email, password, proxy, preferredBindingAddress string, candidates []string, forcePasswordBinding bool) (ExplicitAliasResult, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" || password == "" {
 		return ExplicitAliasResult{}, newAuthError("账号或密码为空", AuthStatusPasswordError)
@@ -170,7 +184,11 @@ func reconcileExplicitAliases(ctx context.Context, email, password, proxy, prefe
 	if err != nil {
 		return ExplicitAliasResult{}, wrapAuthError(fmt.Sprintf("创建微软会话失败: %s", err), AuthStatusRequestError, err)
 	}
-	if _, _, err := loginForExplicitAlias(session, email, password, proxy, preferredBindingAddress); err != nil {
+	if (forcePasswordBinding || os.Getenv("MSACL_FORCE_PASSWORD_LOGIN") == "1") && strings.TrimSpace(password) != "" {
+		if _, _, err := loginForExplicitAliasPassword(session, email, password, proxy, preferredBindingAddress); err != nil {
+			return ExplicitAliasResult{}, err
+		}
+	} else if _, _, err := loginForExplicitAliasOTC(session, email, proxy, preferredBindingAddress); err != nil {
 		return ExplicitAliasResult{}, err
 	}
 	return reconcileExplicitAliasesWithSession(session, candidates)
@@ -222,8 +240,7 @@ func addExplicitAliases(ctx context.Context, email, password, proxy, preferredBi
 				return ExplicitAliasResult{Aliases: aliases, Attempted: attemptedAliases}, wrapAuthError(fmt.Sprintf("创建别名取消: %s", err), AuthStatusRequestError, err)
 			}
 		}
-		prefix := strings.TrimSuffix(candidate, "@outlook.com")
-		alias, category, attempted, err := addSingleExplicitAlias(session, prefix, email, proxy, preferredBindingAddress)
+		alias, category, attempted, err := addSingleExplicitAlias(session, candidate, email, proxy, preferredBindingAddress)
 		if attempted {
 			attemptedAliases = append(attemptedAliases, candidate)
 		}
@@ -287,10 +304,11 @@ func generateExplicitAliasPrefix() (string, error) {
 func normalizeExplicitAliasCandidates(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
-	pattern := regexp.MustCompile(`^[a-z]{2,24}[0-9]{6}@outlook\.com$`)
+	localPattern := regexp.MustCompile(`^[a-z]{2,24}[0-9]{6}$`)
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if !pattern.MatchString(value) {
+		local, domain, ok := strings.Cut(value, "@")
+		if !ok || !localPattern.MatchString(local) || strings.Contains(domain, "@") || !coredomain.IsMicrosoftEmailDomain(value) {
 			continue
 		}
 		if _, ok := seen[value]; ok {
@@ -753,8 +771,12 @@ func followExplicitAliasTarget(session *Session, page, currentURL string, maxRou
 	return page, currentURL, nil
 }
 
-func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBindingAddress string) (string, string, bool, error) {
-	fullAlias := strings.ToLower(prefix + "@outlook.com")
+func addSingleExplicitAlias(session *Session, candidate, email, proxy, preferredBindingAddress string) (string, string, bool, error) {
+	fullAlias := strings.ToLower(strings.TrimSpace(candidate))
+	prefix, domain, ok := strings.Cut(fullAlias, "@")
+	if !ok || prefix == "" || domain == "" || strings.Contains(domain, "@") || !coredomain.IsMicrosoftEmailDomain(fullAlias) {
+		return fullAlias, aliasCategoryFailed, false, nil
+	}
 
 	var page string
 	var canary string
@@ -785,7 +807,7 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		Data: map[string]string{
 			"canary":            canary,
 			"PostOption":        "NONE",
-			"SingleDomain":      "outlook.com",
+			"SingleDomain":      domain,
 			"UpSell":            "",
 			"AddAssocIdOptions": options,
 			"AssociatedIdLive":  prefix,
@@ -799,7 +821,7 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", attempted, wrapAuthError(fmt.Sprintf("提交 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
+		return fullAlias, "", attempted, wrapAuthError(fmt.Sprintf("提交 AddAssocId 异常: %s", err), AuthStatusRequestError, err)
 	}
 	redirectURL := resp.Header.Get("Location")
 	category := classifyAddAssocIDResponse(resp.StatusCode, redirectURL, resp.Body)
@@ -811,14 +833,14 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 	case aliasCategoryExists:
 		present, err := confirmExplicitAliasPresent(session, fullAlias, addAssocIDURL)
 		if err != nil {
-			return "", "", attempted, err
+			return fullAlias, "", attempted, err
 		}
 		if present {
 			return fullAlias, aliasCategoryAdded, attempted, nil
 		}
 		return fullAlias, aliasCategoryExists, attempted, nil
 	case "request":
-		return "", "", attempted, newAuthError(fmt.Sprintf("AddAssocId 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
+		return fullAlias, "", attempted, newAuthError(fmt.Sprintf("AddAssocId 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError)
 	}
 
 	page, currentURL := resp.Body, resp.URL
@@ -830,7 +852,7 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 			HasAllowRedirects: true,
 		})
 		if err != nil {
-			return "", "", attempted, wrapAuthError(fmt.Sprintf("跟随 AddAssocId 跳转异常: %s", err), AuthStatusRequestError, err)
+			return fullAlias, "", attempted, wrapAuthError(fmt.Sprintf("跟随 AddAssocId 跳转异常: %s", err), AuthStatusRequestError, err)
 		}
 		page, currentURL = redirectResp.Body, redirectResp.URL
 	}
@@ -862,22 +884,22 @@ func addSingleExplicitAlias(session *Session, prefix, email, proxy, preferredBin
 		)
 	}
 	if err != nil {
-		return "", "", attempted, annotateExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
+		return fullAlias, "", attempted, annotateExplicitAliasAuthTimeoutStage(err, explicitAliasStageAccountPageIncomplete)
 	}
 	page, currentURL, err = continueExplicitAliasLoginRelay(session, page, currentURL, 6)
 	if err != nil {
-		return "", "", attempted, err
+		return fullAlias, "", attempted, err
 	}
 	page, currentURL, err = followExplicitAliasTarget(session, page, currentURL, 10)
 	if err != nil {
-		return "", "", attempted, err
+		return fullAlias, "", attempted, err
 	}
 	if explicitAliasPresentOnManagePage(page, currentURL, fullAlias) {
 		return fullAlias, aliasCategoryAdded, attempted, nil
 	}
 	present, err := confirmExplicitAliasPresent(session, fullAlias, currentURL)
 	if err != nil {
-		return "", "", attempted, err
+		return fullAlias, "", attempted, err
 	}
 	if present {
 		return fullAlias, aliasCategoryAdded, attempted, nil
@@ -1039,14 +1061,15 @@ func extractAllExplicitAliasesFromManagePage(page, rawURL string) []string {
 	all := aliasRE.FindAllString(normalizedPage, -1)
 	seen := make(map[string]struct{}, len(all))
 	deduped := make([]string, 0, len(all))
-	for _, a := range all {
-		if !coredomain.IsMicrosoftEmailDomain(a) {
+	for _, alias := range all {
+		if !coredomain.IsMicrosoftEmailDomain(alias) {
 			continue
 		}
-		if _, ok := seen[a]; !ok {
-			seen[a] = struct{}{}
-			deduped = append(deduped, a)
+		if _, ok := seen[alias]; ok {
+			continue
 		}
+		seen[alias] = struct{}{}
+		deduped = append(deduped, alias)
 	}
 	return deduped
 }

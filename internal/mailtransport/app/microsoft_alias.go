@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 )
 
 const (
@@ -96,7 +98,7 @@ type MicrosoftAliasCreationResult struct {
 	Attempted       []string
 	Uncertain       []string
 	Absent          []string
-	ExistingAliases []string // all aliases found on the account at login time (for backfill reconciliation)
+	ExistingAliases []string
 	Category        string
 	SafeMessage     string
 	ProxyFailure    bool
@@ -163,7 +165,7 @@ type MicrosoftAliasQueue interface {
 
 type MicrosoftAliasCreator interface {
 	PrepareMicrosoftAliasBinding(ctx context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasBindingPreparationResult, error)
-	GenerateMicrosoftAliasCandidates(count int) ([]string, error)
+	GenerateMicrosoftAliasCandidates(count int, accountEmail string) ([]string, error)
 	CreateMicrosoftAliases(ctx context.Context, req MicrosoftAliasCreationRequest) (MicrosoftAliasCreationResult, error)
 }
 
@@ -383,7 +385,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	account = currentAccount
 
-	candidates, err := s.creator.GenerateMicrosoftAliasCandidates(MicrosoftAliasWeeklyLimit)
+	candidates, err := s.creator.GenerateMicrosoftAliasCandidates(MicrosoftAliasWeeklyLimit, account.EmailAddress)
 	if err != nil {
 		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
 		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
@@ -432,6 +434,13 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	account = currentAccount
 
+	reconcileOnly := true
+	for _, attempt := range attempts {
+		if !attempt.WasUncertain {
+			reconcileOnly = false
+			break
+		}
+	}
 	result, createErr := s.creator.CreateMicrosoftAliases(ctx, MicrosoftAliasCreationRequest{
 		ResourceID:     account.ResourceID,
 		EmailAddress:   account.EmailAddress,
@@ -440,6 +449,7 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 		RecoveryMask:   recoveryMask,
 		BindingMissing: bindingMissing,
 		Candidates:     reservedAliases,
+		ReconcileOnly:  reconcileOnly,
 	})
 	if createErr != nil {
 		result = MicrosoftAliasCreationResult{
@@ -518,9 +528,8 @@ func (s *MicrosoftAliasService) completeAliasResult(
 		return fmt.Errorf("complete microsoft alias attempts: %w", err)
 	}
 
-	// Backfill externally-listed aliases into the local DB. The store owns the
-	// fixed platform-owner invariant; resource IDs and resource owners must
-	// never be accepted as explicit-alias owners here.
+	// names/manage is the remote source of truth. Recover aliases created by an
+	// earlier attempt even when that attempt lost its response before persistence.
 	if len(result.ExistingAliases) > 0 {
 		if err := s.store.BackfillExistingAliases(ctx, task.ResourceID, result.ExistingAliases); err != nil {
 			return fmt.Errorf("backfill existing microsoft aliases: %w", err)
@@ -679,7 +688,7 @@ func normalizeExplicitAliases(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if !strings.HasSuffix(value, "@outlook.com") || strings.Count(value, "@") != 1 {
+		if strings.Count(value, "@") != 1 || !coredomain.IsMicrosoftEmailDomain(value) {
 			continue
 		}
 		if _, ok := seen[value]; ok {

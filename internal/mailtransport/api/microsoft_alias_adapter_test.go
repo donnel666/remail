@@ -4,10 +4,8 @@
 // OTC-login rewrite (Step 5). The adapter now calls msacl.SyncAndAddExplicitAliases
 // directly and no longer offers injectable stub functions.
 //
-// TODO: rewrite these tests to cover the new SyncAndAddExplicitAliases path:
-//   - OTC login failure halts and returns an error
-//   - Successful create returns ExistingAliases
-//   - Backfill-only (empty candidates) lists without creating
+// TODO: add injectable browser functions if adapter-level network sequencing
+// needs coverage beyond the msacl sequence tests.
 package api
 
 import (
@@ -19,6 +17,62 @@ import (
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConfirmedAddedAliasesRejectsFailedAndRateLimitedResults(t *testing.T) {
+	confirmed := confirmedAddedAliases([]msacl.ExplicitAliasResult{
+		{Aliases: []string{"ADDED@OUTLOOK.COM"}, Category: "added"},
+		{Aliases: []string{"failed@outlook.com"}, Category: "failed"},
+		{Aliases: []string{"limited@outlook.com"}, Category: "rate_limited"},
+		{Aliases: []string{"exists@outlook.com"}, Category: "exists"},
+	})
+
+	require.Equal(t, []string{"added@outlook.com"}, confirmed)
+}
+
+func TestNormalizeMicrosoftAliasesDeduplicatesReconciliationResult(t *testing.T) {
+	aliases := normalizeMicrosoftAliases([]string{
+		"FIRST@OUTLOOK.COM", " first@outlook.com ", "second@outlook.com",
+	})
+
+	require.Equal(t, []string{"first@outlook.com", "second@outlook.com"}, aliases)
+}
+
+func TestSummarizeMicrosoftAliasAddResultsPreservesAttemptedProxyFailure(t *testing.T) {
+	result, proxyFailure := summarizeMicrosoftAliasAddResults([]msacl.ExplicitAliasResult{
+		{Aliases: []string{"FIRST@OUTLOOK.COM"}, Attempted: []string{"FIRST@OUTLOOK.COM"}, Category: "added"},
+		{
+			Attempted: []string{"second@outlook.com"}, Category: "request",
+			SafeMessage: "Microsoft alias service is temporarily unavailable.", ProxyFailure: true,
+		},
+	})
+
+	require.True(t, proxyFailure)
+	require.Equal(t, []string{"first@outlook.com"}, result.Aliases)
+	require.Equal(t, []string{"first@outlook.com", "second@outlook.com"}, result.Attempted)
+	require.Equal(t, []string{"second@outlook.com"}, result.Uncertain)
+	require.Equal(t, "request", result.Category)
+}
+
+func TestSummarizeMicrosoftAliasAddResultsPreservesEarlierUncertainWhenLaterCandidateSucceeds(t *testing.T) {
+	result, proxyFailure := summarizeMicrosoftAliasAddResults([]msacl.ExplicitAliasResult{
+		{Attempted: []string{"uncertain@outlook.com"}, Category: "request"},
+		{Aliases: []string{"added@outlook.com"}, Attempted: []string{"added@outlook.com"}, Category: "added"},
+	})
+
+	require.False(t, proxyFailure)
+	require.Equal(t, []string{"added@outlook.com"}, result.Aliases)
+	require.Equal(t, []string{"uncertain@outlook.com", "added@outlook.com"}, result.Attempted)
+	require.Equal(t, []string{"uncertain@outlook.com"}, result.Uncertain)
+	require.Equal(t, "added", result.Category)
+}
+
+func TestAliasCreationSummaryPreservesListedAliasesForBackfill(t *testing.T) {
+	result := mailapp.MicrosoftAliasCreationResult{
+		ExistingAliases: normalizeMicrosoftAliases([]string{"Existing@Outlook.com"}),
+	}
+
+	require.Equal(t, []string{"existing@outlook.com"}, result.ExistingAliases)
+}
 
 func TestMicrosoftAliasAdapterPreparesBindingByRulesBeforeRecoveryLookup(t *testing.T) {
 	msacl.SetAuxiliaryDomains([]string{"recovery.test"})

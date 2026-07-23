@@ -878,6 +878,138 @@ func TestInventoryStatsIncludeBuyerPrivateMicrosoftMySQL(t *testing.T) {
 	require.Equal(t, int64(1), productStats.Items[0].TotalAvailable)
 }
 
+func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
+
+	assertInventory := func(main, aliases, total int64) {
+		t.Helper()
+		stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+		require.NoError(t, err)
+		require.Equal(t, main, stats.Microsoft.MainAvailable)
+		require.Equal(t, aliases, stats.Microsoft.ExplicitAliasAvailable)
+		require.Equal(t, total, stats.TotalAvailable)
+
+		products, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Equal(t, total, products.Items[0].TotalAvailable)
+		if total == 0 {
+			require.Empty(t, products.Items[0].Suffixes)
+		} else {
+			require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
+				Suffix: "example.com", TotalAvailable: total, PublicAvailable: total,
+			}}, products.Items[0].Suffixes)
+		}
+	}
+
+	assertInventory(1, 0, 1)
+	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-inventory-main-history", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "main", mainAllocation.Mailbox)
+	_, err = uc.ReleaseByOrder(context.Background(), mainAllocation.OrderNo)
+	require.NoError(t, err)
+	assertInventory(0, 0, 0)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status)
+VALUES (1000, 1, 'available-alias@example.com', 'normal')`).Error)
+	assertInventory(0, 1, 1)
+
+	aliasAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-inventory-alias-history", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", aliasAllocation.Mailbox)
+	_, err = uc.ReleaseByOrder(context.Background(), aliasAllocation.OrderNo)
+	require.NoError(t, err)
+	assertInventory(0, 0, 0)
+}
+
+func TestDotInventoryCountsOnlyDistinctAllocatableVariantsMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 0, 1, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_resources
+SET email_address = 'm.s1000@example.com'
+WHERE id = 1000`).Error)
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
+	wantAliases := []string{
+		"m.s.1000@example.com",
+		"m.s1.000@example.com",
+		"m.s10.00@example.com",
+		"m.s100.0@example.com",
+	}
+	productTotals, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(len(wantAliases)), productTotals.TotalAvailable)
+
+	for allocated := int64(0); allocated < int64(len(wantAliases)); allocated++ {
+		stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+		require.NoError(t, err)
+		require.Equal(t, int64(len(wantAliases)), stats.Microsoft.DotCapacity)
+		require.Equal(t, int64(len(wantAliases))-allocated, stats.Microsoft.DotAvailable)
+		allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+			OrderNo: fmt.Sprintf("ord-dot-inventory-%d", allocated), BuyerUserID: 2,
+			ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "dot", allocation.Mailbox)
+		require.Equal(t, wantAliases[allocated], allocation.Email)
+		_, err = uc.ReleaseByOrder(context.Background(), allocation.OrderNo)
+		require.NoError(t, err)
+	}
+
+	stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Zero(t, stats.Microsoft.DotAvailable)
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-dot-inventory-exhausted", BuyerUserID: 2,
+		ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO dot_aliases(resource_id, email, status)
+VALUES
+    (1000, 'm..s1000@example.com', 'normal'),
+    (1000, 'imported-history-shape@example.com', 'normal')`).Error)
+	stats, err = repo.GetInventoryStats(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Zero(t, stats.Microsoft.DotAvailable)
+	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Zero(t, productTotals.TotalAvailable)
+	reusable, err := repo.FindReusableDotAlias(context.Background(), 10, 1000)
+	require.NoError(t, err)
+	require.Nil(t, reusable)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO dot_aliases(resource_id, email, status)
+VALUES (1000, 'm.s1.0.00@example.com', 'normal')`).Error)
+	stats, err = repo.GetInventoryStats(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats.Microsoft.DotAvailable)
+	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), productTotals.TotalAvailable)
+	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-dot-inventory-imported", BuyerUserID: 2,
+		ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "m.s1.0.00@example.com", allocation.Email)
+}
+
 func TestInventoryStatsIncludeBuyerPrivateDomainMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
@@ -1099,6 +1231,10 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"microsoft_allocations", "idx_ms_alloc_resource_mailbox_created"},
 		{"microsoft_allocations", "idx_ms_alloc_resource_created_id"},
 		{"microsoft_allocations", "idx_ms_alloc_email_status"},
+		{"microsoft_allocations", "idx_ms_alloc_resource_project_mailbox"},
+		{"microsoft_allocations", "idx_ms_alloc_explicit_project_mailbox"},
+		{"microsoft_allocations", "idx_ms_alloc_dot_project_mailbox"},
+		{"microsoft_allocations", "idx_ms_alloc_plus_project_mailbox"},
 		{"domain_allocations", "idx_domain_alloc_active_mailbox"},
 		{"domain_allocations", "idx_domain_alloc_guard_type"},
 		{"domain_allocations", "idx_domain_alloc_product_project"},
@@ -1128,6 +1264,22 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"idx_ms_alloc_resource_created_id",
 		"EXPLAIN SELECT id, order_no FROM microsoft_allocations WHERE resource_id = 1000 ORDER BY created_at DESC, id DESC LIMIT 20",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_ms_alloc_resource_project_mailbox",
+		"EXPLAIN SELECT 1 FROM microsoft_allocations FORCE INDEX (idx_ms_alloc_resource_project_mailbox) WHERE resource_id = 1000 AND project_id = 10 AND mailbox = 'main' LIMIT 1",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_ms_alloc_explicit_project_mailbox",
+		"EXPLAIN SELECT 1 FROM microsoft_allocations FORCE INDEX (idx_ms_alloc_explicit_project_mailbox) WHERE explicit_alias_id = 1 AND project_id = 10 AND mailbox = 'alias' LIMIT 1",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_ms_alloc_dot_project_mailbox",
+		"EXPLAIN SELECT 1 FROM microsoft_allocations FORCE INDEX (idx_ms_alloc_dot_project_mailbox) WHERE dot_alias_id = 1 AND project_id = 10 AND mailbox = 'dot' LIMIT 1",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_ms_alloc_plus_project_mailbox",
+		"EXPLAIN SELECT 1 FROM microsoft_allocations FORCE INDEX (idx_ms_alloc_plus_project_mailbox) WHERE plus_alias_id = 1 AND project_id = 10 AND mailbox = 'plus' LIMIT 1",
 	)
 	requireExplainUsesIndex(t, db,
 		"PRIMARY",

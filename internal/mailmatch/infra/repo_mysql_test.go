@@ -408,7 +408,7 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 	}, 30)
 	require.NoError(t, err)
 	require.Empty(t, items)
-	pending, err := repo.ListUnprojectedMessages(ctx, []uint{100}, 100)
+	pending, err := repo.ListUnprojectedMessages(ctx, domain.ResourceTypeMicrosoft, []uint{100}, 100)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	require.Equal(t, facts[0].ID, pending[0].ID)
@@ -452,9 +452,54 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, "123456", items[0].VerificationCode)
-	pending, err = repo.ListUnprojectedMessages(ctx, []uint{100}, 100)
+	pending, err = repo.ListUnprojectedMessages(ctx, domain.ResourceTypeMicrosoft, []uint{100}, 100)
 	require.NoError(t, err)
 	require.Empty(t, pending)
+}
+
+func TestListUnprojectedMessagesScopesReplayByResourceTypeMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchOrder(t, db, "OR_TYPED_REPLAY")
+	repo := NewRepo(db, nil)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (101, 'domain', 1)`).Error)
+
+	facts, inserted, err := repo.AppendMessages(ctx, []domain.Message{
+		{
+			EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+			Recipient: "microsoft@example.com", Sender: "sender@example.net",
+			DedupeKey: fmt.Sprintf("%064x", 8101), Status: domain.MessageStatusReceived,
+			ReceivedAt: now,
+		},
+		{
+			EmailResourceID: 101, ResourceType: domain.ResourceTypeDomain,
+			Recipient: "domain@example.com", Sender: "sender@example.net",
+			DedupeKey: fmt.Sprintf("%064x", 8102), Status: domain.MessageStatusReceived,
+			ReceivedAt: now.Add(-time.Second),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, inserted)
+	require.Len(t, facts, 2)
+
+	microsoft, err := repo.ListUnprojectedMessages(
+		ctx, domain.ResourceTypeMicrosoft, []uint{100, 101}, 100,
+	)
+	require.NoError(t, err)
+	require.Len(t, microsoft, 1)
+	require.Equal(t, domain.ResourceTypeMicrosoft, microsoft[0].ResourceType)
+	require.Equal(t, uint(100), microsoft[0].EmailResourceID)
+
+	domains, err := repo.ListUnprojectedMessages(
+		ctx, domain.ResourceTypeDomain, []uint{100, 101}, 100,
+	)
+	require.NoError(t, err)
+	require.Len(t, domains, 1)
+	require.Equal(t, domain.ResourceTypeDomain, domains[0].ResourceType)
+	require.Equal(t, uint(101), domains[0].EmailResourceID)
 }
 
 func concurrentAppendMessage(now time.Time, key uint64, worker int) domain.Message {
@@ -548,9 +593,16 @@ INSERT INTO microsoft_allocations(
 INSERT INTO order_tokens(token_prefix, token_plain, order_no, enabled)
 VALUES ('bulk-prefix', 'bulk-token', 'OR_PICKUP_BATCH', 1)`).Error)
 	require.NoError(t, db.Exec(`
+INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
+    (10, 'sender', 'sender@example\\.net', TRUE),
+    (10, 'recipient', 'exact', TRUE)`).Error)
+	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_resource_fetch_states(email_resource_id, status, cooldown_until)
 VALUES (100, 'normal', ?)`, now.Add(time.Minute)).Error)
 	repo := NewRepo(db, nil)
+	singleScope, err := repo.LoadPickupScope(context.Background(), "bulk-token", "main@example.com")
+	require.NoError(t, err)
+	require.Len(t, singleScope.Rules, 2)
 	message := domain.Message{
 		EmailResourceID:  100,
 		ResourceType:     domain.ResourceTypeMicrosoft,
@@ -583,6 +635,7 @@ VALUES (?, ?, ?)`, orderID, stored[0].ID, now).Error)
 	require.NoError(t, reads[0].Err)
 	require.Equal(t, orderID, reads[0].Scope.OrderID)
 	require.Equal(t, uint64(7), reads[0].Scope.CredentialRevision)
+	require.Len(t, reads[0].Scope.Rules, 2)
 	require.NotNil(t, reads[0].Delivery)
 	require.Equal(t, stored[0].ID, reads[0].Delivery.Message.ID)
 	require.Len(t, reads[0].Messages, 1)

@@ -20,6 +20,47 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	microsoftProjectUnmatchedCondition = `NOT EXISTS (
+			SELECT 1 FROM microsoft_resource_project_matches legacy_match
+			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
+		)`
+	microsoftUnusedMainCondition = `(
+				NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations history_main
+					WHERE history_main.resource_id = ms.id
+					  AND history_main.project_id = ?
+					  AND history_main.mailbox = 'main'
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM microsoft_allocations active_main
+					WHERE active_main.active_kind = 1
+					  AND active_main.active_project_id = 0
+					  AND active_main.active_entity_id = ms.id
+				)
+			)`
+	microsoftReusableExplicitAliasCondition = `EXISTS (
+				SELECT 1
+				FROM explicit_aliases ea
+				WHERE ea.resource_id = ms.id
+				  AND ea.status = 'normal'
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations history_alias
+					WHERE history_alias.explicit_alias_id = ea.id
+					  AND history_alias.project_id = ?
+					  AND history_alias.mailbox = 'alias'
+				  )
+				  AND NOT EXISTS (
+					SELECT 1 FROM microsoft_allocations ma
+					WHERE ma.active_kind = 2
+					  AND ma.active_project_id = 0
+					  AND ma.active_entity_id = ea.id
+				  )
+			)`
+)
+
 type Repo struct {
 	db            *gorm.DB
 	operationLogs *governanceinfra.OperationLogRepo
@@ -419,48 +460,10 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 	args := []any{projectID}
 	where := []string{
 		"ms.status = 'normal'",
-		`NOT EXISTS (
-			SELECT 1 FROM microsoft_resource_project_matches legacy_match
-			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
-		)`,
+		microsoftProjectUnmatchedCondition,
 	}
 	if mailbox == domain.MicrosoftMailboxMain {
-		where = append(where, `(
-			(
-				NOT EXISTS (
-					SELECT 1
-					FROM microsoft_allocations history_main
-					WHERE history_main.resource_id = ms.id
-					  AND history_main.project_id = ?
-					  AND history_main.mailbox = 'main'
-				)
-				AND NOT EXISTS (
-					SELECT 1
-					FROM microsoft_allocations active_main
-					WHERE active_main.active_kind = 1
-					  AND active_main.active_project_id = 0
-					  AND active_main.active_entity_id = ms.id
-				)
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM explicit_aliases ea
-				WHERE ea.resource_id = ms.id
-				  AND ea.status = 'normal'
-				  AND NOT EXISTS (
-					SELECT 1 FROM microsoft_allocations history_alias
-					WHERE history_alias.explicit_alias_id = ea.id
-					  AND history_alias.project_id = ?
-					  AND history_alias.mailbox = 'alias'
-				  )
-				  AND NOT EXISTS (
-					SELECT 1 FROM microsoft_allocations ma
-					WHERE ma.active_kind = 2
-					  AND ma.active_project_id = 0
-					  AND ma.active_entity_id = ea.id
-				  )
-			)
-		)`)
+		where = append(where, "("+microsoftUnusedMainCondition+" OR "+microsoftReusableExplicitAliasCondition+")")
 		args = append(args, projectID, projectID)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
@@ -577,48 +580,10 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, proj
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
-		`NOT EXISTS (
-			SELECT 1 FROM microsoft_resource_project_matches legacy_match
-			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
-		)`,
+		microsoftProjectUnmatchedCondition,
 	}
 	if mailbox == domain.MicrosoftMailboxMain {
-		where = append(where, `(
-			(
-				NOT EXISTS (
-					SELECT 1
-					FROM microsoft_allocations history_main
-					WHERE history_main.resource_id = ms.id
-					  AND history_main.project_id = ?
-					  AND history_main.mailbox = 'main'
-				)
-				AND NOT EXISTS (
-					SELECT 1
-					FROM microsoft_allocations active_main
-					WHERE active_main.active_kind = 1
-					  AND active_main.active_project_id = 0
-					  AND active_main.active_entity_id = ms.id
-				)
-			)
-			OR EXISTS (
-				SELECT 1
-				FROM explicit_aliases ea
-				WHERE ea.resource_id = ms.id
-				  AND ea.status = 'normal'
-				  AND NOT EXISTS (
-					SELECT 1 FROM microsoft_allocations history_alias
-					WHERE history_alias.explicit_alias_id = ea.id
-					  AND history_alias.project_id = ?
-					  AND history_alias.mailbox = 'alias'
-				  )
-				  AND NOT EXISTS (
-					SELECT 1 FROM microsoft_allocations ma
-					WHERE ma.active_kind = 2
-					  AND ma.active_project_id = 0
-					  AND ma.active_entity_id = ea.id
-				  )
-			)
-		)`)
+		where = append(where, "("+microsoftUnusedMainCondition+" OR "+microsoftReusableExplicitAliasCondition+")")
 		args = append(args, projectID, projectID)
 	}
 	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
@@ -888,6 +853,15 @@ func (r *Repo) findReusableProjectAlias(ctx context.Context, table, mailbox stri
 	if mailbox == "plus" {
 		activeKind = 4
 	}
+	validAliasSQL := ""
+	if mailbox == "dot" {
+		validAliasSQL = `AND EXISTS (
+      SELECT 1
+      FROM microsoft_resources ms
+      WHERE ms.id = a.resource_id
+        AND ` + microsoftDotAliasValidForResourceExpression("a", "ms") + `
+  )`
+	}
 	var candidate allocapp.AliasCandidate
 	query := fmt.Sprintf(`
 SELECT a.id AS id, a.email AS email
@@ -911,8 +885,9 @@ WHERE a.resource_id = ?
         AND ma.active_project_id = ?
         AND ma.active_entity_id = a.id
   )
+  %s
 ORDER BY a.id ASC
-LIMIT 1`, table)
+LIMIT 1`, table, validAliasSQL)
 	if err := r.dbFor(ctx).Raw(query, resourceID, projectID, mailbox, mailbox, mailbox, activeKind, projectID).Scan(&candidate).Error; err != nil {
 		return nil, fmt.Errorf("find reusable %s alias: %w", mailbox, err)
 	}
@@ -927,8 +902,9 @@ FROM %s a
 WHERE a.id = ?
   AND a.resource_id = ?
   AND a.status = 'normal'
+  %s
 LIMIT 1
-FOR UPDATE SKIP LOCKED`, table)
+FOR UPDATE SKIP LOCKED`, table, validAliasSQL)
 	if err := r.dbFor(ctx).Raw(lockQuery, candidate.ID, resourceID).Scan(&locked).Error; err != nil {
 		return nil, fmt.Errorf("lock reusable %s alias: %w", mailbox, err)
 	}
@@ -1305,13 +1281,16 @@ WHERE p.id = ?
 		return nil
 	}
 	if stats.Microsoft.Enabled {
-		microsoftScope, microsoftScopeArgs := microsoftInventoryScopeSQL(buyerUserID)
+		microsoftScope, microsoftScopeArgs := microsoftProjectInventoryScopeSQL(projectID, buyerUserID)
 		var capacity struct {
 			EligibleResources int64
+			DotCapacity       int64
 			PlusDailyLimit    int64
 		}
 		if err := scan(&capacity, `
-SELECT COUNT(*) AS eligible_resources, COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
+SELECT COUNT(*) AS eligible_resources,
+       COALESCE(SUM(`+microsoftDotCapacityExpression("ms")+`), 0) AS dot_capacity,
+       COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
 FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
@@ -1322,39 +1301,42 @@ WHERE ms.status = 'normal'
 		stats.Microsoft.EligibleResources = capacity.EligibleResources
 		stats.Microsoft.PlusDailyLimit = capacity.PlusDailyLimit
 		if stats.Microsoft.MainEnabled {
-			var activeMain int64
-			if err := scan(&activeMain, `
+			if err := scan(&stats.Microsoft.MainAvailable, `
 SELECT COUNT(*)
-FROM microsoft_allocations ma
-JOIN microsoft_resources ms ON ms.id = ma.resource_id
+FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-WHERE ma.status = 'allocated'
-  AND ma.mailbox = 'main'
-  AND ms.status = 'normal'
-  AND `+microsoftScope, microsoftScopeArgs...); err != nil {
+WHERE ms.status = 'normal'
+  AND `+microsoftScope+`
+  AND `+microsoftUnusedMainCondition, append(microsoftScopeArgs, projectID)...); err != nil {
 				return nil, err
 			}
-			stats.Microsoft.MainAvailable = nonNegative(capacity.EligibleResources - activeMain)
 			if err := scan(&stats.Microsoft.ExplicitAliasAvailable, `
 SELECT COUNT(*)
 FROM explicit_aliases ea
 JOIN microsoft_resources ms ON ms.id = ea.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-LEFT JOIN microsoft_allocations ma
-  ON ma.explicit_alias_id = ea.id
- AND ma.mailbox = 'alias'
- AND ma.status = 'allocated'
 WHERE ea.status = 'normal'
-  AND ma.id IS NULL
   AND ms.status = 'normal'
-  AND `+microsoftScope, microsoftScopeArgs...); err != nil {
+  AND `+microsoftScope+`
+  AND NOT EXISTS (
+      SELECT 1 FROM microsoft_allocations history_alias
+      WHERE history_alias.explicit_alias_id = ea.id
+        AND history_alias.project_id = ?
+        AND history_alias.mailbox = 'alias'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM microsoft_allocations active_alias
+      WHERE active_alias.active_kind = 2
+        AND active_alias.active_project_id = 0
+        AND active_alias.active_entity_id = ea.id
+  )`, append(microsoftScopeArgs, projectID)...); err != nil {
 				return nil, err
 			}
 		}
 		if stats.Microsoft.DotEnabled {
-			stats.Microsoft.DotCapacity = capacity.EligibleResources * int64(allocapp.DotAliasCapacityPerResource)
+			stats.Microsoft.DotCapacity = capacity.DotCapacity
 			if err := scan(&stats.Microsoft.ActiveDotAllocations, `
 SELECT COUNT(*)
 FROM microsoft_allocations ma
@@ -1365,10 +1347,46 @@ WHERE ma.project_id = ?
   AND ma.mailbox = 'dot'
   AND ma.status = 'allocated'
   AND ms.status = 'normal'
-  AND `+microsoftScope, append([]any{projectID}, microsoftScopeArgs...)...); err != nil {
+	  AND `+microsoftScope, append([]any{projectID}, microsoftScopeArgs...)...); err != nil {
 				return nil, err
 			}
-			stats.Microsoft.DotAvailable = nonNegative(stats.Microsoft.DotCapacity - stats.Microsoft.ActiveDotAllocations)
+			var dotAdjustment struct {
+				CanonicalUnavailable int64
+				NoncanonicalReusable int64
+			}
+			dotVariant := microsoftDotAliasMatchesResourceExpression("da", "ms")
+			validDotAlias := microsoftDotAliasValidForResourceExpression("da", "ms")
+			if err := scan(&dotAdjustment, `
+SELECT
+    COALESCE(SUM(CASE
+        WHEN `+dotVariant+` AND (
+            da.status <> 'normal'
+            OR EXISTS (
+                SELECT 1 FROM microsoft_allocations history_dot
+                WHERE history_dot.dot_alias_id = da.id
+                  AND history_dot.project_id = ?
+                  AND history_dot.mailbox = 'dot'
+            )
+        ) THEN 1 ELSE 0 END), 0) AS canonical_unavailable,
+    COALESCE(SUM(CASE
+        WHEN NOT `+dotVariant+`
+         AND `+validDotAlias+`
+         AND da.status = 'normal'
+         AND NOT EXISTS (
+             SELECT 1 FROM microsoft_allocations history_dot
+             WHERE history_dot.dot_alias_id = da.id
+               AND history_dot.project_id = ?
+               AND history_dot.mailbox = 'dot'
+         ) THEN 1 ELSE 0 END), 0) AS noncanonical_reusable
+FROM dot_aliases da
+JOIN microsoft_resources ms ON ms.id = da.resource_id
+JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
+JOIN users u ON u.id = er.owner_user_id
+WHERE ms.status = 'normal'
+  AND `+microsoftScope, append([]any{projectID, projectID}, microsoftScopeArgs...)...); err != nil {
+				return nil, err
+			}
+			stats.Microsoft.DotAvailable = nonNegative(stats.Microsoft.DotCapacity-dotAdjustment.CanonicalUnavailable) + dotAdjustment.NoncanonicalReusable
 		}
 		if stats.Microsoft.PlusEnabled {
 			if err := scan(&stats.Microsoft.PlusDailyUsed, `
@@ -1592,15 +1610,17 @@ func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projec
 }
 
 func (r *Repo) microsoftSuffixInventoryByScope(ctx context.Context, projectID uint, buyerUserID uint, row productInventoryRow) (map[string]int64, error) {
-	scope, scopeArgs := microsoftInventoryScopeSQL(buyerUserID)
+	scope, scopeArgs := microsoftProjectInventoryScopeSQL(projectID, buyerUserID)
 	result := map[string]int64{}
 	var capacities []struct {
-		Suffix            string
-		EligibleResources int64
-		PlusDailyLimit    int64
+		Suffix         string
+		DotCapacity    int64
+		PlusDailyLimit int64
 	}
 	if err := r.dbFor(ctx).Raw(`
-SELECT ms.email_domain AS suffix, COUNT(*) AS eligible_resources, COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
+SELECT ms.email_domain AS suffix,
+       COALESCE(SUM(`+microsoftDotCapacityExpression("ms")+`), 0) AS dot_capacity,
+       COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
 FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
@@ -1609,52 +1629,57 @@ WHERE ms.status = 'normal'
 GROUP BY ms.email_domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
 		return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
 	}
-	eligibleBySuffix := map[string]int64{}
+	dotCapacityBySuffix := map[string]int64{}
 	plusLimitBySuffix := map[string]int64{}
 	for _, row := range capacities {
 		suffix := normalizeCandidateSuffix(row.Suffix)
 		if suffix == "" {
 			continue
 		}
-		eligibleBySuffix[suffix] += row.EligibleResources
+		dotCapacityBySuffix[suffix] += row.DotCapacity
 		plusLimitBySuffix[suffix] += row.PlusDailyLimit
 	}
 
 	if row.MainWeight > 0 {
-		activeMain, err := r.microsoftSuffixCount(ctx, `
+		availableMain, err := r.microsoftSuffixCount(ctx, `
 SELECT ms.email_domain AS suffix, COUNT(*) AS count
-FROM microsoft_allocations ma
-JOIN microsoft_resources ms ON ms.id = ma.resource_id
+FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-WHERE ma.status = 'allocated'
-  AND ma.mailbox = 'main'
-  AND ms.status = 'normal'
+WHERE ms.status = 'normal'
   AND `+scope+`
-GROUP BY ms.email_domain`, scopeArgs...)
+  AND `+microsoftUnusedMainCondition+`
+GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
 		if err != nil {
 			return nil, err
 		}
 		explicitAlias, err := r.microsoftSuffixCount(ctx, `
-SELECT SUBSTRING_INDEX(ea.email, '@', -1) AS suffix, COUNT(*) AS count
+SELECT ms.email_domain AS suffix, COUNT(*) AS count
 FROM explicit_aliases ea
 JOIN microsoft_resources ms ON ms.id = ea.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-LEFT JOIN microsoft_allocations ma
-  ON ma.explicit_alias_id = ea.id
- AND ma.mailbox = 'alias'
- AND ma.status = 'allocated'
 WHERE ea.status = 'normal'
-  AND ma.id IS NULL
   AND ms.status = 'normal'
   AND `+scope+`
-GROUP BY SUBSTRING_INDEX(ea.email, '@', -1)`, scopeArgs...)
+  AND NOT EXISTS (
+      SELECT 1 FROM microsoft_allocations history_alias
+      WHERE history_alias.explicit_alias_id = ea.id
+        AND history_alias.project_id = ?
+        AND history_alias.mailbox = 'alias'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM microsoft_allocations active_alias
+      WHERE active_alias.active_kind = 2
+        AND active_alias.active_project_id = 0
+        AND active_alias.active_entity_id = ea.id
+  )
+GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
 		if err != nil {
 			return nil, err
 		}
-		for suffix, eligible := range eligibleBySuffix {
-			result[suffix] += nonNegative(eligible - activeMain[suffix])
+		for suffix, count := range availableMain {
+			result[suffix] += count
 		}
 		for suffix, count := range explicitAlias {
 			result[suffix] += count
@@ -1662,23 +1687,54 @@ GROUP BY SUBSTRING_INDEX(ea.email, '@', -1)`, scopeArgs...)
 	}
 
 	if row.DotWeight > 0 {
-		activeDot, err := r.microsoftSuffixCount(ctx, `
-SELECT ms.email_domain AS suffix, COUNT(*) AS count
-FROM microsoft_allocations ma
-JOIN microsoft_resources ms ON ms.id = ma.resource_id
+		type dotSuffixAdjustment struct {
+			Suffix               string
+			CanonicalUnavailable int64
+			NoncanonicalReusable int64
+		}
+		adjustments := make([]dotSuffixAdjustment, 0, len(dotCapacityBySuffix))
+		dotVariant := microsoftDotAliasMatchesResourceExpression("da", "ms")
+		validDotAlias := microsoftDotAliasValidForResourceExpression("da", "ms")
+		err := r.dbFor(ctx).Raw(`
+SELECT
+    ms.email_domain AS suffix,
+    COALESCE(SUM(CASE
+        WHEN `+dotVariant+` AND (
+            da.status <> 'normal'
+            OR EXISTS (
+                SELECT 1 FROM microsoft_allocations history_dot
+                WHERE history_dot.dot_alias_id = da.id
+                  AND history_dot.project_id = ?
+                  AND history_dot.mailbox = 'dot'
+            )
+        ) THEN 1 ELSE 0 END), 0) AS canonical_unavailable,
+    COALESCE(SUM(CASE
+        WHEN NOT `+dotVariant+`
+         AND `+validDotAlias+`
+         AND da.status = 'normal'
+         AND NOT EXISTS (
+             SELECT 1 FROM microsoft_allocations history_dot
+             WHERE history_dot.dot_alias_id = da.id
+               AND history_dot.project_id = ?
+               AND history_dot.mailbox = 'dot'
+         ) THEN 1 ELSE 0 END), 0) AS noncanonical_reusable
+FROM dot_aliases da
+JOIN microsoft_resources ms ON ms.id = da.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-WHERE ma.project_id = ?
-  AND ma.status = 'allocated'
-  AND ma.mailbox = 'dot'
-  AND ms.status = 'normal'
+WHERE ms.status = 'normal'
   AND `+scope+`
-GROUP BY ms.email_domain`, append([]any{projectID}, scopeArgs...)...)
+GROUP BY ms.email_domain`, append([]any{projectID, projectID}, scopeArgs...)...).Scan(&adjustments).Error
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("microsoft dot suffix adjustment: %w", err)
 		}
-		for suffix, eligible := range eligibleBySuffix {
-			result[suffix] += nonNegative(eligible*int64(allocapp.DotAliasCapacityPerResource) - activeDot[suffix])
+		adjustmentBySuffix := make(map[string]dotSuffixAdjustment, len(adjustments))
+		for _, adjustment := range adjustments {
+			adjustmentBySuffix[normalizeCandidateSuffix(adjustment.Suffix)] = adjustment
+		}
+		for suffix, capacity := range dotCapacityBySuffix {
+			adjustment := adjustmentBySuffix[suffix]
+			result[suffix] += nonNegative(capacity-adjustment.CanonicalUnavailable) + adjustment.NoncanonicalReusable
 		}
 	}
 
@@ -2482,6 +2538,49 @@ func microsoftInventoryScopeSQL(buyerUserID uint) (string, []any) {
 		return publicScope, nil
 	}
 	return "(" + publicScope + " OR (ms.for_sale = FALSE AND er.owner_user_id = ?))", []any{buyerUserID}
+}
+
+func microsoftProjectInventoryScopeSQL(projectID uint, buyerUserID uint) (string, []any) {
+	scope, args := microsoftInventoryScopeSQL(buyerUserID)
+	return "(" + scope + ") AND " + microsoftProjectUnmatchedCondition, append(args, projectID)
+}
+
+func microsoftDotCapacityExpression(tableAlias string) string {
+	localPart := "SUBSTRING_INDEX(" + tableAlias + ".email_address, '@', 1)"
+	positions := make([]string, 0, allocapp.DotAliasCapacityPerResource)
+	for position := 1; position <= allocapp.DotAliasCapacityPerResource; position++ {
+		positions = append(positions, fmt.Sprintf(
+			"CASE WHEN CHAR_LENGTH(%s) > %d AND SUBSTRING(%s, %d, 1) <> '.' AND SUBSTRING(%s, %d, 1) <> '.' THEN 1 ELSE 0 END",
+			localPart, position, localPart, position, localPart, position+1,
+		))
+	}
+	return "(" + strings.Join(positions, " + ") + ")"
+}
+
+func microsoftDotAliasMatchesResourceExpression(aliasTable, resourceTable string) string {
+	localPart := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', 1)"
+	domainPart := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', -1)"
+	conditions := make([]string, 0, allocapp.DotAliasCapacityPerResource)
+	for position := 1; position <= allocapp.DotAliasCapacityPerResource; position++ {
+		conditions = append(conditions, fmt.Sprintf(
+			"(CHAR_LENGTH(%s) > %d AND SUBSTRING(%s, %d, 1) <> '.' AND SUBSTRING(%s, %d, 1) <> '.' AND %s.email = CONCAT(LEFT(%s, %d), '.', SUBSTRING(%s, %d), '@', %s))",
+			localPart, position, localPart, position, localPart, position+1, aliasTable, localPart, position, localPart, position+1, domainPart,
+		))
+	}
+	return "(" + strings.Join(conditions, " OR ") + ")"
+}
+
+func microsoftDotAliasValidForResourceExpression(aliasTable, resourceTable string) string {
+	aliasLocal := "SUBSTRING_INDEX(" + aliasTable + ".email, '@', 1)"
+	resourceLocal := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', 1)"
+	aliasDomain := "SUBSTRING_INDEX(" + aliasTable + ".email, '@', -1)"
+	resourceDomain := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', -1)"
+	return "(" + aliasTable + ".email <> " + resourceTable + ".email_address" +
+		" AND " + aliasDomain + " = " + resourceDomain +
+		" AND REPLACE(" + aliasLocal + ", '.', '') = REPLACE(" + resourceLocal + ", '.', '')" +
+		" AND LEFT(" + aliasLocal + ", 1) <> '.'" +
+		" AND RIGHT(" + aliasLocal + ", 1) <> '.'" +
+		" AND LOCATE('..', " + aliasLocal + ") = 0)"
 }
 
 func domainInventoryScopeSQL(buyerUserID uint) (string, []any) {

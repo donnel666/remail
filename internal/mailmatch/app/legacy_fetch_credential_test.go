@@ -35,6 +35,12 @@ type legacyFetchTransportStub struct {
 	err    error
 }
 
+type incrementalFetchTransportStub struct {
+	request FetchMessagesRequest
+	result  FetchMessagesResult
+	err     error
+}
+
 type pickupRequestRepoStub struct {
 	Repository
 	scopes map[string]OrderScope
@@ -69,6 +75,12 @@ func (s *pickupRequestTransportStub) FetchMicrosoftMessages(_ context.Context, r
 }
 
 func (s legacyFetchTransportStub) FetchMicrosoftMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error) {
+	result := s.result
+	return &result, s.err
+}
+
+func (s *incrementalFetchTransportStub) FetchMicrosoftMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
+	s.request = request
 	result := s.result
 	return &result, s.err
 }
@@ -112,9 +124,11 @@ func TestPickupFetchUsesCredentialRevisionFence(t *testing.T) {
 	}
 	credentials := &legacyFetchCredentialStub{}
 	state := &pickupFetchStateStub{}
+	cache := &pickupMessageCacheStub{}
 	uc := NewUseCase(repo, nil, legacyFetchTransportStub{result: FetchMessagesResult{RefreshToken: "rotated-rt"}}, nil)
 	uc.SetMicrosoftCredentialPort(credentials)
 	uc.SetPickupFetchStatePort(state)
+	uc.SetPickupMessageCachePort(cache)
 	uc.now = func() time.Time { return now }
 
 	require.NoError(t, uc.ProcessFetch(context.Background(), pickupFetchTask(91, "ORDER-5", now)))
@@ -123,6 +137,72 @@ func TestPickupFetchUsesCredentialRevisionFence(t *testing.T) {
 	require.Equal(t, uint(91), credentials.update.ResourceID)
 	require.Equal(t, uint64(17), credentials.update.ExpectedCredentialRevision)
 	require.Equal(t, "rotated-rt", credentials.update.RefreshToken)
+	require.Equal(t, 1, cache.loads)
+	require.Equal(t, 1, cache.stores)
+	require.Equal(t, uint(91), cache.storeID)
+	require.Equal(t, pickupMessageCacheTTL, cache.storeTTL)
+}
+
+func TestPickupFetchUsesCachedMessageIDsAndRefreshesCacheWithoutNewMail(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	repo := &legacyFetchRepoStub{scope: OrderScope{
+		OrderNo: "ORDER-CACHE", OrderStatus: "active", ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 8, EmailResourceID: 91,
+		Recipient: "alias@example.com", MicrosoftRT: "old-rt", CredentialRevision: 17,
+	}}
+	state := &pickupFetchStateStub{}
+	cached := FetchedMessage{
+		EmailResourceID: 91, ResourceType: domain.ResourceTypeMicrosoft,
+		MessageIDHeader: "<cached@example.com>", ProviderMessageID: "graph-id",
+		Protocol: "graph", Folder: "Inbox", RawSource: "full cached MIME",
+		ProviderPayload: `{"id":"graph-id"}`, ReceivedAt: now.Add(-time.Minute),
+	}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{cached}}
+	transport := &incrementalFetchTransportStub{}
+	uc := NewUseCase(repo, nil, transport, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessFetch(context.Background(), pickupFetchTask(91, "ORDER-CACHE", now))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, cache.loads)
+	require.Equal(t, []string{
+		"internet:cached@example.com",
+		"provider:graph:inbox:graph-id",
+	}, transport.request.KnownMessageIDs)
+	require.Equal(t, 1, cache.stores)
+	require.Equal(t, pickupMessageCacheTTL, cache.storeTTL)
+	require.Equal(t, []FetchedMessage{cached}, cache.storeMessages)
+}
+
+func TestPickupFetchMergesOnlyNewMessagesAndPreservesCompleteContent(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	repo := &legacyFetchRepoStub{scope: OrderScope{
+		OrderNo: "ORDER-NEW", OrderStatus: "active", ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 8, EmailResourceID: 91,
+		Recipient: "alias@example.com", MicrosoftRT: "old-rt", CredentialRevision: 17,
+	}}
+	oldMessage := FetchedMessage{
+		EmailResourceID: 91, ResourceType: domain.ResourceTypeMicrosoft,
+		MessageIDHeader: "old@example.com", RawSource: "old full MIME",
+		ProviderPayload: `{"id":"old"}`, ReceivedAt: now.Add(-time.Minute),
+	}
+	newMessage := FetchedMessage{
+		EmailResourceID: 91, ResourceType: domain.ResourceTypeMicrosoft,
+		MessageIDHeader: "new@example.com", RawSource: "new full MIME",
+		ProviderPayload: `{"id":"new"}`, ReceivedAt: now,
+	}
+	cache := &pickupMessageCacheStub{found: true, messages: []FetchedMessage{oldMessage}}
+	transport := &incrementalFetchTransportStub{result: FetchMessagesResult{Messages: []FetchedMessage{newMessage}}}
+	uc := NewUseCase(repo, nil, transport, nil)
+	uc.SetPickupFetchStatePort(&pickupFetchStateStub{})
+	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
+
+	require.NoError(t, uc.ProcessFetch(context.Background(), pickupFetchTask(91, "ORDER-NEW", now)))
+	require.Equal(t, []FetchedMessage{newMessage, oldMessage}, cache.storeMessages)
 }
 
 func TestPickupFetchDoesNotOverwriteNewerCredential(t *testing.T) {
@@ -299,6 +379,25 @@ func TestPickupRequestFetchExpiresBeforeAcquiringLease(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	acquired, released := state.snapshot()
+	require.Empty(t, acquired)
+	require.Zero(t, released)
+}
+
+func TestPickupRequestFetchKeepsSlackForTerminalAccounting(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	state := &pickupFetchStateStub{}
+	uc := NewUseCase(&legacyFetchRepoStub{}, nil, legacyFetchTransportStub{}, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.now = func() time.Time { return now }
+
+	outcome, err := uc.ProcessPickupRequestFetchWithOutcome(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now.Add(-(pickupFetchReserveTTL - pickupFetchReturnSlack)),
+		Scopes:      []PickupRequestFetchScope{{OrderNo: "ORDER-TERMINAL-SLACK", EmailResourceID: 99}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, PickupRequestFetchOutcome{Requested: 1, Expired: 1}, outcome)
 	acquired, released := state.snapshot()
 	require.Empty(t, acquired)
 	require.Zero(t, released)

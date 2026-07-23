@@ -27,15 +27,19 @@ import (
 )
 
 const (
-	fetchLookbackWindow   = 90 * 24 * time.Hour
-	readWindowSkew        = 2 * time.Minute
-	codeReadLimit         = 1
-	purchaseReadLimit     = 30
-	messageScanLimit      = 40
-	projectionReplayLimit = 100
-	pickupFetchReserveTTL = 2 * time.Minute
-	pickupFetchLeaseTTL   = 2 * time.Minute
-	pickupFetchHeartbeat  = 30 * time.Second
+	fetchLookbackWindow     = 90 * 24 * time.Hour
+	readWindowSkew          = 2 * time.Minute
+	codeReadLimit           = 1
+	purchaseReadLimit       = 30
+	messageScanLimit        = 40
+	projectionReplayLimit   = 100
+	pickupFetchReserveTTL   = 2 * time.Minute
+	pickupFetchReturnSlack  = 2 * time.Second
+	pickupFetchLeaseTTL     = 2 * time.Minute
+	pickupMessageCacheTTL   = 10 * time.Second
+	pickupMessageCacheLimit = 30
+	pickupMessageCacheIO    = time.Second
+	pickupFetchHeartbeat    = 30 * time.Second
 )
 
 type MailRuleType string
@@ -103,14 +107,15 @@ type FetchedMessage struct {
 }
 
 type FetchMessagesRequest struct {
-	Scope       OrderScope
-	SinceAt     time.Time
-	UntilAt     time.Time
-	RequestID   string
-	Realtime    bool
-	FullHistory bool
-	OnMessages  func([]FetchedMessage)
-	OnReset     func()
+	Scope           OrderScope
+	SinceAt         time.Time
+	UntilAt         time.Time
+	RequestID       string
+	Realtime        bool
+	FullHistory     bool
+	KnownMessageIDs []string
+	OnMessages      func([]FetchedMessage)
+	OnReset         func()
 }
 
 type FetchMessagesResult struct {
@@ -147,7 +152,7 @@ type Repository interface {
 
 type MessageAppendRepository interface {
 	AppendMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, int, error)
-	ListUnprojectedMessages(ctx context.Context, emailResourceIDs []uint, limit int) ([]domain.Message, error)
+	ListUnprojectedMessages(ctx context.Context, resourceType domain.ResourceType, emailResourceIDs []uint, limit int) ([]domain.Message, error)
 	InsertMessageProjections(ctx context.Context, messages []domain.Message) ([]domain.Message, []uint, error)
 }
 
@@ -160,6 +165,12 @@ type PickupFetchStatePort interface {
 	Owns(ctx context.Context, emailResourceID uint, token string) (bool, error)
 	Extend(ctx context.Context, emailResourceID uint, token string, ttl time.Duration) (bool, error)
 	Release(ctx context.Context, emailResourceID uint, token string) error
+}
+
+type PickupMessageCachePort interface {
+	Load(ctx context.Context, emailResourceID uint) ([]FetchedMessage, bool, error)
+	LoadMany(ctx context.Context, emailResourceIDs []uint) (map[uint][]FetchedMessage, error)
+	Store(ctx context.Context, emailResourceID uint, messages []FetchedMessage, ttl time.Duration) error
 }
 
 type MatchResultPort interface {
@@ -230,18 +241,25 @@ type PickupBatchReader interface {
 }
 
 type UseCase struct {
-	repo        Repository
-	queue       FetchQueue
-	transport   MailTransportFetchPort
-	matches     MatchResultPort
-	credentials coreapp.MicrosoftCredentialPort
-	pickupFetch PickupFetchStatePort
-	now         func() time.Time
+	repo           Repository
+	queue          FetchQueue
+	transport      MailTransportFetchPort
+	matches        MatchResultPort
+	credentials    coreapp.MicrosoftCredentialPort
+	pickupFetch    PickupFetchStatePort
+	pickupMessages PickupMessageCachePort
+	now            func() time.Time
 }
 
 func (uc *UseCase) SetPickupFetchStatePort(state PickupFetchStatePort) {
 	if uc != nil {
 		uc.pickupFetch = state
+	}
+}
+
+func (uc *UseCase) SetPickupMessageCachePort(cache PickupMessageCachePort) {
+	if uc != nil {
+		uc.pickupMessages = cache
 	}
 }
 
@@ -266,37 +284,50 @@ func (uc *UseCase) ListOrderMail(ctx context.Context, orderNo string, userID uin
 	if err != nil {
 		return nil, nil, err
 	}
-	items, state, hasDelivery, err := uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasDelivery, cacheSatisfied, err := uc.listOrderMailWithPickupCache(ctx, *scope)
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasDelivery) {
+	if !cacheSatisfied && shouldScheduleReadFetch(*scope, hasDelivery) {
 		uc.scheduleScopeFetch(ctx, *scope)
 	}
 	return items, state, nil
 }
 
 func (uc *UseCase) ListPickupMail(ctx context.Context, token string, email string) ([]domain.MailContent, *domain.FetchState, error) {
-	items, state, scope, hasDelivery, err := uc.readPickupMail(ctx, token, email)
+	items, state, scope, hasDelivery, cacheSatisfied, err := uc.readPickupMail(ctx, token, email)
 	if err != nil {
 		return nil, nil, err
 	}
-	if shouldScheduleReadFetch(*scope, hasDelivery) {
+	if !cacheSatisfied && shouldScheduleReadFetch(*scope, hasDelivery) {
 		uc.scheduleScopeFetch(ctx, *scope)
 	}
 	return items, state, nil
 }
 
-func (uc *UseCase) readPickupMail(ctx context.Context, token string, email string) ([]domain.MailContent, *domain.FetchState, *OrderScope, bool, error) {
+func (uc *UseCase) readPickupMail(ctx context.Context, token string, email string) ([]domain.MailContent, *domain.FetchState, *OrderScope, bool, bool, error) {
 	scope, err := uc.repo.LoadPickupScope(ctx, strings.TrimSpace(token), normalizeEmail(email))
 	if err != nil {
-		return nil, nil, nil, false, err
+		return nil, nil, nil, false, false, err
 	}
-	items, state, hasDelivery, err := uc.listOrderMailByScope(ctx, *scope)
+	items, state, hasDelivery, cacheSatisfied, err := uc.listOrderMailWithPickupCache(ctx, *scope)
 	if err != nil {
-		return nil, nil, nil, false, err
+		return nil, nil, nil, false, cacheSatisfied, err
 	}
-	return items, state, scope, hasDelivery, nil
+	return items, state, scope, hasDelivery, cacheSatisfied, nil
+}
+
+func (uc *UseCase) listOrderMailWithPickupCache(ctx context.Context, scope OrderScope) ([]domain.MailContent, *domain.FetchState, bool, bool, error) {
+	items, state, hasDelivery, err := uc.listOrderMailByScope(ctx, scope)
+	if err != nil || !shouldScheduleReadFetch(scope, hasDelivery) {
+		return items, state, hasDelivery, false, err
+	}
+	cache := uc.applyPickupMessageCache(ctx, scope.EmailResourceID, []OrderScope{scope})
+	if !cache.applied {
+		return items, state, hasDelivery, cache.satisfied, nil
+	}
+	items, state, hasDelivery, err = uc.listOrderMailByScope(ctx, scope)
+	return items, state, hasDelivery, cache.satisfied, err
 }
 
 func (uc *UseCase) ListPickupMailBatch(ctx context.Context, credentials []PickupCredential) []PickupMailResult {
@@ -316,9 +347,9 @@ func (uc *UseCase) ListPickupMailBatch(ctx context.Context, credentials []Pickup
 		go func(index int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			items, state, scope, hasDelivery, err := uc.readPickupMail(ctx, credentials[index].Token, credentials[index].Email)
+			items, state, scope, hasDelivery, cacheSatisfied, err := uc.readPickupMail(ctx, credentials[index].Token, credentials[index].Email)
 			results[index] = PickupMailResult{Items: items, Fetch: state, Err: err}
-			if err == nil && shouldScheduleReadFetch(*scope, hasDelivery) {
+			if err == nil && !cacheSatisfied && shouldScheduleReadFetch(*scope, hasDelivery) {
 				fetchScopes[index] = scope
 			}
 		}(i)
@@ -359,6 +390,17 @@ func (uc *UseCase) listPickupMailBatchBulk(
 		}
 		return results
 	}
+	cacheSatisfied, cacheApplied := uc.applyPickupMessageCaches(ctx, reads)
+	if cacheApplied {
+		refreshed, refreshErr := reader.ReadPickupBatch(ctx, credentials, now, messageScanLimit)
+		if refreshErr != nil {
+			slog.Warn("pickup batch cache refresh read failed", "error", refreshErr)
+		} else if len(refreshed) == len(reads) {
+			reads = refreshed
+		} else {
+			slog.Warn("pickup batch cache refresh returned unexpected item count", "expected", len(reads), "actual", len(refreshed))
+		}
+	}
 
 	fetchScopes := make([]OrderScope, 0, len(reads))
 	for i := range reads {
@@ -377,12 +419,123 @@ func (uc *UseCase) listPickupMailBatchBulk(
 			continue
 		}
 		results[i] = PickupMailResult{Items: items, Fetch: state}
-		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
+		if read.Scope.AllocationType == domain.ResourceTypeMicrosoft && !cacheSatisfied[read.Scope.EmailResourceID] && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
 			fetchScopes = append(fetchScopes, *read.Scope)
 		}
 	}
 	uc.scheduleReadFetchBatch(ctx, fetchScopes)
 	return results
+}
+
+func (uc *UseCase) applyPickupMessageCaches(ctx context.Context, reads []PickupBatchRead) (map[uint]bool, bool) {
+	satisfied := make(map[uint]bool)
+	applied := false
+	scopesByResource := make(map[uint][]OrderScope)
+	for _, read := range reads {
+		if read.Err != nil || read.Scope == nil || read.Scope.AllocationType != domain.ResourceTypeMicrosoft {
+			continue
+		}
+		hasDelivery := read.Delivery != nil
+		if !shouldScheduleReadFetch(*read.Scope, hasDelivery) {
+			continue
+		}
+		resourceID := read.Scope.EmailResourceID
+		if _, exists := scopesByResource[resourceID]; !exists {
+			scopesByResource[resourceID] = nil
+		}
+		scopesByResource[resourceID] = append(scopesByResource[resourceID], *read.Scope)
+	}
+	resourceIDs := make([]uint, 0, len(scopesByResource))
+	for resourceID := range scopesByResource {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Slice(resourceIDs, func(i, j int) bool { return resourceIDs[i] < resourceIDs[j] })
+	if uc == nil || uc.pickupMessages == nil || len(resourceIDs) == 0 {
+		return satisfied, false
+	}
+	cachedByResource, err := uc.pickupMessages.LoadMany(ctx, resourceIDs)
+	if err != nil {
+		slog.Warn("pickup message cache batch read failed", "resources", len(resourceIDs), "error", err)
+		return satisfied, false
+	}
+	for _, resourceID := range resourceIDs {
+		messages, found := cachedByResource[resourceID]
+		result := uc.applyLoadedPickupMessageCache(ctx, resourceID, scopesByResource[resourceID], messages, found)
+		if result.satisfied {
+			satisfied[resourceID] = true
+		}
+		applied = applied || result.applied
+	}
+	return satisfied, applied
+}
+
+type pickupMessageCacheMatch struct {
+	satisfied bool
+	applied   bool
+}
+
+func (uc *UseCase) applyPickupMessageCache(ctx context.Context, emailResourceID uint, scopes []OrderScope) pickupMessageCacheMatch {
+	if uc == nil || uc.pickupMessages == nil || emailResourceID == 0 {
+		return pickupMessageCacheMatch{}
+	}
+	messages, found, err := uc.pickupMessages.Load(ctx, emailResourceID)
+	if err != nil {
+		slog.Warn("pickup message cache read failed", "resource_id", emailResourceID, "error", err)
+		return pickupMessageCacheMatch{}
+	}
+	if !found {
+		return pickupMessageCacheMatch{}
+	}
+	return uc.applyLoadedPickupMessageCache(ctx, emailResourceID, scopes, messages, true)
+}
+
+func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResourceID uint, scopes []OrderScope, messages []FetchedMessage, found bool) pickupMessageCacheMatch {
+	if !found {
+		return pickupMessageCacheMatch{}
+	}
+	messages, allMatched := cachedMessagesMatchingScopes(messages, emailResourceID, scopes)
+	if len(messages) == 0 {
+		return pickupMessageCacheMatch{satisfied: allMatched}
+	}
+	if _, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
+		ctx, messages, domain.ResourceTypeMicrosoft, []uint{emailResourceID}, nil,
+	); err != nil {
+		slog.Warn("pickup cached message matching failed", "resource_id", emailResourceID, "error", err)
+		return pickupMessageCacheMatch{}
+	}
+	platform.AddWorkUnits("mailmatch_fetch", "all", "cache_match", 1)
+	return pickupMessageCacheMatch{satisfied: allMatched, applied: true}
+}
+
+func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uint, scopes []OrderScope) ([]FetchedMessage, bool) {
+	if len(scopes) == 0 {
+		return nil, true
+	}
+	matched := make([]FetchedMessage, 0, len(messages))
+	matchedScopes := make([]bool, len(scopes))
+	for _, message := range messages {
+		if message.EmailResourceID != emailResourceID || message.ResourceType != domain.ResourceTypeMicrosoft {
+			continue
+		}
+		messageMatched := false
+		for index, scope := range scopes {
+			if scope.EmailResourceID != emailResourceID || scope.AllocationType != domain.ResourceTypeMicrosoft {
+				continue
+			}
+			if ok, _, _ := matchAndExtractAnyRecipient(message, scope); ok {
+				matchedScopes[index] = true
+				messageMatched = true
+			}
+		}
+		if messageMatched {
+			matched = append(matched, message)
+		}
+	}
+	allMatched := true
+	for _, scopeMatched := range matchedScopes {
+		allMatched = allMatched && scopeMatched
+	}
+	return matched, allMatched
 }
 
 func (uc *UseCase) scheduleReadFetchBatch(ctx context.Context, scopes []OrderScope) {
@@ -622,7 +775,9 @@ func (uc *UseCase) ProcessPickupRequestFetchWithOutcome(ctx context.Context, tas
 		platform.AddWorkUnits("pickup_fetch", "all", "system_failed", outcome.Failed)
 		platform.AddWorkUnits("pickup_fetch", "all", "expired", outcome.Expired)
 	}()
-	deadline := task.RequestedAt.Add(pickupFetchReserveTTL)
+	// Asynq owns the hard two-minute timeout. Stop scope work slightly earlier
+	// so partial outcomes and lease cleanup can finish before that outer timer.
+	deadline := task.RequestedAt.Add(pickupFetchReserveTTL - pickupFetchReturnSlack)
 	if !uc.now().Before(deadline) {
 		outcome.Expired = outcome.Requested
 		return outcome, nil
@@ -770,8 +925,17 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr 
 	if scope.EmailResourceID != task.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 		return nil
 	}
+	var cachedMessages []FetchedMessage
+	if uc.pickupMessages != nil {
+		messages, found, cacheErr := uc.pickupMessages.Load(ctx, task.EmailResourceID)
+		if cacheErr != nil {
+			slog.Warn("pickup message cache read failed", "resource_id", task.EmailResourceID, "error", cacheErr)
+		} else if found {
+			cachedMessages = pickupMessagesForResource(messages, task.EmailResourceID)
+		}
+	}
 	job := domain.FetchJob{SinceAt: &task.SinceAt, UntilAt: &task.UntilAt}
-	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job)
+	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job, pickupMessageIdentityKeys(cachedMessages))
 	if fetchErr != nil {
 		return fetchErr
 	}
@@ -808,24 +972,112 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr 
 			return err
 		}
 	}
-	stored, matched, lastReceivedAt, err := uc.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, []uint{task.EmailResourceID}, func(txCtx context.Context) error {
-		current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
+	stored := 0
+	matched := 0
+	if len(fetched.Messages) == 0 {
+		current, err := uc.pickupFetch.Owns(ctx, task.EmailResourceID, task.LeaseToken)
 		if err != nil {
 			return err
 		}
 		if !current {
-			return domain.ErrFetchJobConflict
+			return nil
 		}
-		return nil
-	})
-	if err != nil {
-		return err
+	} else {
+		var lastReceivedAt *time.Time
+		stored, matched, lastReceivedAt, err = uc.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, domain.ResourceTypeMicrosoft, []uint{task.EmailResourceID}, func(txCtx context.Context) error {
+			current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
+			if err != nil {
+				return err
+			}
+			if !current {
+				return domain.ErrFetchJobConflict
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		_ = lastReceivedAt
 	}
-	_ = lastReceivedAt
 	platform.AddWorkUnits("mailmatch_fetch", "all", "fetched", len(fetched.Messages))
 	platform.AddWorkUnits("mailmatch_fetch", "all", "stored", stored)
 	platform.AddWorkUnits("mailmatch_fetch", "all", "matched", matched)
+	if uc.pickupMessages != nil {
+		mergedMessages := mergePickupMessages(fetched.Messages, cachedMessages)
+		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
+		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, mergedMessages, pickupMessageCacheTTL)
+		cancel()
+		if err != nil {
+			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
+		} else {
+			platform.AddWorkUnits("mailmatch_fetch", "all", "cache_refresh", 1)
+		}
+	}
 	return nil
+}
+
+func pickupMessagesForResource(messages []FetchedMessage, emailResourceID uint) []FetchedMessage {
+	filtered := make([]FetchedMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.EmailResourceID == emailResourceID && message.ResourceType == domain.ResourceTypeMicrosoft {
+			filtered = append(filtered, message)
+		}
+	}
+	return filtered
+}
+
+func pickupMessageIdentityKeys(messages []FetchedMessage) []string {
+	keys := make([]string, 0, len(messages)*2)
+	seen := make(map[string]struct{}, len(messages)*2)
+	for _, message := range messages {
+		messageID := strings.ToLower(strings.Trim(strings.TrimSpace(message.MessageIDHeader), "<>"))
+		if messageID != "" {
+			keys = appendUniqueIdentityKey(keys, seen, "internet:"+messageID)
+		}
+		providerID := strings.ToLower(strings.TrimSpace(message.ProviderMessageID))
+		if providerID != "" {
+			keys = appendUniqueIdentityKey(keys, seen, strings.Join([]string{
+				"provider",
+				strings.ToLower(strings.TrimSpace(message.Protocol)),
+				strings.ToLower(strings.TrimSpace(message.Folder)),
+				providerID,
+			}, ":"))
+		}
+	}
+	return keys
+}
+
+func appendUniqueIdentityKey(keys []string, seen map[string]struct{}, key string) []string {
+	if key == "" {
+		return keys
+	}
+	if _, exists := seen[key]; exists {
+		return keys
+	}
+	seen[key] = struct{}{}
+	return append(keys, key)
+}
+
+func mergePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
+	merged := make([]FetchedMessage, 0, len(fetched)+len(cached))
+	seen := make(map[string]struct{}, len(fetched)+len(cached))
+	for _, messages := range [][]FetchedMessage{fetched, cached} {
+		for _, message := range messages {
+			key := fmt.Sprintf("%d:%s", message.EmailResourceID, messageDedupeKey(message))
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, message)
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].ReceivedAt.After(merged[j].ReceivedAt)
+	})
+	if len(merged) > pickupMessageCacheLimit {
+		merged = merged[:pickupMessageCacheLimit]
+	}
+	return merged
 }
 
 func (uc *UseCase) keepPickupFetchLease(ctx context.Context, task FetchTask) func() {
@@ -881,7 +1133,13 @@ func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest
 	if req.ResourceType != domain.ResourceTypeDomain {
 		return nil
 	}
-	_, _, _, err := uc.ingestFetchedMessages(ctx, []FetchedMessage{inboundFetchedMessage(req)})
+	_, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
+		ctx,
+		[]FetchedMessage{inboundFetchedMessage(req)},
+		domain.ResourceTypeDomain,
+		[]uint{req.EmailResourceID},
+		nil,
+	)
 	return err
 }
 
@@ -907,12 +1165,13 @@ func (uc *UseCase) ingestFetchedMessagesWithFence(
 	fetched []FetchedMessage,
 	fence func(context.Context) error,
 ) (int, int, *time.Time, error) {
-	return uc.ingestFetchedMessagesForResourcesWithFence(ctx, fetched, fetchedMessageResourceIDs(fetched), fence)
+	return uc.ingestFetchedMessagesForResourcesWithFence(ctx, fetched, "", nil, fence)
 }
 
 func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 	ctx context.Context,
 	fetched []FetchedMessage,
+	replayResourceType domain.ResourceType,
 	replayResourceIDs []uint,
 	fence func(context.Context) error,
 ) (int, int, *time.Time, error) {
@@ -945,10 +1204,8 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		if err != nil {
 			return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message storage failed.", err: err}
 		}
-		pendingMessages, err := appendRepo.ListUnprojectedMessages(
-			ctx,
-			mergeResourceIDs(replayResourceIDs, messageResourceIDs(storedMessages)),
-			projectionReplayLimit,
+		pendingMessages, err := listUnprojectedMessages(
+			ctx, appendRepo, replayResourceType, replayResourceIDs, storedMessages,
 		)
 		if err != nil {
 			return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message recovery failed.", err: err}
@@ -1043,9 +1300,6 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		}
 	}
 	for _, delivery := range storedDeliveries {
-		if appendOnly && !containsMessageID(newlyMatched, delivery.message.ID) {
-			continue
-		}
 		result := MatchResult{
 			OrderNo:          delivery.scope.OrderNo,
 			VerificationCode: delivery.message.VerificationCode,
@@ -1056,14 +1310,6 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		}
 	}
 	return stored, matched, lastReceivedAt, nil
-}
-
-func fetchedMessageResourceIDs(messages []FetchedMessage) []uint {
-	ids := make([]uint, 0, len(messages))
-	for _, message := range messages {
-		ids = append(ids, message.EmailResourceID)
-	}
-	return mergeResourceIDs(ids, nil)
 }
 
 func mergeResourceIDs(first, second []uint) []uint {
@@ -1083,12 +1329,46 @@ func mergeResourceIDs(first, second []uint) []uint {
 	return ids
 }
 
-func messageResourceIDs(messages []domain.Message) []uint {
-	ids := make([]uint, 0, len(messages))
-	for _, message := range messages {
-		ids = append(ids, message.EmailResourceID)
+func listUnprojectedMessages(
+	ctx context.Context,
+	repo MessageAppendRepository,
+	replayResourceType domain.ResourceType,
+	replayResourceIDs []uint,
+	storedMessages []domain.Message,
+) ([]domain.Message, error) {
+	resourceIDsByType := map[domain.ResourceType][]uint{}
+	if replayResourceType == domain.ResourceTypeMicrosoft || replayResourceType == domain.ResourceTypeDomain {
+		resourceIDsByType[replayResourceType] = append(resourceIDsByType[replayResourceType], replayResourceIDs...)
 	}
-	return mergeResourceIDs(ids, nil)
+	for _, message := range storedMessages {
+		if message.ResourceType != domain.ResourceTypeMicrosoft && message.ResourceType != domain.ResourceTypeDomain {
+			continue
+		}
+		resourceIDsByType[message.ResourceType] = append(resourceIDsByType[message.ResourceType], message.EmailResourceID)
+	}
+
+	pending := make([]domain.Message, 0, projectionReplayLimit)
+	for _, resourceType := range []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeDomain} {
+		resourceIDs := mergeResourceIDs(resourceIDsByType[resourceType], nil)
+		if len(resourceIDs) == 0 {
+			continue
+		}
+		messages, err := repo.ListUnprojectedMessages(ctx, resourceType, resourceIDs, projectionReplayLimit)
+		if err != nil {
+			return nil, err
+		}
+		pending = appendUniqueMessages(pending, messages)
+	}
+	sort.SliceStable(pending, func(i, j int) bool {
+		if pending[i].ReceivedAt.Equal(pending[j].ReceivedAt) {
+			return pending[i].ID > pending[j].ID
+		}
+		return pending[i].ReceivedAt.After(pending[j].ReceivedAt)
+	})
+	if len(pending) > projectionReplayLimit {
+		pending = pending[:projectionReplayLimit]
+	}
+	return pending, nil
 }
 
 func appendUniqueMessages(messages, extra []domain.Message) []domain.Message {
@@ -1166,7 +1446,7 @@ func latestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 	return result
 }
 
-func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob) (*FetchMessagesResult, error) {
+func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob, knownMessageIDs []string) (*FetchMessagesResult, error) {
 	sinceAt := time.Now().UTC().Add(-fetchLookbackWindow)
 	if job.SinceAt != nil {
 		sinceAt = *job.SinceAt
@@ -1181,7 +1461,7 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 			return nil, domain.ErrMailServiceUnavailable
 		}
 		return uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
-			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true,
+			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true, KnownMessageIDs: knownMessageIDs,
 		})
 	case domain.ResourceTypeDomain:
 		return &FetchMessagesResult{Messages: nil}, nil

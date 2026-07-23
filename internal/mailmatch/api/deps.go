@@ -58,6 +58,7 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 	transport := NewMicrosoftFetchAdapter(proxies)
 	useCase := mailmatchapp.NewUseCase(repo, queue, transport, matchResultAdapter{trade: trade})
 	useCase.SetPickupFetchStatePort(mailmatchinfra.NewPickupFetchState(redisClient))
+	useCase.SetPickupMessageCachePort(mailmatchinfra.NewPickupMessageCache(redisClient))
 	projectHistory := mailmatchapp.NewProjectHistoryScanUseCase(projectHistoryRepo, repo, queue, transport)
 	if trade != nil {
 		projectHistory.SetHistoricalMicrosoftUsagePort(historicalMicrosoftUsageAdapter{trade: trade})

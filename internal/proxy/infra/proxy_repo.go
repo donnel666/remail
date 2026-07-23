@@ -713,6 +713,9 @@ func (r *ProxyRepo) AcquireResourceProxy(ctx context.Context, key string, ipVers
 	if selected == nil {
 		return nil, domain.ErrProxyUnavailable
 	}
+	// Fairness metadata is best effort and must not share the range-locking
+	// selection transaction with the durable binding write.
+	_ = touchProxyUsed(ctx, r.db, selected.ID, now)
 	return selected, nil
 }
 
@@ -726,9 +729,6 @@ func (r *ProxyRepo) AcquireSystemProxy(ctx context.Context, ipVersion domain.Pro
 		if err != nil {
 			return err
 		}
-		if err := touchProxyUsed(ctx, tx, model.ID, now); err != nil {
-			return err
-		}
 		proxy := proxyFromModel(*model)
 		proxy.LastUsedAt = &now
 		selected = &proxy
@@ -740,6 +740,7 @@ func (r *ProxyRepo) AcquireSystemProxy(ctx context.Context, ipVersion domain.Pro
 	if selected == nil {
 		return nil, domain.ErrProxyUnavailable
 	}
+	_ = touchProxyUsed(ctx, r.db, selected.ID, now)
 	return selected, nil
 }
 
@@ -930,9 +931,6 @@ func coverInvalidBinding(ctx context.Context, tx *gorm.DB, key string, proxy *do
 		}).Error; err != nil {
 		return false, fmt.Errorf("cover proxy binding: %w", err)
 	}
-	if err := touchProxyUsed(ctx, tx, proxy.ID, now); err != nil {
-		return false, err
-	}
 	return true, nil
 }
 
@@ -1029,10 +1027,10 @@ FOR UPDATE`
 	return sql, args
 }
 
-func touchProxyUsed(ctx context.Context, tx *gorm.DB, proxyID uint, usedAt time.Time) error {
-	if err := tx.WithContext(ctx).
+func touchProxyUsed(ctx context.Context, db *gorm.DB, proxyID uint, usedAt time.Time) error {
+	if err := db.WithContext(ctx).
 		Model(&ProxyModel{}).
-		Where("id = ?", proxyID).
+		Where("id = ? AND (last_used_at IS NULL OR last_used_at < ?)", proxyID, usedAt).
 		Update("last_used_at", usedAt).Error; err != nil {
 		return fmt.Errorf("touch proxy used: %w", err)
 	}

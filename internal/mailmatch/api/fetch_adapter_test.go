@@ -16,7 +16,7 @@ type microsoftMessageFetchClientStub struct {
 	results  []mailinfra.MicrosoftMailFetchResult
 }
 
-func TestMicrosoftFetchAdapterRealtimeStopsAtSixWithoutTimeFilter(t *testing.T) {
+func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithoutTimeFilter(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}
 
@@ -25,6 +25,7 @@ func TestMicrosoftFetchAdapterRealtimeStopsAtSixWithoutTimeFilter(t *testing.T) 
 			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
 		},
 		SinceAt: time.Now().Add(-time.Hour), UntilAt: time.Now(), Realtime: true,
+		KnownMessageIDs: []string{"internet:cached@example.com"},
 	})
 
 	require.NoError(t, err)
@@ -33,6 +34,7 @@ func TestMicrosoftFetchAdapterRealtimeStopsAtSixWithoutTimeFilter(t *testing.T) 
 	require.True(t, client.requests[0].StopAfterLimit)
 	require.True(t, client.requests[0].SinceAt.IsZero())
 	require.True(t, client.requests[0].UntilAt.IsZero())
+	require.Equal(t, []string{"internet:cached@example.com"}, client.requests[0].KnownMessageIDs)
 }
 
 func (s *microsoftMessageFetchClientStub) FetchAll(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {
@@ -125,4 +127,28 @@ func TestMicrosoftFetchAdapterReturnsRotatedTokenOnFetchFailure(t *testing.T) {
 	var failure *mailmatchapp.MailFetchFailure
 	require.True(t, errors.As(err, &failure))
 	require.Equal(t, "rotated-refresh-token", failure.RefreshToken)
+}
+
+func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing.T) {
+	rawSource := "  MIME-Version: 1.0\r\n\r\nbody\r\n"
+	providerPayload := "\n{\"id\":\"message-id\",\"body\":\"full\"}\n"
+
+	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{EmailResourceID: 42}, []mailinfra.MicrosoftFetchedMessage{{
+		ID: "message-id", RawSource: rawSource, ProviderPayload: providerPayload,
+	}})
+
+	require.Len(t, messages, 1)
+	require.Equal(t, rawSource, messages[0].RawSource)
+	require.Equal(t, providerPayload, messages[0].ProviderPayload)
+}
+
+func TestMicrosoftMessagesToMailmatchDoesNotInventRecipientForSharedResourceFetch(t *testing.T) {
+	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{
+		EmailResourceID: 42,
+		Recipient:       "requesting-alias@example.com",
+	}, []mailinfra.MicrosoftFetchedMessage{{ID: "message-id"}})
+
+	require.Len(t, messages, 1)
+	require.Empty(t, messages[0].Recipient)
+	require.Empty(t, messages[0].Recipients)
 }

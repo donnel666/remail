@@ -537,6 +537,86 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	)
 }
 
+func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error) {
+	if req.ProjectID == 0 || req.ProductID == 0 || req.BuyerUserID == 0 {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
+	if uc.inventoryCache == nil {
+		return true, nil
+	}
+	unavailable, err := uc.inventoryCache.IsProductUnavailable(ctx, req)
+	if err != nil {
+		return true, err
+	}
+	if unavailable {
+		return false, nil
+	}
+	totals, err := uc.inventoryCache.GetProductInventoryTotals(ctx, req.ProjectID, req.BuyerUserID)
+	if err != nil || totals == nil {
+		// Cache outages and cold starts must not reject an order. The allocator is
+		// still the authoritative check-and-reserve operation.
+		return true, err
+	}
+	available, known := productInventoryAvailable(totals, req)
+	if !known {
+		// A newly enabled product can predate its next inventory refresh. Fail open
+		// so a stale read model never overrides the allocator.
+		return true, nil
+	}
+	return available, nil
+}
+
+func productInventoryAvailable(totals *ProjectProductInventoryTotals, req ProductInventoryAvailabilityRequest) (bool, bool) {
+	if totals == nil {
+		return false, false
+	}
+	for _, item := range totals.Items {
+		if item.ProductID != req.ProductID {
+			continue
+		}
+		if req.EmailSuffix == "" {
+			if req.PublicOnly {
+				return item.PublicAvailable > 0, true
+			}
+			return item.TotalAvailable > 0, true
+		}
+		for _, suffix := range item.Suffixes {
+			if normalizeEmailSuffix(suffix.Suffix) != req.EmailSuffix {
+				continue
+			}
+			if req.PublicOnly {
+				return suffix.PublicAvailable > 0, true
+			}
+			return suffix.TotalAvailable > 0, true
+		}
+		return false, true
+	}
+	return false, false
+}
+
+func (uc *UseCase) MarkProductInventoryUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error) {
+	if req.ProjectID == 0 || req.ProductID == 0 || req.BuyerUserID == 0 {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	if uc.inventoryCache == nil {
+		return false, nil
+	}
+	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
+	// Bounded allocator probes can be exhausted by stale/concurrently claimed
+	// candidates while later resources remain usable. Only publish a zero after
+	// the exact read model independently confirms that this scope is exhausted.
+	fresh, err := uc.repo.GetProductInventoryTotals(ctx, req.ProjectID, req.BuyerUserID)
+	if err != nil {
+		return false, err
+	}
+	available, known := productInventoryAvailable(fresh, req)
+	if !known || available {
+		return false, nil
+	}
+	return uc.inventoryCache.MarkProductUnavailable(ctx, req)
+}
+
 func loadCachedInventory[T any](
 	ctx context.Context,
 	cache InventoryCache,
@@ -1250,6 +1330,9 @@ func dotAliasVariants(email string) []string {
 	}
 	result := make([]string, 0, limit)
 	for i := 1; i <= limit; i++ {
+		if local[i-1] == '.' || local[i] == '.' {
+			continue
+		}
 		result = append(result, local[:i]+"."+local[i:]+"@"+domainPart)
 	}
 	return result

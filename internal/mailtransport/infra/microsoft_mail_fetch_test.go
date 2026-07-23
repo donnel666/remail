@@ -348,6 +348,101 @@ func TestMicrosoftMailFetchClientReturnsNewestRealtimeMessagesAcrossInboxAndJunk
 	})
 }
 
+func TestMicrosoftMailFetchClientStopsAfterFolderHeadsWhenNewestMessageIsCached(t *testing.T) {
+	now := time.Now().UTC()
+	var limits []int
+	var metadataOnly []bool
+	client := &MicrosoftMailFetchClient{
+		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
+			return microsoftGraphIdentityMatched, nil
+		},
+		graphFolderFetch: func(_ context.Context, _ *msacl.Session, _ string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			limits = append(limits, req.MaxMessages)
+			metadataOnly = append(metadataOnly, req.MetadataOnly)
+			message := MicrosoftFetchedMessage{
+				InternetMessageID: "older@example.com", FolderLabel: folder.Label,
+				ReceivedAt: now.Add(-time.Minute), Protocol: "graph",
+			}
+			if folder.Label == "Inbox" {
+				message.InternetMessageID = "cached@example.com"
+				message.ReceivedAt = now
+			}
+			return microsoftFolderFetchResult{Count: 1, Messages: []MicrosoftFetchedMessage{message}}, nil
+		},
+	}
+
+	result, err := client.fetchAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
+		AccessToken: "access-token", MaxMessages: 30, StopAfterLimit: true,
+		KnownMessageIDs: []string{"internet:cached@example.com"},
+	}, &fakeMicrosoftIMAPClient{})
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Messages)
+	require.Zero(t, result.MessageCount)
+	require.Equal(t, []int{1, 1}, limits)
+	require.Equal(t, []bool{true, true}, metadataOnly)
+}
+
+func TestApplyMicrosoftMessageBoundaryReturnsOnlyMessagesNewerThanCachedID(t *testing.T) {
+	now := time.Now().UTC()
+	result := MicrosoftMailFetchResult{Messages: []MicrosoftFetchedMessage{
+		{InternetMessageID: "old@example.com", ReceivedAt: now.Add(-2 * time.Minute)},
+		{InternetMessageID: "new@example.com", ReceivedAt: now},
+		{InternetMessageID: "cached@example.com", ReceivedAt: now.Add(-time.Minute)},
+	}}
+
+	applyMicrosoftMessageBoundary(&result, []string{"internet:cached@example.com"}, 30)
+
+	require.Len(t, result.Messages, 1)
+	require.Equal(t, "new@example.com", result.Messages[0].InternetMessageID)
+	require.Equal(t, 1, result.MessageCount)
+}
+
+func TestMicrosoftMailFetchStreamsOnlyMessagesBeforeCachedBoundary(t *testing.T) {
+	now := time.Now().UTC()
+	client := &MicrosoftMailFetchClient{
+		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
+			return microsoftGraphIdentityMatched, nil
+		},
+		graphFolderFetch: func(_ context.Context, _ *msacl.Session, _ string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			if req.MetadataOnly {
+				message := MicrosoftFetchedMessage{InternetMessageID: "junk-old@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-time.Minute)}
+				if folder.Label == "Inbox" {
+					message.InternetMessageID = "new@example.com"
+					message.ReceivedAt = now
+				}
+				return microsoftFolderFetchResult{Count: 1, Messages: []MicrosoftFetchedMessage{message}}, nil
+			}
+			if folder.Label == "Junk" {
+				return microsoftFolderFetchResult{}, nil
+			}
+			messages := []MicrosoftFetchedMessage{
+				{InternetMessageID: "new@example.com", FolderLabel: folder.Label, ReceivedAt: now},
+				{InternetMessageID: "cached@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-time.Minute)},
+				{InternetMessageID: "older@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-2 * time.Minute)},
+			}
+			return microsoftFolderFetchResult{Count: len(messages), Messages: messages}, nil
+		},
+	}
+	var streamed []MicrosoftFetchedMessage
+
+	result, err := client.fetchGraphAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
+		AccessToken: "access-token", MaxMessages: 30, StopAfterLimit: true,
+		KnownMessageIDs: []string{"internet:cached@example.com"},
+		OnMessages:      func(messages []MicrosoftFetchedMessage) { streamed = append(streamed, messages...) },
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Empty(t, result.Messages)
+	require.Equal(t, 1, result.MessageCount)
+	require.Len(t, streamed, 1)
+	require.Equal(t, "new@example.com", streamed[0].InternetMessageID)
+}
+
 func TestLatestIMAPSeqSetBoundsRealtimeFolderRead(t *testing.T) {
 	seqSet := latestIMAPSeqSet(1_000_000, 6)
 	require.Equal(t, "999995:1000000", seqSet.String())

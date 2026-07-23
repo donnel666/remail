@@ -274,23 +274,23 @@ func firstEmailProofDisplay(proofs []ProofData) string {
 // list existing → add new aliases" session.
 type SyncAndAddExplicitAliasesResult struct {
 	// ExistingAliases lists approved Microsoft aliases found on the
-	// account.live.com/names/manage page. The caller should backfill these into
-	// the local DB (explicit_aliases) for reconciliation.
+	// account.live.com/names/manage page. The caller backfills these into the
+	// local explicit_aliases read model.
 	ExistingAliases []string
 	// AddResults contains one entry per attempted candidate.
 	AddResults []ExplicitAliasResult
-	// OverallFailure is set when the login or list step itself failed.
+	// OverallFailure is set when the login failed.
 	OverallFailure *ExplicitAliasResult
 }
 
 // SyncAndAddExplicitAliases performs a single login session that:
 //  1. Logs in via email OTC (mechanism 1, eOTT_OtcLogin).
-//  2. GET account.live.com/names/manage and lists all existing aliases
-//  3. Creates each candidate in candidates (addSingleExplicitAlias, reusing session)
+//  2. GET account.live.com/names/manage and lists all existing aliases.
+//  3. Creates each candidate in candidates (addSingleExplicitAlias, reusing session).
 //
 // It is the "one login does list+add" primitive required by the architecture
 // constraint (max 3 OTP sends per channel per account per day). Only the
-// SUCCEEDING login proceeds to list+add — a fallback replaces the failed login,
+// SUCCEEDING login proceeds to add — a fallback replaces the failed login,
 // it never doubles the work.
 func SyncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bindingAddress string, candidates []string) *SyncAndAddExplicitAliasesResult {
 	return syncAndAddExplicitAliases(ctx, email, password, proxy, bindingAddress, candidates, false)
@@ -307,13 +307,9 @@ func syncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bind
 	ctx = contextOrBackground(ctx)
 	session, err := newBrowserSession(ctx, proxy)
 	if err != nil {
-		f := ExplicitAliasResult{
-			Category:    "request",
-			SafeMessage: fmt.Sprintf("创建浏览器会话失败: %s", err),
-		}
-		return &SyncAndAddExplicitAliasesResult{
-			OverallFailure: &f,
-		}
+		wrapped := wrapAuthError(fmt.Sprintf("创建浏览器会话失败: %s", err), AuthStatusRequestError, err)
+		mapped := mapExplicitAliasError(wrapped)
+		return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
 	}
 
 	// Step 1: OTC login (mechanism 1). A sent-but-unprocessed code keeps the
@@ -334,46 +330,62 @@ func syncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bind
 		return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
 	}
 
-	// Step 2: List existing aliases from names/manage. That page is often
-	// bounced to login.srf?wa=wsignin1.0; follow the relay to reach it.
+	// List first so aliases created by an earlier attempt but lost locally are
+	// recovered without sending another AddAssocId request.
 	logInfo("列出已有别名 (names/manage)")
 	const namesManageURL = "https://account.live.com/names/manage"
 	var existingAliases []string
-	resp, err := session.Get(namesManageURL, requestOptions{
+	resp, listErr := session.Get(namesManageURL, requestOptions{
 		Headers:           navHeaders(session, map[string]string{"Referer": currentURL}),
 		AllowRedirects:    true,
 		HasAllowRedirects: true,
 	})
-	if err == nil {
-		p2, f2 := resp.Body, resp.URL
-		for i := 0; i < 3 && !isExplicitAliasManageURL(f2); i++ {
-			p2, f2, _ = continueExplicitAliasLoginRelay(session, p2, f2, 6)
-			if !isExplicitAliasManageURL(f2) {
-				p2, f2, _ = followExplicitAliasTarget(session, p2, f2, 10)
-			}
-			if !isExplicitAliasManageURL(f2) {
-				r2, e2 := session.Get(namesManageURL, requestOptions{
-					Headers:           navHeaders(session, map[string]string{"Referer": f2}),
-					AllowRedirects:    true,
-					HasAllowRedirects: true,
-				})
-				if e2 != nil {
-					break
-				}
-				p2, f2 = r2.Body, r2.URL
-			}
-		}
-		if isExplicitAliasManageURL(f2) {
-			existingAliases = extractAllExplicitAliasesFromManagePage(p2, f2)
-			logInfo("发现 %d 个已有别名", len(existingAliases))
-		} else {
-			logWarning("未能进入 names/manage 列出别名: url=%s", f2)
-		}
-	} else {
-		logWarning("获取 names/manage 异常: %v", err)
+	if listErr != nil {
+		wrapped := wrapAuthError(fmt.Sprintf("获取 names/manage 异常: %s", listErr), AuthStatusRequestError, listErr)
+		mapped := mapExplicitAliasError(wrapped)
+		return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
 	}
+	page, finalURL := resp.Body, resp.URL
+	for i := 0; i < 3 && !isExplicitAliasManageURL(finalURL); i++ {
+		page, finalURL, err = continueExplicitAliasLoginRelay(session, page, finalURL, 6)
+		if err != nil {
+			mapped := mapExplicitAliasError(err)
+			return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
+		}
+		if !isExplicitAliasManageURL(finalURL) {
+			page, finalURL, err = followExplicitAliasTarget(session, page, finalURL, 10)
+			if err != nil {
+				mapped := mapExplicitAliasError(err)
+				return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
+			}
+		}
+		if !isExplicitAliasManageURL(finalURL) {
+			next, getErr := session.Get(namesManageURL, requestOptions{
+				Headers:           navHeaders(session, map[string]string{"Referer": finalURL}),
+				AllowRedirects:    true,
+				HasAllowRedirects: true,
+			})
+			if getErr != nil {
+				wrapped := wrapAuthError(fmt.Sprintf("重新获取 names/manage 异常: %s", getErr), AuthStatusRequestError, getErr)
+				mapped := mapExplicitAliasError(wrapped)
+				return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
+			}
+			page, finalURL = next.Body, next.URL
+		}
+	}
+	if !isExplicitAliasManageURL(finalURL) {
+		mapped := mapExplicitAliasError(newExplicitAliasStageError(
+			"Microsoft alias manage page is unavailable.", AuthStatusAuthTimeout, explicitAliasStageManageRedirected,
+		))
+		return &SyncAndAddExplicitAliasesResult{OverallFailure: &mapped}
+	}
+	existingAliases = explicitAliasesExceptPrimary(
+		extractAllExplicitAliasesFromManagePage(page, finalURL), email,
+	)
+	logInfo("发现 %d 个已有别名", len(existingAliases))
 
-	// Step 3: Create new aliases one by one, using the same session
+	// Create candidates independently in the same session; one unavailable alias
+	// must not prevent later best-effort candidates from being attempted.
 	addResults := make([]ExplicitAliasResult, 0, len(candidates))
 	for _, candidate := range normalizeExplicitAliasCandidates(candidates) {
 		if err := ctx.Err(); err != nil {
@@ -383,26 +395,45 @@ func syncAndAddExplicitAliases(ctx context.Context, email, password, proxy, bind
 			})
 			break
 		}
-		prefix := strings.TrimSuffix(candidate, "@outlook.com")
-		alias, category, attempted, err := addSingleExplicitAlias(session, prefix, email, proxy, bindingAddress)
+		alias, category, attempted, err := addSingleExplicitAlias(session, candidate, email, proxy, bindingAddress)
 		if err != nil {
-			mapped := mapExplicitAliasError(err)
-			mapped.ProxyFailure = true
-			addResults = append(addResults, mapped)
+			addResults = append(addResults, explicitAliasAttemptFailure(alias, attempted, err))
 			continue
 		}
-		res := ExplicitAliasResult{Aliases: []string{alias}, Category: category}
-		res.Attempted = []string{}
-		if attempted {
-			res.Attempted = []string{alias}
-		}
-		addResults = append(addResults, res)
+		addResults = append(addResults, explicitAliasAddResult(alias, category, attempted))
 	}
 
-	return &SyncAndAddExplicitAliasesResult{
-		ExistingAliases: existingAliases,
-		AddResults:      addResults,
+	return &SyncAndAddExplicitAliasesResult{ExistingAliases: existingAliases, AddResults: addResults}
+}
+
+func explicitAliasesExceptPrimary(aliases []string, primary string) []string {
+	primary = strings.ToLower(strings.TrimSpace(primary))
+	result := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		if strings.ToLower(strings.TrimSpace(alias)) != primary {
+			result = append(result, alias)
+		}
 	}
+	return result
+}
+
+func explicitAliasAddResult(alias, category string, attempted bool) ExplicitAliasResult {
+	result := ExplicitAliasResult{Category: category}
+	if attempted {
+		result.Attempted = []string{alias}
+	}
+	if category == aliasCategoryAdded {
+		result.Aliases = []string{alias}
+	}
+	return result
+}
+
+func explicitAliasAttemptFailure(alias string, attempted bool, err error) ExplicitAliasResult {
+	result := mapExplicitAliasError(err)
+	if attempted && strings.TrimSpace(alias) != "" {
+		result.Attempted = []string{alias}
+	}
+	return result
 }
 
 // the OTC-specific client_id/id (0000000044C8823E / 38936) instead of the

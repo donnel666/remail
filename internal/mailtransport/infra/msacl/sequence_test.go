@@ -101,7 +101,7 @@ func TestSessionTransportFailureTracksWhetherRequestUsedProxy(t *testing.T) {
 func TestAddSingleExplicitAliasStartsAtAddAssocIDAndUsesFreshCanary(t *testing.T) {
 	const (
 		prefix = "david123456"
-		alias  = prefix + "@outlook.com"
+		alias  = prefix + "@outlook.fr"
 	)
 	session, client := newScriptedSession(t,
 		func(req *http.Request, follow bool) (*http.Response, error) {
@@ -119,7 +119,7 @@ func TestAddSingleExplicitAliasStartsAtAddAssocIDAndUsesFreshCanary(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, "fresh-canary", fields.Get("canary"))
 			require.Equal(t, prefix, fields.Get("AssociatedIdLive"))
-			require.Equal(t, "outlook.com", fields.Get("SingleDomain"))
+			require.Equal(t, "outlook.fr", fields.Get("SingleDomain"))
 			require.Equal(t, "NONE", fields.Get("PostOption"))
 			require.Equal(t, "LIVE", fields.Get("AddAssocIdOptions"))
 			return scriptedResponse(req, 302, addAssocIDURL, "", map[string]string{
@@ -128,7 +128,7 @@ func TestAddSingleExplicitAliasStartsAtAddAssocIDAndUsesFreshCanary(t *testing.T
 		},
 	)
 
-	gotAlias, category, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, alias, "owner@example.com", "", "")
 
 	require.NoError(t, err)
 	require.Equal(t, alias, gotAlias)
@@ -138,7 +138,7 @@ func TestAddSingleExplicitAliasStartsAtAddAssocIDAndUsesFreshCanary(t *testing.T
 }
 
 func TestAddSingleExplicitAliasMissingCanaryIsNotAttempted(t *testing.T) {
-	const prefix = "david123456"
+	const alias = "david123456@outlook.com"
 	session, client := newScriptedSession(t,
 		func(req *http.Request, follow bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, addAssocIDURL)
@@ -152,19 +152,17 @@ func TestAddSingleExplicitAliasMissingCanaryIsNotAttempted(t *testing.T) {
 		},
 	)
 
-	gotAlias, category, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, alias, "owner@example.com", "", "")
 
 	require.NoError(t, err)
-	require.Equal(t, prefix+"@outlook.com", gotAlias)
+	require.Equal(t, alias, gotAlias)
 	require.Equal(t, aliasCategoryFailed, category)
 	require.False(t, attempted)
 	client.requireDone()
 }
 
 func TestAddSingleExplicitAliasMarksLostPostResponseAsAttempted(t *testing.T) {
-	const (
-		prefix = "david123456"
-	)
+	const alias = "david123456@outlook.com"
 	session, client := newScriptedSession(t,
 		func(req *http.Request, _ bool) (*http.Response, error) {
 			requireRequest(t, req, http.MethodGet, addAssocIDURL)
@@ -177,8 +175,64 @@ func TestAddSingleExplicitAliasMarksLostPostResponseAsAttempted(t *testing.T) {
 		},
 	)
 
-	_, _, attempted, err := addSingleExplicitAlias(session, prefix, "owner@example.com", "", "")
+	gotAlias, _, attempted, err := addSingleExplicitAlias(session, alias, "owner@example.com", "", "")
 	require.Error(t, err)
+	require.Equal(t, alias, gotAlias)
+	require.True(t, attempted)
+	client.requireDone()
+}
+
+func TestAddSingleExplicitAliasDoesNotConfirmAlreadyTakenCandidate(t *testing.T) {
+	const alias = "david123456@outlook.com"
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
+			page := `<input type="hidden" name="canary" value="fresh-canary"><input name="AddAssocIdOptions" value="LIVE">`
+			return scriptedResponse(req, 200, addAssocIDURL, page, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, addAssocIDURL)
+			return scriptedResponse(req, 409, addAssocIDURL, "This email address is already taken.", nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
+			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>other@outlook.com</div>`, nil), nil
+		},
+	)
+
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, alias, "owner@example.com", "", "")
+
+	require.NoError(t, err)
+	require.Equal(t, alias, gotAlias)
+	require.Equal(t, aliasCategoryExists, category)
+	require.True(t, attempted)
+	client.requireDone()
+}
+
+func TestAddSingleExplicitAliasConfirmsAlreadyPresentCandidateAfter409(t *testing.T) {
+	const prefix = "david123456"
+	alias := prefix + "@outlook.com"
+	session, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, addAssocIDURL)
+			page := `<input type="hidden" name="canary" value="fresh-canary"><input name="AddAssocIdOptions" value="LIVE">`
+			return scriptedResponse(req, 200, addAssocIDURL, page, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, addAssocIDURL)
+			return scriptedResponse(req, 409, addAssocIDURL, "This email address is already taken.", nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodGet, "https://account.live.com/names/manage")
+			return scriptedResponse(req, 200, "https://account.live.com/names/manage", `<div>`+alias+`</div>`, nil), nil
+		},
+	)
+
+	gotAlias, category, attempted, err := addSingleExplicitAlias(session, alias, "owner@example.com", "", "")
+
+	require.NoError(t, err)
+	require.Equal(t, alias, gotAlias)
+	require.Equal(t, aliasCategoryAdded, category)
 	require.True(t, attempted)
 	client.requireDone()
 }

@@ -30,13 +30,63 @@ func TestGenerateExplicitAliasPrefix(t *testing.T) {
 }
 
 func TestGenerateExplicitAliasCandidates(t *testing.T) {
-	candidates, err := GenerateExplicitAliasCandidates(2)
-	require.NoError(t, err)
-	require.Len(t, candidates, 2)
-	assert.NotEqual(t, candidates[0], candidates[1])
-	for _, candidate := range candidates {
-		assert.Regexp(t, regexp.MustCompile(`^[a-z]{6,18}[0-9]{6}@outlook\.com$`), candidate)
+	for _, accountEmail := range []string{"owner@outlook.com", "owner@hotmail.com", "owner@outlook.fr"} {
+		t.Run(accountEmail, func(t *testing.T) {
+			candidates, err := GenerateExplicitAliasCandidates(2, accountEmail)
+			require.NoError(t, err)
+			require.Len(t, candidates, 2)
+			assert.NotEqual(t, candidates[0], candidates[1])
+			domain := strings.SplitN(accountEmail, "@", 2)[1]
+			for _, candidate := range candidates {
+				assert.Regexp(t, regexp.MustCompile(`^[a-z]{6,18}[0-9]{6}@`+regexp.QuoteMeta(domain)+`$`), candidate)
+			}
+		})
 	}
+	_, err := GenerateExplicitAliasCandidates(2, "owner@gmail.com")
+	require.Error(t, err)
+}
+
+func TestNormalizeExplicitAliasCandidatesUsesMicrosoftWhitelist(t *testing.T) {
+	require.Equal(t, []string{
+		"david123456@hotmail.com",
+		"mary654321@outlook.fr",
+	}, normalizeExplicitAliasCandidates([]string{
+		" David123456@Hotmail.com ",
+		"mary654321@outlook.fr",
+		"invalid123456@gmail.com",
+	}))
+}
+
+func TestExplicitAliasAddResultOnlyConfirmsAddedCategory(t *testing.T) {
+	for _, category := range []string{aliasCategoryFailed, aliasCategoryRateLimited, aliasCategoryExists} {
+		result := explicitAliasAddResult("candidate@outlook.com", category, true)
+		require.Empty(t, result.Aliases, category)
+		require.Equal(t, []string{"candidate@outlook.com"}, result.Attempted, category)
+		require.Equal(t, category, result.Category)
+	}
+
+	result := explicitAliasAddResult("confirmed@outlook.com", aliasCategoryAdded, true)
+	require.Equal(t, []string{"confirmed@outlook.com"}, result.Aliases)
+	require.Equal(t, []string{"confirmed@outlook.com"}, result.Attempted)
+}
+
+func TestExplicitAliasAttemptFailurePreservesPostSideEffect(t *testing.T) {
+	result := explicitAliasAttemptFailure(
+		"candidate@outlook.com",
+		true,
+		newAuthError("lost POST response", AuthStatusRequestError),
+	)
+
+	require.Equal(t, []string{"candidate@outlook.com"}, result.Attempted)
+	require.Equal(t, "request", result.Category)
+	require.False(t, result.ProxyFailure)
+
+	result = explicitAliasAttemptFailure(
+		"candidate@outlook.com",
+		true,
+		wrapAuthError("lost proxied POST response", AuthStatusRequestError, newSessionTransportError(io.ErrUnexpectedEOF, true)),
+	)
+	require.True(t, result.ProxyFailure)
 }
 
 func TestExtractExplicitAliasCanary(t *testing.T) {
@@ -89,6 +139,13 @@ func TestExtractAllExplicitAliasesFromManagePageUsesMicrosoftWhitelist(t *testin
 		"third@outlook.sa",
 		"fourth@hotmail.com",
 	}, extractAllExplicitAliasesFromManagePage(page, "https://account.live.com/names/manage"))
+}
+
+func TestExplicitAliasesExceptPrimaryDoesNotBackfillMainMailbox(t *testing.T) {
+	assert.Equal(t, []string{"alias@outlook.com"}, explicitAliasesExceptPrimary(
+		[]string{"MAIN@OUTLOOK.COM", "alias@outlook.com"},
+		"main@outlook.com",
+	))
 }
 
 func TestIsKMSIPageRejectsOrdinaryLoginContinuation(t *testing.T) {
