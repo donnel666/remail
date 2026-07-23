@@ -235,7 +235,7 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 	if uc.messages == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("mailmatch message use case is unavailable"))
 	}
-	stored, matched, _, err := uc.messages.ingestFetchedMessagesWithFence(ctx, fetched.Messages, func(txCtx context.Context) error {
+	stored, matched, _, err := uc.messages.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, []uint{job.ResourceID}, func(txCtx context.Context) error {
 		return uc.repo.AssertResourceFetchFence(
 			txCtx,
 			job.ResourceID,

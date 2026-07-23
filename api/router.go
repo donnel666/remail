@@ -225,6 +225,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// aggregates over orders, code receipts, wallets, projects and users).
 		// Admin dashboard adds finance (billing) and per-project inventory (alloc).
 		dashboardMod := dashboardapi.NewModule(p.DB, p.Redis, p.Asynq)
+		dashboardMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		dashboardMod.SetAdminPorts(
 			dashboardFinanceDirectory{wallet: billingMod.WalletUseCase},
 			dashboardInventoryDirectory{db: p.DB, alloc: allocMod.UseCase},

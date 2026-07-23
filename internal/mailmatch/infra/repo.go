@@ -14,6 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -88,17 +89,53 @@ type Repo struct {
 	files governanceapp.FilePort
 }
 
+type mailmatchTransactionMetricKey struct{}
+
 func NewRepo(db *gorm.DB, files governanceapp.FilePort) *Repo {
 	return &Repo{db: db, files: files}
 }
 
-func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) (err error) {
 	if _, ok := platform.GormTxFromContext(ctx); ok {
-		return fn(ctx)
+		if ctx.Value(mailmatchTransactionMetricKey{}) != nil {
+			return fn(ctx)
+		}
+		defer func() { recordMailmatchMySQLContention(err) }()
+		return fn(context.WithValue(ctx, mailmatchTransactionMetricKey{}, struct{}{}))
 	}
+	defer func() { recordMailmatchMySQLContention(err) }()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(platform.WithGormTx(ctx, tx))
+		txCtx := platform.WithGormTx(ctx, tx)
+		return fn(context.WithValue(txCtx, mailmatchTransactionMetricKey{}, struct{}{}))
 	})
+}
+
+func mysqlContentionEvent(err error) (string, bool) {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return "", false
+	}
+	switch mysqlErr.Number {
+	case 1205:
+		return "1205", true
+	case 1213:
+		return "1213", true
+	default:
+		return "", false
+	}
+}
+
+func recordMailmatchMySQLContention(err error) {
+	if event, ok := mysqlContentionEvent(err); ok {
+		platform.RecordMySQLTransactionEvent("mailmatch", event)
+	}
+}
+
+func recordMailmatchAutocommitContention(ctx context.Context, err error) {
+	if ctx.Value(mailmatchTransactionMetricKey{}) != nil {
+		return
+	}
+	recordMailmatchMySQLContention(err)
 }
 
 func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
@@ -250,8 +287,10 @@ func (r *Repo) readPickupDeliveries(ctx context.Context, orderIDs []uint) (map[u
 	}
 	var models []MessageModel
 	if err := r.dbFor(ctx).
-		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
-		Where("id IN ?", messageIDs).
+		Table("mailmatch_messages AS m").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
+		Select(projectedMessageColumns(false)).
+		Where("m.id IN ?", messageIDs).
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("read pickup delivery messages: %w", err)
 	}
@@ -302,29 +341,42 @@ func (r *Repo) readPickupMessages(
 		}
 	}
 	var models []MessageModel
-	err := r.dbFor(ctx).Raw(`
+	query := fmt.Sprintf(`
 SELECT id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json,
        sender, subject, body_preview, verification_code, message_id_header,
        provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic,
        received_at, created_at, updated_at
 FROM (
-    SELECT m.id, m.email_resource_id, m.resource_type, m.matched_order_id,
-           m.recipient, m.recipients_json, m.sender, m.subject, m.body_preview,
-           m.verification_code, m.message_id_header, m.provider_message_id,
-           m.dedupe_key, m.protocol, m.folder, m.status, m.match_diagnostic,
-           m.received_at, m.created_at, m.updated_at,
-           ROW_NUMBER() OVER (
-               PARTITION BY m.matched_order_id
-               ORDER BY m.received_at DESC, m.id DESC
-           ) AS rn
-    FROM mailmatch_messages AS m
-    WHERE m.matched_order_id IN ?
-      AND m.received_at >= ?
-      AND m.received_at <= ?
+	    SELECT owned.*,
+	           ROW_NUMBER() OVER (
+	               PARTITION BY owned.matched_order_id
+	               ORDER BY owned.received_at DESC, owned.id DESC
+	           ) AS rn
+	    FROM (
+	        SELECT %s
+	        FROM mailmatch_message_projections AS mp
+	        JOIN mailmatch_messages AS m ON m.id = mp.message_id
+	        WHERE mp.matched_order_id IN ?
+	          AND mp.message_received_at >= ?
+	          AND mp.message_received_at <= ?
+	        UNION ALL
+	        SELECT %s
+	        FROM mailmatch_messages AS m
+	        LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id
+	        WHERE mp.message_id IS NULL
+	          AND m.matched_order_id IN ?
+	          AND m.received_at >= ?
+	          AND m.received_at <= ?
+	    ) AS owned
 ) AS ranked
 WHERE ranked.rn <= ?
-ORDER BY ranked.matched_order_id ASC, ranked.received_at DESC, ranked.id DESC`,
-		orderIDs, start, end, limit).Scan(&models).Error
+	ORDER BY ranked.matched_order_id ASC, ranked.received_at DESC, ranked.id DESC`,
+		projectionOwnedMessageColumns(false), legacyMessageColumns(false))
+	err := r.dbFor(ctx).Raw(query,
+		orderIDs, start, end,
+		orderIDs, start, end,
+		limit,
+	).Scan(&models).Error
 	if err != nil {
 		return nil, fmt.Errorf("read pickup messages: %w", err)
 	}
@@ -669,17 +721,33 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 			end = *scope.ReceiveUntil
 		}
 	}
-	query := r.dbFor(ctx).Model(&MessageModel{}).
-		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
-		Where("matched_order_id = ? AND received_at >= ? AND received_at <= ?",
-			scope.OrderID,
-			start,
-			end,
-		).
-		Order("received_at DESC, id DESC").
-		Limit(limit)
 	var models []MessageModel
-	if err := query.Find(&models).Error; err != nil {
+	query := fmt.Sprintf(`
+SELECT *
+FROM (
+    SELECT %s
+    FROM mailmatch_message_projections AS mp
+    JOIN mailmatch_messages AS m ON m.id = mp.message_id
+    WHERE mp.matched_order_id = ?
+      AND mp.message_received_at >= ?
+      AND mp.message_received_at <= ?
+    UNION ALL
+    SELECT %s
+    FROM mailmatch_messages AS m
+    LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id
+    WHERE mp.message_id IS NULL
+      AND m.matched_order_id = ?
+      AND m.received_at >= ?
+      AND m.received_at <= ?
+) AS owned
+ORDER BY owned.received_at DESC, owned.id DESC
+LIMIT ?`, projectionOwnedMessageColumns(false), legacyMessageColumns(false))
+	if err := r.dbFor(ctx).Raw(
+		query,
+		scope.OrderID, start, end,
+		scope.OrderID, start, end,
+		limit,
+	).Scan(&models).Error; err != nil {
 		return nil, fmt.Errorf("list order mail messages: %w", err)
 	}
 	items := make([]domain.Message, len(models))
@@ -695,8 +763,11 @@ func (r *Repo) FindOrderMessage(ctx context.Context, orderID uint, messageID uin
 	}
 	var model MessageModel
 	if err := r.dbFor(ctx).
-		Where("id = ? AND matched_order_id = ?", messageID, orderID).
-		First(&model).Error; err != nil {
+		Table("mailmatch_messages AS m").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
+		Select(projectedMessageColumns(true)).
+		Where("m.id = ? AND "+effectiveMessageOwnerSQL+" = ?", messageID, orderID).
+		Take(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrMessageNotFound
 		}
@@ -726,8 +797,11 @@ func (r *Repo) FindOrderDelivery(ctx context.Context, orderID uint) (*app.OrderD
 	}
 	var model MessageModel
 	if err := r.dbFor(ctx).
-		Select("id, email_resource_id, resource_type, matched_order_id, recipient, recipients_json, sender, subject, body_preview, verification_code, message_id_header, provider_message_id, dedupe_key, protocol, folder, status, match_diagnostic, received_at, created_at, updated_at").
-		First(&model, "id = ?", *head.MessageID).Error; err != nil {
+		Table("mailmatch_messages AS m").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
+		Select(projectedMessageColumns(false)).
+		Where("m.id = ?", *head.MessageID).
+		Take(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return delivery, nil
 		}

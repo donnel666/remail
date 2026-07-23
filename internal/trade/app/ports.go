@@ -354,8 +354,9 @@ type CheckoutResult struct {
 }
 
 type CheckoutBatchItem struct {
-	Result *CheckoutResult
-	Err    error
+	Result    *CheckoutResult
+	Err       error
+	attempted bool
 }
 
 type MatchCodeResultRequest struct {
@@ -538,8 +539,53 @@ func sameHistoricalMicrosoftOrder(order domain.Order, ownerID uint, allocationID
 		order.MicrosoftAllocID != nil && *order.MicrosoftAllocID == allocationID
 }
 
-func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (*CheckoutResult, error) {
-	return uc.checkout(ctx, req, false, nil)
+func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *CheckoutResult, runErr error) {
+	startedAt := time.Now()
+	defer func() {
+		outcome := checkoutServiceOutcome(runErr)
+		platform.ObserveServiceDuration("checkout", "001", outcome, startedAt)
+		platform.AddWorkUnits("checkout", "001", "requested", 1)
+		platform.AddWorkUnits("checkout", "001", outcome, 1)
+	}()
+	prepared, err := prepareCheckoutRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	prepared.existing, err = uc.repo.FindOrderByIdempotency(
+		ctx,
+		prepared.request.ClientChannel,
+		prepared.request.UserID,
+		prepared.request.APIKeyID,
+		prepared.idempotencyKey,
+		prepared.fingerprint,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if prepared.existing == nil {
+		if err := uc.prepareCheckoutQuote(ctx, &prepared, nil); err != nil {
+			return nil, err
+		}
+	}
+	return uc.checkoutPrepared(ctx, prepared)
+}
+
+func checkoutServiceOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "succeeded"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "canceled"
+	case shouldCommitCheckoutError(err),
+		errors.Is(err, domain.ErrIdempotencyRequired),
+		errors.Is(err, domain.ErrIdempotencyConflict),
+		errors.Is(err, domain.ErrInvalidOrderRequest),
+		errors.Is(err, domain.ErrProjectUnavailable),
+		errors.Is(err, domain.ErrOrderStateConflict):
+		return "business_failed"
+	default:
+		return "system_failed"
+	}
 }
 
 type checkoutQuoteKey struct {
@@ -548,27 +594,40 @@ type checkoutQuoteKey struct {
 	mode      domain.ServiceMode
 }
 
-func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLocked bool, quotes map[checkoutQuoteKey]*OrderingQuote) (*CheckoutResult, error) {
+type checkoutPreparation struct {
+	request        CheckoutRequest
+	mode           domain.ServiceMode
+	policy         domain.SupplyPolicy
+	idempotencyKey string
+	fingerprint    string
+	emailSuffix    string
+	requestID      string
+	existing       *domain.Order
+	quote          *OrderingQuote
+	prepareErr     error
+}
+
+func prepareCheckoutRequest(req CheckoutRequest) (checkoutPreparation, error) {
 	mode, ok := domain.NormalizeServiceMode(req.ServiceMode)
 	if !ok {
-		return nil, domain.ErrInvalidOrderRequest
+		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
 	policy, ok := domain.NormalizeSupplyPolicy(req.SupplyPolicy)
 	if !ok {
-		return nil, domain.ErrInvalidOrderRequest
+		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
 	if req.UserID == 0 || req.ProjectID == 0 || req.ProductID == 0 {
-		return nil, domain.ErrInvalidOrderRequest
+		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	if idempotencyKey == "" {
-		return nil, domain.ErrIdempotencyRequired
+		return checkoutPreparation{}, domain.ErrIdempotencyRequired
 	}
 	if req.ClientChannel == "" {
 		req.ClientChannel = domain.ClientChannelConsole
 	}
 	if req.ClientChannel == domain.ClientChannelAPIKey && (req.APIKeyID == nil || *req.APIKeyID == 0) {
-		return nil, domain.ErrInvalidOrderRequest
+		return checkoutPreparation{}, domain.ErrInvalidOrderRequest
 	}
 	if req.ClientChannel == domain.ClientChannelConsole {
 		req.APIKeyID = nil
@@ -579,59 +638,91 @@ func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLock
 	if req.BatchQuantity > 1 {
 		fingerprintParts = append(fingerprintParts, req.BatchQuantity)
 	}
-	fingerprint := checkoutFingerprint(fingerprintParts...)
-	existing, err := uc.repo.FindOrderByIdempotency(ctx, req.ClientChannel, req.UserID, req.APIKeyID, idempotencyKey, fingerprint)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return uc.resumeExistingCheckout(ctx, req.UserID, existing.OrderNo, emailSuffix, strings.TrimSpace(req.RequestID), walletLocked)
-	}
+	return checkoutPreparation{
+		request:        req,
+		mode:           mode,
+		policy:         policy,
+		idempotencyKey: idempotencyKey,
+		fingerprint:    checkoutFingerprint(fingerprintParts...),
+		emailSuffix:    emailSuffix,
+		requestID:      strings.TrimSpace(req.RequestID),
+	}, nil
+}
 
+func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutPreparation, quotes map[checkoutQuoteKey]*OrderingQuote) error {
+	key := checkoutQuoteKey{
+		projectID: prepared.request.ProjectID,
+		productID: prepared.request.ProductID,
+		mode:      prepared.mode,
+	}
 	// This is the only path that evaluates current product sale status. Once an
 	// order has been persisted, subsequent fulfilment must use that order's
 	// immutable service-window snapshot instead.
-	quoteKey := checkoutQuoteKey{projectID: req.ProjectID, productID: req.ProductID, mode: mode}
-	quote := quotes[quoteKey]
+	quote := quotes[key]
 	if quote == nil {
-		quote, err = uc.ordering.GetOrderingQuote(ctx, req.ProjectID, req.ProductID, req.UserID, mode)
+		var err error
+		quote, err = uc.ordering.GetOrderingQuote(
+			ctx,
+			prepared.request.ProjectID,
+			prepared.request.ProductID,
+			prepared.request.UserID,
+			prepared.mode,
+		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if quotes != nil {
-			quotes[quoteKey] = quote
+			quotes[key] = quote
 		}
+	}
+	prepared.quote = quote
+	return nil
+}
+
+func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
+	if prepared.prepareErr != nil {
+		return nil, prepared.prepareErr
+	}
+	if prepared.existing != nil {
+		return uc.resumeExistingCheckout(
+			ctx,
+			prepared.request.UserID,
+			prepared.existing.OrderNo,
+			prepared.emailSuffix,
+			prepared.requestID,
+		)
+	}
+	if prepared.quote == nil {
+		return nil, errors.New("checkout quote was not prepared")
 	}
 	var result *CheckoutResult
 	var checkoutErr error
-	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		if !walletLocked {
-			if err := uc.wallet.LockConsumer(txCtx, req.UserID); err != nil {
-				return err
-			}
+	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if err := uc.wallet.LockConsumer(txCtx, prepared.request.UserID); err != nil {
+			return err
 		}
 		order, created, err := uc.repo.LoadOrCreatePendingOrder(txCtx, CreatePendingOrderCommand{
 			OrderNo:                 nextOrderNo(),
-			UserID:                  req.UserID,
-			ProjectID:               quote.ProjectID,
-			ProjectProductID:        quote.ProductID,
-			ProductType:             quote.ProductType,
-			ServiceMode:             mode,
-			SupplyPolicy:            policy,
-			PayAmount:               quote.PayAmount,
-			CodeWindowMinutes:       quote.CodeWindowMinutes,
-			ActivationWindowMinutes: quote.ActivationWindowMinutes,
-			WarrantyMinutes:         quote.WarrantyMinutes,
-			ClientChannel:           req.ClientChannel,
-			APIKeyID:                req.APIKeyID,
-			IdempotencyKey:          idempotencyKey,
-			RequestFingerprint:      fingerprint,
+			UserID:                  prepared.request.UserID,
+			ProjectID:               prepared.quote.ProjectID,
+			ProjectProductID:        prepared.quote.ProductID,
+			ProductType:             prepared.quote.ProductType,
+			ServiceMode:             prepared.mode,
+			SupplyPolicy:            prepared.policy,
+			PayAmount:               prepared.quote.PayAmount,
+			CodeWindowMinutes:       prepared.quote.CodeWindowMinutes,
+			ActivationWindowMinutes: prepared.quote.ActivationWindowMinutes,
+			WarrantyMinutes:         prepared.quote.WarrantyMinutes,
+			ClientChannel:           prepared.request.ClientChannel,
+			APIKeyID:                prepared.request.APIKeyID,
+			IdempotencyKey:          prepared.idempotencyKey,
+			RequestFingerprint:      prepared.fingerprint,
 			Now:                     uc.now(),
 		})
 		if err != nil {
 			return err
 		}
-		orderQuote := *quote
+		orderQuote := *prepared.quote
 		if !created {
 			storedQuote, quoteErr := orderingQuoteFromOrder(*order)
 			if quoteErr != nil {
@@ -639,7 +730,7 @@ func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLock
 			}
 			orderQuote = *storedQuote
 		}
-		result, err = uc.resumeCheckout(txCtx, *order, orderQuote, emailSuffix, strings.TrimSpace(req.RequestID))
+		result, err = uc.resumeCheckout(txCtx, *order, orderQuote, prepared.emailSuffix, prepared.requestID)
 		if err != nil {
 			if shouldCommitCheckoutError(err) {
 				if result != nil {
@@ -662,7 +753,7 @@ func (uc *UseCase) checkout(ctx context.Context, req CheckoutRequest, walletLock
 	return result, nil
 }
 
-func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest) ([]CheckoutBatchItem, error) {
+func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest) (items []CheckoutBatchItem, runErr error) {
 	if len(requests) == 0 {
 		return []CheckoutBatchItem{}, nil
 	}
@@ -675,24 +766,31 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 			return nil, domain.ErrInvalidOrderRequest
 		}
 	}
+	metricType, metricSize := checkoutBatchMetric(len(requests))
+	requestStarted := time.Now()
+	defer func() {
+		succeeded, businessFailed, systemFailed, unprocessed := checkoutBatchCounts(len(requests), items, runErr)
+		serviceResult := checkoutBatchServiceResult(businessFailed, systemFailed, unprocessed, runErr)
+		platform.ObserveServiceDuration("checkout_batch", metricSize, serviceResult, requestStarted)
+		platform.AddWorkUnits("checkout_batch", metricSize, "requested", len(requests))
+		platform.AddWorkUnits("checkout_batch", metricSize, "succeeded", succeeded)
+		platform.AddWorkUnits("checkout_batch", metricSize, "business_failed", businessFailed)
+		platform.AddWorkUnits("checkout_batch", metricSize, "system_failed", systemFailed)
+		platform.AddWorkUnits("checkout_batch", metricSize, "unprocessed", unprocessed)
+	}()
 	queuedAt := time.Now()
-	release, err := uc.checkoutBatches.acquire(ctx, userID, len(requests))
-	if err != nil {
-		return nil, err
+	release, runErr := uc.checkoutBatches.acquire(ctx, userID, len(requests))
+	if runErr != nil {
+		return nil, runErr
 	}
 	defer release()
-	metricType, metricSize := checkoutBatchMetric(len(requests))
 	platform.ObserveQueueWait(metricType, queuedAt)
 	queueWait := time.Since(queuedAt)
 	serviceStarted := time.Now()
 	defer platform.ObserveTaskService(metricType, serviceStarted)
 
-	items := make([]CheckoutBatchItem, 0, len(requests))
-	quotes := make(map[checkoutQuoteKey]*OrderingQuote, 1)
-	succeeded, failed := 0, 0
 	defer func() {
-		platform.AddWorkUnits("checkout_batch", metricSize, "succeeded", succeeded)
-		platform.AddWorkUnits("checkout_batch", metricSize, "failed", failed)
+		succeeded, businessFailed, systemFailed, unprocessed := checkoutBatchCounts(len(requests), items, runErr)
 		slog.Info(
 			"checkout batch capacity sample",
 			"quantity", len(requests),
@@ -701,31 +799,204 @@ func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest
 			"queue_wait_ms", queueWait.Milliseconds(),
 			"service_ms", time.Since(serviceStarted).Milliseconds(),
 			"succeeded", succeeded,
-			"failed", failed,
+			"business_failed", businessFailed,
+			"system_failed", systemFailed,
+			"unprocessed", unprocessed,
 		)
 	}()
-	for index, req := range requests {
+	prepared, prepareErr := uc.prepareCheckoutBatch(ctx, requests)
+	if prepareErr != nil {
+		if errors.Is(prepareErr, context.Canceled) || errors.Is(prepareErr, context.DeadlineExceeded) ||
+			errors.Is(prepareErr, domain.ErrIdempotencyConflict) || errors.Is(prepareErr, domain.ErrIdempotencyRequired) ||
+			errors.Is(prepareErr, domain.ErrInvalidOrderRequest) {
+			return nil, prepareErr
+		}
+		items = checkoutBatchFailedItems(len(requests), prepareErr)
+		return items, nil
+	}
+	items, runErr = uc.checkoutBatch(ctx, prepared)
+	return items, runErr
+}
+
+func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPreparation) ([]CheckoutBatchItem, error) {
+	items := make([]CheckoutBatchItem, len(prepared))
+	for index := range prepared {
 		if err := ctx.Err(); err != nil {
-			return items, err
+			return nil, err
 		}
-		result, itemErr := uc.checkout(ctx, req, false, quotes)
-		if itemErr == nil {
-			succeeded++
-		} else if !errors.Is(itemErr, context.Canceled) && !errors.Is(itemErr, context.DeadlineExceeded) {
-			failed++
+		if prepared[index].prepareErr != nil {
+			items[index] = CheckoutBatchItem{Err: prepared[index].prepareErr, attempted: true}
+			continue
 		}
+		result, itemErr := uc.checkoutPrepared(ctx, prepared[index])
+		items[index] = CheckoutBatchItem{Result: result, Err: itemErr, attempted: true}
+		transactionResult := "committed"
+		if itemErr != nil && !shouldCommitCheckoutError(itemErr) {
+			transactionResult = "rolled_back"
+		}
+		platform.RecordServiceDBTransaction("checkout_batch", transactionResult)
 		if errors.Is(itemErr, context.Canceled) || errors.Is(itemErr, context.DeadlineExceeded) {
-			return items, itemErr
-		}
-		if index == 0 && errors.Is(itemErr, domain.ErrIdempotencyConflict) {
 			return nil, itemErr
 		}
-		items = append(items, CheckoutBatchItem{Result: result, Err: itemErr})
-		if itemErr != nil && !errors.Is(itemErr, domain.ErrIdempotencyConflict) {
+		if itemErr != nil && !shouldCommitCheckoutError(itemErr) && !errors.Is(itemErr, domain.ErrIdempotencyConflict) {
+			// Earlier orders are already committed. Stop on infrastructure failure
+			// and preserve the fixed-Q response by marking only the unattempted tail.
+			items[index].Result = nil
+			for tail := index + 1; tail < len(items); tail++ {
+				items[tail].Err = itemErr
+			}
 			break
 		}
 	}
 	return items, nil
+}
+
+func checkoutBatchFailedItems(quantity int, err error) []CheckoutBatchItem {
+	items := make([]CheckoutBatchItem, quantity)
+	for i := range items {
+		items[i].Err = err
+	}
+	return items
+}
+
+func checkoutBatchCounts(requested int, items []CheckoutBatchItem, runErr error) (succeeded, businessFailed, systemFailed, unprocessed int) {
+	for i := range items {
+		if !items[i].attempted {
+			continue
+		}
+		switch {
+		case items[i].Err == nil:
+			succeeded++
+		case shouldCommitCheckoutError(items[i].Err), errors.Is(items[i].Err, domain.ErrIdempotencyConflict):
+			businessFailed++
+		default:
+			systemFailed++
+		}
+	}
+	accounted := succeeded + businessFailed + systemFailed
+	if accounted < requested && errors.Is(runErr, domain.ErrIdempotencyConflict) {
+		businessFailed++
+		accounted++
+	}
+	unprocessed = max(requested-accounted, 0)
+	return succeeded, businessFailed, systemFailed, unprocessed
+}
+
+func checkoutBatchServiceResult(businessFailed, systemFailed, unprocessed int, runErr error) string {
+	switch {
+	case errors.Is(runErr, context.Canceled), errors.Is(runErr, context.DeadlineExceeded):
+		return "canceled"
+	case systemFailed > 0, runErr != nil && !errors.Is(runErr, domain.ErrIdempotencyConflict):
+		return "system_failed"
+	case unprocessed > 0 && businessFailed == 0:
+		return "system_failed"
+	case businessFailed > 0, unprocessed > 0:
+		return "partial"
+	default:
+		return "succeeded"
+	}
+}
+
+type checkoutBatchIdempotencyReader interface {
+	FindOrdersByIdempotencyBatch(
+		ctx context.Context,
+		channel domain.ClientChannel,
+		userID uint,
+		apiKeyID *uint,
+		idempotencyKeys []string,
+	) (map[string]domain.Order, error)
+}
+
+func (uc *UseCase) prepareCheckoutBatch(ctx context.Context, requests []CheckoutRequest) ([]checkoutPreparation, error) {
+	prepared := make([]checkoutPreparation, len(requests))
+	for i := range requests {
+		item, err := prepareCheckoutRequest(requests[i])
+		if err != nil {
+			return nil, err
+		}
+		prepared[i] = item
+	}
+	if err := uc.preloadCheckoutBatch(ctx, prepared); err != nil {
+		return nil, err
+	}
+	if len(prepared) > 0 && errors.Is(prepared[0].prepareErr, domain.ErrIdempotencyConflict) {
+		return nil, prepared[0].prepareErr
+	}
+	quotes := make(map[checkoutQuoteKey]*OrderingQuote, 1)
+	for i := range prepared {
+		if prepared[i].prepareErr != nil || prepared[i].existing != nil {
+			continue
+		}
+		if err := uc.prepareCheckoutQuote(ctx, &prepared[i], quotes); err != nil {
+			return nil, err
+		}
+	}
+	return prepared, nil
+}
+
+func (uc *UseCase) preloadCheckoutBatch(ctx context.Context, prepared []checkoutPreparation) error {
+	if len(prepared) == 0 {
+		return nil
+	}
+	reader, canBatch := uc.repo.(checkoutBatchIdempotencyReader)
+	channel := prepared[0].request.ClientChannel
+	apiKeyID := prepared[0].request.APIKeyID
+	for i := 1; i < len(prepared); i++ {
+		if prepared[i].request.ClientChannel != channel ||
+			apiKeyFingerprint(prepared[i].request.APIKeyID) != apiKeyFingerprint(apiKeyID) {
+			canBatch = false
+			break
+		}
+	}
+	if canBatch {
+		keys := make([]string, len(prepared))
+		for i := range prepared {
+			keys[i] = prepared[i].idempotencyKey
+		}
+		loaded, err := reader.FindOrdersByIdempotencyBatch(
+			ctx,
+			channel,
+			prepared[0].request.UserID,
+			apiKeyID,
+			keys,
+		)
+		if err != nil {
+			return err
+		}
+		for i := range prepared {
+			order, exists := loaded[prepared[i].idempotencyKey]
+			if !exists {
+				continue
+			}
+			if order.RequestFingerprint != prepared[i].fingerprint {
+				prepared[i].prepareErr = domain.ErrIdempotencyConflict
+				continue
+			}
+			orderCopy := order
+			prepared[i].existing = &orderCopy
+		}
+		return nil
+	}
+
+	for i := range prepared {
+		existing, err := uc.repo.FindOrderByIdempotency(
+			ctx,
+			prepared[i].request.ClientChannel,
+			prepared[i].request.UserID,
+			prepared[i].request.APIKeyID,
+			prepared[i].idempotencyKey,
+			prepared[i].fingerprint,
+		)
+		if errors.Is(err, domain.ErrIdempotencyConflict) {
+			prepared[i].prepareErr = err
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		prepared[i].existing = existing
+	}
+	return nil
 }
 
 func checkoutBatchMetric(quantity int) (taskType, size string) {
@@ -747,14 +1018,12 @@ func checkoutBatchMetric(quantity int) (taskType, size string) {
 // resumeExistingCheckout retries a persisted order without consulting current
 // project-product sale state. This keeps idempotent checkout retries usable
 // after a product is delisted while preserving the original order terms.
-func (uc *UseCase) resumeExistingCheckout(ctx context.Context, userID uint, orderNo, emailSuffix, requestID string, walletLocked bool) (*CheckoutResult, error) {
+func (uc *UseCase) resumeExistingCheckout(ctx context.Context, userID uint, orderNo, emailSuffix, requestID string) (*CheckoutResult, error) {
 	var result *CheckoutResult
 	var checkoutErr error
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		if !walletLocked {
-			if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
-				return err
-			}
+		if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
+			return err
 		}
 		order, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
 		if err != nil {
@@ -1051,10 +1320,20 @@ func (uc *UseCase) AdminRetryOrderRefund(ctx context.Context, req AdminOrderComm
 	}
 	var refunded *domain.Order
 	changed := false
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+	owner, err := uc.repo.FindOrder(ctx, orderNo)
+	if err != nil {
+		return nil, err
+	}
+	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
+			return err
+		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
 		if err != nil {
 			return err
+		}
+		if locked.UserID != owner.UserID {
+			return domain.ErrOrderStateConflict
 		}
 		refunded = locked
 		if locked.Status != domain.OrderStatusFailed || locked.DebitTxID == nil || locked.RefundTxID != nil {
@@ -1289,10 +1568,20 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 	}
 	var refunded *domain.Order
 	changed := false
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+	owner, err := uc.repo.FindOrder(ctx, orderNo)
+	if err != nil {
+		return nil, false, err
+	}
+	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
+			return err
+		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
 		if err != nil {
 			return err
+		}
+		if locked.UserID != owner.UserID {
+			return domain.ErrOrderStateConflict
 		}
 		refunded = locked
 		if locked.Status == domain.OrderStatusRefunded {
@@ -1388,6 +1677,7 @@ func cleanupRetryShouldReleaseAllocation(order domain.Order) bool {
 }
 
 func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote OrderingQuote, emailSuffix string, requestID string) (*CheckoutResult, error) {
+	var currentAllocation *AllocationResult
 	for {
 		switch order.Status {
 		case domain.OrderStatusPendingPayment:
@@ -1410,6 +1700,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				}
 				return nil, err
 			}
+			currentAllocation = allocation
 			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
 			debit, err := uc.wallet.DebitConsumer(ctx, WalletCommand{
 				UserID:         order.UserID,
@@ -1458,19 +1749,23 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 			order = *updated
 
 		case domain.OrderStatusPaid:
-			allocation, err := uc.allocate(ctx, order, emailSuffix)
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientInventory) {
-					return nil, err
+			allocation := currentAllocation
+			if allocation == nil {
+				var err error
+				allocation, err = uc.allocate(ctx, order, emailSuffix)
+				if err != nil {
+					if !errors.Is(err, domain.ErrInsufficientInventory) {
+						return nil, err
+					}
+					failed, refundErr := uc.refundPaidOrder(ctx, order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
+					if refundErr != nil {
+						return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
+					}
+					if failed == nil {
+						return nil, errors.New("refund failed order returned no order")
+					}
+					return &CheckoutResult{Order: *failed}, err
 				}
-				failed, refundErr := uc.refundPaidOrder(ctx, order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
-				if refundErr != nil {
-					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
-				}
-				if failed == nil {
-					return nil, errors.New("refund failed order returned no order")
-				}
-				return &CheckoutResult{Order: *failed}, err
 			}
 			receiveStartedAt := uc.now()
 			receiveUntil := serviceReceiveUntil(receiveStartedAt, quote, order.ServiceMode)

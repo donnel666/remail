@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -304,6 +305,89 @@ func TestMicrosoftMailFetchClientStreamsInboxAndJunk(t *testing.T) {
 	require.Equal(t, []string{"Inbox", "Junk"}, fetchedFolders)
 	require.Equal(t, map[string]int{"Inbox": 1, "Junk": 1}, result.FolderCounts)
 	require.Equal(t, 2, result.MessageCount)
+}
+
+func TestMicrosoftMailFetchClientReturnsNewestRealtimeMessagesAcrossInboxAndJunk(t *testing.T) {
+	var folders []string
+	now := time.Now().UTC()
+	client := &MicrosoftMailFetchClient{
+		graphIdentity: func(context.Context, *msacl.Session, string, string) (microsoftGraphIdentityStatus, error) {
+			return microsoftGraphIdentityMatched, nil
+		},
+		graphFolderFetch: func(_ context.Context, _ *msacl.Session, _ string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
+			folders = append(folders, folder.Label)
+			require.Equal(t, 6, req.MaxMessages)
+			messages := make([]MicrosoftFetchedMessage, req.MaxMessages)
+			for i := range messages {
+				offset := i*2 + 1
+				if folder.Label == "Junk" {
+					offset = i * 2
+				}
+				messages[i] = MicrosoftFetchedMessage{
+					ID: folder.Label + strconv.Itoa(i), FolderLabel: folder.Label,
+					ReceivedAt: now.Add(-time.Duration(offset) * time.Minute),
+				}
+			}
+			return microsoftFolderFetchResult{Count: len(messages), Messages: messages}, nil
+		},
+	}
+
+	result, err := client.fetchGraphAll(context.Background(), MicrosoftMailFetchRequest{
+		EmailAddress: "configured@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
+		AccessToken: "access-token", MaxMessages: 6, StopAfterLimit: true,
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Valid)
+	require.Equal(t, []string{"Inbox", "Junk"}, folders)
+	require.Equal(t, 6, result.MessageCount)
+	require.Len(t, result.Messages, 6)
+	require.Equal(t, []string{"Junk", "Inbox", "Junk", "Inbox", "Junk", "Inbox"}, []string{
+		result.Messages[0].FolderLabel, result.Messages[1].FolderLabel, result.Messages[2].FolderLabel,
+		result.Messages[3].FolderLabel, result.Messages[4].FolderLabel, result.Messages[5].FolderLabel,
+	})
+}
+
+func TestLatestIMAPSeqSetBoundsRealtimeFolderRead(t *testing.T) {
+	seqSet := latestIMAPSeqSet(1_000_000, 6)
+	require.Equal(t, "999995:1000000", seqSet.String())
+	nums, ok := seqSet.Nums()
+	require.True(t, ok)
+	require.Len(t, nums, 6)
+}
+
+func TestNewestMicrosoftMessagesKeepsGlobalNewestAcrossFolders(t *testing.T) {
+	now := time.Now().UTC()
+	messages := make([]MicrosoftFetchedMessage, 0, 12)
+	for i := 0; i < 6; i++ {
+		messages = append(messages,
+			MicrosoftFetchedMessage{ID: "inbox-" + strconv.Itoa(i), FolderLabel: "Inbox", ReceivedAt: now.Add(-time.Duration(i*2+1) * time.Minute)},
+			MicrosoftFetchedMessage{ID: "junk-" + strconv.Itoa(i), FolderLabel: "Junk", ReceivedAt: now.Add(-time.Duration(i*2) * time.Minute)},
+		)
+	}
+
+	newest := newestMicrosoftMessages(messages, 6)
+	require.Len(t, newest, 6)
+	require.Equal(t, []string{"junk-0", "inbox-0", "junk-1", "inbox-1", "junk-2", "inbox-2"}, []string{
+		newest[0].ID, newest[1].ID, newest[2].ID, newest[3].ID, newest[4].ID, newest[5].ID,
+	})
+}
+
+func TestIMAPCandidateFoldersPreferSpecialUseJunk(t *testing.T) {
+	folders := imapCandidateFoldersFromList([]*imap.ListData{
+		{Mailbox: "INBOX"},
+		{Mailbox: "Spam Archive"},
+		{Mailbox: "Junk Email", Attrs: []imap.MailboxAttr{imap.MailboxAttrJunk}},
+	})
+
+	firstJunk := ""
+	for _, folder := range folders {
+		if folder.Label == "Junk" {
+			firstJunk = folder.ID
+			break
+		}
+	}
+	require.Equal(t, "Junk Email", firstJunk)
 }
 
 func TestMicrosoftMailFetchClientJunkFailureInvalidatesInboxSuccess(t *testing.T) {

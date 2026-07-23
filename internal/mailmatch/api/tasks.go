@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	fetchDispatcherInterval      = 15 * time.Second
-	projectHistoryConcurrency    = 4 // ponytail: fixed per-process ceiling; use a dedicated server if horizontal replicas need a cluster-wide cap.
-	projectHistoryDispatchLimit  = 4
-	projectHistoryReleaseTimeout = 5 * time.Second
+	fetchDispatcherInterval     = 15 * time.Second
+	projectHistoryConcurrency   = 4 // ponytail: fixed per-process ceiling; use a dedicated server if horizontal replicas need a cluster-wide cap.
+	projectHistoryDispatchLimit = 4
+	backgroundReleaseTimeout    = 5 * time.Second
 )
 
 var projectHistorySlots = make(chan struct{}, projectHistoryConcurrency)
@@ -74,6 +74,9 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 	// can be acknowledged without touching persistent resource fetch state.
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetch, pickupFetchHandler)
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchPickupFetch, pickupFetchHandler)
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchPickupRequestFetch, func(ctx context.Context, task *asynq.Task) error {
+		return processPickupRequestFetchTask(ctx, task, module)
+	})
 
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceFetch, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ResourceFetch == nil {
@@ -83,6 +86,16 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode mailmatch resource fetch task: %w: %w", err, asynq.SkipRetry)
 		}
+		release, admitted := acquireBackgroundExecution(module)
+		if !admitted {
+			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
+				defer cancel()
+				return module.ResourceFetch.ReleaseDispatch(recoveryCtx, payload)
+			}
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
 		if err := module.ResourceFetch.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"mailmatch resource fetch task failed",
@@ -113,7 +126,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		release, admitted := acquireProjectHistoryCapacity(module)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
-				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), projectHistoryReleaseTimeout)
+				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
 				defer cancel()
 				if err := module.ProjectHistory.ReleaseDispatch(recoveryCtx, payload); err != nil {
 					return err
@@ -179,6 +192,71 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 	})
 }
 
+func processPickupRequestFetchTask(ctx context.Context, task *asynq.Task, module *Module) error {
+	if module == nil || module.UseCase == nil {
+		return nil
+	}
+	var payload mailmatchapp.PickupRequestFetchTask
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		platform.RecordTaskEvent("pickup_request_fetch", "failed")
+		slog.Warn("discarding invalid pickup request fetch task", "error", err)
+		return nil
+	}
+	startedAt := time.Now()
+	size := pickupRequestTaskSize(len(payload.Scopes))
+	platform.RecordTaskEvent("pickup_request_fetch", "started")
+	platform.ObserveQueueWait("pickup_request_fetch", payload.RequestedAt)
+	if !payload.RequestedAt.IsZero() && !startedAt.Before(payload.RequestedAt.Add(2*time.Minute)) {
+		_ = module.UseCase.ProcessPickupRequestFetch(ctx, payload)
+		platform.RecordTaskEvent("pickup_request_fetch", "expired")
+		platform.ObserveServiceDuration("pickup_fetch", size, "expired", startedAt)
+		platform.ObserveServiceEndToEnd("pickup_fetch", size, "expired", payload.RequestedAt)
+		return nil
+	}
+	outcome, err := module.UseCase.ProcessPickupRequestFetchWithOutcome(ctx, payload)
+	result := pickupRequestTaskResult(outcome, err)
+	platform.RecordTaskEvent("pickup_request_fetch", result)
+	platform.ObserveServiceDuration("pickup_fetch", size, result, startedAt)
+	platform.ObserveServiceEndToEnd("pickup_fetch", size, result, payload.RequestedAt)
+	if err != nil {
+		slog.Warn("pickup request fetch task completed with scope failures", "scopes", len(payload.Scopes), "error", err)
+		return nil
+	}
+	return nil
+}
+
+func pickupRequestTaskResult(outcome mailmatchapp.PickupRequestFetchOutcome, err error) string {
+	switch {
+	case err != nil && outcome.Succeeded+outcome.NoWork > 0:
+		return "partial"
+	case err != nil:
+		return "system_failed"
+	case outcome.Expired > 0 && outcome.Succeeded+outcome.NoWork > 0:
+		return "partial"
+	case outcome.Expired > 0:
+		return "expired"
+	case outcome.Succeeded > 0:
+		return "succeeded"
+	default:
+		return "no_work"
+	}
+}
+
+func pickupRequestTaskSize(quantity int) string {
+	switch {
+	case quantity <= 1:
+		return "single"
+	case quantity <= 20:
+		return "002_020"
+	case quantity <= 50:
+		return "021_050"
+	case quantity <= 100:
+		return "051_100"
+	default:
+		return "101_200"
+	}
+}
+
 func startFetchDispatcherSeeder(module *Module) {
 	if module == nil || (module.UseCase == nil && module.ResourceFetch == nil && module.ProjectHistory == nil) {
 		return
@@ -196,16 +274,9 @@ func startFetchDispatcherSeeder(module *Module) {
 }
 
 func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
-	backgroundRelease := func() {}
-	if module != nil && module.BackgroundExecution != nil {
-		var admitted bool
-		backgroundRelease, admitted = module.BackgroundExecution.TryAcquire()
-		if !admitted {
-			return func() {}, false
-		}
-		if backgroundRelease == nil {
-			backgroundRelease = func() {}
-		}
+	backgroundRelease, admitted := acquireBackgroundExecution(module)
+	if !admitted {
+		return func() {}, false
 	}
 	select {
 	case projectHistorySlots <- struct{}{}:
@@ -217,6 +288,17 @@ func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
 		backgroundRelease()
 		return func() {}, false
 	}
+}
+
+func acquireBackgroundExecution(module *Module) (func(), bool) {
+	if module == nil || module.BackgroundExecution == nil {
+		return func() {}, true
+	}
+	release, admitted := module.BackgroundExecution.TryAcquire()
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted
 }
 
 func scheduleMailmatchFetchDispatcher(ctx context.Context, module *Module, delay time.Duration) {

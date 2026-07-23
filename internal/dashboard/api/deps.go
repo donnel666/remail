@@ -19,6 +19,17 @@ type Module struct {
 	adminCache *adminDashboardCache
 	view       *infra.ViewRepo
 	asynq      *asynq.Client
+	background BackgroundExecutionGate
+}
+
+type BackgroundExecutionGate interface {
+	TryAcquire() (release func(), admitted bool)
+}
+
+func (m *Module) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
+	if m != nil {
+		m.background = gate
+	}
 }
 
 func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asynq.Client) *Module {

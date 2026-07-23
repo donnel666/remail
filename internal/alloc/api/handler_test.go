@@ -223,12 +223,19 @@ INSERT INTO microsoft_allocations(
 )`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_messages(
-    id, email_resource_id, resource_type, matched_order_id, recipient, sender, subject,
+    id, email_resource_id, resource_type, recipient, sender, subject,
     body_preview, verification_code, dedupe_key, status, received_at
 ) VALUES (
-    4000, 1000, 'microsoft', 2000, 'admin-allocation@outlook.com', 'sender@example.com',
-    'Verification', 'Your code is 654321', '654321',
-    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'matched', UTC_TIMESTAMP()
+    4000, 1000, 'microsoft', 'admin-allocation@outlook.com', 'sender@example.com',
+    'Verification', 'Your code is 654321', '',
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'received', UTC_TIMESTAMP()
+)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_message_projections(
+    message_id, matched_order_id, status, verification_code,
+    match_diagnostic, message_received_at
+) VALUES (
+    4000, 2000, 'matched', '654321', 'projection-only delivery', UTC_TIMESTAMP()
 )`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)

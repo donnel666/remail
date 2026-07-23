@@ -23,10 +23,10 @@ var (
 	httpDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "remail_http_request_duration_seconds",
-			Help:    "HTTP request duration by route.",
-			Buckets: prometheus.DefBuckets,
+			Help:    "HTTP request duration by route and status class.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
 		},
-		[]string{"method", "route"},
+		[]string{"method", "route", "status_class"},
 	)
 	businessEvents = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "remail_business_events_total", Help: "Important business outcomes."},
@@ -55,6 +55,30 @@ var (
 			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 9, 15, 30, 60},
 		},
 		[]string{"task_type"},
+	)
+	serviceDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remail_service_duration_seconds",
+			Help:    "Complete service execution time by bounded service, size, and result.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
+		},
+		[]string{"service", "size", "result"},
+	)
+	serviceEndToEndDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remail_service_end_to_end_duration_seconds",
+			Help:    "Time from a service request or enqueue timestamp to its terminal result.",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 180, 300},
+		},
+		[]string{"service", "size", "result"},
+	)
+	taskEvents = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_task_events_total", Help: "Task lifecycle events by bounded task type and event."},
+		[]string{"task_type", "event"},
+	)
+	serviceDBTransactions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_service_db_transactions_total", Help: "Logical database transaction outcomes by bounded service and result."},
+		[]string{"service", "result"},
 	)
 	workUnits = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "remail_work_units_total", Help: "Completed workload units by bounded workload, size class, and result."},
@@ -86,6 +110,10 @@ func init() {
 		mailVisibleDuration,
 		queueWaitDuration,
 		taskServiceDuration,
+		serviceDuration,
+		serviceEndToEndDuration,
+		taskEvents,
+		serviceDBTransactions,
 		workUnits,
 		workloadState,
 		mysqlTransactionEvents,
@@ -203,10 +231,18 @@ func HTTPMetricsMiddleware() gin.HandlerFunc {
 		if route == "" {
 			route = "unmatched"
 		}
-		status := strconv.Itoa(c.Writer.Status())
+		statusCode := c.Writer.Status()
+		status := strconv.Itoa(statusCode)
 		httpRequests.WithLabelValues(c.Request.Method, route, status).Inc()
-		httpDuration.WithLabelValues(c.Request.Method, route).Observe(time.Since(startedAt).Seconds())
+		httpDuration.WithLabelValues(c.Request.Method, route, httpStatusClass(statusCode)).Observe(time.Since(startedAt).Seconds())
 	}
+}
+
+func httpStatusClass(status int) string {
+	if status < 100 || status > 599 {
+		return "unknown"
+	}
+	return strconv.Itoa(status/100) + "xx"
 }
 
 func RecordBusinessEvent(event string, result string) {
@@ -240,6 +276,35 @@ func ObserveTaskService(taskType string, startedAt time.Time) {
 		return
 	}
 	taskServiceDuration.WithLabelValues(taskType).Observe(time.Since(startedAt).Seconds())
+}
+
+// ObserveServiceDuration records one complete service result. Labels must be
+// bounded enums; never pass user, request, order, or resource identifiers.
+func ObserveServiceDuration(service, size, result string, startedAt time.Time) {
+	if startedAt.IsZero() {
+		return
+	}
+	serviceDuration.WithLabelValues(service, size, result).Observe(time.Since(startedAt).Seconds())
+}
+
+// ObserveServiceEndToEnd records time from request/enqueue to a terminal result.
+func ObserveServiceEndToEnd(service, size, result string, requestedAt time.Time) {
+	if requestedAt.IsZero() {
+		return
+	}
+	seconds := time.Since(requestedAt).Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	serviceEndToEndDuration.WithLabelValues(service, size, result).Observe(seconds)
+}
+
+func RecordTaskEvent(taskType, event string) {
+	taskEvents.WithLabelValues(taskType, event).Inc()
+}
+
+func RecordServiceDBTransaction(service, result string) {
+	serviceDBTransactions.WithLabelValues(service, result).Inc()
 }
 
 func AddWorkUnits(workload, size, result string, units int) {

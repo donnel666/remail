@@ -60,12 +60,17 @@ o.service_mode AS service_mode,
 o.status AS order_status,
 CAST(o.pay_amount AS CHAR) AS pay_amount,
 u.email AS buyer_email,
-COALESCE(m.verification_code, '') AS verification_code,
+COALESCE(CASE
+    WHEN (CASE WHEN mp.message_id IS NULL THEN m.matched_order_id ELSE mp.matched_order_id END) = o.id
+    THEN (CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END)
+    ELSE ''
+END, '') AS verification_code,
 o.receive_until AS receive_until`).
 		Joins("JOIN projects AS p ON p.id = o.project_id").
 		Joins("JOIN users AS u ON u.id = o.user_id").
 		Joins("LEFT JOIN mailmatch_order_delivery_heads AS h ON h.order_id = o.id").
-		Joins("LEFT JOIN mailmatch_messages AS m ON m.id = h.message_id AND m.matched_order_id = o.id").
+		Joins("LEFT JOIN mailmatch_messages AS m ON m.id = h.message_id").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
 		Where("o.order_no IN ?", orderNos).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query administrator allocation enrichments: %w", err)

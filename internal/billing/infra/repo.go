@@ -151,21 +151,7 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 
 func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		db := tx.WithContext(ctx)
-		name := "billing_sp_" + platform.NewUUIDV7CompactString()
-		if err := db.SavePoint(name).Error; err != nil {
-			return fmt.Errorf("create billing savepoint: %w", err)
-		}
-		if err := fn(ctx, db); err != nil {
-			if isWholeTransactionRollbackError(err) {
-				return err
-			}
-			if rollbackErr := db.RollbackTo(name).Error; rollbackErr != nil {
-				return fmt.Errorf("rollback billing savepoint: %w: %v", err, rollbackErr)
-			}
-			return err
-		}
-		return nil
+		return fn(ctx, tx.WithContext(ctx))
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(platform.WithGormTx(ctx, tx), tx)
@@ -198,17 +184,8 @@ func (r *BillingRepo) LockConsumerWallet(ctx context.Context, userID uint) error
 		return domain.ErrInvalidFilter
 	}
 	return r.withTx(ctx, func(ctx context.Context, tx *gorm.DB) error {
-		model := defaultWalletModel(userID)
-		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
-			return fmt.Errorf("ensure wallet: %w", err)
-		}
-		var wallet WalletModel
-		if err := tx.WithContext(ctx).
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&wallet, "user_id = ?", userID).Error; err != nil {
-			return fmt.Errorf("lock wallet: %w", err)
-		}
-		return nil
+		_, err := r.lockWalletInTx(ctx, tx, userID)
+		return err
 	})
 }
 
@@ -362,8 +339,12 @@ func (r *BillingRepo) TransferReferralRewards(ctx context.Context, req billingap
 func (r *BillingRepo) AdjustConsumerBalance(ctx context.Context, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
 	var result billingapp.AdjustBalanceResult
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		wallet, err := r.lockWalletInTx(txCtx, tx, req.UserID)
+		if err != nil {
+			return err
+		}
 		response, replayed, err := r.withIdempotencyInTx(txCtx, tx, req.UserID, "wallet.adjust", req.IdempotencyKey, req.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
-			created, err := r.adjustConsumerBalanceInTx(txCtx, writeTx, req)
+			created, err := r.adjustConsumerBalanceInTx(txCtx, writeTx, wallet, req)
 			if err != nil {
 				return nil, err
 			}
@@ -519,8 +500,9 @@ func (r *BillingRepo) withIdempotencyInTx(
 		RequestFingerprint: fingerprint,
 		Status:             "processing",
 	}
-	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
-		return nil, false, fmt.Errorf("create idempotency key: %w", err)
+	created := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
+	if created.Error != nil {
+		return nil, false, fmt.Errorf("create idempotency key: %w", created.Error)
 	}
 
 	var stored IdempotencyKeyModel
@@ -539,6 +521,14 @@ func (r *BillingRepo) withIdempotencyInTx(
 
 	response, err := run(tx)
 	if err != nil {
+		// Expected batch-item failures may be committed by the parent transaction.
+		// Remove only the receipt created by this attempt; unexpected errors still
+		// abort the parent transaction and roll every write back.
+		if created.RowsAffected == 1 {
+			if deleteErr := tx.WithContext(ctx).Delete(&IdempotencyKeyModel{}, stored.ID).Error; deleteErr != nil {
+				return nil, false, fmt.Errorf("discard failed idempotency key: %w: %v", err, deleteErr)
+			}
+		}
 		return nil, false, err
 	}
 	if err := tx.WithContext(ctx).
@@ -642,11 +632,7 @@ func (r *BillingRepo) redeemCardInTx(ctx context.Context, tx *gorm.DB, req billi
 	}, nil
 }
 
-func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
-	wallet, err := r.lockWalletInTx(ctx, tx, req.UserID)
-	if err != nil {
-		return nil, err
-	}
+func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB, wallet *WalletModel, req billingapp.AdjustConsumerBalanceCommand) (*billingapp.AdjustBalanceResult, error) {
 	bizType := "admin_wallet_adjustment"
 	if req.TransactionType == domain.TransactionTypeRefund {
 		bizType = "wallet_refund"
@@ -656,6 +642,7 @@ func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB
 		Amount:          req.Amount,
 		Direction:       req.Direction,
 		TransactionType: req.TransactionType,
+		ClampToBalance:  req.ClampToBalance,
 		BizType:         bizType,
 		BizID:           trimBizID(req.Reason),
 		IdempotencyKey:  req.IdempotencyKey,
@@ -833,10 +820,16 @@ func defaultWalletModel(userID uint) WalletModel {
 }
 
 func (r *BillingRepo) lockWalletInTx(ctx context.Context, tx *gorm.DB, userID uint) (*WalletModel, error) {
-	if _, err := r.getOrCreateWallet(ctx, tx, userID); err != nil {
-		return nil, err
-	}
 	var wallet WalletModel
+	err := tx.WithContext(ctx).First(&wallet, "user_id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		model := defaultWalletModel(userID)
+		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+			return nil, fmt.Errorf("ensure wallet: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("find wallet for lock: %w", err)
+	}
 	if err := tx.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&wallet, "user_id = ?", userID).Error; err != nil {
@@ -876,6 +869,7 @@ type consumerTransactionRequest struct {
 	Amount          string
 	Direction       domain.TransactionDirection
 	TransactionType domain.TransactionType
+	ClampToBalance  bool
 	BizType         string
 	BizID           string
 	IdempotencyKey  string
@@ -890,6 +884,9 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 	before, err := domain.ParseMoney(wallet.ConsumerBalance)
 	if err != nil {
 		return nil, err
+	}
+	if req.ClampToBalance && req.Direction == domain.TransactionDirectionOut && before.IsPositive() && before.LessThan(amount) {
+		amount = before
 	}
 	var afterString string
 	var signedAmount decimal.Decimal

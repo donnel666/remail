@@ -106,8 +106,11 @@ func (a orderDeliveryAdapter) ListOrderDeliveries(ctx context.Context, orderIDs 
 	}
 	if err := a.db.WithContext(ctx).
 		Table("mailmatch_order_delivery_heads AS h").
-		Select("h.order_id, COALESCE(m.verification_code, '') AS verification_code, h.message_received_at AS received_at").
+		Select(`h.order_id,
+COALESCE(CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END, '') AS verification_code,
+h.message_received_at AS received_at`).
 		Joins("LEFT JOIN mailmatch_messages AS m ON m.id = h.message_id").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
 		Where("h.order_id IN ?", orderIDs).
 		Find(&rows).Error; err != nil {
 		return nil, err

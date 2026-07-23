@@ -97,8 +97,8 @@ func (r *AdminMessageRepo) ListAdminMessageSummaries(
 		"m.sender",
 		"m.subject",
 		"m.body_preview AS preview",
-		"m.status",
-		"m.verification_code",
+		"CASE WHEN mp.message_id IS NULL THEN m.status ELSE mp.status END AS status",
+		"CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END AS verification_code",
 		"o.order_no",
 		"m.received_at",
 	}, ", ")
@@ -146,12 +146,12 @@ func (r *AdminMessageRepo) FindAdminMessageDetailWithLog(
 			"m.sender",
 			"m.subject",
 			"m.body_preview AS preview",
-			"m.status",
-			"m.verification_code",
+			"CASE WHEN mp.message_id IS NULL THEN m.status ELSE mp.status END AS status",
+			"CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END AS verification_code",
 			"o.order_no",
 			"m.received_at",
 			"m.raw_body AS body",
-			"m.match_diagnostic",
+			"CASE WHEN mp.message_id IS NULL THEN m.match_diagnostic ELSE mp.match_diagnostic END AS match_diagnostic",
 		}, ", ")
 		query := adminMessageBaseQueryDB(tx.WithContext(ctx), resourceID, resourceType, "")
 		err := query.
@@ -190,7 +190,8 @@ func (r *AdminMessageRepo) adminMessageBaseQuery(ctx context.Context, resourceID
 func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.ResourceType, search string) *gorm.DB {
 	db = db.
 		Table("mailmatch_messages AS m").
-		Joins("LEFT JOIN orders o ON o.id = m.matched_order_id").
+		Joins("LEFT JOIN mailmatch_message_projections AS mp ON mp.message_id = m.id").
+		Joins("LEFT JOIN orders o ON o.id = "+effectiveMessageOwnerSQL).
 		Where("m.email_resource_id = ? AND m.resource_type = ?", resourceID, string(resourceType))
 	if resourceType == domain.ResourceTypeDomain {
 		db = db.Joins("JOIN domain_resources dr ON dr.id = m.email_resource_id")
@@ -208,7 +209,7 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
         OR m.subject LIKE ? ESCAPE '\\'
         OR m.body_preview LIKE ? ESCAPE '\\'
         OR m.raw_body LIKE ? ESCAPE '\\'
-        OR m.verification_code LIKE ? ESCAPE '\\'`, like, like, like, like, like, like)
+		OR (CASE WHEN mp.message_id IS NULL THEN m.verification_code ELSE mp.verification_code END) LIKE ? ESCAPE '\\'`, like, like, like, like, like, like)
 }
 
 func escapeAdminMessageLike(value string) string {

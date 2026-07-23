@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -13,6 +14,25 @@ import (
 type microsoftMessageFetchClientStub struct {
 	requests []mailinfra.MicrosoftMailFetchRequest
 	results  []mailinfra.MicrosoftMailFetchResult
+}
+
+func TestMicrosoftFetchAdapterRealtimeStopsAtSixWithoutTimeFilter(t *testing.T) {
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+		Scope: mailmatchapp.OrderScope{
+			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+		},
+		SinceAt: time.Now().Add(-time.Hour), UntilAt: time.Now(), Realtime: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, client.requests, 1)
+	require.Equal(t, realtimeMicrosoftMessageMaximum, client.requests[0].MaxMessages)
+	require.True(t, client.requests[0].StopAfterLimit)
+	require.True(t, client.requests[0].SinceAt.IsZero())
+	require.True(t, client.requests[0].UntilAt.IsZero())
 }
 
 func (s *microsoftMessageFetchClientStub) FetchAll(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {

@@ -15,6 +15,7 @@ import (
 const (
 	TypeMailmatchFetch                = "mailmatch:fetch"
 	TypeMailmatchPickupFetch          = "mailmatch:pickup_fetch"
+	TypeMailmatchPickupRequestFetch   = "mailmatch:pickup_request_fetch_v2"
 	TypeMailmatchResourceFetch        = "mailmatch:resource_fetch"
 	TypeMailmatchFetchDispatcher      = "mailmatch:fetch_dispatcher"
 	TypeProjectHistoryScan            = "mailmatch:project_history_scan"
@@ -22,7 +23,7 @@ const (
 	TypeProjectHistoryDispatcher      = "mailmatch:project_history_dispatcher"
 
 	mailmatchQueueName            = platform.QueueMailfetch
-	pickupFetchTaskMaxRetry       = 0
+	pickupRequestFetchTaskTimeout = 2 * time.Minute
 	resourceFetchTaskMaxRetry     = 3
 	mailmatchFetchTaskTimeout     = 20 * time.Minute
 	mailmatchDispatchTaskTimeout  = 30 * time.Second
@@ -40,29 +41,28 @@ func NewFetchQueue(client *asynq.Client) *FetchQueue {
 	return &FetchQueue{client: client}
 }
 
-func (q *FetchQueue) EnqueueFetch(ctx context.Context, task app.FetchTask) (bool, error) {
+func (q *FetchQueue) EnqueuePickupRequest(ctx context.Context, task app.PickupRequestFetchTask) (bool, error) {
 	if q == nil || q.client == nil {
-		return false, fmt.Errorf("mailmatch fetch queue is unavailable")
+		return false, fmt.Errorf("mailmatch pickup request queue is unavailable")
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return false, fmt.Errorf("marshal mailmatch fetch task: %w", err)
+		return false, fmt.Errorf("marshal mailmatch pickup request task: %w", err)
 	}
-	asynqTask := asynq.NewTask(TypeMailmatchPickupFetch, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
-		asynqTask,
+		asynq.NewTask(TypeMailmatchPickupRequestFetch, payload),
 		asynq.Queue(mailmatchQueueName),
-		asynq.Unique(mailmatchFetchTaskTimeout),
-		asynq.MaxRetry(pickupFetchTaskMaxRetry),
-		asynq.Timeout(mailmatchFetchTaskTimeout),
+		asynq.Unique(pickupRequestFetchTaskTimeout),
+		asynq.MaxRetry(0),
+		asynq.Timeout(pickupRequestFetchTaskTimeout),
 		asynq.Retention(0),
 	)
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		return false, nil
+	}
 	if err != nil {
-		if errors.Is(err, asynq.ErrDuplicateTask) {
-			return false, nil
-		}
-		return false, fmt.Errorf("enqueue mailmatch fetch task: %w", err)
+		return false, fmt.Errorf("enqueue mailmatch pickup request task: %w", err)
 	}
 	return true, nil
 }
@@ -79,7 +79,7 @@ func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.Resource
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
-		asynq.Queue(mailmatchQueueName),
+		asynq.Queue(platform.QueueBackgroundProjectHistory),
 		asynq.Unique(mailmatchFetchTaskTimeout),
 		asynq.MaxRetry(resourceFetchTaskMaxRetry),
 		asynq.Timeout(mailmatchFetchTaskTimeout),
@@ -184,7 +184,7 @@ func (q *FetchQueue) EnqueueFetchDispatcher(ctx context.Context, delay time.Dura
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(mailmatchQueueName),
+		asynq.Queue(platform.QueueBackgroundProjectHistory),
 		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(mailmatchDispatchTaskTimeout),

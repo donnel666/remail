@@ -11,6 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type dashboardBackgroundGateStub struct {
+	calls int
+}
+
+func (s *dashboardBackgroundGateStub) TryAcquire() (func(), bool) {
+	s.calls++
+	return func() {}, false
+}
+
 func TestDashboardRefreshesUseBackgroundQueueAndDeduplicate(t *testing.T) {
 	server := miniredis.RunT(t)
 	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}
@@ -33,4 +42,17 @@ func TestDashboardRefreshesUseBackgroundQueueAndDeduplicate(t *testing.T) {
 	}
 	require.Equal(t, rankingRefreshTaskTimeout, timeouts[typeRankingRefresh])
 	require.Equal(t, adminDashboardRefreshTaskTimeout, timeouts[typeAdminDashboardRefresh])
+}
+
+func TestDashboardRefreshDefersWhenAdaptiveBackgroundWindowIsFull(t *testing.T) {
+	gate := &dashboardBackgroundGateStub{}
+	module := NewModule(nil, nil, nil)
+	module.SetBackgroundExecutionGate(gate)
+	mux := asynq.NewServeMux()
+	cleanup := RegisterTaskHandlers(mux, module)
+	t.Cleanup(func() { cleanup(context.Background()) })
+
+	err := mux.ProcessTask(context.Background(), asynq.NewTask(typeRankingRefresh, nil))
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.Equal(t, 1, gate.calls)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,24 @@ func TestMain(m *testing.M) {
 func newTradeMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return tradeAPIMySQLTestServer.Database(t, tradeMigrationsDir(t))
+}
+
+func tradeInnoDBMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
+	t.Helper()
+	var count uint64
+	require.NoError(t, db.Raw(`SELECT COUNT FROM information_schema.innodb_metrics WHERE NAME = ?`, name).Scan(&count).Error)
+	return count
+}
+
+func tradeCheckoutFactCounts(t *testing.T, db *gorm.DB) map[string]int64 {
+	t.Helper()
+	counts := make(map[string]int64, 5)
+	for _, table := range []string{"orders", "wallet_transactions", "microsoft_allocations", "order_tokens", "order_events"} {
+		var count int64
+		require.NoError(t, db.Table(table).Count(&count).Error)
+		counts[table] = count
+	}
+	return counts
 }
 
 func tradeMigrationsDir(t *testing.T) string {
@@ -782,7 +801,7 @@ INSERT INTO mailmatch_messages(
     email_resource_id, resource_type, recipient, sender, subject, raw_body,
     verification_code, dedupe_key, status, received_at
 ) VALUES (?, 'microsoft', ?, 'noreply@example.com', 'Code', 'Your code is 123456',
-          '123456', REPEAT('d', 64), 'matched', ?)`,
+          '', REPEAT('d', 64), 'received', ?)`,
 		resourceID,
 		result.Order.DeliveryEmail,
 		receivedAt,
@@ -793,6 +812,15 @@ INSERT INTO mailmatch_messages(
 		Where("email_resource_id = ? AND dedupe_key = REPEAT('d', 64)", resourceID).
 		Scan(&messageID).Error)
 	require.NotZero(t, messageID)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_message_projections(
+    message_id, matched_order_id, status, verification_code,
+    match_diagnostic, message_received_at
+) VALUES (?, ?, 'matched', '123456', 'projection-only delivery', ?)`,
+		messageID,
+		result.Order.ID,
+		receivedAt,
+	).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
 VALUES (?, ?, ?)`, result.Order.ID, messageID, receivedAt).Error)
@@ -1125,14 +1153,20 @@ func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
 		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20}, Quantity: 100,
 	})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
-	req.Header.Set("Idempotency-Key", "route-order-hundred-batch")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key.KeyPlain)
+		req.Header.Set("Idempotency-Key", "route-order-hundred-batch")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	deadlocksBefore := tradeInnoDBMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := tradeInnoDBMetricCount(t, db, "lock_timeouts")
 
 	started := time.Now()
-	router.ServeHTTP(rec, req)
+	rec := request()
 	elapsed := time.Since(started)
 	t.Logf("100-item checkout request completed in %s", elapsed)
 
@@ -1141,6 +1175,73 @@ func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
 	var items CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
 	require.Len(t, items, 100)
+	facts := tradeCheckoutFactCounts(t, db)
+	replayed := request()
+	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
+	require.Equal(t, facts, tradeCheckoutFactCounts(t, db), "idempotent replay must not create any new checkout fact")
+	require.Equal(t, deadlocksBefore, tradeInnoDBMetricCount(t, db, "lock_deadlocks"))
+	require.Equal(t, timeoutsBefore, tradeInnoDBMetricCount(t, db, "lock_timeouts"))
+}
+
+func TestOrderRouteConcurrentHundredItemBatchesForDifferentUsersHaveNoDeadlocksMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
+	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
+	seedTradeMicrosoftResources(t, db, 1, 1100, 100, true)
+
+	openapiMod := openapiapi.NewModule(db)
+	keys := make(map[uint]string, 2)
+	for _, userID := range []uint{2, 3} {
+		key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
+			UserID: userID, Name: fmt.Sprintf("hundred-batch-%d", userID),
+			IdempotencyKey: fmt.Sprintf("apikey-idem-hundred-batch-%d", userID), RequestID: fmt.Sprintf("req-hundred-batch-%d", userID),
+		})
+		require.NoError(t, err)
+		keys[userID] = key.KeyPlain
+	}
+	router := gin.New()
+	registerOpenOrderRoute(router, newTradeModule(db), openapiMod)
+	body, err := json.Marshal(CreateOrderBatchRequest{
+		CreateOrderRequest: CreateOrderRequest{ProjectID: 10, ProductID: 20}, Quantity: 100,
+	})
+	require.NoError(t, err)
+	deadlocksBefore := tradeInnoDBMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := tradeInnoDBMetricCount(t, db, "lock_timeouts")
+
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, len(keys))
+	var wg sync.WaitGroup
+	for userID, key := range keys {
+		wg.Add(1)
+		go func(userID uint, key string) {
+			defer wg.Done()
+			<-start
+			req := httptest.NewRequest(http.MethodPost, "/v1/open/orders/batch?serviceMode=code&supply=public_only", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("route-order-hundred-batch-%d", userID))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			results <- rec
+		}(userID, key)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for rec := range results {
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+		var items CreateOrderBatchResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
+		require.Len(t, items, 100)
+	}
+	var orderCount, allocationCount int64
+	require.NoError(t, db.Table("orders").Count(&orderCount).Error)
+	require.NoError(t, db.Table("microsoft_allocations").Count(&allocationCount).Error)
+	require.EqualValues(t, 200, orderCount)
+	require.EqualValues(t, 200, allocationCount)
+	require.Equal(t, deadlocksBefore, tradeInnoDBMetricCount(t, db, "lock_deadlocks"))
+	require.Equal(t, timeoutsBefore, tradeInnoDBMetricCount(t, db, "lock_timeouts"))
 }
 
 func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
@@ -1179,7 +1280,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.Equal(t, http.StatusMultiStatus, first.Code, first.Body.String())
 	var firstResults CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResults))
-	require.Len(t, firstResults, 2)
+	require.Len(t, firstResults, 3)
 	require.Equal(t, "succeeded", firstResults[0].Status)
 	for i := 1; i < len(firstResults); i++ {
 		require.Equal(t, "failed", firstResults[i].Status)
@@ -1191,7 +1292,7 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 	require.Equal(t, http.StatusMultiStatus, replay.Code, replay.Body.String())
 	var replayResults CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(replay.Body.Bytes(), &replayResults))
-	require.Len(t, replayResults, 2)
+	require.Len(t, replayResults, 3)
 	for i := range firstResults {
 		require.Equal(t, firstResults[i].Index, replayResults[i].Index)
 		require.Equal(t, firstResults[i].Status, replayResults[i].Status)
@@ -1205,13 +1306,13 @@ func TestOrderRouteBatchPartialFailureConvergesOnRetryMySQL(t *testing.T) {
 
 	var orderCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ?", 2).Count(&orderCount).Error)
-	require.EqualValues(t, 2, orderCount)
+	require.EqualValues(t, 3, orderCount)
 	var activeCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "active").Count(&activeCount).Error)
 	require.EqualValues(t, 1, activeCount)
 	var failedCount int64
 	require.NoError(t, db.Table("orders").Where("user_id = ? AND status = ?", 2, "failed").Count(&failedCount).Error)
-	require.EqualValues(t, 1, failedCount)
+	require.EqualValues(t, 2, failedCount)
 	var debitCount int64
 	require.NoError(t, db.Table("wallet_transactions").Where("user_id = ? AND transaction_type = ?", 2, "debit").Count(&debitCount).Error)
 	require.EqualValues(t, 1, debitCount)
@@ -1730,6 +1831,179 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	var allocationCount int64
 	require.NoError(t, db.Table("microsoft_allocations").Where("order_no = ?", orderRow.OrderNo).Count(&allocationCount).Error)
 	require.EqualValues(t, 1, allocationCount)
+}
+
+func TestConcurrentCheckoutReplayAndRefundPathsDoNotDuplicateFactsMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "microsoft")
+	seedTradeMicrosoftResources(t, db, 1, 1000, 2, true)
+	creditBuyer(t, db, 2, "20.00")
+
+	uc := newTradeUseCase(db)
+	requests := []tradeapp.CheckoutRequest{
+		{
+			UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
+			ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "order-idem-concurrent-refund",
+			RequestID: "req-concurrent-refund",
+		},
+		{
+			UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
+			ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "order-idem-concurrent-retry-refund",
+			RequestID: "req-concurrent-retry-refund",
+		},
+	}
+	created := make([]*tradeapp.CheckoutResult, len(requests))
+	for i := range requests {
+		var err error
+		created[i], err = uc.Checkout(context.Background(), requests[i])
+		require.NoError(t, err)
+		require.Equal(t, tradedomain.OrderStatusActive, created[i].Order.Status)
+	}
+	require.NoError(t, db.Table("orders").
+		Where("order_no = ?", created[1].Order.OrderNo).
+		Updates(map[string]any{
+			"status":                 string(tradedomain.OrderStatusFailed),
+			"failure_code":           string(tradedomain.OrderFailureServiceToken),
+			"service_cleanup_status": "partial_failure",
+		}).Error)
+
+	factsBefore := tradeCheckoutFactCounts(t, db)
+	deadlocksBefore := tradeInnoDBMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := tradeInnoDBMetricCount(t, db, "lock_timeouts")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	activeReplayErr := make(chan error, 1)
+	failedReplayErr := make(chan error, 1)
+	refundErrs := make(chan error, 2)
+	retryRefundErrs := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := uc.Checkout(ctx, requests[0])
+		activeReplayErr <- err
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := uc.Checkout(ctx, requests[1])
+		failedReplayErr <- err
+	}()
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := uc.AdminRefundOrder(ctx, tradeapp.AdminOrderCommandRequest{
+				OrderNo: created[0].Order.OrderNo, Reason: "Concurrent refund gate.",
+				IdempotencyKey: "concurrent-refund-idem", RequestID: "req-concurrent-refund-gate",
+			})
+			refundErrs <- err
+		}()
+	}
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := uc.AdminRetryOrderRefund(ctx, tradeapp.AdminOrderCommandRequest{
+				OrderNo: created[1].Order.OrderNo, Reason: "Concurrent retry refund gate.",
+				IdempotencyKey: "concurrent-retry-refund-idem", RequestID: "req-concurrent-retry-refund-gate",
+			})
+			retryRefundErrs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(refundErrs)
+	close(retryRefundErrs)
+
+	require.NoError(t, <-activeReplayErr)
+	require.ErrorIs(t, <-failedReplayErr, tradedomain.ErrInvalidOrderRequest)
+	for err := range refundErrs {
+		require.NoError(t, err)
+	}
+	retrySucceeded, retryConflicted := 0, 0
+	for err := range retryRefundErrs {
+		switch {
+		case err == nil:
+			retrySucceeded++
+		case errors.Is(err, tradedomain.ErrOrderStateConflict):
+			retryConflicted++
+		default:
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, retrySucceeded)
+	require.Equal(t, 1, retryConflicted)
+
+	factsAfter := tradeCheckoutFactCounts(t, db)
+	require.Equal(t, factsBefore["orders"], factsAfter["orders"])
+	require.Equal(t, factsBefore["microsoft_allocations"], factsAfter["microsoft_allocations"])
+	require.Equal(t, factsBefore["order_tokens"], factsAfter["order_tokens"])
+	require.Equal(t, factsBefore["wallet_transactions"]+2, factsAfter["wallet_transactions"])
+	require.Equal(t, factsBefore["order_events"]+2, factsAfter["order_events"])
+
+	for i, order := range created {
+		var stored struct {
+			Status     string
+			DebitTxID  *uint
+			RefundTxID *uint
+		}
+		require.NoError(t, db.Table("orders").
+			Select("status, debit_tx_id, refund_tx_id").
+			Where("order_no = ?", order.Order.OrderNo).
+			Take(&stored).Error)
+		require.NotNil(t, stored.DebitTxID)
+		require.NotNil(t, stored.RefundTxID)
+		if i == 0 {
+			require.Equal(t, string(tradedomain.OrderStatusRefunded), stored.Status)
+		} else {
+			require.Equal(t, string(tradedomain.OrderStatusFailed), stored.Status)
+		}
+
+		for _, transactionType := range []string{"debit", "refund"} {
+			var count int64
+			require.NoError(t, db.Table("wallet_transactions").
+				Where("user_id = ? AND transaction_type = ? AND biz_id = ?", 2, transactionType, "order:"+order.Order.OrderNo).
+				Count(&count).Error)
+			require.EqualValues(t, 1, count)
+		}
+		var allocationCount, enabledTokenCount, tokenCount int64
+		require.NoError(t, db.Table("microsoft_allocations").
+			Where("order_no = ?", order.Order.OrderNo).
+			Count(&allocationCount).Error)
+		require.EqualValues(t, 1, allocationCount)
+		require.NoError(t, db.Table("microsoft_allocations").
+			Where("order_no = ? AND status = ?", order.Order.OrderNo, "released").
+			Count(&allocationCount).Error)
+		require.EqualValues(t, 1, allocationCount)
+		require.NoError(t, db.Table("order_tokens").Where("order_no = ?", order.Order.OrderNo).Count(&tokenCount).Error)
+		require.EqualValues(t, 1, tokenCount)
+		require.NoError(t, db.Table("order_tokens").
+			Where("order_no = ? AND enabled = ?", order.Order.OrderNo, true).
+			Count(&enabledTokenCount).Error)
+		require.Zero(t, enabledTokenCount)
+	}
+	for _, event := range []struct {
+		orderNo  string
+		typeName string
+	}{
+		{orderNo: created[0].Order.OrderNo, typeName: "order.refunded"},
+		{orderNo: created[1].Order.OrderNo, typeName: "order.refund_retried"},
+	} {
+		var count int64
+		require.NoError(t, db.Table("order_events").
+			Where("order_no = ? AND event_type = ?", event.orderNo, event.typeName).
+			Count(&count).Error)
+		require.EqualValues(t, 1, count)
+	}
+	require.Equal(t, deadlocksBefore, tradeInnoDBMetricCount(t, db, "lock_deadlocks"))
+	require.Equal(t, timeoutsBefore, tradeInnoDBMetricCount(t, db, "lock_timeouts"))
 }
 
 func newTradeUseCase(db *gorm.DB) *tradeapp.UseCase {

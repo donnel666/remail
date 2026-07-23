@@ -266,7 +266,7 @@ func (*allocationLockRepo) TouchMicrosoftAllocated(context.Context, uint, time.T
 	return nil
 }
 
-func TestAllocationNeverWaitsForAnotherRootOrContinuesAfterWriteConflict(t *testing.T) {
+func TestAllocationStopsParentTransactionAfterWriteConflict(t *testing.T) {
 	repo := &allocationLockRepo{writeConflict: true}
 	_, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
 		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
@@ -296,7 +296,7 @@ func TestHistoricalAllocationStopsAfterOrderGuardConflict(t *testing.T) {
 	}
 }
 
-func TestAllocationSkipsSafeCandidateMissesInsideParentTransaction(t *testing.T) {
+func TestAllocationWaitsForFirstRootAndSkipsLaterCandidateMisses(t *testing.T) {
 	tests := []struct {
 		name                 string
 		rootUnavailable      map[uint]bool
@@ -323,6 +323,24 @@ func TestAllocationSkipsSafeCandidateMissesInsideParentTransaction(t *testing.T)
 				t.Fatalf("calls wait/skip/create = %d/%d/%d, want 1/2/1", repo.waiting, repo.skipping, repo.creates)
 			}
 		})
+	}
+}
+
+func TestAllocationReusesHeldRootAcrossBucketProbes(t *testing.T) {
+	repo := &allocationLockRepo{
+		candidates:           []MicrosoftCandidate{{ResourceID: 1}},
+		candidateUnavailable: map[uint]bool{1: true},
+	}
+
+	_, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+	})
+
+	if !errors.Is(err, domain.ErrInsufficientInventory) {
+		t.Fatalf("Allocate() error = %v, want insufficient inventory", err)
+	}
+	if repo.waiting != 1 || repo.skipping != 0 {
+		t.Fatalf("root lock calls wait/skip = %d/%d, want 1/0", repo.waiting, repo.skipping)
 	}
 }
 

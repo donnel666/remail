@@ -12,7 +12,7 @@ const (
 	checkoutBatchConcurrency = 1024
 	checkoutBatchMaxWaiting  = 1024
 	checkoutBatchUnitSize    = 20
-	checkoutBatchMaxUnits    = 1024
+	checkoutBatchMaxUnits    = checkoutBatchMaxWaiting * (100 / checkoutBatchUnitSize)
 )
 
 type checkoutBatchWaiter struct {

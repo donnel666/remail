@@ -153,6 +153,7 @@ type AdjustConsumerBalanceCommand struct {
 	Reason             string
 	TransactionType    domain.TransactionType
 	Direction          domain.TransactionDirection
+	ClampToBalance     bool
 	IdempotencyKey     string
 	RequestFingerprint string
 	RequestID          string
@@ -299,12 +300,12 @@ func (uc *WalletUseCase) RedeemCard(ctx context.Context, req RedeemCardRequest) 
 
 func (uc *WalletUseCase) CreditConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeCredit
-	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionIn)
+	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionIn, false)
 }
 
 func (uc *WalletUseCase) DebitConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeDebit
-	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut)
+	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut, false)
 }
 
 func (uc *WalletUseCase) LockConsumer(ctx context.Context, userID uint) error {
@@ -316,10 +317,10 @@ func (uc *WalletUseCase) LockConsumer(ctx context.Context, userID uint) error {
 
 func (uc *WalletUseCase) RefundConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeRefund
-	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionIn)
+	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionIn, false)
 }
 
-func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerBalanceRequest, direction domain.TransactionDirection) (*AdjustBalanceResult, error) {
+func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerBalanceRequest, direction domain.TransactionDirection, clampToBalance bool) (*AdjustBalanceResult, error) {
 	amount, err := normalizeConsumerAdjustmentAmount(req.Amount, req.TransactionType)
 	if err != nil {
 		return nil, err
@@ -339,6 +340,7 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 		Reason:             reason,
 		TransactionType:    req.TransactionType,
 		Direction:          direction,
+		ClampToBalance:     clampToBalance,
 		IdempotencyKey:     idempotencyKey,
 		RequestFingerprint: fingerprint,
 		RequestID:          strings.TrimSpace(req.RequestID),
@@ -348,11 +350,9 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 }
 
 // BulkAdjustConsumer applies a signed amount to each user's consumer balance:
-// positive credits, negative debits (abs value). The amount is parsed once; a
-// zero amount is rejected. Each user gets a unique idempotency key derived from
-// the requestID so a retried bulk request dedupes per user. A per-user
-// insufficient-balance failure is counted as skipped without aborting the
-// batch; any other error is treated as unexpected and returned.
+// positive credits, negative debits (abs value). Negative adjustments are
+// capped at the user's current positive balance so bulk clearing never fails
+// just because the requested amount is larger than the wallet.
 func (uc *WalletUseCase) BulkAdjustConsumer(ctx context.Context, userIDs []uint, amount string, reason string, idempotencyKey string, requestID string, operationLog *governancedomain.OperationLog) (affected int, skipped int, err error) {
 	parsed, err := domain.ParseMoney(amount)
 	if err != nil {
@@ -377,7 +377,8 @@ func (uc *WalletUseCase) BulkAdjustConsumer(ctx context.Context, userIDs []uint,
 		if credit {
 			_, err = uc.CreditConsumer(ctx, req)
 		} else {
-			_, err = uc.DebitConsumer(ctx, req)
+			req.TransactionType = domain.TransactionTypeDebit
+			_, err = uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut, true)
 		}
 		if err != nil {
 			if errors.Is(err, domain.ErrInsufficientBalance) {

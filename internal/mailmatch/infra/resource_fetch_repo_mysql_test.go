@@ -70,7 +70,7 @@ func TestResourceFetchRepoUsesCurrentResourceStateAndGenerationFenceMySQL(t *tes
 	require.NoError(t, repo.AssertResourceFetchFence(ctx, 100, second.Generation, 7))
 }
 
-func TestResourceFetchRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
+func TestResourceFetchRepoBoundsInfrastructureFailuresMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)
 	repo := NewResourceFetchRepo(db)
@@ -79,33 +79,34 @@ func TestResourceFetchRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
 		ClientID: "client", RefreshToken: "rt", CredentialRevision: 7,
 	}})
 	ctx := context.Background()
-	job := resourceFetchStateRequest("idem-failure")
-	_, err := repo.CreateOrReuseResourceFetch(ctx, &job, nil)
-	require.NoError(t, err)
+	for _, kind := range []domain.ResourceFetchJobKind{domain.ResourceFetchJobFetch, domain.ResourceFetchJobHistory} {
+		t.Run(string(kind), func(t *testing.T) {
+			job := resourceFetchStateRequest("idem-failure-" + string(kind))
+			job.Kind = kind
+			_, err := repo.CreateOrReuseResourceFetch(ctx, &job, nil)
+			require.NoError(t, err)
 
-	current, err := repo.MarkResourceFetchProcessing(ctx, 100, job.Generation)
-	require.NoError(t, err)
-	require.True(t, current)
-	released, err := repo.ReleaseResourceFetchInfrastructureFailure(ctx, 100, job.Generation, "redis unavailable", nil)
-	require.NoError(t, err)
-	require.True(t, released)
-	var releasedState FetchStateModel
-	require.NoError(t, db.First(&releasedState, "email_resource_id = ?", 100).Error)
-	job.Generation = releasedState.Generation
+			for attempt := 1; attempt <= 3; attempt++ {
+				current, err := repo.MarkResourceFetchProcessing(ctx, 100, job.Generation)
+				require.NoError(t, err)
+				require.True(t, current)
+				retry, err := repo.ReleaseResourceFetchInfrastructureFailure(ctx, 100, job.Generation, "redis unavailable", nil)
+				require.NoError(t, err)
+				require.Equal(t, attempt < 3, retry)
 
-	for attempt := 1; attempt <= 3; attempt++ {
-		current, err = repo.MarkResourceFetchProcessing(ctx, 100, job.Generation)
-		require.NoError(t, err)
-		require.True(t, current)
-		retry, err := repo.MarkResourceFetchFailure(ctx, 100, job.Generation, "mailbox unavailable", true, time.Now().UTC(), nil)
-		require.NoError(t, err)
-		require.Equal(t, attempt < 3, retry)
+				var state FetchStateModel
+				require.NoError(t, db.First(&state, "email_resource_id = ?", 100).Error)
+				require.Equal(t, attempt, state.Failures)
+				job.Generation = state.Generation
+			}
+
+			stored, err := repo.FindResourceFetch(ctx, 100, job.Generation)
+			require.NoError(t, err)
+			require.Equal(t, kind, stored.Kind)
+			require.Equal(t, domain.ResourceFetchJobFailed, stored.Status)
+			require.Equal(t, 3, stored.Attempts)
+		})
 	}
-
-	stored, err := repo.FindResourceFetch(ctx, 100, job.Generation)
-	require.NoError(t, err)
-	require.Equal(t, domain.ResourceFetchJobFailed, stored.Status)
-	require.Equal(t, 3, stored.Attempts)
 }
 
 func TestResourceFetchRepoCompletesCurrentGenerationAndRotatesTokenMySQL(t *testing.T) {

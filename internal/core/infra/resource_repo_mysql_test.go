@@ -472,7 +472,7 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRollsBackOnDuplicateMySQL
 	require.Zero(t, childCount)
 }
 
-func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftMySQL(t *testing.T) {
+func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftAndAdvancesFencesMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)
 	importRepo := NewResourceImportRepo(db)
@@ -497,6 +497,17 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 		Status:       domain.MicrosoftStatusPending,
 	}
 	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, ms))
+	previousVersion := root.Version
+	var previousMicrosoft MicrosoftResourceModel
+	require.NoError(t, db.First(&previousMicrosoft, ms.ID).Error)
+	previousCredentialRevision := previousMicrosoft.CredentialRevision
+	previousTokenRefresh := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).
+		Where("id = ?", ms.ID).
+		Updates(map[string]any{
+			"token_last_refreshed_at": previousTokenRefresh,
+			"token_last_request_id":   "old-token-request",
+		}).Error)
 
 	require.NoError(t, repo.DeletePrivateMicrosoftWithLog(context.Background(), 1, ms.ID, governancedomain.OperationLog{
 		OperatorUserID: 1,
@@ -557,10 +568,36 @@ func TestCreateMicrosoftResourcesAndMarkImportSucceededRestoresDeletedMicrosoftM
 	require.Equal(t, 7, stored.QualityScore)
 	require.Empty(t, stored.LastSafeError)
 	require.Nil(t, stored.LastAllocatedAt)
+	require.Equal(t, previousCredentialRevision+1, stored.CredentialRevision)
+	require.False(t, stored.CredentialUpdatedAt.IsZero())
+	require.Nil(t, stored.TokenLastRefreshedAt)
+	require.Empty(t, stored.TokenLastRequestID)
+	require.Equal(t, stored.CredentialRevision, msResources[0].CredentialRevision)
+	require.WithinDuration(t, stored.CredentialUpdatedAt, msResources[0].CredentialUpdatedAt, time.Millisecond)
 
-	var ownerID uint
-	require.NoError(t, db.Raw("SELECT owner_user_id FROM email_resources WHERE id = ?", ms.ID).Scan(&ownerID).Error)
-	require.EqualValues(t, 2, ownerID)
+	var storedRoot EmailResourceModel
+	require.NoError(t, db.First(&storedRoot, ms.ID).Error)
+	require.EqualValues(t, 2, storedRoot.OwnerUserID)
+	require.Equal(t, previousVersion+1, storedRoot.Version)
+	require.Equal(t, storedRoot.Version, resources[0].Version)
+
+	adminRepo := NewAdminResourceRepo(db)
+	credentialService := coreapp.NewMicrosoftCredentialService(adminRepo)
+	require.ErrorIs(t, credentialService.ApplyMicrosoftFetchRefreshToken(context.Background(), coreapp.MicrosoftFetchRefreshTokenRotation{
+		ResourceID: ms.ID, ExpectedCredentialRevision: previousCredentialRevision,
+		RefreshToken: "stale-worker-refresh", Now: time.Now().UTC(),
+	}), coreapp.ErrMicrosoftCredentialChanged)
+	require.ErrorIs(t, adminRepo.SaveAdminMicrosoft(
+		context.Background(),
+		&domain.EmailResource{ID: ms.ID, Type: domain.ResourceTypeMicrosoft, OwnerUserID: 2},
+		&domain.MicrosoftResource{ID: ms.ID},
+		previousVersion,
+	), domain.ErrResourceVersionConflict)
+	require.NoError(t, db.First(&stored, ms.ID).Error)
+	require.Equal(t, "new-refresh", stored.RefreshToken)
+	require.Equal(t, previousCredentialRevision+1, stored.CredentialRevision)
+	require.NoError(t, db.First(&storedRoot, ms.ID).Error)
+	require.Equal(t, previousVersion+1, storedRoot.Version)
 
 	storedImport, err := importRepo.FindByID(context.Background(), importRecord.ID)
 	require.NoError(t, err)

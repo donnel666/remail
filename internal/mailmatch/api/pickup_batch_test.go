@@ -21,8 +21,6 @@ import (
 
 func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t)
-	require.Equal(t, 1024, pickupMaxActive)
-	require.Equal(t, 1024, pickupMaxTotal)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize)
 	for i := range items {
 		items[i] = PickupCredentialRequest{
@@ -110,39 +108,23 @@ func TestPickupBatchDoesNotRateLimitRepeatedIPOrTokens(t *testing.T) {
 	require.Equal(t, int64(4), repo.loadCalls.Load())
 }
 
-func TestPickupBatchRejectsBeforeDatabaseWhenGlobalQueueIsFull(t *testing.T) {
-	repo, router := newPickupBatchTestRouter(t)
-	globalPickupOutstanding = make(chan struct{}, 1)
-	globalPickupExecution = make(chan struct{}, 1)
-	globalPickupOutstanding <- struct{}{}
-
-	response := performPickupBatchRequest(router, "192.0.2.21:1234", PickupBatchRequest{Items: []PickupCredentialRequest{
-		{Email: "a@example.com", Token: "token-a"},
-		{Email: "b@example.com", Token: "token-b"},
-	}})
-
-	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-	require.Equal(t, "1", response.Header().Get("Retry-After"))
-	require.Zero(t, repo.loadCalls.Load())
-}
-
-func TestPickupBatchQueueCancellationReleasesOutstandingPermit(t *testing.T) {
-	oldOutstanding := globalPickupOutstanding
-	oldExecution := globalPickupExecution
-	globalPickupOutstanding = make(chan struct{}, 1)
-	globalPickupExecution = make(chan struct{}, 1)
-	globalPickupExecution <- struct{}{}
-	t.Cleanup(func() {
-		globalPickupOutstanding = oldOutstanding
-		globalPickupExecution = oldExecution
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, admitted := acquirePickup(ctx)
-
-	require.False(t, admitted)
-	require.Empty(t, globalPickupOutstanding)
+func TestPickupBatchServiceResult(t *testing.T) {
+	tests := []struct {
+		name                        string
+		succeeded, business, system int
+		want                        string
+	}{
+		{name: "succeeded", succeeded: 2, want: "succeeded"},
+		{name: "business failed", business: 2, want: "business_failed"},
+		{name: "system failed", system: 2, want: "system_failed"},
+		{name: "partial success", succeeded: 1, system: 1, want: "partial"},
+		{name: "mixed failures", business: 1, system: 1, want: "partial"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, pickupBatchServiceResult(test.succeeded, test.business, test.system))
+		})
+	}
 }
 
 func TestPickupBatchRejectsOversizedBody(t *testing.T) {
@@ -228,15 +210,6 @@ func (*pickupBatchRepoStub) ListOrderMessages(context.Context, mailmatchapp.Orde
 
 func newPickupBatchTestRouter(t *testing.T) (*pickupBatchRepoStub, *gin.Engine) {
 	t.Helper()
-	oldOutstanding := globalPickupOutstanding
-	oldExecution := globalPickupExecution
-	globalPickupOutstanding = make(chan struct{}, pickupMaxTotal)
-	globalPickupExecution = make(chan struct{}, pickupMaxActive)
-	t.Cleanup(func() {
-		globalPickupOutstanding = oldOutstanding
-		globalPickupExecution = oldExecution
-	})
-
 	repo := &pickupBatchRepoStub{}
 	module := &Module{UseCase: mailmatchapp.NewUseCase(repo, nil, nil, nil)}
 	router := gin.New()

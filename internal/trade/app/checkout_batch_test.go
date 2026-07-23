@@ -18,6 +18,8 @@ type batchRepoSpy struct {
 	Repository
 	mu         sync.Mutex
 	orders     map[string]domain.Order
+	finds      int
+	findsInTx  int
 	topTx      int
 	nestedTx   int
 	committed  int
@@ -45,11 +47,20 @@ func (r *batchRepoSpy) WithTx(ctx context.Context, fn func(context.Context) erro
 	return err
 }
 
-func (r *batchRepoSpy) FindOrderByIdempotency(_ context.Context, _ domain.ClientChannel, _ uint, _ *uint, idempotencyKey, _ string) (*domain.Order, error) {
+func (r *batchRepoSpy) FindOrderByIdempotency(ctx context.Context, _ domain.ClientChannel, _ uint, _ *uint, idempotencyKey, _ string) (*domain.Order, error) {
+	r.mu.Lock()
+	r.finds++
+	if ctx.Value(batchTxContextKey{}) != nil {
+		r.findsInTx++
+	}
+	r.mu.Unlock()
 	if err := r.findErrors[idempotencyKey]; err != nil {
 		return nil, err
 	}
-	order := r.orders[idempotencyKey]
+	order, exists := r.orders[idempotencyKey]
+	if !exists {
+		return nil, nil
+	}
 	return &order, nil
 }
 
@@ -85,10 +96,107 @@ func (batchTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*
 	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
 }
 
+type batchOrderingSpy struct {
+	OrderingPort
+	mu        sync.Mutex
+	calls     int
+	callsInTx int
+}
+
+func (s *batchOrderingSpy) GetOrderingQuote(ctx context.Context, projectID uint, productID uint, _ uint, _ domain.ServiceMode) (*OrderingQuote, error) {
+	s.mu.Lock()
+	s.calls++
+	if ctx.Value(batchTxContextKey{}) != nil {
+		s.callsInTx++
+	}
+	s.mu.Unlock()
+	return &OrderingQuote{
+		ProjectID: projectID, ProductID: productID, ProductType: domain.ProductTypeMicrosoft,
+		PayAmount: "1.00", ActivationWindowMinutes: 10, WarrantyMinutes: 10,
+	}, nil
+}
+
+type batchPreloadRepoSpy struct {
+	*batchRepoSpy
+	batchFinds     int
+	batchFindsInTx int
+}
+
+func (r *batchPreloadRepoSpy) FindOrdersByIdempotencyBatch(
+	ctx context.Context,
+	_ domain.ClientChannel,
+	_ uint,
+	_ *uint,
+	idempotencyKeys []string,
+) (map[string]domain.Order, error) {
+	r.mu.Lock()
+	r.batchFinds++
+	if ctx.Value(batchTxContextKey{}) != nil {
+		r.batchFindsInTx++
+	}
+	r.mu.Unlock()
+	orders := make(map[string]domain.Order, len(idempotencyKeys))
+	for _, key := range idempotencyKeys {
+		if order, exists := r.orders[key]; exists {
+			orders[key] = order
+		}
+	}
+	return orders, nil
+}
+
 type batchCancelTokenSpy struct {
 	OrderTokenPort
 	cancel context.CancelFunc
 	once   sync.Once
+}
+
+type batchErrorTokenSpy struct {
+	OrderTokenPort
+	err error
+}
+
+type batchOrderErrorTokenSpy struct {
+	OrderTokenPort
+	orderNo string
+	err     error
+}
+
+func (s batchErrorTokenSpy) FindOrderTokenByOrder(context.Context, string) (*OrderToken, error) {
+	return nil, s.err
+}
+
+func (s batchOrderErrorTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
+	if orderNo == s.orderNo {
+		return nil, s.err
+	}
+	return &OrderToken{TokenPlain: "token-" + orderNo}, nil
+}
+
+type batchRetryRepoSpy struct {
+	*batchRepoSpy
+}
+
+func (r *batchRetryRepoSpy) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	if ctx.Value(batchTxContextKey{}) != nil {
+		return r.batchRepoSpy.WithTx(ctx, fn)
+	}
+	r.mu.Lock()
+	r.topTx++
+	r.mu.Unlock()
+	txCtx := context.WithValue(ctx, batchTxContextKey{}, true)
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.rolledBack++
+	r.mu.Unlock()
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.committed++
+	r.mu.Unlock()
+	return nil
 }
 
 func (s *batchCancelTokenSpy) FindOrderTokenByOrder(_ context.Context, orderNo string) (*OrderToken, error) {
@@ -136,7 +244,7 @@ func TestPaidCheckoutStopsImmediatelyOnAllocationWriteError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-func TestCheckoutBatchUsesOneCommittedTransactionPerItemAndKeepsPartialSuccess(t *testing.T) {
+func TestCheckoutBatchUsesIndependentItemTransactionsAndKeepsPartialSuccess(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
 		"second": batchOrder("second", domain.OrderStatusFailed, domain.OrderFailureInsufficientInventory),
@@ -160,6 +268,27 @@ func TestCheckoutBatchUsesOneCommittedTransactionPerItemAndKeepsPartialSuccess(t
 	require.Equal(t, 2, wallet.locks)
 }
 
+func TestPrepareCheckoutBatchUsesOnePreloadAndOneQuoteOutsideTransaction(t *testing.T) {
+	base := &batchRepoSpy{orders: map[string]domain.Order{}}
+	repo := &batchPreloadRepoSpy{batchRepoSpy: base}
+	ordering := &batchOrderingSpy{}
+	uc := NewUseCase(repo, ordering, &batchWalletSpy{}, nil, batchTokenSpy{})
+
+	prepared, err := uc.prepareCheckoutBatch(context.Background(), []CheckoutRequest{
+		batchRequest("first", 2), batchRequest("second", 2),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, prepared, 2)
+	require.Equal(t, 1, repo.batchFinds)
+	require.Zero(t, repo.batchFindsInTx)
+	require.Zero(t, base.finds)
+	require.Zero(t, base.topTx)
+	require.Equal(t, 1, ordering.calls)
+	require.Zero(t, ordering.callsInTx)
+	require.Same(t, prepared[0].quote, prepared[1].quote)
+}
+
 func TestCheckoutBatchHandlesOneHundredItemsInOneBoundedCall(t *testing.T) {
 	orders := make(map[string]domain.Order, 100)
 	requests := make([]CheckoutRequest, 100)
@@ -178,10 +307,11 @@ func TestCheckoutBatchHandlesOneHundredItemsInOneBoundedCall(t *testing.T) {
 	require.Len(t, items, 100)
 	require.Less(t, time.Since(started), time.Second)
 	require.Equal(t, 100, repo.topTx)
+	require.Zero(t, repo.nestedTx)
 	require.Equal(t, 100, repo.committed)
 }
 
-func TestCheckoutBatchReturnsCancellationWithCompletedPrefix(t *testing.T) {
+func TestCheckoutBatchKeepsCommittedItemsWhenRequestIsCanceled(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{
 		"first":  batchOrder("first", domain.OrderStatusActive, ""),
 		"second": batchOrder("second", domain.OrderStatusActive, ""),
@@ -194,9 +324,145 @@ func TestCheckoutBatchReturnsCancellationWithCompletedPrefix(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, context.Canceled)
-	require.Len(t, items, 1)
-	require.Equal(t, "order-first", items[0].Result.Order.OrderNo)
+	require.Nil(t, items)
 	require.Equal(t, 1, repo.topTx)
+	require.Equal(t, 1, repo.committed)
+	require.Zero(t, repo.rolledBack)
+}
+
+func TestCheckoutBatchReturnsFixedQuantityAfterItemInfrastructureRollback(t *testing.T) {
+	wantErr := errors.New("database unavailable")
+	repo := &batchRepoSpy{orders: map[string]domain.Order{
+		"first":  batchOrder("first", domain.OrderStatusActive, ""),
+		"second": batchOrder("second", domain.OrderStatusActive, ""),
+	}}
+	uc := NewUseCase(repo, nil, &batchWalletSpy{}, nil, batchErrorTokenSpy{err: wantErr})
+
+	items, err := uc.CheckoutBatch(context.Background(), []CheckoutRequest{
+		batchRequest("first", 2), batchRequest("second", 2),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	for i := range items {
+		require.Nil(t, items[i].Result)
+		require.ErrorIs(t, items[i].Err, wantErr)
+	}
+	require.True(t, items[0].attempted)
+	require.False(t, items[1].attempted)
+	require.Equal(t, 1, repo.rolledBack)
+}
+
+func TestCheckoutBatchKeepsEarlierCommitWhenLaterItemHasInfrastructureFailure(t *testing.T) {
+	wantErr := errors.New("database unavailable")
+	repo := &batchRepoSpy{orders: map[string]domain.Order{
+		"first":  batchOrder("first", domain.OrderStatusActive, ""),
+		"second": batchOrder("second", domain.OrderStatusActive, ""),
+		"third":  batchOrder("third", domain.OrderStatusActive, ""),
+	}}
+	uc := NewUseCase(repo, nil, &batchWalletSpy{}, nil, batchOrderErrorTokenSpy{
+		orderNo: "order-second", err: wantErr,
+	})
+
+	items, err := uc.CheckoutBatch(context.Background(), []CheckoutRequest{
+		batchRequest("first", 3), batchRequest("second", 3), batchRequest("third", 3),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	require.NoError(t, items[0].Err)
+	require.NotNil(t, items[0].Result)
+	require.ErrorIs(t, items[1].Err, wantErr)
+	require.Nil(t, items[1].Result)
+	require.ErrorIs(t, items[2].Err, wantErr)
+	require.Nil(t, items[2].Result)
+	require.True(t, items[0].attempted)
+	require.True(t, items[1].attempted)
+	require.False(t, items[2].attempted)
+	require.Equal(t, 2, repo.topTx)
+	require.Equal(t, 1, repo.committed)
+	require.Equal(t, 1, repo.rolledBack)
+}
+
+func TestCheckoutBatchResetsResultsWhenTransactionRetries(t *testing.T) {
+	base := &batchRepoSpy{orders: map[string]domain.Order{
+		"first":  batchOrder("first", domain.OrderStatusActive, ""),
+		"second": batchOrder("second", domain.OrderStatusActive, ""),
+	}}
+	repo := &batchRetryRepoSpy{batchRepoSpy: base}
+	uc := NewUseCase(repo, nil, &batchWalletSpy{}, nil, batchTokenSpy{})
+
+	items, err := uc.CheckoutBatch(context.Background(), []CheckoutRequest{
+		batchRequest("first", 2), batchRequest("second", 2),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, 2, base.topTx)
+	require.Equal(t, 2, base.rolledBack)
+	require.Equal(t, 2, base.committed)
+}
+
+func TestCheckoutBatchMetricsKeepWorkUnitConservation(t *testing.T) {
+	tests := []struct {
+		name       string
+		items      []CheckoutBatchItem
+		runErr     error
+		wantCounts [4]int
+		wantResult string
+	}{
+		{
+			name:       "succeeded",
+			items:      []CheckoutBatchItem{{attempted: true}, {attempted: true}, {attempted: true}},
+			wantCounts: [4]int{3, 0, 0, 0},
+			wantResult: "succeeded",
+		},
+		{
+			name: "partial",
+			items: []CheckoutBatchItem{
+				{attempted: true},
+				{Err: domain.ErrInsufficientInventory, attempted: true},
+				{Err: domain.ErrIdempotencyConflict, attempted: true},
+			},
+			wantCounts: [4]int{1, 2, 0, 0},
+			wantResult: "partial",
+		},
+		{
+			name:       "system failed",
+			items:      []CheckoutBatchItem{{Err: errors.New("database unavailable"), attempted: true}, {Err: errors.New("database unavailable")}, {Err: errors.New("database unavailable")}},
+			wantCounts: [4]int{0, 0, 1, 2},
+			wantResult: "system_failed",
+		},
+		{
+			name:       "preparation failed before item execution",
+			items:      []CheckoutBatchItem{{Err: errors.New("database unavailable")}, {Err: errors.New("database unavailable")}, {Err: errors.New("database unavailable")}},
+			wantCounts: [4]int{0, 0, 0, 3},
+			wantResult: "system_failed",
+		},
+		{
+			name:       "canceled",
+			runErr:     context.Canceled,
+			wantCounts: [4]int{0, 0, 0, 3},
+			wantResult: "canceled",
+		},
+		{
+			name:       "base idempotency conflict",
+			runErr:     domain.ErrIdempotencyConflict,
+			wantCounts: [4]int{0, 1, 0, 2},
+			wantResult: "partial",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			succeeded, businessFailed, systemFailed, unprocessed := checkoutBatchCounts(3, tt.items, tt.runErr)
+			got := [4]int{succeeded, businessFailed, systemFailed, unprocessed}
+
+			require.Equal(t, tt.wantCounts, got)
+			require.Equal(t, 3, succeeded+businessFailed+systemFailed+unprocessed)
+			require.Equal(t, tt.wantResult, checkoutBatchServiceResult(businessFailed, systemFailed, unprocessed, tt.runErr))
+		})
+	}
 }
 
 func TestCheckoutBatchContinuesAfterItemIdempotencyConflict(t *testing.T) {
@@ -219,6 +485,7 @@ func TestCheckoutBatchContinuesAfterItemIdempotencyConflict(t *testing.T) {
 	require.ErrorIs(t, items[1].Err, domain.ErrIdempotencyConflict)
 	require.NoError(t, items[2].Err)
 	require.Equal(t, 2, repo.topTx)
+	require.Zero(t, repo.nestedTx)
 }
 
 func TestCheckoutBatchStopsWhenBaseIdempotencyKeyConflicts(t *testing.T) {
@@ -235,12 +502,13 @@ func TestCheckoutBatchStopsWhenBaseIdempotencyKeyConflicts(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
 	require.Nil(t, items)
 	require.Zero(t, repo.topTx)
+	require.Zero(t, repo.rolledBack)
 }
 
 func TestCheckoutBatchGateIsFIFOAndBounded(t *testing.T) {
 	require.Equal(t, 1024, checkoutBatchConcurrency)
 	require.Equal(t, 1024, checkoutBatchMaxWaiting)
-	require.Equal(t, 1024, checkoutBatchMaxUnits)
+	require.Equal(t, 5120, checkoutBatchMaxUnits)
 	gate := newCheckoutBatchGate()
 	releases := make([]func(), 0, checkoutBatchConcurrency)
 	for userID := uint(1); userID <= checkoutBatchConcurrency; userID++ {

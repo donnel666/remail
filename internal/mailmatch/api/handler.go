@@ -33,21 +33,20 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	queuedAt := time.Now()
-	release, admitted := acquirePickup(ctx)
-	if !admitted {
-		writePickupUnavailable(c)
-		return
-	}
-	defer release()
-	platform.ObserveQueueWait("pickup_single", queuedAt)
 	serviceStarted := time.Now()
-	defer platform.ObserveTaskService("pickup_single", serviceStarted)
+	serviceResult := "succeeded"
+	defer func() { platform.ObserveServiceDuration("pickup_single", "single", serviceResult, serviceStarted) }()
 	items, state, err := h.mod.UseCase.ListPickupMail(ctx, tokenPlain, email)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			serviceResult = "canceled"
 			writePickupUnavailable(c)
 			return
+		}
+		if errors.Is(err, domain.ErrPickupCredentialInvalid) || errors.Is(err, domain.ErrOrderUnavailable) {
+			serviceResult = "business_failed"
+		} else {
+			serviceResult = "system_failed"
 		}
 		writeMailmatchError(c, err)
 		return
@@ -69,6 +68,7 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 	credentials := make([]mailmatchapp.PickupCredential, 0, len(req.Items))
 	credentialIndexes := make([]int, 0, len(req.Items))
 	failed := false
+	succeededItems, businessFailedItems, systemFailedItems := 0, 0, 0
 	for i := range req.Items {
 		resp[i].Index = i
 		credential := mailmatchapp.PickupCredential{
@@ -79,22 +79,18 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 			resp[i].Status = "failed"
 			resp[i].Error = &PickupBatchItemErrorResponse{Code: "invalid_request", Message: "Invalid pickup credential."}
 			failed = true
+			businessFailedItems++
 			continue
 		}
 		credentials = append(credentials, credential)
 		credentialIndexes = append(credentialIndexes, i)
 	}
 	ctx := c.Request.Context()
-	queuedAt := time.Now()
-	release, admitted := acquirePickup(ctx)
-	if !admitted {
-		writePickupUnavailable(c)
-		return
-	}
-	defer release()
-	platform.ObserveQueueWait("pickup_batch", queuedAt)
 	serviceStarted := time.Now()
-	defer platform.ObserveTaskService("pickup_batch", serviceStarted)
+	serviceResult := "succeeded"
+	defer func() {
+		platform.ObserveServiceDuration("pickup_batch", pickupServiceSize(len(req.Items)), serviceResult, serviceStarted)
+	}()
 	results := h.mod.UseCase.ListPickupMailBatch(ctx, credentials)
 	for i := range results {
 		index := credentialIndexes[i]
@@ -105,17 +101,46 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 				c.Header("Retry-After", "1")
 			}
 			failed = true
+			if errors.Is(results[i].Err, domain.ErrPickupCredentialInvalid) || errors.Is(results[i].Err, domain.ErrOrderUnavailable) {
+				businessFailedItems++
+			} else {
+				systemFailedItems++
+			}
 			continue
 		}
 		data := orderMailResponse(results[i].Items, results[i].Fetch)
 		resp[index].Status = "succeeded"
 		resp[index].Data = &data
+		succeededItems++
 	}
+	size := pickupServiceSize(len(req.Items))
+	platform.AddWorkUnits("pickup_batch", size, "requested", len(req.Items))
+	platform.AddWorkUnits("pickup_batch", size, "succeeded", succeededItems)
+	platform.AddWorkUnits("pickup_batch", size, "business_failed", businessFailedItems)
+	platform.AddWorkUnits("pickup_batch", size, "system_failed", systemFailedItems)
+	platform.AddWorkUnits(
+		"pickup_batch", size, "unprocessed",
+		len(req.Items)-succeededItems-businessFailedItems-systemFailedItems,
+	)
 	status := http.StatusOK
 	if failed {
 		status = http.StatusMultiStatus
 	}
+	serviceResult = pickupBatchServiceResult(succeededItems, businessFailedItems, systemFailedItems)
 	c.JSON(status, resp)
+}
+
+func pickupBatchServiceResult(succeeded, businessFailed, systemFailed int) string {
+	switch {
+	case businessFailed == 0 && systemFailed == 0:
+		return "succeeded"
+	case succeeded == 0 && businessFailed > 0 && systemFailed == 0:
+		return "business_failed"
+	case succeeded == 0 && systemFailed > 0 && businessFailed == 0:
+		return "system_failed"
+	default:
+		return "partial"
+	}
 }
 
 func (h *Handler) GetPickupMessage(c *gin.Context) {
@@ -143,46 +168,21 @@ func (h *Handler) GetPickupMessage(c *gin.Context) {
 const (
 	maxPickupBatchSize  = 200
 	maxPickupBatchBytes = 128 << 10
-	pickupMaxActive     = 1024
-	pickupMaxTotal      = 1024
 )
 
-var (
-	// ponytail: process-local limits match the current single app replica;
-	// move these permits to Redis only when the app is horizontally scaled.
-	globalPickupOutstanding = make(chan struct{}, pickupMaxTotal)
-	globalPickupExecution   = make(chan struct{}, pickupMaxActive)
-)
-
-func acquirePickup(ctx context.Context) (func(), bool) {
-	if ctx.Err() != nil {
-		return nil, false
-	}
-	select {
-	case globalPickupOutstanding <- struct{}{}:
-		observePickupState()
+func pickupServiceSize(quantity int) string {
+	switch {
+	case quantity <= 1:
+		return "single"
+	case quantity <= 20:
+		return "002_020"
+	case quantity <= 50:
+		return "021_050"
+	case quantity <= 100:
+		return "051_100"
 	default:
-		return nil, false
+		return "101_200"
 	}
-	select {
-	case globalPickupExecution <- struct{}{}:
-		observePickupState()
-		return func() {
-			<-globalPickupExecution
-			<-globalPickupOutstanding
-			observePickupState()
-		}, true
-	case <-ctx.Done():
-		<-globalPickupOutstanding
-		observePickupState()
-		return nil, false
-	}
-}
-
-func observePickupState() {
-	active := len(globalPickupExecution)
-	queued := max(len(globalPickupOutstanding)-active, 0)
-	platform.SetWorkloadState("pickup", active, queued, queued)
 }
 
 func writePickupUnavailable(c *gin.Context) {

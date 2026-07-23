@@ -35,6 +35,39 @@ type legacyFetchTransportStub struct {
 	err    error
 }
 
+type pickupRequestRepoStub struct {
+	Repository
+	scopes map[string]OrderScope
+}
+
+func (s *pickupRequestRepoStub) LoadOrderScopeForServiceToken(_ context.Context, orderNo string) (*OrderScope, error) {
+	scope, ok := s.scopes[orderNo]
+	if !ok {
+		return nil, domain.ErrOrderNotFound
+	}
+	return &scope, nil
+}
+
+func (*pickupRequestRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (*pickupRequestRepoStub) UpsertMessages(_ context.Context, messages []domain.Message) ([]domain.Message, error) {
+	return messages, nil
+}
+
+type pickupRequestTransportStub struct {
+	calls []string
+}
+
+func (s *pickupRequestTransportStub) FetchMicrosoftMessages(_ context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error) {
+	s.calls = append(s.calls, req.Scope.OrderNo)
+	if req.Scope.OrderNo == "ORDER-FAIL" {
+		return nil, errors.New("provider unavailable")
+	}
+	return &FetchMessagesResult{}, nil
+}
+
 func (s legacyFetchTransportStub) FetchMicrosoftMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error) {
 	result := s.result
 	return &result, s.err
@@ -199,6 +232,109 @@ func TestPickupFetchReturnsRedisCleanupFailure(t *testing.T) {
 	err := uc.ProcessFetch(context.Background(), pickupFetchTask(97, "ORDER-CLEANUP", now))
 
 	require.ErrorIs(t, err, cleanupErr)
+}
+
+func TestPickupRequestFetchOwnsWholeRequestAndCleansLease(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	repo := &legacyFetchRepoStub{scope: OrderScope{
+		OrderNo: "ORDER-REQUEST", OrderStatus: "active", ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 12, EmailResourceID: 98,
+		Recipient: "alias@example.com",
+	}}
+	state := &pickupFetchStateStub{}
+	uc := NewUseCase(repo, nil, legacyFetchTransportStub{}, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now,
+		Scopes:      []PickupRequestFetchScope{{OrderNo: "ORDER-REQUEST", EmailResourceID: 98}},
+	})
+
+	require.NoError(t, err)
+	acquired, released := state.snapshot()
+	require.Equal(t, []uint{98}, acquired)
+	require.Equal(t, 1, released)
+}
+
+func TestPickupRequestFetchFallsBackToNextValidOrderForResource(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	repo := &pickupRequestRepoStub{scopes: map[string]OrderScope{
+		"ORDER-VALID": {
+			OrderNo: "ORDER-VALID", OrderStatus: "active", ServiceMode: "purchase",
+			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 12,
+			EmailResourceID: 98, Recipient: "alias@example.com",
+		},
+	}}
+	transport := &pickupRequestTransportStub{}
+	state := &pickupFetchStateStub{}
+	uc := NewUseCase(repo, nil, transport, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now,
+		Scopes: []PickupRequestFetchScope{{
+			OrderNo: "ORDER-EXPIRED", OrderNos: []string{"ORDER-EXPIRED", "ORDER-VALID"}, EmailResourceID: 98,
+		}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"ORDER-VALID"}, transport.calls)
+	acquired, released := state.snapshot()
+	require.Equal(t, []uint{98}, acquired)
+	require.Equal(t, 1, released)
+}
+
+func TestPickupRequestFetchExpiresBeforeAcquiringLease(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	state := &pickupFetchStateStub{}
+	uc := NewUseCase(&legacyFetchRepoStub{}, nil, legacyFetchTransportStub{}, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now.Add(-pickupFetchReserveTTL),
+		Scopes:      []PickupRequestFetchScope{{OrderNo: "ORDER-EXPIRED", EmailResourceID: 99}},
+	})
+
+	require.NoError(t, err)
+	acquired, released := state.snapshot()
+	require.Empty(t, acquired)
+	require.Zero(t, released)
+}
+
+func TestPickupRequestFetchContinuesAfterScopeFailureAndCleansEveryLease(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	repo := &pickupRequestRepoStub{scopes: map[string]OrderScope{
+		"ORDER-FAIL": {
+			OrderNo: "ORDER-FAIL", OrderStatus: "active", ServiceMode: "purchase",
+			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 101, EmailResourceID: 101, Recipient: "a@example.com",
+		},
+		"ORDER-OK": {
+			OrderNo: "ORDER-OK", OrderStatus: "active", ServiceMode: "purchase",
+			AllocationType: domain.ResourceTypeMicrosoft, AllocationID: 102, EmailResourceID: 102, Recipient: "b@example.com",
+		},
+	}}
+	transport := &pickupRequestTransportStub{}
+	state := &pickupFetchStateStub{}
+	uc := NewUseCase(repo, nil, transport, nil)
+	uc.SetPickupFetchStatePort(state)
+	uc.now = func() time.Time { return now }
+
+	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{
+		RequestedAt: now,
+		Scopes: []PickupRequestFetchScope{
+			{OrderNo: "ORDER-FAIL", EmailResourceID: 101},
+			{OrderNo: "ORDER-OK", EmailResourceID: 102},
+		},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, []string{"ORDER-FAIL", "ORDER-OK"}, transport.calls)
+	acquired, released := state.snapshot()
+	require.Equal(t, []uint{101, 102}, acquired)
+	require.Equal(t, 2, released)
 }
 
 func pickupFetchTask(resourceID uint, orderNo string, now time.Time) FetchTask {

@@ -34,6 +34,13 @@ func newBillingMySQLTestDB(t *testing.T) *gorm.DB {
 	return billingMySQLTestServer.Database(t, billingMigrationsDir(t))
 }
 
+func billingInnoDBMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
+	t.Helper()
+	var count uint64
+	require.NoError(t, db.Raw(`SELECT COUNT FROM information_schema.innodb_metrics WHERE NAME = ?`, name).Scan(&count).Error)
+	return count
+}
+
 func billingMigrationsDir(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -428,6 +435,22 @@ func TestBillingRepoAdjustConsumerBalanceMySQL(t *testing.T) {
 		Now:                time.Now().UTC(),
 	})
 	require.ErrorIs(t, err, domain.ErrInsufficientBalance)
+
+	clamped, err := repo.AdjustConsumerBalance(ctx, billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "100.00",
+		Reason:             "bulk clear",
+		TransactionType:    domain.TransactionTypeDebit,
+		Direction:          domain.TransactionDirectionOut,
+		ClampToBalance:     true,
+		IdempotencyKey:     "idem-debit-clamp",
+		RequestFingerprint: "fingerprint-debit-clamp",
+		RequestID:          "req-debit-clamp",
+		Now:                time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "0.00", clamped.Wallet.ConsumerBalance)
+	require.Equal(t, "-5.50", clamped.Transaction.Amount)
 }
 
 func TestBillingRepoConsumerBalanceSixDecimalPrecisionMySQL(t *testing.T) {
@@ -698,6 +721,106 @@ func TestBillingRepoConcurrentFirstCreditsCreateOneWalletMySQL(t *testing.T) {
 	var walletCount int64
 	require.NoError(t, db.Model(&WalletModel{}).Where("user_id = ?", userID).Count(&walletCount).Error)
 	require.EqualValues(t, 1, walletCount)
+}
+
+func TestBillingRepoWalletFirstAdjustCompetesWithDirectAdjustWithoutDeadlockMySQL(t *testing.T) {
+	db := newBillingMySQLTestDB(t)
+	userID := createBillingTestUser(t, db, "wallet-first-adjust@example.com")
+	repo := NewBillingRepo(db)
+	_, err := repo.GetOrCreateWalletSummary(context.Background(), userID)
+	require.NoError(t, err)
+
+	command := billingapp.AdjustConsumerBalanceCommand{
+		UserID:             userID,
+		Amount:             "5.00",
+		Reason:             "wallet-first concurrency gate",
+		TransactionType:    domain.TransactionTypeCredit,
+		Direction:          domain.TransactionDirectionIn,
+		IdempotencyKey:     "idem-wallet-first-concurrency",
+		RequestFingerprint: "fingerprint-wallet-first-concurrency",
+		RequestID:          "req-wallet-first-concurrency",
+		Now:                time.Now().UTC(),
+	}
+	deadlocksBefore := billingInnoDBMetricCount(t, db, "lock_deadlocks")
+	timeoutsBefore := billingInnoDBMetricCount(t, db, "lock_timeouts")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type adjustOutcome struct {
+		result *billingapp.AdjustBalanceResult
+		err    error
+	}
+	type walletLockProbeKey struct{}
+	walletLocked := make(chan struct{})
+	directWalletLockAttempt := make(chan struct{})
+	var probeOnce sync.Once
+	const probeCallback = "test:direct_wallet_lock_attempt"
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(probeCallback, func(tx *gorm.DB) {
+		_, locking := tx.Statement.Clauses["FOR"]
+		if tx.Statement.Context.Value(walletLockProbeKey{}) == true && tx.Statement.Table == "wallets" && locking {
+			probeOnce.Do(func() { close(directWalletLockAttempt) })
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove(probeCallback)) })
+	proceed := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(proceed) }) }
+	defer release()
+	outerResult := make(chan adjustOutcome, 1)
+	go func() {
+		var adjusted *billingapp.AdjustBalanceResult
+		err := repo.withTx(ctx, func(txCtx context.Context, _ *gorm.DB) error {
+			if err := repo.LockConsumerWallet(txCtx, userID); err != nil {
+				return err
+			}
+			close(walletLocked)
+			select {
+			case <-proceed:
+			case <-txCtx.Done():
+				return txCtx.Err()
+			}
+			var err error
+			adjusted, err = repo.AdjustConsumerBalance(txCtx, command)
+			return err
+		})
+		outerResult <- adjustOutcome{result: adjusted, err: err}
+	}()
+	<-walletLocked
+
+	directResult := make(chan adjustOutcome, 1)
+	go func() {
+		directCtx := context.WithValue(ctx, walletLockProbeKey{}, true)
+		adjusted, err := repo.AdjustConsumerBalance(directCtx, command)
+		directResult <- adjustOutcome{result: adjusted, err: err}
+	}()
+	select {
+	case <-directWalletLockAttempt:
+	case <-ctx.Done():
+		require.NoError(t, ctx.Err())
+	}
+	release()
+
+	outer := <-outerResult
+	direct := <-directResult
+	require.NoError(t, outer.err)
+	require.NoError(t, direct.err)
+	require.NotNil(t, outer.result)
+	require.NotNil(t, direct.result)
+	require.Equal(t, outer.result.Transaction.ID, direct.result.Transaction.ID)
+	require.Equal(t, "5.00", outer.result.Wallet.ConsumerBalance)
+	require.Equal(t, "5.00", direct.result.Wallet.ConsumerBalance)
+
+	var transactionCount, receiptCount int64
+	require.NoError(t, db.Model(&WalletTransactionModel{}).
+		Where("user_id = ? AND idempotency_key = ?", userID, command.IdempotencyKey).
+		Count(&transactionCount).Error)
+	require.EqualValues(t, 1, transactionCount)
+	require.NoError(t, db.Model(&IdempotencyKeyModel{}).
+		Where("owner_user_id = ? AND idempotency_key = ? AND operation = ?", userID, command.IdempotencyKey, "wallet.adjust").
+		Count(&receiptCount).Error)
+	require.EqualValues(t, 1, receiptCount)
+	require.Equal(t, deadlocksBefore, billingInnoDBMetricCount(t, db, "lock_deadlocks"))
+	require.Equal(t, timeoutsBefore, billingInnoDBMetricCount(t, db, "lock_timeouts"))
 }
 
 func TestBillingRepoIndexesAndExplainMySQL(t *testing.T) {

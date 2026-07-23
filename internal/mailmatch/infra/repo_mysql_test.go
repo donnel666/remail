@@ -13,6 +13,7 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -52,6 +53,48 @@ VALUES (99999, ?, ?)`, messageID, now).Error
 INSERT INTO mailmatch_order_delivery_heads(order_id, message_id, message_received_at)
 VALUES (?, 99999, ?)`, orderID, now).Error
 	require.Error(t, err)
+}
+
+func TestMessageProjectionMigrationDownRestoresLegacyDecisionMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_PROJECTION_DOWN")
+	require.NoError(t, db.Exec(`
+INSERT INTO wallet_transactions(
+    transaction_no, user_id, transaction_type, balance_bucket, direction,
+    amount, balance_before, balance_after, biz_type, biz_id, idempotency_key
+) VALUES ('TX_PROJECTION_DOWN', 2, 'debit', 'consumer', 'out', -1, 10, 9, 'order', 'OR_PROJECTION_DOWN', 'TX_PROJECTION_DOWN')`).Error)
+	require.NoError(t, db.Exec(`
+UPDATE orders
+SET status = 'failed', debit_tx_id = (
+    SELECT id FROM wallet_transactions WHERE transaction_no = 'TX_PROJECTION_DOWN'
+), failure_code = 'unknown'
+WHERE id = ?`, orderID).Error)
+	receivedAt := time.Now().UTC().Truncate(time.Second)
+	messageID := seedMailmatchMessage(t, db, "654321", receivedAt, "z")
+	require.NoError(t, db.Table("mailmatch_messages").Where("id = ?", messageID).Updates(map[string]any{
+		"matched_order_id": nil, "status": "received", "verification_code": "", "match_diagnostic": "",
+	}).Error)
+	require.NoError(t, db.Create(&MessageProjectionModel{
+		MessageID: messageID, MatchedOrderID: &orderID, Status: string(domain.MessageStatusMatched),
+		VerificationCode: "654321", MatchDiagnostic: "projection decision", MessageReceivedAt: receivedAt,
+	}).Error)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, goose.SetDialect("mysql"))
+	require.NoError(t, goose.DownTo(sqlDB, mailmatchMigrationsDir(t), 39))
+
+	var legacy MessageModel
+	require.NoError(t, db.First(&legacy, messageID).Error)
+	require.Equal(t, &orderID, legacy.MatchedOrderID)
+	require.Equal(t, string(domain.MessageStatusMatched), legacy.Status)
+	require.Equal(t, "654321", legacy.VerificationCode)
+	require.Equal(t, "projection decision", legacy.MatchDiagnostic)
+	var pendingRefundCount int64
+	require.NoError(t, db.Table("orders").
+		Where("id = ? AND status = 'failed' AND debit_tx_id IS NOT NULL AND refund_tx_id IS NULL AND refund_amount = 0", orderID).
+		Count(&pendingRefundCount).Error)
+	require.Equal(t, int64(1), pendingRefundCount)
 }
 
 func TestCreateCodeOrderDeliveryDoesNotOverwriteMySQL(t *testing.T) {
@@ -151,6 +194,282 @@ func TestUpsertMessagesPreservesMatchedCodeMySQL(t *testing.T) {
 	require.Equal(t, "Your code is 123456", stored.RawBody)
 	require.Equal(t, "Your code is 123456", stored.BodyPreview)
 	require.Equal(t, "123456", stored.VerificationCode)
+}
+
+func TestAppendMessagesKeepFactsImmutableAndMatchedOwnershipTerminalMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_MESSAGE_APPEND_ONLY")
+	repo := NewRepo(db, nil)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	first := domain.Message{
+		EmailResourceID:  100,
+		ResourceType:     domain.ResourceTypeMicrosoft,
+		MatchedOrderID:   &orderID,
+		Recipient:        "first@example.com",
+		Sender:           "sender@example.net",
+		Subject:          "First subject",
+		RawBody:          "Your code is 123456",
+		BodyPreview:      "Your code is 123456",
+		VerificationCode: "123456",
+		DedupeKey:        fmt.Sprintf("%064x", 2),
+		Status:           domain.MessageStatusMatched,
+		MatchDiagnostic:  "Matched the active order.",
+		ReceivedAt:       now,
+	}
+	second := first
+	second.MatchedOrderID = nil
+	second.Recipient = "second@example.com"
+	second.Subject = "Second subject"
+	second.VerificationCode = ""
+	second.DedupeKey = fmt.Sprintf("%064x", 1)
+	second.Status = domain.MessageStatusIgnored
+	second.MatchDiagnostic = "No active order matched."
+
+	stored, inserted, err := repo.AppendMessages(ctx, []domain.Message{first, second})
+	require.NoError(t, err)
+	require.Equal(t, 2, inserted)
+	require.Len(t, stored, 2)
+	require.Equal(t, first.DedupeKey, stored[0].DedupeKey)
+	require.Equal(t, second.DedupeKey, stored[1].DedupeKey)
+	require.NotZero(t, stored[0].ID)
+	require.NotZero(t, stored[1].ID)
+	first.ID = stored[0].ID
+	second.ID = stored[1].ID
+	projected, newlyMatched, err := repo.InsertMessageProjections(ctx, []domain.Message{first, second})
+	require.NoError(t, err)
+	require.Len(t, projected, 2)
+	require.Equal(t, []uint{stored[0].ID}, newlyMatched)
+	require.Equal(t, orderID, *projected[0].MatchedOrderID)
+
+	var factBefore MessageModel
+	require.NoError(t, db.Where("id = ?", stored[0].ID).Take(&factBefore).Error)
+	var projectionBefore MessageProjectionModel
+	require.NoError(t, db.Where("message_id = ?", stored[0].ID).Take(&projectionBefore).Error)
+
+	changed := first
+	changed.ID = stored[0].ID
+	changed.MatchedOrderID = nil
+	changed.Recipient = "changed@example.com"
+	changed.Subject = "Changed subject"
+	changed.RawBody = "changed body"
+	changed.BodyPreview = "changed preview"
+	changed.VerificationCode = "654321"
+	changed.Status = domain.MessageStatusIgnored
+	changed.MatchDiagnostic = "Changed diagnostic."
+	changed.ReceivedAt = now.Add(time.Hour)
+	resolved, inserted, err := repo.AppendMessages(ctx, []domain.Message{changed})
+	require.NoError(t, err)
+	require.Zero(t, inserted)
+	require.Len(t, resolved, 1)
+	require.Equal(t, stored[0].ID, resolved[0].ID)
+	require.Equal(t, first.Recipient, resolved[0].Recipient)
+	require.Equal(t, first.Subject, resolved[0].Subject)
+	require.Equal(t, first.RawBody, resolved[0].RawBody)
+	require.Empty(t, resolved[0].VerificationCode)
+	_, newlyMatched, err = repo.InsertMessageProjections(ctx, []domain.Message{changed})
+	require.NoError(t, err)
+	require.Empty(t, newlyMatched)
+
+	var factAfter MessageModel
+	require.NoError(t, db.Where("id = ?", stored[0].ID).Take(&factAfter).Error)
+	var projectionAfter MessageProjectionModel
+	require.NoError(t, db.Where("message_id = ?", stored[0].ID).Take(&projectionAfter).Error)
+	require.Equal(t, factBefore, factAfter)
+	require.Nil(t, factAfter.MatchedOrderID)
+	require.Equal(t, "received", factAfter.Status)
+	require.Empty(t, factAfter.VerificationCode)
+	require.Empty(t, factAfter.MatchDiagnostic)
+	require.Equal(t, projectionBefore, projectionAfter)
+	require.Equal(t, orderID, *projectionAfter.MatchedOrderID)
+	require.Equal(t, "matched", projectionAfter.Status)
+	require.Equal(t, "123456", projectionAfter.VerificationCode)
+	invalidProjection := second
+	invalidProjection.ID = stored[1].ID
+	invalidProjection.MatchedOrderID = &orderID
+	invalidProjection.Status = domain.MessageStatusIgnored
+	_, _, err = repo.InsertMessageProjections(ctx, []domain.Message{invalidProjection})
+	require.Error(t, err)
+	promoted := second
+	promoted.ID = stored[1].ID
+	promoted.MatchedOrderID = &orderID
+	promoted.Status = domain.MessageStatusMatched
+	promoted.VerificationCode = "654321"
+	projected, newlyMatched, err = repo.InsertMessageProjections(ctx, []domain.Message{promoted})
+	require.NoError(t, err)
+	require.Equal(t, []uint{stored[1].ID}, newlyMatched)
+	require.Equal(t, orderID, *projected[0].MatchedOrderID)
+	require.Equal(t, "654321", projected[0].VerificationCode)
+
+	_, _, err = repo.AppendMessages(ctx, []domain.Message{{
+		EmailResourceID: 99999,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		Recipient:       "missing@example.com",
+		DedupeKey:       fmt.Sprintf("%064x", 99999),
+		Status:          domain.MessageStatusIgnored,
+		ReceivedAt:      now,
+	}})
+	require.ErrorIs(t, err, domain.ErrMessageNotFound)
+	_, _, err = repo.InsertMessageProjections(ctx, []domain.Message{{
+		ID:         99999,
+		Status:     domain.MessageStatusIgnored,
+		ReceivedAt: now,
+	}})
+	require.ErrorIs(t, err, domain.ErrMessageNotFound)
+}
+
+func TestAppendMessagesConcurrentOverlapMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	seedMailmatchOrder(t, db, "OR_MESSAGE_APPEND_CONCURRENT")
+	repo := NewRepo(db, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	now := time.Now().UTC().Truncate(time.Second)
+	const (
+		workers     = 12
+		sharedCount = 8
+		uniqueCount = 4
+	)
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			messages := make([]domain.Message, 0, sharedCount+uniqueCount)
+			for i := sharedCount - 1; i >= 0; i-- {
+				messages = append(messages, concurrentAppendMessage(now, uint64(i+1), worker))
+			}
+			for i := uniqueCount - 1; i >= 0; i-- {
+				key := uint64((worker+1)*1000 + i)
+				messages = append(messages, concurrentAppendMessage(now, key, worker))
+			}
+			stored, _, err := repo.AppendMessages(ctx, messages)
+			if err == nil {
+				for i := range messages {
+					messages[i].ID = stored[i].ID
+				}
+				_, _, err = repo.InsertMessageProjections(ctx, messages)
+			}
+			errs <- err
+		}(worker)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	expected := int64(sharedCount + workers*uniqueCount)
+	var messageCount int64
+	require.NoError(t, db.Model(&MessageModel{}).Where("email_resource_id = ?", 100).Count(&messageCount).Error)
+	require.Equal(t, expected, messageCount)
+	var projectionCount int64
+	require.NoError(t, db.Model(&MessageProjectionModel{}).Count(&projectionCount).Error)
+	require.Equal(t, expected, projectionCount)
+}
+
+func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	orderID := seedMailmatchOrder(t, db, "OR_MESSAGE_FENCE")
+	repo := NewRepo(db, nil)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	decision := domain.Message{
+		EmailResourceID: 100, ResourceType: domain.ResourceTypeMicrosoft,
+		MatchedOrderID: &orderID, Recipient: "main@example.com",
+		Sender: "sender@example.net", Subject: "Fence code",
+		RawBody: "Your code is 123456", BodyPreview: "Your code is 123456",
+		VerificationCode: "123456", DedupeKey: fmt.Sprintf("%064x", 7001),
+		Status: domain.MessageStatusMatched, ReceivedAt: now,
+	}
+	facts, inserted, err := repo.AppendMessages(ctx, []domain.Message{decision})
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted)
+	require.Len(t, facts, 1)
+	require.Nil(t, facts[0].MatchedOrderID)
+	require.Equal(t, domain.MessageStatusReceived, facts[0].Status)
+	require.Empty(t, facts[0].VerificationCode)
+	decision.ID = facts[0].ID
+
+	// The first fence and pure fact append have completed. A failed second
+	// fence must leave no ownership that order reads can observe.
+	err = repo.WithTx(ctx, func(context.Context) error {
+		return domain.ErrFetchJobConflict
+	})
+	require.ErrorIs(t, err, domain.ErrFetchJobConflict)
+	startedAt := now.Add(-time.Minute)
+	items, err := repo.ListOrderMessages(ctx, app.OrderScope{
+		OrderID: orderID, ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeMicrosoft, ReceiveStartedAt: &startedAt,
+	}, 30)
+	require.NoError(t, err)
+	require.Empty(t, items)
+	pending, err := repo.ListUnprojectedMessages(ctx, []uint{100}, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, facts[0].ID, pending[0].ID)
+
+	wantRollback := fmt.Errorf("injected delivery failure")
+	err = repo.WithTx(ctx, func(txCtx context.Context) error {
+		projected, _, err := repo.InsertMessageProjections(txCtx, []domain.Message{decision})
+		if err != nil {
+			return err
+		}
+		if err := repo.CreateCodeOrderDelivery(txCtx, orderID, projected[0]); err != nil {
+			return err
+		}
+		return wantRollback
+	})
+	require.ErrorIs(t, err, wantRollback)
+	var projectionCount int64
+	require.NoError(t, db.Model(&MessageProjectionModel{}).Count(&projectionCount).Error)
+	require.Zero(t, projectionCount)
+	var deliveryCount int64
+	require.NoError(t, db.Model(&OrderDeliveryHeadModel{}).Count(&deliveryCount).Error)
+	require.Zero(t, deliveryCount)
+
+	err = repo.WithTx(ctx, func(txCtx context.Context) error {
+		projected, _, err := repo.InsertMessageProjections(txCtx, []domain.Message{decision})
+		if err != nil {
+			return err
+		}
+		return repo.CreateCodeOrderDelivery(txCtx, orderID, projected[0])
+	})
+	require.NoError(t, err)
+	delivery, err := repo.FindOrderDelivery(ctx, orderID)
+	require.NoError(t, err)
+	require.NotNil(t, delivery)
+	require.NotNil(t, delivery.Message)
+	require.Equal(t, "123456", delivery.Message.VerificationCode)
+	items, err = repo.ListOrderMessages(ctx, app.OrderScope{
+		OrderID: orderID, ServiceMode: "purchase",
+		AllocationType: domain.ResourceTypeMicrosoft, ReceiveStartedAt: &startedAt,
+	}, 30)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "123456", items[0].VerificationCode)
+	pending, err = repo.ListUnprojectedMessages(ctx, []uint{100}, 100)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+func concurrentAppendMessage(now time.Time, key uint64, worker int) domain.Message {
+	return domain.Message{
+		EmailResourceID: 100,
+		ResourceType:    domain.ResourceTypeMicrosoft,
+		Recipient:       "concurrent@example.com",
+		Sender:          fmt.Sprintf("worker-%d@example.net", worker),
+		Subject:         "Concurrent append",
+		RawBody:         "immutable body",
+		DedupeKey:       fmt.Sprintf("%064x", key),
+		Status:          domain.MessageStatusIgnored,
+		MatchDiagnostic: "No active order matched.",
+		ReceivedAt:      now,
+	}
 }
 
 func TestListOrderMessagesOnlyReturnsPersistedOwnershipMySQL(t *testing.T) {

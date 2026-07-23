@@ -5,6 +5,7 @@ import (
 	stdmail "net/mail"
 	"regexp"
 	"strings"
+	"time"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
@@ -13,7 +14,10 @@ import (
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 )
 
-const maxFetchProxyAttempts = 2
+const (
+	maxFetchProxyAttempts           = 2
+	realtimeMicrosoftMessageMaximum = 6
+)
 
 type microsoftMessageFetchClient interface {
 	FetchAll(context.Context, mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error)
@@ -42,8 +46,20 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 	}
 	var lastFailure error
 	maxMessages := 30
+	sinceAt := req.SinceAt
+	untilAt := req.UntilAt
+	stopAfterLimit := false
+	if req.Realtime {
+		maxMessages = realtimeMicrosoftMessageMaximum
+		sinceAt = time.Time{}
+		untilAt = time.Time{}
+		stopAfterLimit = true
+	}
 	if req.FullHistory {
 		maxMessages = 0
+		sinceAt = req.SinceAt
+		untilAt = req.UntilAt
+		stopAfterLimit = false
 	}
 	for attempt := 0; attempt < maxFetchProxyAttempts; attempt++ {
 		streamed := false
@@ -71,15 +87,16 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			proxyID = proxyConfig.ID
 		}
 		result, err := a.client.FetchAll(ctx, mailinfra.MicrosoftMailFetchRequest{
-			EmailAddress: req.Scope.MicrosoftEmail,
-			ClientID:     req.Scope.MicrosoftClientID,
-			RefreshToken: req.Scope.MicrosoftRT,
-			ProxyURL:     proxyURL,
-			SinceAt:      req.SinceAt,
-			UntilAt:      req.UntilAt,
-			MaxMessages:  maxMessages,
-			OnMessages:   onMessages,
-			OnReset:      req.OnReset,
+			EmailAddress:   req.Scope.MicrosoftEmail,
+			ClientID:       req.Scope.MicrosoftClientID,
+			RefreshToken:   req.Scope.MicrosoftRT,
+			ProxyURL:       proxyURL,
+			SinceAt:        sinceAt,
+			UntilAt:        untilAt,
+			MaxMessages:    maxMessages,
+			StopAfterLimit: stopAfterLimit,
+			OnMessages:     onMessages,
+			OnReset:        req.OnReset,
 		})
 		if rotated := strings.TrimSpace(result.RefreshToken); rotated != "" {
 			// A mailbox operation can fail after Microsoft has already rotated the

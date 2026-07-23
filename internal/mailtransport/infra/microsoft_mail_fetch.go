@@ -54,16 +54,17 @@ type MicrosoftMailFetchClient struct {
 }
 
 type MicrosoftMailFetchRequest struct {
-	EmailAddress string
-	ClientID     string
-	RefreshToken string
-	AccessToken  string
-	ProxyURL     string
-	SinceAt      time.Time
-	UntilAt      time.Time
-	MaxMessages  int
-	OnMessages   func([]MicrosoftFetchedMessage)
-	OnReset      func()
+	EmailAddress   string
+	ClientID       string
+	RefreshToken   string
+	AccessToken    string
+	ProxyURL       string
+	SinceAt        time.Time
+	UntilAt        time.Time
+	MaxMessages    int
+	StopAfterLimit bool
+	OnMessages     func([]MicrosoftFetchedMessage)
+	OnReset        func()
 }
 
 type MicrosoftMailFetchResult struct {
@@ -278,6 +279,12 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 }
 
 func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+	streamMessages := req.OnMessages
+	if req.StopAfterLimit {
+		// A global newest-N result cannot be streamed folder by folder: a newer
+		// Junk message may displace an Inbox message already emitted.
+		req.OnMessages = nil
+	}
 	if c != nil && c.graphFetch != nil {
 		return c.graphFetch(ctx, req)
 	}
@@ -343,7 +350,8 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		fetchFolder = c.graphFolderFetch
 	}
 	for _, folder := range defaultMicrosoftMailFolders {
-		folderResult, err := fetchFolder(ctx, session, accessToken, folder, req)
+		folderRequest := req
+		folderResult, err := fetchFolder(ctx, session, accessToken, folder, folderRequest)
 		if err != nil {
 			category, message, proxyFailure := classifyMicrosoftGraphFailure(err)
 			failure := microsoftMailFetchFailure(category, message, proxyFailure)
@@ -358,11 +366,12 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 		result.Messages = append(result.Messages, folderResult.Messages...)
 	}
 	if req.OnMessages == nil {
-		sort.SliceStable(result.Messages, func(i, j int) bool {
-			return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
-		})
-		result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+		result.Messages = newestMicrosoftMessages(result.Messages, req.MaxMessages)
 		result.MessageCount = len(result.Messages)
+	}
+	if req.StopAfterLimit && streamMessages != nil && len(result.Messages) > 0 {
+		streamMessages(result.Messages)
+		result.Messages = nil
 	}
 	return result, nil
 }
@@ -560,6 +569,12 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		return microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
 	}
 
+	streamMessages := req.OnMessages
+	if req.StopAfterLimit {
+		// Buffer both folders so the final limit applies to their combined
+		// received-time order rather than whichever folder is read first.
+		req.OnMessages = nil
+	}
 	result := MicrosoftMailFetchResult{
 		Valid:        true,
 		Protocol:     "imap",
@@ -568,6 +583,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	}
 	completedFolders := map[string]bool{}
 	for _, folder := range imapCandidateFolders(client) {
+		folderLimit := req.MaxMessages
 		if completedFolders[folder.Label] {
 			continue
 		}
@@ -585,7 +601,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 			result.FolderCounts[folder.Label] = 0
 			continue
 		}
-		seqSet, err := recentIMAPSeqSet(operationCtx, client, selectData.NumMessages, req.SinceAt, req.MaxMessages)
+		seqSet, err := recentIMAPSeqSet(operationCtx, client, selectData.NumMessages, req.SinceAt, folderLimit)
 		if err != nil || len(seqSet) == 0 {
 			return microsoftMailFetchFailure("request", "Microsoft mailbox history could not be read completely.", false), err
 		}
@@ -635,11 +651,12 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		return microsoftMailFetchFailure("request", "Inbox and Junk must both be read completely.", false), nil
 	}
 	if req.OnMessages == nil {
-		sort.SliceStable(result.Messages, func(i, j int) bool {
-			return result.Messages[i].ReceivedAt.After(result.Messages[j].ReceivedAt)
-		})
-		result.Messages = limitMicrosoftMessages(result.Messages, req.MaxMessages)
+		result.Messages = newestMicrosoftMessages(result.Messages, req.MaxMessages)
 		result.MessageCount = len(result.Messages)
+	}
+	if req.StopAfterLimit && streamMessages != nil && len(result.Messages) > 0 {
+		streamMessages(result.Messages)
+		result.Messages = nil
 	}
 	return result, nil
 }
@@ -821,28 +838,47 @@ func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint
 	if total == 0 {
 		return nil, nil
 	}
-	var nums []uint32
+	criteria := &imap.SearchCriteria{}
 	if !sinceAt.IsZero() {
-		data, err := client.Search(&imap.SearchCriteria{Since: sinceAt.UTC()}, nil).Wait()
+		criteria.Since = sinceAt.UTC()
+	}
+	if maxMessages > 0 && client.Caps().Has(imap.CapSort) {
+		nums, err := client.Sort(&imapclient.SortOptions{
+			SearchCriteria: criteria,
+			SortCriteria:   []imapclient.SortCriterion{{Key: imapclient.SortKeyArrival, Reverse: true}},
+		}).Wait()
+		if err == nil {
+			return imap.SeqSetNum(nums[:min(len(nums), maxMessages)]...), ctx.Err()
+		}
+	}
+	if maxMessages > 0 {
+		return latestIMAPSeqSet(total, maxMessages), ctx.Err()
+	}
+
+	seqSet := imap.SeqSet{}
+	if sinceAt.IsZero() {
+		seqSet.AddRange(1, total)
+	} else {
+		data, err := client.Search(criteria, nil).Wait()
 		if err != nil {
 			return nil, err
 		}
-		nums = data.AllSeqNums()
+		seqSet = imap.SeqSetNum(data.AllSeqNums()...)
 	}
-	if len(nums) == 0 {
-		start := uint32(1)
-		if maxMessages > 0 && int(total) > maxMessages {
-			start = total - uint32(maxMessages) + 1
-		}
-		seqSet := imap.SeqSet{}
-		seqSet.AddRange(start, total)
-		return seqSet, ctx.Err()
-	}
-	if maxMessages > 0 && len(nums) > maxMessages {
-		nums = nums[len(nums)-maxMessages:]
-	}
-	seqSet := imap.SeqSetNum(nums...)
 	return seqSet, ctx.Err()
+}
+
+func latestIMAPSeqSet(total uint32, maxMessages int) imap.SeqSet {
+	if total == 0 || maxMessages <= 0 {
+		return nil
+	}
+	start := uint32(1)
+	if total > uint32(maxMessages) {
+		start = total - uint32(maxMessages) + 1
+	}
+	seqSet := imap.SeqSet{}
+	seqSet.AddRange(start, total)
+	return seqSet
 }
 
 func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {
@@ -858,30 +894,49 @@ func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {
 	if err != nil {
 		return fallback
 	}
+	return imapCandidateFoldersFromList(listed)
+}
+
+func imapCandidateFoldersFromList(listed []*imap.ListData) []MicrosoftMailFolder {
+	fallback := []MicrosoftMailFolder{
+		{ID: "INBOX", Label: "Inbox"},
+		{ID: "Junk", Label: "Junk"},
+		{ID: "Junk Email", Label: "Junk"},
+	}
 	folders := make([]MicrosoftMailFolder, 0, len(listed)+len(fallback))
+	specialUseJunk := make([]MicrosoftMailFolder, 0, 1)
+	namedJunk := make([]MicrosoftMailFolder, 0, 2)
 	for _, item := range listed {
+		if item == nil {
+			continue
+		}
 		name := strings.TrimSpace(item.Mailbox)
 		if name == "" {
 			continue
 		}
-		label := ""
 		if strings.EqualFold(name, "INBOX") {
-			label = "Inbox"
+			folders = append(folders, MicrosoftMailFolder{ID: name, Label: "Inbox"})
+			continue
 		}
-		lowerName := strings.ToLower(name)
-		if strings.Contains(lowerName, "junk") || strings.Contains(lowerName, "spam") {
-			label = "Junk"
-		}
+		isSpecialUseJunk := false
 		for _, attr := range item.Attrs {
 			if attr == imap.MailboxAttrJunk {
-				label = "Junk"
+				isSpecialUseJunk = true
 				break
 			}
 		}
-		if label != "" {
-			folders = append(folders, MicrosoftMailFolder{ID: name, Label: label})
+		folder := MicrosoftMailFolder{ID: name, Label: "Junk"}
+		if isSpecialUseJunk {
+			specialUseJunk = append(specialUseJunk, folder)
+			continue
+		}
+		lowerName := strings.ToLower(name)
+		if strings.Contains(lowerName, "junk") || strings.Contains(lowerName, "spam") {
+			namedJunk = append(namedJunk, folder)
 		}
 	}
+	folders = append(folders, specialUseJunk...)
+	folders = append(folders, namedJunk...)
 	folders = append(folders, fallback...)
 	return uniqueMicrosoftMailFolders(folders)
 }
@@ -1116,6 +1171,13 @@ func limitMicrosoftMessages(messages []MicrosoftFetchedMessage, limit int) []Mic
 		return messages
 	}
 	return messages[:limit]
+}
+
+func newestMicrosoftMessages(messages []MicrosoftFetchedMessage, limit int) []MicrosoftFetchedMessage {
+	sort.SliceStable(messages, func(i, j int) bool {
+		return messages[i].ReceivedAt.After(messages[j].ReceivedAt)
+	})
+	return limitMicrosoftMessages(messages, limit)
 }
 
 func bodyPreview(value string) string {

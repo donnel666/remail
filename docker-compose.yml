@@ -1,6 +1,8 @@
 services:
   mysql:
     image: mysql:8.0
+    command:
+      - --max-connections=550
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: remail
@@ -18,8 +20,11 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "6gb", "--maxmemory-policy", "noeviction"]
     ports:
       - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -53,7 +58,10 @@ services:
     environment:
       SERVER_ADDR: ":8080"
       MYSQL_DSN: "remail:remail@tcp(mysql:3306)/remail?charset=utf8mb4&parseTime=True&loc=Local"
+      MYSQL_MAX_OPEN_CONNS: "500"
+      MYSQL_MAX_IDLE_CONNS: "500"
       REDIS_ADDR: "redis:6379"
+      REDIS_POOL_SIZE: "1024"
       MINIO_ENDPOINT: "minio:9000"
       MINIO_ACCESS_KEY: "remail"
       MINIO_SECRET_KEY: "remail_secret"
@@ -92,4 +100,5 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:
   minio_data:

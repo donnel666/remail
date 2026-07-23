@@ -28,6 +28,11 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if module == nil || module.view == nil {
 			return nil
 		}
+		release, admitted := acquireDashboardBackground(module)
+		if !admitted {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
 		if err := module.view.RefreshLeaderboardCache(ctx, dashboardapp.TodayStart(time.Now())); err != nil {
 			return fmt.Errorf("refresh dashboard leaderboard cache: %w", err)
 		}
@@ -37,6 +42,11 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if module == nil || module.adminCache == nil || module.AdminQuery == nil {
 			return nil
 		}
+		release, admitted := acquireDashboardBackground(module)
+		if !admitted {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
 		if err := module.adminCache.refresh(ctx, module.AdminQuery.AdminDashboard); err != nil {
 			return fmt.Errorf("refresh admin dashboard cache: %w", err)
 		}
@@ -73,6 +83,17 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		case <-shutdownCtx.Done():
 		}
 	}
+}
+
+func acquireDashboardBackground(module *Module) (func(), bool) {
+	if module == nil || module.background == nil {
+		return func() {}, true
+	}
+	release, admitted := module.background.TryAcquire()
+	if release == nil {
+		release = func() {}
+	}
+	return release, admitted
 }
 
 func enqueueAdminDashboardRefresh(ctx context.Context, client *asynq.Client) {

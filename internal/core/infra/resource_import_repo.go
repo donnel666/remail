@@ -457,22 +457,8 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(
 				return nil
 			}
 
-			emails := make([]string, 0, len(chunkMicrosoft))
-			for i := range chunkMicrosoft {
-				emails = append(emails, chunkMicrosoft[i].EmailAddress)
-			}
-			existingBefore, err := findMicrosoftResourceModelsByEmails(tx, emails, true, true)
+			restored, err := createMicrosoftBatchTx(tx, chunkResources, chunkMicrosoft)
 			if err != nil {
-				return fmt.Errorf("find restorable microsoft resources: %w", err)
-			}
-			restored := make(map[string]struct{}, len(existingBefore))
-			for _, existing := range existingBefore {
-				if domain.MicrosoftResourceStatus(existing.Status) == domain.MicrosoftStatusDeleted {
-					restored[microsoftEmailKey(existing.EmailAddress)] = struct{}{}
-				}
-			}
-
-			if err := createMicrosoftBatchTx(tx, chunkResources, chunkMicrosoft); err != nil {
 				return err
 			}
 			chunkIDs, err = findMicrosoftResourceIDsByImportRowsTx(tx, chunkMicrosoft)
@@ -640,7 +626,7 @@ func findMicrosoftResourceIDsByImportRowsTx(tx *gorm.DB, rows []domain.Microsoft
 	for _, row := range rows {
 		emails = append(emails, row.EmailAddress)
 	}
-	models, err := findMicrosoftResourceModelsByEmails(tx, emails, false, false)
+	models, err := findMicrosoftResourceModelsByEmails(tx, emails, false)
 	if err != nil {
 		return nil, fmt.Errorf("find imported microsoft resource ids: %w", err)
 	}

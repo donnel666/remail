@@ -25,7 +25,10 @@ const (
 	inventoryRefreshBatchSize = 5
 )
 
-var errCandidateUnavailable = errors.New("allocation candidate unavailable")
+var (
+	errCandidateUnavailable = errors.New("allocation candidate unavailable")
+	errResourceRootBusy     = errors.New("allocation resource root busy")
+)
 
 var pinyinMailboxNameParts = [...]string{
 	"an", "ao", "bai", "bao", "bei", "bo", "cai", "chang", "chao", "chen",
@@ -105,7 +108,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 	var err error
 	attempts := candidateRetryCount
 	if uc.repo.HasParentTx(ctx) {
-		// Savepoint rollback retains InnoDB locks, so retry only in a fresh transaction.
+		// A nested retry would keep the parent wallet/resource locks and sleep in
+		// the same transaction. Let the complete order transaction roll back first.
 		attempts = 1
 	}
 	for attempt := 0; attempt < attempts; attempt++ {
@@ -140,13 +144,30 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 				guardCreated = true
 				return nil
 			}
-			rootLocked := false
+			type resourceRootKey struct {
+				id             uint
+				allocationType domain.AllocationType
+			}
+			lockedRoots := make(map[resourceRootKey]struct{})
 			cmd.lockResourceRoot = func(lockCtx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error) {
-				if rootLocked {
-					return uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
+				key := resourceRootKey{id: resourceID, allocationType: allocationType}
+				if _, locked := lockedRoots[key]; locked {
+					return true, nil
+				}
+				// A request-level batch may already hold earlier resource roots. Never
+				// wait for another root in that state; SKIP LOCKED keeps the shared
+				// wallet -> resource lock order acyclic.
+				if len(lockedRoots) > 0 {
+					locked, err := uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
+					if locked {
+						lockedRoots[key] = struct{}{}
+					}
+					return locked, err
 				}
 				locked, err := uc.repo.LockResourceRoot(lockCtx, resourceID, allocationType)
-				rootLocked = locked
+				if locked {
+					lockedRoots[key] = struct{}{}
+				}
 				return locked, err
 			}
 			for _, scope := range scopes {
@@ -777,24 +798,30 @@ func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, c
 func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	preferences := microsoftMailboxPreferences(cmd.OrderNo, config)
 	now := time.Now().UTC()
+	resourceBusy := false
 	for _, mailbox := range preferences {
 		buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, string(mailbox))
 		for _, bucket := range buckets {
-			result, _, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
+			result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
 			if err != nil {
 				return nil, err
 			}
+			resourceBusy = resourceBusy || busy
 			if result != nil {
 				return result, nil
 			}
 		}
-		result, _, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
+		result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
 		if err != nil {
 			return nil, err
 		}
+		resourceBusy = resourceBusy || busy
 		if result != nil {
 			return result, nil
 		}
+	}
+	if resourceBusy {
+		return nil, domain.ErrAllocationConflict
 	}
 	return nil, domain.ErrInsufficientInventory
 }
@@ -809,12 +836,17 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 		return nil, false, err
 	}
 	if len(candidates) == 0 {
-		return nil, true, nil
+		return nil, false, nil
 	}
+	resourceBusy := false
 	for _, candidate := range candidates {
 		result, err := uc.tryMicrosoftCandidate(ctx, cmd, config, mailbox, candidate, now)
 		if err == nil && result != nil {
 			return result, false, nil
+		}
+		if errors.Is(err, errResourceRootBusy) {
+			resourceBusy = true
+			continue
 		}
 		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
 			continue
@@ -823,7 +855,7 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 		// rolls back, so conflicts must never advance to another candidate.
 		return nil, false, err
 	}
-	return nil, false, nil
+	return nil, resourceBusy, nil
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
@@ -836,7 +868,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		return nil, err
 	}
 	if !lockedRoot {
-		return nil, errCandidateUnavailable
+		return nil, errResourceRootBusy
 	}
 
 	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, cmd.EmailSuffix)
@@ -987,22 +1019,28 @@ func (uc *UseCase) allocateDomain(ctx context.Context, cmd AllocateCommand, conf
 
 func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
 	now := time.Now().UTC()
+	resourceBusy := false
 	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "domain")
 	for _, bucket := range buckets {
-		result, _, err := uc.tryDomainBucket(ctx, cmd, config, &bucket, now)
+		result, busy, err := uc.tryDomainBucket(ctx, cmd, config, &bucket, now)
 		if err != nil {
 			return nil, err
 		}
+		resourceBusy = resourceBusy || busy
 		if result != nil {
 			return result, nil
 		}
 	}
-	result, _, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
+	result, busy, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
 	if err != nil {
 		return nil, err
 	}
+	resourceBusy = resourceBusy || busy
 	if result != nil {
 		return result, nil
+	}
+	if resourceBusy {
+		return nil, domain.ErrAllocationConflict
 	}
 	return nil, domain.ErrInsufficientInventory
 }
@@ -1017,12 +1055,17 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 		return nil, false, err
 	}
 	if len(candidates) == 0 {
-		return nil, true, nil
+		return nil, false, nil
 	}
+	resourceBusy := false
 	for _, candidate := range candidates {
 		result, err := uc.tryDomainCandidate(ctx, cmd, config, candidate, now)
 		if err == nil && result != nil {
 			return result, false, nil
+		}
+		if errors.Is(err, errResourceRootBusy) {
+			resourceBusy = true
+			continue
 		}
 		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
 			continue
@@ -1030,7 +1073,7 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 		// Domain allocation conflicts have the same failed-INSERT lock lifetime.
 		return nil, false, err
 	}
-	return nil, false, nil
+	return nil, resourceBusy, nil
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
@@ -1043,7 +1086,7 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 		return nil, err
 	}
 	if !lockedRoot {
-		return nil, errCandidateUnavailable
+		return nil, errResourceRootBusy
 	}
 
 	lockedCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)

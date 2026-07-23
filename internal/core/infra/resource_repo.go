@@ -255,7 +255,7 @@ func uniqueMicrosoftEmails(emails []string) []string {
 	return result
 }
 
-func findMicrosoftResourceModelsByEmails(db *gorm.DB, emails []string, lockRows bool, includeDeleted bool) ([]MicrosoftResourceModel, error) {
+func findMicrosoftResourceModelsByEmails(db *gorm.DB, emails []string, includeDeleted bool) ([]MicrosoftResourceModel, error) {
 	uniqueEmails := uniqueMicrosoftEmails(emails)
 	if len(uniqueEmails) == 0 {
 		return nil, nil
@@ -269,9 +269,6 @@ func findMicrosoftResourceModelsByEmails(db *gorm.DB, emails []string, lockRows 
 		}
 
 		query := db.Model(&MicrosoftResourceModel{}).Where("email_address IN ?", uniqueEmails[start:end])
-		if lockRows {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
 		if !includeDeleted {
 			query = query.Where("status <> ?", string(domain.MicrosoftStatusDeleted))
 		}
@@ -346,14 +343,27 @@ func (r *ResourceRepo) CreateDomain(ctx context.Context, resource *domain.EmailR
 }
 
 func createDomainTx(tx *gorm.DB, resource *domain.EmailResource, dr *domain.MailDomainResource) error {
-	var existing DomainResourceModel
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	var candidate DomainResourceModel
+	err := tx.Select("id").
 		Where("domain = ?", dr.Domain).
-		First(&existing).Error
+		First(&candidate).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("find existing domain resource: %w", err)
 	}
 	if err == nil {
+		var root EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ?", candidate.ID, string(domain.ResourceTypeDomain)).
+			First(&root).Error; err != nil {
+			return fmt.Errorf("lock deleted domain resource root: %w", err)
+		}
+
+		var existing DomainResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", candidate.ID).
+			First(&existing).Error; err != nil {
+			return fmt.Errorf("lock deleted domain resource: %w", err)
+		}
 		if domain.MailDomainStatus(existing.Status) != domain.DomainStatusDeleted {
 			return domain.ErrDuplicateDomain
 		}
@@ -425,13 +435,9 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 			return fmt.Errorf("transfer restored domain mailbox history: %w", err)
 		}
 
-		var restoredRoot EmailResourceModel
-		if err := tx.First(&restoredRoot, existing.ID).Error; err != nil {
-			return fmt.Errorf("read restored domain root: %w", err)
-		}
 		resource.ID = existing.ID
-		resource.Version = restoredRoot.Version
-		resource.CreatedAt = existing.CreatedAt
+		resource.Version = root.Version + 1
+		resource.CreatedAt = root.CreatedAt
 		resource.UpdatedAt = now
 		dr.ID = existing.ID
 		dr.ValidationGeneration = existing.ValidationGeneration + 1
@@ -485,12 +491,12 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 	return nil
 }
 
-func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []domain.MicrosoftResource) error {
+func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []domain.MicrosoftResource) (map[string]struct{}, error) {
 	if len(resources) != len(ms) {
-		return fmt.Errorf("create microsoft batch: resource count mismatch")
+		return nil, fmt.Errorf("create microsoft batch: resource count mismatch")
 	}
 	if len(resources) == 0 {
-		return nil
+		return map[string]struct{}{}, nil
 	}
 
 	seenEmails := make(map[string]struct{}, len(ms))
@@ -498,22 +504,60 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	for i := range ms {
 		key := microsoftEmailKey(ms[i].EmailAddress)
 		if _, ok := seenEmails[key]; ok {
-			return domain.ErrDuplicateEmail
+			return nil, domain.ErrDuplicateEmail
 		}
 		seenEmails[key] = struct{}{}
 		emails = append(emails, strings.TrimSpace(ms[i].EmailAddress))
 	}
 
-	existingModels, err := findMicrosoftResourceModelsByEmails(tx, emails, true, true)
+	candidates, err := findMicrosoftResourceModelsByEmails(tx, emails, true)
 	if err != nil {
-		return fmt.Errorf("find existing microsoft resources: %w", err)
+		return nil, fmt.Errorf("find existing microsoft resources: %w", err)
+	}
+	candidateIDs := make([]uint, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidateIDs = append(candidateIDs, candidate.ID)
+	}
+	sort.Slice(candidateIDs, func(i, j int) bool { return candidateIDs[i] < candidateIDs[j] })
+
+	rootVersions := make(map[uint]uint64, len(candidateIDs))
+	existingModels := make([]MicrosoftResourceModel, 0, len(candidateIDs))
+	if len(candidateIDs) > 0 {
+		var roots []EmailResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND type = ?", candidateIDs, string(domain.ResourceTypeMicrosoft)).
+			Order("id ASC").
+			Find(&roots).Error; err != nil {
+			return nil, fmt.Errorf("lock deleted microsoft resource roots: %w", err)
+		}
+		if len(roots) != len(candidateIDs) {
+			return nil, fmt.Errorf("lock deleted microsoft resource roots: %w", domain.ErrResourceNotFound)
+		}
+		for _, root := range roots {
+			rootVersions[root.ID] = root.Version
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ?", candidateIDs).
+			Order("id ASC").
+			Find(&existingModels).Error; err != nil {
+			return nil, fmt.Errorf("lock deleted microsoft resources: %w", err)
+		}
+		if len(existingModels) != len(candidateIDs) {
+			return nil, fmt.Errorf("lock deleted microsoft resources: %w", domain.ErrResourceNotFound)
+		}
 	}
 	existingByEmail := make(map[string]MicrosoftResourceModel, len(existingModels))
+	restored := make(map[string]struct{}, len(existingModels))
 	for _, model := range existingModels {
-		if domain.MicrosoftResourceStatus(model.Status) != domain.MicrosoftStatusDeleted {
-			return domain.ErrDuplicateEmail
+		if _, requested := seenEmails[microsoftEmailKey(model.EmailAddress)]; !requested {
+			continue
 		}
-		existingByEmail[microsoftEmailKey(model.EmailAddress)] = model
+		if domain.MicrosoftResourceStatus(model.Status) != domain.MicrosoftStatusDeleted {
+			return nil, domain.ErrDuplicateEmail
+		}
+		key := microsoftEmailKey(model.EmailAddress)
+		existingByEmail[key] = model
+		restored[key] = struct{}{}
 	}
 
 	newResources := make([]domain.EmailResource, 0, len(resources))
@@ -546,21 +590,27 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		})
 
 		resources[i].ID = existing.ID
+		resources[i].Version = rootVersions[existing.ID] + 1
 		resources[i].CreatedAt = existing.CreatedAt
 		resources[i].UpdatedAt = now
 		ms[i].ID = existing.ID
+		ms[i].CredentialRevision = max(existing.CredentialRevision, uint64(1)) + 1
+		ms[i].CredentialUpdatedAt = now
+		ms[i].TokenLastRefreshedAt = nil
+		ms[i].TokenLastRequestID = ""
 		ms[i].ValidationGeneration = existing.ValidationGeneration + 1
 		ms[i].ValidationFailures = 0
 		ms[i].CreatedAt = existing.CreatedAt
 		ms[i].UpdatedAt = now
 	}
+	sort.Slice(restoreRows, func(i, j int) bool { return restoreRows[i].ID < restoreRows[j].ID })
 	if err := restoreDeletedMicrosoftBatchTx(tx, restoreRows); err != nil {
-		return err
+		return nil, err
 	}
 	resources = newResources
 	ms = newMicrosoftResources
 	if len(resources) == 0 {
-		return nil
+		return restored, nil
 	}
 
 	rootModels := make([]EmailResourceModel, len(resources))
@@ -571,7 +621,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		}
 	}
 	if err := tx.CreateInBatches(&rootModels, resourceImportInsertBatchSize).Error; err != nil {
-		return fmt.Errorf("create email resource batch: %w", err)
+		return nil, fmt.Errorf("create email resource batch: %w", err)
 	}
 
 	msModels := make([]MicrosoftResourceModel, len(ms))
@@ -582,9 +632,9 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	}
 	if err := tx.CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
 		if isDuplicateKeyError(err) {
-			return domain.ErrDuplicateEmail
+			return nil, domain.ErrDuplicateEmail
 		}
-		return fmt.Errorf("create microsoft resource batch: %w", err)
+		return nil, fmt.Errorf("create microsoft resource batch: %w", err)
 	}
 
 	for i := range resources {
@@ -598,7 +648,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		ms[i].CreatedAt = msModels[i].CreatedAt
 		ms[i].UpdatedAt = msModels[i].UpdatedAt
 	}
-	return nil
+	return restored, nil
 }
 
 type microsoftImportRestoreRow struct {
@@ -656,10 +706,14 @@ CREATE TEMPORARY TABLE ` + microsoftImportRestoreTempTable + ` (
 UPDATE email_resources er
 JOIN `+microsoftImportRestoreTempTable+` ir ON ir.id = er.id
 SET er.owner_user_id = ir.owner_user_id,
+	er.version = er.version + 1,
 	er.updated_at = ir.updated_at
 WHERE er.type = ?`, string(domain.ResourceTypeMicrosoft))
 	if rootResult.Error != nil {
 		return fmt.Errorf("restore deleted email resources: %w", rootResult.Error)
+	}
+	if rootResult.RowsAffected != int64(len(rows)) {
+		return domain.ErrResourceNotFound
 	}
 
 	microsoftResult := tx.Exec(`
@@ -670,6 +724,10 @@ SET mr.email_address = ir.email_address,
 	mr.password = ir.password,
 	mr.client_id = ir.client_id,
 	mr.refresh_token = ir.refresh_token,
+	mr.credential_revision = GREATEST(mr.credential_revision, 1) + 1,
+	mr.credential_updated_at = ir.updated_at,
+	mr.token_last_refreshed_at = NULL,
+	mr.token_last_request_id = '',
 	mr.long_lived = ir.long_lived,
 	mr.graph_available = ir.graph_available,
 	mr.rt_expire_at = ir.rt_expire_at,

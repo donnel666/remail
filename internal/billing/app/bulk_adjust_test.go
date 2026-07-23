@@ -21,16 +21,18 @@ func (s stubWalletRepo) AdjustConsumerBalance(_ context.Context, req AdjustConsu
 
 func TestBulkAdjustConsumer(t *testing.T) {
 	var gotDirection domain.TransactionDirection
+	var gotClampToBalance bool
 	repo := stubWalletRepo{adjust: func(req AdjustConsumerBalanceCommand) (*AdjustBalanceResult, error) {
 		gotDirection = req.Direction
-		if req.UserID == 2 { // one user cannot cover the debit
+		gotClampToBalance = req.ClampToBalance
+		if req.UserID == 2 && !req.ClampToBalance { // non-bulk debits still reject overdrafts
 			return nil, domain.ErrInsufficientBalance
 		}
 		return &AdjustBalanceResult{}, nil
 	}}
 	uc := NewWalletUseCase(repo)
 
-	// Negative amount debits; user 2 is skipped, the other two affected.
+	// Negative amount debits use the partial-debit path for bulk clearing.
 	affected, skipped, err := uc.BulkAdjustConsumer(context.Background(), []uint{1, 2, 3}, "-10.00", "test", "idem-1", "req-1", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -38,8 +40,11 @@ func TestBulkAdjustConsumer(t *testing.T) {
 	if gotDirection != domain.TransactionDirectionOut {
 		t.Fatalf("negative amount should debit, got direction %q", gotDirection)
 	}
-	if affected != 2 || skipped != 1 {
-		t.Fatalf("want affected=2 skipped=1, got affected=%d skipped=%d", affected, skipped)
+	if !gotClampToBalance {
+		t.Fatal("bulk debit should clamp to the current balance")
+	}
+	if affected != 3 || skipped != 0 {
+		t.Fatalf("want affected=3 skipped=0, got affected=%d skipped=%d", affected, skipped)
 	}
 
 	// Positive amount credits.

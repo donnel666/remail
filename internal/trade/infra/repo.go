@@ -98,6 +98,9 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 			return err
 		}
 		platform.RecordMySQLTransactionEvent("trade", mysqlRetryEvent(err))
+		if !isDeadlockVictim(err) {
+			return err
+		}
 		if attempt == 1 {
 			platform.RecordMySQLTransactionEvent("trade", "retry_exhausted")
 			return err
@@ -244,6 +247,45 @@ func (r *Repo) FindOrderByIdempotency(ctx context.Context, channel domain.Client
 	}
 	order := orderModelToDomain(model)
 	return &order, nil
+}
+
+func (r *Repo) FindOrdersByIdempotencyBatch(
+	ctx context.Context,
+	channel domain.ClientChannel,
+	userID uint,
+	apiKeyID *uint,
+	idempotencyKeys []string,
+) (map[string]domain.Order, error) {
+	result := make(map[string]domain.Order, len(idempotencyKeys))
+	if len(idempotencyKeys) == 0 {
+		return result, nil
+	}
+	keys := make([]string, 0, len(idempotencyKeys))
+	seen := make(map[string]struct{}, len(idempotencyKeys))
+	for _, key := range idempotencyKeys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return result, nil
+	}
+	var models []OrderModel
+	if err := r.dbFor(ctx).
+		Where("idempotency_subject = ? AND idempotency_key IN ?", idempotencySubject(channel, userID, apiKeyID), keys).
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("find idempotent order batch: %w", err)
+	}
+	for _, model := range models {
+		result[model.IdempotencyKey] = orderModelToDomain(model)
+	}
+	return result, nil
 }
 
 func (r *Repo) FindOrder(ctx context.Context, orderNo string) (*domain.Order, error) {
@@ -1218,12 +1260,17 @@ func isDeadlockError(err error) bool {
 	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205)
 }
 
+func isDeadlockVictim(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
+}
+
 func mysqlRetryEvent(err error) string {
 	var mysqlErr *mysql.MySQLError
 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1205 {
-		return "lock_timeout"
+		return "1205"
 	}
-	return "deadlock"
+	return "1213"
 }
 
 func deadlockBackoff(attempt int) time.Duration {

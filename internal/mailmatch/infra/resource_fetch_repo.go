@@ -191,24 +191,47 @@ func (r *ResourceFetchRepo) MarkResourceFetchProcessing(ctx context.Context, res
 }
 
 func (r *ResourceFetchRepo) ReleaseResourceFetchInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, log *governancedomain.SystemLog) (bool, error) {
-	updated := false
+	retryScheduled := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
-		result := tx.Model(&FetchStateModel{}).
+		var state FetchStateModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("email_resource_id = ? AND generation = ? AND status = ? AND operation_kind IN ?", resourceID, generation, string(domain.ResourceFetchJobRunning), resourceFetchOperationKinds()).
-			Updates(map[string]any{
-				"status": string(domain.ResourceFetchJobQueued), "generation": gorm.Expr("generation + 1"),
-				"started_at": nil, "last_safe_error": safeDiagnostic(safeError),
-			})
+			First(&state).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		failures := min(state.Failures+1, domain.ResourceFetchDefaultMaxAttempts)
+		retryScheduled = failures < domain.ResourceFetchDefaultMaxAttempts
+		updates := map[string]any{
+			"status":          string(domain.ResourceFetchJobFailed),
+			"failures":        failures,
+			"started_at":      nil,
+			"finished_at":     time.Now().UTC(),
+			"last_safe_error": safeDiagnostic(safeError),
+		}
+		if retryScheduled {
+			updates["status"] = string(domain.ResourceFetchJobQueued)
+			updates["generation"] = gorm.Expr("generation + 1")
+			updates["finished_at"] = nil
+		}
+		result := tx.Model(&FetchStateModel{}).
+			Where("email_resource_id = ? AND generation = ? AND status = ?", resourceID, generation, string(domain.ResourceFetchJobRunning)).
+			Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
-		updated = result.RowsAffected == 1
-		if !updated || log == nil {
+		if result.RowsAffected != 1 {
+			return domain.ErrResourceFetchInvalidClaim
+		}
+		if log == nil {
 			return nil
 		}
 		return r.systemLogs.CreateInTx(txCtx, tx, log)
 	})
-	return updated, err
+	return retryScheduled, err
 }
 
 func (r *ResourceFetchRepo) LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64) (*domain.ResourceFetchScope, error) {

@@ -76,18 +76,7 @@ func NewRepo(db *gorm.DB) *Repo {
 
 func (r *Repo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		db := tx.WithContext(ctx)
-		name := "openapi_sp_" + strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
-		if err := db.SavePoint(name).Error; err != nil {
-			return fmt.Errorf("create openapi savepoint: %w", err)
-		}
-		if err := fn(ctx, db); err != nil {
-			if rollbackErr := db.RollbackTo(name).Error; rollbackErr != nil {
-				return fmt.Errorf("rollback openapi savepoint: %w: %v", err, rollbackErr)
-			}
-			return err
-		}
-		return nil
+		return fn(ctx, tx.WithContext(ctx))
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(platform.WithGormTx(ctx, tx), tx)

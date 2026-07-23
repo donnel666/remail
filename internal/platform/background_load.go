@@ -71,9 +71,9 @@ type systemLoadSample struct {
 }
 
 // adaptiveConcurrencyGate is one process-wide, non-blocking execution window
-// shared by every background task type. A denied task is deferred by Asynq
-// instead of waiting in the handler, so admission control never consumes the
-// task's execution timeout.
+// shared by background data-plane handlers. Small dispatcher tasks only enqueue
+// bounded work and remain outside this window so they cannot block its progress.
+// A denied worker is deferred by Asynq instead of waiting in the handler.
 type adaptiveConcurrencyGate struct {
 	mu      sync.Mutex
 	maximum int

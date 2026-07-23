@@ -35,24 +35,8 @@ func NewRepo(db *gorm.DB) *Repo {
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if tx, ok := platform.GormTxFromContext(ctx); ok {
-		name := "alloc_sp_" + platform.NewUUIDV7CompactString()
-		if err := tx.WithContext(ctx).SavePoint(name).Error; err != nil {
-			return fmt.Errorf("create allocation savepoint: %w", err)
-		}
-		if err := fn(ctx); err != nil {
-			// MySQL 1213 has already rolled back the whole transaction, so its
-			// savepoint is gone. A 1205 only rolls back the timed-out statement
-			// by default and must still roll back this nested operation.
-			if isWholeTransactionRollbackError(err) {
-				return err
-			}
-			if rollbackErr := tx.WithContext(ctx).RollbackTo(name).Error; rollbackErr != nil {
-				return fmt.Errorf("rollback allocation savepoint: %w: %v", err, rollbackErr)
-			}
-			return err
-		}
-		return nil
+	if _, ok := platform.GormTxFromContext(ctx); ok {
+		return fn(ctx)
 	}
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -65,6 +49,9 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 			return err
 		}
 		platform.RecordMySQLTransactionEvent("alloc", mysqlRetryEvent(err))
+		if !isWholeTransactionRollbackError(err) {
+			return err
+		}
 		if attempt == 1 {
 			platform.RecordMySQLTransactionEvent("alloc", "retry_exhausted")
 			return err
@@ -2550,9 +2537,9 @@ func isWholeTransactionRollbackError(err error) bool {
 func mysqlRetryEvent(err error) string {
 	var mysqlErr *mysql.MySQLError
 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1205 {
-		return "lock_timeout"
+		return "1205"
 	}
-	return "deadlock"
+	return "1213"
 }
 
 func deadlockBackoff(attempt int) time.Duration {
