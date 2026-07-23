@@ -85,7 +85,7 @@ func TestEveryEnqueuedQueueIsServedByExactlyOneTier(t *testing.T) {
 }
 
 func TestLoadControllerCeilingMatchesBackgroundServer(t *testing.T) {
-	controller := NewBackgroundLoadController(asynqBackgroundWorkerConcurrency)
+	controller := NewBackgroundLoadController(asynqBackgroundWorkerConcurrency, defaultBackgroundOverloadPercent)
 	snapshot := controller.Snapshot()
 	if snapshot.Maximum != asynqBackgroundWorkerConcurrency {
 		t.Fatalf("adaptive ceiling must match the background Asynq ceiling, got adaptive=%d asynq=%d", snapshot.Maximum, asynqBackgroundWorkerConcurrency)

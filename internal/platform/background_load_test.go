@@ -58,7 +58,7 @@ func (s *systemLoadReaderStub) callCount() int {
 
 func newBackgroundLoadControllerTestHarness(cpuPercent, memoryPercent float64) (*BackgroundLoadController, *systemLoadReaderStub) {
 	load := &systemLoadReaderStub{cpu: cpuPercent, memory: memoryPercent}
-	return newBackgroundLoadController(load, 128), load
+	return newBackgroundLoadController(load, 128, defaultBackgroundOverloadPercent), load
 }
 
 func saturateBackgroundWindow(t *testing.T, controller *BackgroundLoadController) []func() {
@@ -110,7 +110,7 @@ func TestBackgroundLoadControllerSlowStartsThenAdditivelyRampsToMaximum(t *testi
 
 func TestBackgroundLoadControllerScalesRecoveryStepForFiveHundredTwelveCeiling(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 20, memory: 20}
-	controller := newBackgroundLoadController(load, 512)
+	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
 	require.Equal(t, 32, controller.increaseStep)
 	require.Equal(t, 256, controller.slowStartThreshold)
 	var releases []func()
@@ -132,7 +132,7 @@ func TestBackgroundLoadControllerScalesRecoveryStepForFiveHundredTwelveCeiling(t
 
 func TestBackgroundLoadControllerDoesNotRampWhileIdle(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 10, memory: 10}
-	controller := newBackgroundLoadController(load, 512)
+	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
 
 	for range 32 {
 		controller.sampleAndTune(context.Background())
@@ -143,7 +143,7 @@ func TestBackgroundLoadControllerDoesNotRampWhileIdle(t *testing.T) {
 
 func TestBackgroundLoadControllerCapsAdditiveRecoveryAtLowWindow(t *testing.T) {
 	load := &systemLoadReaderStub{cpu: 20, memory: 20}
-	controller := newBackgroundLoadController(load, 512)
+	controller := newBackgroundLoadController(load, 512, defaultBackgroundOverloadPercent)
 	controller.gate.Resize(backgroundWorkerMinimum)
 	controller.slowStartThreshold = backgroundWorkerMinimum
 	releases := saturateBackgroundWindow(t, controller)
@@ -212,6 +212,26 @@ func TestBackgroundLoadControllerUsesFortyToFiftyPercentHysteresisBand(t *testin
 	load.set(50, 30)
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 36, controller.Snapshot().Limit)
+}
+
+func TestBackgroundLoadControllerUsesConfiguredOverloadPercent(t *testing.T) {
+	load := &systemLoadReaderStub{cpu: 50, memory: 20}
+	controller := newBackgroundLoadController(load, 128, 70)
+	controller.gate.Resize(128)
+
+	controller.sampleAndTune(context.Background())
+	require.Equal(t, 128, controller.Snapshot().Limit, "50 percent must not trigger the configured 70 percent overload line")
+
+	load.set(70, 20)
+	controller.sampleAndTune(context.Background())
+	require.Equal(t, 64, controller.Snapshot().Limit)
+
+	load.set(59.9, 59.9)
+	releases := saturateBackgroundWindow(t, controller)
+	defer releaseBackgroundPermits(releases)
+	controller.sampleAndTune(context.Background())
+	controller.sampleAndTune(context.Background())
+	require.Equal(t, 64+backgroundWorkerMinimumIncreaseStep, controller.Snapshot().Limit)
 }
 
 func TestBackgroundLoadControllerHoldsWhenMetricsCannotProveHeadroom(t *testing.T) {

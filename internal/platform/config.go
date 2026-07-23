@@ -24,6 +24,9 @@ type Config struct {
 	Turnstile   TurnstileConfig
 	Log         LogConfig
 	Diagnostics DiagnosticsConfig
+	// BackgroundLoadOverloadPercent is the CPU or memory level that halves the
+	// adaptive background worker window. Recovery stays ten points below it.
+	BackgroundLoadOverloadPercent float64
 }
 
 // ServerConfig holds HTTP server settings.
@@ -186,6 +189,7 @@ func Load() (*Config, error) {
 			PprofCPUProfileDuration: getDuration("PPROF_CPU_PROFILE_DURATION", 10*time.Second),
 			PprofCPUCheckInterval:   getDuration("PPROF_CPU_CHECK_INTERVAL", 30*time.Second),
 		},
+		BackgroundLoadOverloadPercent: getFloat("BACKGROUND_LOAD_OVERLOAD_PERCENT", defaultBackgroundOverloadPercent),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -241,6 +245,9 @@ func (c *Config) validate() error {
 	}
 	if c.Redis.PoolSize <= 0 {
 		return fmt.Errorf("REDIS_POOL_SIZE must be positive")
+	}
+	if !validSystemPercent(c.BackgroundLoadOverloadPercent) || c.BackgroundLoadOverloadPercent <= backgroundLoadHysteresisPercent {
+		return fmt.Errorf("BACKGROUND_LOAD_OVERLOAD_PERCENT must be greater than %.0f and at most 100", backgroundLoadHysteresisPercent)
 	}
 	if c.MinIO.AccessKey == "" {
 		return fmt.Errorf("MINIO_ACCESS_KEY is required")

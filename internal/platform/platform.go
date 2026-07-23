@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 	p.RealtimeAsynqServer = initRealtimeAsynqServer(cfg.Redis)
 	p.AsynqServer = initAsynqServer(cfg.Redis)
 	p.BackgroundAsynqServer = initBackgroundAsynqServer(cfg.Redis)
-	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrency)
+	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrency, cfg.BackgroundLoadOverloadPercent)
 	SetMetricsBackgroundLoad(p.BackgroundLoad)
 	p.SMTP = cfg.SMTP
 	p.TrustedProxies = append([]string(nil), cfg.Server.TrustedProxies...)

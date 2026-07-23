@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	backgroundOverloadPercent    = 50.0
-	backgroundRecoveryPercent    = 40.0
-	backgroundLoadSampleInterval = 2 * time.Second
+	defaultBackgroundOverloadPercent = 50.0
+	backgroundLoadHysteresisPercent  = 10.0
+	backgroundLoadSampleInterval     = 2 * time.Second
 
 	// The Asynq server owns the hard ceiling. The adaptive window starts
 	// conservatively, slow-starts and then probes upward additively while the
@@ -142,11 +142,13 @@ type BackgroundLoadSnapshot struct {
 // BackgroundLoadController applies an AIMD-style feedback loop to one global
 // background execution window. CPU and memory are the only pressure signals:
 //
-//   - below 40% for both signals while the current window is saturated: after
+//   - below the configured recovery threshold for both signals while the
+//     current window is saturated: after
 //     two confirming samples, double up to the remembered slow-start threshold,
 //     then grow additively without increasing by more than half the window;
-//   - from 40% up to 50%: hold the current window;
-//   - at or above 50% for either signal: halve the window.
+//   - between the recovery and overload thresholds: hold the current window;
+//   - at or above the configured overload threshold for either signal: halve
+//     the window.
 //
 // The 10-point hysteresis band prevents boundary chatter. Multiplicative
 // decrease gives foreground work capacity quickly. Startup doubles only to
@@ -164,6 +166,8 @@ type BackgroundLoadController struct {
 	increaseStep       int
 	slowStartThreshold int
 	sampleInterval     time.Duration
+	overloadPercent    float64
+	recoveryPercent    float64
 
 	tuneMu            sync.Mutex
 	sampleMu          sync.RWMutex
@@ -179,13 +183,16 @@ type BackgroundLoadController struct {
 	done        chan struct{}
 }
 
-func NewBackgroundLoadController(maximum int) *BackgroundLoadController {
-	return newBackgroundLoadController(gopsutilSystemLoadReader{}, maximum)
+func NewBackgroundLoadController(maximum int, overloadPercent float64) *BackgroundLoadController {
+	return newBackgroundLoadController(gopsutilSystemLoadReader{}, maximum, overloadPercent)
 }
 
-func newBackgroundLoadController(load systemLoadReader, maximum int) *BackgroundLoadController {
+func newBackgroundLoadController(load systemLoadReader, maximum int, overloadPercent float64) *BackgroundLoadController {
 	if maximum <= 0 {
 		maximum = 1
+	}
+	if !validSystemPercent(overloadPercent) || overloadPercent <= backgroundLoadHysteresisPercent {
+		overloadPercent = defaultBackgroundOverloadPercent
 	}
 	minimum := min(backgroundWorkerMinimum, maximum)
 	initial := min(max(backgroundWorkerInitial, minimum), maximum)
@@ -199,6 +206,8 @@ func newBackgroundLoadController(load systemLoadReader, maximum int) *Background
 		increaseStep:       increaseStep,
 		slowStartThreshold: slowStartThreshold,
 		sampleInterval:     backgroundLoadSampleInterval,
+		overloadPercent:    overloadPercent,
+		recoveryPercent:    overloadPercent - backgroundLoadHysteresisPercent,
 	}
 }
 
@@ -291,11 +300,11 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 	current, active, _ := c.gate.Stats()
 	next := current
 	reason := "hysteresis"
-	high := (sample.cpuValid && sample.cpuPercent >= backgroundOverloadPercent) ||
-		(sample.memoryValid && sample.memoryPercent >= backgroundOverloadPercent)
+	high := (sample.cpuValid && sample.cpuPercent >= c.overloadPercent) ||
+		(sample.memoryValid && sample.memoryPercent >= c.overloadPercent)
 	low := sample.cpuValid && sample.memoryValid &&
-		sample.cpuPercent < backgroundRecoveryPercent &&
-		sample.memoryPercent < backgroundRecoveryPercent
+		sample.cpuPercent < c.recoveryPercent &&
+		sample.memoryPercent < c.recoveryPercent
 	healthy := sample.cpuValid && sample.memoryValid
 	if healthy {
 		c.metricFailures = 0
@@ -352,6 +361,8 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 			"cpu_valid", sample.cpuValid,
 			"memory_percent", sample.memoryPercent,
 			"memory_valid", sample.memoryValid,
+			"overload_percent", c.overloadPercent,
+			"recovery_percent", c.recoveryPercent,
 		)
 	}
 

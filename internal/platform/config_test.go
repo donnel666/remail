@@ -35,6 +35,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "1x0000000000000000000000000000000AA", cfg.Turnstile.SecretKey)
 	assert.Equal(t, "info", cfg.Log.Level)
 	assert.Equal(t, "json", cfg.Log.Format)
+	assert.Equal(t, 50.0, cfg.BackgroundLoadOverloadPercent)
 	assert.Equal(t, "direct", cfg.SMTP.Mode)
 	assert.Equal(t, "no-reply@aishop6.com", cfg.SMTP.From)
 	assert.Equal(t, "aishop6.com", cfg.SMTP.Domain)
@@ -50,6 +51,23 @@ func TestConfigLoadDefaults(t *testing.T) {
 	assert.Equal(t, "mx.aishop6.com", cfg.SMTP.InboundDomain)
 	assert.Equal(t, int64(10<<20), cfg.SMTP.InboundMaxMessageBytes)
 	assert.Equal(t, "", cfg.Diagnostics.PprofAddr)
+}
+
+func TestConfigLoadsBackgroundLoadOverloadPercent(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("MYSQL_DSN", "test:test@tcp(127.0.0.1:3306)/test")
+	t.Setenv("MINIO_ACCESS_KEY", "testkey")
+	t.Setenv("MINIO_SECRET_KEY", "testsecret")
+	t.Setenv("SESSION_SECRET", "testsecret")
+	t.Setenv("BACKGROUND_LOAD_OVERLOAD_PERCENT", "70")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 70.0, cfg.BackgroundLoadOverloadPercent)
+
+	t.Setenv("BACKGROUND_LOAD_OVERLOAD_PERCENT", "10")
+	_, err = Load()
+	require.ErrorContains(t, err, "BACKGROUND_LOAD_OVERLOAD_PERCENT")
 }
 
 func TestMySQLDSNUsesDriverInterpolationWithoutPreparedStatementCache(t *testing.T) {
@@ -223,6 +241,7 @@ func clearConfigEnv(t *testing.T) {
 		"REDIS_PASSWORD",
 		"REDIS_DB",
 		"REDIS_POOL_SIZE",
+		"BACKGROUND_LOAD_OVERLOAD_PERCENT",
 		"MINIO_ENDPOINT",
 		"MINIO_ACCESS_KEY",
 		"MINIO_SECRET_KEY",
