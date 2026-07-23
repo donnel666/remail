@@ -102,6 +102,10 @@ type ProjectProductInventoryTotals struct {
 	ProjectID      uint
 	TotalAvailable int64
 	Items          []ProductInventoryTotal
+	// Cold marks a deliberately seeded zero snapshot whose aggregate refresh
+	// has not completed yet. It makes every product/suffix a known zero without
+	// requiring synchronous aggregate SQL on a cache miss.
+	Cold bool
 }
 
 type ProductInventoryAvailabilityRequest struct {
@@ -128,11 +132,13 @@ type InventoryCache interface {
 	SetInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
 	RefreshInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
 	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
+	GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*ProjectProductInventoryTotals, error)
+	InitializeInventory(ctx context.Context, entries []InventoryCacheEntry, ttl time.Duration) error
 	SetProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	IsProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	MarkProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
-	ClaimActiveInventory(ctx context.Context, since time.Time, limit int) ([]InventoryCacheEntry, error)
+	ClaimActiveInventory(ctx context.Context, since time.Time, before time.Time, limit int) ([]InventoryCacheEntry, error)
 	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error
 	AcquireInventoryRefresh(ctx context.Context, entry InventoryCacheEntry, ttl time.Duration) (token string, acquired bool, err error)
@@ -317,7 +323,7 @@ type Repository interface {
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
 	IsDomainMailboxAllocated(ctx context.Context, projectID uint, mailboxID uint) (bool, error)
-	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
+	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*AliasCandidate, error)
 	FindReusableDotAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindReusablePlusAlias(ctx context.Context, projectID uint, resourceID uint) (*AliasCandidate, error)
 	FindExplicitAlias(ctx context.Context, resourceID uint, email string) (*AliasCandidate, error)

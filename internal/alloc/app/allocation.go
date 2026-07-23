@@ -511,6 +511,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 		func(ctx context.Context) (*InventoryStats, error) {
 			return uc.inventoryCache.GetInventoryStats(ctx, projectID)
 		},
+		func() *InventoryStats { return &InventoryStats{ProjectID: projectID} },
 		uc.ScheduleInventoryRefresh,
 	)
 }
@@ -522,19 +523,97 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err := uc.repo.AssertProjectInventoryAccess(ctx, projectID, viewerUserID); err != nil {
 		return nil, err
 	}
-	if uc.inventoryCache == nil {
-		return uc.repo.GetProductInventoryTotals(ctx, projectID)
+	return uc.GetProductInventorySnapshot(ctx, projectID)
+}
+
+// GetProductInventorySnapshot reads the shared project snapshot after the
+// caller has already authorized project visibility.
+func (uc *UseCase) GetProductInventorySnapshot(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error) {
+	if projectID == 0 {
+		return nil, domain.ErrInvalidAllocationRequest
 	}
-	entry := InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID}
-	return loadCachedInventory(
-		ctx,
-		uc.inventoryCache,
-		entry,
-		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
-			return uc.inventoryCache.GetProductInventoryTotals(ctx, projectID)
-		},
-		uc.ScheduleInventoryRefresh,
-	)
+	snapshots, err := uc.GetProductInventorySnapshots(ctx, []uint{projectID})
+	if err != nil {
+		return nil, err
+	}
+	snapshot := snapshots[projectID]
+	if snapshot == nil {
+		return nil, domain.ErrProjectNotAllocatable
+	}
+	return snapshot, nil
+}
+
+// GetProductInventorySnapshots reads shared snapshots for project IDs that the
+// caller has already authorized. Cold keys are seeded as known-zero snapshots
+// and queued for asynchronous refresh.
+func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*ProjectProductInventoryTotals, error) {
+	projectIDs = uniqueInventoryProjectIDs(projectIDs)
+	if len(projectIDs) == 0 {
+		return map[uint]*ProjectProductInventoryTotals{}, nil
+	}
+	if uc.inventoryCache == nil {
+		result := make(map[uint]*ProjectProductInventoryTotals, len(projectIDs))
+		for _, projectID := range projectIDs {
+			totals, err := uc.repo.GetProductInventoryTotals(ctx, projectID)
+			if errors.Is(err, domain.ErrProjectNotAllocatable) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			result[projectID] = totals
+		}
+		return result, nil
+	}
+	snapshots, err := uc.inventoryCache.GetProductInventorySnapshots(ctx, projectIDs)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]InventoryCacheEntry, 0, len(projectIDs)-len(snapshots))
+	for _, projectID := range projectIDs {
+		if snapshots[projectID] == nil {
+			missing = append(missing, InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID})
+		}
+	}
+	if len(missing) == 0 {
+		return snapshots, nil
+	}
+	if err := uc.inventoryCache.InitializeInventory(ctx, missing, inventoryCacheHardTTL); err != nil {
+		return nil, fmt.Errorf("initialize inventory cache: %w", err)
+	}
+	missingProjectIDs := make([]uint, len(missing))
+	for i := range missing {
+		missingProjectIDs[i] = missing[i].ProjectID
+	}
+	initialized, err := uc.inventoryCache.GetProductInventorySnapshots(ctx, missingProjectIDs)
+	if err != nil {
+		return nil, err
+	}
+	_ = uc.ScheduleInventoryRefresh(ctx)
+	for _, entry := range missing {
+		if totals := initialized[entry.ProjectID]; totals != nil {
+			snapshots[entry.ProjectID] = totals
+		} else {
+			snapshots[entry.ProjectID] = &ProjectProductInventoryTotals{ProjectID: entry.ProjectID, Cold: true}
+		}
+	}
+	return snapshots, nil
+}
+
+func uniqueInventoryProjectIDs(projectIDs []uint) []uint {
+	result := make([]uint, 0, len(projectIDs))
+	seen := make(map[uint]struct{}, len(projectIDs))
+	for _, projectID := range projectIDs {
+		if projectID == 0 {
+			continue
+		}
+		if _, ok := seen[projectID]; ok {
+			continue
+		}
+		seen[projectID] = struct{}{}
+		result = append(result, projectID)
+	}
+	return result
 }
 
 func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error) {
@@ -559,15 +638,18 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
 			return uc.inventoryCache.GetProductInventoryTotals(ctx, req.ProjectID)
 		},
+		func() *ProjectProductInventoryTotals {
+			return &ProjectProductInventoryTotals{ProjectID: req.ProjectID, Cold: true}
+		},
 		uc.ScheduleInventoryRefresh,
 	)
-	if errors.Is(err, domain.ErrInventoryRefreshInProgress) {
-		return true, nil
-	}
 	if err != nil || totals == nil {
-		// Cache outages and cold starts must not reject an order. The allocator is
-		// still the authoritative check-and-reserve operation.
+		// Cache outages must not reject an order. The allocator is still the
+		// authoritative check-and-reserve operation.
 		return true, err
+	}
+	if totals.Cold {
+		return false, nil
 	}
 	// The shared snapshot contains public supply only. A zero cannot prove that
 	// a private-first buyer has no owned resource, so warm the shared cache but
@@ -587,6 +669,9 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 func productInventoryAvailable(totals *ProjectProductInventoryTotals, req ProductInventoryAvailabilityRequest) (bool, bool) {
 	if totals == nil {
 		return false, false
+	}
+	if totals.Cold {
+		return false, true
 	}
 	for _, item := range totals.Items {
 		if item.ProductID != req.ProductID {
@@ -652,20 +737,26 @@ func loadCachedInventory[T any](
 	cache InventoryCache,
 	entry InventoryCacheEntry,
 	load func(context.Context) (*T, error),
+	cold func() *T,
 	schedule func(context.Context) error,
 ) (*T, error) {
 	if cached, err := load(ctx); err != nil || cached != nil {
 		return cached, err
 	}
-	if err := cache.RequeueInventory(ctx, []InventoryCacheEntry{entry}); err != nil {
-		return nil, fmt.Errorf("queue inventory cache refresh: %w", err)
+	if err := cache.InitializeInventory(ctx, []InventoryCacheEntry{entry}, inventoryCacheHardTTL); err != nil {
+		return nil, fmt.Errorf("initialize inventory cache: %w", err)
+	}
+	cached, err := load(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if schedule != nil {
-		if err := schedule(ctx); err != nil {
-			return nil, fmt.Errorf("schedule inventory cache refresh: %w", err)
-		}
+		_ = schedule(ctx)
 	}
-	return nil, domain.ErrInventoryRefreshInProgress
+	if cached != nil {
+		return cached, nil
+	}
+	return cold(), nil
 }
 
 func (uc *UseCase) RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error) {
@@ -706,10 +797,19 @@ func (uc *UseCase) QueueRoutingCandidateRefresh(ctx context.Context, projectID u
 }
 
 func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefreshResult, error) {
+	return uc.RefreshInventoryCacheBefore(ctx, time.Now())
+}
+
+// RefreshInventoryCacheBefore refreshes only entries active before one task's
+// cutoff, so reads during aggregation are left for the next task.
+func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.Time) (*InventoryRefreshResult, error) {
 	if uc == nil || uc.inventoryCache == nil {
 		return &InventoryRefreshResult{}, nil
 	}
-	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, time.Now().Add(-inventoryCacheActivityTTL), inventoryRefreshBatchSize)
+	if before.IsZero() {
+		before = time.Now()
+	}
+	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, before.Add(-inventoryCacheActivityTTL), before, inventoryRefreshBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("claim active inventory cache entries: %w", err)
 	}
@@ -996,10 +1096,11 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		if err != nil {
 			return nil, err
 		}
-		if !matched && !candidate.MainAllocated {
+		_, candidateSuffix, validEmail := splitEmail(candidate.EmailAddress)
+		if (cmd.EmailSuffix == "" || validEmail && candidateSuffix == cmd.EmailSuffix) && !matched && !candidate.MainAllocated {
 			return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
 		}
-		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, config.ProjectID, candidate.ResourceID)
+		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, config.ProjectID, candidate.ResourceID, cmd.EmailSuffix)
 		if aliasErr != nil {
 			return nil, aliasErr
 		}

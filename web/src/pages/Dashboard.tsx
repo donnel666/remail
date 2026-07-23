@@ -95,7 +95,6 @@ function filterProducts(
 type ProductInventoryTotal = ProjectInventoryTotalResponse["products"][number];
 
 const maxCreateOrderQuantity = 100;
-const inventoryFetchConcurrency = 6;
 const orderPageLimit = 100;
 const initialOrderCursors: Record<ServiceMode, number | undefined> = {
   code: undefined,
@@ -116,7 +115,7 @@ function toWorkbenchProject(
   return {
     description: project.description ?? "",
     id: String(project.id),
-    inventoryLoaded: Boolean(inventory),
+    inventoryLoaded: true,
     logoUrl: project.logoUrl,
     name: project.name,
     products: (project.products ?? []).flatMap((product) =>
@@ -522,27 +521,8 @@ export default function Dashboard() {
         (project) => project.status === "listed",
       );
       setProjects(listed.map((project) => toWorkbenchProject(project)));
-      // Totals aren't in the project list payload; fetch them for every project
-      // so the list shows stock without needing a selection.
-      void loadAllProjectInventory(listed.map((project) => String(project.id)));
     } catch (err) {
       Toast.error(apiErrorMessage(err, t("An unexpected error occurred.")));
-    }
-  }
-
-  async function loadAllProjectInventory(projectIds: string[]) {
-    // ponytail: capped per-project fan-out; add a bulk inventory endpoint if
-    // project counts grow past a couple hundred. Backend caches each project inventory.
-    for (
-      let start = 0;
-      start < projectIds.length;
-      start += inventoryFetchConcurrency
-    ) {
-      await Promise.all(
-        projectIds
-          .slice(start, start + inventoryFetchConcurrency)
-          .map((id) => loadProjectInventory(id, { silent: true })),
-      );
     }
   }
 

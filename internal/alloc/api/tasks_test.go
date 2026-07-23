@@ -54,7 +54,43 @@ type failingInventoryTaskCache struct {
 	allocapp.InventoryCache
 }
 
-func (*failingInventoryTaskCache) ClaimActiveInventory(context.Context, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
+type boundedInventoryTaskRepo struct {
+	allocapp.Repository
+	calls atomic.Int32
+}
+
+func (r *boundedInventoryTaskRepo) GetInventoryStats(_ context.Context, projectID uint) (*allocapp.InventoryStats, error) {
+	r.calls.Add(1)
+	return &allocapp.InventoryStats{ProjectID: projectID}, nil
+}
+
+type boundedInventoryTaskCache struct {
+	allocapp.InventoryCache
+	claims int
+}
+
+func (c *boundedInventoryTaskCache) ClaimActiveInventory(_ context.Context, _ time.Time, _ time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
+	c.claims++
+	entries := make([]allocapp.InventoryCacheEntry, limit)
+	for i := range entries {
+		entries[i] = allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: uint((c.claims-1)*limit + i + 1)}
+	}
+	return entries, nil
+}
+
+func (*boundedInventoryTaskCache) AcquireInventoryRefresh(context.Context, allocapp.InventoryCacheEntry, time.Duration) (string, bool, error) {
+	return "token", true, nil
+}
+
+func (*boundedInventoryTaskCache) RefreshInventoryStats(context.Context, uint, *allocapp.InventoryStats, time.Duration) error {
+	return nil
+}
+
+func (*boundedInventoryTaskCache) ReleaseInventoryRefresh(context.Context, allocapp.InventoryCacheEntry, string) error {
+	return nil
+}
+
+func (*failingInventoryTaskCache) ClaimActiveInventory(context.Context, time.Time, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
 	return []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 1}}, nil
 }
 
@@ -90,7 +126,7 @@ func TestInventoryRefreshAdmissionDenialDefersTask(t *testing.T) {
 	require.False(t, gate.released.Load())
 }
 
-func TestInventoryRefreshTaskDefersAfterOneFailedAttempt(t *testing.T) {
+func TestInventoryRefreshTaskReturnsAggregateFailure(t *testing.T) {
 	repo := &failingInventoryTaskRepo{}
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(&failingInventoryTaskCache{})
@@ -100,12 +136,28 @@ func TestInventoryRefreshTaskDefersAfterOneFailedAttempt(t *testing.T) {
 
 	result, deferred, err := refreshInventoryTask(ctx, useCase)
 
-	require.NoError(t, err)
-	require.True(t, deferred)
+	require.ErrorContains(t, err, "aggregate unavailable")
+	require.False(t, deferred)
 	require.Equal(t, 1, result.Attempted)
 	require.Equal(t, 1, result.Failed)
 	require.EqualValues(t, 1, repo.calls.Load())
 	require.Equal(t, wantDeadline, repo.deadline, "the Asynq task deadline is the refresh budget")
+}
+
+func TestInventoryRefreshTaskStopsNormallyAtItsWorkLimit(t *testing.T) {
+	repo := &boundedInventoryTaskRepo{}
+	cache := &boundedInventoryTaskCache{}
+	useCase := allocapp.NewUseCase(repo)
+	useCase.SetInventoryCache(cache)
+
+	result, deferred, err := refreshInventoryTask(context.Background(), useCase)
+
+	require.NoError(t, err)
+	require.False(t, deferred)
+	require.Equal(t, inventoryRefreshMaxEntriesPerTask, result.Attempted)
+	require.Equal(t, inventoryRefreshMaxEntriesPerTask, result.Updated)
+	require.EqualValues(t, inventoryRefreshMaxEntriesPerTask, repo.calls.Load())
+	require.Equal(t, inventoryRefreshMaxEntriesPerTask/5, cache.claims)
 }
 
 func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {

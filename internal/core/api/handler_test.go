@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -46,6 +47,30 @@ type mockProjectRepo struct {
 	summaries []coreapp.ProjectSummary
 	nextID    uint
 	logs      []*governancedomain.OperationLog
+}
+
+type projectInventoryProviderStub struct {
+	totals *allocapp.ProjectProductInventoryTotals
+	err    error
+	calls  *int
+	ids    *[]uint
+}
+
+func (s projectInventoryProviderStub) GetProductInventorySnapshots(_ context.Context, projectIDs []uint) (map[uint]*allocapp.ProjectProductInventoryTotals, error) {
+	if s.calls != nil {
+		(*s.calls)++
+	}
+	if s.ids != nil {
+		*s.ids = append([]uint(nil), projectIDs...)
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	result := make(map[uint]*allocapp.ProjectProductInventoryTotals, len(projectIDs))
+	for _, projectID := range projectIDs {
+		result[projectID] = s.totals
+	}
+	return result, nil
 }
 
 func newMockProjectRepo() *mockProjectRepo {
@@ -3551,12 +3576,21 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 
 	repo := newMockProjectRepo()
 	repo.details[1] = projectDetailForAPITest()
-	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
-	h := NewCoreHandler(mod)
+	mod := &CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
+			ProjectID: 1,
+			Items: []allocapp.ProductInventoryTotal{{
+				ProductID: 11, TotalAvailable: 12, PublicAvailable: 12,
+				Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: "hotmail.com", TotalAvailable: 7, PublicAvailable: 7}},
+			}},
+		}},
+	}
+	h := NewOpenCoreHandler(mod)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/v1/projects/1", nil)
+	c.Request = httptest.NewRequest("GET", "/v1/open/projects/1", nil)
 	c.Params = gin.Params{{Key: "projectId", Value: "1"}}
 	setAuthContext(c, 2, iamdomain.RoleUser)
 
@@ -3567,6 +3601,10 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	products := body["products"].([]any)
 	product := products[0].(map[string]any)
+	require.Equal(t, float64(12), product["totalAvailable"])
+	require.Equal(t, float64(12), product["publicAvailable"])
+	suffixes := product["suffixes"].([]any)
+	require.Equal(t, "hotmail.com", suffixes[0].(map[string]any)["suffix"])
 	require.NotContains(t, product, "codeSupplierPrice")
 	require.NotContains(t, product, "purchaseSupplierPrice")
 	require.NotContains(t, product, "mainWeight")
@@ -3596,6 +3634,7 @@ func TestCoreHandler_GetProjectDetailIncludesInternalProductFieldsForProjectAdmi
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	products := body["products"].([]any)
 	product := products[0].(map[string]any)
+	require.NotContains(t, product, "totalAvailable")
 	require.Equal(t, "0.050000", product["codeSupplierPrice"])
 	require.Equal(t, "0.000000", product["purchaseSupplierPrice"])
 	require.Equal(t, float64(1), product["mainWeight"])
@@ -3641,7 +3680,16 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 			MailRuleCount: len(detail.MailRules),
 		},
 	}
-	mod := &CoreModule{ProjectUseCase: coreapp.NewProjectUseCase(repo)}
+	mod := &CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
+			ProjectID: 1,
+			Items: []allocapp.ProductInventoryTotal{{
+				ProductID: 11, TotalAvailable: 12, PublicAvailable: 12,
+				Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: "hotmail.com", TotalAvailable: 7, PublicAvailable: 7}},
+			}},
+		}},
+	}
 	h := NewCoreHandler(mod, mockPermissionChecker{allowed: true})
 
 	w := httptest.NewRecorder()
@@ -3663,6 +3711,10 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	require.Equal(t, "microsoft", product["type"])
 	require.Equal(t, "0.100000", product["codePrice"])
 	require.Equal(t, "0.000000", product["purchasePrice"])
+	require.Equal(t, float64(12), product["totalAvailable"])
+	require.Equal(t, float64(12), product["publicAvailable"])
+	suffixes := product["suffixes"].([]any)
+	require.Equal(t, "hotmail.com", suffixes[0].(map[string]any)["suffix"])
 	require.NotContains(t, product, "codeSupplierPrice")
 	require.NotContains(t, product, "mainWeight")
 	facets := body["facets"].(map[string]any)
@@ -3671,6 +3723,86 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	require.Equal(t, float64(1), statusFacets["listed"])
 	productTypeFacets := facets["productType"].(map[string]any)
 	require.Equal(t, float64(1), productTypeFacets["microsoft"])
+}
+
+func TestCoreHandler_GetProjectsReturnsColdInventoryAsZero(t *testing.T) {
+	detail := projectDetailForAPITest()
+	repo := newMockProjectRepo()
+	repo.summaries = []coreapp.ProjectSummary{{
+		Project: detail.Project, Products: detail.Products, ProductCount: len(detail.Products), MailRuleCount: len(detail.MailRules),
+	}}
+	h := NewCoreHandler(&CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
+			ProjectID: detail.Project.ID, Cold: true,
+		}},
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/open/projects", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body ProjectListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Zero(t, body.Items[0].Products[0].TotalAvailable)
+	require.Zero(t, body.Items[0].Products[0].PublicAvailable)
+	require.Empty(t, body.Items[0].Products[0].Suffixes)
+}
+
+func TestCoreHandler_GetProjectsDoesNotTurnInventoryDependencyFailuresIntoZero(t *testing.T) {
+	detail := projectDetailForAPITest()
+	repo := newMockProjectRepo()
+	repo.summaries = []coreapp.ProjectSummary{{
+		Project: detail.Project, Products: detail.Products, ProductCount: len(detail.Products), MailRuleCount: len(detail.MailRules),
+	}}
+	h := NewCoreHandler(&CoreModule{
+		ProjectUseCase:   coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{err: errors.New("redis unavailable")},
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/open/projects", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "totalAvailable")
+}
+
+func TestCoreHandler_GetProjectsLoadsSharedInventoryInOneBatch(t *testing.T) {
+	detail := projectDetailForAPITest()
+	second := *detail
+	second.Project.ID = 2
+	second.Products = append([]coredomain.Product(nil), detail.Products...)
+	second.Products[0].ID = 12
+	second.Products[0].ProjectID = 2
+	repo := newMockProjectRepo()
+	repo.summaries = []coreapp.ProjectSummary{
+		{Project: detail.Project, Products: detail.Products, ProductCount: 1},
+		{Project: second.Project, Products: second.Products, ProductCount: 1},
+	}
+	calls := 0
+	var ids []uint
+	h := NewCoreHandler(&CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{
+			totals: &allocapp.ProjectProductInventoryTotals{}, calls: &calls, ids: &ids,
+		},
+	})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/v1/open/projects", nil)
+	setAuthContext(c, 1, iamdomain.RoleUser)
+
+	h.GetProjects(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, 1, calls)
+	require.Equal(t, []uint{1, 2}, ids)
 }
 
 func TestCoreHandler_ProjectOwnerCanSeeRejectReasonAndResubmit(t *testing.T) {
@@ -3762,6 +3894,7 @@ func TestCoreHandler_AdminProjectApproveMovesReviewingToListed(t *testing.T) {
 	h.PostAdminProjectApprove(c)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "totalAvailable")
 	var body ProjectDetailResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, string(coredomain.ProjectStatusListed), body.Project.Status)

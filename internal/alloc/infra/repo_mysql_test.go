@@ -932,6 +932,69 @@ VALUES (1000, 1, 'available-alias@example.com', 'normal')`).Error)
 	assertInventory(0, 0, 0)
 }
 
+func TestMicrosoftExplicitAliasUsesOwnSuffixForInventoryAndAllocationMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 1, true, "normal")
+	require.NoError(t, db.Exec(`
+UPDATE microsoft_resources
+SET email_address = 'primary@outlook.com', email_domain = 'outlook.com'
+WHERE id = 1000`).Error)
+
+	repo := NewRepo(db)
+	uc := allocapp.NewUseCase(repo)
+	main, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-cross-suffix-main", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "outlook.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "primary@outlook.com", main.Email)
+	_, err = uc.ReleaseByOrder(context.Background(), main.OrderNo)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Exec(`
+INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
+    (1000, 1, 'first@hotmail.com', 'normal'),
+    (1000, 1, 'second@outlook.com', 'normal')`).Error)
+
+	totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "hotmail.com", TotalAvailable: 1, PublicAvailable: 1},
+		{Suffix: "outlook.com", TotalAvailable: 1, PublicAvailable: 1},
+	}, totals.Items[0].Suffixes)
+
+	hotmailAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-cross-suffix-hotmail-alias", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "hotmail.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", hotmailAllocation.Mailbox)
+	require.Equal(t, "first@hotmail.com", hotmailAllocation.Email)
+	_, err = uc.ReleaseByOrder(context.Background(), hotmailAllocation.OrderNo)
+	require.NoError(t, err)
+
+	totals, err = repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "outlook.com", TotalAvailable: 1, PublicAvailable: 1},
+	}, totals.Items[0].Suffixes)
+
+	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-cross-suffix-hotmail-exhausted", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "hotmail.com",
+	})
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+
+	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-cross-suffix-outlook-alias", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "@outlook.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alias", allocation.Mailbox)
+	require.Equal(t, "second@outlook.com", allocation.Email)
+}
+
 func TestDotInventoryCountsOnlyDistinctAllocatableVariantsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 0, 1, 0)

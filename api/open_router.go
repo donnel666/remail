@@ -22,7 +22,7 @@ func registerOpenRoutes(
 	open.Use(openapiapi.KeyRequired())
 
 	openHandler := openapiapi.NewHandler(openapiMod)
-	coreHandler := coreapi.NewCoreHandler(coreMod, checker)
+	coreHandler := coreapi.NewOpenCoreHandler(coreMod, checker)
 	billingHandler := billingapi.NewBillingHandler(billingMod, checker)
 	tradeHandler := tradeapi.NewHandler(tradeMod)
 

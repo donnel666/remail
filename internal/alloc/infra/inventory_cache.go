@@ -39,36 +39,97 @@ func (c *InventoryCache) RefreshInventoryStats(ctx context.Context, projectID ui
 }
 
 func (c *InventoryCache) GetProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
-	totals, err := loadInventoryCache[allocapp.ProjectProductInventoryTotals](ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID))
-	if err != nil || totals == nil {
-		return totals, err
-	}
-	if err := c.applyProductUnavailableMarkers(ctx, totals); err != nil {
+	snapshots, err := c.GetProductInventorySnapshots(ctx, []uint{projectID})
+	if err != nil {
 		return nil, err
 	}
-	return totals, nil
+	return snapshots[projectID], nil
 }
 
-func (c *InventoryCache) applyProductUnavailableMarkers(ctx context.Context, totals *allocapp.ProjectProductInventoryTotals) error {
-	if totals == nil {
-		return nil
+func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*allocapp.ProjectProductInventoryTotals, error) {
+	result := make(map[uint]*allocapp.ProjectProductInventoryTotals, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return result, nil
 	}
-	requests := productUnavailableMarkerRequests(*totals)
-	if len(requests) == 0 {
-		return nil
+	keys := make([]string, len(projectIDs))
+	for i, projectID := range projectIDs {
+		keys[i] = inventoryCacheKey(allocapp.InventoryCacheProducts, projectID)
 	}
-	keys := make([]string, len(requests))
-	for i := range requests {
-		keys[i] = productUnavailableMarkerKey(requests[i])
-	}
-	markers, err := c.redis.MGet(ctx, keys...).Result()
+	payloads, err := c.redis.MGet(ctx, keys...).Result()
 	if err != nil {
-		return fmt.Errorf("load product inventory corrections: %w", err)
+		return nil, fmt.Errorf("load product inventory snapshots: %w", err)
 	}
-	for i, marker := range markers {
-		if marker != nil {
-			markProductUnavailable(totals, requests[i])
+	loadedKeys := make([]redis.Z, 0, len(keys))
+	requests := make([]allocapp.ProductInventoryAvailabilityRequest, 0)
+	requestTotals := make([]*allocapp.ProjectProductInventoryTotals, 0)
+	for i, payload := range payloads {
+		if payload == nil {
+			continue
 		}
+		var totals allocapp.ProjectProductInventoryTotals
+		if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", keys[i], err)
+		}
+		result[projectIDs[i]] = &totals
+		loadedKeys = append(loadedKeys, redis.Z{Score: float64(time.Now().UnixMilli()), Member: keys[i]})
+		for _, request := range productUnavailableMarkerRequests(totals) {
+			requests = append(requests, request)
+			requestTotals = append(requestTotals, &totals)
+		}
+	}
+	if len(requests) > 0 {
+		markerKeys := make([]string, len(requests))
+		for i := range requests {
+			markerKeys[i] = productUnavailableMarkerKey(requests[i])
+		}
+		markers, err := c.redis.MGet(ctx, markerKeys...).Result()
+		if err != nil {
+			return nil, fmt.Errorf("load product inventory corrections: %w", err)
+		}
+		for i, marker := range markers {
+			if marker != nil {
+				markProductUnavailable(requestTotals[i], requests[i])
+			}
+		}
+	}
+	if len(loadedKeys) > 0 {
+		if err := c.redis.ZAdd(ctx, inventoryCacheActiveKey, loadedKeys...).Err(); err != nil {
+			return nil, fmt.Errorf("touch product inventory snapshots: %w", err)
+		}
+	}
+	return result, nil
+}
+
+// InitializeInventory seeds cold keys with known-zero snapshots without
+// overwriting a concurrent background refresh.
+func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry, ttl time.Duration) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	now := float64(time.Now().UnixMilli())
+	_, err := c.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, entry := range entries {
+			var value any
+			switch entry.Kind {
+			case allocapp.InventoryCacheStats:
+				value = &allocapp.InventoryStats{ProjectID: entry.ProjectID}
+			case allocapp.InventoryCacheProducts:
+				value = &allocapp.ProjectProductInventoryTotals{ProjectID: entry.ProjectID, Cold: true}
+			default:
+				continue
+			}
+			payload, marshalErr := json.Marshal(value)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
+			pipe.SetNX(ctx, key, payload, ttl)
+			pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: now, Member: key})
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("initialize inventory cache: %w", err)
 	}
 	return nil
 }
@@ -270,21 +331,26 @@ func markProductUnavailable(totals *allocapp.ProjectProductInventoryTotals, req 
 	return true
 }
 
-func (c *InventoryCache) ClaimActiveInventory(ctx context.Context, since time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
+func (c *InventoryCache) ClaimActiveInventory(ctx context.Context, since time.Time, before time.Time, limit int) ([]allocapp.InventoryCacheEntry, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	minimum := strconv.FormatInt(since.UnixMilli(), 10)
-	if err := c.redis.ZRemRangeByScore(ctx, inventoryCacheActiveKey, "-inf", "("+minimum).Err(); err != nil {
-		return nil, fmt.Errorf("remove inactive inventory cache keys: %w", err)
+	if before.IsZero() {
+		before = time.Now()
 	}
-	items, err := c.redis.ZPopMin(ctx, inventoryCacheActiveKey, int64(limit)).Result()
+	minimum := strconv.FormatInt(since.UnixMilli(), 10)
+	items, err := claimActiveInventoryScript.Run(ctx, c.redis, []string{inventoryCacheActiveKey},
+		"("+minimum,
+		minimum,
+		strconv.FormatInt(before.UnixMilli(), 10),
+		limit,
+	).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("claim active inventory cache keys: %w", err)
 	}
 	entries := make([]allocapp.InventoryCacheEntry, 0, len(items))
 	for _, item := range items {
-		entry, ok := parseInventoryCacheKey(fmt.Sprint(item.Member))
+		entry, ok := parseInventoryCacheKey(item)
 		if !ok {
 			continue
 		}
@@ -419,4 +485,13 @@ if redis.call("GET", KEYS[1]) ~= ARGV[1] then
   return 0
 end
 return redis.call("DEL", KEYS[1])
+`)
+
+var claimActiveInventoryScript = redis.NewScript(`
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
+local entries = redis.call("ZRANGEBYSCORE", KEYS[1], ARGV[2], ARGV[3], "LIMIT", 0, ARGV[4])
+if #entries > 0 then
+  redis.call("ZREM", KEYS[1], unpack(entries))
+end
+return entries
 `)

@@ -41,11 +41,11 @@ const (
 					  AND active_main.active_entity_id = ms.id
 				)
 			)`
-	microsoftReusableExplicitAliasCondition = `EXISTS (
+	microsoftReusableExplicitAliasConditionTemplate = `EXISTS (
 				SELECT 1
 				FROM explicit_aliases ea
 				WHERE ea.resource_id = ms.id
-				  AND ea.status = 'normal'
+				  AND ea.status = 'normal'%s
 				  AND NOT EXISTS (
 					SELECT 1 FROM microsoft_allocations history_alias
 					WHERE history_alias.explicit_alias_id = ea.id
@@ -60,6 +60,28 @@ const (
 				  )
 			)`
 )
+
+func reusableExplicitAliasCondition(projectID uint, emailSuffix string) (string, []any) {
+	filter := ""
+	args := make([]any, 0, 2)
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		filter = " AND SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) = ?"
+		args = append(args, suffix)
+	}
+	args = append(args, projectID)
+	return fmt.Sprintf(microsoftReusableExplicitAliasConditionTemplate, filter), args
+}
+
+func microsoftMainCandidateCondition(projectID uint, emailSuffix string) (string, []any) {
+	suffix := normalizeCandidateSuffix(emailSuffix)
+	aliasCondition, aliasArgs := reusableExplicitAliasCondition(projectID, suffix)
+	if suffix == "" {
+		return "(" + microsoftUnusedMainCondition + " OR " + aliasCondition + ")",
+			append([]any{projectID}, aliasArgs...)
+	}
+	return "((ms.email_domain = ? AND " + microsoftUnusedMainCondition + ") OR " + aliasCondition + ")",
+		append([]any{suffix, projectID}, aliasArgs...)
+}
 
 type Repo struct {
 	db            *gorm.DB
@@ -462,11 +484,12 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 		"ms.status = 'normal'",
 		microsoftProjectUnmatchedCondition,
 	}
+	suffix := normalizeCandidateSuffix(emailSuffix)
 	if mailbox == domain.MicrosoftMailboxMain {
-		where = append(where, "("+microsoftUnusedMainCondition+" OR "+microsoftReusableExplicitAliasCondition+")")
-		args = append(args, projectID, projectID)
-	}
-	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		condition, conditionArgs := microsoftMainCandidateCondition(projectID, suffix)
+		where = append(where, condition)
+		args = append(args, conditionArgs...)
+	} else if suffix != "" {
 		where = append(where, "ms.email_domain = ?")
 		args = append(args, suffix)
 	}
@@ -582,11 +605,12 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, proj
 		"ms.status = 'normal'",
 		microsoftProjectUnmatchedCondition,
 	}
+	suffix := normalizeCandidateSuffix(emailSuffix)
 	if mailbox == domain.MicrosoftMailboxMain {
-		where = append(where, "("+microsoftUnusedMainCondition+" OR "+microsoftReusableExplicitAliasCondition+")")
-		args = append(args, projectID, projectID)
-	}
-	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		condition, conditionArgs := microsoftMainCandidateCondition(projectID, suffix)
+		where = append(where, condition)
+		args = append(args, conditionArgs...)
+	} else if suffix != "" {
 		where = append(where, "ms.email_domain = ?")
 		args = append(args, suffix)
 	}
@@ -776,7 +800,14 @@ SELECT EXISTS (
 	return allocated, nil
 }
 
-func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint) (*allocapp.AliasCandidate, error) {
+func (r *Repo) FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*allocapp.AliasCandidate, error) {
+	suffix := normalizeCandidateSuffix(emailSuffix)
+	suffixSQL := ""
+	args := []any{resourceID, projectID}
+	if suffix != "" {
+		suffixSQL = " AND SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) = ?"
+		args = append(args, suffix)
+	}
 	var candidate allocapp.AliasCandidate
 	err := r.dbFor(ctx).Raw(`
 SELECT ea.id AS id, ea.email AS email
@@ -796,9 +827,9 @@ WHERE ea.resource_id = ?
       WHERE ma.active_kind = 2
         AND ma.active_project_id = 0
         AND ma.active_entity_id = ea.id
-	  )
+	  )`+suffixSQL+`
 ORDER BY ea.id ASC
-LIMIT 1`, resourceID, projectID).Scan(&candidate).Error
+LIMIT 1`, args...).Scan(&candidate).Error
 	if err != nil {
 		return nil, fmt.Errorf("find reusable explicit alias: %w", err)
 	}
@@ -807,14 +838,18 @@ LIMIT 1`, resourceID, projectID).Scan(&candidate).Error
 	}
 
 	var locked allocapp.AliasCandidate
+	lockArgs := []any{candidate.ID, resourceID}
+	if suffix != "" {
+		lockArgs = append(lockArgs, suffix)
+	}
 	err = r.dbFor(ctx).Raw(`
 SELECT ea.id AS id, ea.email AS email
 FROM explicit_aliases ea
 WHERE ea.id = ?
   AND ea.resource_id = ?
-  AND ea.status = 'normal'
+  AND ea.status = 'normal'`+suffixSQL+`
 LIMIT 1
-FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error
+FOR UPDATE SKIP LOCKED`, lockArgs...).Scan(&locked).Error
 	if err != nil {
 		return nil, fmt.Errorf("lock reusable explicit alias: %w", err)
 	}
@@ -1623,7 +1658,7 @@ GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
 			return nil, err
 		}
 		explicitAlias, err := r.microsoftSuffixCount(ctx, `
-SELECT ms.email_domain AS suffix, COUNT(*) AS count
+SELECT SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1) AS suffix, COUNT(*) AS count
 FROM explicit_aliases ea
 JOIN microsoft_resources ms ON ms.id = ea.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
@@ -1643,7 +1678,7 @@ WHERE ea.status = 'normal'
         AND active_alias.active_project_id = 0
         AND active_alias.active_entity_id = ea.id
   )
-GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
+GROUP BY SUBSTRING_INDEX(LOWER(TRIM(ea.email)), '@', -1)`, append(scopeArgs, projectID)...)
 		if err != nil {
 			return nil, err
 		}

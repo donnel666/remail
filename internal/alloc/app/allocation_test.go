@@ -56,6 +56,54 @@ type candidateRefreshQueueStub struct {
 	inventoryCalls  int
 }
 
+type missingProductInventoryRepoStub struct{ Repository }
+
+func (*missingProductInventoryRepoStub) GetProductInventoryTotals(context.Context, uint) (*ProjectProductInventoryTotals, error) {
+	return nil, domain.ErrProjectNotAllocatable
+}
+
+func TestProductInventorySnapshotPreservesMissingProjectErrorWithoutCache(t *testing.T) {
+	_, err := NewUseCase(&missingProductInventoryRepoStub{}).GetProductInventorySnapshot(context.Background(), 10)
+	if !errors.Is(err, domain.ErrProjectNotAllocatable) {
+		t.Fatalf("GetProductInventorySnapshot() error = %v", err)
+	}
+}
+
+type warmOnInitializeInventoryCache struct {
+	InventoryCache
+	initialized bool
+	totals      *ProjectProductInventoryTotals
+}
+
+func (c *warmOnInitializeInventoryCache) GetProductInventorySnapshots(_ context.Context, projectIDs []uint) (map[uint]*ProjectProductInventoryTotals, error) {
+	result := make(map[uint]*ProjectProductInventoryTotals)
+	if c.initialized {
+		for _, projectID := range projectIDs {
+			result[projectID] = c.totals
+		}
+	}
+	return result, nil
+}
+
+func (c *warmOnInitializeInventoryCache) InitializeInventory(context.Context, []InventoryCacheEntry, time.Duration) error {
+	c.initialized = true
+	return nil
+}
+
+func TestProductInventoryColdRaceReturnsConcurrentWarmSnapshot(t *testing.T) {
+	cache := &warmOnInitializeInventoryCache{totals: &ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 7}}
+	useCase := NewUseCase(&missingProductInventoryRepoStub{})
+	useCase.SetInventoryCache(cache)
+
+	totals, err := useCase.GetProductInventorySnapshot(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("GetProductInventorySnapshot() error = %v", err)
+	}
+	if totals.Cold || totals.TotalAvailable != 7 {
+		t.Fatalf("GetProductInventorySnapshot() = %#v, want concurrent warm snapshot", totals)
+	}
+}
+
 func (q *candidateRefreshQueueStub) EnqueueCandidateRefresh(context.Context, CandidateRefreshTask) (bool, error) {
 	if q.events != nil {
 		*q.events = append(*q.events, "enqueue")
@@ -235,7 +283,7 @@ func (*allocationLockRepo) FindReusablePlusAlias(_ context.Context, _ uint, reso
 	return &AliasCandidate{ID: resourceID, Email: fmt.Sprintf("ms%d+1@example.com", resourceID)}, nil
 }
 
-func (r *allocationLockRepo) FindReusableExplicitAlias(context.Context, uint, uint) (*AliasCandidate, error) {
+func (r *allocationLockRepo) FindReusableExplicitAlias(context.Context, uint, uint, string) (*AliasCandidate, error) {
 	return r.explicitAlias, nil
 }
 

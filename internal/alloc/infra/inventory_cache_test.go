@@ -10,7 +10,6 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
-	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +24,10 @@ type inventoryCacheRepoStub struct {
 	accessErr    error
 }
 
-type inventoryRefreshQueueStub struct{ calls int }
+type inventoryRefreshQueueStub struct {
+	calls int
+	err   error
+}
 
 func (*inventoryRefreshQueueStub) EnqueueCandidateRefresh(context.Context, allocapp.CandidateRefreshTask) (bool, error) {
 	return false, nil
@@ -37,7 +39,7 @@ func (*inventoryRefreshQueueStub) EnqueueCandidateRefreshDispatcher(context.Cont
 
 func (q *inventoryRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++
-	return nil
+	return q.err
 }
 
 func (r *inventoryCacheRepoStub) AssertProjectInventoryAccess(context.Context, uint, uint) error {
@@ -70,8 +72,9 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	useCase.SetInventoryCache(NewInventoryCache(client))
 
 	stats, err := useCase.GetInventoryStats(context.Background(), 10)
-	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
-	require.Nil(t, stats)
+	require.NoError(t, err)
+	require.Equal(t, uint(10), stats.ProjectID)
+	require.Zero(t, stats.TotalAvailable)
 	require.Zero(t, repo.statsCalls, "HTTP cold misses must not run aggregate SQL")
 	result, err := useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
@@ -84,8 +87,10 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	require.Equal(t, 1, repo.statsCalls)
 
 	totals, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
-	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
-	require.Nil(t, totals)
+	require.NoError(t, err)
+	require.Equal(t, uint(10), totals.ProjectID)
+	require.True(t, totals.Cold)
+	require.Zero(t, totals.TotalAvailable)
 	require.Zero(t, repo.productCalls, "HTTP cold misses must not run aggregate SQL")
 	result, err = useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
@@ -123,6 +128,88 @@ func TestInventoryCacheServesRedisAndRefreshesActiveEntries(t *testing.T) {
 	require.EqualValues(t, 9, totals.TotalAvailable)
 	require.Equal(t, 3, repo.statsCalls)
 	require.Equal(t, 2, repo.productCalls)
+}
+
+func TestProductInventorySnapshotsQueueEveryColdProjectBeforeReturning(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	repo := &inventoryCacheRepoStub{totals: allocapp.ProjectProductInventoryTotals{
+		Items: []allocapp.ProductInventoryTotal{{ProductID: 20, TotalAvailable: 4, PublicAvailable: 4}},
+	}}
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(repo, queue)
+	useCase.SetInventoryCache(NewInventoryCache(client))
+
+	snapshots, err := useCase.GetProductInventorySnapshots(context.Background(), []uint{10, 11})
+	require.NoError(t, err)
+	require.Len(t, snapshots, 2)
+	require.True(t, snapshots[10].Cold)
+	require.True(t, snapshots[11].Cold)
+	require.Equal(t, 1, queue.calls)
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Err())
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(allocapp.InventoryCacheProducts, 11)).Err())
+
+	result, err := useCase.RefreshInventoryCache(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Updated)
+	snapshots, err = useCase.GetProductInventorySnapshots(context.Background(), []uint{10, 11})
+	require.NoError(t, err)
+	require.Len(t, snapshots, 2)
+	require.Equal(t, 2, repo.productCalls)
+}
+
+func TestInitializeInventoryDoesNotOverwriteWarmSnapshots(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	require.NoError(t, cache.SetInventoryStats(context.Background(), 10, &allocapp.InventoryStats{
+		ProjectID: 10, TotalAvailable: 7,
+	}, time.Hour))
+	require.NoError(t, cache.SetProductInventoryTotals(context.Background(), 10, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 8,
+	}, time.Hour))
+
+	require.NoError(t, cache.InitializeInventory(context.Background(), []allocapp.InventoryCacheEntry{
+		{Kind: allocapp.InventoryCacheStats, ProjectID: 10},
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 10},
+	}, 24*time.Hour))
+
+	stats, err := cache.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, stats.TotalAvailable)
+	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 8, totals.TotalAvailable)
+	require.False(t, totals.Cold)
+}
+
+func TestColdInventoryReturnsZeroWhenImmediateRefreshEnqueueFails(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	queue := &inventoryRefreshQueueStub{err: errors.New("queue unavailable")}
+	useCase := allocapp.NewUseCase(&inventoryCacheRepoStub{}, queue)
+	useCase.SetInventoryCache(NewInventoryCache(client))
+
+	stats, err := useCase.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, uint(10), stats.ProjectID)
+	require.Zero(t, stats.TotalAvailable)
+	snapshots, err := useCase.GetProductInventorySnapshots(context.Background(), []uint{10, 11})
+	require.NoError(t, err)
+	require.True(t, snapshots[10].Cold)
+	require.True(t, snapshots[11].Cold)
+	require.Equal(t, 2, queue.calls)
+
+	for _, entry := range []allocapp.InventoryCacheEntry{
+		{Kind: allocapp.InventoryCacheStats, ProjectID: 10},
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 10},
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 11},
+	} {
+		require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(entry.Kind, entry.ProjectID)).Err())
+	}
 }
 
 func TestCachedInventoryPrecheckAndAllocatorZeroCorrection(t *testing.T) {
@@ -211,7 +298,7 @@ func TestCachedInventoryPrecheckAndAllocatorZeroCorrection(t *testing.T) {
 	require.EqualValues(t, 7, updated.Items[0].Suffixes[0].TotalAvailable)
 }
 
-func TestCachedInventoryPrecheckFailsOpenOnColdCache(t *testing.T) {
+func TestCachedInventoryPrecheckTreatsColdSnapshotAsKnownZero(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
@@ -222,7 +309,7 @@ func TestCachedInventoryPrecheckFailsOpenOnColdCache(t *testing.T) {
 		ProjectID: 10, ProductID: 20,
 	})
 	require.NoError(t, err)
-	require.True(t, available)
+	require.False(t, available)
 	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheActiveKey).Val(), "a cold checkout must warm the shared project cache")
 }
 
@@ -240,12 +327,33 @@ func TestInventoryCacheRewarmUpdatesOldActiveMarker(t *testing.T) {
 		Member: key,
 	}).Err())
 
-	_, err := useCase.GetInventoryStats(context.Background(), 10)
-	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	stats, err := useCase.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, uint(10), stats.ProjectID)
+	require.Zero(t, stats.TotalAvailable)
 	require.Zero(t, repo.statsCalls)
-	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-2*time.Minute), 10)
+	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-2*time.Minute), time.Now(), 10)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheStats, ProjectID: 10}}, claimed)
+}
+
+func TestClaimActiveInventoryLeavesEntriesTouchedAfterTaskCutoff(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	cutoff := time.Now()
+	oldEntry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
+	freshEntry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 11}
+	require.NoError(t, client.ZAdd(context.Background(), inventoryCacheActiveKey,
+		redis.Z{Score: float64(cutoff.Add(-time.Minute).UnixMilli()), Member: inventoryCacheKey(oldEntry.Kind, oldEntry.ProjectID)},
+		redis.Z{Score: float64(cutoff.Add(time.Second).UnixMilli()), Member: inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)},
+	).Err())
+
+	claimed, err := cache.ClaimActiveInventory(context.Background(), cutoff.Add(-2*time.Minute), cutoff, 10)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.InventoryCacheEntry{oldEntry}, claimed)
+	require.NoError(t, client.ZScore(context.Background(), inventoryCacheActiveKey, inventoryCacheKey(freshEntry.Kind, freshEntry.ProjectID)).Err())
 }
 
 func TestInventoryCacheV3DoesNotServeV2InventorySemantics(t *testing.T) {
@@ -263,7 +371,7 @@ func TestInventoryCacheV3DoesNotServeV2InventorySemantics(t *testing.T) {
 	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.Nil(t, totals)
-	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-time.Minute), 10)
+	claimed, err := cache.ClaimActiveInventory(context.Background(), time.Now().Add(-time.Minute), time.Now(), 10)
 	require.NoError(t, err)
 	require.Empty(t, claimed)
 	active, err := client.ZCard(context.Background(), inventoryCacheActiveKey).Result()
@@ -319,8 +427,9 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(cache)
 
-	_, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
-	require.ErrorIs(t, err, allocdomain.ErrInventoryRefreshInProgress)
+	cold, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
+	require.NoError(t, err)
+	require.True(t, cold.Cold)
 	result, err := useCase.RefreshInventoryCache(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Updated)
@@ -366,8 +475,8 @@ func TestInventoryCacheColdMissesReturnImmediatelyWithoutDatabaseWork(t *testing
 		_, err := useCase.GetInventoryStats(context.Background(), 10)
 		errs <- err
 	}()
-	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
-	require.ErrorIs(t, <-errs, allocdomain.ErrInventoryRefreshInProgress)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
 	require.Zero(t, repo.calls.Load())
 	require.EqualValues(t, 1, client.ZCard(context.Background(), inventoryCacheActiveKey).Val())
 }

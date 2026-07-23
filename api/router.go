@@ -150,6 +150,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod.UseCase.SetHistoricalMicrosoftAliasPort(mailMod.MicrosoftAliases)
 		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		cleanupFuncs = append(cleanupFuncs, allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod))
+		coreMod.ProductInventory = allocMod.UseCase
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,
 			mailMod.BindingQuery,

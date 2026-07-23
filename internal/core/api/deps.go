@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
@@ -14,6 +17,10 @@ type BackgroundExecutionGate interface {
 	TryAcquire() (release func(), admitted bool)
 }
 
+type ProductInventoryProvider interface {
+	GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*allocapp.ProjectProductInventoryTotals, error)
+}
+
 // CoreModule holds all wired dependencies for the Core (resource) module.
 type CoreModule struct {
 	ImportUseCase        *coreapp.ImportUseCase
@@ -24,6 +31,7 @@ type CoreModule struct {
 	MailboxUseCase       *coreapp.DomainMailboxUseCase
 	ProjectUseCase       *coreapp.ProjectUseCase
 	ProjectAssets        *coreapp.ProjectAssetUseCase
+	ProductInventory     ProductInventoryProvider
 	AdminResourceQuery   *coreapp.AdminResourceQuery
 	AdminCommands        *coreapp.AdminResourceCommandService
 	AdminBulk            *coreapp.AdminResourceBulkService

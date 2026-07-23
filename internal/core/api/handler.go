@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
@@ -29,6 +32,13 @@ const MaxResourceValidationRequestBytes = 1024 * 1024 // 1 MB
 type CoreHandler struct {
 	module            *CoreModule
 	permissionChecker middleware.PermissionChecker
+	detailInventory   bool
+}
+
+func NewOpenCoreHandler(module *CoreModule, checkers ...middleware.PermissionChecker) *CoreHandler {
+	handler := NewCoreHandler(module, checkers...)
+	handler.detailInventory = true
+	return handler
 }
 
 // NewCoreHandler creates a new Core handler.
@@ -545,9 +555,14 @@ func (h *CoreHandler) GetProjects(c *gin.Context) {
 		return
 	}
 
+	inventoryByProductID, err := h.projectProductInventoryByID(c.Request.Context(), result.Items)
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
 	items := make([]ProjectItemResponse, len(result.Items))
 	for i := range result.Items {
-		items[i] = toProjectItemResponse(result.Items[i], isAdmin, userID)
+		items[i] = toProjectItemResponse(result.Items[i], isAdmin, userID, inventoryByProductID)
 	}
 	c.JSON(http.StatusOK, ProjectListResponse{
 		Items:  items,
@@ -615,8 +630,58 @@ func (h *CoreHandler) GetProject(c *gin.Context) {
 		writeCoreError(c, err)
 		return
 	}
+	if !h.detailInventory {
+		c.JSON(http.StatusOK, toProjectDetailResponse(detail, includeInternal, userID))
+		return
+	}
 
-	c.JSON(http.StatusOK, toProjectDetailResponse(detail, includeInternal, userID))
+	inventoryByProductID, err := h.projectProductInventoryByID(c.Request.Context(), []coreapp.ProjectSummary{{
+		Project: detail.Project, Products: detail.Products,
+	}})
+	if err != nil {
+		writeCoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toProjectDetailResponseWithInventory(detail, includeInternal, userID, inventoryByProductID))
+}
+
+func (h *CoreHandler) projectProductInventoryByID(ctx context.Context, summaries []coreapp.ProjectSummary) (map[uint]allocapp.ProductInventoryTotal, error) {
+	if h.module == nil || h.module.ProductInventory == nil {
+		return nil, nil
+	}
+	projectIDs := make([]uint, 0, len(summaries))
+	for i := range summaries {
+		if summaries[i].Project.Status == coredomain.ProjectStatusListed && hasEnabledProjectProduct(summaries[i].Products) {
+			projectIDs = append(projectIDs, summaries[i].Project.ID)
+		}
+	}
+	if len(projectIDs) == 0 {
+		return nil, nil
+	}
+	snapshots, err := h.module.ProductInventory.GetProductInventorySnapshots(ctx, projectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load project inventory snapshots: %w", err)
+	}
+	result := make(map[uint]allocapp.ProductInventoryTotal)
+	for _, projectID := range projectIDs {
+		totals := snapshots[projectID]
+		if totals == nil {
+			return nil, fmt.Errorf("load project %d inventory: empty snapshot", projectID)
+		}
+		for _, item := range totals.Items {
+			result[item.ProductID] = item
+		}
+	}
+	return result, nil
+}
+
+func hasEnabledProjectProduct(products []coredomain.Product) bool {
+	for i := range products {
+		if products[i].Status == coredomain.ProductStatusEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 // POST /v1/projects/:projectId/resubmit
@@ -1407,7 +1472,7 @@ func toAppProjectBulkSelection(req ProjectBulkSelectionRequest) coreapp.ProjectB
 	}
 }
 
-func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint) ProjectItemResponse {
+func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) ProjectItemResponse {
 	project := summary.Project
 	item := ProjectItemResponse{
 		ID:             project.ID,
@@ -1420,7 +1485,7 @@ func toProjectItemResponse(summary coreapp.ProjectSummary, includeInternal bool,
 		LooseMatch:     project.LooseMatch,
 		ProductCount:   summary.ProductCount,
 		MailRuleCount:  summary.MailRuleCount,
-		Products:       toProjectProductSummaryResponses(summary.Products),
+		Products:       toProjectProductSummaryResponses(summary.Products, inventoryByProductID),
 		CreatedAt:      project.CreatedAt,
 		UpdatedAt:      project.UpdatedAt,
 	}
@@ -1477,13 +1542,14 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 	}
 }
 
-func toProjectProductSummaryResponses(products []coredomain.Product) []ProjectProductSummaryResponse {
+func toProjectProductSummaryResponses(products []coredomain.Product, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) []ProjectProductSummaryResponse {
 	if len(products) == 0 {
 		return nil
 	}
 	items := make([]ProjectProductSummaryResponse, len(products))
 	for i := range products {
 		product := products[i]
+		inventory := inventoryByProductID[product.ID]
 		items[i] = ProjectProductSummaryResponse{
 			ID:                      product.ID,
 			Type:                    string(product.Type),
@@ -1495,21 +1561,29 @@ func toProjectProductSummaryResponses(products []coredomain.Product) []ProjectPr
 			CodeWindowMinutes:       product.CodeWindowMinutes,
 			ActivationWindowMinutes: product.ActivationWindowMinutes,
 			WarrantyMinutes:         product.WarrantyMinutes,
+			TotalAvailable:          inventory.TotalAvailable,
+			PublicAvailable:         inventory.PublicAvailable,
+			Suffixes:                toProjectProductSuffixInventoryResponses(inventory.Suffixes),
 		}
 	}
 	return items
 }
 
 func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal bool, viewerUserID uint) ProjectDetailResponse {
+	return toProjectDetailResponseWithInventory(detail, includeInternal, viewerUserID, nil)
+}
+
+func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, includeInternal bool, viewerUserID uint, inventoryByProductID map[uint]allocapp.ProductInventoryTotal) ProjectDetailResponse {
 	exposeApplicationFields := includeInternal || isOwnProjectApplication(detail.Project, viewerUserID)
 	item := toProjectItemResponse(coreapp.ProjectSummary{
 		Project:       detail.Project,
 		ProductCount:  len(detail.Products),
 		MailRuleCount: len(detail.MailRules),
-	}, includeInternal, viewerUserID)
+	}, includeInternal, viewerUserID, inventoryByProductID)
 	products := make([]ProjectProductResponse, len(detail.Products))
 	for i := range detail.Products {
 		product := detail.Products[i]
+		inventory := inventoryByProductID[product.ID]
 		products[i] = ProjectProductResponse{
 			ID:                      product.ID,
 			ProjectID:               product.ProjectID,
@@ -1524,6 +1598,11 @@ func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal b
 			WarrantyMinutes:         product.WarrantyMinutes,
 			CreatedAt:               product.CreatedAt,
 			UpdatedAt:               product.UpdatedAt,
+		}
+		if inventoryByProductID != nil {
+			products[i].TotalAvailable = int64Ptr(inventory.TotalAvailable)
+			products[i].PublicAvailable = int64Ptr(inventory.PublicAvailable)
+			products[i].Suffixes = toProjectProductSuffixInventoryResponses(inventory.Suffixes)
 		}
 		if includeInternal {
 			products[i].CodeSupplierPrice = product.CodeSupplierPrice
@@ -1561,7 +1640,24 @@ func toProjectDetailResponse(detail *coredomain.ProjectDetail, includeInternal b
 	}
 }
 
+func toProjectProductSuffixInventoryResponses(items []allocapp.ProductInventorySuffixTotal) []ProjectProductSuffixInventoryResponse {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]ProjectProductSuffixInventoryResponse, len(items))
+	for i := range items {
+		result[i] = ProjectProductSuffixInventoryResponse{
+			Suffix: items[i].Suffix, TotalAvailable: items[i].TotalAvailable, PublicAvailable: items[i].PublicAvailable,
+		}
+	}
+	return result
+}
+
 func intPtr(value int) *int {
+	return &value
+}
+
+func int64Ptr(value int64) *int64 {
 	return &value
 }
 

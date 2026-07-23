@@ -374,24 +374,27 @@ type ProjectProductTypeFacetsResponse struct {
 
 // ProjectProductResponse is a product view under a project.
 type ProjectProductResponse struct {
-	ID                      uint      `json:"id"`
-	ProjectID               uint      `json:"projectId"`
-	Type                    string    `json:"type"`
-	Status                  string    `json:"status"`
-	CodeEnabled             bool      `json:"codeEnabled"`
-	PurchaseEnabled         bool      `json:"purchaseEnabled"`
-	CodePrice               string    `json:"codePrice"`
-	PurchasePrice           string    `json:"purchasePrice"`
-	CodeSupplierPrice       string    `json:"codeSupplierPrice,omitempty"`
-	PurchaseSupplierPrice   string    `json:"purchaseSupplierPrice,omitempty"`
-	CodeWindowMinutes       int       `json:"codeWindowMinutes"`
-	ActivationWindowMinutes int       `json:"activationWindowMinutes"`
-	WarrantyMinutes         int       `json:"warrantyMinutes"`
-	MainWeight              *int      `json:"mainWeight,omitempty"`
-	DotWeight               *int      `json:"dotWeight,omitempty"`
-	PlusWeight              *int      `json:"plusWeight,omitempty"`
-	CreatedAt               time.Time `json:"createdAt"`
-	UpdatedAt               time.Time `json:"updatedAt"`
+	ID                      uint                                    `json:"id"`
+	ProjectID               uint                                    `json:"projectId"`
+	Type                    string                                  `json:"type"`
+	Status                  string                                  `json:"status"`
+	CodeEnabled             bool                                    `json:"codeEnabled"`
+	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
+	CodePrice               string                                  `json:"codePrice"`
+	PurchasePrice           string                                  `json:"purchasePrice"`
+	CodeSupplierPrice       string                                  `json:"codeSupplierPrice,omitempty"`
+	PurchaseSupplierPrice   string                                  `json:"purchaseSupplierPrice,omitempty"`
+	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
+	ActivationWindowMinutes int                                     `json:"activationWindowMinutes"`
+	WarrantyMinutes         int                                     `json:"warrantyMinutes"`
+	TotalAvailable          *int64                                  `json:"totalAvailable,omitempty"`
+	PublicAvailable         *int64                                  `json:"publicAvailable,omitempty"`
+	Suffixes                []ProjectProductSuffixInventoryResponse `json:"suffixes,omitempty"`
+	MainWeight              *int                                    `json:"mainWeight,omitempty"`
+	DotWeight               *int                                    `json:"dotWeight,omitempty"`
+	PlusWeight              *int                                    `json:"plusWeight,omitempty"`
+	CreatedAt               time.Time                               `json:"createdAt"`
+	UpdatedAt               time.Time                               `json:"updatedAt"`
 }
 
 // ProjectProductSummaryResponse is a safe product summary embedded in project lists.
