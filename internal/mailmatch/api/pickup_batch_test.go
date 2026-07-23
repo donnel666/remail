@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPickupBatchAcceptsTwoHundredItems(t *testing.T) {
+func TestPickupBatchAcceptsOneHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize)
 	for i := range items {
@@ -81,7 +81,7 @@ func TestPickupBatchReturnsOneHundredItemBodyWhenRequestBudgetExpires(t *testing
 	}
 }
 
-func TestPickupBatchRejectsMoreThanTwoHundredItems(t *testing.T) {
+func TestPickupBatchRejectsMoreThanOneHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize+1)
 	for i := range items {

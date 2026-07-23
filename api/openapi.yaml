@@ -10597,7 +10597,7 @@ components:
         items:
           type: array
           minItems: 2
-          maxItems: 200
+          maxItems: 100
           items:
             $ref: "#/components/schemas/PickupCredentialRequest"
       additionalProperties: false
@@ -10605,7 +10605,7 @@ components:
     PickupBatchResponse:
       type: array
       minItems: 2
-      maxItems: 200
+      maxItems: 100
       items:
         $ref: "#/components/schemas/PickupBatchItemResponse"
 

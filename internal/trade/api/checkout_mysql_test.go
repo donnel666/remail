@@ -1482,9 +1482,19 @@ func TestCheckoutEmailSuffixMismatchDoesNotDebitMySQL(t *testing.T) {
 	})
 	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
 
-	var orderCount int64
-	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-suffix-missing").Count(&orderCount).Error)
-	require.Zero(t, orderCount)
+	var order struct {
+		Status       string
+		FailureCode  string
+		DebitTxID    *uint
+		RefundTxID   *uint
+		RefundAmount string
+	}
+	require.NoError(t, db.Table("orders").Where("idempotency_key = ?", "order-idem-suffix-missing").Take(&order).Error)
+	require.Equal(t, string(tradedomain.OrderStatusFailed), order.Status)
+	require.Equal(t, string(tradedomain.OrderFailureInsufficientInventory), order.FailureCode)
+	require.Nil(t, order.DebitTxID)
+	require.Nil(t, order.RefundTxID)
+	require.Equal(t, "0.000000", order.RefundAmount)
 	var txCount int64
 	require.NoError(t, db.Table("wallet_transactions").
 		Where("user_id = ? AND transaction_type = 'debit'", 2).

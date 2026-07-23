@@ -61,7 +61,7 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 		return
 	}
 	if len(req.Items) < 2 || len(req.Items) > maxPickupBatchSize {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Pickup batch must contain between 2 and 200 items.", "requestId": middleware.GetRequestID(c)})
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Pickup batch must contain between 2 and 100 items.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
 	resp := make(PickupBatchResponse, len(req.Items))
@@ -166,7 +166,7 @@ func (h *Handler) GetPickupMessage(c *gin.Context) {
 }
 
 const (
-	maxPickupBatchSize  = 200
+	maxPickupBatchSize  = 100
 	maxPickupBatchBytes = 128 << 10
 )
 
