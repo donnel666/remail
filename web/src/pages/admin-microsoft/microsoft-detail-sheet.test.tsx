@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   bindingMessages: vi.fn(),
   createAlias: vi.fn(),
   fetchMail: vi.fn(),
+  getTask: vi.fn(),
   message: vi.fn(),
   messages: vi.fn(),
   mobile: false,
@@ -184,6 +185,7 @@ vi.mock("@/lib/admin-microsoft-api", () => ({
   fetchAdminMicrosoftMail: mocks.fetchMail,
   getAdminMicrosoftBindingMessage: mocks.bindingMessage,
   getAdminMicrosoftMessage: mocks.message,
+  getAdminMicrosoftTask: mocks.getTask,
   listAdminMicrosoftAliases: mocks.alias,
   listAdminMicrosoftBindingMessages: mocks.bindingMessages,
   listAdminMicrosoftMessages: mocks.messages,
@@ -299,7 +301,10 @@ describe("admin Microsoft detail sheet runtime", () => {
     mocks.refreshToken.mockResolvedValue({});
     mocks.scanProjects.mockResolvedValue({});
     mocks.createAlias.mockResolvedValue({});
-    mocks.fetchMail.mockResolvedValue({});
+    mocks.fetchMail.mockResolvedValue({
+      task: { status: "succeeded", taskId: "fetch:42" },
+    });
+    mocks.getTask.mockResolvedValue({ status: "succeeded", taskId: "fetch:42" });
     mocks.allocationPage.mockReturnValue({
       items: [],
       loading: false,
@@ -521,6 +526,45 @@ describe("admin Microsoft detail sheet runtime", () => {
       await waitFor(() => expect(action).toHaveBeenCalledWith(42));
       await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(index + 1));
     }
+  });
+
+  it("also submits mail fetch from the mailbox tab", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    mocks.fetchMail.mockResolvedValueOnce({
+      task: { status: "queued", taskId: "fetch:42" },
+    });
+    renderSheet(detail(42), onRefresh);
+    fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Fetch mail" }));
+
+    await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(42));
+    await waitFor(() =>
+      expect(mocks.getTask).toHaveBeenCalledWith("fetch:42", expect.any(AbortSignal))
+    );
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+  });
+
+  it("prevents duplicate mailbox fetch submissions", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    mocks.fetchMail.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    renderSheet(detail(42));
+    fireEvent.click(screen.getByRole("tab", { name: "Mailbox" }));
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(1));
+
+    const button = screen.getByRole("button", { name: "Fetch mail" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(mocks.fetchMail).toHaveBeenCalledTimes(1);
+
+    resolveFetch({ task: { status: "succeeded", taskId: "fetch:42" } });
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(2));
   });
 
   it("polls active tasks and stops after the task reaches a terminal state", async () => {

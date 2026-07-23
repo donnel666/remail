@@ -28,6 +28,7 @@ import {
   fetchAdminMicrosoftMail,
   getAdminMicrosoftBindingMessage,
   getAdminMicrosoftMessage,
+  getAdminMicrosoftTask,
   listAdminMicrosoftAliases,
   listAdminMicrosoftBindingMessages,
   listAdminMicrosoftMessages,
@@ -946,14 +947,18 @@ function ResourceMailsPanel({
   auxiliary = false,
   emptyDescription,
   extraOffset = 0,
+  fetchDisabled = false,
   hideMailboxMeta = false,
+  onRefresh,
   resourceId,
   t,
 }: {
   auxiliary?: boolean;
   emptyDescription?: string;
   extraOffset?: number;
+  fetchDisabled?: boolean;
   hideMailboxMeta?: boolean;
+  onRefresh?: () => void | Promise<void>;
   resourceId: number;
   t: TFunction;
 }) {
@@ -970,6 +975,9 @@ function ResourceMailsPanel({
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const fetchInFlightRef = useRef(false);
+  const fetchPollAbortRef = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MailDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -987,6 +995,13 @@ function ResourceMailsPanel({
     setSelectedDetail(null);
     setAddressFilter("all");
   }, [auxiliary, debouncedSearch, pageSize, resourceId]);
+
+  useEffect(
+    () => () => {
+      fetchPollAbortRef.current?.abort();
+    },
+    [resourceId]
+  );
 
   useEffect(() => {
     if (listScopeRef.current !== listScope) {
@@ -1113,6 +1128,68 @@ function ResourceMailsPanel({
     [hasMore, listError, listLoading, nextCursor]
   );
 
+  const fetchMail = async () => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+    setFetchLoading(true);
+    const controller = new AbortController();
+    fetchPollAbortRef.current?.abort();
+    fetchPollAbortRef.current = controller;
+    try {
+      const accepted = await fetchAdminMicrosoftMail(resourceId);
+      Toast.success(t("Mail fetch submitted."));
+      let task = accepted.task;
+      let lastPollError: unknown = null;
+      for (
+        let attempt = 0;
+        attempt < 20 && (task.status === "queued" || task.status === "running");
+        attempt += 1
+      ) {
+        if (attempt > 0) {
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 1_500));
+        }
+        if (controller.signal.aborted) return;
+        try {
+          task = await getAdminMicrosoftTask(task.taskId, controller.signal);
+          lastPollError = null;
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          lastPollError = error;
+        }
+      }
+      if (controller.signal.aborted) return;
+      if (
+        lastPollError &&
+        (task.status === "queued" || task.status === "running")
+      ) {
+        Toast.error(getIamErrorMessage(t, lastPollError, "Microsoft task load failed."));
+      }
+      if (["failed", "uncertain", "canceled"].includes(task.status)) {
+        Toast.error(t("Fetch failed"));
+      }
+      setMessages([]);
+      setCursor(null);
+      setRetryKey((value) => value + 1);
+      try {
+        await onRefresh?.();
+      } catch (error) {
+        Toast.error(
+          getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
+        );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        Toast.error(getIamErrorMessage(t, error, "Fetch failed"));
+      }
+    } finally {
+      if (fetchPollAbortRef.current === controller) {
+        fetchPollAbortRef.current = null;
+        fetchInFlightRef.current = false;
+        setFetchLoading(false);
+      }
+    }
+  };
+
   return (
     <div
       className="flex flex-col overflow-hidden rounded-xl border border-[var(--semi-color-border)] md:grid md:grid-cols-[320px_minmax(0,1fr)]"
@@ -1132,9 +1209,22 @@ function ResourceMailsPanel({
             size="small"
             value={search}
           />
-          <div className="flex items-center justify-between text-xs text-[var(--semi-color-text-2)]">
-            <span>{t("Mail count")}</span>
-            <span className="font-mono tabular-nums">{total}</span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 text-xs text-[var(--semi-color-text-2)]">
+              <span>{t("Mail count")}</span>
+              <span className="font-mono tabular-nums">{total}</span>
+            </div>
+            {auxiliary ? null : (
+              <Button
+                disabled={fetchDisabled || fetchLoading}
+                loading={fetchLoading}
+                onClick={() => void fetchMail()}
+                size="small"
+                type="primary"
+              >
+                {t("Fetch mail")}
+              </Button>
+            )}
           </div>
           {hideMailboxMeta ? null : (
             <Select
@@ -1361,7 +1451,13 @@ export function MicrosoftDetailSheet({
               <TaskDiagnostics detail={detail} onRefresh={onRefresh} t={t} />
             ) : null}
             {activeTab === "mails" ? (
-              <ResourceMailsPanel hideMailboxMeta resourceId={detail.id} t={t} />
+              <ResourceMailsPanel
+                fetchDisabled={detail.status === "deleted"}
+                hideMailboxMeta
+                onRefresh={onRefresh}
+                resourceId={detail.id}
+                t={t}
+              />
             ) : null}
             {activeTab === "auxiliary" ? (
               detail.bindingAddress ? (
