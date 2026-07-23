@@ -5,17 +5,18 @@ import (
 
 	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
+	iaminfra "github.com/donnel666/remail/internal/iam/infra"
 )
 
-// ticketRequesterDirectory adapts IAM's owner-summary port to the aftersale
-// OwnerLookupPort so the ticket console can show each requester. It reuses the
-// same IAM adapter that enriches admin resource owners and order buyers, and
-// lives in the composition root so aftersale need not depend on core.
-type ticketRequesterDirectory struct {
+// ticketParticipantDirectory adapts IAM's user data to the safe aftersale
+// participant directory and lives here to avoid a cross-context dependency.
+type ticketParticipantDirectory struct {
 	owners coreapp.OwnerQueryPort
+	users  *iaminfra.UserRepo
 }
 
-func (d ticketRequesterDirectory) GetByIDs(ctx context.Context, ids []uint) (map[uint]aftersaleapp.RequesterSummary, error) {
+func (d ticketParticipantDirectory) GetByIDs(ctx context.Context, ids []uint) (map[uint]aftersaleapp.RequesterSummary, error) {
 	if d.owners == nil || len(ids) == 0 {
 		return map[uint]aftersaleapp.RequesterSummary{}, nil
 	}
@@ -32,6 +33,28 @@ func (d ticketRequesterDirectory) GetByIDs(ctx context.Context, ids []uint) (map
 			GroupName: summary.GroupName,
 			Role:      summary.Role,
 			Enabled:   summary.Enabled,
+		}
+	}
+	return out, nil
+}
+
+func (d ticketParticipantDirectory) ListActiveSuperAdmins(ctx context.Context) ([]aftersaleapp.RequesterSummary, error) {
+	if d.users == nil {
+		return []aftersaleapp.RequesterSummary{}, nil
+	}
+	role, enabled := iamdomain.RoleSuperAdmin, true
+	users, err := d.users.ListByFilter(ctx, iamdomain.UserListFilter{Role: &role, Enabled: &enabled}, 0, -1)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]aftersaleapp.RequesterSummary, len(users))
+	for i := range users {
+		out[i] = aftersaleapp.RequesterSummary{
+			ID:       users[i].ID,
+			Email:    users[i].Email,
+			Nickname: users[i].Nickname,
+			Role:     users[i].Role.String(),
+			Enabled:  users[i].IsActive(),
 		}
 	}
 	return out, nil

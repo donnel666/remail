@@ -9,7 +9,7 @@ import (
 
 func inboundTestUseCase() (*UseCase, *fakeRepo) {
 	uc, repo, _, _ := newTestUseCase()
-	uc.mailConfig = TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com"}
+	uc.mailConfig = TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"}
 	return uc, repo
 }
 
@@ -59,13 +59,16 @@ func TestStripQuotedReply(t *testing.T) {
 
 func TestIngestInboundReply(t *testing.T) {
 	uc, repo := inboundTestUseCase()
+	uc.SetOwnerLookupPort(fakeOwners{admins: []RequesterSummary{{
+		ID: 42, Email: "admin@example.com", Nickname: "Admin", Role: "super_admin", Enabled: true,
+	}}})
+	mailer := &fakeMail{}
+	uc.mail = mailer
 	repo.ticket = &domain.Ticket{TicketNo: "AS1", ReplyToken: "tok", RequesterUserID: 7, Status: domain.TicketStatusProcessing}
 
 	body := "客户的邮件回复\n\n" + replyDelimiter + "\n> 原文"
 	err := uc.IngestInboundReply(context.Background(), InboundReplyCommand{
 		Recipient: "support+as1-tok@tickets.example.com",
-		FromEmail: "customer@example.com",
-		FromName:  "Customer",
 		Body:      body,
 	})
 	if err != nil {
@@ -75,8 +78,15 @@ func TestIngestInboundReply(t *testing.T) {
 		t.Fatalf("expected 1 reply, got %d", len(repo.replyCalls))
 	}
 	msg := repo.replyCalls[0].Message
-	if msg.SenderType != domain.SenderTypeUser || msg.Content != "客户的邮件回复" || msg.SenderUserID != 7 {
+	if msg.SenderType != domain.SenderTypeUser || msg.Content != "客户的邮件回复" || msg.SenderUserID != 7 || msg.SenderName != "nick" {
 		t.Fatalf("unexpected message: %+v", msg)
+	}
+	if len(mailer.sent) != 1 || mailer.sent[0].To != "admin@example.com" {
+		t.Fatalf("super-admin notifications: %+v", mailer.sent)
+	}
+	expectedReplyTo := uc.mailConfig.replyAddress("AS1", uc.mailConfig.platformReplyToken("AS1", "tok", 42))
+	if mailer.sent[0].ReplyTo != expectedReplyTo {
+		t.Fatalf("super-admin Reply-To = %q", mailer.sent[0].ReplyTo)
 	}
 
 	// Bad token is rejected silently (no reply, no error).
@@ -104,13 +114,51 @@ func TestIngestInboundReply(t *testing.T) {
 	}
 }
 
+func TestIngestInboundSuperAdminReplyNotifiesRequester(t *testing.T) {
+	uc, repo := inboundTestUseCase()
+	uc.SetOwnerLookupPort(fakeOwners{admins: []RequesterSummary{{
+		ID: 42, Email: "admin@example.com", Nickname: "Admin", Role: "super_admin", Enabled: true,
+	}}})
+	mailer := &fakeMail{}
+	uc.mail = mailer
+	repo.ticket = &domain.Ticket{
+		TicketNo: "AS1", Title: "help", ReplyToken: "tok", RequesterUserID: 7, Status: domain.TicketStatusOpen,
+	}
+	adminToken := uc.mailConfig.platformReplyToken("AS1", "tok", 42)
+
+	err := uc.IngestInboundReply(context.Background(), InboundReplyCommand{
+		Recipient: "support+as1-" + adminToken + "@tickets.example.com",
+		Body:      "管理员的邮件回复",
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(repo.replyCalls) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(repo.replyCalls))
+	}
+	msg := repo.replyCalls[0].Message
+	if msg.SenderType != domain.SenderTypePlatform || msg.SenderUserID != 42 || msg.SenderName != "Admin" {
+		t.Fatalf("unexpected platform message: %+v", msg)
+	}
+	if len(mailer.sent) != 1 || mailer.sent[0].To != "u@example.com" {
+		t.Fatalf("requester notifications: %+v", mailer.sent)
+	}
+	if mailer.sent[0].ReplyTo != uc.mailConfig.replyAddress("AS1", "tok") {
+		t.Fatalf("requester Reply-To = %q", mailer.sent[0].ReplyTo)
+	}
+}
+
 func TestReplyAddressAndToken(t *testing.T) {
-	config := TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com"}
+	config := TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"}
 	if got := config.replyAddress("AS1B2C3", "tok123"); got != "support+AS1B2C3-tok123@tickets.example.com" {
 		t.Fatalf("replyAddress = %q", got)
 	}
 	if !config.enabled() {
 		t.Fatal("config should be enabled")
+	}
+	adminToken := config.platformReplyToken("AS1B2C3", "tok123", 42)
+	if len(adminToken) != 16 || adminToken == "tok123" || adminToken != config.platformReplyToken("AS1B2C3", "tok123", 42) {
+		t.Fatalf("unexpected platform token %q", adminToken)
 	}
 	if (TicketMailConfig{}).enabled() {
 		t.Fatal("empty config should be disabled")

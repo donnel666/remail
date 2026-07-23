@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -60,10 +63,10 @@ type RefundResult struct {
 	RefundAmount string
 }
 
-// OwnerLookupPort enriches ticket rows with the requester's safe summary,
-// published by IAM and batched over requester ids.
+// OwnerLookupPort publishes the IAM-owned ticket participant directory.
 type OwnerLookupPort interface {
 	GetByIDs(ctx context.Context, ids []uint) (map[uint]RequesterSummary, error)
+	ListActiveSuperAdmins(ctx context.Context) ([]RequesterSummary, error)
 }
 
 type RequesterSummary struct {
@@ -102,10 +105,11 @@ type TicketMailCommand struct {
 type TicketMailConfig struct {
 	ReplyLocalPart string
 	ReplyDomain    string
+	ReplySecret    string
 }
 
 func (c TicketMailConfig) enabled() bool {
-	return strings.TrimSpace(c.ReplyDomain) != "" && strings.TrimSpace(c.ReplyLocalPart) != ""
+	return strings.TrimSpace(c.ReplyDomain) != "" && strings.TrimSpace(c.ReplyLocalPart) != "" && strings.TrimSpace(c.ReplySecret) != ""
 }
 
 // replyAddress builds the per-ticket Reply-To plus-address. The token guards
@@ -115,12 +119,30 @@ func (c TicketMailConfig) replyAddress(ticketNo, token string) string {
 	return fmt.Sprintf("%s+%s-%s@%s", c.ReplyLocalPart, ticketNo, token, c.ReplyDomain)
 }
 
+// platformReplyToken gives each super-admin a Reply-To credential that cannot
+// be derived from the requester credential visible in the customer's email.
+func (c TicketMailConfig) platformReplyToken(ticketNo, requesterToken string, adminID uint) string {
+	mac := hmac.New(sha256.New, []byte(c.ReplySecret))
+	fmt.Fprintf(mac, "aftersale-platform-reply\x00%s\x00%s\x00%d", ticketNo, requesterToken, adminID)
+	return hex.EncodeToString(mac.Sum(nil)[:8])
+}
+
+func replyTokenEqual(left, right string) bool {
+	return hmac.Equal([]byte(strings.ToLower(strings.TrimSpace(left))), []byte(strings.ToLower(strings.TrimSpace(right))))
+}
+
+func ticketMailIdempotencyKey(ticketNo string, messageID, adminID uint) string {
+	if adminID == 0 {
+		return fmt.Sprintf("astk-%s-%d", ticketNo, messageID)
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%d", ticketNo, messageID, adminID)))
+	return "astk-sa-" + hex.EncodeToString(digest[:16])
+}
+
 // InboundReplyCommand is a parsed inbound email routed to a ticket. Body is the
 // raw text body; the use case strips quoted history from it.
 type InboundReplyCommand struct {
 	Recipient string // the plus-addressed RCPT TO, e.g. support+AS1-tok@domain
-	FromEmail string
-	FromName  string
 	Body      string
 }
 

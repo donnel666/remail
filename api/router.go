@@ -184,11 +184,15 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Aftersale module (support tickets over orders/general, refunds via Trade).
 		aftersaleMod := aftersaleapi.NewModule(p.DB, tradeMod.UseCase, fileStore)
-		aftersaleMod.UseCase.SetOwnerLookupPort(ticketRequesterDirectory{owners: iamMod.AdminResourceOwners})
+		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
 		if p.SMTP.TicketMailEnabled {
 			aftersaleMod.UseCase.SetMailer(
 				aftersaleMailAdapter{delivery: mailMod.DeliveryUseCase, from: p.SMTP.TicketMailFrom},
-				aftersaleapp.TicketMailConfig{ReplyLocalPart: p.SMTP.TicketReplyLocalPart, ReplyDomain: p.SMTP.TicketReplyDomain},
+				aftersaleapp.TicketMailConfig{
+					ReplyLocalPart: p.SMTP.TicketReplyLocalPart,
+					ReplyDomain:    p.SMTP.TicketReplyDomain,
+					ReplySecret:    p.TicketReplySecret,
+				},
 			)
 		}
 		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker)

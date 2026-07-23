@@ -19,7 +19,7 @@ import (
 
 const maxInboundBodyBytes = 256 << 10 // 256 KiB of text is plenty for one reply
 
-// InboundConsumer ingests customer email replies into tickets. It implements
+// InboundConsumer ingests requester and super-admin email replies into tickets. It implements
 // mailtransport's InboundConsumerPort and parses the raw MIME itself, since the
 // transport only hands over the raw bytes.
 type InboundConsumer struct {
@@ -52,14 +52,12 @@ func (c *InboundConsumer) IngestInboundMail(ctx context.Context, req mailapp.Inb
 	if isBounceEnvelope(req.EnvelopeFrom) {
 		return nil
 	}
-	fromEmail, fromName, body, auto := parseInboundEmail(req.Raw)
+	_, _, body, auto := parseInboundEmail(req.Raw)
 	if auto || strings.TrimSpace(body) == "" {
 		return nil
 	}
 	return c.useCase.IngestInboundReply(ctx, aftersaleapp.InboundReplyCommand{
 		Recipient: req.Recipient,
-		FromEmail: fromEmail,
-		FromName:  fromName,
 		Body:      body,
 	})
 }

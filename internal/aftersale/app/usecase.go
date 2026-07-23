@@ -41,7 +41,7 @@ func NewUseCase(repo Repository, orders OrderPort, refunds RefundPort, files Fil
 	}
 }
 
-// SetOwnerLookupPort attaches the IAM-backed requester directory. Wired in the
+// SetOwnerLookupPort attaches the IAM-backed participant directory. Wired in the
 // composition root to avoid a cross-context import cycle.
 func (uc *UseCase) SetOwnerLookupPort(owners OwnerLookupPort) { uc.owners = owners }
 
@@ -146,6 +146,7 @@ func (uc *UseCase) CreateTicket(ctx context.Context, req CreateTicketRequest) (*
 		return nil, err
 	}
 	uc.notifyRequester(ctx, view, ticketMailCreated)
+	uc.notifySuperAdmins(ctx, view, ticketMailCreated)
 	return view, nil
 }
 
@@ -188,10 +189,10 @@ func (uc *UseCase) ReplyTicket(ctx context.Context, req ReplyTicketRequest) (*Ti
 	if err != nil {
 		return nil, err
 	}
-	// Only platform replies notify the customer; the customer's own replies
-	// (console or inbound email) are not echoed back to them.
 	if req.AsPlatform {
 		uc.notifyRequester(ctx, view, ticketMailReplied)
+	} else {
+		uc.notifySuperAdmins(ctx, view, ticketMailReplied)
 	}
 	return view, nil
 }
@@ -238,7 +239,11 @@ func (uc *UseCase) CloseTicket(ctx context.Context, req CloseTicketRequest) (*Ti
 	if err != nil {
 		return nil, err
 	}
-	uc.notifyRequester(ctx, view, ticketMailResolved)
+	if req.AsPlatform {
+		uc.notifyRequester(ctx, view, ticketMailResolved)
+	} else {
+		uc.notifySuperAdmins(ctx, view, ticketMailResolved)
+	}
 	return view, nil
 }
 

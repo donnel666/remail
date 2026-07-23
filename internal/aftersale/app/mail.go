@@ -27,8 +27,7 @@ func newReplyToken() string {
 	return strings.ToLower(platform.NewUUIDV4CompactUpper())[:16]
 }
 
-// notifyRequester emails the ticket requester about the latest activity. It is
-// best-effort: any failure is logged and never propagated (INV-AS7).
+// notifyRequester emails the ticket requester about the latest platform activity.
 func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind ticketMailKind) {
 	if uc.mail == nil || !uc.mailConfig.enabled() || view == nil || view.Ticket == nil {
 		return
@@ -41,13 +40,42 @@ func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind t
 	if to == "" || len(ticket.Messages) == 0 || strings.TrimSpace(ticket.ReplyToken) == "" {
 		return
 	}
+	uc.sendTicketMail(ctx, ticket, to, ticket.ReplyToken, 0, kind, false)
+}
+
+// notifySuperAdmins emails every active super-admin about requester activity.
+// Recipient lookup and delivery are best-effort (INV-AS7).
+func (uc *UseCase) notifySuperAdmins(ctx context.Context, view *TicketView, kind ticketMailKind) {
+	if uc.mail == nil || !uc.mailConfig.enabled() || uc.owners == nil || view == nil || view.Ticket == nil {
+		return
+	}
+	ticket := view.Ticket
+	if len(ticket.Messages) == 0 || strings.TrimSpace(ticket.ReplyToken) == "" {
+		return
+	}
+	admins, err := uc.owners.ListActiveSuperAdmins(ctx)
+	if err != nil {
+		slog.Warn("aftersale super-admin lookup failed", "ticketNo", ticket.TicketNo, "error", err)
+		return
+	}
+	for _, admin := range admins {
+		to := strings.TrimSpace(admin.Email)
+		if admin.ID == 0 || !admin.Enabled || to == "" {
+			continue
+		}
+		token := uc.mailConfig.platformReplyToken(ticket.TicketNo, ticket.ReplyToken, admin.ID)
+		uc.sendTicketMail(ctx, ticket, to, token, admin.ID, kind, true)
+	}
+}
+
+func (uc *UseCase) sendTicketMail(ctx context.Context, ticket *domain.Ticket, to, replyToken string, adminID uint, kind ticketMailKind, platformRecipient bool) {
 	last := ticket.Messages[len(ticket.Messages)-1]
 
-	subject, intro := ticketMailSubjectIntro(kind, ticket)
+	subject, intro := ticketMailSubjectIntro(kind, ticket, platformRecipient)
 	command := TicketMailCommand{
-		IdempotencyKey: fmt.Sprintf("astk-%s-%d", ticket.TicketNo, last.ID),
+		IdempotencyKey: ticketMailIdempotencyKey(ticket.TicketNo, last.ID, adminID),
 		To:             to,
-		ReplyTo:        uc.mailConfig.replyAddress(ticket.TicketNo, ticket.ReplyToken),
+		ReplyTo:        uc.mailConfig.replyAddress(ticket.TicketNo, replyToken),
 		Subject:        subject,
 		TextBody:       ticketMailText(ticket, intro, last.Content),
 		HTMLBody:       ticketMailHTML(ticket, intro, last.Content),
@@ -57,8 +85,18 @@ func (uc *UseCase) notifyRequester(ctx context.Context, view *TicketView, kind t
 	}
 }
 
-func ticketMailSubjectIntro(kind ticketMailKind, ticket *domain.Ticket) (subject, intro string) {
+func ticketMailSubjectIntro(kind ticketMailKind, ticket *domain.Ticket, platformRecipient bool) (subject, intro string) {
 	base := fmt.Sprintf("【工单 %s】%s", ticket.TicketNo, ticket.Title)
+	if platformRecipient {
+		switch kind {
+		case ticketMailCreated:
+			return base, "用户创建了新的售后工单："
+		case ticketMailReplied:
+			return "Re: " + base, "用户回复了售后工单："
+		default: // ticketMailResolved
+			return "Re: " + base, "用户已关闭售后工单："
+		}
+	}
 	switch kind {
 	case ticketMailCreated:
 		return base, "您的售后工单已创建，我们会尽快为您处理。您提交的内容："

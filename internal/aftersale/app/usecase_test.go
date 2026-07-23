@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,8 +31,18 @@ func (f *fakeRepo) Create(_ context.Context, params CreateTicketParams) (*domain
 		Title:               params.Title,
 		Status:              domain.TicketStatusOpen,
 		RequesterUserID:     params.RequesterUserID,
+		ReplyToken:          params.ReplyToken,
 		Order:               params.Order,
 		PlatformUnreadCount: 1,
+		Messages: []domain.TicketMessage{{
+			ID:           1,
+			TicketNo:     params.TicketNo,
+			SenderType:   params.FirstMessage.SenderType,
+			SenderUserID: params.FirstMessage.SenderUserID,
+			SenderName:   params.FirstMessage.SenderName,
+			SenderEmail:  params.FirstMessage.SenderEmail,
+			Content:      params.FirstMessage.Content,
+		}},
 	}
 	return f.ticket, nil
 }
@@ -55,6 +66,15 @@ func (f *fakeRepo) Facets(context.Context, ListFilter) (*TicketFacets, error) {
 
 func (f *fakeRepo) Reply(_ context.Context, params ReplyParams) (*domain.Ticket, error) {
 	f.replyCalls = append(f.replyCalls, params)
+	f.ticket.Messages = append(f.ticket.Messages, domain.TicketMessage{
+		ID:           uint(len(f.ticket.Messages) + 1),
+		TicketNo:     params.TicketNo,
+		SenderType:   params.Message.SenderType,
+		SenderUserID: params.Message.SenderUserID,
+		SenderName:   params.Message.SenderName,
+		SenderEmail:  params.Message.SenderEmail,
+		Content:      params.Message.Content,
+	})
 	if params.Message.SenderType == domain.SenderTypePlatform && f.ticket.Status == domain.TicketStatusOpen {
 		f.ticket.Status = domain.TicketStatusProcessing
 	}
@@ -68,6 +88,12 @@ func (f *fakeRepo) MarkRead(_ context.Context, _ string, platformSide bool) (*do
 
 func (f *fakeRepo) Close(_ context.Context, params CloseParams) (*domain.Ticket, error) {
 	f.closeCalls = append(f.closeCalls, params)
+	f.ticket.Messages = append(f.ticket.Messages, domain.TicketMessage{
+		ID:         uint(len(f.ticket.Messages) + 1),
+		TicketNo:   params.TicketNo,
+		SenderType: domain.SenderTypeSystem,
+		Content:    params.SystemMessage,
+	})
 	f.ticket.Status = domain.TicketStatusClosed
 	resolution := params.Resolution
 	f.ticket.Resolution = &resolution
@@ -115,14 +141,29 @@ func (f *fakeFileStore) Read(context.Context, string) (string, []byte, error) {
 	return "image/png", []byte("x"), nil
 }
 
-type fakeOwners struct{}
+type fakeOwners struct {
+	admins []RequesterSummary
+}
 
 func (fakeOwners) GetByIDs(_ context.Context, ids []uint) (map[uint]RequesterSummary, error) {
 	out := make(map[uint]RequesterSummary, len(ids))
 	for _, id := range ids {
-		out[id] = RequesterSummary{ID: id, Nickname: "nick", Email: "u@example.com"}
+		out[id] = RequesterSummary{ID: id, Nickname: "nick", Email: "u@example.com", Enabled: true}
 	}
 	return out, nil
+}
+
+func (f fakeOwners) ListActiveSuperAdmins(context.Context) ([]RequesterSummary, error) {
+	return f.admins, nil
+}
+
+type fakeMail struct {
+	sent []TicketMailCommand
+}
+
+func (f *fakeMail) SendTicketMail(_ context.Context, mail TicketMailCommand) error {
+	f.sent = append(f.sent, mail)
+	return nil
 }
 
 func newTestUseCase() (*UseCase, *fakeRepo, *fakeRefundPort, *fakeFileStore) {
@@ -223,6 +264,79 @@ func TestCreateTicketGeneral(t *testing.T) {
 	}
 	if view.Requester == nil || view.Requester.Nickname != "nick" {
 		t.Fatalf("requester not enriched: %+v", view.Requester)
+	}
+}
+
+func TestCreateTicketNotifiesRequesterAndSuperAdmin(t *testing.T) {
+	uc, _, _, _ := newTestUseCase()
+	uc.SetOwnerLookupPort(fakeOwners{admins: []RequesterSummary{
+		{ID: 42, Email: "admin@example.com", Nickname: "Admin", Role: "super_admin", Enabled: true},
+		{ID: 43, Email: "admin2@example.com", Nickname: "Admin 2", Role: "super_admin", Enabled: true},
+		{ID: 44, Email: "disabled@example.com", Nickname: "Disabled", Role: "super_admin", Enabled: false},
+	}})
+	mailer := &fakeMail{}
+	config := TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"}
+	uc.SetMailer(mailer, config)
+
+	view, err := uc.CreateTicket(context.Background(), CreateTicketRequest{
+		RequesterUserID: 7,
+		RequesterEmail:  "u@example.com",
+		TicketType:      domain.TicketTypeGeneral,
+		Title:           "help",
+		FirstMessage:    "hi",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(mailer.sent) != 3 {
+		t.Fatalf("sent %d mails, want requester plus 2 active super-admins", len(mailer.sent))
+	}
+	byRecipient := make(map[string]TicketMailCommand, len(mailer.sent))
+	keys := make(map[string]struct{}, len(mailer.sent))
+	for _, sent := range mailer.sent {
+		byRecipient[sent.To] = sent
+		keys[sent.IdempotencyKey] = struct{}{}
+		if len(sent.IdempotencyKey) > 64 {
+			t.Fatalf("idempotency key exceeds database limit: %q", sent.IdempotencyKey)
+		}
+	}
+	requesterMail, requesterOK := byRecipient["u@example.com"]
+	adminMail, adminOK := byRecipient["admin@example.com"]
+	admin2Mail, admin2OK := byRecipient["admin2@example.com"]
+	if !requesterOK || !adminOK || !admin2OK {
+		t.Fatalf("unexpected recipients: %+v", byRecipient)
+	}
+	if len(keys) != len(mailer.sent) {
+		t.Fatalf("idempotency keys must be unique: %+v", mailer.sent)
+	}
+	if requesterMail.ReplyTo != config.replyAddress(view.Ticket.TicketNo, view.Ticket.ReplyToken) {
+		t.Fatalf("requester Reply-To = %q", requesterMail.ReplyTo)
+	}
+	expectedAdminReplyTo := config.replyAddress(view.Ticket.TicketNo, config.platformReplyToken(view.Ticket.TicketNo, view.Ticket.ReplyToken, 42))
+	expectedAdmin2ReplyTo := config.replyAddress(view.Ticket.TicketNo, config.platformReplyToken(view.Ticket.TicketNo, view.Ticket.ReplyToken, 43))
+	if adminMail.ReplyTo != expectedAdminReplyTo || admin2Mail.ReplyTo != expectedAdmin2ReplyTo ||
+		adminMail.ReplyTo == admin2Mail.ReplyTo || adminMail.ReplyTo == requesterMail.ReplyTo {
+		t.Fatalf("Reply-To addresses must be recipient-specific: %+v", byRecipient)
+	}
+}
+
+func TestUserCloseNotifiesSuperAdmin(t *testing.T) {
+	uc, repo, _, _ := newTestUseCase()
+	uc.SetOwnerLookupPort(fakeOwners{admins: []RequesterSummary{{
+		ID: 42, Email: "admin@example.com", Role: "super_admin", Enabled: true,
+	}}})
+	mailer := &fakeMail{}
+	uc.SetMailer(mailer, TicketMailConfig{ReplyLocalPart: "support", ReplyDomain: "tickets.example.com", ReplySecret: "secret"})
+	repo.ticket = &domain.Ticket{
+		TicketNo: "AS1", Title: "help", ReplyToken: "tok", RequesterUserID: 7, Status: domain.TicketStatusOpen,
+		Messages: []domain.TicketMessage{{ID: 1, SenderType: domain.SenderTypeUser, Content: "hi"}},
+	}
+
+	if _, err := uc.CloseTicket(context.Background(), CloseTicketRequest{TicketNo: "AS1", UserID: 7}); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if len(mailer.sent) != 1 || mailer.sent[0].To != "admin@example.com" || !strings.Contains(mailer.sent[0].TextBody, "用户已主动关闭") {
+		t.Fatalf("super-admin close notification: %+v", mailer.sent)
 	}
 }
 

@@ -9,11 +9,9 @@ import (
 	"github.com/donnel666/remail/internal/aftersale/domain"
 )
 
-// IngestInboundReply appends a customer's email reply as a user message. It
-// validates the per-ticket token from the plus-addressed recipient so a leaked
-// ticket number alone cannot forge messages. Permanent problems (unknown
-// ticket, bad token, closed ticket, empty body) return nil so the mail is not
-// retried; only transient repo errors propagate.
+// IngestInboundReply appends an authenticated requester or super-admin email
+// reply and notifies the other side. Permanent problems return nil so the mail
+// is not retried; only transient repository/directory errors propagate.
 func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyCommand) error {
 	ticketNo, token, ok := uc.parseReplyRecipient(cmd.Recipient)
 	if !ok {
@@ -26,10 +24,6 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 		}
 		return err
 	}
-	if stored := strings.TrimSpace(ticket.ReplyToken); stored == "" || !strings.EqualFold(stored, token) {
-		slog.Warn("aftersale inbound reply rejected: token mismatch", "ticketNo", ticketNo)
-		return nil
-	}
 	if ticket.Status.IsTerminal() {
 		slog.Info("aftersale inbound reply to closed ticket dropped", "ticketNo", ticketNo)
 		return nil
@@ -38,21 +32,75 @@ func (uc *UseCase) IngestInboundReply(ctx context.Context, cmd InboundReplyComma
 	if content == "" {
 		return nil
 	}
-	_, err = uc.repo.Reply(ctx, ReplyParams{
+
+	view, err := uc.viewOf(ctx, ticket)
+	if err != nil {
+		return err
+	}
+	if view.Requester == nil {
+		slog.Warn("aftersale inbound reply rejected: requester unavailable", "ticketNo", ticketNo)
+		return nil
+	}
+
+	message := MessageInsert{Content: content}
+	platformSender := false
+	if replyTokenEqual(ticket.ReplyToken, token) {
+		name := strings.TrimSpace(view.Requester.Nickname)
+		if name == "" {
+			name = strings.TrimSpace(view.Requester.Email)
+		}
+		message.SenderType = domain.SenderTypeUser
+		message.SenderUserID = ticket.RequesterUserID
+		message.SenderName = name
+		message.SenderEmail = strings.TrimSpace(view.Requester.Email)
+	} else {
+		if uc.owners == nil {
+			return nil
+		}
+		admins, lookupErr := uc.owners.ListActiveSuperAdmins(ctx)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		var sender *RequesterSummary
+		for i := range admins {
+			expected := uc.mailConfig.platformReplyToken(ticket.TicketNo, ticket.ReplyToken, admins[i].ID)
+			if admins[i].Enabled && replyTokenEqual(expected, token) {
+				sender = &admins[i]
+				break
+			}
+		}
+		if sender == nil {
+			slog.Warn("aftersale inbound reply rejected: token mismatch", "ticketNo", ticketNo)
+			return nil
+		}
+		name := strings.TrimSpace(sender.Nickname)
+		if name == "" {
+			name = strings.TrimSpace(sender.Email)
+		}
+		message.SenderType = domain.SenderTypePlatform
+		message.SenderUserID = sender.ID
+		message.SenderName = name
+		message.SenderEmail = strings.TrimSpace(sender.Email)
+		platformSender = true
+	}
+
+	// ponytail: inbound tasks lack a stable source ID; add one plus a unique
+	// constraint if crash-window duplicate replies become a real issue.
+	updated, err := uc.repo.Reply(ctx, ReplyParams{
 		TicketNo: ticketNo,
-		Message: MessageInsert{
-			SenderType:   domain.SenderTypeUser,
-			SenderUserID: ticket.RequesterUserID,
-			SenderName:   strings.TrimSpace(cmd.FromName),
-			SenderEmail:  strings.TrimSpace(cmd.FromEmail),
-			Content:      content,
-		},
+		Message:  message,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketClosed) {
 			return nil
 		}
 		return err
+	}
+	view.Ticket = updated
+	if platformSender {
+		uc.notifyRequester(ctx, view, ticketMailReplied)
+	} else {
+		uc.notifySuperAdmins(ctx, view, ticketMailReplied)
 	}
 	return nil
 }

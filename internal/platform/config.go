@@ -80,9 +80,8 @@ type SMTPConfig struct {
 	InboundMaxRecipients   int
 	InboundReadTimeout     time.Duration
 	InboundWriteTimeout    time.Duration
-	// After-sales ticket email (opt-in). When enabled, ticket activity is
-	// emailed to the customer with a per-ticket Reply-To so email replies feed
-	// back into the ticket.
+	// After-sales ticket email (opt-in). Ticket activity is emailed to the
+	// requester and active super-admins with authenticated Reply-To addresses.
 	TicketMailEnabled    bool
 	TicketMailFrom       string
 	TicketReplyLocalPart string
