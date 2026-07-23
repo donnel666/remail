@@ -44,7 +44,7 @@ type failingInventoryTaskRepo struct {
 	deadline time.Time
 }
 
-func (r *failingInventoryTaskRepo) GetInventoryStats(ctx context.Context, _ uint, _ uint) (*allocapp.InventoryStats, error) {
+func (r *failingInventoryTaskRepo) GetInventoryStats(ctx context.Context, _ uint) (*allocapp.InventoryStats, error) {
 	r.calls.Add(1)
 	r.deadline, _ = ctx.Deadline()
 	return nil, errors.New("aggregate unavailable")

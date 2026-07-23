@@ -80,7 +80,7 @@ func (d dashboardInventoryDirectory) ProjectInventoryRanking(ctx context.Context
 	}
 	items := make([]dashboardapp.AdminInventoryItem, 0, len(projects))
 	for _, p := range projects {
-		stats, err := d.alloc.GetInventoryStats(ctx, p.ID, 0)
+		stats, err := d.alloc.GetInventoryStats(ctx, p.ID)
 		if errors.Is(err, allocdomain.ErrProjectNotAllocatable) || errors.Is(err, allocdomain.ErrInventoryRefreshInProgress) {
 			// Cold inventory entries are queued by GetInventoryStats and appear on
 			// the next dashboard refresh.

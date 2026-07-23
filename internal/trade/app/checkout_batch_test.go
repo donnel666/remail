@@ -311,7 +311,9 @@ func TestCheckoutRejectsZeroInventoryBeforeOpeningTransaction(t *testing.T) {
 	inventory := &checkoutInventorySpy{}
 	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
 
-	result, err := uc.Checkout(context.Background(), batchRequest("zero-inventory", 1))
+	request := batchRequest("zero-inventory", 1)
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+	result, err := uc.Checkout(context.Background(), request)
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
@@ -329,6 +331,7 @@ func TestCheckoutBatchChecksSharedZeroInventoryOnceAndReturnsEveryItem(t *testin
 	requests := make([]CheckoutRequest, 100)
 	for i := range requests {
 		requests[i] = batchRequest(fmt.Sprintf("zero-inventory-%03d", i), len(requests))
+		requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
 	}
 
 	items, err := uc.CheckoutBatch(context.Background(), requests)
@@ -375,6 +378,7 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	requests := make([]CheckoutRequest, 100)
 	for i := range requests {
 		requests[i] = batchRequest(fmt.Sprintf("stale-inventory-%03d", i), len(requests))
+		requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
 	}
 
 	items, err := uc.CheckoutBatch(context.Background(), requests)
@@ -392,6 +396,31 @@ func TestCheckoutBatchMarksAllocatorExhaustionAndSkipsMatchingTail(t *testing.T)
 	require.Equal(t, uint(9), inventory.marked.ProductID)
 	require.Equal(t, 1, repo.topTx)
 	require.Equal(t, 1, wallet.locks)
+}
+
+func TestCheckoutBatchDoesNotSkipPrivateFirstTailFromSharedPublicCorrection(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	inventory := &checkoutInventorySpy{available: true}
+	uc := NewUseCase(repo, &batchOrderingSpy{}, wallet, inventory, batchTokenSpy{})
+	requests := []CheckoutRequest{
+		batchRequest("private-first-1", 2),
+		batchRequest("private-first-2", 2),
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, len(requests))
+	for _, item := range items {
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+		require.True(t, item.attempted)
+	}
+	require.Equal(t, 1, inventory.checks)
+	require.Equal(t, len(requests), inventory.allocationCalls)
+	require.Equal(t, len(requests), inventory.marks)
+	require.Equal(t, len(requests), repo.topTx)
+	require.Equal(t, len(requests), wallet.locks)
 }
 
 func TestCheckoutBatchUsesIndependentItemTransactionsAndKeepsPartialSuccess(t *testing.T) {

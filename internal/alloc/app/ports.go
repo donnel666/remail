@@ -107,7 +107,6 @@ type ProjectProductInventoryTotals struct {
 type ProductInventoryAvailabilityRequest struct {
 	ProjectID   uint
 	ProductID   uint
-	BuyerUserID uint
 	EmailSuffix string
 	PublicOnly  bool
 }
@@ -120,18 +119,17 @@ const (
 )
 
 type InventoryCacheEntry struct {
-	Kind        InventoryCacheKind
-	ProjectID   uint
-	BuyerUserID uint
+	Kind      InventoryCacheKind
+	ProjectID uint
 }
 
 type InventoryCache interface {
-	GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error)
-	SetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *InventoryStats, ttl time.Duration) error
-	RefreshInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *InventoryStats, ttl time.Duration) error
-	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error)
-	SetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
-	RefreshProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
+	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
+	SetInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
+	RefreshInventoryStats(ctx context.Context, projectID uint, stats *InventoryStats, ttl time.Duration) error
+	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
+	SetProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
+	RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *ProjectProductInventoryTotals, ttl time.Duration) error
 	IsProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	MarkProductUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error)
 	ClaimActiveInventory(ctx context.Context, since time.Time, limit int) ([]InventoryCacheEntry, error)
@@ -344,8 +342,8 @@ type Repository interface {
 	ListActiveByRecipient(ctx context.Context, recipient string) ([]domain.UnifiedAllocation, error)
 
 	AssertProjectInventoryAccess(ctx context.Context, projectID uint, buyerUserID uint) error
-	GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error)
-	GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error)
+	GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
+	GetProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
 	RefreshRoutingCandidates(ctx context.Context, projectID uint) (int, error)
 	ListRoutingCandidates(ctx context.Context, filter CandidateFilter) (*CandidateListResult, error)
 

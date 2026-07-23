@@ -826,7 +826,7 @@ func TestInventoryStatsAreScopedToProjectProductsMySQL(t *testing.T) {
 	seedDomainResources(t, db, 1, 2000, 3)
 
 	repo := NewRepo(db)
-	stats, err := repo.GetInventoryStats(context.Background(), 10, 0)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.False(t, stats.Microsoft.Enabled)
 	require.True(t, stats.Domain.Enabled)
@@ -835,7 +835,7 @@ func TestInventoryStatsAreScopedToProjectProductsMySQL(t *testing.T) {
 	require.Equal(t, int64(30000), stats.Domain.TotalAvailable)
 	require.Equal(t, int64(30000), stats.TotalAvailable)
 
-	_, err = repo.GetInventoryStats(context.Background(), 999, 0)
+	_, err = repo.GetInventoryStats(context.Background(), 999)
 	require.ErrorIs(t, err, domain.ErrProjectNotAllocatable)
 }
 
@@ -852,30 +852,27 @@ func TestProjectInventoryAccessIsCheckedLiveMySQL(t *testing.T) {
 	require.ErrorIs(t, repo.AssertProjectInventoryAccess(context.Background(), 10, 2), domain.ErrProjectNotAllocatable)
 }
 
-func TestInventoryStatsIncludeBuyerPrivateMicrosoftMySQL(t *testing.T) {
+func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	seedMicrosoftResources(t, db, 2, 1000, 1, false, "normal")
 
 	repo := NewRepo(db)
-	adminStats, err := repo.GetInventoryStats(context.Background(), 10, 0)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
-	require.Zero(t, adminStats.Microsoft.EligibleResources)
-	require.Zero(t, adminStats.TotalAvailable)
+	require.Zero(t, stats.Microsoft.EligibleResources)
+	require.Zero(t, stats.Microsoft.MainAvailable)
+	require.Zero(t, stats.TotalAvailable)
 
-	buyerStats, err := repo.GetInventoryStats(context.Background(), 10, 2)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), buyerStats.Microsoft.EligibleResources)
-	require.Equal(t, int64(1), buyerStats.Microsoft.MainAvailable)
-	require.Equal(t, int64(1), buyerStats.TotalAvailable)
-
-	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, uint(10), productStats.ProjectID)
-	require.Equal(t, int64(1), productStats.TotalAvailable)
+	require.Zero(t, productStats.TotalAvailable)
 	require.Len(t, productStats.Items, 1)
 	require.Equal(t, uint(20), productStats.Items[0].ProductID)
-	require.Equal(t, int64(1), productStats.Items[0].TotalAvailable)
+	require.Zero(t, productStats.Items[0].TotalAvailable)
+	require.Zero(t, productStats.Items[0].PublicAvailable)
+	require.Empty(t, productStats.Items[0].Suffixes)
 }
 
 func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing.T) {
@@ -887,16 +884,18 @@ func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing
 
 	assertInventory := func(main, aliases, total int64) {
 		t.Helper()
-		stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+		stats, err := repo.GetInventoryStats(context.Background(), 10)
 		require.NoError(t, err)
 		require.Equal(t, main, stats.Microsoft.MainAvailable)
 		require.Equal(t, aliases, stats.Microsoft.ExplicitAliasAvailable)
 		require.Equal(t, total, stats.TotalAvailable)
 
-		products, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+		products, err := repo.GetProductInventoryTotals(context.Background(), 10)
 		require.NoError(t, err)
+		require.Equal(t, total, products.TotalAvailable)
 		require.Len(t, products.Items, 1)
 		require.Equal(t, total, products.Items[0].TotalAvailable)
+		require.Equal(t, total, products.Items[0].PublicAvailable)
 		if total == 0 {
 			require.Empty(t, products.Items[0].Suffixes)
 		} else {
@@ -949,12 +948,12 @@ WHERE id = 1000`).Error)
 		"m.s10.00@example.com",
 		"m.s100.0@example.com",
 	}
-	productTotals, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	productTotals, err := repo.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, int64(len(wantAliases)), productTotals.TotalAvailable)
 
 	for allocated := int64(0); allocated < int64(len(wantAliases)); allocated++ {
-		stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+		stats, err := repo.GetInventoryStats(context.Background(), 10)
 		require.NoError(t, err)
 		require.Equal(t, int64(len(wantAliases)), stats.Microsoft.DotCapacity)
 		require.Equal(t, int64(len(wantAliases))-allocated, stats.Microsoft.DotAvailable)
@@ -969,7 +968,7 @@ WHERE id = 1000`).Error)
 		require.NoError(t, err)
 	}
 
-	stats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.Zero(t, stats.Microsoft.DotAvailable)
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
@@ -983,10 +982,10 @@ INSERT INTO dot_aliases(resource_id, email, status)
 VALUES
     (1000, 'm..s1000@example.com', 'normal'),
     (1000, 'imported-history-shape@example.com', 'normal')`).Error)
-	stats, err = repo.GetInventoryStats(context.Background(), 10, 2)
+	stats, err = repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.Zero(t, stats.Microsoft.DotAvailable)
-	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.Zero(t, productTotals.TotalAvailable)
 	reusable, err := repo.FindReusableDotAlias(context.Background(), 10, 1000)
@@ -996,10 +995,10 @@ VALUES
 	require.NoError(t, db.Exec(`
 INSERT INTO dot_aliases(resource_id, email, status)
 VALUES (1000, 'm.s1.0.00@example.com', 'normal')`).Error)
-	stats, err = repo.GetInventoryStats(context.Background(), 10, 2)
+	stats, err = repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), stats.Microsoft.DotAvailable)
-	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10, 2)
+	productTotals, err = repo.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), productTotals.TotalAvailable)
 	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
@@ -1010,28 +1009,25 @@ VALUES (1000, 'm.s1.0.00@example.com', 'normal')`).Error)
 	require.Equal(t, "m.s1.0.00@example.com", allocation.Email)
 }
 
-func TestInventoryStatsIncludeBuyerPrivateDomainMySQL(t *testing.T) {
+func TestInventoryStatsExcludePrivateDomainFromSharedPoolMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedDomainResourcesWithPurpose(t, db, 2, 2000, 1, "not_sale")
 
 	repo := NewRepo(db)
-	adminStats, err := repo.GetInventoryStats(context.Background(), 10, 0)
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
-	require.Zero(t, adminStats.Domain.EligibleResources)
-	require.Zero(t, adminStats.TotalAvailable)
+	require.Zero(t, stats.Domain.EligibleResources)
+	require.Zero(t, stats.Domain.TotalAvailable)
+	require.Zero(t, stats.TotalAvailable)
 
-	buyerStats, err := repo.GetInventoryStats(context.Background(), 10, 2)
+	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), buyerStats.Domain.EligibleResources)
-	require.Equal(t, int64(10000), buyerStats.Domain.TotalAvailable)
-	require.Equal(t, int64(10000), buyerStats.TotalAvailable)
-
-	productStats, err := repo.GetProductInventoryTotals(context.Background(), 10, 2)
-	require.NoError(t, err)
-	require.Equal(t, int64(10000), productStats.TotalAvailable)
+	require.Zero(t, productStats.TotalAvailable)
 	require.Len(t, productStats.Items, 1)
-	require.Equal(t, int64(10000), productStats.Items[0].TotalAvailable)
+	require.Zero(t, productStats.Items[0].TotalAvailable)
+	require.Zero(t, productStats.Items[0].PublicAvailable)
+	require.Empty(t, productStats.Items[0].Suffixes)
 }
 
 func TestPlusDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {

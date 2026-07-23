@@ -1233,7 +1233,7 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 	return result, nil
 }
 
-func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.InventoryStats, error) {
+func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
 	stats := &allocapp.InventoryStats{ProjectID: projectID}
 	var productRows []struct {
 		Type       string
@@ -1245,18 +1245,9 @@ func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint, buyerUserI
 SELECT pp.type AS type, pp.main_weight AS main_weight, pp.dot_weight AS dot_weight, pp.plus_weight AS plus_weight
 FROM projects p
 JOIN project_products pp ON pp.project_id = p.id
-WHERE p.id = ?
-  AND p.status = 'listed'
-  AND pp.status = 'enabled'
-  AND (
-      ? = 0
-      OR p.access_type = 'public'
-      OR EXISTS (
-          SELECT 1
-          FROM project_accesses pa
-          WHERE pa.project_id = p.id AND pa.user_id = ?
-      )
-  )`, projectID, buyerUserID, buyerUserID).Scan(&productRows).Error; err != nil {
+	WHERE p.id = ?
+	  AND p.status = 'listed'
+	  AND pp.status = 'enabled'`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load inventory project products: %w", err)
 	}
 	if len(productRows) == 0 {
@@ -1281,7 +1272,7 @@ WHERE p.id = ?
 		return nil
 	}
 	if stats.Microsoft.Enabled {
-		microsoftScope, microsoftScopeArgs := microsoftProjectInventoryScopeSQL(projectID, buyerUserID)
+		microsoftScope, microsoftScopeArgs := microsoftProjectInventoryScopeSQL(projectID)
 		var capacity struct {
 			EligibleResources int64
 			DotCapacity       int64
@@ -1419,7 +1410,7 @@ WHERE adu.usage_date = ?
 			EligibleResources int64
 			MailboxDailyLimit int64
 		}
-		domainScope, domainScopeArgs := domainInventoryScopeSQL(buyerUserID)
+		domainScope, domainScopeArgs := domainInventoryScopeSQL()
 		if err := scan(&capacity, `
 SELECT COUNT(*) AS eligible_resources, COALESCE(SUM(dr.mailbox_daily_limit), 0) AS mailbox_daily_limit
 FROM domain_resources dr
@@ -1499,7 +1490,7 @@ type productInventoryRow struct {
 	PlusWeight int
 }
 
-func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.ProjectProductInventoryTotals, error) {
+func (r *Repo) GetProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
 	var productRows []productInventoryRow
 	if err := r.dbFor(ctx).Raw(`
 SELECT
@@ -1510,33 +1501,18 @@ SELECT
     pp.plus_weight AS plus_weight
 FROM projects p
 JOIN project_products pp ON pp.project_id = p.id
-WHERE p.id = ?
-  AND p.status = 'listed'
-  AND pp.status = 'enabled'
-  AND (
-      p.access_type = 'public'
-      OR EXISTS (
-          SELECT 1
-          FROM project_accesses pa
-          WHERE pa.project_id = p.id AND pa.user_id = ?
-      )
-  )
-ORDER BY pp.id ASC`, projectID, buyerUserID).Scan(&productRows).Error; err != nil {
+	WHERE p.id = ?
+	  AND p.status = 'listed'
+	  AND pp.status = 'enabled'
+	ORDER BY pp.id ASC`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load product inventory rows: %w", err)
 	}
 	if len(productRows) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
-	stats, err := r.GetInventoryStats(ctx, projectID, buyerUserID)
+	stats, err := r.GetInventoryStats(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	publicStats := stats
-	if buyerUserID != 0 {
-		publicStats, err = r.GetInventoryStats(ctx, projectID, 0)
-		if err != nil {
-			return nil, err
-		}
 	}
 	result := &allocapp.ProjectProductInventoryTotals{
 		ProjectID: projectID,
@@ -1546,13 +1522,13 @@ ORDER BY pp.id ASC`, projectID, buyerUserID).Scan(&productRows).Error; err != ni
 		item := allocapp.ProductInventoryTotal{
 			ProductID:       row.ProductID,
 			TotalAvailable:  productInventoryTotalFromStats(row, stats),
-			PublicAvailable: productInventoryTotalFromStats(row, publicStats),
+			PublicAvailable: productInventoryTotalFromStats(row, stats),
 		}
 		switch domain.AllocationType(row.Type) {
 		case domain.AllocationTypeMicrosoft:
-			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, buyerUserID, row)
+			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case domain.AllocationTypeDomain:
-			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx, buyerUserID)
+			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
 		default:
 			return nil, domain.ErrProjectNotAllocatable
 		}
@@ -1594,23 +1570,16 @@ type suffixInventoryValue struct {
 	PublicAvailable int64
 }
 
-func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projectID uint, buyerUserID uint, row productInventoryRow) ([]allocapp.ProductInventorySuffixTotal, error) {
-	total, err := r.microsoftSuffixInventoryByScope(ctx, projectID, buyerUserID, row)
+func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projectID uint, row productInventoryRow) ([]allocapp.ProductInventorySuffixTotal, error) {
+	total, err := r.microsoftSuffixInventoryByScope(ctx, projectID, row)
 	if err != nil {
 		return nil, err
 	}
-	public := total
-	if buyerUserID != 0 {
-		public, err = r.microsoftSuffixInventoryByScope(ctx, projectID, 0, row)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return mergeSuffixInventory(total, public), nil
+	return mergeSuffixInventory(total, total), nil
 }
 
-func (r *Repo) microsoftSuffixInventoryByScope(ctx context.Context, projectID uint, buyerUserID uint, row productInventoryRow) (map[string]int64, error) {
-	scope, scopeArgs := microsoftProjectInventoryScopeSQL(projectID, buyerUserID)
+func (r *Repo) microsoftSuffixInventoryByScope(ctx context.Context, projectID uint, row productInventoryRow) (map[string]int64, error) {
+	scope, scopeArgs := microsoftProjectInventoryScopeSQL(projectID)
 	result := map[string]int64{}
 	var capacities []struct {
 		Suffix         string
@@ -1762,23 +1731,16 @@ GROUP BY ms.email_domain`, append([]any{today}, scopeArgs...)...)
 	return result, nil
 }
 
-func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context, buyerUserID uint) ([]allocapp.ProductInventorySuffixTotal, error) {
-	total, err := r.domainSuffixInventoryByScope(ctx, buyerUserID)
+func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context) ([]allocapp.ProductInventorySuffixTotal, error) {
+	total, err := r.domainSuffixInventoryByScope(ctx)
 	if err != nil {
 		return nil, err
 	}
-	public := total
-	if buyerUserID != 0 {
-		public, err = r.domainSuffixInventoryByScope(ctx, 0)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return mergeSuffixInventory(total, public), nil
+	return mergeSuffixInventory(total, total), nil
 }
 
-func (r *Repo) domainSuffixInventoryByScope(ctx context.Context, buyerUserID uint) (map[string]int64, error) {
-	scope, scopeArgs := domainInventoryScopeSQL(buyerUserID)
+func (r *Repo) domainSuffixInventoryByScope(ctx context.Context) (map[string]int64, error) {
+	scope, scopeArgs := domainInventoryScopeSQL()
 	var capacities []struct {
 		Suffix            string
 		MailboxDailyLimit int64
@@ -2532,16 +2494,13 @@ func isValidDailyUsageKind(kind domain.DailyUsageKind) bool {
 	return kind == domain.DailyUsageKindPlus || kind == domain.DailyUsageKindDomainMailbox
 }
 
-func microsoftInventoryScopeSQL(buyerUserID uint) (string, []any) {
+func microsoftInventoryScopeSQL() (string, []any) {
 	publicScope := "(ms.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))"
-	if buyerUserID == 0 {
-		return publicScope, nil
-	}
-	return "(" + publicScope + " OR (ms.for_sale = FALSE AND er.owner_user_id = ?))", []any{buyerUserID}
+	return publicScope, nil
 }
 
-func microsoftProjectInventoryScopeSQL(projectID uint, buyerUserID uint) (string, []any) {
-	scope, args := microsoftInventoryScopeSQL(buyerUserID)
+func microsoftProjectInventoryScopeSQL(projectID uint) (string, []any) {
+	scope, args := microsoftInventoryScopeSQL()
 	return "(" + scope + ") AND " + microsoftProjectUnmatchedCondition, append(args, projectID)
 }
 
@@ -2583,12 +2542,9 @@ func microsoftDotAliasValidForResourceExpression(aliasTable, resourceTable strin
 		" AND LOCATE('..', " + aliasLocal + ") = 0)"
 }
 
-func domainInventoryScopeSQL(buyerUserID uint) (string, []any) {
+func domainInventoryScopeSQL() (string, []any) {
 	publicScope := "(dr.purpose = 'sale' AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin'))"
-	if buyerUserID == 0 {
-		return publicScope, nil
-	}
-	return "(" + publicScope + " OR (dr.purpose = 'not_sale' AND er.owner_user_id = ?))", []any{buyerUserID}
+	return publicScope, nil
 }
 
 func normalizeCandidateSuffix(value string) string {

@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix = "alloc:inventory:v2:"
-	inventoryCacheActiveKey = "alloc:inventory:active"
+	inventoryCacheKeyPrefix = "alloc:inventory:v3:"
+	inventoryCacheActiveKey = "alloc:inventory:v3:active"
 )
 
 type InventoryCache struct {
@@ -26,34 +26,34 @@ func NewInventoryCache(client redis.UniversalClient) *InventoryCache {
 	return &InventoryCache{redis: client}
 }
 
-func (c *InventoryCache) GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.InventoryStats, error) {
-	return loadInventoryCache[allocapp.InventoryStats](ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID, buyerUserID))
+func (c *InventoryCache) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
+	return loadInventoryCache[allocapp.InventoryStats](ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID))
 }
 
-func (c *InventoryCache) SetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *allocapp.InventoryStats, ttl time.Duration) error {
-	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID, buyerUserID), stats, ttl)
+func (c *InventoryCache) SetInventoryStats(ctx context.Context, projectID uint, stats *allocapp.InventoryStats, ttl time.Duration) error {
+	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID), stats, ttl)
 }
 
-func (c *InventoryCache) RefreshInventoryStats(ctx context.Context, projectID uint, buyerUserID uint, stats *allocapp.InventoryStats, ttl time.Duration) error {
-	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID, buyerUserID), stats, ttl)
+func (c *InventoryCache) RefreshInventoryStats(ctx context.Context, projectID uint, stats *allocapp.InventoryStats, ttl time.Duration) error {
+	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheStats, projectID), stats, ttl)
 }
 
-func (c *InventoryCache) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*allocapp.ProjectProductInventoryTotals, error) {
-	totals, err := loadInventoryCache[allocapp.ProjectProductInventoryTotals](ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID, buyerUserID))
+func (c *InventoryCache) GetProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
+	totals, err := loadInventoryCache[allocapp.ProjectProductInventoryTotals](ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID))
 	if err != nil || totals == nil {
 		return totals, err
 	}
-	if err := c.applyProductUnavailableMarkers(ctx, totals, buyerUserID); err != nil {
+	if err := c.applyProductUnavailableMarkers(ctx, totals); err != nil {
 		return nil, err
 	}
 	return totals, nil
 }
 
-func (c *InventoryCache) applyProductUnavailableMarkers(ctx context.Context, totals *allocapp.ProjectProductInventoryTotals, buyerUserID uint) error {
+func (c *InventoryCache) applyProductUnavailableMarkers(ctx context.Context, totals *allocapp.ProjectProductInventoryTotals) error {
 	if totals == nil {
 		return nil
 	}
-	requests := productUnavailableMarkerRequests(*totals, buyerUserID)
+	requests := productUnavailableMarkerRequests(*totals)
 	if len(requests) == 0 {
 		return nil
 	}
@@ -73,12 +73,12 @@ func (c *InventoryCache) applyProductUnavailableMarkers(ctx context.Context, tot
 	return nil
 }
 
-func (c *InventoryCache) SetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
-	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID, buyerUserID), totals, ttl)
+func (c *InventoryCache) SetProductInventoryTotals(ctx context.Context, projectID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
+	return storeInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), totals, ttl)
 }
 
-func (c *InventoryCache) RefreshProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
-	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID, buyerUserID), totals, ttl)
+func (c *InventoryCache) RefreshProductInventoryTotals(ctx context.Context, projectID uint, totals *allocapp.ProjectProductInventoryTotals, ttl time.Duration) error {
+	return refreshInventoryCache(ctx, c.redis, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID), totals, ttl)
 }
 
 func (c *InventoryCache) IsProductUnavailable(ctx context.Context, req allocapp.ProductInventoryAvailabilityRequest) (bool, error) {
@@ -105,7 +105,7 @@ func (c *InventoryCache) IsProductUnavailable(ctx context.Context, req allocapp.
 // this correction from overwriting a concurrent background refresh, and
 // KEEPTTL preserves the 24-hour hard expiry.
 func (c *InventoryCache) MarkProductUnavailable(ctx context.Context, req allocapp.ProductInventoryAvailabilityRequest) (bool, error) {
-	key := inventoryCacheKey(allocapp.InventoryCacheProducts, req.ProjectID, req.BuyerUserID)
+	key := inventoryCacheKey(allocapp.InventoryCacheProducts, req.ProjectID)
 	markerKey := productUnavailableMarkerKey(req)
 	for attempt := 0; attempt < 3; attempt++ {
 		marked := false
@@ -171,16 +171,16 @@ func productInventoryTargetExists(totals allocapp.ProjectProductInventoryTotals,
 	return false
 }
 
-func productUnavailableMarkerRequests(totals allocapp.ProjectProductInventoryTotals, buyerUserID uint) []allocapp.ProductInventoryAvailabilityRequest {
+func productUnavailableMarkerRequests(totals allocapp.ProjectProductInventoryTotals) []allocapp.ProductInventoryAvailabilityRequest {
 	requests := make([]allocapp.ProductInventoryAvailabilityRequest, 0, len(totals.Items)*2)
 	for _, item := range totals.Items {
 		for _, publicOnly := range []bool{false, true} {
 			requests = append(requests, allocapp.ProductInventoryAvailabilityRequest{
-				ProjectID: totals.ProjectID, ProductID: item.ProductID, BuyerUserID: buyerUserID, PublicOnly: publicOnly,
+				ProjectID: totals.ProjectID, ProductID: item.ProductID, PublicOnly: publicOnly,
 			})
 			for _, suffix := range item.Suffixes {
 				requests = append(requests, allocapp.ProductInventoryAvailabilityRequest{
-					ProjectID: totals.ProjectID, ProductID: item.ProductID, BuyerUserID: buyerUserID,
+					ProjectID: totals.ProjectID, ProductID: item.ProductID,
 					EmailSuffix: suffix.Suffix, PublicOnly: publicOnly,
 				})
 			}
@@ -200,7 +200,6 @@ func productUnavailableMarkerKey(req allocapp.ProductInventoryAvailabilityReques
 	}
 	return inventoryCacheKeyPrefix + "unavailable:" +
 		strconv.FormatUint(uint64(req.ProjectID), 10) + ":" +
-		strconv.FormatUint(uint64(req.BuyerUserID), 10) + ":" +
 		strconv.FormatUint(uint64(req.ProductID), 10) + ":" + scope + ":" + suffix
 }
 
@@ -301,7 +300,7 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 	now := float64(time.Now().UnixMilli())
 	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		for _, entry := range entries {
-			pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID, entry.BuyerUserID)})
+			pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID)})
 		}
 		return nil
 	})
@@ -312,7 +311,7 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 }
 
 func (c *InventoryCache) DeleteInventory(ctx context.Context, entry allocapp.InventoryCacheEntry) error {
-	key := inventoryCacheKey(entry.Kind, entry.ProjectID, entry.BuyerUserID)
+	key := inventoryCacheKey(entry.Kind, entry.ProjectID)
 	_, err := c.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 		pipe.Del(ctx, key)
 		pipe.ZRem(ctx, inventoryCacheActiveKey, key)
@@ -391,17 +390,17 @@ func refreshInventoryCache(ctx context.Context, client redis.UniversalClient, ke
 	return nil
 }
 
-func inventoryCacheKey(kind allocapp.InventoryCacheKind, projectID uint, buyerUserID uint) string {
-	return inventoryCacheKeyPrefix + string(kind) + ":" + strconv.FormatUint(uint64(projectID), 10) + ":" + strconv.FormatUint(uint64(buyerUserID), 10)
+func inventoryCacheKey(kind allocapp.InventoryCacheKind, projectID uint) string {
+	return inventoryCacheKeyPrefix + string(kind) + ":" + strconv.FormatUint(uint64(projectID), 10)
 }
 
 func inventoryCacheLockKey(entry allocapp.InventoryCacheEntry) string {
-	return inventoryCacheKeyPrefix + "lock:" + string(entry.Kind) + ":" + strconv.FormatUint(uint64(entry.ProjectID), 10) + ":" + strconv.FormatUint(uint64(entry.BuyerUserID), 10)
+	return inventoryCacheKeyPrefix + "lock:" + string(entry.Kind) + ":" + strconv.FormatUint(uint64(entry.ProjectID), 10)
 }
 
 func parseInventoryCacheKey(key string) (allocapp.InventoryCacheEntry, bool) {
 	parts := strings.Split(strings.TrimPrefix(key, inventoryCacheKeyPrefix), ":")
-	if !strings.HasPrefix(key, inventoryCacheKeyPrefix) || len(parts) != 3 {
+	if !strings.HasPrefix(key, inventoryCacheKeyPrefix) || len(parts) != 2 {
 		return allocapp.InventoryCacheEntry{}, false
 	}
 	kind := allocapp.InventoryCacheKind(parts[0])
@@ -412,11 +411,7 @@ func parseInventoryCacheKey(key string) (allocapp.InventoryCacheEntry, bool) {
 	if err != nil || projectID == 0 {
 		return allocapp.InventoryCacheEntry{}, false
 	}
-	buyerUserID, err := strconv.ParseUint(parts[2], 10, 64)
-	if err != nil {
-		return allocapp.InventoryCacheEntry{}, false
-	}
-	return allocapp.InventoryCacheEntry{Kind: kind, ProjectID: uint(projectID), BuyerUserID: uint(buyerUserID)}, true
+	return allocapp.InventoryCacheEntry{Kind: kind, ProjectID: uint(projectID)}, true
 }
 
 var inventoryCacheLockReleaseScript = redis.NewScript(`

@@ -4188,11 +4188,6 @@ paths:
           required: true
           schema:
             type: integer
-        - name: buyerUserId
-          in: query
-          schema:
-            type: integer
-            description: Optional buyer id used to count owned private Microsoft candidates.
       responses:
         "200":
           description: Project inventory diagnostics

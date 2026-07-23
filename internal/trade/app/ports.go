@@ -84,7 +84,6 @@ type AllocationPort interface {
 type InventoryAvailabilityCommand struct {
 	ProjectID   uint
 	ProductID   uint
-	BuyerUserID uint
 	EmailSuffix string
 	PublicOnly  bool
 }
@@ -849,7 +848,6 @@ func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []che
 	type inventoryKey struct {
 		projectID   uint
 		productID   uint
-		buyerUserID uint
 		emailSuffix string
 		publicOnly  bool
 	}
@@ -862,15 +860,14 @@ func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []che
 		}
 		key := inventoryKey{
 			projectID: item.quote.ProjectID, productID: item.quote.ProductID,
-			buyerUserID: item.request.UserID, emailSuffix: item.emailSuffix,
-			publicOnly: item.policy == domain.SupplyPolicyPublicOnly,
+			emailSuffix: item.emailSuffix, publicOnly: item.policy == domain.SupplyPolicyPublicOnly,
 		}
 		available, exists := availability[key]
 		if !checked[key] {
 			var err error
 			available, err = checker.HasAvailableInventory(ctx, InventoryAvailabilityCommand{
-				ProjectID: key.projectID, ProductID: key.productID, BuyerUserID: key.buyerUserID,
-				EmailSuffix: key.emailSuffix, PublicOnly: key.publicOnly,
+				ProjectID: key.projectID, ProductID: key.productID, EmailSuffix: key.emailSuffix,
+				PublicOnly: key.publicOnly,
 			})
 			checked[key] = true
 			if err != nil {
@@ -893,14 +890,13 @@ func (uc *UseCase) markCheckoutInventoryUnavailable(ctx context.Context, prepare
 	}
 	marked, err := marker.MarkInventoryUnavailable(ctx, InventoryAvailabilityCommand{
 		ProjectID: prepared.quote.ProjectID, ProductID: prepared.quote.ProductID,
-		BuyerUserID: prepared.request.UserID, EmailSuffix: prepared.emailSuffix,
-		PublicOnly: prepared.policy == domain.SupplyPolicyPublicOnly,
+		EmailSuffix: prepared.emailSuffix, PublicOnly: prepared.policy == domain.SupplyPolicyPublicOnly,
 	})
 	if err != nil {
 		slog.Warn("mark checkout inventory unavailable failed", "project_id", prepared.quote.ProjectID, "product_id", prepared.quote.ProductID, "error", err)
 		return false
 	}
-	return marked
+	return marked && prepared.policy == domain.SupplyPolicyPublicOnly
 }
 
 func (uc *UseCase) checkoutBatch(ctx context.Context, prepared []checkoutPreparation) ([]CheckoutBatchItem, error) {
@@ -950,7 +946,6 @@ func sameCheckoutInventoryKey(left, right checkoutPreparation) bool {
 	}
 	return left.quote.ProjectID == right.quote.ProjectID &&
 		left.quote.ProductID == right.quote.ProductID &&
-		left.request.UserID == right.request.UserID &&
 		left.emailSuffix == right.emailSuffix &&
 		left.policy == right.policy
 }

@@ -119,11 +119,7 @@ func (h *Handler) GetProjectInventory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	buyerUserID, ok := parseOptionalUint(c, "buyerUserId")
-	if !ok {
-		return
-	}
-	stats, err := h.module.UseCase.GetInventoryStats(c.Request.Context(), projectID, buyerUserID)
+	stats, err := h.module.UseCase.GetInventoryStats(c.Request.Context(), projectID)
 	if err != nil {
 		writeAllocError(c, err)
 		return

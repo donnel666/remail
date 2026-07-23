@@ -7678,11 +7678,6 @@ type PostAdminProjectDuplicateParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
-// GetAdminProjectInventoryParams defines parameters for GetAdminProjectInventory.
-type GetAdminProjectInventoryParams struct {
-	BuyerUserId *int `form:"buyerUserId,omitempty" json:"buyerUserId,omitempty"`
-}
-
 // PostAdminProjectRejectParams defines parameters for PostAdminProjectReject.
 type PostAdminProjectRejectParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -9825,7 +9820,7 @@ type ServerInterface interface {
 	PostAdminProjectDuplicate(c *gin.Context, projectId int, params PostAdminProjectDuplicateParams)
 	// Get allocation inventory diagnostics for a project
 	// (GET /v1/admin/projects/{projectId}/inventory)
-	GetAdminProjectInventory(c *gin.Context, projectId int, params GetAdminProjectInventoryParams)
+	GetAdminProjectInventory(c *gin.Context, projectId int)
 	// Reject a reviewing project application
 	// (POST /v1/admin/projects/{projectId}/reject)
 	PostAdminProjectReject(c *gin.Context, projectId int, params PostAdminProjectRejectParams)
@@ -14113,17 +14108,6 @@ func (siw *ServerInterfaceWrapper) GetAdminProjectInventory(c *gin.Context) {
 
 	c.Set(string(CookieAuthScopes), []string{})
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAdminProjectInventoryParams
-
-	// ------------- Optional query parameter "buyerUserId" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "buyerUserId", c.Request.URL.Query(), &params.BuyerUserId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter buyerUserId: %w", err), http.StatusBadRequest)
-		return
-	}
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -14131,7 +14115,7 @@ func (siw *ServerInterfaceWrapper) GetAdminProjectInventory(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.GetAdminProjectInventory(c, projectId, params)
+	siw.Handler.GetAdminProjectInventory(c, projectId)
 }
 
 // PostAdminProjectReject operation middleware

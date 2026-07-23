@@ -10923,9 +10923,7 @@ export interface operations {
     };
     getAdminProjectInventory: {
         parameters: {
-            query?: {
-                buyerUserId?: number;
-            };
+            query?: never;
             header?: never;
             path: {
                 projectId: number;

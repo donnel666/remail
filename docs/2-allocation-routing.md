@@ -205,28 +205,32 @@ Microsoft `main` 在持有资源根锁后必须同时复核当前项目历史和
 
 | 路径 | 条件 |
 |------|------|
-| 公开出售 | `Microsoft.status=normal AND forSale=true`，且 owner 启用并具备 `supplier/admin/super_admin` 任一角色。 |
-| 自用私有 | `Microsoft.status=normal AND forSale=false AND ownerUserId=buyerUserId`；只能由 owner 自己分配，不进入公开池。 |
+| 公开出售 | `Microsoft.status=normal AND forSale=true`，且 owner 启用并具备 `supplier/admin/super_admin` 任一角色；进入项目级共享库存。 |
+| 自用私有 | `Microsoft.status=normal AND forSale=false AND ownerUserId=buyerUserId`；只能由 owner 自己分配，不进入公开库存读模型。 |
 
 Domain 公开出售候选和自用私有候选也必须使用两条显式查询路径：
 
 | 路径 | 条件 |
 |------|------|
-| 公开出售 | `Domain.status=normal AND purpose=sale AND mailServer=online`，且 owner 启用并具备 `supplier/admin/super_admin` 任一角色。 |
-| 自用私有 | `Domain.status=normal AND purpose=not_sale AND mailServer=online AND ownerUserId=buyerUserId`；只能由 owner 自己分配，不进入公开池。 |
+| 公开出售 | `Domain.status=normal AND purpose=sale AND mailServer=online`，且 owner 启用并具备 `supplier/admin/super_admin` 任一角色；进入项目级共享库存。 |
+| 自用私有 | `Domain.status=normal AND purpose=not_sale AND mailServer=online AND ownerUserId=buyerUserId`；只能由 owner 自己分配，不进入公开库存读模型。 |
 
-P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事务内 `FOR UPDATE SKIP LOCKED` 重校验资源状态、出售标记或用途、owner 启用状态和 owner 角色。早期按“项目 × 全资源”维护的 RoutingCandidate 镜像与刷新任务已删除，避免百万资源下的存储倍增和刷新写风暴；库存诊断使用 Redis 读模型，用户请求只实时校验项目可见性并读取缓存，冷 miss 标记活跃键、调度异步预热并返回 `503 + Retry-After`。后台任务每两分钟限量刷新近期活跃的库存键；只有异步刷新会重置二十四小时 TTL，缓存读取不续期，短期刷新失败继续服务已有快照，TTL 到期后重新预热。
+P1-I5 分配直接使用 SourceCandidate 查询 Core 源表，并在同一短事务内 `FOR UPDATE SKIP LOCKED` 重校验资源状态、出售标记或用途、owner 启用状态和 owner 角色。早期按“项目 × 全资源”维护的 RoutingCandidate 镜像与刷新任务已删除，避免百万资源下的存储倍增和刷新写风暴；库存诊断使用项目级 Redis 读模型，用户只参与实时项目可见性校验，不参与库存 key 或聚合 SQL。所有用户共享同一项目快照，冷 miss 只为该项目标记一次活跃键并调度异步预热。后台任务每十分钟限量刷新近期活跃的项目库存；只有异步刷新会重置二十四小时 TTL，缓存读取不续期，短期刷新失败继续服务已有快照，TTL 到期后重新预热。
+
+项目级库存使用独立的 `alloc:inventory:v3:*` 数据、锁和 active ZSET，不读取 buyer 语义的 v2 payload。滚动发布期间不得删除旧 active ZSET；全部旧实例退出且最长十分钟旧刷新任务 drain 后，一次性执行 `UNLINK alloc:inventory:active`。旧 v2 payload 依靠二十四小时 TTL、旧 marker/lock 依靠十分钟 TTL 自然淘汰。
 
 Microsoft 候选查询和行锁重校验必须读取既有 `microsoft_allocations` 历史：同一具体 `main/explicitAliasId/dotAliasId/plusAliasId` 已经分配给目标项目时不得再次选择，但同一主资源下未用于该项目的其他别名仍可分配。验证后的历史扫描把识别结果交给 BC-TRADE；已有 Allocation 的具体关系直接复用且不创建假订单，只有缺失关系才通过 BC-ALLOC 既有 alias、order guard 和 allocation repository 创建超级管理员 0 元已过保订单对应的 `released` Allocation，BC-MAILMATCH 不直写本表。旧 `microsoft_resource_project_matches` 仅作为尚未重扫数据的保守兼容挡板，资源完成重扫后删除对应旧行。
 
-P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 后缀或 Domain 域名维度库存，不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。`publicAvailable` 仅用于前端区分 `private_first/public_only` 下单策略的可用量，不是管理员来源明细。库存分两类：
+P1-I5 项目库存按项目商品启用的分配形态计算。管理员库存诊断可以看到来源明细；普通用户和下单页只看到项目商品库存、可选 Microsoft 后缀或 Domain 域名维度库存，不返回具体供应商、资源 ID、别名或生成邮箱等来源 breakdown。兼容字段 `totalAvailable` 与 `publicAvailable` 都表示同一份项目公共库存；买家自有资源不进入该读模型。库存分两类：
 
 | 类型 | 库存口径 |
 |------|----------|
 | 主邮箱类 | `mainWeight > 0` 时计入可用主邮箱和可用显式别名。 |
 | 点别名 | `dotWeight > 0` 时按 `eligibleMicrosoftResourceCount * 10 - activeDotAllocationsForProject` 估算；分配生成点别名也最多生成 10 个，保证展示和实际一致。 |
 | 加号别名 | `plusWeight > 0` 时按 `SUM(microsoft.plusDailyLimit) - todayPlusUsage` 计算。 |
-| 自建生成邮箱 | Domain 商品启用时按当前主体可用 Domain scope 的 `SUM(domain.mailboxDailyLimit) - todayDomainMailboxUsage` 计算；后台 buyer=0 只看公开池，普通用户叠加自己的 `purpose=not_sale` 私有池。 |
+| 自建生成邮箱 | Domain 商品启用时按公共可售 Domain scope 的 `SUM(domain.mailboxDailyLimit) - todayDomainMailboxUsage` 计算；用户私有 `purpose=not_sale` 资源只在权威分配的 `private_first` 路径中判断，不进入共享库存。 |
+
+共享库存为公共可售资源的项目级快照。`public_only` 可以在共享库存为零时快速拒绝；`private_first` 不能据此断言买家自有资源也为零，因此必须继续进入权威分配器。
 
 `plusDailyLimit` 归 Microsoft 资源，`mailboxDailyLimit` 归 Domain 资源，默认都是 `10000`。这两个字段保护的是资源本身，不放在项目商品上；多个项目共享同一个资源时，一个项目的消耗会减少其他项目看到的共享可用量。
 

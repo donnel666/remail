@@ -496,49 +496,49 @@ func (uc *UseCase) AssertNoActiveAllocations(ctx context.Context, resourceIDs []
 	return uc.repo.AssertNoActiveAllocations(ctx, resourceIDs)
 }
 
-func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint, buyerUserID uint) (*InventoryStats, error) {
+func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error) {
 	if projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	if uc.inventoryCache == nil {
-		return uc.repo.GetInventoryStats(ctx, projectID, buyerUserID)
+		return uc.repo.GetInventoryStats(ctx, projectID)
 	}
-	entry := InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID, BuyerUserID: buyerUserID}
+	entry := InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: projectID}
 	return loadCachedInventory(
 		ctx,
 		uc.inventoryCache,
 		entry,
 		func(ctx context.Context) (*InventoryStats, error) {
-			return uc.inventoryCache.GetInventoryStats(ctx, projectID, buyerUserID)
+			return uc.inventoryCache.GetInventoryStats(ctx, projectID)
 		},
 		uc.ScheduleInventoryRefresh,
 	)
 }
 
-func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) (*ProjectProductInventoryTotals, error) {
-	if projectID == 0 || buyerUserID == 0 {
+func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, viewerUserID uint) (*ProjectProductInventoryTotals, error) {
+	if projectID == 0 || viewerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	if err := uc.repo.AssertProjectInventoryAccess(ctx, projectID, buyerUserID); err != nil {
+	if err := uc.repo.AssertProjectInventoryAccess(ctx, projectID, viewerUserID); err != nil {
 		return nil, err
 	}
 	if uc.inventoryCache == nil {
-		return uc.repo.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+		return uc.repo.GetProductInventoryTotals(ctx, projectID)
 	}
-	entry := InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID, BuyerUserID: buyerUserID}
+	entry := InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID}
 	return loadCachedInventory(
 		ctx,
 		uc.inventoryCache,
 		entry,
 		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
-			return uc.inventoryCache.GetProductInventoryTotals(ctx, projectID, buyerUserID)
+			return uc.inventoryCache.GetProductInventoryTotals(ctx, projectID)
 		},
 		uc.ScheduleInventoryRefresh,
 	)
 }
 
 func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error) {
-	if req.ProjectID == 0 || req.ProductID == 0 || req.BuyerUserID == 0 {
+	if req.ProjectID == 0 || req.ProductID == 0 {
 		return false, domain.ErrInvalidAllocationRequest
 	}
 	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
@@ -549,14 +549,31 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 	if err != nil {
 		return true, err
 	}
-	if unavailable {
+	if unavailable && req.PublicOnly {
 		return false, nil
 	}
-	totals, err := uc.inventoryCache.GetProductInventoryTotals(ctx, req.ProjectID, req.BuyerUserID)
+	totals, err := loadCachedInventory(
+		ctx,
+		uc.inventoryCache,
+		InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: req.ProjectID},
+		func(ctx context.Context) (*ProjectProductInventoryTotals, error) {
+			return uc.inventoryCache.GetProductInventoryTotals(ctx, req.ProjectID)
+		},
+		uc.ScheduleInventoryRefresh,
+	)
+	if errors.Is(err, domain.ErrInventoryRefreshInProgress) {
+		return true, nil
+	}
 	if err != nil || totals == nil {
 		// Cache outages and cold starts must not reject an order. The allocator is
 		// still the authoritative check-and-reserve operation.
 		return true, err
+	}
+	// The shared snapshot contains public supply only. A zero cannot prove that
+	// a private-first buyer has no owned resource, so warm the shared cache but
+	// leave the final decision to the authoritative allocator.
+	if !req.PublicOnly {
+		return true, nil
 	}
 	available, known := productInventoryAvailable(totals, req)
 	if !known {
@@ -596,20 +613,33 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 }
 
 func (uc *UseCase) MarkProductInventoryUnavailable(ctx context.Context, req ProductInventoryAvailabilityRequest) (bool, error) {
-	if req.ProjectID == 0 || req.ProductID == 0 || req.BuyerUserID == 0 {
+	if req.ProjectID == 0 || req.ProductID == 0 {
 		return false, domain.ErrInvalidAllocationRequest
 	}
 	if uc.inventoryCache == nil {
 		return false, nil
 	}
 	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
-	// Bounded allocator probes can be exhausted by stale/concurrently claimed
-	// candidates while later resources remain usable. Only publish a zero after
-	// the exact read model independently confirms that this scope is exhausted.
-	fresh, err := uc.repo.GetProductInventoryTotals(ctx, req.ProjectID, req.BuyerUserID)
+	// The shared snapshot contains public supply only, so one project-level
+	// correction covers every buyer and both supply policies. Avoid repeating
+	// the expensive aggregate confirmation while that correction is live.
+	req.PublicOnly = false
+	alreadyUnavailable, err := uc.inventoryCache.IsProductUnavailable(ctx, req)
 	if err != nil {
 		return false, err
 	}
+	if alreadyUnavailable {
+		return true, nil
+	}
+	// Bounded allocator probes can be exhausted by stale/concurrently claimed
+	// candidates while later resources remain usable. Only publish a zero after
+	// the exact read model independently confirms that this scope is exhausted.
+	fresh, err := uc.repo.GetProductInventoryTotals(ctx, req.ProjectID)
+	if err != nil {
+		return false, err
+	}
+	// The shared snapshot is entirely public. Correct both the total and public
+	// views together, regardless of which supply policy observed the miss.
 	available, known := productInventoryAvailable(fresh, req)
 	if !known || available {
 		return false, nil
@@ -708,22 +738,22 @@ func (uc *UseCase) RefreshInventoryCache(ctx context.Context) (*InventoryRefresh
 		removed := false
 		switch entry.Kind {
 		case InventoryCacheStats:
-			stats, refreshErr := uc.repo.GetInventoryStats(ctx, entry.ProjectID, entry.BuyerUserID)
+			stats, refreshErr := uc.repo.GetInventoryStats(ctx, entry.ProjectID)
 			err = refreshErr
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && stats == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
 			} else if err == nil {
-				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, entry.BuyerUserID, stats, inventoryCacheHardTTL)
+				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, stats, inventoryCacheHardTTL)
 			}
 		case InventoryCacheProducts:
-			totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID, entry.BuyerUserID)
+			totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID)
 			err = refreshErr
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && totals == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
 			} else if err == nil {
-				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, entry.BuyerUserID, totals, inventoryCacheHardTTL)
+				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, totals, inventoryCacheHardTTL)
 			}
 		default:
 			err = uc.inventoryCache.DeleteInventory(ctx, entry)

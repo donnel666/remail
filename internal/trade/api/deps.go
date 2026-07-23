@@ -231,15 +231,15 @@ type allocationAdapter struct {
 
 func (a allocationAdapter) HasAvailableInventory(ctx context.Context, cmd tradeapp.InventoryAvailabilityCommand) (bool, error) {
 	return a.alloc.HasProductInventory(ctx, allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, BuyerUserID: cmd.BuyerUserID,
-		EmailSuffix: cmd.EmailSuffix, PublicOnly: cmd.PublicOnly,
+		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, EmailSuffix: cmd.EmailSuffix,
+		PublicOnly: cmd.PublicOnly,
 	})
 }
 
 func (a allocationAdapter) MarkInventoryUnavailable(ctx context.Context, cmd tradeapp.InventoryAvailabilityCommand) (bool, error) {
 	return a.alloc.MarkProductInventoryUnavailable(ctx, allocapp.ProductInventoryAvailabilityRequest{
-		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, BuyerUserID: cmd.BuyerUserID,
-		EmailSuffix: cmd.EmailSuffix, PublicOnly: cmd.PublicOnly,
+		ProjectID: cmd.ProjectID, ProductID: cmd.ProductID, EmailSuffix: cmd.EmailSuffix,
+		PublicOnly: cmd.PublicOnly,
 	})
 }
 
