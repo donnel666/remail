@@ -924,7 +924,7 @@ export default function Orders() {
   });
 
   return (
-    <div className="px-2 pt-5">
+    <div className="console-content-width py-5">
       <CardPro
         type="type3"
         tabsArea={tabsArea}

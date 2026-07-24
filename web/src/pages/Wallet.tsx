@@ -483,7 +483,7 @@ export default function Wallet() {
 
   return (
     <>
-      <div className="mx-auto max-w-[1280px] px-2 pt-5">
+      <div className="console-content-width py-5">
         <div className="grid gap-5 xl:grid-cols-2">
           <div className="space-y-2">
             <Card

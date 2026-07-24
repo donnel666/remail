@@ -78,7 +78,7 @@ export function OverviewPanel({ tabsArea }: { tabsArea: ReactNode }) {
   }, [load]);
 
   return (
-    <div className="console-dashboard-page h-full w-full px-[13px] py-5 md:px-8">
+    <div className="console-content-width console-dashboard-page h-full py-5">
       <FinanceDashboardHeader
         dateRangePresets={dateRangePresets}
         displayName={displayName}

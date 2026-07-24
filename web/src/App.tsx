@@ -290,10 +290,6 @@ function scheduleApiDocsPreload() {
   );
 }
 
-function SystemSettings() {
-  return <PlaceholderPage titleKey="System Settings" />;
-}
-
 function Loading() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
@@ -464,6 +460,16 @@ const rootRoute = createRootRoute({
   errorComponent: ({ reset }) => <ServerErrorPage onRetry={reset} />,
 });
 
+const devRoutes = import.meta.env.DEV
+  ? [
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/admin/settings",
+        component: lazy(() => import("./pages/system-settings")),
+      }),
+    ]
+  : [];
+
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Home }),
   createRoute({
@@ -525,7 +531,7 @@ const routeTree = rootRoute.addChildren([
     path: "/admin/tickets",
     component: AdminTickets,
   }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/admin/settings", component: SystemSettings }),
+  ...devRoutes,
 ]);
 
 const router = createRouter({ routeTree });

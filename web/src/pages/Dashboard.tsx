@@ -953,7 +953,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="workbench-responsive-shell">
+      <div className="console-content-width workbench-responsive-shell">
         <div className="workbench-layout">
           <ProjectListPanel
             onApply={() => setApplyOpen(true)}

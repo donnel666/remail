@@ -21,6 +21,9 @@ export interface RechargeListFilter {
 }
 
 export async function getWallet() {
+  if (import.meta.env.DEV) {
+    return (await import("./dev-api-mocks")).DEV_WALLET as WalletResponse;
+  }
   return unwrap<WalletResponse>(await client.GET("/v1/wallet"));
 }
 

@@ -41,6 +41,9 @@ export interface AdminUserListFilter {
 }
 
 export async function getActivation() {
+  if (import.meta.env.DEV) {
+    return (await import("./dev-api-mocks")).DEV_ACTIVATION as ActivationResponse;
+  }
   return unwrap<ActivationResponse>(await client.GET("/v1/activation"));
 }
 
@@ -77,6 +80,9 @@ export async function logout() {
 }
 
 export async function getMe() {
+  if (import.meta.env.DEV) {
+    return (await import("./dev-api-mocks")).DEV_ME as MeResponse;
+  }
   return unwrap<MeResponse>(await client.GET("/v1/me"));
 }
 

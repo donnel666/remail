@@ -503,6 +503,20 @@ body[theme-mode="dark"] .semi-always-light,
 }
 
 /* Match the classic NewAPI dashboard without changing Remail's global type scale. */
+.console-content-width {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 13px;
+  padding-left: 13px;
+}
+
+@media (min-width: 768px) {
+  .console-content-width {
+    padding-right: 32px;
+    padding-left: 32px;
+  }
+}
+
 .console-dashboard-page {
   font-family: Lato, "Helvetica Neue", Arial, Helvetica, "Microsoft YaHei", sans-serif;
 }
@@ -537,9 +551,8 @@ body[theme-mode="dark"] .semi-always-light,
 }
 
 .account-page {
-  width: min(100%, 1280px);
-  margin: 0 auto;
-  padding: 20px 8px 28px;
+  padding-top: 20px;
+  padding-bottom: 28px;
 }
 
 .account-hero-card {
@@ -969,7 +982,8 @@ body[theme-mode="dark"] .semi-always-light,
 
 @media (max-width: 767px) {
   .account-page {
-    padding: 12px 8px 20px;
+    padding-top: 12px;
+    padding-bottom: 20px;
   }
 
   .account-hero-cover {
@@ -1748,7 +1762,7 @@ body[theme-mode="dark"] .semi-always-light,
     minmax(620px, 1.45fr);
   gap: 10px;
   overflow: hidden;
-  padding: 10px;
+  padding: 20px 0;
   background: var(--semi-color-bg-0);
 }
 

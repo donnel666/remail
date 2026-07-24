@@ -72,7 +72,7 @@ export default function AdminDashboard() {
   }, [load]);
 
   return (
-    <div className="console-dashboard-page h-full w-full px-[13px] py-5 md:px-8">
+    <div className="console-content-width console-dashboard-page h-full py-5">
       <AdminDashboardHeader
         dateRangePresets={dateRangePresets}
         displayName={displayName}

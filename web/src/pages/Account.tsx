@@ -188,7 +188,7 @@ export default function Account() {
   };
 
   return (
-    <div className="account-page">
+    <div className="account-page console-content-width">
       <Card
         bodyStyle={{ padding: 12 }}
         className="account-hero-card !rounded-2xl overflow-hidden"

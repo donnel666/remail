@@ -514,7 +514,7 @@ export default function AdminSystemLogs() {
     : { time: true, result: true, resource: true, summary: true };
 
   return (
-    <div className="px-2 pt-5">
+    <div className="console-content-width py-5">
       <CardPro
         actionsArea={actionsArea}
         paginationArea={paginationArea}

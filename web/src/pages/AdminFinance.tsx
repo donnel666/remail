@@ -63,5 +63,5 @@ export default function AdminFinance() {
 
   if (effectiveTab === "overview") return panel;
 
-  return <div className="px-2 pt-5">{panel}</div>;
+  return <div className="console-content-width py-5">{panel}</div>;
 }

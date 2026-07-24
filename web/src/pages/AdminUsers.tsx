@@ -1071,7 +1071,7 @@ export default function AdminUsers() {
   });
 
   return (
-    <div className="px-2 pt-5">
+    <div className="console-content-width py-5">
       <CardPro
         actionsArea={actionsArea}
         paginationArea={paginationArea}
