@@ -201,7 +201,7 @@ function OrderAccordionItem({
               <div className="workbench-code-content">
                 <div className="workbench-mini-label">
                   {order.serviceMode === "code"
-                    ? t("Latest verification code")
+                    ? t("Verification code")
                     : t("Quick verification code")}
                 </div>
                 <div className="workbench-code-value-row">

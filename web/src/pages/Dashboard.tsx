@@ -277,19 +277,6 @@ function toWorkbenchMessages(
   });
 }
 
-function messageTimestamp(value: string) {
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : 0;
-}
-
-function latestVerificationMessage(messages: WorkbenchMessage[]) {
-  return [...messages]
-    .filter((item) => item.verificationCode)
-    .sort(
-      (a, b) => messageTimestamp(b.receivedAt) - messageTimestamp(a.receivedAt),
-    )[0];
-}
-
 function orderServiceState(order: OrderResponse): ServiceState {
   if (order.status === "completed") {
     return order.serviceMode === "code" ? "code_received" : "warranty_ended";
@@ -627,7 +614,9 @@ export default function Dashboard() {
               lastMailReceivedAt:
                 detail.lastMailReceivedAt ?? item.lastMailReceivedAt,
               verificationCode:
-                detail.verificationCode || item.verificationCode,
+                detail.hasDelivery
+                  ? detail.verificationCode
+                  : item.verificationCode,
             }
           : item,
       ),
@@ -742,8 +731,6 @@ export default function Dashboard() {
         if (fetchSeqRef.current.get(target.orderNo) !== seq) return;
 
         const messages = toWorkbenchMessages(result.items);
-        const latestDelivery = latestVerificationMessage(messages);
-        const latestCode = latestDelivery?.verificationCode;
         const lastFetchedAt =
           result.fetch?.lastReceivedAt ??
           result.fetch?.lastSuccessAt ??
@@ -764,21 +751,16 @@ export default function Dashboard() {
               ? {
                   ...(refreshedDetail ?? item),
                   messages,
-                  hasDelivery:
-                    Boolean(latestCode) ||
-                    refreshedDetail?.hasDelivery ||
-                    item.hasDelivery,
+                  hasDelivery: refreshedDetail?.hasDelivery || item.hasDelivery,
                   lastFetchedAt,
                   lastMailReceivedAt:
                     refreshedDetail?.lastMailReceivedAt ??
-                    latestDelivery?.receivedAt ??
                     item.lastMailReceivedAt,
-                  verificationCode: latestCode ?? item.verificationCode,
-                  serviceState: latestCode
-                    ? target.serviceMode === "code"
-                      ? "code_received"
-                      : "in_warranty"
-                    : (refreshedDetail?.serviceState ?? item.serviceState),
+                  verificationCode: refreshedDetail?.hasDelivery
+                    ? refreshedDetail.verificationCode
+                    : item.verificationCode,
+                  serviceState:
+                    refreshedDetail?.serviceState ?? item.serviceState,
                 }
               : item,
           ),
@@ -854,28 +836,18 @@ export default function Dashboard() {
               return order;
             }
             const messages = toWorkbenchMessages(result.items);
-            const latestDelivery = latestVerificationMessage(messages);
-            const latestCode = latestDelivery?.verificationCode;
             return {
               ...order,
               messages,
-              hasDelivery: Boolean(latestCode) || order.hasDelivery,
               lastFetchedAt:
                 result.fetch?.lastReceivedAt ??
                 result.fetch?.lastSuccessAt ??
                 result.fetch?.lastSubmittedAt ??
                 new Date().toISOString(),
-              lastMailReceivedAt:
-                latestDelivery?.receivedAt ?? order.lastMailReceivedAt,
-              verificationCode: latestCode ?? order.verificationCode,
-              serviceState: latestCode
-                ? order.serviceMode === "code"
-                  ? "code_received"
-                  : "in_warranty"
-                : order.serviceState,
             };
           }),
         );
+        void refreshOrders(targets[0].serviceMode);
       } catch {
         // Individual order controls remain available when the whole request fails.
       } finally {

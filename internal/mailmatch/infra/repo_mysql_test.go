@@ -97,7 +97,7 @@ WHERE id = ?`, orderID).Error)
 	require.Equal(t, int64(1), pendingRefundCount)
 }
 
-func TestCreateCodeOrderDeliveryDoesNotOverwriteMySQL(t *testing.T) {
+func TestCreateOrderDeliveryDoesNotOverwriteMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	orderID := seedMailmatchOrder(t, db, "OR_DELIVERY_ONCE")
 	repo := NewRepo(db, nil)
@@ -107,8 +107,8 @@ func TestCreateCodeOrderDeliveryDoesNotOverwriteMySQL(t *testing.T) {
 	first := domain.Message{ID: seedMailmatchMessage(t, db, "111111", firstAt, "b"), ReceivedAt: firstAt, VerificationCode: "111111"}
 	second := domain.Message{ID: seedMailmatchMessage(t, db, "222222", secondAt, "c"), ReceivedAt: secondAt, VerificationCode: "222222"}
 
-	require.NoError(t, repo.CreateCodeOrderDelivery(ctx, orderID, first))
-	require.NoError(t, repo.CreateCodeOrderDelivery(ctx, orderID, second))
+	require.NoError(t, repo.CreateOrderDelivery(ctx, orderID, first))
+	require.NoError(t, repo.CreateOrderDelivery(ctx, orderID, second))
 
 	delivery, err := repo.FindOrderDelivery(ctx, orderID)
 	require.NoError(t, err)
@@ -124,31 +124,6 @@ func TestCreateCodeOrderDeliveryDoesNotOverwriteMySQL(t *testing.T) {
 	require.NotNil(t, delivery)
 	require.Nil(t, delivery.Message)
 	require.WithinDuration(t, firstAt, delivery.ReceivedAt, time.Second)
-}
-
-func TestAdvancePurchaseOrderDeliveryOnlyMovesForwardMySQL(t *testing.T) {
-	db := newMailmatchMySQLTestDB(t)
-	orderID := seedMailmatchOrder(t, db, "OR_DELIVERY_LATEST")
-	repo := NewRepo(db, nil)
-	ctx := context.Background()
-	baseAt := time.Now().UTC().Add(-10 * time.Minute)
-	newerAt := baseAt.Add(5 * time.Minute)
-	olderAt := baseAt.Add(-5 * time.Minute)
-	first := domain.Message{ID: seedMailmatchMessage(t, db, "", baseAt, "d"), ReceivedAt: baseAt}
-	newer := domain.Message{ID: seedMailmatchMessage(t, db, "222222", newerAt, "e"), ReceivedAt: newerAt, VerificationCode: "222222"}
-	older := domain.Message{ID: seedMailmatchMessage(t, db, "333333", olderAt, "f"), ReceivedAt: olderAt, VerificationCode: "333333"}
-
-	require.NoError(t, repo.AdvancePurchaseOrderDelivery(ctx, orderID, first))
-	require.NoError(t, repo.AdvancePurchaseOrderDelivery(ctx, orderID, newer))
-	require.NoError(t, repo.AdvancePurchaseOrderDelivery(ctx, orderID, older))
-
-	delivery, err := repo.FindOrderDelivery(ctx, orderID)
-	require.NoError(t, err)
-	require.NotNil(t, delivery)
-	require.NotNil(t, delivery.Message)
-	require.Equal(t, newer.ID, delivery.Message.ID)
-	require.Equal(t, "222222", delivery.Message.VerificationCode)
-	require.WithinDuration(t, newerAt, delivery.ReceivedAt, time.Second)
 }
 
 func TestUpsertMessagesPreservesMatchedCodeMySQL(t *testing.T) {
@@ -419,7 +394,7 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := repo.CreateCodeOrderDelivery(txCtx, orderID, projected[0]); err != nil {
+		if err := repo.CreateOrderDelivery(txCtx, orderID, projected[0]); err != nil {
 			return err
 		}
 		return wantRollback
@@ -437,7 +412,7 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return repo.CreateCodeOrderDelivery(txCtx, orderID, projected[0])
+		return repo.CreateOrderDelivery(txCtx, orderID, projected[0])
 	})
 	require.NoError(t, err)
 	delivery, err := repo.FindOrderDelivery(ctx, orderID)

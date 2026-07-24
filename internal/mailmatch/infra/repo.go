@@ -847,8 +847,8 @@ func (r *Repo) FindOrderDelivery(ctx context.Context, orderID uint) (*app.OrderD
 	return delivery, nil
 }
 
-func (r *Repo) CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
-	if orderID == 0 || message.ID == 0 || strings.TrimSpace(message.VerificationCode) == "" || message.ReceivedAt.IsZero() {
+func (r *Repo) CreateOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
+	if orderID == 0 || message.ID == 0 || message.ReceivedAt.IsZero() {
 		return domain.ErrInvalidRequest
 	}
 	model := OrderDeliveryHeadModel{
@@ -859,33 +859,7 @@ func (r *Repo) CreateCodeOrderDelivery(ctx context.Context, orderID uint, messag
 	if err := r.dbFor(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&model).Error; err != nil {
-		return fmt.Errorf("create code order delivery: %w", err)
-	}
-	return nil
-}
-
-func (r *Repo) AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error {
-	if orderID == 0 || message.ID == 0 || message.ReceivedAt.IsZero() {
-		return domain.ErrInvalidRequest
-	}
-	err := r.dbFor(ctx).Exec(`
-INSERT INTO mailmatch_order_delivery_heads (
-    order_id, message_id, message_received_at
-) VALUES (?, ?, ?)
-ON DUPLICATE KEY UPDATE
-	    message_id = IF(
-	        VALUES(message_received_at) > message_received_at
-	        OR (VALUES(message_received_at) = message_received_at AND VALUES(message_id) > message_id),
-	        VALUES(message_id),
-	        message_id
-	    ),
-	    message_received_at = GREATEST(VALUES(message_received_at), message_received_at)`,
-		orderID,
-		message.ID,
-		message.ReceivedAt.UTC(),
-	).Error
-	if err != nil {
-		return fmt.Errorf("advance purchase order delivery: %w", err)
+		return fmt.Errorf("create order delivery: %w", err)
 	}
 	return nil
 }

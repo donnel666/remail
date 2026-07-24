@@ -362,10 +362,7 @@ export default function Orders() {
           if (mailboxOrderNoRef.current !== orderNo) return;
           const messages = toMailboxMessages(result.items);
           setMailboxMessages(messages);
-          const latestCode = messages.find(
-            (message) => message.verificationCode
-          )?.verificationCode;
-          if (latestCode && latestCode !== detail.verificationCode) {
+          if (messages.length > 0 && !detail.hasDelivery) {
             const refreshed = await resolveOrderDetail(orderNo, { force: true });
             if (mailboxOrderNoRef.current === orderNo) {
               setMailboxOrder(refreshed);

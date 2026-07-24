@@ -60,6 +60,19 @@ describe("mergeOrderRuntimeState", () => {
     expect(merged.verificationCode).toBe("123456");
     expect(merged.serviceState).toBe("code_received");
   });
+
+  it("uses the server delivery code instead of a locally selected later message", () => {
+    const current = order({
+      hasDelivery: true,
+      verificationCode: "970183",
+    });
+    const merged = mergeOrderRuntimeState(
+      order({ hasDelivery: true, verificationCode: "344992" }),
+      current,
+    );
+
+    expect(merged.verificationCode).toBe("344992");
+  });
 });
 
 describe("shouldShowQuickFetchControl", () => {

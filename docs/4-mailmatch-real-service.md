@@ -14,6 +14,7 @@
 | 2026-07-15 | V1.7 | Codex | 明确宽松模式按 `sender + recipient` 两元素唯一匹配；购买订单匹配到邮件即可写交付头并通知 Trade 激活，验证码提取允许为空。严格模式仍要求 `sender + recipient + subject + body` 四元素全部命中。 |
 | 2026-07-16 | V1.8 | Codex | 管理员 Domain/Microsoft 邮件摘要统一要求服务端搜索和 `(receivedAt,id)` 稳定游标；首屏计算后端 `total`，续页跳过重复 `COUNT`，前端按全局页大小无限滚动，禁止全量加载后本地搜索或推算邮件总数。 |
 | 2026-07-20 | V1.9 | Codex | 新增批量 Pickup，一次提交 2 到 200 组资源钥匙并按输入顺序返回逐项结果；增加请求体/凭证长度校验、客户端 IP 限流，并保留逐 Token 限流。 |
+| 2026-07-24 | V1.10 | Codex | 接码与购买统一在单次拉取内固定最早匹配邮件；后续邮件只保留在手动查询列表中，不再覆盖订单验证码。 |
 
 > 核心域。BC-MAILMATCH 保存邮件事实，按项目规则识别订单服务结果。协议收发不在本上下文内。
 
@@ -60,15 +61,17 @@
 | 字段 | 含义 |
 |------|------|
 | `orderId` | 已交付结果所属订单 ID；一单最多一行 |
-| `messageId` | 当前交付对应的原始 `Message.id` |
-| `messageReceivedAt` | 邮件收件时间；购买订单并发推进时的 CAS 比较事实 |
+| `messageId` | 本次拉取选中的原始 `Message.id` |
+| `messageReceivedAt` | 被选中邮件的收件时间 |
 
 交付头只在邮件唯一命中后写入；接码订单仍要求提取到验证码，购买订单在宽松模式下允许验证码为空：
 
 | 场景 | 写入规则 |
 |------|----------|
 | 接码 `serviceMode=code` | 首次唯一命中且提取到验证码后写入一次，后续重复匹配不覆盖。 |
-| 购买 `serviceMode=purchase` | 严格模式四元素命中，或宽松模式 `sender + recipient` 命中后写入；按 `messageReceivedAt, messageId` 原子推进到最新邮件，验证码可以为空，旧邮件不能倒退覆盖。 |
+| 购买 `serviceMode=purchase` | 严格模式四元素命中，或宽松模式 `sender + recipient` 命中后写入；验证码可以为空，后续邮件不覆盖最早匹配结果。 |
+
+同一次拉取得到多封匹配邮件时，按 `(messageReceivedAt, dedupeKey)` 选最早一封写入交付头。后续拉取不改动已有交付头；Pickup 仍返回订单作用域内的其他邮件，用户可以手动查看和复制其中的验证码。
 
 六元素响应必须通过 `messageId` 读取原始 `Message`，禁止在交付头重复保存发件人、收件人、主题、正文或验证码。`Message` 仍然是结构化邮件事实，匹配仍然按“原始收件人候选 -> 有效分配 -> 项目规则”执行。为控制表体积，`Message` 表不保存 `raw_source/provider_payload`，`rawBody` 只保存用于匹配与展示的正文；需要协议原件时使用 MailTransport 保存的 MinIO 私有 RFC822 对象。交付头不能作为匹配输入，不能绕过规则直接交付。
 
@@ -108,7 +111,7 @@ flowchart TD
     F -->|1 个命中| C[提取 verificationCode]
     F -->|多个命中| K[保持 received + 冲突诊断]
     C --> S[matched]
-    S --> Q[写入或推进订单交付头]
+    S --> Q[写入或保留最早订单交付头]
     Q --> T[通知 MatchResultPort]
 ```
 
@@ -150,7 +153,7 @@ flowchart TD
 | INV-M9 | 服务凭证读取只通过 `pickup(email + token)` 进入，BC-OPENAPI 只负责 token 事实校验和反查 `orderNo`。 |
 | INV-M10 | pickup 响应统一返回 6 元素：发件人、收件人、收件时间、主题、正文、验证码；不能返回底层邮箱未经过滤的全部邮件。 |
 | INV-M11 | 接码订单交付头只在唯一命中并提取验证码后写入；购买订单在宽松模式两元素唯一命中后即可写入，验证码允许为空。交付头不能表达候选关系、冲突关系或匹配历史。 |
-| INV-M12 | 接码订单交付头只写一次；购买订单交付头只能按更新的 `messageReceivedAt, messageId` 前进。 |
+| INV-M12 | 接码与购买订单交付头均只在首次匹配结果写入；单次拉取内选最早的 `(messageReceivedAt, dedupeKey)`，后续拉取不得覆盖。 |
 | INV-M13 | pickup 通过交付头读取原始 Message；接码已有交付头时不得重复触发外部拉取。 |
 | INV-M14 | 订单列表只读取交付头摘要，不得因列表加载提交邮件拉取任务。自动收件只针对当前展开且尚未交付的订单。 |
 | INV-M15 | 管理员资源邮件列表只返回摘要，不返回 `rawBody` 或对象存储 key；正文只能通过 resourceId + messageId 的单封授权查询按需读取。 |
@@ -227,6 +230,6 @@ flowchart TD
 | ADR-MM-3 | 不持久化通用邮件-订单匹配历史 | 订单候选和规则匹配仍实时计算；只保留每单一个已交付结果头，不保存候选、冲突和历史关系。 |
 | ADR-MM-4 | 服务凭证读取以 `pickup(email + token)` 为唯一外部入口 | Token 是资源钥匙，持有者不需要登录；MailMatch 内部仍以 token 反查的 `orderNo` 为服务边界。 |
 | ADR-MM-5 | 多订单命中不交付 | 避免规则冲突导致错误验证码交付。 |
-| ADR-MM-6 | 增加订单交付头 | 接码需要一次性交付结果，购买需要展示最新验证码；只保存 `orderId + messageId + messageReceivedAt`，六元素继续读取唯一的原始 `Message`。 |
+| ADR-MM-6 | 增加订单交付头 | 接码与购买都需要稳定的一次性交付结果；只保存 `orderId + messageId + messageReceivedAt`，六元素继续读取唯一的原始 `Message`，其他邮件仍可手动查询。 |
 | ADR-MM-7 | 管理员邮件列表摘要与正文读取分离 | 保留完整诊断能力，同时降低默认载荷和正文暴露面；不为此重复存储正文。 |
 | ADR-MM-8 | 资源级 Fetch 复用/扩展现有 durable single-flight 事实 | 管理运维不能伪造 orderNo，也不应无证据新建第二套表；继续复用 MailTransport 协议和 MailMatch 统一落库/匹配。 |

@@ -49,6 +49,8 @@ export function mergeOrderRuntimeState(
     messages: current.messages,
     serviceState: preserveDeliveredState ? current.serviceState : next.serviceState,
     token: next.token || current.token,
-    verificationCode: next.verificationCode || current.verificationCode,
+    verificationCode: preserveDeliveredState
+      ? current.verificationCode
+      : next.verificationCode,
   };
 }

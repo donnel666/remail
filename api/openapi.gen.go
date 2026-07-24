@@ -5985,7 +5985,7 @@ type OrderResponse struct {
 	DeliveryEmail  string                       `json:"deliveryEmail"`
 	FailureCode    *OrderResponseFailureCode    `json:"failureCode,omitempty"`
 
-	// HasDelivery Whether the order already has a matched verification-code delivery.
+	// HasDelivery Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
 	HasDelivery bool `json:"hasDelivery"`
 	Id          int  `json:"id"`
 
@@ -6022,7 +6022,7 @@ type OrderResponse struct {
 	UpdatedAt    time.Time                 `json:"updatedAt"`
 	UserId       int                       `json:"userId"`
 
-	// VerificationCode Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery.
+	// VerificationCode Verification code from the earliest matched delivery, when that message contains one.
 	VerificationCode *string `json:"verificationCode,omitempty"`
 }
 

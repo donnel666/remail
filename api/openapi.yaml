@@ -10575,10 +10575,10 @@ components:
           description: Service credential used by pickup URLs and later mail-result APIs.
         hasDelivery:
           type: boolean
-          description: Whether the order already has a matched verification-code delivery.
+          description: Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
         verificationCode:
           type: string
-          description: Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery.
+          description: Verification code from the earliest matched delivery, when that message contains one.
         lastMailReceivedAt:
           type: string
           format: date-time

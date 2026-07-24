@@ -3501,9 +3501,9 @@ export interface components {
             serviceCleanupStatus: string;
             /** @description Service credential used by pickup URLs and later mail-result APIs. */
             serviceToken?: string;
-            /** @description Whether the order already has a matched verification-code delivery. */
+            /** @description Whether the order already has a matched delivery. Purchase deliveries may have no verification code. */
             hasDelivery: boolean;
-            /** @description Last delivered verification code. Code orders keep the first delivery; purchase orders expose the latest delivery. */
+            /** @description Verification code from the earliest matched delivery, when that message contains one. */
             verificationCode?: string;
             /**
              * Format: date-time

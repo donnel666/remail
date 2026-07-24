@@ -124,9 +124,20 @@ func (r *matchingRepoStub) UpsertMessages(_ context.Context, messages []domain.M
 	return messages, nil
 }
 
-func (r *matchingRepoStub) AdvancePurchaseOrderDelivery(_ context.Context, _ uint, message domain.Message) error {
+func (r *matchingRepoStub) CreateOrderDelivery(_ context.Context, _ uint, message domain.Message) error {
+	if r.purchaseDelivery != nil {
+		return nil
+	}
 	r.purchaseDelivery = &message
 	return nil
+}
+
+func (r *matchingRepoStub) FindOrderDelivery(context.Context, uint) (*OrderDelivery, error) {
+	if r.purchaseDelivery == nil {
+		return nil, nil
+	}
+	message := *r.purchaseDelivery
+	return &OrderDelivery{Message: &message, ReceivedAt: message.ReceivedAt}, nil
 }
 
 type matchResultStub struct {
@@ -1192,9 +1203,9 @@ func TestHistoricalMessageMatchesProjectWithoutVerificationCode(t *testing.T) {
 	require.Equal(t, "dot", historicalRecipientKind("firstname@example.com", "first.name@example.com"))
 }
 
-func TestLatestOrderDeliveriesKeepsNewestMessagePerOrder(t *testing.T) {
+func TestEarliestOrderDeliveriesKeepsOldestMessagePerOrder(t *testing.T) {
 	base := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
-	deliveries := latestOrderDeliveries([]matchedDelivery{
+	deliveries := earliestOrderDeliveries([]matchedDelivery{
 		{scope: OrderScope{OrderID: 1}, message: domain.Message{DedupeKey: "older", ReceivedAt: base}},
 		{scope: OrderScope{OrderID: 2}, message: domain.Message{DedupeKey: "other", ReceivedAt: base}},
 		{scope: OrderScope{OrderID: 1}, message: domain.Message{DedupeKey: "newer", ReceivedAt: base.Add(time.Minute)}},
@@ -1206,6 +1217,59 @@ func TestLatestOrderDeliveriesKeepsNewestMessagePerOrder(t *testing.T) {
 	for _, delivery := range deliveries {
 		byOrder[delivery.scope.OrderID] = delivery
 	}
-	require.Equal(t, "newer", byOrder[1].message.DedupeKey)
+	require.Equal(t, "older", byOrder[1].message.DedupeKey)
 	require.Equal(t, "other", byOrder[2].message.DedupeKey)
+}
+
+func TestLaterPullNotifiesWithImmutableDeliveryHead(t *testing.T) {
+	base := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	repo := &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 1, OrderNo: "OR_FIXED", EmailResourceID: 1,
+		Recipient: "user@example.com", ServiceMode: "purchase", OrderStatus: "active", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}}}
+	matches := &matchResultStub{}
+	uc := NewUseCase(repo, nil, nil, matches)
+
+	_, _, _, err := uc.ingestFetchedMessages(context.Background(), []FetchedMessage{{
+		EmailResourceID: 1, ResourceType: domain.ResourceTypeDomain,
+		Recipient: "user@example.com", Sender: "sender@example.net", ReceivedAt: base,
+	}})
+	require.NoError(t, err)
+	_, _, _, err = uc.ingestFetchedMessages(context.Background(), []FetchedMessage{{
+		EmailResourceID: 1, ResourceType: domain.ResourceTypeDomain,
+		Recipient: "user@example.com", Sender: "sender@example.net", ReceivedAt: base.Add(time.Minute),
+	}})
+	require.NoError(t, err)
+
+	require.Len(t, matches.results, 2)
+	require.Equal(t, base, matches.results[0].MatchedAt)
+	require.Equal(t, base, matches.results[1].MatchedAt)
+}
+
+func TestCodePickupIncludesOtherStoredMessagesAfterDelivery(t *testing.T) {
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	scope := OrderScope{
+		OrderID: 1, OrderNo: "OR_CODE", EmailResourceID: 1,
+		Recipient: "user@example.com", ServiceMode: "code", OrderStatus: "active",
+	}
+	delivered := domain.Message{ID: 1, ReceivedAt: now.Add(-2 * time.Minute), VerificationCode: "111111"}
+	other := domain.Message{ID: 2, ReceivedAt: now.Add(-time.Minute), VerificationCode: "222222"}
+	items, _, hasDelivery, err := (&UseCase{}).listOrderMailFromBatch(
+		PickupBatchRead{
+			Scope:    &scope,
+			Delivery: &OrderDelivery{Message: &delivered, ReceivedAt: delivered.ReceivedAt},
+			Messages: []domain.Message{other},
+		},
+		now,
+	)
+
+	require.NoError(t, err)
+	require.True(t, hasDelivery)
+	require.Len(t, items, 2)
+	require.Equal(t, uint(delivered.ID), items[0].ID)
+	require.Equal(t, uint(other.ID), items[1].ID)
 }

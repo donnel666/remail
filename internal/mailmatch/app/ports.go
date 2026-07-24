@@ -144,8 +144,7 @@ type Repository interface {
 	ListOrderMessages(ctx context.Context, scope OrderScope, limit int) ([]domain.Message, error)
 	FindOrderMessage(ctx context.Context, orderID uint, messageID uint) (*domain.Message, error)
 	FindOrderDelivery(ctx context.Context, orderID uint) (*OrderDelivery, error)
-	CreateCodeOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
-	AdvancePurchaseOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
+	CreateOrderDelivery(ctx context.Context, orderID uint, message domain.Message) error
 	ListMatchingScopesByRecipient(ctx context.Context, resourceType domain.ResourceType, emailResourceID uint, recipient string, receivedAt time.Time) ([]OrderScope, error)
 	UpsertMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error)
 }
@@ -551,7 +550,7 @@ func (uc *UseCase) listOrderMailFromBatch(
 		return nil, nil, false, domain.ErrOrderUnavailable
 	}
 	limit := purchaseReadLimit
-	if scope.ServiceMode == "code" {
+	if scope.ServiceMode == "code" && read.Delivery == nil {
 		limit = codeReadLimit
 	}
 	messages := filterPickupMessages(scope, read.Messages, now)
@@ -564,12 +563,6 @@ func (uc *UseCase) listOrderMailFromBatch(
 	items := make([]domain.MailContent, len(messages))
 	for i := range messages {
 		items[i] = mailContentFromMessage(messages[i])
-	}
-	if read.Delivery != nil && scope.ServiceMode == "code" {
-		if read.Delivery.Message == nil {
-			return nil, nil, true, nil
-		}
-		return []domain.MailContent{mailContentFromMessage(*read.Delivery.Message)}, nil, true, nil
 	}
 	if read.Delivery != nil && read.Delivery.Message != nil {
 		items = prependDeliveryMail(items, mailContentFromMessage(*read.Delivery.Message), limit)
@@ -633,14 +626,8 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if delivery != nil && scope.ServiceMode == "code" {
-		if delivery.Message == nil {
-			return nil, nil, true, nil
-		}
-		return []domain.MailContent{mailContentFromMessage(*delivery.Message)}, nil, true, nil
-	}
 	limit := purchaseReadLimit
-	if scope.ServiceMode == "code" {
+	if scope.ServiceMode == "code" && delivery == nil {
 		limit = codeReadLimit
 	}
 	messages, err := uc.repo.ListOrderMessages(ctx, scope, messageScanLimit)
@@ -664,13 +651,10 @@ func (uc *UseCase) saveOrderDelivery(ctx context.Context, scope OrderScope, mess
 	if scope.OrderID == 0 || message.ID == 0 {
 		return nil
 	}
-	if scope.ServiceMode == "code" {
-		if strings.TrimSpace(message.VerificationCode) == "" {
-			return nil
-		}
-		return uc.repo.CreateCodeOrderDelivery(ctx, scope.OrderID, message)
+	if scope.ServiceMode == "code" && strings.TrimSpace(message.VerificationCode) == "" {
+		return nil
 	}
-	return uc.repo.AdvancePurchaseOrderDelivery(ctx, scope.OrderID, message)
+	return uc.repo.CreateOrderDelivery(ctx, scope.OrderID, message)
 }
 
 func mailContentFromMessage(message domain.Message) domain.MailContent {
@@ -1241,7 +1225,7 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		}
 		stored = inserted
 	}
-	matchDeliveries = latestOrderDeliveries(matchDeliveries)
+	matchDeliveries = earliestOrderDeliveries(matchDeliveries)
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		if fence != nil {
 			if err := fence(txCtx); err != nil {
@@ -1300,6 +1284,17 @@ func (uc *UseCase) ingestFetchedMessagesForResourcesWithFence(
 		}
 	}
 	for _, delivery := range storedDeliveries {
+		// Notify from the immutable head, not from a later matching pull.
+		canonical, findErr := uc.repo.FindOrderDelivery(ctx, delivery.scope.OrderID)
+		if findErr != nil {
+			return stored, matched, lastReceivedAt, &mailIngestError{safe: "Mail delivery lookup failed.", err: findErr}
+		}
+		if canonical != nil {
+			delivery.message = domain.Message{ReceivedAt: canonical.ReceivedAt}
+			if canonical.Message != nil {
+				delivery.message = *canonical.Message
+			}
+		}
 		result := MatchResult{
 			OrderNo:          delivery.scope.OrderNo,
 			VerificationCode: delivery.message.VerificationCode,
@@ -1424,20 +1419,20 @@ func mailMessageIdentity(message domain.Message) string {
 	return fmt.Sprintf("%d:%s", message.EmailResourceID, strings.TrimSpace(message.DedupeKey))
 }
 
-func latestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
+func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 	if len(deliveries) < 2 {
 		return deliveries
 	}
-	latestByOrder := make(map[uint]matchedDelivery, len(deliveries))
+	earliestByOrder := make(map[uint]matchedDelivery, len(deliveries))
 	for _, delivery := range deliveries {
-		current, exists := latestByOrder[delivery.scope.OrderID]
-		if !exists || delivery.message.ReceivedAt.After(current.message.ReceivedAt) ||
-			(delivery.message.ReceivedAt.Equal(current.message.ReceivedAt) && delivery.message.DedupeKey > current.message.DedupeKey) {
-			latestByOrder[delivery.scope.OrderID] = delivery
+		current, exists := earliestByOrder[delivery.scope.OrderID]
+		if !exists || delivery.message.ReceivedAt.Before(current.message.ReceivedAt) ||
+			(delivery.message.ReceivedAt.Equal(current.message.ReceivedAt) && delivery.message.DedupeKey < current.message.DedupeKey) {
+			earliestByOrder[delivery.scope.OrderID] = delivery
 		}
 	}
-	result := make([]matchedDelivery, 0, len(latestByOrder))
-	for _, delivery := range latestByOrder {
+	result := make([]matchedDelivery, 0, len(earliestByOrder))
+	for _, delivery := range earliestByOrder {
 		result = append(result, delivery)
 	}
 	sort.Slice(result, func(i, j int) bool {

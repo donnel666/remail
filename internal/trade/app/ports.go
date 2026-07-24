@@ -1316,7 +1316,7 @@ func (uc *UseCase) attachOrderDelivery(ctx context.Context, result *CheckoutResu
 }
 
 func attachOrderDeliverySummary(result *CheckoutResult, delivery OrderDeliverySummary) {
-	if result == nil || strings.TrimSpace(delivery.VerificationCode) == "" || delivery.ReceivedAt.IsZero() {
+	if result == nil || delivery.ReceivedAt.IsZero() {
 		return
 	}
 	receivedAt := delivery.ReceivedAt.UTC()
