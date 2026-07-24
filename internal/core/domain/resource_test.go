@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -502,6 +503,27 @@ func TestIsMicrosoftEmailDomain(t *testing.T) {
 	for email, want := range cases {
 		if got := IsMicrosoftEmailDomain(email); got != want {
 			t.Errorf("IsMicrosoftEmailDomain(%q) = %v, want %v", email, got, want)
+		}
+	}
+}
+
+func TestDefaultMicrosoftDomainSettingMatchesBuiltInWhitelist(t *testing.T) {
+	configured := map[string]struct{}{}
+	for _, setting := range runtimeconfig.DefaultSettings() {
+		if setting.Key != "microsoft_domain_whitelist" {
+			continue
+		}
+		for _, domain := range strings.Split(setting.Value, ",") {
+			configured[domain] = struct{}{}
+		}
+		break
+	}
+	if len(configured) != len(microsoftEmailWhitelist) {
+		t.Fatalf("default domains = %d, built-in domains = %d", len(configured), len(microsoftEmailWhitelist))
+	}
+	for domain := range microsoftEmailWhitelist {
+		if _, ok := configured[domain]; !ok {
+			t.Fatalf("default whitelist is missing %q", domain)
 		}
 	}
 }

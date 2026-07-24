@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/donnel666/remail/internal/systemsettings/infra"
@@ -22,6 +23,7 @@ func TestNewModuleSeedsMissingDefaultsBeforeLoadingSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 4, runtimeconfig.Int("smtp_task_retry_count", 3, 0))
 	require.Equal(t, 5, runtimeconfig.Int("smtp_outbound_payload_ttl_minutes", 0, 1))
+	require.Len(t, strings.Split(runtimeconfig.String("microsoft_domain_whitelist", ""), ","), 32)
 
 	var count int64
 	require.NoError(t, db.WithContext(context.Background()).Model(&infra.SettingModel{}).Count(&count).Error)

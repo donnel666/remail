@@ -11,7 +11,7 @@ func DefaultSettings() []domain.Setting {
 }
 
 var defaultSettings = []domain.Setting{
-	{Key: "microsoft_domain_whitelist", Value: ""},
+	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "default_plus_daily_limit", Value: "10000"},
 	{Key: "default_mailbox_daily_limit", Value: "10000"},
 	{Key: "resource_validation_max_failures", Value: "3"},
