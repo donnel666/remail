@@ -2,10 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"strings"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -27,13 +24,4 @@ func writeSystemLog(ctx context.Context, logs SystemLogPort, level, eventType, r
 		Message:   message,
 		Detail:    safeDiagnostic(fmt.Sprint(detail)),
 	})
-}
-
-func mailLogID(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:16]
 }

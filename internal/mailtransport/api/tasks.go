@@ -165,7 +165,7 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		return nil
 	})
 
-	mux.HandleFunc(mailinfra.TypeOutboundDispatch, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(mailinfra.TypeOutboundDispatch, func(_ context.Context, _ *asynq.Task) error {
 		// Legacy durable-outbox dispatch tasks intentionally do nothing.
 		return nil
 	})

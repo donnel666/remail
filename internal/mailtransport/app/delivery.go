@@ -8,10 +8,6 @@ import (
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 )
 
-const (
-	outboundMailClaimTimeout = 2 * time.Minute
-)
-
 type OutboundMailStore interface {
 	Reserve(ctx context.Context, mail *domain.OutboundMail) (*domain.OutboundMail, bool, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (*domain.OutboundMail, error)
@@ -60,11 +56,4 @@ func deliveryUnavailable(stage string, err error) error {
 		return fmt.Errorf("%w: %s", domain.ErrDeliveryUnavailable, stage)
 	}
 	return fmt.Errorf("%w: %s: %s", domain.ErrDeliveryUnavailable, stage, safeDiagnostic(err.Error()))
-}
-
-func outboundMailClaimExpired(mail *domain.OutboundMail, now time.Time) bool {
-	if mail.UpdatedAt.IsZero() {
-		return true
-	}
-	return !mail.UpdatedAt.Add(outboundMailClaimTimeout).After(now)
 }
