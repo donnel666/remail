@@ -460,15 +460,11 @@ const rootRoute = createRootRoute({
   errorComponent: ({ reset }) => <ServerErrorPage onRetry={reset} />,
 });
 
-const devRoutes = import.meta.env.DEV
-  ? [
-      createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/admin/settings",
-        component: lazy(() => import("./pages/system-settings")),
-      }),
-    ]
-  : [];
+const systemSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/settings",
+  component: lazy(() => import("./pages/system-settings")),
+});
 
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Home }),
@@ -531,7 +527,7 @@ const routeTree = rootRoute.addChildren([
     path: "/admin/tickets",
     component: AdminTickets,
   }),
-  ...devRoutes,
+  systemSettingsRoute,
 ]);
 
 const router = createRouter({ routeTree });

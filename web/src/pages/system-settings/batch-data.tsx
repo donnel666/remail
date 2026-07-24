@@ -3,7 +3,7 @@ import { Button } from "@douyinfe/semi-ui";
 import { DatabaseZap, Save, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { parseOption } from "@/lib/settings-api-mock";
+import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection } from "./settings-layout";

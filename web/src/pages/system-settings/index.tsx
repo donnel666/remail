@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Spin, TabPane, Tabs } from "@douyinfe/semi-ui";
+import { Spin, TabPane, Tabs, Toast } from "@douyinfe/semi-ui";
 import {
   getSystemOptions, updateSystemOption, updateSystemOptionsBulk,
   type SystemOption,
-} from "@/lib/settings-api-mock";
+} from "@/lib/system-settings-api";
 import { useAuth, hasPermissionKey } from "@/context/auth-provider";
 import {
   Shield, Mail, Cpu, ShoppingCart, Cog, Users,
@@ -50,15 +50,19 @@ export default function SystemSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState(SECTIONS[0].key);
 
-  const canAccess = currentUser && hasPermissionKey(currentUser, "iam:permission:read");
+  const canAccess = currentUser && hasPermissionKey(currentUser, "system:settings:read");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const result = await getSystemOptions();
       setOptions(result.options ?? []);
-    } finally { setLoading(false); }
-  }, []);
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("加载系统设置失败"));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -67,8 +71,12 @@ export default function SystemSettingsPage() {
     try {
       await updateSystemOption(key, value);
       setOptions((prev) => { const nx = prev.filter((o) => o.key !== key); nx.push({ key, value }); return nx; });
-    } finally { setSaving(false); }
-  }, []);
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+    } finally {
+      setSaving(false);
+    }
+  }, [t]);
 
   const handleBulkSave = useCallback(async (updates: { key: string; value: string }[]) => {
     setSaving(true);
@@ -82,15 +90,16 @@ export default function SystemSettingsPage() {
         }
         return nx;
       });
-    } finally { setSaving(false); }
-  }, []);
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+    } finally {
+      setSaving(false);
+    }
+  }, [t]);
 
   if (!canAccess) {
-    return <div className="flex h-64 items-center justify-center"><p className="text-muted-foreground">{t("Permission required: super_admin")}</p></div>;
+    return <div className="flex h-64 items-center justify-center"><p className="text-muted-foreground">{t("Permission required: system settings")}</p></div>;
   }
-
-  const active = SECTIONS.find((section) => section.key === activeSection) ?? SECTIONS[0];
-  const Active = active.component;
 
   return (
     <div className="console-content-width min-h-[calc(100vh-64px)] pt-3">
@@ -107,15 +116,13 @@ export default function SystemSettingsPage() {
             itemKey={section.key}
             tab={<span className="flex items-center gap-1.5">{section.icon}{t(section.label)}</span>}
           >
-            {activeSection === section.key ? (
+            <div hidden={activeSection !== section.key} className="min-h-40">
               <Spin spinning={loading} size="large">
-                <div className="min-h-40">
-                  {!loading ? (
-                    <Active key={active.key} options={options} loading={saving} onSave={handleSave} onBulkSave={handleBulkSave} />
-                  ) : null}
-                </div>
+                {!loading ? (
+                  <section.component options={options} loading={saving} onSave={handleSave} onBulkSave={handleBulkSave} />
+                ) : null}
               </Spin>
-            ) : null}
+            </div>
           </TabPane>
         ))}
       </Tabs>

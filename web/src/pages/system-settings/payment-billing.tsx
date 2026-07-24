@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Button, InputNumber } from "@douyinfe/semi-ui";
+import { Button, InputNumber, Toast } from "@douyinfe/semi-ui";
 import { CreditCard, Plus, RefreshCw, Save, Trash2, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { parseOption } from "@/lib/settings-api-mock";
+import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField } from "./settings-layout";
@@ -28,6 +28,15 @@ export default function PaymentSection({ options, onBulkSave }: SectionProps) {
     finally { setSavingCard(null); }
   };
   const saveTopup = async () => {
+    if (topupTiers.some(({ amount, bonus }) => !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(bonus) || bonus < 0)) {
+      Toast.warning(t("充值档位金额必须大于 0，赠送金额不能为负数"));
+      return;
+    }
+    const amounts = topupTiers.map(({ amount }) => amount.toFixed(2));
+    if (new Set(amounts).size !== amounts.length) {
+      Toast.warning(t("充值档位金额不能重复"));
+      return;
+    }
     const serialized = serializeTopupTiers(topupTiers);
     setForm((current) => ({ ...current, ...serialized }));
     setSavingCard("topup");

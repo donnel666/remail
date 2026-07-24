@@ -4804,6 +4804,40 @@ type AdminSystemLogListResponse struct {
 	Total  int64                `json:"total"`
 }
 
+// AdminSystemSetting defines model for AdminSystemSetting.
+type AdminSystemSetting struct {
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
+	Key       string     `json:"key"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+	Value     string     `json:"value"`
+}
+
+// AdminSystemSettingRequest defines model for AdminSystemSettingRequest.
+type AdminSystemSettingRequest struct {
+	Value string `json:"value"`
+}
+
+// AdminSystemSettingResponse defines model for AdminSystemSettingResponse.
+type AdminSystemSettingResponse struct {
+	Option AdminSystemSetting `json:"option"`
+}
+
+// AdminSystemSettingUpdate defines model for AdminSystemSettingUpdate.
+type AdminSystemSettingUpdate struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// AdminSystemSettingsBulkRequest defines model for AdminSystemSettingsBulkRequest.
+type AdminSystemSettingsBulkRequest struct {
+	Settings []AdminSystemSettingUpdate `json:"settings"`
+}
+
+// AdminSystemSettingsResponse defines model for AdminSystemSettingsResponse.
+type AdminSystemSettingsResponse struct {
+	Options []AdminSystemSetting `json:"options"`
+}
+
 // AdminTaskAcceptedResponse defines model for AdminTaskAcceptedResponse.
 type AdminTaskAcceptedResponse struct {
 	// Accepted Safely displayable accepted count. A filter batch may report zero until expansion.
@@ -8060,6 +8094,24 @@ type PostAdminServerParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PutAdminSettingsParams defines parameters for PutAdminSettings.
+type PutAdminSettingsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// DeleteAdminSettingParams defines parameters for DeleteAdminSetting.
+type DeleteAdminSettingParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PutAdminSettingParams defines parameters for PutAdminSetting.
+type PutAdminSettingParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminSupplierApplicationsParams defines parameters for GetAdminSupplierApplications.
 type GetAdminSupplierApplicationsParams struct {
 	Status *string `form:"status,omitempty" json:"status,omitempty"`
@@ -8876,6 +8928,12 @@ type PutAdminMicrosoftResourceCredentialsJSONRequestBody = AdminMicrosoftReplace
 
 // PostAdminServerJSONRequestBody defines body for PostAdminServer for application/json ContentType.
 type PostAdminServerJSONRequestBody = CreateMailServerRequest
+
+// PutAdminSettingsJSONRequestBody defines body for PutAdminSettings for application/json ContentType.
+type PutAdminSettingsJSONRequestBody = AdminSystemSettingsBulkRequest
+
+// PutAdminSettingJSONRequestBody defines body for PutAdminSetting for application/json ContentType.
+type PutAdminSettingJSONRequestBody = AdminSystemSettingRequest
 
 // PostAdminSupplierApplicationRejectJSONRequestBody defines body for PostAdminSupplierApplicationReject for application/json ContentType.
 type PostAdminSupplierApplicationRejectJSONRequestBody = AdminRejectSupplierApplicationRequest
@@ -9938,6 +9996,21 @@ type ServerInterface interface {
 	// Create a mail server owned by the current administrator
 	// (POST /v1/admin/servers)
 	PostAdminServer(c *gin.Context, params PostAdminServerParams)
+	// List system settings (admin only)
+	// (GET /v1/admin/settings)
+	GetAdminSettings(c *gin.Context)
+	// Replace system settings in bulk (admin only)
+	// (PUT /v1/admin/settings)
+	PutAdminSettings(c *gin.Context, params PutAdminSettingsParams)
+	// Delete one system setting (admin only)
+	// (DELETE /v1/admin/settings/{key})
+	DeleteAdminSetting(c *gin.Context, key string, params DeleteAdminSettingParams)
+	// Get one system setting (admin only)
+	// (GET /v1/admin/settings/{key})
+	GetAdminSetting(c *gin.Context, key string)
+	// Upsert one system setting (admin only)
+	// (PUT /v1/admin/settings/{key})
+	PutAdminSetting(c *gin.Context, key string, params PutAdminSettingParams)
 	// List supplier applications
 	// (GET /v1/admin/suppliers/applications)
 	GetAdminSupplierApplications(c *gin.Context, params GetAdminSupplierApplicationsParams)
@@ -16671,6 +16744,201 @@ func (siw *ServerInterfaceWrapper) PostAdminServer(c *gin.Context) {
 	siw.Handler.PostAdminServer(c, params)
 }
 
+// GetAdminSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSettings(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSettings(c)
+}
+
+// PutAdminSettings operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminSettings(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminSettingsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminSettings(c, params)
+}
+
+// DeleteAdminSetting operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminSetting(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", c.Param("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter key: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminSettingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminSetting(c, key, params)
+}
+
+// GetAdminSetting operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminSetting(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", c.Param("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter key: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminSetting(c, key)
+}
+
+// PutAdminSetting operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminSetting(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", c.Param("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter key: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminSettingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminSetting(c, key, params)
+}
+
 // GetAdminSupplierApplications operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminSupplierApplications(c *gin.Context) {
 
@@ -21508,6 +21776,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/resources/:resourceId/validate", wrapper.PostAdminMicrosoftResourceValidate)
 	router.GET(options.BaseURL+"/v1/admin/servers", wrapper.GetAdminServers)
 	router.POST(options.BaseURL+"/v1/admin/servers", wrapper.PostAdminServer)
+	router.GET(options.BaseURL+"/v1/admin/settings", wrapper.GetAdminSettings)
+	router.PUT(options.BaseURL+"/v1/admin/settings", wrapper.PutAdminSettings)
+	router.DELETE(options.BaseURL+"/v1/admin/settings/:key", wrapper.DeleteAdminSetting)
+	router.GET(options.BaseURL+"/v1/admin/settings/:key", wrapper.GetAdminSetting)
+	router.PUT(options.BaseURL+"/v1/admin/settings/:key", wrapper.PutAdminSetting)
 	router.GET(options.BaseURL+"/v1/admin/suppliers/applications", wrapper.GetAdminSupplierApplications)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/approve", wrapper.PostAdminSupplierApplicationApprove)
 	router.POST(options.BaseURL+"/v1/admin/suppliers/applications/:applicationId/reject", wrapper.PostAdminSupplierApplicationReject)

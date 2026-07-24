@@ -32,7 +32,7 @@ import {
 } from "@douyinfe/semi-illustrations";
 import { useTranslation } from "react-i18next";
 
-import { parseOption, parseSettingsList } from "@/lib/settings-api-mock";
+import { parseOption, parseSettingsList } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import {
@@ -67,6 +67,7 @@ const D = {
   maintenance_notice: "",
   maintenance_mode: false,
   maintenance_allow_ips: "",
+  announcement_enabled: true,
   faq_enabled: true,
   faq_list: "[]",
 };
@@ -110,7 +111,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const [faqModalOpen, setFaqModalOpen] = useState(false);
   const [announcementDraft, setAnnouncementDraft] = useState<Announcement>(EMPTY_ANNOUNCEMENT);
   const [faqDraft, setFaqDraft] = useState<FAQItem>(EMPTY_FAQ);
-  const [announcementPanelEnabled, setAnnouncementPanelEnabled] = useState(false);
+  const [announcementPanelEnabled, setAnnouncementPanelEnabled] = useState(parsed.announcement_enabled);
   const [announcementDirty, setAnnouncementDirty] = useState(false);
   const [selectedAnnouncementIds, setSelectedAnnouncementIds] = useState<number[]>([]);
   const [faqDirty, setFaqDirty] = useState(false);
@@ -139,6 +140,10 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     };
     if (!draft.title || !draft.content) {
       Toast.warning(t("请填写公告标题和内容"));
+      return;
+    }
+    if (!draft.id && announcements.length >= 100) {
+      Toast.warning(t("系统公告最多添加 100 条"));
       return;
     }
     setAnnouncements((current) => draft.id
@@ -180,6 +185,10 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     };
     if (!draft.question || !draft.answer) {
       Toast.warning(t("请填写问题和答案"));
+      return;
+    }
+    if (!draft.id && faqList.length >= 50) {
+      Toast.warning(t("常见问题最多添加 50 条"));
       return;
     }
     setFaqList((current) => draft.id
@@ -271,7 +280,11 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
         <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!announcementDirty} onClick={() => void saveAnnouncements()}>{t("保存设置")}</Button>
       </div>
       <div className="order-1 flex items-center gap-2 md:order-2">
-        <Switch aria-label={t("系统公告开关")} checked={announcementPanelEnabled} onChange={setAnnouncementPanelEnabled} />
+        <Switch aria-label={t("系统公告开关")} checked={announcementPanelEnabled} onChange={(value) => {
+          const previous = announcementPanelEnabled;
+          setAnnouncementPanelEnabled(value);
+          void onBulkSave([{ key: "announcement_enabled", value: String(value) }]).catch(() => setAnnouncementPanelEnabled(previous));
+        }} />
         <Text>{announcementPanelEnabled ? t("已启用") : t("已禁用")}</Text>
       </div>
     </div>

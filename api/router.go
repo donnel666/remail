@@ -28,6 +28,7 @@ import (
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
+	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -129,6 +130,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		}
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 
+		// Generic administrator-managed system settings.
+		systemSettingsMod := systemsettingsapi.NewModule(p.DB)
+		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
+		systemsettingsapi.RegisterRoutes(v1, systemSettingsMod, iamSessionFetcher, iamMod.PermissionChecker)
+
 		// Core module (resources, mail servers, domains)
 		coreMod, err = coreapi.NewCoreModule(p.DB, p.Redis, fileStore, p.Asynq, mailMod.ValidationUseCase, mailMod.BindingRecorder)
 		if err != nil {
@@ -140,7 +146,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
 		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)
-		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		governanceMod := governanceapi.NewModule(p.DB)
 		governanceapi.RegisterRoutes(v1, governanceMod, iamSessionFetcher, iamMod.PermissionChecker)
 		mailapi.RegisterMailTransportRoutes(v1, mailMod, iamSessionFetcher, iamMod.PermissionChecker)

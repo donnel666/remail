@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button, Modal } from "@douyinfe/semi-ui";
+import { Button, Modal, Toast } from "@douyinfe/semi-ui";
 import { Edit, Plus, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { createUserGroup, getUserGroups, updateUserGroup, type UserGroupFormValues } from "@/lib/settings-api-mock";
+import { createUserGroup, getUserGroups, updateUserGroup, type UserGroupFormValues } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSwitchField, SettingsTextField } from "./settings-layout";
@@ -20,19 +20,37 @@ export default function UserGroupSection(_props: SectionProps) {
 
   const load = async () => {
     setLoading(true);
-    try { const result = await getUserGroups(); setGroups(result.groups); }
-    finally { setLoading(false); }
+    try {
+      const result = await getUserGroups();
+      setGroups(result.groups);
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("加载用户分组失败"));
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { void load(); }, []);
 
   const save = async () => {
+    const code = editing.code.trim();
+    const name = editing.name.trim();
+    if (!code || !name) {
+      Toast.warning(t("请填写分组标识码和分组名称"));
+      return;
+    }
+    if (groups.some((group) => group.id !== editing.id && group.code.trim().toLowerCase() === code.toLowerCase())) {
+      Toast.warning(t("分组标识码不能重复"));
+      return;
+    }
     setSaving(true);
     try {
-      const { id, ...values } = editing;
+      const { id, ...values } = { ...editing, code, name, description: editing.description.trim() };
       if (id) await updateUserGroup(id, values);
       else await createUserGroup(values);
       setShowForm(false);
       await load();
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : t("保存用户分组失败"));
     } finally { setSaving(false); }
   };
 

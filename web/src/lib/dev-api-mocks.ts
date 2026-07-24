@@ -4,6 +4,7 @@ const permissions = [
   "iam:user:read", "iam:user:write", "iam:user:operate",
   "iam:user_group:read", "iam:user_group:write",
   "iam:permission:read", "iam:permission:write", "iam:permission:sensitive",
+  "system:settings:read", "system:settings:write", "system:settings:sensitive",
   "iam:invite:read", "iam:invite:write", "iam:invite:operate",
   "iam:supplier_application:read", "iam:supplier_application:operate",
   "core:resource:read", "core:resource:write", "core:resource:operate",

@@ -111,12 +111,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         icon: ScrollText,
         requiredPermission: permissionKey("governance:log", "read"),
       },
-      ...(import.meta.env.DEV ? [{
+      {
         path: "/admin/settings",
         labelKey: "System Settings",
         icon: Settings,
-        requiredPermission: permissionKey("iam:permission", "read"),
-      }] : []),
+        requiredPermission: permissionKey("system:settings", "read"),
+      },
     ],
   },
 ];

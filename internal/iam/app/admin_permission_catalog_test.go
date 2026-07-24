@@ -20,6 +20,9 @@ func TestPermissionCatalogCoversAdminFrontendContract(t *testing.T) {
 	required := []string{
 		"iam:user:read",
 		"iam:permission:sensitive",
+		"system:settings:read",
+		"system:settings:write",
+		"system:settings:sensitive",
 		"core:resource:read",
 		"core:project:read",
 		"proxy:proxy:read",

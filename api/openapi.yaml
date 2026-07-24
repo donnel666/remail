@@ -1151,6 +1151,184 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/settings:
+    get:
+      operationId: getAdminSettings
+      summary: List system settings (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: System settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemSettingsResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: putAdminSettings
+      summary: Replace system settings in bulk (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSystemSettingsBulkRequest"
+      responses:
+        "200":
+          description: Updated system settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemSettingsResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/settings/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getAdminSetting
+      summary: Get one system setting (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: System setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemSettingResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Setting not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: putAdminSetting
+      summary: Upsert one system setting (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSystemSettingRequest"
+      responses:
+        "200":
+          description: Updated system setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemSettingResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteAdminSetting
+      summary: Delete one system setting (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Setting deleted
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Setting not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/admin/users/{userId}/apikeys:
     get:
       operationId: getAdminUserApiKeys
@@ -2319,6 +2497,10 @@ paths:
                 type: string
                 format: binary
             image/webp:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
               schema:
                 type: string
                 format: binary
@@ -11940,6 +12122,76 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/UserGroupResponse"
+      additionalProperties: false
+
+    AdminSystemSetting:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    AdminSystemSettingsResponse:
+      type: object
+      required:
+        - options
+      properties:
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSystemSetting"
+      additionalProperties: false
+
+    AdminSystemSettingResponse:
+      type: object
+      required:
+        - option
+      properties:
+        option:
+          $ref: "#/components/schemas/AdminSystemSetting"
+      additionalProperties: false
+
+    AdminSystemSettingRequest:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+      additionalProperties: false
+
+    AdminSystemSettingUpdate:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+      additionalProperties: false
+
+    AdminSystemSettingsBulkRequest:
+      type: object
+      required:
+        - settings
+      properties:
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSystemSettingUpdate"
       additionalProperties: false
 
     AdminUpdateUserRequest:

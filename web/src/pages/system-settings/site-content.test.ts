@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSettingsList } from "@/lib/settings-api-mock";
+import { parseSettingsList } from "@/lib/system-settings-api";
 
 describe("parseSettingsList", () => {
   it("accepts arrays and safely ignores invalid setting values", () => {

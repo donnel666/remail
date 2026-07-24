@@ -3,7 +3,7 @@ import { Button, TagInput } from "@douyinfe/semi-ui";
 import { Database, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { parseOption } from "@/lib/settings-api-mock";
+import { parseOption } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
 import { FormItem, FormLabel, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection } from "./settings-layout";

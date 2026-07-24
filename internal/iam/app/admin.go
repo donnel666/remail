@@ -108,6 +108,7 @@ var permissionCatalog = []domain.PermissionCatalogItem{
 	{Resource: "iam:permission", Actions: []string{"read", "write", "sensitive"}},
 	{Resource: "iam:invite", Actions: []string{"read", "write", "operate"}},
 	{Resource: "iam:supplier_application", Actions: []string{"read", "operate"}},
+	{Resource: "system:settings", Actions: []string{"read", "write", "sensitive"}},
 	{Resource: "core:resource", Actions: []string{"read", "write", "operate"}},
 	{Resource: "core:project", Actions: []string{"read", "write", "operate"}},
 	{Resource: "trade:order", Actions: []string{"read", "write", "operate"}},
