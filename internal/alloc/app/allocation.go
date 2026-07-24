@@ -1179,6 +1179,9 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCo
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
 	}
+	if _, suffix, valid := splitEmail(email); cmd.EmailSuffix != "" && (!valid || suffix != cmd.EmailSuffix) {
+		return nil, errCandidateUnavailable
+	}
 	allocation := &domain.MicrosoftAllocation{
 		OrderNo:         cmd.OrderNo,
 		ProjectID:       config.ProjectID,

@@ -401,7 +401,7 @@ func TestMicrosoftMainUsesAliasWhenMainIsAlreadyAllocated(t *testing.T) {
 		explicitAlias: &AliasCandidate{ID: 9, Email: "alias@example.com"},
 	}
 	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5,
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
 	})
 
 	if err != nil || result == nil || result.Email != "alias@example.com" {
@@ -409,6 +409,26 @@ func TestMicrosoftMainUsesAliasWhenMainIsAlreadyAllocated(t *testing.T) {
 	}
 	if repo.createdMailbox != domain.MicrosoftMailboxAlias || repo.createdResource != 1 {
 		t.Fatalf("created mailbox/resource = %s/%d, want alias/1", repo.createdMailbox, repo.createdResource)
+	}
+}
+
+func TestMicrosoftAllocationRejectsWrongDeliverySuffix(t *testing.T) {
+	repo := &allocationLockRepo{
+		config: ProductAllocationConfig{
+			ProjectID: 4, ProductID: 5, ProductType: domain.AllocationTypeMicrosoft, MainWeight: 1,
+		},
+		candidates:    []MicrosoftCandidate{{ResourceID: 1, EmailAddress: "main@hotmail.com", MainAllocated: true}},
+		explicitAlias: &AliasCandidate{ID: 9, Email: "alias@outlook.com"},
+	}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "hotmail.com",
+	})
+
+	if !errors.Is(err, domain.ErrInsufficientInventory) || result != nil {
+		t.Fatalf("Allocate() result = %#v, error = %v; want insufficient inventory", result, err)
+	}
+	if repo.creates != 0 {
+		t.Fatalf("CreateMicrosoftAllocation() calls = %d, want 0", repo.creates)
 	}
 }
 
