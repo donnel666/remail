@@ -11,8 +11,8 @@ import (
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
 
-// ponytail: this monolith uses a process-local snapshot; add Redis pub/sub if
-// system-setting writes can be served by multiple API replicas.
+// The process-local snapshot is refreshed by the system-settings API's Redis
+// invalidation subscriber when the service runs with multiple replicas.
 var current atomic.Value
 var updateMu sync.Mutex
 
@@ -27,7 +27,7 @@ func Replace(settings []domain.Setting) {
 	defer updateMu.Unlock()
 	values := make(map[string]string, len(settings))
 	for _, setting := range settings {
-		key := strings.TrimSpace(setting.Key)
+		key := canonicalKey(setting.Key)
 		if Validate(key, setting.Value) == nil {
 			values[key] = setting.Value
 		}
@@ -45,7 +45,7 @@ func SetMany(settings []domain.Setting) {
 	defer updateMu.Unlock()
 	values := clone()
 	for _, setting := range settings {
-		values[strings.TrimSpace(setting.Key)] = setting.Value
+		values[canonicalKey(setting.Key)] = setting.Value
 	}
 	current.Store(values)
 }
@@ -54,12 +54,12 @@ func Delete(key string) {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 	values := clone()
-	delete(values, strings.TrimSpace(key))
+	delete(values, canonicalKey(key))
 	current.Store(values)
 }
 
 func String(key, fallback string) string {
-	value, ok := current.Load().(map[string]string)[key]
+	value, ok := current.Load().(map[string]string)[canonicalKey(key)]
 	if !ok {
 		return fallback
 	}
@@ -71,7 +71,7 @@ func Snapshot() Values {
 }
 
 func (values Values) String(key, fallback string) string {
-	value, ok := values[key]
+	value, ok := values[canonicalKey(key)]
 	if !ok {
 		return fallback
 	}
@@ -123,4 +123,8 @@ func clone() map[string]string {
 		values[key] = value
 	}
 	return values
+}
+
+func canonicalKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }

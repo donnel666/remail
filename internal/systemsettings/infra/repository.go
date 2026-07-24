@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
@@ -22,7 +23,7 @@ type SettingModel struct {
 func (SettingModel) TableName() string { return "system_settings" }
 
 func (m SettingModel) toDomain() domain.Setting {
-	return domain.Setting{Key: m.Key, Value: m.Value, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
+	return domain.Setting{Key: strings.ToLower(strings.TrimSpace(m.Key)), Value: m.Value, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
 }
 
 type Repository struct {
@@ -59,9 +60,29 @@ func (r *Repository) List(ctx context.Context) ([]domain.Setting, error) {
 	return settings, nil
 }
 
+// InsertMissing seeds new settings without changing values already managed by
+// an administrator. The primary key conflict is intentionally ignored so
+// concurrent application instances can run startup initialization safely.
+func (r *Repository) InsertMissing(ctx context.Context, settings []domain.Setting) error {
+	if len(settings) == 0 {
+		return nil
+	}
+	models := make([]SettingModel, len(settings))
+	for i, setting := range settings {
+		models[i] = SettingModel{Key: setting.Key, Value: setting.Value}
+	}
+	if err := r.dbFor(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoNothing: true,
+	}).Create(&models).Error; err != nil {
+		return fmt.Errorf("insert missing system settings: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) Get(ctx context.Context, key string) (*domain.Setting, error) {
 	var model SettingModel
-	if err := r.dbFor(ctx).Where("`key` = ?", key).First(&model).Error; err != nil {
+	if err := r.dbFor(ctx).Where("LOWER(`key`) = LOWER(?)", key).First(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrSettingNotFound
 		}
@@ -101,12 +122,13 @@ func (r *Repository) BulkUpsert(ctx context.Context, settings []domain.Setting) 
 		keys[i] = settings[i].Key
 	}
 	var stored []SettingModel
-	if err := r.dbFor(ctx).Where("`key` IN ?", keys).Find(&stored).Error; err != nil {
+	if err := r.dbFor(ctx).Where("LOWER(`key`) IN ?", keys).Find(&stored).Error; err != nil {
 		return nil, fmt.Errorf("reload bulk system settings: %w", err)
 	}
 	byKey := make(map[string]domain.Setting, len(stored))
 	for i := range stored {
-		byKey[stored[i].Key] = stored[i].toDomain()
+		setting := stored[i].toDomain()
+		byKey[setting.Key] = setting
 	}
 	result := make([]domain.Setting, len(settings))
 	for i := range settings {
@@ -120,7 +142,7 @@ func (r *Repository) BulkUpsert(ctx context.Context, settings []domain.Setting) 
 }
 
 func (r *Repository) Delete(ctx context.Context, key string) error {
-	result := r.dbFor(ctx).Where("`key` = ?", key).Delete(&SettingModel{})
+	result := r.dbFor(ctx).Where("LOWER(`key`) = LOWER(?)", key).Delete(&SettingModel{})
 	if result.Error != nil {
 		return fmt.Errorf("delete system setting: %w", result.Error)
 	}

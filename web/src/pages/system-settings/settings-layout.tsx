@@ -68,6 +68,13 @@ export function SettingsFormGrid({ children, className }: { children: ReactNode;
   </div>;
 }
 
+export function SettingsInvalidValuesNotice({ keys, message }: { keys: readonly string[]; message: string }) {
+  if (keys.length === 0) return null;
+  return <p role="alert" aria-live="polite" className="mt-3 text-sm text-[var(--semi-color-danger)]">
+    {message}: {keys.join(", ")}
+  </p>;
+}
+
 // ---- FormItem — wraps a single form field ----
 export function FormItem({ children, spanFull }: { children: ReactNode; spanFull?: boolean }) {
   return <div data-settings-form-span={spanFull ? "full" : undefined} data-slot="form-item" className="flex flex-col gap-1.5 min-w-0">
@@ -97,7 +104,7 @@ export function SettingsSwitchField({ checked, onChange, label, description, dis
 
 // ---- SettingsNumberField — number input with label in 2-col grid ----
 export function SettingsNumberField({ label, value, onChange, min, max, precision, step }: {
-  label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; precision?: number; step?: number;
+  label: string; value: number | undefined; onChange: (v: number) => void; min?: number; max?: number; precision?: number; step?: number;
 }) {
   const id = useId();
   return (
@@ -110,7 +117,7 @@ export function SettingsNumberField({ label, value, onChange, min, max, precisio
 
 // ---- SettingsTextField — text input with label ----
 export function SettingsTextField({ label, value, onChange, placeholder, type, disabled }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; disabled?: boolean;
+  label: string; value: string | undefined; onChange: (v: string) => void; placeholder?: string; type?: string; disabled?: boolean;
 }) {
   const id = useId();
   return (

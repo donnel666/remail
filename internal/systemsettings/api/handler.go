@@ -159,7 +159,7 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 func isSensitiveKey(key string) bool {
-	switch strings.TrimSpace(key) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "github_client_secret", "epay_merchant_key":
 		return true
 	default:
@@ -222,7 +222,7 @@ func mutationMeta(c *gin.Context) app.MutationMeta {
 
 func toDTO(setting domain.Setting) settingDTO {
 	return settingDTO{
-		Key:       setting.Key,
+		Key:       strings.ToLower(strings.TrimSpace(setting.Key)),
 		Value:     setting.Value,
 		CreatedAt: setting.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		UpdatedAt: setting.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),

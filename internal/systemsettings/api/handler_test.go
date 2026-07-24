@@ -152,6 +152,11 @@ func TestAdminSettingsCRUD(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, missing.Code)
 }
 
+func TestSettingDTOCanonicalizesLegacyKeyCase(t *testing.T) {
+	dto := toDTO(settingsdomain.Setting{Key: "SMTP_TASK_RETRY_COUNT", Value: "3"})
+	require.Equal(t, "smtp_task_retry_count", dto.Key)
+}
+
 func TestAdminSettingsRejectInvalidKnownValue(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{}}
 	r := testRouter(repo)

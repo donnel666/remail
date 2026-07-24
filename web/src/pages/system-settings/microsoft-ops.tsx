@@ -3,23 +3,29 @@ import { Button } from "@douyinfe/semi-ui";
 import { Save, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { parseOption } from "@/lib/system-settings-api";
+import { invalidNumericKeys, selectOptions, serializeOptions } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection } from "./settings-layout";
-
-const D = { microsoft_alias_weekly_limit: 2, microsoft_alias_yearly_limit: 10, microsoft_alias_ensure_interval_hours: 24, microsoft_alias_reconciliation_grace_hours: 24, microsoft_alias_transient_backoff_base_minutes: 15, microsoft_alias_transient_backoff_max_hours: 12, microsoft_alias_negative_confirm_required: 3, token_refresh_max_attempts: 3, token_refresh_scan_limit: 2000, token_refresh_lookahead_days: 30, token_refresh_hour: 3, recovery_code_lease_minutes: 10, password_recovery_code_wait_seconds: 90, msacl_token_poll_timeout_seconds: 30, msacl_token_poll_interval_seconds: 3, imap_operation_timeout_seconds: 60, imap_full_history_timeout_minutes: 15, proxy_handshake_timeout_seconds: 30, graph_message_page_top: 100, mail_stream_batch_size: 100, mail_fetch_client_timeout_seconds: 30, imap_dial_timeout_seconds: 20, imap_keepalive_seconds: 30, oauth_validation_timeout_seconds: 30 };
+import { SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection } from "./settings-layout";
+import { MICROSOFT_OPS_KEYS } from "./email-service-keys";
 
 export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState(parseOption(options, D) as Record<string, unknown>);
+  const [form, setForm] = useState<Record<string, unknown>>(() => selectOptions(options, MICROSOFT_OPS_KEYS));
   const [saving, setSaving] = useState(false);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
-  const number = (value: unknown) => Number(value) || 0;
+  const number = (value: unknown): number | undefined => {
+    if (value === undefined || value === null || String(value).trim() === "") return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const invalidKeys = invalidNumericKeys(form, MICROSOFT_OPS_KEYS);
   const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
   const save = async () => {
     setSaving(true);
-    try { await onBulkSave(Object.entries(form).map(([key, value]) => ({ key, value: String(value) }))); }
+    try {
+      await onBulkSave(serializeOptions(MICROSOFT_OPS_KEYS, form, MICROSOFT_OPS_KEYS));
+    }
     finally { setSaving(false); }
   };
 
@@ -50,6 +56,7 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
       {field("IMAP 保活间隔（秒）", "imap_keepalive_seconds")}
       {field("OAuth 与微软浏览器请求超时（秒）", "oauth_validation_timeout_seconds")}
     </SettingsFormGrid>
+    <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
     <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

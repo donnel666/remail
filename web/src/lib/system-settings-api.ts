@@ -16,6 +16,54 @@ export function parseSettingsList<T>(raw: unknown): T[] {
   }
 }
 
+export function selectOptions(
+  options: SystemOption[] | undefined,
+  keys: readonly string[],
+): Record<string, string> {
+  const allowed = new Set(keys.map((key) => key.trim().toLowerCase()));
+  const selected: Record<string, string> = {};
+  for (const option of options ?? []) {
+    const key = option.key.trim().toLowerCase();
+    if (allowed.has(key)) {
+      selected[key] = option.value;
+    }
+  }
+  return selected;
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function isIntegerNumber(value: unknown): boolean {
+  if (value === undefined || value === null || String(value).trim() === "") return false;
+  if (typeof value === "number") return Number.isSafeInteger(value);
+  const text = String(value).trim();
+  if (!/^[+-]?\d+$/.test(text)) return false;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed);
+}
+
+export function invalidNumericKeys(
+  form: Record<string, unknown>,
+  numericKeys: readonly string[],
+): string[] {
+  return numericKeys.filter((key) => hasOwn(form, key) && !isIntegerNumber(form[key]));
+}
+
+export function serializeOptions(
+  keys: readonly string[],
+  form: Record<string, unknown>,
+  numericKeys: readonly string[] = [],
+): SystemOption[] {
+  const numeric = new Set(numericKeys);
+  return keys.flatMap((key) => {
+    if (!hasOwn(form, key) || form[key] === undefined) return [];
+    if (numeric.has(key) && !isIntegerNumber(form[key])) return [];
+    return [{ key, value: String(form[key]) }];
+  });
+}
+
 export function parseOption<T extends Record<string, unknown>>(
   options: SystemOption[] | undefined,
   defaults: T,

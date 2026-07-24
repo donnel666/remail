@@ -45,7 +45,7 @@ var removedKeys = map[string]struct{}{
 }
 
 func Validate(key, value string) error {
-	key = strings.TrimSpace(key)
+	key = canonicalKey(key)
 	rawValue := value
 	value = strings.TrimSpace(value)
 	if _, removed := removedKeys[key]; removed {
@@ -95,7 +95,7 @@ func Validate(key, value string) error {
 func ValidateUpdates(settings []domain.Setting) error {
 	values := clone()
 	for _, setting := range settings {
-		key := strings.TrimSpace(setting.Key)
+		key := canonicalKey(setting.Key)
 		if err := Validate(key, setting.Value); err != nil {
 			return err
 		}
@@ -106,14 +106,14 @@ func ValidateUpdates(settings []domain.Setting) error {
 
 func ValidateDelete(key string) error {
 	values := clone()
-	delete(values, strings.TrimSpace(key))
+	delete(values, canonicalKey(key))
 	return validateRelationships(values)
 }
 
 func ValidateSnapshot(settings []domain.Setting) error {
 	values := make(map[string]string, len(settings))
 	for _, setting := range settings {
-		key := strings.TrimSpace(setting.Key)
+		key := canonicalKey(setting.Key)
 		if err := Validate(key, setting.Value); err != nil {
 			continue
 		}

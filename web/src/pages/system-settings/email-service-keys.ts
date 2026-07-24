@@ -1,0 +1,108 @@
+export const EMAIL_RESOURCE_KEYS = [
+  "microsoft_domain_whitelist",
+  "default_plus_daily_limit",
+  "default_mailbox_daily_limit",
+  "resource_validation_max_failures",
+  "resource_import_max_bytes",
+  "max_project_logo_bytes",
+  "project_name_max",
+  "project_description_max",
+  "project_target_platform_max",
+] as const;
+
+export const ALLOCATION_KEYS = [
+  "candidate_window_size",
+  "global_candidate_window",
+  "bucket_probe_count",
+  "alias_generation_window",
+  "candidate_retry_count",
+  "dot_alias_capacity_per_resource",
+  "inventory_refresh_interval_minutes",
+  "inventory_cache_activity_ttl_minutes",
+  "inventory_cache_hard_ttl_hours",
+] as const;
+
+export const MAILMATCH_KEYS = [
+  "fetch_lookback_window_days",
+  "read_window_skew_minutes",
+  "code_read_limit",
+  "purchase_read_limit",
+  "message_scan_limit",
+  "projection_replay_limit",
+  "pickup_fetch_reserve_ttl_minutes",
+  "pickup_fetch_lease_ttl_minutes",
+  "pickup_message_cache_ttl_seconds",
+  "pickup_message_cache_limit",
+  "pickup_fetch_heartbeat_seconds",
+  "mailmatch_fetch_timeout_minutes",
+  "pickup_request_fetch_timeout_minutes",
+  "project_history_timeout_minutes",
+  "fetch_dispatcher_interval_seconds",
+  "project_history_concurrency",
+  "project_history_dispatch_limit",
+  "verification_code_pattern",
+] as const;
+
+export const MICROSOFT_OPS_KEYS = [
+  "microsoft_alias_weekly_limit",
+  "microsoft_alias_yearly_limit",
+  "microsoft_alias_ensure_interval_hours",
+  "microsoft_alias_reconciliation_grace_hours",
+  "microsoft_alias_transient_backoff_base_minutes",
+  "microsoft_alias_transient_backoff_max_hours",
+  "microsoft_alias_negative_confirm_required",
+  "token_refresh_max_attempts",
+  "token_refresh_scan_limit",
+  "token_refresh_lookahead_days",
+  "token_refresh_hour",
+  "recovery_code_lease_minutes",
+  "password_recovery_code_wait_seconds",
+  "msacl_token_poll_timeout_seconds",
+  "msacl_token_poll_interval_seconds",
+  "imap_operation_timeout_seconds",
+  "imap_full_history_timeout_minutes",
+  "proxy_handshake_timeout_seconds",
+  "graph_message_page_top",
+  "mail_stream_batch_size",
+  "mail_fetch_client_timeout_seconds",
+  "imap_dial_timeout_seconds",
+  "imap_keepalive_seconds",
+  "oauth_validation_timeout_seconds",
+] as const;
+
+export const PROXY_NETWORK_KEYS = [
+  "proxy_check_interval_seconds",
+  "proxy_failure_threshold",
+  "proxy_check_timeout_seconds",
+  "resource_binding_ttl_days",
+  "max_proxy_attempts",
+  "pending_proxy_check_limit",
+  "proxy_idle_conn_timeout_seconds",
+  "proxy_tls_handshake_timeout_seconds",
+] as const;
+
+export const MAIL_DELIVERY_KEYS = [
+  "smtp_outbound_payload_ttl_minutes",
+  "smtp_task_retry_count",
+  "outbound_mail_timeout_minutes",
+  "inbound_mail_timeout_minutes",
+  "auxiliary_domain_refresh_interval_seconds",
+  "max_inbound_header_runes",
+  "max_inbound_preview_runes",
+  "max_inbound_body_bytes",
+  "max_inbound_body_runes",
+  "max_inbound_mime_depth",
+  "mail_dispatcher_interval_seconds",
+  "alias_dispatcher_interval_seconds",
+  "token_refresh_dispatcher_interval_seconds",
+  "legacy_alias_retry_delay_seconds",
+] as const;
+
+export const EMAIL_SERVICE_KEYS = [
+  ...EMAIL_RESOURCE_KEYS,
+  ...ALLOCATION_KEYS,
+  ...MAILMATCH_KEYS,
+  ...MICROSOFT_OPS_KEYS,
+  ...PROXY_NETWORK_KEYS,
+  ...MAIL_DELIVERY_KEYS,
+] as const;

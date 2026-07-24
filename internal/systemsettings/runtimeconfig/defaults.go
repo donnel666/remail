@@ -1,0 +1,101 @@
+package runtimeconfig
+
+import "github.com/donnel666/remail/internal/systemsettings/domain"
+
+const DefaultSettingsCount = 82
+
+// DefaultSettings is the single source of initial values for runtime-managed
+// email-service settings. Startup inserts only keys that are not in storage.
+func DefaultSettings() []domain.Setting {
+	return append([]domain.Setting(nil), defaultSettings...)
+}
+
+var defaultSettings = []domain.Setting{
+	{Key: "microsoft_domain_whitelist", Value: ""},
+	{Key: "default_plus_daily_limit", Value: "10000"},
+	{Key: "default_mailbox_daily_limit", Value: "10000"},
+	{Key: "resource_validation_max_failures", Value: "3"},
+	{Key: "resource_import_max_bytes", Value: "104857600"},
+	{Key: "max_project_logo_bytes", Value: "2097152"},
+	{Key: "project_name_max", Value: "120"},
+	{Key: "project_description_max", Value: "1000"},
+	{Key: "project_target_platform_max", Value: "120"},
+
+	{Key: "candidate_window_size", Value: "4"},
+	{Key: "global_candidate_window", Value: "8"},
+	{Key: "bucket_probe_count", Value: "4"},
+	{Key: "alias_generation_window", Value: "32"},
+	{Key: "candidate_retry_count", Value: "5"},
+	{Key: "dot_alias_capacity_per_resource", Value: "10"},
+	{Key: "inventory_refresh_interval_minutes", Value: "10"},
+	{Key: "inventory_cache_activity_ttl_minutes", Value: "20"},
+	{Key: "inventory_cache_hard_ttl_hours", Value: "24"},
+
+	{Key: "fetch_lookback_window_days", Value: "90"},
+	{Key: "read_window_skew_minutes", Value: "2"},
+	{Key: "code_read_limit", Value: "1"},
+	{Key: "purchase_read_limit", Value: "30"},
+	{Key: "message_scan_limit", Value: "40"},
+	{Key: "projection_replay_limit", Value: "100"},
+	{Key: "pickup_fetch_reserve_ttl_minutes", Value: "2"},
+	{Key: "pickup_fetch_lease_ttl_minutes", Value: "2"},
+	{Key: "pickup_message_cache_ttl_seconds", Value: "10"},
+	{Key: "pickup_message_cache_limit", Value: "30"},
+	{Key: "pickup_fetch_heartbeat_seconds", Value: "30"},
+	{Key: "mailmatch_fetch_timeout_minutes", Value: "20"},
+	{Key: "pickup_request_fetch_timeout_minutes", Value: "2"},
+	{Key: "project_history_timeout_minutes", Value: "20"},
+	{Key: "fetch_dispatcher_interval_seconds", Value: "15"},
+	{Key: "project_history_concurrency", Value: "4"},
+	{Key: "project_history_dispatch_limit", Value: "4"},
+	{Key: "verification_code_pattern", Value: `(^|[^\d])(\d{6,8})([^\d]|$)`},
+
+	{Key: "microsoft_alias_weekly_limit", Value: "2"},
+	{Key: "microsoft_alias_yearly_limit", Value: "10"},
+	{Key: "microsoft_alias_ensure_interval_hours", Value: "24"},
+	{Key: "microsoft_alias_reconciliation_grace_hours", Value: "24"},
+	{Key: "microsoft_alias_transient_backoff_base_minutes", Value: "15"},
+	{Key: "microsoft_alias_transient_backoff_max_hours", Value: "12"},
+	{Key: "microsoft_alias_negative_confirm_required", Value: "3"},
+	{Key: "token_refresh_max_attempts", Value: "3"},
+	{Key: "token_refresh_scan_limit", Value: "2000"},
+	{Key: "token_refresh_lookahead_days", Value: "30"},
+	{Key: "token_refresh_hour", Value: "3"},
+	{Key: "recovery_code_lease_minutes", Value: "10"},
+	{Key: "password_recovery_code_wait_seconds", Value: "90"},
+	{Key: "msacl_token_poll_timeout_seconds", Value: "30"},
+	{Key: "msacl_token_poll_interval_seconds", Value: "3"},
+	{Key: "imap_operation_timeout_seconds", Value: "60"},
+	{Key: "imap_full_history_timeout_minutes", Value: "15"},
+	{Key: "proxy_handshake_timeout_seconds", Value: "30"},
+	{Key: "graph_message_page_top", Value: "100"},
+	{Key: "mail_stream_batch_size", Value: "100"},
+	{Key: "mail_fetch_client_timeout_seconds", Value: "30"},
+	{Key: "imap_dial_timeout_seconds", Value: "20"},
+	{Key: "imap_keepalive_seconds", Value: "30"},
+	{Key: "oauth_validation_timeout_seconds", Value: "30"},
+
+	{Key: "proxy_check_interval_seconds", Value: "15"},
+	{Key: "proxy_failure_threshold", Value: "3"},
+	{Key: "proxy_check_timeout_seconds", Value: "6"},
+	{Key: "resource_binding_ttl_days", Value: "7"},
+	{Key: "max_proxy_attempts", Value: "3"},
+	{Key: "pending_proxy_check_limit", Value: "100"},
+	{Key: "proxy_idle_conn_timeout_seconds", Value: "15"},
+	{Key: "proxy_tls_handshake_timeout_seconds", Value: "5"},
+
+	{Key: "smtp_outbound_payload_ttl_minutes", Value: "5"},
+	{Key: "smtp_task_retry_count", Value: "3"},
+	{Key: "outbound_mail_timeout_minutes", Value: "3"},
+	{Key: "inbound_mail_timeout_minutes", Value: "2"},
+	{Key: "auxiliary_domain_refresh_interval_seconds", Value: "60"},
+	{Key: "max_inbound_header_runes", Value: "500"},
+	{Key: "max_inbound_preview_runes", Value: "1000"},
+	{Key: "max_inbound_body_bytes", Value: "1048576"},
+	{Key: "max_inbound_body_runes", Value: "200000"},
+	{Key: "max_inbound_mime_depth", Value: "12"},
+	{Key: "mail_dispatcher_interval_seconds", Value: "15"},
+	{Key: "alias_dispatcher_interval_seconds", Value: "2"},
+	{Key: "token_refresh_dispatcher_interval_seconds", Value: "2"},
+	{Key: "legacy_alias_retry_delay_seconds", Value: "30"},
+}

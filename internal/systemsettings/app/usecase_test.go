@@ -126,6 +126,15 @@ type fakeOperationLogs struct {
 	err   error
 }
 
+type fakeRuntimeSettingsPublisher struct {
+	count int
+}
+
+func (p *fakeRuntimeSettingsPublisher) Publish(context.Context) error {
+	p.count++
+	return nil
+}
+
 func (f *fakeOperationLogs) Create(_ context.Context, log *governancedomain.OperationLog) error {
 	cloned := *log
 	f.items = append(f.items, &cloned)
@@ -137,19 +146,19 @@ func TestSystemSettingsUseCaseNormalizesKeys(t *testing.T) {
 	logs := &fakeOperationLogs{}
 	uc := NewSystemSettingsUseCase(repo, logs)
 
-	if _, err := uc.Upsert(context.Background(), "  mail.foo  ", "value", MutationMeta{}); err != nil {
+	if _, err := uc.Upsert(context.Background(), "  MAIL.FOO  ", "value", MutationMeta{}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if repo.upsertKey != "mail.foo" {
 		t.Fatalf("key = %q, want mail.foo", repo.upsertKey)
 	}
-	if _, err := uc.Get(context.Background(), "  mail.foo  "); err != nil {
+	if _, err := uc.Get(context.Background(), "  MAIL.FOO  "); err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if repo.getKey != "mail.foo" {
 		t.Fatalf("get key = %q, want mail.foo", repo.getKey)
 	}
-	if err := uc.Delete(context.Background(), "  mail.foo  ", MutationMeta{}); err != nil {
+	if err := uc.Delete(context.Background(), "  MAIL.FOO  ", MutationMeta{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if repo.deleteKey != "mail.foo" {
@@ -186,6 +195,19 @@ func TestBulkUpsertValidatesEverythingBeforeWriting(t *testing.T) {
 	if repo.bulkCalled || repo.setting != nil {
 		t.Fatal("bulk repository was called before all keys were validated")
 	}
+}
+
+func TestBulkUpsertSkipsUnchangedInvalidLegacyValue(t *testing.T) {
+	repo := &fakeRepository{setting: &domain.Setting{Key: "candidate_window_size", Value: "bad"}}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+
+	saved, err := uc.BulkUpsert(context.Background(), []domain.Setting{
+		{Key: "candidate_window_size", Value: "bad"},
+		{Key: "global_candidate_window", Value: "8"},
+	}, MutationMeta{})
+	require.NoError(t, err)
+	require.Equal(t, []domain.Setting{{Key: "global_candidate_window", Value: "8"}}, saved)
+	require.Equal(t, "global_candidate_window", repo.upsertKey)
 }
 
 func TestMutationAndSafeAuditShareTransaction(t *testing.T) {
@@ -256,5 +278,22 @@ func TestAllMutationsWriteValueFreeAuditLogs(t *testing.T) {
 	}
 	if logs.items[0].ResourceID != "one" || logs.items[1].SafeSummary != "updated system settings count=2" || logs.items[2].ResourceID != "three" {
 		t.Fatalf("unexpected audit keys/counts: %+v", logs.items)
+	}
+}
+
+func TestSystemSettingMutationsPublishRuntimeChanges(t *testing.T) {
+	publisher := &fakeRuntimeSettingsPublisher{}
+	uc := NewSystemSettingsUseCase(&fakeRepository{}, &fakeOperationLogs{})
+	uc.SetRuntimeSettingsPublisher(publisher)
+	t.Cleanup(func() { runtimeconfig.Delete("published_runtime_key") })
+
+	if _, err := uc.Upsert(context.Background(), "published_runtime_key", "value", MutationMeta{}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := uc.Delete(context.Background(), "published_runtime_key", MutationMeta{}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if publisher.count != 2 {
+		t.Fatalf("published notifications = %d, want 2", publisher.count)
 	}
 }

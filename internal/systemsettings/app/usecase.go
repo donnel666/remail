@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
@@ -18,9 +21,10 @@ var settingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`
 // SystemSettingsUseCase handles the small amount of normalization required at
 // the administrator API boundary before delegating persistence to the repo.
 type SystemSettingsUseCase struct {
-	repo Repository
-	logs governanceapp.OperationLogPort
-	mu   sync.Mutex
+	repo      Repository
+	logs      governanceapp.OperationLogPort
+	publisher RuntimeSettingsPublisher
+	mu        sync.Mutex
 }
 
 type MutationMeta struct {
@@ -31,6 +35,12 @@ type MutationMeta struct {
 
 func NewSystemSettingsUseCase(repo Repository, logs governanceapp.OperationLogPort) *SystemSettingsUseCase {
 	return &SystemSettingsUseCase{repo: repo, logs: logs}
+}
+
+func (uc *SystemSettingsUseCase) SetRuntimeSettingsPublisher(publisher RuntimeSettingsPublisher) {
+	if uc != nil {
+		uc.publisher = publisher
+	}
 }
 
 func (uc *SystemSettingsUseCase) List(ctx context.Context) ([]domain.Setting, error) {
@@ -73,22 +83,36 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 		return nil, err
 	}
 	runtimeconfig.Set(setting.Key, setting.Value)
+	uc.publishRuntimeSettings(ctx)
 	return setting, nil
 }
 
 func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []domain.Setting, meta MutationMeta) ([]domain.Setting, error) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
-	normalized := make([]domain.Setting, len(settings))
-	for i, setting := range settings {
+	normalized := make([]domain.Setting, 0, len(settings))
+	for _, setting := range settings {
 		key, err := normalizeKey(setting.Key)
 		if err != nil {
 			return nil, err
 		}
 		if err := runtimeconfig.Validate(key, setting.Value); err != nil {
-			return nil, err
+			// Keep an invalid legacy value from blocking unrelated fields in the
+			// same form. It is skipped only when the client sent the exact value
+			// already stored; changing it still requires a valid replacement.
+			if !errors.Is(err, domain.ErrInvalidValue) {
+				return nil, err
+			}
+			existing, getErr := uc.repo.Get(ctx, key)
+			if getErr != nil || existing == nil || existing.Value != setting.Value {
+				return nil, err
+			}
+			continue
 		}
-		normalized[i] = domain.Setting{Key: key, Value: setting.Value}
+		normalized = append(normalized, domain.Setting{Key: key, Value: setting.Value})
+	}
+	if len(normalized) == 0 {
+		return []domain.Setting{}, nil
 	}
 	if err := runtimeconfig.ValidateUpdates(normalized); err != nil {
 		return nil, err
@@ -113,6 +137,7 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 		return nil, err
 	}
 	runtimeconfig.SetMany(saved)
+	uc.publishRuntimeSettings(ctx)
 	return saved, nil
 }
 
@@ -141,7 +166,22 @@ func (uc *SystemSettingsUseCase) Delete(ctx context.Context, key string, meta Mu
 		return err
 	}
 	runtimeconfig.Delete(key)
+	uc.publishRuntimeSettings(ctx)
 	return nil
+}
+
+func (uc *SystemSettingsUseCase) publishRuntimeSettings(ctx context.Context) {
+	if uc == nil || uc.publisher == nil {
+		return
+	}
+	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := uc.publisher.Publish(notifyCtx); err != nil {
+		// The database write and this process' snapshot are already committed.
+		// Pub/Sub is an acceleration path; a later write or restart can recover
+		// another replica if Redis is temporarily unavailable.
+		slog.Warn("publish system settings runtime update failed", "error", err)
+	}
 }
 
 func (uc *SystemSettingsUseCase) mutate(ctx context.Context, log *governancedomain.OperationLog, fn func(context.Context) error) error {
@@ -164,7 +204,7 @@ func normalizeKey(key string) (string, error) {
 	if !settingKeyPattern.MatchString(key) {
 		return "", domain.ErrInvalidKey
 	}
-	return key, nil
+	return strings.ToLower(key), nil
 }
 
 func auditResourceID(key string) string {

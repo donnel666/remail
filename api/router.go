@@ -71,10 +71,11 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	var coreMod *coreapi.CoreModule
 	v1 := r.Group("/v1")
 	{
-		systemSettingsMod, err := systemsettingsapi.NewModule(p.DB)
+		systemSettingsMod, err := systemsettingsapi.NewModule(p.DB, p.Redis)
 		if err != nil {
 			return nil, cleanup, err
 		}
+		cleanupFuncs = append(cleanupFuncs, systemSettingsMod.Start(context.Background()))
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
 		retentionLocation, err := time.LoadLocation("Asia/Shanghai")

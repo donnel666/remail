@@ -9,13 +9,13 @@ import (
 )
 
 func TestRuntimeSettingsUpdateImmediately(t *testing.T) {
-	Replace([]domain.Setting{{Key: "smtp_outbound_payload_ttl_minutes", Value: "7"}})
+	Replace([]domain.Setting{{Key: "SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES", Value: "7"}})
 	t.Cleanup(func() { Replace(nil) })
 
 	require.Equal(t, 7*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
-	Set("smtp_outbound_payload_ttl_minutes", "9")
+	Set("SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES", "9")
 	require.Equal(t, 9*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
-	Delete("smtp_outbound_payload_ttl_minutes")
+	Delete("SMTP_OUTBOUND_PAYLOAD_TTL_MINUTES")
 	require.Equal(t, 5*time.Minute, Duration("smtp_outbound_payload_ttl_minutes", 5*time.Minute, time.Minute, 1))
 }
 
@@ -51,6 +51,7 @@ func TestRuntimeSettingsRejectUnsafeAndConflictingValues(t *testing.T) {
 	require.ErrorIs(t, Validate("alias_generation_window", "2147483647"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("project_name_max", "121"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("bucket_count", "64"), domain.ErrInvalidKey)
+	require.ErrorIs(t, Validate("BUCKET_COUNT", "64"), domain.ErrInvalidKey)
 	require.ErrorIs(t, ValidateUpdates([]domain.Setting{
 		{Key: "pickup_fetch_reserve_ttl_minutes", Value: "1"},
 		{Key: "pickup_fetch_lease_ttl_minutes", Value: "1"},
