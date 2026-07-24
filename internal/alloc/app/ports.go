@@ -5,11 +5,14 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
-	BucketCount                  = 64
+	MicrosoftBucketCount         = coredomain.MicrosoftAllocationBucketCount
+	DomainBucketCount            = coredomain.DomainAllocationBucketCount
+	GeneratedMailboxBucketCount  = coredomain.GeneratedMailboxBucketCount
 	DotAliasCapacityPerResource  = 10
 	InventoryRefreshInterval     = 10 * time.Minute
 	candidateWindowSize          = 4
@@ -19,6 +22,7 @@ const (
 	candidateRetryCount          = 5
 	candidateRetryDelay          = 10 * time.Millisecond
 	maxCandidateWindowSize       = 100
+	maxBucketProbeCount          = 64
 	maxAliasGenerationWindow     = 1000
 	maxCandidateRetryCount       = 20
 	maxDotAliasCapacity          = 64
@@ -36,7 +40,7 @@ func globalCandidateWindowValue() int {
 }
 
 func bucketProbeCountValue() int {
-	return min(runtimeconfig.Int("bucket_probe_count", bucketProbeCount, 1), BucketCount)
+	return min(runtimeconfig.Int("bucket_probe_count", bucketProbeCount, 1), maxBucketProbeCount)
 }
 
 func aliasGenerationWindowValue() int {
@@ -93,8 +97,9 @@ type AliasCandidate struct {
 }
 
 type GeneratedMailboxCandidate struct {
-	ID    uint
-	Email string
+	ID         uint
+	ResourceID uint
+	Email      string
 }
 
 type DailyUsageReservation struct {
@@ -234,7 +239,7 @@ type RoutingCandidate struct {
 	ForSale         bool
 	QualityScore    int
 	Status          string
-	Bucket          uint8
+	Bucket          uint16
 	LastAllocatedAt *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -357,12 +362,14 @@ type Repository interface {
 	CreateOrderGuard(ctx context.Context, orderNo string, allocationType domain.AllocationType) error
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
 
-	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint8, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
-	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]DomainCandidate, error)
+	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]DomainCandidate, error)
+	ListGeneratedMailboxCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]GeneratedMailboxCandidate, error)
 	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	TryLockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*MicrosoftCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
+	LockGeneratedMailboxCandidate(ctx context.Context, mailboxID uint, resourceID uint, projectID uint) (*GeneratedMailboxCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)

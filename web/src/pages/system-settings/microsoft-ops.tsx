@@ -57,6 +57,6 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
       {field("OAuth 与微软浏览器请求超时（秒）", "oauth_validation_timeout_seconds")}
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

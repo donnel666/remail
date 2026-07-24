@@ -1042,6 +1042,8 @@
   "Inherit": "继承",
   "Permissions load failed.": "权限加载失败。",
   "Permissions saved.": "权限已保存。",
+  "Settings saved.": "设置保存成功。",
+  "Settings save failed.": "设置保存失败。",
   "Permissions save failed.": "权限保存失败。",
   "Override count": "已设置 {{count}} 条覆盖",
   "Clear overrides": "清空覆盖",

@@ -72,6 +72,11 @@ func TestRuntimeSettingsRejectUnsafeAndConflictingValues(t *testing.T) {
 	}))
 }
 
+func TestRuntimeDefaultSettingsCannotBeDeleted(t *testing.T) {
+	require.ErrorIs(t, ValidateDelete("SMTP_TASK_RETRY_COUNT"), domain.ErrInvalidValue)
+	require.NoError(t, ValidateDelete("custom.setting"))
+}
+
 func TestReplaceFallsBackFromConflictingPersistedValues(t *testing.T) {
 	Replace([]domain.Setting{
 		{Key: "pickup_fetch_reserve_ttl_minutes", Value: "1"},

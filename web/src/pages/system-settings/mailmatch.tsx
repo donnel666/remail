@@ -52,6 +52,6 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       <SettingsTextField label={t("验证码识别正则")} value={typeof form.verification_code_pattern === "string" ? form.verification_code_pattern : undefined} onChange={(value) => update("verification_code_pattern", value)} />
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

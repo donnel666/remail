@@ -21,6 +21,12 @@ func TestMetricsHandlerExposesReMailMetrics(t *testing.T) {
 	AddWorkUnits("test", "small", "succeeded", 2)
 	SetWorkloadState("test", 1, 2, 3)
 	RecordMySQLTransactionEvent("test", "deadlock")
+	ObserveAllocationDuration("microsoft", "succeeded", time.Now())
+	RecordAllocationResult("microsoft", "succeeded")
+	AddAllocationCandidateAttempts("microsoft", 2)
+	RecordAllocationResourceLockSkip("microsoft")
+	RecordAllocationCandidateRecheckMiss("microsoft")
+	RecordAllocationBucketFallback("microsoft", "first_bucket_empty")
 	ObserveExternalService("test", "request", "succeeded", time.Now())
 	recorder := httptest.NewRecorder()
 	MetricsHandler().ServeHTTP(recorder, httptest.NewRequest("GET", "/metrics", nil))
@@ -39,8 +45,19 @@ func TestMetricsHandlerExposesReMailMetrics(t *testing.T) {
 	require.True(t, strings.Contains(body, "remail_work_units_total"))
 	require.True(t, strings.Contains(body, "remail_workload_state"))
 	require.True(t, strings.Contains(body, "remail_mysql_transaction_events_total"))
+	require.True(t, strings.Contains(body, "remail_allocation_duration_seconds"))
+	require.True(t, strings.Contains(body, "remail_allocation_results_total"))
+	require.True(t, strings.Contains(body, "remail_allocation_candidate_attempts_total"))
+	require.True(t, strings.Contains(body, "remail_allocation_resource_lock_skips_total"))
+	require.True(t, strings.Contains(body, "remail_allocation_candidate_recheck_misses_total"))
+	require.True(t, strings.Contains(body, "remail_allocation_bucket_fallbacks_total"))
 	require.True(t, strings.Contains(body, "remail_external_service_duration_seconds"))
 	require.True(t, strings.Contains(body, "remail_db_wait_duration_seconds_total"))
+}
+
+func TestNormalizeAllocationResultPreservesExistingHit(t *testing.T) {
+	require.Equal(t, "existing", normalizeAllocationResult("existing"))
+	require.Equal(t, "system_failed", normalizeAllocationResult("unexpected"))
 }
 
 func TestHTTPMetricsMiddlewareRecordsStatusClassAndLongDurationBuckets(t *testing.T) {

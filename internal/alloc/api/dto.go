@@ -116,7 +116,7 @@ type RoutingCandidateResponse struct {
 	ForSale         bool       `json:"forSale"`
 	QualityScore    int        `json:"qualityScore"`
 	Status          string     `json:"status"`
-	Bucket          uint8      `json:"bucket"`
+	Bucket          uint16     `json:"bucket"`
 	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`

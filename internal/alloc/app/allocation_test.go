@@ -191,8 +191,13 @@ func TestCandidateRefreshThirdBusinessFailureBecomesAbnormal(t *testing.T) {
 
 type generatedMailboxRetryRepo struct {
 	Repository
-	candidate DomainCandidate
-	calls     int
+	candidate      DomainCandidate
+	reusable       *GeneratedMailboxCandidate
+	domainBuckets  []int
+	generatedLists int
+	calls          int
+	consumeCalls   int
+	domainCreates  int
 }
 
 type allocationLockRepo struct {
@@ -201,11 +206,13 @@ type allocationLockRepo struct {
 	candidates           []MicrosoftCandidate
 	rootUnavailable      map[uint]bool
 	candidateUnavailable map[uint]bool
+	emptyBuckets         map[uint16]bool
 	explicitAlias        *AliasCandidate
 	writeConflict        bool
 	guardConflict        bool
 	finds                int
 	lists                int
+	listedBuckets        []int
 	waiting              int
 	skipping             int
 	creates              int
@@ -231,12 +238,47 @@ func (r *allocationLockRepo) LoadProductConfig(context.Context, uint, uint, bool
 	return &r.config, nil
 }
 
-func (r *allocationLockRepo) ListMicrosoftSourceCandidates(context.Context, uint, uint, domain.SupplyScope, domain.MicrosoftMailbox, *uint8, int, string) ([]MicrosoftCandidate, error) {
+func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, bucket *uint16, _ int, _ string) ([]MicrosoftCandidate, error) {
 	r.lists++
+	if bucket == nil {
+		r.listedBuckets = append(r.listedBuckets, -1)
+	} else {
+		r.listedBuckets = append(r.listedBuckets, int(*bucket))
+		if r.emptyBuckets[*bucket] {
+			return nil, nil
+		}
+	}
 	if len(r.candidates) == 0 {
 		return []MicrosoftCandidate{{ResourceID: 1}, {ResourceID: 2}}, nil
 	}
 	return r.candidates, nil
+}
+
+func TestSpecifiedSuffixFallsBackAfterFirstEmptyBucket(t *testing.T) {
+	firstBucket := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)[0]
+	tests := []struct {
+		name        string
+		emailSuffix string
+		wantGlobal  bool
+	}{
+		{name: "specified suffix", emailSuffix: "example.com", wantGlobal: true},
+		{name: "random suffix", wantGlobal: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &allocationLockRepo{emptyBuckets: map[uint16]bool{firstBucket: true}}
+			result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+				OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: tt.emailSuffix,
+			})
+
+			if err != nil || result == nil {
+				t.Fatalf("Allocate() result = %#v, error = %v; want success", result, err)
+			}
+			if len(repo.listedBuckets) != 2 || (repo.listedBuckets[1] == -1) != tt.wantGlobal {
+				t.Fatalf("listed buckets = %v, want second query global = %v", repo.listedBuckets, tt.wantGlobal)
+			}
+		})
+	}
 }
 
 func (r *allocationLockRepo) LockResourceRoot(context.Context, uint, domain.AllocationType) (bool, error) {
@@ -441,6 +483,27 @@ func (r *generatedMailboxRetryRepo) LockDomainCandidate(context.Context, uint, u
 	return &r.candidate, nil
 }
 
+func (r *generatedMailboxRetryRepo) ListDomainSourceCandidates(_ context.Context, _ uint, _ domain.SupplyScope, bucket *uint16, _ int, _ string) ([]DomainCandidate, error) {
+	if bucket == nil {
+		r.domainBuckets = append(r.domainBuckets, -1)
+	} else {
+		r.domainBuckets = append(r.domainBuckets, int(*bucket))
+	}
+	return []DomainCandidate{r.candidate}, nil
+}
+
+func (r *generatedMailboxRetryRepo) ListGeneratedMailboxCandidates(context.Context, uint, uint, domain.SupplyScope, *uint16, int, string) ([]GeneratedMailboxCandidate, error) {
+	r.generatedLists++
+	if r.reusable == nil {
+		return nil, nil
+	}
+	return []GeneratedMailboxCandidate{*r.reusable}, nil
+}
+
+func (r *generatedMailboxRetryRepo) LockGeneratedMailboxCandidate(context.Context, uint, uint, uint) (*GeneratedMailboxCandidate, error) {
+	return r.reusable, nil
+}
+
 func (*generatedMailboxRetryRepo) EnsureDailyUsageAvailable(context.Context, string, domain.AllocationType, uint, domain.DailyUsageKind, int) error {
 	return nil
 }
@@ -449,8 +512,8 @@ func (*generatedMailboxRetryRepo) IsDomainMailboxAllocated(context.Context, uint
 	return false, nil
 }
 
-func (*generatedMailboxRetryRepo) FindReusableGeneratedMailbox(context.Context, uint, uint) (*GeneratedMailboxCandidate, error) {
-	return nil, nil
+func (r *generatedMailboxRetryRepo) FindReusableGeneratedMailbox(context.Context, uint, uint) (*GeneratedMailboxCandidate, error) {
+	return r.reusable, nil
 }
 
 func (r *generatedMailboxRetryRepo) FindOrCreateGeneratedMailbox(_ context.Context, _ uint, _ uint, email string) (*GeneratedMailboxCandidate, error) {
@@ -461,13 +524,15 @@ func (r *generatedMailboxRetryRepo) FindOrCreateGeneratedMailbox(_ context.Conte
 	return &GeneratedMailboxCandidate{ID: 7, Email: email}, nil
 }
 
-func (*generatedMailboxRetryRepo) CreateDomainAllocation(_ context.Context, allocation *domain.GeneratedMailboxAllocation) error {
+func (r *generatedMailboxRetryRepo) CreateDomainAllocation(_ context.Context, allocation *domain.GeneratedMailboxAllocation) error {
+	r.domainCreates++
 	allocation.ID = 8
 	allocation.CreatedAt = time.Now().UTC()
 	return nil
 }
 
-func (*generatedMailboxRetryRepo) ConsumeDailyUsage(context.Context, string, domain.AllocationType, uint, domain.DailyUsageKind, int) error {
+func (r *generatedMailboxRetryRepo) ConsumeDailyUsage(context.Context, string, domain.AllocationType, uint, domain.DailyUsageKind, int) error {
+	r.consumeCalls++
 	return nil
 }
 
@@ -567,7 +632,7 @@ func TestAllocationRuntimeSettingsClampUnsafeValues(t *testing.T) {
 	if candidateWindowSizeValue() != maxCandidateWindowSize || globalCandidateWindowValue() != maxCandidateWindowSize {
 		t.Fatal("candidate windows were not clamped")
 	}
-	if bucketProbeCountValue() != BucketCount || aliasGenerationWindowValue() != maxAliasGenerationWindow || candidateRetryCountValue() != maxCandidateRetryCount {
+	if bucketProbeCountValue() != maxBucketProbeCount || aliasGenerationWindowValue() != maxAliasGenerationWindow || candidateRetryCountValue() != maxCandidateRetryCount {
 		t.Fatal("allocation loop bounds were not clamped")
 	}
 	if DotAliasCapacityPerResourceValue() != maxDotAliasCapacity {
@@ -575,6 +640,120 @@ func TestAllocationRuntimeSettingsClampUnsafeValues(t *testing.T) {
 	}
 	if InventoryRefreshIntervalValue() != maxInventoryRefreshInterval || inventoryCacheActivityTTLValue() != maxInventoryCacheActivityTTL || inventoryCacheHardTTLValue() != maxInventoryCacheHardTTL {
 		t.Fatal("inventory durations were not clamped")
+	}
+}
+
+func TestBucketProbeSequenceSupportsExpandedBuckets(t *testing.T) {
+	runtimeconfig.Set("bucket_probe_count", "64")
+	defer runtimeconfig.Delete("bucket_probe_count")
+
+	for name, test := range map[string]struct {
+		kind  string
+		count uint16
+	}{
+		"microsoft": {kind: string(domain.MicrosoftMailboxPlus), count: MicrosoftBucketCount},
+		"domain":    {kind: "domain", count: DomainBucketCount},
+		"generated": {kind: "generated-domain", count: GeneratedMailboxBucketCount},
+	} {
+		t.Run(name, func(t *testing.T) {
+			seenAboveUint8 := false
+			for i := 0; i < 128; i++ {
+				buckets := bucketProbeSequence(fmt.Sprintf("order-%d", i), 4, test.kind, test.count)
+				if len(buckets) != maxBucketProbeCount {
+					t.Fatalf("bucket count = %d, want %d", len(buckets), maxBucketProbeCount)
+				}
+				for _, bucket := range buckets {
+					if bucket >= test.count {
+						t.Fatalf("bucket = %d, want < %d", bucket, test.count)
+					}
+					seenAboveUint8 = seenAboveUint8 || bucket > 255
+				}
+			}
+			if !seenAboveUint8 {
+				t.Fatal("probe sequence never used a bucket above uint8 capacity")
+			}
+		})
+	}
+}
+
+func TestAllocationMetricResultClassifiesOutcomes(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		existing bool
+		want     string
+	}{
+		{name: "success", want: "succeeded"},
+		{name: "existing idempotent allocation", existing: true, want: "existing"},
+		{name: "existing commit failure", err: errors.New("commit failed"), existing: true, want: "system_failed"},
+		{name: "insufficient inventory", err: domain.ErrInsufficientInventory, want: "insufficient_inventory"},
+		{name: "conflict", err: domain.ErrAllocationConflict, want: "conflict"},
+		{name: "invalid request", err: domain.ErrInvalidAllocationRequest, want: "invalid_request"},
+		{name: "project unavailable", err: domain.ErrProjectNotAllocatable, want: "invalid_request"},
+		{name: "system failure", err: errors.New("database unavailable"), want: "system_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := allocationMetricResult(tt.err, tt.existing); got != tt.want {
+				t.Fatalf("allocationMetricResult(%v, %t) = %q, want %q", tt.err, tt.existing, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDomainAllocationReusesBucketedGeneratedMailboxBeforeCreating(t *testing.T) {
+	repo := &generatedMailboxRetryRepo{
+		candidate: DomainCandidate{ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10},
+		reusable:  &GeneratedMailboxCandidate{ID: 7, ResourceID: 1, Email: "existing@example.com"},
+	}
+	result, busy, err := NewUseCase(repo).tryReusableDomainMailboxes(
+		context.Background(),
+		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
+	)
+	if err != nil || busy || result == nil || result.Email != "existing@example.com" {
+		t.Fatalf("reuse result = %#v, busy = %v, error = %v", result, busy, err)
+	}
+	if repo.calls != 0 {
+		t.Fatalf("generated mailbox calls = %d, want 0", repo.calls)
+	}
+}
+
+func TestSpecifiedDomainReusesMailboxWithoutMailboxBucketProbe(t *testing.T) {
+	repo := &generatedMailboxRetryRepo{
+		candidate: DomainCandidate{ResourceID: 1, OwnerUserID: 2, Domain: "example.com", MailboxDailyLimit: 10},
+		reusable:  &GeneratedMailboxCandidate{ID: 7, ResourceID: 1, Email: "existing@example.com"},
+	}
+	result, err := NewUseCase(repo).allocateDomainOnce(
+		context.Background(),
+		AllocateCommand{OrderNo: "order-1", BuyerUserID: 3, SupplyScope: domain.SupplyScopeOwned, EmailSuffix: "example.com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
+	)
+	if err != nil || result == nil || result.Email != "existing@example.com" {
+		t.Fatalf("specified-domain reuse result = %#v, error = %v", result, err)
+	}
+	if repo.generatedLists != 0 || len(repo.domainBuckets) != 1 || repo.domainBuckets[0] != -1 || repo.calls != 0 {
+		t.Fatalf("generated lists/domain buckets/generated calls = %d/%v/%d, want 0/[-1]/0", repo.generatedLists, repo.domainBuckets, repo.calls)
+	}
+}
+
+func TestDomainAllocationRejectsWrongDeliverySuffixBeforeUsage(t *testing.T) {
+	repo := &generatedMailboxRetryRepo{}
+	result, err := NewUseCase(repo).createDomainAllocation(
+		context.Background(),
+		AllocateCommand{EmailSuffix: "example.com", ensureOrderGuard: func(context.Context, domain.AllocationType) error { return nil }},
+		ProductAllocationConfig{ProjectID: 4, ProductID: 5},
+		1,
+		7,
+		"wrong@other.com",
+		time.Now().UTC(),
+		&DailyUsageReservation{UsageDate: "2026-07-25", AllocationType: domain.AllocationTypeDomain, ResourceID: 1, Kind: domain.DailyUsageKindDomainMailbox, Limit: 10},
+	)
+	if !errors.Is(err, errCandidateUnavailable) || result != nil {
+		t.Fatalf("wrong-suffix result = %#v, error = %v", result, err)
+	}
+	if repo.consumeCalls != 0 || repo.domainCreates != 0 {
+		t.Fatalf("usage/create calls = %d/%d, want 0/0", repo.consumeCalls, repo.domainCreates)
 	}
 }
 

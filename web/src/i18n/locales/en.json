@@ -1043,6 +1043,8 @@
   "Inherit": "Inherit",
   "Permissions load failed.": "Failed to load permissions.",
   "Permissions saved.": "Permissions saved.",
+  "Settings saved.": "Settings saved.",
+  "Settings save failed.": "Settings save failed.",
   "Permissions save failed.": "Failed to save permissions.",
   "Override count": "{{count}} overrides set",
   "Clear overrides": "Clear overrides",

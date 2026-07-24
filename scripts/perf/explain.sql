@@ -11,7 +11,7 @@ SELECT ms.id AS resource_id, ms.email_address, ms.quality_score
 FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
-WHERE ms.alloc_bucket = MOD(@resource_id, 64)
+WHERE ms.alloc_bucket = MOD(@resource_id, 2048)
   AND ms.for_sale = TRUE
   AND ms.status = 'normal'
   AND u.status = 'active'

@@ -28,6 +28,17 @@ type blockingRepository struct {
 	release chan struct{}
 }
 
+type persistedSnapshotRepository struct {
+	*fakeRepository
+	persisted []domain.Setting
+	listed    bool
+}
+
+func (r *persistedSnapshotRepository) List(context.Context) ([]domain.Setting, error) {
+	r.listed = true
+	return append([]domain.Setting(nil), r.persisted...), nil
+}
+
 func (r *blockingRepository) Upsert(ctx context.Context, key, value string) (*domain.Setting, error) {
 	r.entered <- value
 	if value == "first" {
@@ -180,6 +191,40 @@ func TestSystemSettingsUseCaseRejectsInvalidKnownValues(t *testing.T) {
 	if _, err := uc.Upsert(context.Background(), "smtp_outbound_payload_ttl_minutes", "0", MutationMeta{}); !errors.Is(err, domain.ErrInvalidValue) {
 		t.Fatalf("error = %v, want ErrInvalidValue", err)
 	}
+}
+
+func TestSystemSettingsUseCaseValidatesAgainstPersistedSnapshot(t *testing.T) {
+	runtimeconfig.Replace([]domain.Setting{
+		{Key: "candidate_window_size", Value: "4"},
+		{Key: "global_candidate_window", Value: "8"},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	repo := &persistedSnapshotRepository{
+		fakeRepository: &fakeRepository{},
+		persisted: []domain.Setting{
+			{Key: "candidate_window_size", Value: "7"},
+			{Key: "global_candidate_window", Value: "8"},
+		},
+	}
+
+	_, err := NewSystemSettingsUseCase(repo, &fakeOperationLogs{}).Upsert(
+		context.Background(), "global_candidate_window", "5", MutationMeta{},
+	)
+
+	require.ErrorIs(t, err, domain.ErrInvalidValue)
+	require.True(t, repo.listed)
+	require.Empty(t, repo.upsertKey)
+}
+
+func TestSystemSettingsUseCaseRejectsDeletingRuntimeDefault(t *testing.T) {
+	repo := &fakeRepository{setting: &domain.Setting{Key: "smtp_task_retry_count", Value: "3"}}
+	err := NewSystemSettingsUseCase(repo, &fakeOperationLogs{}).Delete(
+		context.Background(), "smtp_task_retry_count", MutationMeta{},
+	)
+
+	require.ErrorIs(t, err, domain.ErrInvalidValue)
+	require.Empty(t, repo.deleteKey)
+	require.NotNil(t, repo.setting)
 }
 
 func TestBulkUpsertValidatesEverythingBeforeWriting(t *testing.T) {

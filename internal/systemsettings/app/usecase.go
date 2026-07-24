@@ -62,7 +62,8 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	if err != nil {
 		return nil, err
 	}
-	if err := runtimeconfig.ValidateUpdates([]domain.Setting{{Key: key, Value: value}}); err != nil {
+	update := domain.Setting{Key: key, Value: value}
+	if err := runtimeconfig.Validate(key, value); err != nil {
 		return nil, err
 	}
 	var setting *domain.Setting
@@ -76,6 +77,13 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 		SafeSummary:    "updated system setting key=" + key,
 		RequestID:      meta.RequestID,
 	}, func(txCtx context.Context) error {
+		persisted, err := uc.repo.List(txCtx)
+		if err != nil {
+			return err
+		}
+		if err := runtimeconfig.ValidatePersistedUpdates(persisted, []domain.Setting{update}); err != nil {
+			return err
+		}
 		setting, err = uc.repo.Upsert(txCtx, key, value)
 		return err
 	})
@@ -114,10 +122,6 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	if len(normalized) == 0 {
 		return []domain.Setting{}, nil
 	}
-	if err := runtimeconfig.ValidateUpdates(normalized); err != nil {
-		return nil, err
-	}
-
 	var saved []domain.Setting
 	err := uc.mutate(ctx, &governancedomain.OperationLog{
 		OperatorUserID: meta.OperatorUserID,
@@ -129,7 +133,13 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 		SafeSummary:    fmt.Sprintf("updated system settings count=%d", len(normalized)),
 		RequestID:      meta.RequestID,
 	}, func(txCtx context.Context) error {
-		var err error
+		persisted, err := uc.repo.List(txCtx)
+		if err != nil {
+			return err
+		}
+		if err := runtimeconfig.ValidatePersistedUpdates(persisted, normalized); err != nil {
+			return err
+		}
 		saved, err = uc.repo.BulkUpsert(txCtx, normalized)
 		return err
 	})

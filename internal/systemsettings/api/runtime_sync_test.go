@@ -38,3 +38,24 @@ func TestRuntimeSettingsSyncReloadsPublishedChanges(t *testing.T) {
 		return runtimeconfig.Int("smtp_task_retry_count", 3, 0) == 4
 	}, time.Second, 10*time.Millisecond)
 }
+
+func TestRuntimeSettingsSyncPeriodicallyReconcilesMissedPublish(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:system-settings-runtime-reconcile?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&infra.SettingModel{}))
+
+	module, err := NewModule(db, nil)
+	require.NoError(t, err)
+	module.runtimeSync.reconcileInterval = 10 * time.Millisecond
+	stop := module.Start(context.Background())
+	t.Cleanup(func() { stop(context.Background()) })
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+
+	repo := infra.NewRepository(db)
+	_, err = repo.Upsert(context.Background(), "smtp_task_retry_count", "4")
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return runtimeconfig.Int("smtp_task_retry_count", 3, 0) == 4
+	}, time.Second, 10*time.Millisecond)
+}

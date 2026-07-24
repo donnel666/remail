@@ -92,6 +92,34 @@ var (
 		prometheus.CounterOpts{Name: "remail_mysql_transaction_events_total", Help: "MySQL transaction contention events by component and event."},
 		[]string{"component", "event"},
 	)
+	allocationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remail_allocation_duration_seconds",
+			Help:    "Allocation execution time by allocation type and result; succeeded is newly created and existing is an idempotent hit.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
+		},
+		[]string{"allocation_type", "result"},
+	)
+	allocationResults = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_allocation_results_total", Help: "Allocation outcomes by allocation type and result; succeeded is newly created and existing is an idempotent hit."},
+		[]string{"allocation_type", "result"},
+	)
+	allocationCandidateAttempts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_allocation_candidate_attempts_total", Help: "Candidate resources attempted during allocation."},
+		[]string{"allocation_type"},
+	)
+	allocationResourceLockSkips = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_allocation_resource_lock_skips_total", Help: "Resource-root locks skipped during allocation."},
+		[]string{"allocation_type"},
+	)
+	allocationCandidateRecheckMisses = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_allocation_candidate_recheck_misses_total", Help: "Candidates rejected after the resource root was locked and rechecked."},
+		[]string{"allocation_type"},
+	)
+	allocationBucketFallbacks = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "remail_allocation_bucket_fallbacks_total", Help: "Global candidate scans entered after a bucket-probe path did not allocate a resource."},
+		[]string{"allocation_type", "reason"},
+	)
 	externalServiceDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "remail_external_service_duration_seconds",
@@ -117,6 +145,12 @@ func init() {
 		workUnits,
 		workloadState,
 		mysqlTransactionEvents,
+		allocationDuration,
+		allocationResults,
+		allocationCandidateAttempts,
+		allocationResourceLockSkips,
+		allocationCandidateRecheckMisses,
+		allocationBucketFallbacks,
 		externalServiceDuration,
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{Name: "remail_db_open_connections", Help: "Current open database connections."},
@@ -322,6 +356,63 @@ func SetWorkloadState(workload string, active, queued, queuedUnits int) {
 
 func RecordMySQLTransactionEvent(component, event string) {
 	mysqlTransactionEvents.WithLabelValues(component, event).Inc()
+}
+
+func ObserveAllocationDuration(allocationType, result string, startedAt time.Time) {
+	if startedAt.IsZero() {
+		return
+	}
+	allocationDuration.WithLabelValues(normalizeAllocationType(allocationType), normalizeAllocationResult(result)).Observe(time.Since(startedAt).Seconds())
+}
+
+func RecordAllocationResult(allocationType, result string) {
+	allocationResults.WithLabelValues(normalizeAllocationType(allocationType), normalizeAllocationResult(result)).Inc()
+}
+
+func AddAllocationCandidateAttempts(allocationType string, count int) {
+	if count <= 0 {
+		return
+	}
+	allocationCandidateAttempts.WithLabelValues(normalizeAllocationType(allocationType)).Add(float64(count))
+}
+
+func RecordAllocationResourceLockSkip(allocationType string) {
+	allocationResourceLockSkips.WithLabelValues(normalizeAllocationType(allocationType)).Inc()
+}
+
+func RecordAllocationCandidateRecheckMiss(allocationType string) {
+	allocationCandidateRecheckMisses.WithLabelValues(normalizeAllocationType(allocationType)).Inc()
+}
+
+func RecordAllocationBucketFallback(allocationType, reason string) {
+	allocationBucketFallbacks.WithLabelValues(normalizeAllocationType(allocationType), normalizeAllocationFallbackReason(reason)).Inc()
+}
+
+func normalizeAllocationType(value string) string {
+	switch value {
+	case "microsoft", "domain":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeAllocationResult(value string) string {
+	switch value {
+	case "succeeded", "existing", "insufficient_inventory", "conflict", "invalid_request", "system_failed":
+		return value
+	default:
+		return "system_failed"
+	}
+}
+
+func normalizeAllocationFallbackReason(value string) string {
+	switch value {
+	case "first_bucket_empty", "probes_exhausted":
+		return value
+	default:
+		return "probes_exhausted"
+	}
 }
 
 func ObserveExternalService(provider, operation, result string, startedAt time.Time) {

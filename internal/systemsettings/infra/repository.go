@@ -50,7 +50,11 @@ func (r *Repository) dbFor(ctx context.Context) *gorm.DB {
 
 func (r *Repository) List(ctx context.Context) ([]domain.Setting, error) {
 	var models []SettingModel
-	if err := r.dbFor(ctx).Order("`key` ASC").Find(&models).Error; err != nil {
+	query := r.dbFor(ctx).Order("`key` ASC")
+	if _, ok := platform.GormTxFromContext(ctx); ok {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list system settings: %w", err)
 	}
 	settings := make([]domain.Setting, len(models))

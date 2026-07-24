@@ -33,7 +33,7 @@ export default function AllocationSection({ options, onBulkSave }: SectionProps)
     <SettingsFormGrid className="mt-4">
       {field("单轮候选窗口", "candidate_window_size")}
       {field("全局候选窗口", "global_candidate_window")}
-      {field("每轮探测桶数量", "bucket_probe_count")}
+      <SettingsNumberField label={t("每轮探测桶数量")} value={number(form.bucket_probe_count)} onChange={(value) => update("bucket_probe_count", value)} min={1} max={64} />
       {field("别名生成窗口", "alias_generation_window")}
       {field("候选获取重试次数", "candidate_retry_count")}
       {field("点别名生成位置窗口", "dot_alias_capacity_per_resource")}
@@ -42,6 +42,6 @@ export default function AllocationSection({ options, onBulkSave }: SectionProps)
       {field("库存缓存硬过期（小时）", "inventory_cache_hard_ttl_hours")}
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

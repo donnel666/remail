@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/platform"
 )
 
 const (
@@ -96,7 +97,26 @@ func NewUseCase(repo Repository, queues ...CandidateRefreshQueue) *UseCase {
 	}
 }
 
-func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.UnifiedAllocation, error) {
+func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *domain.UnifiedAllocation, runErr error) {
+	startedAt := time.Now()
+	metricType := "unknown"
+	existingHit := false
+	defer func() {
+		recovered := recover()
+		if result != nil {
+			metricType = string(result.Type)
+		}
+		metricResult := allocationMetricResult(runErr, existingHit)
+		if recovered != nil {
+			metricResult = "system_failed"
+		}
+		platform.ObserveAllocationDuration(metricType, metricResult, startedAt)
+		platform.RecordAllocationResult(metricType, metricResult)
+		if recovered != nil {
+			panic(recovered)
+		}
+	}()
+
 	cmd.OrderNo = strings.TrimSpace(cmd.OrderNo)
 	scopes := normalizedSupplyScopes(cmd)
 	cmd.EmailSuffix = normalizeEmailSuffix(cmd.EmailSuffix)
@@ -104,7 +124,6 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 
-	var result *domain.UnifiedAllocation
 	var err error
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
@@ -114,6 +133,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 	}
 	for attempt := 0; attempt < attempts; attempt++ {
 		result = nil
+		existingHit = false
 		err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			existing, err := uc.repo.FindExistingAllocation(txCtx, cmd.OrderNo)
 			if err != nil {
@@ -121,6 +141,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 			}
 			if existing != nil {
 				result = existing
+				existingHit = true
 				return nil
 			}
 
@@ -131,6 +152,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 			if config == nil {
 				return domain.ErrProjectNotAllocatable
 			}
+			metricType = string(config.ProductType)
 			// Create the guard only after a candidate is locked. Rolling back an
 			// empty owned-scope guard retained the right-edge supremum lock in MySQL.
 			guardCreated := false
@@ -161,6 +183,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 					locked, err := uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
 					if locked {
 						lockedRoots[key] = struct{}{}
+					} else if err == nil {
+						platform.RecordAllocationResourceLockSkip(string(allocationType))
 					}
 					return locked, err
 				}
@@ -204,6 +228,23 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 		return nil, domain.ErrInsufficientInventory
 	}
 	return result, nil
+}
+
+func allocationMetricResult(err error, existing bool) string {
+	switch {
+	case err == nil && existing:
+		return "existing"
+	case err == nil:
+		return "succeeded"
+	case errors.Is(err, domain.ErrInsufficientInventory):
+		return "insufficient_inventory"
+	case errors.Is(err, domain.ErrAllocationConflict):
+		return "conflict"
+	case errors.Is(err, domain.ErrInvalidAllocationRequest), errors.Is(err, domain.ErrProjectNotAllocatable):
+		return "invalid_request"
+	default:
+		return "system_failed"
+	}
 }
 
 func normalizedSupplyScopes(cmd AllocateCommand) []domain.SupplyScope {
@@ -1010,9 +1051,10 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 	now := time.Now().UTC()
 	resourceBusy := false
 	for _, mailbox := range preferences {
-		buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, string(mailbox))
-		for _, bucket := range buckets {
-			result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
+		buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, string(mailbox), MicrosoftBucketCount)
+		fallbackReason := "probes_exhausted"
+		for probeIndex, bucket := range buckets {
+			result, busy, hadCandidates, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, &bucket, now)
 			if err != nil {
 				return nil, err
 			}
@@ -1020,8 +1062,13 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 			if result != nil {
 				return result, nil
 			}
+			if probeIndex == 0 && cmd.EmailSuffix != "" && !hadCandidates {
+				fallbackReason = "first_bucket_empty"
+				break
+			}
 		}
-		result, busy, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
+		platform.RecordAllocationBucketFallback(string(domain.AllocationTypeMicrosoft), fallbackReason)
+		result, busy, _, err := uc.tryMicrosoftBucket(ctx, cmd, config, mailbox, nil, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1036,23 +1083,24 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, bucket *uint8, now time.Time) (*domain.UnifiedAllocation, bool, error) {
+func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, bucket *uint16, now time.Time) (*domain.UnifiedAllocation, bool, bool, error) {
 	limit := candidateWindowSizeValue()
 	if bucket == nil {
 		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if len(candidates) == 0 {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	resourceBusy := false
 	for _, candidate := range candidates {
+		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeMicrosoft), 1)
 		result, err := uc.tryMicrosoftCandidate(ctx, cmd, config, mailbox, candidate, now)
 		if err == nil && result != nil {
-			return result, false, nil
+			return result, false, true, nil
 		}
 		if errors.Is(err, errResourceRootBusy) {
 			resourceBusy = true
@@ -1063,9 +1111,9 @@ func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, 
 		}
 		// A failed allocation INSERT retains index locks until this transaction
 		// rolls back, so conflicts must never advance to another candidate.
-		return nil, false, err
+		return nil, false, true, err
 	}
-	return nil, resourceBusy, nil
+	return nil, resourceBusy, true, nil
 }
 
 func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, candidate MicrosoftCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
@@ -1086,6 +1134,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		return nil, err
 	}
 	if lockedCandidate == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeMicrosoft))
 		return nil, errCandidateUnavailable
 	}
 	candidate = *lockedCandidate
@@ -1232,11 +1281,124 @@ func (uc *UseCase) allocateDomain(ctx context.Context, cmd AllocateCommand, conf
 }
 
 func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
+	resourceBusy := false
+	if cmd.EmailSuffix == "" {
+		result, busy, err := uc.tryReusableDomainMailboxes(ctx, cmd, config)
+		if err != nil || result != nil {
+			return result, err
+		}
+		resourceBusy = busy
+	}
+	result, err := uc.generateDomainMailboxOnce(ctx, cmd, config)
+	if errors.Is(err, domain.ErrInsufficientInventory) && resourceBusy {
+		return nil, domain.ErrAllocationConflict
+	}
+	return result, err
+}
+
+func (uc *UseCase) tryReusableDomainMailboxes(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, bool, error) {
 	now := time.Now().UTC()
 	resourceBusy := false
-	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "domain")
+	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "generated-domain", GeneratedMailboxBucketCount)
 	for _, bucket := range buckets {
-		result, busy, err := uc.tryDomainBucket(ctx, cmd, config, &bucket, now)
+		result, busy, _, err := uc.tryGeneratedMailboxBucket(ctx, cmd, config, &bucket, now)
+		if err != nil {
+			return nil, false, err
+		}
+		resourceBusy = resourceBusy || busy
+		if result != nil {
+			return result, resourceBusy, nil
+		}
+	}
+	return nil, resourceBusy, nil
+}
+
+func (uc *UseCase) tryGeneratedMailboxBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, bucket *uint16, now time.Time) (*domain.UnifiedAllocation, bool, bool, error) {
+	candidates, err := uc.repo.ListGeneratedMailboxCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, bucket, candidateWindowSizeValue(), cmd.EmailSuffix)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if len(candidates) == 0 {
+		return nil, false, false, nil
+	}
+	resourceBusy := false
+	for _, candidate := range candidates {
+		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeDomain), 1)
+		result, err := uc.tryGeneratedMailboxCandidate(ctx, cmd, config, candidate, now)
+		if err == nil && result != nil {
+			return result, false, true, nil
+		}
+		if errors.Is(err, errResourceRootBusy) {
+			resourceBusy = true
+			continue
+		}
+		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
+			continue
+		}
+		return nil, false, true, err
+	}
+	return nil, resourceBusy, true, nil
+}
+
+func (uc *UseCase) tryGeneratedMailboxCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate GeneratedMailboxCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
+	lockRoot := uc.repo.LockResourceRoot
+	if cmd.lockResourceRoot != nil {
+		lockRoot = cmd.lockResourceRoot
+	}
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeDomain)
+	if err != nil {
+		return nil, err
+	}
+	if !lockedRoot {
+		return nil, errResourceRootBusy
+	}
+
+	domainCandidate, err := uc.repo.LockDomainCandidate(ctx, candidate.ResourceID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
+	if err != nil {
+		return nil, err
+	}
+	if domainCandidate == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeDomain))
+		return nil, errCandidateUnavailable
+	}
+	mailbox, err := uc.repo.LockGeneratedMailboxCandidate(ctx, candidate.ID, candidate.ResourceID, config.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if mailbox == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeDomain))
+		return nil, errCandidateUnavailable
+	}
+
+	dailyUsage := DailyUsageReservation{
+		UsageDate:      allocationUsageDate(now),
+		AllocationType: domain.AllocationTypeDomain,
+		ResourceID:     candidate.ResourceID,
+		Kind:           domain.DailyUsageKindDomainMailbox,
+		Limit:          domainCandidate.MailboxDailyLimit,
+	}
+	if err := uc.repo.EnsureDailyUsageAvailable(ctx, dailyUsage.UsageDate, dailyUsage.AllocationType, dailyUsage.ResourceID, dailyUsage.Kind, dailyUsage.Limit); err != nil {
+		return nil, err
+	}
+	return uc.createDomainAllocation(ctx, cmd, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
+}
+
+func (uc *UseCase) generateDomainMailboxOnce(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
+	now := time.Now().UTC()
+	if cmd.EmailSuffix != "" {
+		result, busy, _, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
+		if err != nil || result != nil {
+			return result, err
+		}
+		if busy {
+			return nil, domain.ErrAllocationConflict
+		}
+		return nil, domain.ErrInsufficientInventory
+	}
+	resourceBusy := false
+	buckets := bucketProbeSequence(cmd.OrderNo, config.ProjectID, "domain", DomainBucketCount)
+	for _, bucket := range buckets {
+		result, busy, _, err := uc.tryDomainBucket(ctx, cmd, config, &bucket, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1245,7 +1407,8 @@ func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, 
 			return result, nil
 		}
 	}
-	result, busy, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
+	platform.RecordAllocationBucketFallback(string(domain.AllocationTypeDomain), "probes_exhausted")
+	result, busy, _, err := uc.tryDomainBucket(ctx, cmd, config, nil, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1259,23 +1422,24 @@ func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, 
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, bucket *uint8, now time.Time) (*domain.UnifiedAllocation, bool, error) {
+func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, bucket *uint16, now time.Time) (*domain.UnifiedAllocation, bool, bool, error) {
 	limit := candidateWindowSizeValue()
 	if bucket == nil {
 		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if len(candidates) == 0 {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	resourceBusy := false
 	for _, candidate := range candidates {
+		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeDomain), 1)
 		result, err := uc.tryDomainCandidate(ctx, cmd, config, candidate, now)
 		if err == nil && result != nil {
-			return result, false, nil
+			return result, false, true, nil
 		}
 		if errors.Is(err, errResourceRootBusy) {
 			resourceBusy = true
@@ -1285,9 +1449,9 @@ func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, con
 			continue
 		}
 		// Domain allocation conflicts have the same failed-INSERT lock lifetime.
-		return nil, false, err
+		return nil, false, true, err
 	}
-	return nil, resourceBusy, nil
+	return nil, resourceBusy, true, nil
 }
 
 func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate DomainCandidate, now time.Time) (*domain.UnifiedAllocation, error) {
@@ -1308,6 +1472,7 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 		return nil, err
 	}
 	if lockedCandidate == nil {
+		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeDomain))
 		return nil, errCandidateUnavailable
 	}
 	candidate = *lockedCandidate
@@ -1330,6 +1495,7 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 	if mailbox != nil {
 		return uc.createDomainAllocation(ctx, cmd, config, candidate.ResourceID, mailbox.ID, mailbox.Email, now, &dailyUsage)
 	}
+
 	for _, email := range generatedMailboxVariants(candidate.Domain) {
 		mailbox, err = uc.repo.FindOrCreateGeneratedMailbox(ctx, candidate.ResourceID, candidate.OwnerUserID, email)
 		if err != nil {
@@ -1353,6 +1519,9 @@ func (uc *UseCase) tryDomainCandidate(ctx context.Context, cmd AllocateCommand, 
 func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, resourceID uint, mailboxID uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
+	}
+	if _, suffix, valid := splitEmail(email); cmd.EmailSuffix != "" && (!valid || suffix != cmd.EmailSuffix) {
+		return nil, errCandidateUnavailable
 	}
 	allocation := &domain.GeneratedMailboxAllocation{
 		OrderNo:     cmd.OrderNo,
@@ -1438,12 +1607,12 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 	return result
 }
 
-func bucketProbeSequence(orderNo string, projectID uint, kind string) []uint8 {
-	start := uint8(hash64(orderNo+"|"+strconv.Itoa(int(projectID))+"|"+kind) % BucketCount)
-	probeCount := bucketProbeCountValue()
-	result := make([]uint8, 0, probeCount)
+func bucketProbeSequence(orderNo string, projectID uint, kind string, bucketCount uint16) []uint16 {
+	start := uint16(hash64(orderNo+"|"+strconv.Itoa(int(projectID))+"|"+kind) % uint64(bucketCount))
+	probeCount := min(bucketProbeCountValue(), int(bucketCount))
+	result := make([]uint16, 0, probeCount)
 	for i := 0; i < probeCount; i++ {
-		result = append(result, uint8((int(start)+i)%BucketCount))
+		result = append(result, uint16((int(start)+i)%int(bucketCount)))
 	}
 	return result
 }

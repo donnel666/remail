@@ -93,7 +93,25 @@ func Validate(key, value string) error {
 // ValidateUpdates checks relationships after applying an atomic settings write
 // to the current process snapshot.
 func ValidateUpdates(settings []domain.Setting) error {
-	values := clone()
+	return validateUpdates(clone(), settings)
+}
+
+// ValidatePersistedUpdates checks a write against the latest database snapshot.
+// Callers use it while holding the settings rows inside the write transaction so
+// relationship checks stay valid when multiple application replicas write.
+func ValidatePersistedUpdates(persisted, updates []domain.Setting) error {
+	values := make(map[string]string, len(persisted)+len(updates))
+	for _, setting := range persisted {
+		key := canonicalKey(setting.Key)
+		if Validate(key, setting.Value) == nil {
+			values[key] = strings.TrimSpace(setting.Value)
+		}
+	}
+	sanitizeRelationships(values)
+	return validateUpdates(values, updates)
+}
+
+func validateUpdates(values map[string]string, settings []domain.Setting) error {
 	for _, setting := range settings {
 		key := canonicalKey(setting.Key)
 		if err := Validate(key, setting.Value); err != nil {
@@ -105,8 +123,14 @@ func ValidateUpdates(settings []domain.Setting) error {
 }
 
 func ValidateDelete(key string) error {
+	key = canonicalKey(key)
+	for _, setting := range defaultSettings {
+		if setting.Key == key {
+			return domain.ErrInvalidValue
+		}
+	}
 	values := clone()
-	delete(values, canonicalKey(key))
+	delete(values, key)
 	return validateRelationships(values)
 }
 

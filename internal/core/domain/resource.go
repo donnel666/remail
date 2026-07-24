@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"hash/crc32"
 	"strings"
 	"time"
 	"unicode"
@@ -15,6 +16,27 @@ const (
 	ResourceTypeMicrosoft ResourceType = "microsoft"
 	ResourceTypeDomain    ResourceType = "domain"
 )
+
+// Allocation bucket counts are persisted data invariants. Keep these in sync
+// with migrations before changing them; they are intentionally not runtime settings.
+const (
+	MicrosoftAllocationBucketCount uint16 = 2048
+	DomainAllocationBucketCount    uint16 = 512
+	GeneratedMailboxBucketCount    uint16 = 2048
+)
+
+func MicrosoftAllocationBucket(resourceID uint) uint16 {
+	return uint16(resourceID % uint(MicrosoftAllocationBucketCount))
+}
+
+func MailDomainAllocationBucket(resourceID uint) uint16 {
+	return uint16(resourceID % uint(DomainAllocationBucketCount))
+}
+
+func GeneratedMailboxBucket(email string) uint16 {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	return uint16(crc32.ChecksumIEEE([]byte(normalizedEmail)) % uint32(GeneratedMailboxBucketCount))
+}
 
 const (
 	DefaultPlusDailyLimit    = 10000

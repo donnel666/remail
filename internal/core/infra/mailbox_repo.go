@@ -20,6 +20,7 @@ type GeneratedMailboxModel struct {
 	OwnerUserID     uint       `gorm:"not null;column:owner_user_id"`
 	Email           string     `gorm:"type:varchar(255);not null"`
 	Status          string     `gorm:"type:varchar(32);not null;default:'normal'"`
+	AllocBucket     uint16     `gorm:"not null;default:0;column:alloc_bucket"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime"`
 }

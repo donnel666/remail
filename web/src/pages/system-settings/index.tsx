@@ -86,8 +86,9 @@ export default function SystemSettingsPage() {
     try {
       await updateSystemOption(key, value);
       setOptions((prev) => { const nx = prev.filter((o) => o.key !== key); nx.push({ key, value }); return nx; });
+      Toast.success(t("Settings saved."));
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+      Toast.error(error instanceof Error ? error.message : t("Settings save failed."));
       throw error;
     } finally {
       setSaving(false);
@@ -106,8 +107,9 @@ export default function SystemSettingsPage() {
         }
         return nx;
       });
+      Toast.success(t("Settings saved."));
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+      Toast.error(error instanceof Error ? error.message : t("Settings save failed."));
       throw error;
     } finally {
       setSaving(false);

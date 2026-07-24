@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getSystemOptions: vi.fn(),
+  updateSystemOptionsBulk: vi.fn(),
   toastError: vi.fn(),
+  toastSuccess: vi.fn(),
   t: (key: string) => key,
 }));
 
@@ -19,7 +21,7 @@ vi.mock("@douyinfe/semi-ui", () => ({
   Spin: ({ children }: any) => <>{children}</>,
   TabPane: ({ children }: any) => <>{children}</>,
   Tabs: ({ children }: any) => <>{children}</>,
-  Toast: { error: mocks.toastError },
+  Toast: { error: mocks.toastError, success: mocks.toastSuccess },
 }));
 
 vi.mock("@/context/auth-provider", () => ({
@@ -39,7 +41,7 @@ vi.mock("@/context/auth-provider", () => ({
 vi.mock("@/lib/system-settings-api", () => ({
   getSystemOptions: mocks.getSystemOptions,
   updateSystemOption: vi.fn(),
-  updateSystemOptionsBulk: vi.fn(),
+  updateSystemOptionsBulk: mocks.updateSystemOptionsBulk,
 }));
 
 vi.mock("./settings-layout", () => ({
@@ -48,7 +50,20 @@ vi.mock("./settings-layout", () => ({
 
 vi.mock("./site-content", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./auth-security", () => ({ default: () => <div data-testid="settings-section" /> }));
-vi.mock("./email-service", () => ({ default: () => <div data-testid="settings-section" /> }));
+vi.mock("./email-service", () => ({
+  default: ({ onBulkSave }: any) => (
+    <button
+      type="button"
+      onClick={() =>
+        void onBulkSave([
+          { key: "candidate_window_size", value: "4" },
+        ]).catch(() => undefined)
+      }
+    >
+      save-email-settings
+    </button>
+  ),
+}));
 vi.mock("./orders-payment", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./system-operations", () => ({ default: () => <div data-testid="settings-section" /> }));
 vi.mock("./users-rebates", () => ({ default: () => <div data-testid="settings-section" /> }));
@@ -78,5 +93,23 @@ describe("SystemSettingsPage", () => {
       expect(screen.getAllByTestId("settings-section").length).toBeGreaterThan(0);
     });
     expect(mocks.getSystemOptions).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows success and failure feedback for settings saves", async () => {
+    mocks.getSystemOptions.mockResolvedValue({ options: [] });
+    mocks.updateSystemOptionsBulk
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("save failed"));
+
+    render(<SystemSettingsPage />);
+    const save = await screen.findByText("save-email-settings");
+
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Settings saved."));
+    expect(mocks.toastError).not.toHaveBeenCalled();
+
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("save failed"));
+    expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
   });
 });

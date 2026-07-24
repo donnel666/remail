@@ -538,3 +538,33 @@ func TestRuntimeDailyLimitsClampToStorageCapacity(t *testing.T) {
 		t.Fatal("daily limits were not clamped")
 	}
 }
+
+func TestAllocationBucketCapacity(t *testing.T) {
+	for name, test := range map[string]struct {
+		bucket   func(uint) uint16
+		last     uint
+		capacity uint
+	}{
+		"microsoft": {bucket: MicrosoftAllocationBucket, last: 2047, capacity: 2048},
+		"domain":    {bucket: MailDomainAllocationBucket, last: 511, capacity: 512},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := test.bucket(test.last); got != uint16(test.last) {
+				t.Fatalf("bucket(%d) = %d, want %d", test.last, got, test.last)
+			}
+			if got := test.bucket(test.capacity); got != 0 {
+				t.Fatalf("bucket(%d) = %d, want 0", test.capacity, got)
+			}
+		})
+	}
+}
+
+func TestGeneratedMailboxBucketUsesNormalizedEmailCRC32(t *testing.T) {
+	const email = "user@example.com"
+	if got := GeneratedMailboxBucket("  USER@Example.COM  "); got != 1441 {
+		t.Fatalf("GeneratedMailboxBucket(normalized %q) = %d, want 1441", email, got)
+	}
+	if got := GeneratedMailboxBucket(email); got != GeneratedMailboxBucket("  USER@Example.COM  ") {
+		t.Fatalf("normalized email buckets differ: %d != %d", got, GeneratedMailboxBucket("  USER@Example.COM  "))
+	}
+}

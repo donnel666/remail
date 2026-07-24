@@ -2124,7 +2124,7 @@ func seedTradeMicrosoftResource(t *testing.T, db *gorm.DB, ownerID int, id int, 
 	).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO microsoft_resources(id, email_address, email_domain, password, for_sale, status, quality_score, alloc_bucket)
-VALUES (?, ?, ?, 'secret', ?, 'normal', ?, MOD(?, 64))`,
+VALUES (?, ?, ?, 'secret', ?, 'normal', ?, MOD(?, 2048))`,
 		id,
 		email,
 		domain,
@@ -2151,7 +2151,7 @@ ON DUPLICATE KEY UPDATE status = VALUES(status)`, mailServerID, ownerID).Error)
 		).Error)
 		require.NoError(t, db.Exec(`
 INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, domain_tld, mail_server_id, purpose, status, alloc_bucket)
-VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 64))`,
+VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 512))`,
 			id,
 			ownerID,
 			domainName,

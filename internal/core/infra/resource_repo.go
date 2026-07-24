@@ -67,7 +67,7 @@ type MicrosoftResourceModel struct {
 	ValidationFailures   int        `gorm:"not null;default:0;column:validation_failures"`
 	QualityScore         int        `gorm:"not null;default:0;column:quality_score"`
 	PlusDailyLimit       int        `gorm:"not null;default:10000;column:plus_daily_limit"`
-	AllocBucket          uint8      `gorm:"not null;default:0;column:alloc_bucket"`
+	AllocBucket          uint16     `gorm:"not null;default:0;column:alloc_bucket"`
 	LastSafeError        string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	LastAllocatedAt      *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt            time.Time  `gorm:"not null;autoCreateTime"`
@@ -138,7 +138,7 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 		ValidationFailures:   ms.ValidationFailures,
 		QualityScore:         ms.QualityScore,
 		PlusDailyLimit:       normalizeDailyLimit(ms.PlusDailyLimit, domain.DefaultPlusDailyLimitValue()),
-		AllocBucket:          uint8(ms.ID % 64),
+		AllocBucket:          domain.MicrosoftAllocationBucket(ms.ID),
 		LastSafeError:        ms.LastSafeError,
 		LastAllocatedAt:      ms.LastAllocatedAt,
 		CreatedAt:            ms.CreatedAt,
@@ -159,7 +159,7 @@ type DomainResourceModel struct {
 	ValidationFailures   int        `gorm:"not null;default:0;column:validation_failures"`
 	LastSafeError        string     `gorm:"type:varchar(500);not null;default:'';column:last_safe_error"`
 	MailboxDailyLimit    int        `gorm:"not null;default:10000;column:mailbox_daily_limit"`
-	AllocBucket          uint8      `gorm:"not null;default:0;column:alloc_bucket"`
+	AllocBucket          uint16     `gorm:"not null;default:0;column:alloc_bucket"`
 	LastAllocatedAt      *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt            time.Time  `gorm:"not null;autoCreateTime"`
 	UpdatedAt            time.Time  `gorm:"not null;autoUpdateTime"`
@@ -318,7 +318,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 
 		msModel := fromMicrosoftDomain(ms)
 		msModel.ID = root.ID
-		msModel.AllocBucket = uint8(root.ID % 64)
+		msModel.AllocBucket = domain.MicrosoftAllocationBucket(root.ID)
 		if err := tx.Create(msModel).Error; err != nil {
 			return fmt.Errorf("create microsoft resource: %w", err)
 		}
@@ -419,7 +419,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 				"validation_failures":   0,
 				"last_safe_error":       dr.LastSafeError,
 				"mailbox_daily_limit":   normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimitValue()),
-				"alloc_bucket":          uint8(existing.ID % 64),
+				"alloc_bucket":          domain.MailDomainAllocationBucket(existing.ID),
 				"last_allocated_at":     nil,
 				"updated_at":            now,
 			})
@@ -471,7 +471,7 @@ WHERE gm.resource_id = ? AND da.id IS NULL`, existing.ID).Error; err != nil {
 		ValidationFailures:   dr.ValidationFailures,
 		LastSafeError:        dr.LastSafeError,
 		MailboxDailyLimit:    normalizeDailyLimit(dr.MailboxDailyLimit, domain.DefaultMailboxDailyLimitValue()),
-		AllocBucket:          uint8(root.ID % 64),
+		AllocBucket:          domain.MailDomainAllocationBucket(root.ID),
 	}
 	if err := tx.Create(domainModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -628,7 +628,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	for i := range ms {
 		msModels[i] = *fromMicrosoftDomain(&ms[i])
 		msModels[i].ID = rootModels[i].ID
-		msModels[i].AllocBucket = uint8(rootModels[i].ID % 64)
+		msModels[i].AllocBucket = domain.MicrosoftAllocationBucket(rootModels[i].ID)
 	}
 	if err := tx.CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
 		if isDuplicateKeyError(err) {

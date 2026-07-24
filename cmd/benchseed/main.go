@@ -135,7 +135,7 @@ func seedResources(ctx context.Context, db *sql.DB, count int64, batchSize int) 
 			start, end, func(i int64) (string, []any) {
 				id := resourceIDBase + i
 				return "(?,'microsoft',?,'bench.local','bench','','',TRUE,'normal',100,?)",
-					[]any{id, fmt.Sprintf("ms-%d@bench.local", i), id % 64}
+					[]any{id, fmt.Sprintf("ms-%d@bench.local", i), id % 2048}
 			}); err != nil {
 			_ = tx.Rollback()
 			return err

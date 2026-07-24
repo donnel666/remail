@@ -14,6 +14,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
@@ -717,6 +718,75 @@ VALUES (?, ?, ?, ?)`, 2000, 2, "disabled@d2000.example.com", "disabled").Error)
 	require.Nil(t, mailbox)
 }
 
+func TestGeneratedMailboxCandidatesUseExpandedBucketMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResources(t, db, 1, 4095, 1)
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status, alloc_bucket)
+VALUES (2047, 4095, 1, 'existing@d4095.example.com', 'normal', 2047)`).Error)
+
+	bucket := uint16(2047)
+	candidates, err := NewRepo(db).ListGeneratedMailboxCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, &bucket, 4, "")
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	require.Equal(t, uint(2047), candidates[0].ID)
+	require.Equal(t, uint(4095), candidates[0].ResourceID)
+}
+
+func TestFindOrCreateGeneratedMailboxAssignsExpandedBucketMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResources(t, db, 1, 4095, 1)
+
+	mailbox, err := NewRepo(db).FindOrCreateGeneratedMailbox(context.Background(), 4095, 1, "new@d4095.example.com")
+	require.NoError(t, err)
+	require.NotNil(t, mailbox)
+	var bucket uint16
+	require.NoError(t, db.Raw("SELECT alloc_bucket FROM generated_mailboxes WHERE id = ?", mailbox.ID).Scan(&bucket).Error)
+	require.Equal(t, coredomain.GeneratedMailboxBucket(mailbox.Email), bucket)
+}
+
+func TestGeneratedMailboxReuseUsesActiveColumnsMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "domain", 0, 0, 0)
+	seedDomainResources(t, db, 1, 4095, 1)
+	require.NoError(t, db.Exec(`
+INSERT INTO generated_mailboxes(id, resource_id, owner_user_id, email, status, alloc_bucket)
+VALUES
+    (2047, 4095, 1, 'active@d4095.example.com', 'normal', 2047),
+    (2048, 4095, 1, 'reusable@d4095.example.com', 'normal', 0)`).Error)
+	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-active-generated', 'domain')").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email)
+VALUES ('ord-active-generated', 10, 20, 4095, 'public', 2047, 'active@d4095.example.com')`).Error)
+
+	repo := NewRepo(db)
+	bucket := uint16(2047)
+	candidates, err := repo.ListGeneratedMailboxCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, &bucket, 4, "")
+	require.NoError(t, err)
+	require.Empty(t, candidates)
+
+	locked, err := repo.LockGeneratedMailboxCandidate(context.Background(), 2047, 4095, 10)
+	require.NoError(t, err)
+	require.Nil(t, locked)
+
+	reusable, err := repo.FindReusableGeneratedMailbox(context.Background(), 10, 4095)
+	require.NoError(t, err)
+	require.NotNil(t, reusable)
+	require.Equal(t, uint(2048), reusable.ID)
+	require.Equal(t, uint(4095), reusable.ResourceID)
+
+	require.NoError(t, db.Exec(`
+UPDATE domain_allocations
+SET status = 'released', released_at = NOW()
+WHERE order_no = 'ord-active-generated'`).Error)
+	reusable, err = repo.FindReusableGeneratedMailbox(context.Background(), 10, 4095)
+	require.NoError(t, err)
+	require.NotNil(t, reusable)
+	require.Equal(t, uint(2047), reusable.ID)
+}
+
 func TestFindOrCreateMicrosoftAliasesDoNotReuseDisabledRowsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 0, 1, 1)
@@ -1254,6 +1324,12 @@ INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, last_
 VALUES
     (2000, 1, 'a@d2000.example.com', 'normal', NULL),
     (2000, 1, 'b@d2000.example.com', 'normal', NOW())`).Error)
+	var activeMailboxID uint
+	require.NoError(t, db.Raw("SELECT MIN(id) FROM generated_mailboxes WHERE resource_id = 2000").Scan(&activeMailboxID).Error)
+	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('ord-explain-domain-active', 'domain')").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_allocations(order_no, project_id, product_id, resource_id, supply_scope, mailbox_id, email)
+VALUES ('ord-explain-domain-active', 10, 20, 2000, 'public', ?, 'a@d2000.example.com')`, activeMailboxID).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO allocation_daily_usages(usage_date, resource_type, resource_id, usage_kind, used_count)
 VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
@@ -1277,6 +1353,7 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 		{"plus_aliases", "idx_plus_aliases_alloc_reuse"},
 		{"generated_mailboxes", "idx_generated_mailboxes_id_resource"},
 		{"generated_mailboxes", "idx_generated_mailboxes_alloc_reuse"},
+		{"generated_mailboxes", "idx_generated_mailboxes_bucket_reuse"},
 		{"allocation_daily_usages", "PRIMARY"},
 		{"allocation_daily_usages", "idx_allocation_daily_usages_resource"},
 		{"allocation_order_guards", "PRIMARY"},
@@ -1306,11 +1383,15 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 
 	requireExplainUsesIndex(t, db,
 		"idx_microsoft_alloc_public",
-		"EXPLAIN SELECT id FROM microsoft_resources WHERE alloc_bucket = MOD(1000, 64) AND for_sale = TRUE AND status = 'normal' ORDER BY last_allocated_at ASC, quality_score DESC, id ASC LIMIT 4",
+		"EXPLAIN SELECT id FROM microsoft_resources WHERE alloc_bucket = MOD(1000, 2048) AND for_sale = TRUE AND status = 'normal' ORDER BY last_allocated_at ASC, quality_score DESC, id ASC LIMIT 4",
 	)
 	requireExplainUsesIndex(t, db,
 		"idx_domain_alloc_public",
-		"EXPLAIN SELECT id FROM domain_resources WHERE alloc_bucket = MOD(2000, 64) AND purpose = 'sale' AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 4",
+		"EXPLAIN SELECT id FROM domain_resources WHERE alloc_bucket = MOD(2000, 512) AND purpose = 'sale' AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 4",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_generated_mailboxes_bucket_reuse",
+		"EXPLAIN SELECT id FROM generated_mailboxes WHERE alloc_bucket = MOD(2000, 2048) AND status = 'normal' ORDER BY last_allocated_at ASC, id ASC LIMIT 4",
 	)
 	requireExplainUsesIndex(t, db,
 		"idx_generated_mailboxes_alloc_reuse",
@@ -1343,6 +1424,10 @@ VALUES (CURRENT_DATE(), 'microsoft', 1000, 'plus', 1)`).Error)
 	requireExplainUsesIndex(t, db,
 		"PRIMARY",
 		"EXPLAIN SELECT used_count FROM allocation_daily_usages WHERE usage_date = CURRENT_DATE() AND resource_type = 'microsoft' AND resource_id = 1000 AND usage_kind = 'plus' FOR UPDATE",
+	)
+	requireExplainUsesIndex(t, db,
+		"idx_domain_alloc_active_mailbox",
+		fmt.Sprintf("EXPLAIN SELECT 1 FROM domain_allocations FORCE INDEX (idx_domain_alloc_active_mailbox) WHERE active_project_id = 10 AND active_mailbox_id = %d LIMIT 1", activeMailboxID),
 	)
 }
 
@@ -1387,7 +1472,7 @@ func seedMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count i
 		).Error)
 		require.NoError(t, db.Exec(`
 INSERT INTO microsoft_resources(id, email_address, email_domain, password, for_sale, status, quality_score, alloc_bucket)
-VALUES (?, ?, 'example.com', 'secret', ?, ?, ?, MOD(?, 64))`,
+VALUES (?, ?, 'example.com', 'secret', ?, ?, ?, MOD(?, 2048))`,
 			id,
 			email,
 			forSale,
@@ -1408,6 +1493,18 @@ func requireIndexExists(t *testing.T, db *gorm.DB, tableName string, indexName s
 		indexName,
 	).Scan(&count).Error)
 	require.Positive(t, count, "expected index %s on %s", indexName, tableName)
+}
+
+func requireIndexMissing(t *testing.T, db *gorm.DB, tableName string, indexName string) {
+	t.Helper()
+
+	var count int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+		tableName,
+		indexName,
+	).Scan(&count).Error)
+	require.Zero(t, count, "unexpected index %s on %s", indexName, tableName)
 }
 
 func requireExplainUsesIndex(t *testing.T, db *gorm.DB, expectedKey string, query string) {
@@ -1456,7 +1553,7 @@ ON DUPLICATE KEY UPDATE status = VALUES(status)`, mailServerID, ownerID).Error)
 		).Error)
 		require.NoError(t, db.Exec(`
 INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, domain_tld, mail_server_id, purpose, status, alloc_bucket)
-VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 64))`,
+VALUES (?, 'domain', ?, ?, 'example.com', ?, ?, 'normal', MOD(?, 512))`,
 			id,
 			ownerID,
 			domainName,

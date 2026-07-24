@@ -12,6 +12,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
@@ -314,6 +315,7 @@ type GeneratedMailboxModel struct {
 	OwnerUserID     uint       `gorm:"column:owner_user_id"`
 	Email           string     `gorm:"type:varchar(255);not null"`
 	Status          string     `gorm:"type:varchar(32);not null"`
+	AllocBucket     uint16     `gorm:"column:alloc_bucket"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
 }
@@ -329,7 +331,7 @@ type RoutingCandidateModel struct {
 	ForSale         bool       `gorm:"column:for_sale"`
 	QualityScore    int        `gorm:"column:quality_score"`
 	Status          string     `gorm:"column:status"`
-	Bucket          uint8      `gorm:"column:alloc_bucket"`
+	Bucket          uint16     `gorm:"column:alloc_bucket"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
@@ -345,7 +347,7 @@ type DomainRoutingCandidateModel struct {
 	DomainTLD       string     `gorm:"column:domain_tld"`
 	Purpose         string     `gorm:"column:purpose"`
 	Status          string     `gorm:"column:status"`
-	Bucket          uint8      `gorm:"column:alloc_bucket"`
+	Bucket          uint16     `gorm:"column:alloc_bucket"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
@@ -478,7 +480,7 @@ LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 	}, nil
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint8, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
 	args := []any{projectID}
 	where := []string{
 		"ms.status = 'normal'",
@@ -522,7 +524,7 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint8, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
+func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
 	args := []any{}
 	where := []string{
 		"dr.status = 'normal'",
@@ -556,6 +558,54 @@ LIMIT ?`
 	var rows []allocapp.DomainCandidate
 	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list domain source allocation candidates: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) ListGeneratedMailboxCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]allocapp.GeneratedMailboxCandidate, error) {
+	args := []any{projectID}
+	where := []string{
+		"gm.status = 'normal'",
+		"dr.status = 'normal'",
+		"ms.status = 'online'",
+		`NOT EXISTS (
+            SELECT 1
+            FROM domain_allocations da
+            WHERE da.active_project_id = ?
+              AND da.active_mailbox_id = gm.id
+        )`,
+	}
+	switch scope {
+	case domain.SupplyScopeOwned:
+		where = append(where, "dr.purpose = 'not_sale'", "dr.owner_user_id = ?")
+		args = append(args, buyerUserID)
+	default:
+		where = append(where, "dr.purpose = 'sale'", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
+	}
+	if suffix := normalizeCandidateSuffix(emailSuffix); suffix != "" {
+		where = append(where, "dr.domain = ?")
+		args = append(args, suffix)
+	}
+	if bucket != nil {
+		where = append(where, "gm.alloc_bucket = ?")
+		args = append(args, *bucket)
+	}
+	args = append(args, limit)
+
+	query := `
+SELECT gm.id AS id, gm.resource_id AS resource_id, gm.email AS email
+FROM generated_mailboxes gm
+JOIN domain_resources dr ON dr.id = gm.resource_id
+JOIN email_resources er ON er.id = dr.id AND er.type = 'domain'
+JOIN mail_servers ms ON ms.id = dr.mail_server_id
+JOIN users u ON u.id = er.owner_user_id
+WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY gm.last_allocated_at ASC, gm.id ASC
+LIMIT ?`
+
+	var rows []allocapp.GeneratedMailboxCandidate
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list generated mailbox allocation candidates: %w", err)
 	}
 	return rows, nil
 }
@@ -712,6 +762,30 @@ func (r *Repo) LockDomainCandidate(ctx context.Context, resourceID uint, buyerUs
 		return nil, fmt.Errorf("lock domain allocation candidate: %w", err)
 	}
 	if row.ResourceID == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (r *Repo) LockGeneratedMailboxCandidate(ctx context.Context, mailboxID uint, resourceID uint, projectID uint) (*allocapp.GeneratedMailboxCandidate, error) {
+	var row allocapp.GeneratedMailboxCandidate
+	if err := r.dbFor(ctx).Raw(`
+SELECT gm.id AS id, gm.resource_id AS resource_id, gm.email AS email
+FROM generated_mailboxes gm
+WHERE gm.id = ?
+  AND gm.resource_id = ?
+  AND gm.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM domain_allocations da
+      WHERE da.active_project_id = ?
+        AND da.active_mailbox_id = gm.id
+  )
+LIMIT 1
+FOR UPDATE SKIP LOCKED`, mailboxID, resourceID, projectID).Scan(&row).Error; err != nil {
+		return nil, fmt.Errorf("lock generated mailbox allocation candidate: %w", err)
+	}
+	if row.ID == 0 {
 		return nil, nil
 	}
 	return &row, nil
@@ -982,16 +1056,15 @@ func (r *Repo) FindOrCreatePlusAlias(ctx context.Context, resourceID uint, email
 func (r *Repo) FindReusableGeneratedMailbox(ctx context.Context, projectID uint, resourceID uint) (*allocapp.GeneratedMailboxCandidate, error) {
 	var candidate allocapp.GeneratedMailboxCandidate
 	if err := r.dbFor(ctx).Raw(`
-SELECT gm.id AS id, gm.email AS email
+SELECT gm.id AS id, gm.resource_id AS resource_id, gm.email AS email
 FROM generated_mailboxes gm
 WHERE gm.resource_id = ?
   AND gm.status = 'normal'
   AND NOT EXISTS (
       SELECT 1
       FROM domain_allocations da
-      WHERE da.mailbox_id = gm.id
-        AND da.project_id = ?
-        AND da.status = 'allocated'
+      WHERE da.active_project_id = ?
+        AND da.active_mailbox_id = gm.id
   )
 ORDER BY gm.last_allocated_at ASC, gm.id ASC
 LIMIT 1`, resourceID, projectID).Scan(&candidate).Error; err != nil {
@@ -1003,13 +1076,19 @@ LIMIT 1`, resourceID, projectID).Scan(&candidate).Error; err != nil {
 
 	var locked allocapp.GeneratedMailboxCandidate
 	if err := r.dbFor(ctx).Raw(`
-SELECT gm.id AS id, gm.email AS email
+SELECT gm.id AS id, gm.resource_id AS resource_id, gm.email AS email
 FROM generated_mailboxes gm
 WHERE gm.id = ?
   AND gm.resource_id = ?
   AND gm.status = 'normal'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM domain_allocations da
+      WHERE da.active_project_id = ?
+        AND da.active_mailbox_id = gm.id
+  )
 LIMIT 1
-FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error; err != nil {
+FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID, projectID).Scan(&locked).Error; err != nil {
 		return nil, fmt.Errorf("lock reusable generated mailbox: %w", err)
 	}
 	if locked.ID == 0 {
@@ -1019,11 +1098,13 @@ FOR UPDATE SKIP LOCKED`, candidate.ID, resourceID).Scan(&locked).Error; err != n
 }
 
 func (r *Repo) FindOrCreateGeneratedMailbox(ctx context.Context, resourceID uint, ownerUserID uint, email string) (*allocapp.GeneratedMailboxCandidate, error) {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	model := GeneratedMailboxModel{
 		ResourceID:  resourceID,
 		OwnerUserID: ownerUserID,
-		Email:       strings.ToLower(strings.TrimSpace(email)),
+		Email:       normalizedEmail,
 		Status:      "normal",
+		AllocBucket: coredomain.GeneratedMailboxBucket(normalizedEmail),
 	}
 	if err := r.dbFor(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
 		return nil, fmt.Errorf("create generated mailbox: %w", err)
@@ -1035,7 +1116,7 @@ func (r *Repo) FindOrCreateGeneratedMailbox(ctx context.Context, resourceID uint
 	if found.Status != "normal" {
 		return nil, nil
 	}
-	return &allocapp.GeneratedMailboxCandidate{ID: found.ID, Email: found.Email}, nil
+	return &allocapp.GeneratedMailboxCandidate{ID: found.ID, ResourceID: found.ResourceID, Email: found.Email}, nil
 }
 
 func (r *Repo) EnsureDailyUsageAvailable(ctx context.Context, usageDate string, allocationType domain.AllocationType, resourceID uint, kind domain.DailyUsageKind, limit int) error {
@@ -2080,7 +2161,7 @@ type routingCandidateRow struct {
 	ForSale         bool       `gorm:"column:for_sale"`
 	QualityScore    int        `gorm:"column:quality_score"`
 	Status          string     `gorm:"column:status"`
-	Bucket          uint8      `gorm:"column:alloc_bucket"`
+	Bucket          uint16     `gorm:"column:alloc_bucket"`
 	LastAllocatedAt *time.Time `gorm:"column:last_allocated_at"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`

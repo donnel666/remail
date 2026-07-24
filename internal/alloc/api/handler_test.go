@@ -191,7 +191,7 @@ func seedAdminAllocationReadComposition(t *testing.T, db *gorm.DB) {
 INSERT INTO email_resources(id, type, owner_user_id) VALUES (1000, 'microsoft', 1)`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO microsoft_resources(id, email_address, email_domain, password, status, for_sale, quality_score, alloc_bucket)
-VALUES (1000, 'admin-allocation@outlook.com', 'outlook.com', 'write-only', 'normal', FALSE, 100, MOD(1000, 64))`).Error)
+VALUES (1000, 'admin-allocation@outlook.com', 'outlook.com', 'write-only', 'normal', FALSE, 100, MOD(1000, 2048))`).Error)
 	require.NoError(t, db.Exec(`
 INSERT INTO orders(
     id, order_no, user_id, project_id, project_product_id, product_type, service_mode,
