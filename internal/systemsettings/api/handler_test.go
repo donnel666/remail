@@ -46,8 +46,8 @@ func (r *fakeRepository) Get(_ context.Context, key string) (*settingsdomain.Set
 	if !ok {
 		return nil, settingsdomain.ErrSettingNotFound
 	}
-	copy := item
-	return &copy, nil
+	cloned := item
+	return &cloned, nil
 }
 
 func (r *fakeRepository) Upsert(_ context.Context, key, value string) (*settingsdomain.Setting, error) {
@@ -82,8 +82,8 @@ type fakeOperationLogs struct {
 }
 
 func (l *fakeOperationLogs) Create(_ context.Context, log *governancedomain.OperationLog) error {
-	copy := *log
-	l.items = append(l.items, &copy)
+	cloned := *log
+	l.items = append(l.items, &cloned)
 	return nil
 }
 

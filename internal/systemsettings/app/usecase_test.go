@@ -22,8 +22,8 @@ type fakeRepository struct {
 func (f *fakeRepository) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	var snapshot *domain.Setting
 	if f.setting != nil {
-		copy := *f.setting
-		snapshot = &copy
+		cloned := *f.setting
+		snapshot = &cloned
 	}
 	if err := fn(ctx); err != nil {
 		f.setting = snapshot
@@ -44,8 +44,8 @@ func (f *fakeRepository) Get(_ context.Context, key string) (*domain.Setting, er
 	if f.setting == nil {
 		return nil, domain.ErrSettingNotFound
 	}
-	copy := *f.setting
-	return &copy, nil
+	cloned := *f.setting
+	return &cloned, nil
 }
 
 func (f *fakeRepository) Upsert(_ context.Context, key, value string) (*domain.Setting, error) {
@@ -78,8 +78,8 @@ type fakeOperationLogs struct {
 }
 
 func (f *fakeOperationLogs) Create(_ context.Context, log *governancedomain.OperationLog) error {
-	copy := *log
-	f.items = append(f.items, &copy)
+	cloned := *log
+	f.items = append(f.items, &cloned)
 	return f.err
 }
 
