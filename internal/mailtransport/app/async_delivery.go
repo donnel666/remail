@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const outboundSendRetries = 3
@@ -19,8 +20,9 @@ type OutboundMailQueue interface {
 // OutboundSendTask normally carries only ID. Message remains for draining
 // tasks created by the previous deployment.
 type OutboundSendTask struct {
-	ID      string                 `json:"id,omitempty"`
-	Message domain.OutboundMessage `json:"message,omitempty"`
+	ID         string                 `json:"id,omitempty"`
+	Message    domain.OutboundMessage `json:"message,omitempty"`
+	RetryCount *int                   `json:"retryCount,omitempty"`
 }
 
 type AsyncDeliveryService struct {
@@ -66,6 +68,10 @@ func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTas
 	if uc.sender == nil {
 		return deliveryUnavailable("outbound mail sender unavailable", nil)
 	}
+	retries := min(runtimeconfig.Int("smtp_task_retry_count", outboundSendRetries, 0), 20)
+	if task.RetryCount != nil {
+		retries = min(max(*task.RetryCount, 0), 20)
+	}
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return deliveryUnavailable("outbound mail send interrupted", err)
@@ -81,7 +87,7 @@ func (uc *OutboundSendUseCase) Process(ctx context.Context, task OutboundSendTas
 		if errors.As(err, &failure) && !failure.Retryable {
 			return deliveryUnavailable("outbound mail send failed", err)
 		}
-		if attempt == outboundSendRetries {
+		if attempt == retries {
 			return deliveryUnavailable("outbound mail send failed", err)
 		}
 		delay := time.Duration(attempt+1) * time.Second

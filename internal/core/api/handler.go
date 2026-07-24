@@ -15,6 +15,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,9 +25,27 @@ const MaxImportBytes = 100 * 1024 * 1024 // 100 MB
 // MaxProjectLogoBytes limits project logo uploads to small web-safe images.
 const MaxProjectLogoBytes = 2 * 1024 * 1024 // 2 MB
 
+const (
+	maxConfiguredImportBytes      = 512 * 1024 * 1024
+	maxConfiguredProjectLogoBytes = 20 * 1024 * 1024
+	multipartFormOverheadBytes    = 1 * 1024 * 1024
+)
+
 // MaxResourceValidationRequestBytes bounds the explicit-ID selection before
 // JSON decoding. Ten thousand numeric IDs fit comfortably within this limit.
 const MaxResourceValidationRequestBytes = 1024 * 1024 // 1 MB
+
+func maxImportBytesValue() int64 {
+	return int64(min(runtimeconfig.Int("resource_import_max_bytes", MaxImportBytes, 1), maxConfiguredImportBytes))
+}
+
+func maxProjectLogoBytesValue() int64 {
+	return int64(min(runtimeconfig.Int("max_project_logo_bytes", MaxProjectLogoBytes, 1), maxConfiguredProjectLogoBytes))
+}
+
+func multipartRequestMaxBytes(fileMax int64) int64 {
+	return fileMax + multipartFormOverheadBytes
+}
 
 // CoreHandler holds the Core HTTP handlers.
 type CoreHandler struct {
@@ -247,7 +266,8 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 	}
 
 	// Limit request body size to prevent memory exhaustion
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxImportBytes)
+	maxBytes := maxImportBytesValue()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, multipartRequestMaxBytes(maxBytes))
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -276,8 +296,8 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		return
 	}
 
-	content, err := io.ReadAll(file)
-	if err != nil {
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(content)) > maxBytes {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message":   "Invalid import file.",
 			"requestId": middleware.GetRequestID(c),
@@ -1016,7 +1036,8 @@ func (h *CoreHandler) DeleteAdminProjectAccess(c *gin.Context) {
 
 // POST /v1/admin/projects/logos
 func (h *CoreHandler) PostAdminProjectLogo(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxProjectLogoBytes)
+	maxBytes := maxProjectLogoBytesValue()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, multipartRequestMaxBytes(maxBytes))
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1027,8 +1048,8 @@ func (h *CoreHandler) PostAdminProjectLogo(c *gin.Context) {
 	}
 	defer file.Close()
 
-	content, err := io.ReadAll(file)
-	if err != nil {
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(content)) > maxBytes {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message":   "Invalid project logo.",
 			"requestId": middleware.GetRequestID(c),

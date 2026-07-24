@@ -16,7 +16,7 @@ export default function ProxySection({ options, onBulkSave }: SectionProps) {
   const [saving, setSaving] = useState(false);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
   const number = (value: unknown) => Number(value) || 0;
-  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={0} />;
+  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
   const save = async () => {
     setSaving(true);
     try { await onBulkSave(Object.entries(form).map(([key, value]) => ({ key, value: String(value) }))); }
@@ -29,7 +29,7 @@ export default function ProxySection({ options, onBulkSave }: SectionProps) {
       {field("代理失败阈值", "proxy_failure_threshold")}
       {field("代理检测请求超时（秒）", "proxy_check_timeout_seconds")}
       {field("资源代理绑定有效期（天）", "resource_binding_ttl_days")}
-      {field("代理获取最大尝试次数", "max_proxy_attempts")}
+      {field("代理获取尝试硬上限", "max_proxy_attempts")}
       {field("待检测代理查询上限", "pending_proxy_check_limit")}
       {field("代理空闲连接超时（秒）", "proxy_idle_conn_timeout_seconds")}
       {field("代理 TLS 握手超时（秒）", "proxy_tls_handshake_timeout_seconds")}

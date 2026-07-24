@@ -9,6 +9,7 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -26,6 +27,13 @@ type MicrosoftTokenRefreshQueue struct {
 	client *asynq.Client
 }
 
+func microsoftTokenRefreshTimeout() time.Duration {
+	settings := runtimeconfig.Snapshot()
+	attempts := min(settings.Int("max_proxy_attempts", 3, 1), 20) + 1
+	requestTimeout := min(settings.Duration("oauth_validation_timeout_seconds", 30*time.Second, time.Second, 1), 300*time.Second)
+	return max(microsoftTokenRefreshTaskTimeout, time.Duration(attempts)*requestTimeout)
+}
+
 func NewMicrosoftTokenRefreshQueue(client *asynq.Client) *MicrosoftTokenRefreshQueue {
 	return &MicrosoftTokenRefreshQueue{client: client}
 }
@@ -41,13 +49,14 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Co
 	if err != nil {
 		return false, fmt.Errorf("marshal microsoft token refresh task: %w", err)
 	}
+	taskTimeout := microsoftTokenRefreshTimeout()
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeMicrosoftTokenRefresh, payload),
 		asynq.Queue(MicrosoftTokenRefreshQueueName),
-		asynq.Unique(microsoftTokenRefreshTaskTimeout),
+		asynq.Unique(taskTimeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
-		asynq.Timeout(microsoftTokenRefreshTaskTimeout),
+		asynq.Timeout(taskTimeout),
 		asynq.Retention(0),
 	)
 	if err != nil {

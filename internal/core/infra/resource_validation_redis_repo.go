@@ -284,12 +284,13 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 		}
 		safeMessage := safeValidationMessage(result.SafeMessage)
 		nextStatus := string(domain.MicrosoftStatusAbnormal)
-		nextFailures := min(ms.ValidationFailures+1, coreapp.ResourceValidationMaxFailures)
+		maxFailures := coreapp.ResourceValidationMaxFailuresValue()
+		nextFailures := min(ms.ValidationFailures+1, maxFailures)
 		if result.Valid {
 			nextStatus = string(domain.MicrosoftStatusIdentifying)
 			nextFailures = 0
 			safeMessage = ""
-		} else if result.Retryable && nextFailures < coreapp.ResourceValidationMaxFailures {
+		} else if result.Retryable && nextFailures < maxFailures {
 			nextStatus = string(domain.MicrosoftStatusPending)
 		}
 		updates := map[string]any{
@@ -369,12 +370,13 @@ func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, task cor
 		}
 		safeMessage := safeValidationMessage(result.SafeMessage)
 		nextStatus := string(domain.DomainStatusAbnormal)
-		nextFailures := min(resource.ValidationFailures+1, coreapp.ResourceValidationMaxFailures)
+		maxFailures := coreapp.ResourceValidationMaxFailuresValue()
+		nextFailures := min(resource.ValidationFailures+1, maxFailures)
 		if result.Valid {
 			nextStatus = string(domain.DomainStatusNormal)
 			nextFailures = 0
 			safeMessage = ""
-		} else if result.Retryable && nextFailures < coreapp.ResourceValidationMaxFailures {
+		} else if result.Retryable && nextFailures < maxFailures {
 			nextStatus = string(domain.DomainStatusPending)
 		}
 		now := time.Now().UTC()

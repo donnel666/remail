@@ -13,6 +13,7 @@ import (
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -33,14 +34,18 @@ type microsoftAliasRunningRetryStoreStub struct {
 }
 
 type failingOutboundSenderStub struct {
-	calls int
-	panic bool
+	calls     int
+	panic     bool
+	retryable bool
 }
 
 func (s *failingOutboundSenderStub) Send(context.Context, maildomain.OutboundMessage) error {
 	s.calls++
 	if s.panic {
 		panic("smtp panic")
+	}
+	if s.retryable {
+		return errors.New("smtp unavailable")
 	}
 	return &mailapp.OutboundSendFailure{SafeMessage: "SMTP server rejected the message.", Cause: errors.New("smtp 550")}
 }
@@ -70,6 +75,19 @@ func TestOutboundSMTPFailureDeletesTemporaryRedisPayload(t *testing.T) {
 	_, found, loadErr := queue.LoadOutboundSend(context.Background(), id)
 	require.NoError(t, loadErr)
 	require.False(t, found)
+}
+
+func TestOutboundSMTPTaskKeepsQueuedRetrySnapshot(t *testing.T) {
+	runtimeconfig.Set("smtp_task_retry_count", "0")
+	t.Cleanup(func() { runtimeconfig.Delete("smtp_task_retry_count") })
+	sender := &failingOutboundSenderStub{retryable: true}
+	mux, task, _, _ := queuedOutboundTaskForHandler(t, sender)
+	runtimeconfig.Set("smtp_task_retry_count", "1")
+
+	err := mux.ProcessTask(context.Background(), task)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, sender.calls)
 }
 
 func TestOutboundSMTPPanicDeletesPayloadAndRevokesTask(t *testing.T) {

@@ -2541,8 +2541,9 @@ func microsoftProjectInventoryScopeSQL(projectID uint) (string, []any) {
 
 func microsoftDotCapacityExpression(tableAlias string) string {
 	localPart := "SUBSTRING_INDEX(" + tableAlias + ".email_address, '@', 1)"
-	positions := make([]string, 0, allocapp.DotAliasCapacityPerResource)
-	for position := 1; position <= allocapp.DotAliasCapacityPerResource; position++ {
+	capacity := allocapp.DotAliasCapacityPerResourceValue()
+	positions := make([]string, 0, capacity)
+	for position := 1; position <= capacity; position++ {
 		positions = append(positions, fmt.Sprintf(
 			"CASE WHEN CHAR_LENGTH(%s) > %d AND SUBSTRING(%s, %d, 1) <> '.' AND SUBSTRING(%s, %d, 1) <> '.' THEN 1 ELSE 0 END",
 			localPart, position, localPart, position, localPart, position+1,
@@ -2554,8 +2555,9 @@ func microsoftDotCapacityExpression(tableAlias string) string {
 func microsoftDotAliasMatchesResourceExpression(aliasTable, resourceTable string) string {
 	localPart := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', 1)"
 	domainPart := "SUBSTRING_INDEX(" + resourceTable + ".email_address, '@', -1)"
-	conditions := make([]string, 0, allocapp.DotAliasCapacityPerResource)
-	for position := 1; position <= allocapp.DotAliasCapacityPerResource; position++ {
+	capacity := allocapp.DotAliasCapacityPerResourceValue()
+	conditions := make([]string, 0, capacity)
+	for position := 1; position <= capacity; position++ {
 		conditions = append(conditions, fmt.Sprintf(
 			"(CHAR_LENGTH(%s) > %d AND SUBSTRING(%s, %d, 1) <> '.' AND SUBSTRING(%s, %d, 1) <> '.' AND %s.email = CONCAT(LEFT(%s, %d), '.', SUBSTRING(%s, %d), '@', %s))",
 			localPart, position, localPart, position, localPart, position+1, aliasTable, localPart, position, localPart, position+1, domainPart,

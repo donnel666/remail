@@ -13,6 +13,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -300,7 +301,7 @@ func (r *MicrosoftTokenRefreshRepo) RecordRetryableFailure(ctx context.Context, 
 			return err
 		}
 		failures := state.Failures + 1
-		abnormal = failures >= mailapp.MicrosoftTokenRefreshDefaultMaxAttempts
+		abnormal = failures >= runtimeconfig.Int("token_refresh_max_attempts", mailapp.MicrosoftTokenRefreshDefaultMaxAttempts, 1)
 		status := mailapp.MicrosoftTokenRefreshPending
 		var finishedAt any
 		if abnormal {

@@ -242,6 +242,8 @@ func writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidKey):
 		status, message = http.StatusBadRequest, "Invalid system setting key."
+	case errors.Is(err, domain.ErrInvalidValue):
+		status, message = http.StatusBadRequest, "Invalid system setting value."
 	case errors.Is(err, domain.ErrSettingNotFound):
 		status, message = http.StatusNotFound, "System setting not found."
 	case errors.Is(err, errUnavailable):

@@ -29,16 +29,16 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
       <FormItem spanFull>
         <FormLabel>{t("微软邮箱域名白名单")}</FormLabel>
         <TagInput aria-label={t("微软邮箱域名白名单")} value={domains} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入邮箱域名后回车")} onChange={(values) => update("microsoft_domain_whitelist", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
-        <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个允许导入的微软邮箱域名单独显示")}</p>
+        <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个允许导入的微软邮箱域名单独显示；留空使用系统内置白名单")}</p>
       </FormItem>
-      <SettingsNumberField label={t("子地址默认日配额")} value={number(form.default_plus_daily_limit)} onChange={(value) => update("default_plus_daily_limit", value)} min={0} />
-      <SettingsNumberField label={t("邮箱默认日配额")} value={number(form.default_mailbox_daily_limit)} onChange={(value) => update("default_mailbox_daily_limit", value)} min={0} />
-      <SettingsNumberField label={t("验证最大连续失败次数")} value={number(form.resource_validation_max_failures)} onChange={(value) => update("resource_validation_max_failures", value)} min={0} />
-      <SettingsNumberField label={t("资源导入文件最大体积（MB）")} value={number(form.resource_import_max_bytes) / BYTES_PER_MB} onChange={(value) => update("resource_import_max_bytes", Math.round(value * BYTES_PER_MB))} min={0} />
-      <SettingsNumberField label={t("项目 Logo 最大体积（MB）")} value={number(form.max_project_logo_bytes) / BYTES_PER_MB} onChange={(value) => update("max_project_logo_bytes", Math.round(value * BYTES_PER_MB))} min={0} />
-      <SettingsNumberField label={t("项目名称最大长度")} value={number(form.project_name_max)} onChange={(value) => update("project_name_max", value)} min={0} />
-      <SettingsNumberField label={t("项目描述最大长度")} value={number(form.project_description_max)} onChange={(value) => update("project_description_max", value)} min={0} />
-      <SettingsNumberField label={t("目标平台名最大长度")} value={number(form.project_target_platform_max)} onChange={(value) => update("project_target_platform_max", value)} min={0} />
+      <SettingsNumberField label={t("子地址默认日配额")} value={number(form.default_plus_daily_limit)} onChange={(value) => update("default_plus_daily_limit", value)} min={1} />
+      <SettingsNumberField label={t("邮箱默认日配额")} value={number(form.default_mailbox_daily_limit)} onChange={(value) => update("default_mailbox_daily_limit", value)} min={1} />
+      <SettingsNumberField label={t("验证最大连续失败次数")} value={number(form.resource_validation_max_failures)} onChange={(value) => update("resource_validation_max_failures", value)} min={1} />
+      <SettingsNumberField label={t("资源导入文件最大体积（MB）")} value={number(form.resource_import_max_bytes) / BYTES_PER_MB} onChange={(value) => update("resource_import_max_bytes", Math.round(value * BYTES_PER_MB))} min={1} />
+      <SettingsNumberField label={t("项目 Logo 最大体积（MB）")} value={number(form.max_project_logo_bytes) / BYTES_PER_MB} onChange={(value) => update("max_project_logo_bytes", Math.round(value * BYTES_PER_MB))} min={1} />
+      <SettingsNumberField label={t("项目名称最大长度")} value={number(form.project_name_max)} onChange={(value) => update("project_name_max", value)} min={1} />
+      <SettingsNumberField label={t("项目描述最大长度")} value={number(form.project_description_max)} onChange={(value) => update("project_description_max", value)} min={1} />
+      <SettingsNumberField label={t("目标平台名最大长度")} value={number(form.project_target_platform_max)} onChange={(value) => update("project_target_platform_max", value)} min={1} />
     </SettingsFormGrid>
     <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;

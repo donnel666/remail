@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -59,7 +60,11 @@ func (c *MicrosoftOAuthClient) RefreshToken(ctx context.Context, req MicrosoftOA
 		return microsoftOAuthFailure("request", "Microsoft refresh token is missing.", false), nil
 	}
 
-	return exchangeMicrosoftAccessToken(ctx, clientID, refreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, c.timeout)
+	timeout := 30 * time.Second
+	if c != nil && c.timeout > 0 {
+		timeout = c.timeout
+	}
+	return exchangeMicrosoftAccessToken(ctx, clientID, refreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, runtimeconfig.Duration("oauth_validation_timeout_seconds", timeout, time.Second, 1))
 }
 
 func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOAuthRequest) (MicrosoftOAuthResult, error) {

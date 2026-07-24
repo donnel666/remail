@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -355,7 +357,7 @@ func verifyPasswordRecoveryBindingWithSession(
 	}
 	watchTimeout := codeTimeout
 	if watchTimeout <= 0 {
-		watchTimeout = passwordRecoveryDefaultCodeWait
+		watchTimeout = runtimeconfig.Duration("password_recovery_code_wait_seconds", passwordRecoveryDefaultCodeWait, time.Second, 1)
 	}
 	watchSeconds := int(watchTimeout / time.Second)
 	if watchSeconds <= 0 {

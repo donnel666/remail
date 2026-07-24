@@ -71,6 +71,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	var coreMod *coreapi.CoreModule
 	v1 := r.Group("/v1")
 	{
+		systemSettingsMod, err := systemsettingsapi.NewModule(p.DB)
+		if err != nil {
+			return nil, cleanup, err
+		}
 		// IAM module (activation, auth, users)
 		fileStore := governanceinfra.NewMinIOFileStore(p.MinIO, p.MinIOBucket)
 		retentionLocation, err := time.LoadLocation("Asia/Shanghai")
@@ -132,7 +136,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionMaxAge, p.SessionSecure)
 
 		// Generic administrator-managed system settings.
-		systemSettingsMod := systemsettingsapi.NewModule(p.DB)
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
 		systemsettingsapi.RegisterRoutes(v1, systemSettingsMod, iamSessionFetcher, iamMod.PermissionChecker)
 

@@ -12,6 +12,7 @@ import (
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	proxyinfra "github.com/donnel666/remail/internal/proxy/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -81,10 +82,16 @@ func startProxyCheckDispatcherSeeder(module *ProxyModule) {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(proxyCheckDispatcherInterval)
+		// Poll once per second so a saved interval takes effect without restarting.
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			module.ProxyUseCase.ScheduleProxyCheckDispatcher(context.Background(), 0)
+		lastRun := time.Now()
+		for now := range ticker.C {
+			interval := runtimeconfig.Duration("proxy_check_interval_seconds", proxyCheckDispatcherInterval, time.Second, 1)
+			if now.Sub(lastRun) >= interval {
+				module.ProxyUseCase.ScheduleProxyCheckDispatcher(context.Background(), 0)
+				lastRun = now
+			}
 		}
 	}()
 }

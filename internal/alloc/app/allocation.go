@@ -106,7 +106,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (*domain.U
 
 	var result *domain.UnifiedAllocation
 	var err error
-	attempts := candidateRetryCount
+	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
 		// the same transaction. Let the complete order transaction roll back first.
@@ -578,7 +578,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 	if len(missing) == 0 {
 		return snapshots, nil
 	}
-	if err := uc.inventoryCache.InitializeInventory(ctx, missing, inventoryCacheHardTTL); err != nil {
+	if err := uc.inventoryCache.InitializeInventory(ctx, missing, inventoryCacheHardTTLValue()); err != nil {
 		return nil, fmt.Errorf("initialize inventory cache: %w", err)
 	}
 	missingProjectIDs := make([]uint, len(missing))
@@ -743,7 +743,7 @@ func loadCachedInventory[T any](
 	if cached, err := load(ctx); err != nil || cached != nil {
 		return cached, err
 	}
-	if err := cache.InitializeInventory(ctx, []InventoryCacheEntry{entry}, inventoryCacheHardTTL); err != nil {
+	if err := cache.InitializeInventory(ctx, []InventoryCacheEntry{entry}, inventoryCacheHardTTLValue()); err != nil {
 		return nil, fmt.Errorf("initialize inventory cache: %w", err)
 	}
 	cached, err := load(ctx)
@@ -809,7 +809,7 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 	if before.IsZero() {
 		before = time.Now()
 	}
-	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, before.Add(-inventoryCacheActivityTTL), before, inventoryRefreshBatchSize)
+	entries, err := uc.inventoryCache.ClaimActiveInventory(ctx, before.Add(-inventoryCacheActivityTTLValue()), before, inventoryRefreshBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("claim active inventory cache entries: %w", err)
 	}
@@ -844,7 +844,7 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
 			} else if err == nil {
-				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, stats, inventoryCacheHardTTL)
+				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, stats, inventoryCacheHardTTLValue())
 			}
 		case InventoryCacheProducts:
 			totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID)
@@ -853,7 +853,7 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
 			} else if err == nil {
-				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, totals, inventoryCacheHardTTL)
+				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, totals, inventoryCacheHardTTLValue())
 			}
 		default:
 			err = uc.inventoryCache.DeleteInventory(ctx, entry)
@@ -1037,9 +1037,9 @@ func (uc *UseCase) allocateMicrosoftOnce(ctx context.Context, cmd AllocateComman
 }
 
 func (uc *UseCase) tryMicrosoftBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, bucket *uint8, now time.Time) (*domain.UnifiedAllocation, bool, error) {
-	limit := candidateWindowSize
+	limit := candidateWindowSizeValue()
 	if bucket == nil {
-		limit = globalCandidateWindow
+		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
@@ -1260,9 +1260,9 @@ func (uc *UseCase) allocateDomainOnce(ctx context.Context, cmd AllocateCommand, 
 }
 
 func (uc *UseCase) tryDomainBucket(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, bucket *uint8, now time.Time) (*domain.UnifiedAllocation, bool, error) {
-	limit := candidateWindowSize
+	limit := candidateWindowSizeValue()
 	if bucket == nil {
-		limit = globalCandidateWindow
+		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListDomainSourceCandidates(ctx, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 	if err != nil {
@@ -1440,8 +1440,9 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 
 func bucketProbeSequence(orderNo string, projectID uint, kind string) []uint8 {
 	start := uint8(hash64(orderNo+"|"+strconv.Itoa(int(projectID))+"|"+kind) % BucketCount)
-	result := make([]uint8, 0, bucketProbeCount)
-	for i := 0; i < bucketProbeCount; i++ {
+	probeCount := bucketProbeCountValue()
+	result := make([]uint8, 0, probeCount)
+	for i := 0; i < probeCount; i++ {
 		result = append(result, uint8((int(start)+i)%BucketCount))
 	}
 	return result
@@ -1459,8 +1460,8 @@ func dotAliasVariants(email string) []string {
 		return nil
 	}
 	limit := len(local) - 1
-	if limit > DotAliasCapacityPerResource {
-		limit = DotAliasCapacityPerResource
+	if capacity := DotAliasCapacityPerResourceValue(); limit > capacity {
+		limit = capacity
 	}
 	result := make([]string, 0, limit)
 	for i := 1; i <= limit; i++ {
@@ -1487,8 +1488,9 @@ func plusAliasVariants(email string, projectID uint, orderNo string) []string {
 		return nil
 	}
 	base := strconv.FormatUint(uint64(projectID), 36) + strconv.FormatUint(hash64(orderNo)%46656, 36)
-	result := make([]string, 0, aliasGenerationWindow)
-	for i := 0; i < aliasGenerationWindow; i++ {
+	window := aliasGenerationWindowValue()
+	result := make([]string, 0, window)
+	for i := 0; i < window; i++ {
 		result = append(result, local+"+p"+base+strconv.FormatInt(int64(i), 36)+"@"+domainPart)
 	}
 	return result
@@ -1499,9 +1501,10 @@ func generatedMailboxVariants(domainPart string) []string {
 	if domainPart == "" {
 		return nil
 	}
-	result := make([]string, 0, aliasGenerationWindow)
-	seen := make(map[string]struct{}, aliasGenerationWindow)
-	for len(result) < aliasGenerationWindow {
+	window := aliasGenerationWindowValue()
+	result := make([]string, 0, window)
+	seen := make(map[string]struct{}, window)
+	for len(result) < window {
 		name := generatedMailboxName(rand.IntN(generatedMailboxNameCount()))
 		var suffix strings.Builder
 		for range rand.IntN(7) {

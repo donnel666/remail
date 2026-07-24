@@ -345,7 +345,8 @@ func (h *CoreHandler) PostAdminMicrosoftResourceImport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxImportBytes)
+	maxBytes := maxImportBytesValue()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, multipartRequestMaxBytes(maxBytes))
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
@@ -371,8 +372,8 @@ func (h *CoreHandler) PostAdminMicrosoftResourceImport(c *gin.Context) {
 		writeAdminResourceError(c, domain.ErrInvalidImportFormat)
 		return
 	}
-	content, err := io.ReadAll(io.LimitReader(file, MaxImportBytes+1))
-	if err != nil || len(content) > MaxImportBytes {
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(content)) > maxBytes {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
 		return
 	}

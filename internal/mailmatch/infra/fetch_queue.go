@@ -9,6 +9,7 @@ import (
 
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -31,6 +32,10 @@ const (
 	validatedHistoryTaskMaxRetry  = 20
 	projectHistoryTaskTimeout     = 20 * time.Minute
 	projectHistoryDispatchTimeout = 30 * time.Second
+
+	maxPickupRequestFetchTaskTimeout = 30 * time.Minute
+	maxMailmatchFetchTaskTimeout     = time.Hour
+	maxProjectHistoryTaskTimeout     = 2 * time.Hour
 )
 
 type FetchQueue struct {
@@ -45,6 +50,10 @@ func (q *FetchQueue) EnqueuePickupRequest(ctx context.Context, task app.PickupRe
 	if q == nil || q.client == nil {
 		return false, fmt.Errorf("mailmatch pickup request queue is unavailable")
 	}
+	timeout := min(runtimeconfig.Duration("pickup_request_fetch_timeout_minutes", pickupRequestFetchTaskTimeout, time.Minute, 1), maxPickupRequestFetchTaskTimeout)
+	if task.ExpiresAt.IsZero() && !task.RequestedAt.IsZero() {
+		task.ExpiresAt = task.RequestedAt.Add(timeout)
+	}
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return false, fmt.Errorf("marshal mailmatch pickup request task: %w", err)
@@ -53,9 +62,9 @@ func (q *FetchQueue) EnqueuePickupRequest(ctx context.Context, task app.PickupRe
 		ctx,
 		asynq.NewTask(TypeMailmatchPickupRequestFetch, payload),
 		asynq.Queue(mailmatchQueueName),
-		asynq.Unique(pickupRequestFetchTaskTimeout),
+		asynq.Unique(timeout),
 		asynq.MaxRetry(0),
-		asynq.Timeout(pickupRequestFetchTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -76,13 +85,14 @@ func (q *FetchQueue) EnqueueResourceFetch(ctx context.Context, task app.Resource
 		return false, fmt.Errorf("marshal mailmatch resource fetch task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeMailmatchResourceFetch, payload)
+	timeout := min(runtimeconfig.Duration("mailmatch_fetch_timeout_minutes", mailmatchFetchTaskTimeout, time.Minute, 1), maxMailmatchFetchTaskTimeout)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
-		asynq.Unique(mailmatchFetchTaskTimeout),
+		asynq.Unique(timeout),
 		asynq.MaxRetry(resourceFetchTaskMaxRetry),
-		asynq.Timeout(mailmatchFetchTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)
 	if err != nil {
@@ -102,13 +112,14 @@ func (q *FetchQueue) EnqueueProjectHistoryScan(ctx context.Context, task app.Pro
 	if err != nil {
 		return false, fmt.Errorf("marshal project history scan task: %w", err)
 	}
+	timeout := min(runtimeconfig.Duration("project_history_timeout_minutes", projectHistoryTaskTimeout, time.Minute, 1), maxProjectHistoryTaskTimeout)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeProjectHistoryScan, payload),
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
-		asynq.Unique(projectHistoryTaskTimeout),
+		asynq.Unique(timeout),
 		asynq.MaxRetry(projectHistoryTaskMaxRetry),
-		asynq.Timeout(projectHistoryTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -128,13 +139,14 @@ func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, t
 	if err != nil {
 		return fmt.Errorf("marshal validated microsoft history scan task: %w", err)
 	}
+	timeout := min(runtimeconfig.Duration("project_history_timeout_minutes", projectHistoryTaskTimeout, time.Minute, 1), maxProjectHistoryTaskTimeout)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeValidatedMicrosoftHistoryScan, payload),
 		asynq.Queue(platform.QueueBackgroundProjectHistory),
-		asynq.Unique(projectHistoryTaskTimeout),
+		asynq.Unique(timeout),
 		asynq.MaxRetry(validatedHistoryTaskMaxRetry),
-		asynq.Timeout(projectHistoryTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)
 	if errors.Is(err, asynq.ErrDuplicateTask) {

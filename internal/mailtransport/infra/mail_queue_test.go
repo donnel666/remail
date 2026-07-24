@@ -10,6 +10,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -85,6 +86,8 @@ func TestOutboundMailQueueStoresFiveMinutePayloadAndQueuesOnlyReference(t *testi
 	require.NoError(t, json.Unmarshal(pending[0].Payload, &payload))
 	require.NotEmpty(t, payload.ID)
 	require.Empty(t, payload.Message.To)
+	require.NotNil(t, payload.RetryCount)
+	require.Equal(t, 3, *payload.RetryCount)
 	require.NotContains(t, string(pending[0].Payload), "123456")
 	require.NotEqual(t, TypeOutboundSend, pending[0].ID)
 	require.Zero(t, pending[0].MaxRetry)
@@ -116,4 +119,17 @@ func TestOutboundMailQueueRejectsSameIdempotencyKeyWithDifferentPayload(t *testi
 
 	require.ErrorIs(t, err, maildomain.ErrOutboundIdempotencyConflict)
 	require.False(t, accepted)
+}
+
+func TestOutboundMailQueueUsesRuntimePayloadTTL(t *testing.T) {
+	server, client, _, redisClient := newMailQueueTestClient(t)
+	runtimeconfig.Set("smtp_outbound_payload_ttl_minutes", "7")
+	t.Cleanup(func() { runtimeconfig.Delete("smtp_outbound_payload_ttl_minutes") })
+	queue := NewOutboundMailQueue(client, redisClient)
+	message := mailapp.VerificationCodeMessage("user@example.com", "123456")
+
+	accepted, err := queue.EnqueueOutboundSend(context.Background(), mailapp.OutboundSendTask{Message: message})
+	require.NoError(t, err)
+	require.True(t, accepted)
+	require.Equal(t, 7*time.Minute, server.TTL(outboundPayloadKey(outboundPayloadID(message.IdempotencyKey))))
 }

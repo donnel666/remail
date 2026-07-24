@@ -14,12 +14,18 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
-	projectLogoMaxBytes = 2 * 1024 * 1024
-	projectLogoPrefix   = "projects/logos/"
+	projectLogoMaxBytes           = 2 * 1024 * 1024
+	projectLogoConfiguredMaxBytes = 20 * 1024 * 1024
+	projectLogoPrefix             = "projects/logos/"
 )
+
+func projectLogoMaxBytesValue() int {
+	return min(runtimeconfig.Int("max_project_logo_bytes", projectLogoMaxBytes, 1), projectLogoConfiguredMaxBytes)
+}
 
 type ProjectLogo struct {
 	ContentType string
@@ -38,7 +44,7 @@ func (uc *ProjectAssetUseCase) SaveLogo(ctx context.Context, fileName string, co
 	if uc.files == nil {
 		return "", domain.ErrFileStorageUnavailable
 	}
-	if len(content) == 0 || len(content) > projectLogoMaxBytes {
+	if len(content) == 0 || len(content) > projectLogoMaxBytesValue() {
 		return "", domain.ErrInvalidProject
 	}
 	contentType, extension, ok := projectLogoContentType(content, fileName)

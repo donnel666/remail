@@ -16,7 +16,7 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
   const [saving, setSaving] = useState(false);
   const update = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
   const number = (value: unknown) => Number(value) || 0;
-  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={0} />;
+  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
   const save = async () => {
     setSaving(true);
     try { await onBulkSave(Object.entries(form).map(([key, value]) => ({ key, value: String(value) }))); }

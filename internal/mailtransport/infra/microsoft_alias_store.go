@@ -14,6 +14,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1109,8 +1110,8 @@ func (s *MicrosoftAliasStore) Reserve(
 			return err
 		}
 		remaining := minAliasQuota(
-			mailapp.MicrosoftAliasWeeklyLimit-usage.WeekCount,
-			mailapp.MicrosoftAliasYearlyLimit-usage.YearCount,
+			runtimeconfig.Int("microsoft_alias_weekly_limit", mailapp.MicrosoftAliasWeeklyLimit, 1)-usage.WeekCount,
+			runtimeconfig.Int("microsoft_alias_yearly_limit", mailapp.MicrosoftAliasYearlyLimit, 1)-usage.YearCount,
 		)
 		if remaining <= 0 {
 			return nil

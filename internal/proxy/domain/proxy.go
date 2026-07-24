@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type ProxyPool string
@@ -242,7 +244,7 @@ func (p *Proxy) ReportFailure(safeError string, retryable bool) error {
 		return nil
 	}
 	p.Errors++
-	if p.Errors >= failureThreshold && p.Status == ProxyStatusNormal {
+	if p.Errors >= runtimeconfig.Int("proxy_failure_threshold", failureThreshold, 1) && p.Status == ProxyStatusNormal {
 		if !CanTransitionProxyStatus(p.Status, ProxyStatusPending) {
 			return ErrInvalidProxyStatus
 		}

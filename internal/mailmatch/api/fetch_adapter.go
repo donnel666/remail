@@ -6,17 +6,18 @@ import (
 	stdmail "net/mail"
 	"regexp"
 	"strings"
-	"time"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
-	maxFetchProxyAttempts           = 2
+	fetchProxyAttempts              = 2
+	maxFetchProxyAttempts           = 20
 	realtimeMicrosoftMessageMaximum = 30
 )
 
@@ -52,8 +53,6 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 	stopAfterLimit := false
 	if req.Realtime {
 		maxMessages = realtimeMicrosoftMessageMaximum
-		sinceAt = time.Time{}
-		untilAt = time.Time{}
 		stopAfterLimit = true
 	}
 	if req.FullHistory {
@@ -62,7 +61,8 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		untilAt = req.UntilAt
 		stopAfterLimit = false
 	}
-	for attempt := 0; attempt < maxFetchProxyAttempts; attempt++ {
+	proxyAttempts := min(runtimeconfig.Int("max_proxy_attempts", fetchProxyAttempts, 1), maxFetchProxyAttempts)
+	for attempt := 0; attempt < proxyAttempts; attempt++ {
 		streamed := false
 		var onMessages func([]mailinfra.MicrosoftFetchedMessage)
 		if req.OnMessages != nil {

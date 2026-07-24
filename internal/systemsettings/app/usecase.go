@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 var settingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`)
@@ -18,6 +20,7 @@ var settingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,190}$`
 type SystemSettingsUseCase struct {
 	repo Repository
 	logs governanceapp.OperationLogPort
+	mu   sync.Mutex
 }
 
 type MutationMeta struct {
@@ -43,8 +46,13 @@ func (uc *SystemSettingsUseCase) Get(ctx context.Context, key string) (*domain.S
 }
 
 func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, meta MutationMeta) (*domain.Setting, error) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
 	key, err := normalizeKey(key)
 	if err != nil {
+		return nil, err
+	}
+	if err := runtimeconfig.ValidateUpdates([]domain.Setting{{Key: key, Value: value}}); err != nil {
 		return nil, err
 	}
 	var setting *domain.Setting
@@ -64,17 +72,26 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 	if err != nil {
 		return nil, err
 	}
+	runtimeconfig.Set(setting.Key, setting.Value)
 	return setting, nil
 }
 
 func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []domain.Setting, meta MutationMeta) ([]domain.Setting, error) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
 	normalized := make([]domain.Setting, len(settings))
 	for i, setting := range settings {
 		key, err := normalizeKey(setting.Key)
 		if err != nil {
 			return nil, err
 		}
+		if err := runtimeconfig.Validate(key, setting.Value); err != nil {
+			return nil, err
+		}
 		normalized[i] = domain.Setting{Key: key, Value: setting.Value}
+	}
+	if err := runtimeconfig.ValidateUpdates(normalized); err != nil {
+		return nil, err
 	}
 
 	var saved []domain.Setting
@@ -95,15 +112,21 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	if err != nil {
 		return nil, err
 	}
+	runtimeconfig.SetMany(saved)
 	return saved, nil
 }
 
 func (uc *SystemSettingsUseCase) Delete(ctx context.Context, key string, meta MutationMeta) error {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
 	key, err := normalizeKey(key)
 	if err != nil {
 		return err
 	}
-	return uc.mutate(ctx, &governancedomain.OperationLog{
+	if err := runtimeconfig.ValidateDelete(key); err != nil {
+		return err
+	}
+	if err := uc.mutate(ctx, &governancedomain.OperationLog{
 		OperatorUserID: meta.OperatorUserID,
 		OperationType:  "system_settings.delete",
 		ResourceType:   "system_setting",
@@ -114,7 +137,11 @@ func (uc *SystemSettingsUseCase) Delete(ctx context.Context, key string, meta Mu
 		RequestID:      meta.RequestID,
 	}, func(txCtx context.Context) error {
 		return uc.repo.Delete(txCtx, key)
-	})
+	}); err != nil {
+		return err
+	}
+	runtimeconfig.Delete(key)
+	return nil
 }
 
 func (uc *SystemSettingsUseCase) mutate(ctx context.Context, log *governancedomain.OperationLog, fn func(context.Context) error) error {

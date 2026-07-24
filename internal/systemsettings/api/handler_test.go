@@ -152,6 +152,17 @@ func TestAdminSettingsCRUD(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, missing.Code)
 }
 
+func TestAdminSettingsRejectInvalidKnownValue(t *testing.T) {
+	repo := &fakeRepository{items: map[string]settingsdomain.Setting{}}
+	r := testRouter(repo)
+
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, requestWithSession(http.MethodPut, "/v1/admin/settings/smtp_outbound_payload_ttl_minutes", `{"value":"0"}`))
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.NotContains(t, repo.items, "smtp_outbound_payload_ttl_minutes")
+}
+
 func TestSensitiveSettingsRequireSensitivePermission(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
 		"site_title":           {Key: "site_title", Value: "ReMail"},

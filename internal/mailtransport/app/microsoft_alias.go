@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coredomain "github.com/donnel666/remail/internal/core/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -259,7 +260,7 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 func (s *MicrosoftAliasService) beginEnsureSchedules(now time.Time) bool {
 	s.ensureMu.Lock()
 	defer s.ensureMu.Unlock()
-	if !s.lastEnsureAt.IsZero() && now.Sub(s.lastEnsureAt) < microsoftAliasEnsureInterval {
+	if !s.lastEnsureAt.IsZero() && now.Sub(s.lastEnsureAt) < runtimeconfig.Duration("microsoft_alias_ensure_interval_hours", microsoftAliasEnsureInterval, time.Hour, 1) {
 		return false
 	}
 	s.lastEnsureAt = now
@@ -385,7 +386,9 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	account = currentAccount
 
-	candidates, err := s.creator.GenerateMicrosoftAliasCandidates(MicrosoftAliasWeeklyLimit, account.EmailAddress)
+	weeklyLimit := runtimeconfig.Int("microsoft_alias_weekly_limit", MicrosoftAliasWeeklyLimit, 1)
+	yearlyLimit := runtimeconfig.Int("microsoft_alias_yearly_limit", MicrosoftAliasYearlyLimit, 1)
+	candidates, err := s.creator.GenerateMicrosoftAliasCandidates(weeklyLimit, account.EmailAddress)
 	if err != nil {
 		next := now.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
 		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "Microsoft alias service is temporarily unavailable.", true))
@@ -409,9 +412,9 @@ func (s *MicrosoftAliasService) Process(ctx context.Context, task MicrosoftAlias
 	}
 	if len(attempts) == 0 {
 		next := now.Add(time.Minute)
-		if usage.YearCount >= MicrosoftAliasYearlyLimit {
+		if usage.YearCount >= yearlyLimit {
 			next = yearEnd
-		} else if usage.WeekCount >= MicrosoftAliasWeeklyLimit {
+		} else if usage.WeekCount >= weeklyLimit {
 			next = weekEnd
 		}
 		return ignoreStaleAliasClaim(s.store.Defer(ctx, task.ResourceID, account.ClaimToken, next, "", false))
@@ -550,9 +553,9 @@ func (s *MicrosoftAliasService) completeAliasResult(
 	if hasUncertain {
 		next = completedAt.Add(microsoftAliasTransientDelay(task.ResourceID, account.FailureStreak+1))
 		failed = true
-	} else if usage.YearCount >= MicrosoftAliasYearlyLimit {
+	} else if usage.YearCount >= runtimeconfig.Int("microsoft_alias_yearly_limit", MicrosoftAliasYearlyLimit, 1) {
 		next = yearEnd
-	} else if usage.WeekCount >= MicrosoftAliasWeeklyLimit {
+	} else if usage.WeekCount >= runtimeconfig.Int("microsoft_alias_weekly_limit", MicrosoftAliasWeeklyLimit, 1) {
 		next = weekEnd
 	} else {
 		switch resultCategory {
@@ -606,14 +609,14 @@ func microsoftAliasReconciliationCanRelease(attempt MicrosoftAliasAttempt, now t
 	if !attempt.WasAttempted || attempt.UncertainSince == nil || now.Before(*attempt.UncertainSince) {
 		return false
 	}
-	if now.Sub(*attempt.UncertainSince) < microsoftAliasReconciliationGrace {
+	if now.Sub(*attempt.UncertainSince) < runtimeconfig.Duration("microsoft_alias_reconciliation_grace_hours", microsoftAliasReconciliationGrace, time.Hour, 1) {
 		return false
 	}
 	confirmations := attempt.NegativeConfirmations
 	if attempt.LastNegativeConfirmationAt == nil || now.Sub(*attempt.LastNegativeConfirmationAt) >= microsoftAliasNegativeConfirmationInterval {
 		confirmations++
 	}
-	return confirmations >= microsoftAliasRequiredNegativeConfirmations
+	return confirmations >= runtimeconfig.Int("microsoft_alias_negative_confirm_required", microsoftAliasRequiredNegativeConfirmations, 1)
 }
 
 func microsoftAliasTransientDelay(resourceID uint, failureStreak int) time.Duration {
@@ -624,12 +627,14 @@ func microsoftAliasTransientDelay(resourceID uint, failureStreak int) time.Durat
 	if shift > 6 {
 		shift = 6
 	}
-	delay := microsoftAliasTransientBackoffBase * time.Duration(1<<shift)
+	base := runtimeconfig.Duration("microsoft_alias_transient_backoff_base_minutes", microsoftAliasTransientBackoffBase, time.Minute, 1)
+	maximum := runtimeconfig.Duration("microsoft_alias_transient_backoff_max_hours", microsoftAliasTransientBackoffMax, time.Hour, 1)
+	delay := base * time.Duration(1<<shift)
 	seed := uint64(resourceID)*0x9e3779b97f4a7c15 + uint64(failureStreak)*0xbf58476d1ce4e5b9
 	jitterPercent := 80 + seed%41
 	jittered := time.Duration(int64(delay) * int64(jitterPercent) / 100)
-	if jittered > microsoftAliasTransientBackoffMax {
-		return microsoftAliasTransientBackoffMax
+	if jittered > maximum {
+		return maximum
 	}
 	return jittered
 }

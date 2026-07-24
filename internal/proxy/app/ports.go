@@ -9,6 +9,7 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/proxy/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type ProxyRepository interface {
@@ -726,8 +727,9 @@ func (uc *ProxyUseCase) runProxyCheckAttempts(ctx context.Context, proxyURL stri
 }
 
 func (uc *ProxyUseCase) DispatchPendingProxyChecks(ctx context.Context, limit int) (*ProxyCheckDispatchResult, error) {
-	if limit <= 0 || limit > pendingProxyCheckLimit {
-		limit = pendingProxyCheckLimit
+	pendingLimit := runtimeconfig.Int("pending_proxy_check_limit", pendingProxyCheckLimit, 1)
+	if limit <= 0 || limit > pendingLimit {
+		limit = pendingLimit
 	}
 	tasks, err := uc.proxies.ListPendingProxyChecks(ctx, limit)
 	if err != nil {
@@ -782,7 +784,7 @@ func (uc *ProxyUseCase) Acquire(ctx context.Context, req AcquireProxyRequest) (*
 	if req.Attempt < 0 {
 		req.Attempt = 0
 	}
-	if req.Attempt >= maxProxyAttempts {
+	if req.Attempt >= runtimeconfig.Int("max_proxy_attempts", maxProxyAttempts, 1) {
 		_ = uc.writeSystemLog(ctx, "warning", "proxy.direct_fallback", req.RequestID, "proxy_binding", req.Key, "Proxy attempt budget exhausted, falling back to direct connection.", "Proxy attempts exhausted.")
 		return directProxyConfig(), nil
 	}
@@ -792,7 +794,7 @@ func (uc *ProxyUseCase) Acquire(ctx context.Context, req AcquireProxyRequest) (*
 	var proxy *domain.Proxy
 	var err error
 	if req.Key != "" && req.Attempt == 0 {
-		proxy, err = uc.proxies.AcquireResourceProxy(ctx, req.Key, ipVersion, now, resourceBindingTTL)
+		proxy, err = uc.proxies.AcquireResourceProxy(ctx, req.Key, ipVersion, now, runtimeconfig.Duration("resource_binding_ttl_days", resourceBindingTTL, 24*time.Hour, 1))
 		if err == nil {
 			return proxyConfig(proxy), nil
 		}

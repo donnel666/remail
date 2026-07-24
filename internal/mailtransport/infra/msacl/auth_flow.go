@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type AuthSuccess struct {
@@ -53,10 +55,11 @@ func sessionSetDC(session *Session, interval, expiresIn int) {
 }
 
 func sessionDCInterval(session *Session) int {
-	if session != nil && session.dcInterval > 0 {
+	interval := min(runtimeconfig.Int("msacl_token_poll_interval_seconds", tokenPollInterval, 1), 300)
+	if session != nil && session.dcInterval > interval {
 		return session.dcInterval
 	}
-	return tokenPollInterval
+	return interval
 }
 
 func loadRemoteConnectPage(session *Session) (string, error) {
@@ -524,7 +527,7 @@ func handleConsent(session *Session, page, rawURL string) (string, string, error
 
 func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string]any, error) {
 	pollInterval := sessionDCInterval(session)
-	timeout := tokenPollTimeout
+	timeout := min(runtimeconfig.Int("msacl_token_poll_timeout_seconds", tokenPollTimeout, 1), 1800)
 	if pollInterval*6 > timeout {
 		timeout = pollInterval * 6
 	}
@@ -563,7 +566,7 @@ func pollForToken(session *Session, deviceCode, boundMailbox string) (map[string
 			return nil, newAuthError(fmt.Sprintf("Token 错误: %s", firstNonEmpty(asString(data["error_description"]), errorCode)), AuthStatusAuthTimeout, boundMailbox)
 		}
 	}
-	logError("步骤9: token 轮询超时 (%ds, %d 次)", tokenPollTimeout, pollCount)
+	logError("步骤9: token 轮询超时 (%ds, %d 次)", timeout, pollCount)
 	return nil, newAuthError("授权超时", AuthStatusAuthTimeout, boundMailbox)
 }
 

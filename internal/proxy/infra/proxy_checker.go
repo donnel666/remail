@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/proxy/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	xproxy "golang.org/x/net/proxy"
 )
 
@@ -61,11 +62,16 @@ func NewProxyChecker() *ProxyChecker {
 }
 
 func (c *ProxyChecker) Check(ctx context.Context, proxyURL string) (domain.CheckResult, error) {
+	timeout := c.timeout
+	if timeout <= 0 {
+		timeout = 6 * time.Second
+	}
+	timeout = runtimeconfig.Duration("proxy_check_timeout_seconds", timeout, time.Second, 1)
 	normalizedURL, err := domain.NormalizeProxyURL(proxyURL)
 	if err != nil {
 		return domain.CheckResult{NonRetryable: true, LastSafeError: "Invalid proxy URL.", CheckedAt: time.Now().UTC()}, err
 	}
-	client, err := c.httpClient(normalizedURL)
+	client, err := c.httpClient(normalizedURL, timeout)
 	if err != nil {
 		return domain.CheckResult{NonRetryable: true, LastSafeError: "Invalid proxy URL.", CheckedAt: time.Now().UTC()}, err
 	}
@@ -73,7 +79,7 @@ func (c *ProxyChecker) Check(ctx context.Context, proxyURL string) (domain.Check
 	var lastSafeError string
 	for _, endpoint := range c.endpoints {
 		start := time.Now()
-		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
+		reqCtx, cancel := context.WithTimeout(ctx, timeout)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint.url, nil)
 		if err != nil {
 			cancel()
@@ -111,7 +117,7 @@ func (c *ProxyChecker) Check(ctx context.Context, proxyURL string) (domain.Check
 			continue
 		}
 		latencyMs := int(time.Since(start).Milliseconds())
-		if speedMs, ok := c.measureLatency(ctx, client); ok {
+		if speedMs, ok := c.measureLatency(ctx, client, timeout); ok {
 			latencyMs = speedMs
 		}
 		return domain.CheckResult{
@@ -132,9 +138,9 @@ func (c *ProxyChecker) Check(ctx context.Context, proxyURL string) (domain.Check
 	}, domain.ErrProxyCheckFailed
 }
 
-func (c *ProxyChecker) measureLatency(ctx context.Context, client *http.Client) (int, bool) {
+func (c *ProxyChecker) measureLatency(ctx context.Context, client *http.Client, timeout time.Duration) (int, bool) {
 	for _, targetURL := range c.speedURLs {
-		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
+		reqCtx, cancel := context.WithTimeout(ctx, timeout)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
 		if err != nil {
 			cancel()
@@ -158,13 +164,13 @@ func (c *ProxyChecker) measureLatency(ctx context.Context, client *http.Client) 
 	return 0, false
 }
 
-func (c *ProxyChecker) httpClient(proxyURL string) (*http.Client, error) {
+func (c *ProxyChecker) httpClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	transport := &http.Transport{
 		Proxy:                 nil,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 		MaxIdleConns:          2,
-		IdleConnTimeout:       15 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
+		IdleConnTimeout:       runtimeconfig.Duration("proxy_idle_conn_timeout_seconds", 15*time.Second, time.Second, 1),
+		TLSHandshakeTimeout:   runtimeconfig.Duration("proxy_tls_handshake_timeout_seconds", 5*time.Second, time.Second, 1),
 		ExpectContinueTimeout: time.Second,
 	}
 
@@ -208,7 +214,7 @@ func (c *ProxyChecker) httpClient(proxyURL string) (*http.Client, error) {
 
 	return &http.Client{
 		Transport: transport,
-		Timeout:   c.timeout + time.Second,
+		Timeout:   timeout + time.Second,
 	}, nil
 }
 

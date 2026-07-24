@@ -24,6 +24,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -40,7 +41,28 @@ const (
 	pickupMessageCacheLimit = 30
 	pickupMessageCacheIO    = time.Second
 	pickupFetchHeartbeat    = 30 * time.Second
+
+	maxFetchLookbackWindow     = 3650 * 24 * time.Hour
+	maxReadWindowSkew          = 24 * time.Hour
+	maxCodeReadLimit           = 100
+	maxPurchaseReadLimit       = 500
+	maxMessageScanLimit        = 500
+	maxProjectionReplayLimit   = 1000
+	maxPickupFetchReserveTTL   = 30 * time.Minute
+	maxPickupFetchLeaseTTL     = 10 * time.Minute
+	maxPickupMessageCacheTTL   = 5 * time.Minute
+	maxPickupMessageCacheLimit = 100
+	maxPickupFetchHeartbeat    = 5 * time.Minute
+	maxVerificationPatternSize = 4096
 )
+
+func boundedRuntimeInt(key string, fallback, maximum int) int {
+	return min(runtimeconfig.Int(key, fallback, 1), maximum)
+}
+
+func boundedRuntimeDuration(key string, fallback, unit, maximum time.Duration) time.Duration {
+	return min(runtimeconfig.Duration(key, fallback, unit, 1), maximum)
+}
 
 type MailRuleType string
 
@@ -201,7 +223,18 @@ type PickupRequestFetchScope struct {
 
 type PickupRequestFetchTask struct {
 	RequestedAt time.Time                 `json:"requestedAt"`
+	ExpiresAt   time.Time                 `json:"expiresAt,omitempty"`
 	Scopes      []PickupRequestFetchScope `json:"scopes"`
+}
+
+func (task PickupRequestFetchTask) EffectiveExpiresAt() time.Time {
+	if !task.ExpiresAt.IsZero() {
+		return task.ExpiresAt
+	}
+	if task.RequestedAt.IsZero() {
+		return time.Time{}
+	}
+	return task.RequestedAt.Add(2 * time.Minute)
 }
 
 type PickupRequestFetchOutcome struct {
@@ -375,7 +408,8 @@ func (uc *UseCase) listPickupMailBatchBulk(
 	}
 
 	now := uc.now()
-	reads, err := reader.ReadPickupBatch(ctx, credentials, now, messageScanLimit)
+	scanLimit := boundedRuntimeInt("message_scan_limit", messageScanLimit, maxMessageScanLimit)
+	reads, err := reader.ReadPickupBatch(ctx, credentials, now, scanLimit)
 	if err != nil {
 		for i := range results {
 			results[i].Err = err
@@ -391,7 +425,7 @@ func (uc *UseCase) listPickupMailBatchBulk(
 	}
 	cacheSatisfied, cacheApplied := uc.applyPickupMessageCaches(ctx, reads)
 	if cacheApplied {
-		refreshed, refreshErr := reader.ReadPickupBatch(ctx, credentials, now, messageScanLimit)
+		refreshed, refreshErr := reader.ReadPickupBatch(ctx, credentials, now, scanLimit)
 		if refreshErr != nil {
 			slog.Warn("pickup batch cache refresh read failed", "error", refreshErr)
 		} else if len(refreshed) == len(reads) {
@@ -549,13 +583,14 @@ func (uc *UseCase) listOrderMailFromBatch(
 	if !scopeReadable(scope, func() time.Time { return now }) {
 		return nil, nil, false, domain.ErrOrderUnavailable
 	}
-	limit := purchaseReadLimit
+	limit := boundedRuntimeInt("purchase_read_limit", purchaseReadLimit, maxPurchaseReadLimit)
 	if scope.ServiceMode == "code" && read.Delivery == nil {
-		limit = codeReadLimit
+		limit = boundedRuntimeInt("code_read_limit", codeReadLimit, maxCodeReadLimit)
 	}
 	messages := filterPickupMessages(scope, read.Messages, now)
-	if len(messages) > messageScanLimit {
-		messages = messages[:messageScanLimit]
+	scanLimit := boundedRuntimeInt("message_scan_limit", messageScanLimit, maxMessageScanLimit)
+	if len(messages) > scanLimit {
+		messages = messages[:scanLimit]
 	}
 	if len(messages) > limit {
 		messages = messages[:limit]
@@ -576,7 +611,7 @@ func filterPickupMessages(scope OrderScope, messages []domain.Message, now time.
 		start = now.Add(-3 * 24 * time.Hour)
 	}
 	if scope.ReceiveStartedAt != nil {
-		serviceStart := scope.ReceiveStartedAt.Add(-readWindowSkew)
+		serviceStart := scope.ReceiveStartedAt.Add(-boundedRuntimeDuration("read_window_skew_minutes", readWindowSkew, time.Minute, maxReadWindowSkew))
 		if serviceStart.After(start) {
 			start = serviceStart
 		}
@@ -626,11 +661,11 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	if err != nil {
 		return nil, nil, false, err
 	}
-	limit := purchaseReadLimit
+	limit := boundedRuntimeInt("purchase_read_limit", purchaseReadLimit, maxPurchaseReadLimit)
 	if scope.ServiceMode == "code" && delivery == nil {
-		limit = codeReadLimit
+		limit = boundedRuntimeInt("code_read_limit", codeReadLimit, maxCodeReadLimit)
 	}
-	messages, err := uc.repo.ListOrderMessages(ctx, scope, messageScanLimit)
+	messages, err := uc.repo.ListOrderMessages(ctx, scope, boundedRuntimeInt("message_scan_limit", messageScanLimit, maxMessageScanLimit))
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -759,9 +794,13 @@ func (uc *UseCase) ProcessPickupRequestFetchWithOutcome(ctx context.Context, tas
 		platform.AddWorkUnits("pickup_fetch", "all", "system_failed", outcome.Failed)
 		platform.AddWorkUnits("pickup_fetch", "all", "expired", outcome.Expired)
 	}()
-	// Asynq owns the hard two-minute timeout. Stop scope work slightly earlier
+	timing := configuredPickupFetchTiming()
+	// Asynq owns the hard timeout. Stop scope work slightly earlier
 	// so partial outcomes and lease cleanup can finish before that outer timer.
-	deadline := task.RequestedAt.Add(pickupFetchReserveTTL - pickupFetchReturnSlack)
+	deadline := task.RequestedAt.Add(timing.reserveTTL - pickupFetchReturnSlack)
+	if outerDeadline := task.EffectiveExpiresAt().Add(-pickupFetchReturnSlack); outerDeadline.Before(deadline) {
+		deadline = outerDeadline
+	}
 	if !uc.now().Before(deadline) {
 		outcome.Expired = outcome.Requested
 		return outcome, nil
@@ -779,7 +818,7 @@ func (uc *UseCase) ProcessPickupRequestFetchWithOutcome(ctx context.Context, tas
 			resultErr = errors.Join(resultErr, err)
 			continue
 		}
-		executed, err := uc.processPickupRequestScope(taskCtx, task.RequestedAt, scope)
+		executed, err := uc.processPickupRequestScope(taskCtx, task.RequestedAt, scope, timing)
 		if err != nil {
 			outcome.Failed++
 			resultErr = errors.Join(resultErr, err)
@@ -801,7 +840,7 @@ func (uc *UseCase) ProcessPickupRequestFetchWithOutcome(ctx context.Context, tas
 	return outcome, resultErr
 }
 
-func (uc *UseCase) processPickupRequestScope(ctx context.Context, requestedAt time.Time, scope PickupRequestFetchScope) (bool, error) {
+func (uc *UseCase) processPickupRequestScope(ctx context.Context, requestedAt time.Time, scope PickupRequestFetchScope, timing pickupFetchTiming) (bool, error) {
 	orderNo, err := uc.selectPickupRequestOrder(ctx, scope)
 	if err != nil || orderNo == "" {
 		return false, err
@@ -810,18 +849,18 @@ func (uc *UseCase) processPickupRequestScope(ctx context.Context, requestedAt ti
 	if err != nil {
 		return false, err
 	}
-	ttl := requestedAt.Add(pickupFetchReserveTTL).Sub(uc.now())
+	ttl := requestedAt.Add(timing.reserveTTL).Sub(uc.now())
 	if ttl <= 0 {
 		return false, nil
 	}
-	acquired, err := uc.pickupFetch.Acquire(ctx, scope.EmailResourceID, token, min(ttl, pickupFetchReserveTTL))
+	acquired, err := uc.pickupFetch.Acquire(ctx, scope.EmailResourceID, token, min(ttl, timing.reserveTTL))
 	if err != nil || !acquired {
 		return false, err
 	}
-	err = uc.ProcessFetch(ctx, FetchTask{
+	err = uc.processFetch(ctx, FetchTask{
 		OrderNo: orderNo, EmailResourceID: scope.EmailResourceID,
 		LeaseToken: token, RequestedAt: requestedAt,
-	})
+	}, timing)
 	return true, err
 }
 
@@ -873,13 +912,17 @@ func newPickupFetchToken() (string, error) {
 }
 
 func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr error) {
+	return uc.processFetch(ctx, task, configuredPickupFetchTiming())
+}
+
+func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pickupFetchTiming) (resultErr error) {
 	if task.Generation > 0 && strings.TrimSpace(task.OrderNo) == "" && strings.TrimSpace(task.LeaseToken) == "" {
 		return nil
 	}
 	if uc == nil || uc.pickupFetch == nil || task.EmailResourceID == 0 || strings.TrimSpace(task.OrderNo) == "" || strings.TrimSpace(task.LeaseToken) == "" {
 		return domain.ErrInvalidRequest
 	}
-	leaseTTL := pickupFetchTTL(task.RequestedAt, uc.now())
+	leaseTTL := pickupFetchTTL(task.RequestedAt, uc.now(), timing)
 	if leaseTTL <= 0 {
 		return uc.pickupFetch.Release(context.WithoutCancel(ctx), task.EmailResourceID, task.LeaseToken)
 	}
@@ -890,7 +933,7 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr 
 	if !extended {
 		return nil
 	}
-	stopLease := uc.keepPickupFetchLease(ctx, task)
+	stopLease := uc.keepPickupFetchLease(ctx, task, timing)
 	defer func() {
 		stopLease()
 		resultErr = errors.Join(resultErr, uc.pickupFetch.Release(
@@ -926,7 +969,7 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr 
 	if fetched == nil {
 		return domain.ErrMailServiceUnavailable
 	}
-	leaseTTL = pickupFetchTTL(task.RequestedAt, uc.now())
+	leaseTTL = pickupFetchTTL(task.RequestedAt, uc.now(), timing)
 	if leaseTTL <= 0 {
 		return nil
 	}
@@ -989,7 +1032,7 @@ func (uc *UseCase) ProcessFetch(ctx context.Context, task FetchTask) (resultErr 
 	if uc.pickupMessages != nil {
 		mergedMessages := mergePickupMessages(fetched.Messages, cachedMessages)
 		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
-		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, mergedMessages, pickupMessageCacheTTL)
+		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, mergedMessages, boundedRuntimeDuration("pickup_message_cache_ttl_seconds", pickupMessageCacheTTL, time.Second, maxPickupMessageCacheTTL))
 		cancel()
 		if err != nil {
 			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
@@ -1058,25 +1101,26 @@ func mergePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].ReceivedAt.After(merged[j].ReceivedAt)
 	})
-	if len(merged) > pickupMessageCacheLimit {
-		merged = merged[:pickupMessageCacheLimit]
+	limit := boundedRuntimeInt("pickup_message_cache_limit", pickupMessageCacheLimit, maxPickupMessageCacheLimit)
+	if len(merged) > limit {
+		merged = merged[:limit]
 	}
 	return merged
 }
 
-func (uc *UseCase) keepPickupFetchLease(ctx context.Context, task FetchTask) func() {
+func (uc *UseCase) keepPickupFetchLease(ctx context.Context, task FetchTask, timing pickupFetchTiming) func() {
 	heartbeatCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(pickupFetchHeartbeat)
+		ticker := time.NewTicker(timing.heartbeat)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-heartbeatCtx.Done():
 				return
 			case <-ticker.C:
-				leaseTTL := pickupFetchTTL(task.RequestedAt, uc.now())
+				leaseTTL := pickupFetchTTL(task.RequestedAt, uc.now(), timing)
 				if leaseTTL <= 0 {
 					return
 				}
@@ -1099,12 +1143,34 @@ func (uc *UseCase) keepPickupFetchLease(ctx context.Context, task FetchTask) fun
 	}
 }
 
-func pickupFetchTTL(requestedAt, now time.Time) time.Duration {
-	remaining := requestedAt.Add(pickupFetchReserveTTL).Sub(now)
+type pickupFetchTiming struct {
+	reserveTTL time.Duration
+	leaseTTL   time.Duration
+	heartbeat  time.Duration
+}
+
+func configuredPickupFetchTiming() pickupFetchTiming {
+	settings := runtimeconfig.Snapshot()
+	timing := pickupFetchTiming{
+		reserveTTL: min(settings.Duration("pickup_fetch_reserve_ttl_minutes", pickupFetchReserveTTL, time.Minute, 1), maxPickupFetchReserveTTL),
+		leaseTTL:   min(settings.Duration("pickup_fetch_lease_ttl_minutes", pickupFetchLeaseTTL, time.Minute, 1), maxPickupFetchLeaseTTL),
+		heartbeat:  min(settings.Duration("pickup_fetch_heartbeat_seconds", pickupFetchHeartbeat, time.Second, 1), maxPickupFetchHeartbeat),
+	}
+	if timing.heartbeat >= timing.leaseTTL {
+		timing.heartbeat = timing.leaseTTL / 2
+	}
+	if timing.heartbeat <= 0 {
+		timing.heartbeat = time.Second
+	}
+	return timing
+}
+
+func pickupFetchTTL(requestedAt, now time.Time, timing pickupFetchTiming) time.Duration {
+	remaining := requestedAt.Add(timing.reserveTTL).Sub(now)
 	if remaining <= 0 {
 		return 0
 	}
-	return min(remaining, pickupFetchLeaseTTL)
+	return min(remaining, timing.leaseTTL)
 }
 
 func (uc *UseCase) IngestInboundMail(ctx context.Context, req InboundMailRequest) error {
@@ -1342,13 +1408,14 @@ func listUnprojectedMessages(
 		resourceIDsByType[message.ResourceType] = append(resourceIDsByType[message.ResourceType], message.EmailResourceID)
 	}
 
-	pending := make([]domain.Message, 0, projectionReplayLimit)
+	limit := boundedRuntimeInt("projection_replay_limit", projectionReplayLimit, maxProjectionReplayLimit)
+	pending := make([]domain.Message, 0, limit)
 	for _, resourceType := range []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeDomain} {
 		resourceIDs := mergeResourceIDs(resourceIDsByType[resourceType], nil)
 		if len(resourceIDs) == 0 {
 			continue
 		}
-		messages, err := repo.ListUnprojectedMessages(ctx, resourceType, resourceIDs, projectionReplayLimit)
+		messages, err := repo.ListUnprojectedMessages(ctx, resourceType, resourceIDs, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -1360,8 +1427,8 @@ func listUnprojectedMessages(
 		}
 		return pending[i].ReceivedAt.After(pending[j].ReceivedAt)
 	})
-	if len(pending) > projectionReplayLimit {
-		pending = pending[:projectionReplayLimit]
+	if len(pending) > limit {
+		pending = pending[:limit]
 	}
 	return pending, nil
 }
@@ -1442,12 +1509,12 @@ func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 }
 
 func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob, knownMessageIDs []string) (*FetchMessagesResult, error) {
-	sinceAt := time.Now().UTC().Add(-fetchLookbackWindow)
-	if job.SinceAt != nil {
+	sinceAt := uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", fetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))
+	if job.SinceAt != nil && !job.SinceAt.IsZero() {
 		sinceAt = *job.SinceAt
 	}
 	untilAt := uc.now()
-	if job.UntilAt != nil {
+	if job.UntilAt != nil && !job.UntilAt.IsZero() {
 		untilAt = *job.UntilAt
 	}
 	switch scope.AllocationType {
@@ -1882,17 +1949,52 @@ func extractByBodyRules(body string, patterns []string) string {
 	return ""
 }
 
-var verificationCodeRe = regexp.MustCompile(`(^|[^\d])(\d{6,8})([^\d]|$)`)
+const verificationCodePattern = `(^|[^\d])(\d{6,8})([^\d]|$)`
+
+var verificationCodeRe = regexp.MustCompile(verificationCodePattern)
 
 func extractVerificationCode(body string) string {
-	matches := verificationCodeRe.FindStringSubmatch(body)
+	pattern := runtimeconfig.String("verification_code_pattern", verificationCodePattern)
+	if len(pattern) > maxVerificationPatternSize {
+		pattern = verificationCodePattern
+	}
+	re := compileCachedRegex(pattern)
+	if re == nil {
+		re = verificationCodeRe
+	}
+	matches := re.FindStringSubmatch(body)
 	if len(matches) == 0 {
 		return ""
 	}
-	if len(matches) > 2 && isDigits(matches[2]) {
-		return matches[2]
+	for _, match := range matches[1:] {
+		if isDigits(match) {
+			return match
+		}
 	}
-	return ""
+	if isDigits(matches[0]) {
+		return matches[0]
+	}
+	return longestDigitRun(matches[0])
+}
+
+func longestDigitRun(value string) string {
+	start, bestStart, bestLength := -1, 0, 0
+	for i := 0; i <= len(value); i++ {
+		if i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 && i-start > bestLength {
+			bestStart, bestLength = start, i-start
+		}
+		start = -1
+	}
+	if bestLength == 0 {
+		return ""
+	}
+	return value[bestStart : bestStart+bestLength]
 }
 
 func isDigits(value string) bool {

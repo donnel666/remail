@@ -15,6 +15,7 @@ import (
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -212,6 +213,21 @@ func TestMicrosoftTokenRefreshACLConvertsProtocolErrorsToSafeRetryableResult(t *
 	require.Equal(t, "request", result.Category)
 	require.Equal(t, "Microsoft mail service is temporarily unavailable.", result.SafeMessage)
 	require.NotContains(t, result.SafeMessage, "canary")
+}
+
+func TestMicrosoftTokenRefreshACLUsesRuntimeProxyAttemptLimit(t *testing.T) {
+	runtimeconfig.Set("max_proxy_attempts", "1")
+	t.Cleanup(func() { runtimeconfig.Delete("max_proxy_attempts") })
+	oauth := &microsoftOAuthProtocolStub{result: mailinfra.MicrosoftOAuthResult{
+		Category:     "request",
+		ProxyFailure: true,
+	}}
+	adapter := &ResourceValidationAdapter{microsoft: oauth}
+
+	_, err := adapter.RefreshMicrosoftToken(context.Background(), mailapp.MicrosoftTokenRefreshProtocolRequest{})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, oauth.calls)
 }
 
 func TestRecoverBindingForValidationReturnsCandidateWithFenceOnlyWhenEligible(t *testing.T) {

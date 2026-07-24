@@ -11,6 +11,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	moneyfmt "github.com/donnel666/remail/internal/money"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -20,6 +21,18 @@ const (
 	projectDescriptionMax    = 1000
 	projectRulePatternMax    = 500
 )
+
+func projectNameMaxValue() int {
+	return min(runtimeconfig.Int("project_name_max", projectNameMax, 1), projectNameMax)
+}
+
+func projectTargetPlatformMaxValue() int {
+	return min(runtimeconfig.Int("project_target_platform_max", projectTargetPlatformMax, 1), projectTargetPlatformMax)
+}
+
+func projectDescriptionMaxValue() int {
+	return min(runtimeconfig.Int("project_description_max", projectDescriptionMax, 0), projectDescriptionMax)
+}
 
 // ProjectRepository persists Project aggregates.
 type ProjectRepository interface {
@@ -703,13 +716,13 @@ func normalizeProject(req CreateProjectRequest, status domain.ProjectStatus) (do
 	targetPlatform := strings.TrimSpace(req.TargetPlatform)
 	logoURL := strings.TrimSpace(req.LogoURL)
 	description := strings.TrimSpace(req.Description)
-	if name == "" || len([]rune(name)) > projectNameMax {
+	if name == "" || len([]rune(name)) > projectNameMaxValue() {
 		return domain.Project{}, domain.ErrInvalidProject
 	}
-	if targetPlatform == "" || len([]rune(targetPlatform)) > projectTargetPlatformMax {
+	if targetPlatform == "" || len([]rune(targetPlatform)) > projectTargetPlatformMaxValue() {
 		return domain.Project{}, domain.ErrInvalidProject
 	}
-	if len([]rune(logoURL)) > projectLogoURLMax || len([]rune(description)) > projectDescriptionMax {
+	if len([]rune(logoURL)) > projectLogoURLMax || len([]rune(description)) > projectDescriptionMaxValue() {
 		return domain.Project{}, domain.ErrInvalidProject
 	}
 	accessType := domain.ProjectAccessType("")

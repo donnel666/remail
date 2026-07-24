@@ -15,6 +15,7 @@ import (
 	http "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 var proxySchemes = []string{
@@ -143,7 +144,7 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 	if proxy != "" {
 		logDebug("微软请求使用代理: %s", proxyLabel(proxy))
 	}
-	client, err := newTLSHTTPClient(fp.Profile, proxy, 30)
+	client, err := newTLSHTTPClient(fp.Profile, proxy, oauthValidationTimeoutSeconds())
 	if err != nil {
 		return nil, newSessionTransportError(err, proxy != "")
 	}
@@ -155,6 +156,10 @@ func newBrowserSession(ctx context.Context, proxy string) (*Session, error) {
 		userAgent:   fp.UserAgent,
 		usesProxy:   proxy != "",
 	}, nil
+}
+
+func oauthValidationTimeoutSeconds() int {
+	return min(runtimeconfig.Int("oauth_validation_timeout_seconds", 30, 1), 300)
 }
 
 func newPlainSession(ctx context.Context, proxy string, timeoutSeconds int) (*Session, error) {

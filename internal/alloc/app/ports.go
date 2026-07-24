@@ -5,19 +5,63 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
-	BucketCount                 = 64
-	DotAliasCapacityPerResource = 10
-	InventoryRefreshInterval    = 10 * time.Minute
-	candidateWindowSize         = 4
-	globalCandidateWindow       = 8
-	bucketProbeCount            = 4
-	aliasGenerationWindow       = 32
-	candidateRetryCount         = 5
-	candidateRetryDelay         = 10 * time.Millisecond
+	BucketCount                  = 64
+	DotAliasCapacityPerResource  = 10
+	InventoryRefreshInterval     = 10 * time.Minute
+	candidateWindowSize          = 4
+	globalCandidateWindow        = 8
+	bucketProbeCount             = 4
+	aliasGenerationWindow        = 32
+	candidateRetryCount          = 5
+	candidateRetryDelay          = 10 * time.Millisecond
+	maxCandidateWindowSize       = 100
+	maxAliasGenerationWindow     = 1000
+	maxCandidateRetryCount       = 20
+	maxDotAliasCapacity          = 64
+	maxInventoryRefreshInterval  = 24 * time.Hour
+	maxInventoryCacheActivityTTL = 30 * 24 * time.Hour
+	maxInventoryCacheHardTTL     = 365 * 24 * time.Hour
 )
+
+func candidateWindowSizeValue() int {
+	return min(runtimeconfig.Int("candidate_window_size", candidateWindowSize, 1), maxCandidateWindowSize)
+}
+
+func globalCandidateWindowValue() int {
+	return min(runtimeconfig.Int("global_candidate_window", globalCandidateWindow, 1), maxCandidateWindowSize)
+}
+
+func bucketProbeCountValue() int {
+	return min(runtimeconfig.Int("bucket_probe_count", bucketProbeCount, 1), BucketCount)
+}
+
+func aliasGenerationWindowValue() int {
+	return min(runtimeconfig.Int("alias_generation_window", aliasGenerationWindow, 1), maxAliasGenerationWindow)
+}
+
+func candidateRetryCountValue() int {
+	return min(runtimeconfig.Int("candidate_retry_count", candidateRetryCount, 1), maxCandidateRetryCount)
+}
+
+func DotAliasCapacityPerResourceValue() int {
+	return min(runtimeconfig.Int("dot_alias_capacity_per_resource", DotAliasCapacityPerResource, 1), maxDotAliasCapacity)
+}
+
+func InventoryRefreshIntervalValue() time.Duration {
+	return min(runtimeconfig.Duration("inventory_refresh_interval_minutes", InventoryRefreshInterval, time.Minute, 1), maxInventoryRefreshInterval)
+}
+
+func inventoryCacheActivityTTLValue() time.Duration {
+	return min(runtimeconfig.Duration("inventory_cache_activity_ttl_minutes", inventoryCacheActivityTTL, time.Minute, 1), maxInventoryCacheActivityTTL)
+}
+
+func inventoryCacheHardTTLValue() time.Duration {
+	return min(runtimeconfig.Duration("inventory_cache_hard_ttl_hours", inventoryCacheHardTTL, time.Hour, 1), maxInventoryCacheHardTTL)
+}
 
 type ProductAllocationConfig struct {
 	ProjectID   uint

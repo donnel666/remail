@@ -9,9 +9,24 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMicrosoftMaintenanceTaskTimeoutsCoverRuntimeBudgets(t *testing.T) {
+	runtimeconfig.Set("max_proxy_attempts", "3")
+	runtimeconfig.Set("oauth_validation_timeout_seconds", "60")
+	runtimeconfig.Set("password_recovery_code_wait_seconds", "1800")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("max_proxy_attempts")
+		runtimeconfig.Delete("oauth_validation_timeout_seconds")
+		runtimeconfig.Delete("password_recovery_code_wait_seconds")
+	})
+
+	require.Equal(t, 4*time.Minute, microsoftTokenRefreshTimeout())
+	require.Equal(t, 48*time.Minute+30*time.Second, microsoftAliasTimeout())
+}
 
 func TestMicrosoftTokenRefreshQueueReportsOnlyNewAcceptance(t *testing.T) {
 	server := miniredis.RunT(t)

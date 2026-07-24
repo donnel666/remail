@@ -8,6 +8,7 @@ import (
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,15 +17,17 @@ type microsoftMessageFetchClientStub struct {
 	results  []mailinfra.MicrosoftMailFetchResult
 }
 
-func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithoutTimeFilter(t *testing.T) {
+func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithinRequestedWindow(t *testing.T) {
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{Valid: true}}}
 	adapter := &MicrosoftFetchAdapter{client: client}
+	sinceAt := time.Now().Add(-time.Hour)
+	untilAt := time.Now()
 
 	_, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
 		Scope: mailmatchapp.OrderScope{
 			MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
 		},
-		SinceAt: time.Now().Add(-time.Hour), UntilAt: time.Now(), Realtime: true,
+		SinceAt: sinceAt, UntilAt: untilAt, Realtime: true,
 		KnownMessageIDs: []string{"internet:cached@example.com"},
 	})
 
@@ -32,8 +35,8 @@ func TestMicrosoftFetchAdapterRealtimeStopsAtThirtyWithoutTimeFilter(t *testing.
 	require.Len(t, client.requests, 1)
 	require.Equal(t, realtimeMicrosoftMessageMaximum, client.requests[0].MaxMessages)
 	require.True(t, client.requests[0].StopAfterLimit)
-	require.True(t, client.requests[0].SinceAt.IsZero())
-	require.True(t, client.requests[0].UntilAt.IsZero())
+	require.Equal(t, sinceAt, client.requests[0].SinceAt)
+	require.Equal(t, untilAt, client.requests[0].UntilAt)
 	require.Equal(t, []string{"internet:cached@example.com"}, client.requests[0].KnownMessageIDs)
 }
 
@@ -94,6 +97,37 @@ func TestMicrosoftFetchAdapterStopsAfterTwoInternalAttempts(t *testing.T) {
 
 	require.Error(t, err)
 	require.Len(t, client.requests, 2)
+}
+
+func TestMicrosoftFetchAdapterProxyAttemptsUpdateAtRuntime(t *testing.T) {
+	defer runtimeconfig.Delete("max_proxy_attempts")
+	runtimeconfig.Set("max_proxy_attempts", "3")
+	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{
+		{Category: "request", ProxyFailure: true},
+		{Category: "request", ProxyFailure: true},
+		{Valid: true},
+	}}
+	adapter := &MicrosoftFetchAdapter{client: client}
+	req := mailmatchapp.FetchMessagesRequest{Scope: mailmatchapp.OrderScope{
+		MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client-id", MicrosoftRT: "refresh-token",
+	}}
+
+	_, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Len(t, client.requests, 3)
+
+	runtimeconfig.Set("max_proxy_attempts", "1")
+	client.requests = nil
+	client.results = []mailinfra.MicrosoftMailFetchResult{
+		{Category: "request", ProxyFailure: true},
+		{Valid: true},
+	}
+
+	_, err = adapter.FetchMicrosoftMessages(context.Background(), req)
+
+	require.Error(t, err)
+	require.Len(t, client.requests, 1)
 }
 
 func TestMicrosoftFetchAdapterFullHistoryHasNoMessageLimit(t *testing.T) {

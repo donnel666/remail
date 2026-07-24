@@ -9,6 +9,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -185,20 +186,37 @@ func (s *projectHistoryCredentialsStub) ApplyMicrosoftHistoryScanResult(_ contex
 }
 
 type projectHistoryTransportStub struct {
-	request FetchMessagesRequest
-	result  *FetchMessagesResult
-	err     error
-	pages   [][]FetchedMessage
+	request  FetchMessagesRequest
+	result   *FetchMessagesResult
+	err      error
+	pages    [][]FetchedMessage
+	deadline time.Time
 }
 
-func (s *projectHistoryTransportStub) FetchMicrosoftMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
+func (s *projectHistoryTransportStub) FetchMicrosoftMessages(ctx context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {
 	s.request = request
+	s.deadline, _ = ctx.Deadline()
 	if request.OnMessages != nil && s.err == nil {
 		for _, page := range s.pages {
 			request.OnMessages(page)
 		}
 	}
 	return s.result, s.err
+}
+
+func TestProjectHistoryMailboxTimeoutFollowsIMAPFullHistorySetting(t *testing.T) {
+	defer runtimeconfig.Delete("imap_full_history_timeout_minutes")
+	runtimeconfig.Set("imap_full_history_timeout_minutes", "30")
+	resource := &coreapp.MicrosoftCredentialScope{
+		ResourceID: 10, Status: "identifying", EmailAddress: "main@example.com",
+		ClientID: "client", RefreshToken: "refresh", CredentialRevision: 4,
+	}
+	transport := &projectHistoryTransportStub{result: &FetchMessagesResult{}}
+	uc := NewProjectHistoryScanUseCase(nil, &projectHistoryMatchesStub{scope: projectHistoryScope()}, &projectHistoryQueueStub{}, transport)
+	uc.SetMicrosoftCredentialPort(&projectHistoryCredentialsStub{resources: []*coreapp.MicrosoftCredentialScope{resource}})
+
+	require.NoError(t, uc.ProcessValidatedMicrosoftHistory(context.Background(), ValidatedMicrosoftHistoryScanTask{ResourceID: 10}))
+	require.WithinDuration(t, time.Now().Add(30*time.Minute), transport.deadline, time.Second)
 }
 
 func TestProjectHistoryDispatchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {

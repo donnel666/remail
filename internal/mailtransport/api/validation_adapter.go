@@ -15,6 +15,7 @@ import (
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const maxMicrosoftProxyAttempts = 3
@@ -74,6 +75,10 @@ type microsoftValidationBindingStore interface {
 	FindByResourceIDs(ctx context.Context, resourceIDs []uint) (map[uint]maildomain.MicrosoftBindingMailbox, error)
 }
 
+func microsoftProxyAttemptLimit() int {
+	return runtimeconfig.Int("max_proxy_attempts", maxMicrosoftProxyAttempts, 1)
+}
+
 type ResourceValidationAdapter struct {
 	proxies                    microsoftProxyProvider
 	microsoft                  microsoftOAuthProtocol
@@ -96,7 +101,8 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 	}
 
 	var last mailapp.MicrosoftTokenRefreshProtocolResult
-	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+	maxProxyAttempts := microsoftProxyAttemptLimit()
+	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireMicrosoftTokenProxy(ctx, request, attempt)
 		if err != nil {
 			return unavailableMicrosoftTokenRefreshResult(), nil
@@ -130,7 +136,7 @@ func (a *ResourceValidationAdapter) RefreshMicrosoftToken(
 			_ = a.reportProxyFailure(ctx, proxyID, last.SafeMessage)
 			continue
 		}
-		if raw.ProxyFailure && proxyID == 0 && attempt < maxMicrosoftProxyAttempts {
+		if raw.ProxyFailure && proxyID == 0 && attempt < maxProxyAttempts {
 			continue
 		}
 		if proxyID != 0 {
@@ -259,7 +265,8 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 	var authoritativeRefreshToken string
 	credentialsKnownAuthoritative := false
 	recoveryAttempted := false
-	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+	maxProxyAttempts := microsoftProxyAttemptLimit()
+	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireProxy(ctx, req, attempt)
 		if err != nil {
 			return coreapp.MicrosoftValidationResult{}, err
@@ -394,7 +401,7 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			_ = a.reportProxyFailure(ctx, proxyID, rawResult.SafeMessage)
 			continue
 		}
-		if rawResult.ProxyFailure && proxyID == 0 && attempt < maxMicrosoftProxyAttempts {
+		if rawResult.ProxyFailure && proxyID == 0 && attempt < maxProxyAttempts {
 			continue
 		}
 		if proxyID != 0 {
@@ -590,7 +597,8 @@ func (a *ResourceValidationAdapter) acquireTokenWithBindingProxy(
 	bindingAddress string,
 ) (mailinfra.MicrosoftOAuthResult, error) {
 	last := unavailableMicrosoftBindingResult()
-	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+	maxProxyAttempts := microsoftProxyAttemptLimit()
+	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return mailinfra.MicrosoftOAuthResult{}, err
 		}
@@ -985,7 +993,8 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 		evaluate = msacl.EvaluateActiveBindingRecoveryEligibility
 	}
 
-	for attempt := 0; attempt <= maxMicrosoftProxyAttempts; attempt++ {
+	maxProxyAttempts := microsoftProxyAttemptLimit()
+	for attempt := 0; attempt <= maxProxyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
@@ -994,7 +1003,7 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 			if cancelErr := microsoftRecoveryContextError(ctx, err); cancelErr != nil {
 				return nil, false, cancelErr
 			}
-			if attempt < maxMicrosoftProxyAttempts {
+			if attempt < maxProxyAttempts {
 				continue
 			}
 			logMicrosoftBindingRecoverySkip(req, "proxy_unavailable")
@@ -1020,7 +1029,7 @@ func (a *ResourceValidationAdapter) recoverBindingForValidation(
 				logMicrosoftBindingRecoverySkip(req, "probe_rejected")
 				return nil, false, nil
 			}
-			if attempt < maxMicrosoftProxyAttempts {
+			if attempt < maxProxyAttempts {
 				continue
 			}
 			logMicrosoftBindingRecoverySkip(req, "probe_unavailable")

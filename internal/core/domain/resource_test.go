@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 func TestMicrosoftResource_IsAllocatable(t *testing.T) {
@@ -501,5 +503,16 @@ func TestIsMicrosoftEmailDomain(t *testing.T) {
 		if got := IsMicrosoftEmailDomain(email); got != want {
 			t.Errorf("IsMicrosoftEmailDomain(%q) = %v, want %v", email, got, want)
 		}
+	}
+}
+
+func TestRuntimeDailyLimitsClampToStorageCapacity(t *testing.T) {
+	runtimeconfig.Set("default_plus_daily_limit", "9223372036854775807")
+	runtimeconfig.Set("default_mailbox_daily_limit", "9223372036854775807")
+	defer runtimeconfig.Delete("default_plus_daily_limit")
+	defer runtimeconfig.Delete("default_mailbox_daily_limit")
+
+	if DefaultPlusDailyLimitValue() != maxConfiguredDailyLimit || DefaultMailboxDailyLimitValue() != maxConfiguredDailyLimit {
+		t.Fatal("daily limits were not clamped")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -154,7 +155,7 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 			if releaseErr := module.AliasDispatch.MarkDispatchFailed(
 				recoveryCtx,
 				payload,
-				time.Now().UTC().Add(backgroundLegacyAliasRetryDelay),
+				time.Now().UTC().Add(runtimeconfig.Duration("legacy_alias_retry_delay_seconds", backgroundLegacyAliasRetryDelay, time.Second, 1)),
 				"Microsoft alias task infrastructure failed; dispatcher will retry.",
 			); releaseErr != nil {
 				return fmt.Errorf("release failed microsoft alias task after %v: %w", err, releaseErr)
@@ -237,6 +238,7 @@ func processOutboundSendTask(ctx context.Context, task *asynq.Task, module *Mail
 	}
 	payload.ID = strings.TrimSpace(payload.ID)
 	if payload.ID != "" {
+		retryCount := payload.RetryCount
 		if module.OutboundQueue == nil {
 			slog.Warn("outbound mail task discarded", "reason", "payload store unavailable")
 			return nil
@@ -251,6 +253,7 @@ func processOutboundSendTask(ctx context.Context, task *asynq.Task, module *Mail
 			slog.Warn("outbound mail task discarded", "reason", "payload expired")
 			return nil
 		}
+		stored.RetryCount = retryCount
 		payload = stored
 	}
 	if err := module.OutboundSendUseCase.Process(ctx, payload); err != nil {
@@ -316,7 +319,7 @@ func releaseMicrosoftAliasDispatch(ctx context.Context, module *MailTransportMod
 	if err := module.AliasDispatch.MarkDispatchFailed(
 		recoveryCtx,
 		task,
-		time.Now().UTC().Add(backgroundLegacyAliasRetryDelay),
+		time.Now().UTC().Add(runtimeconfig.Duration("legacy_alias_retry_delay_seconds", backgroundLegacyAliasRetryDelay, time.Second, 1)),
 		"",
 	); err != nil {
 		return fmt.Errorf("release legacy microsoft alias dispatch: %w", err)

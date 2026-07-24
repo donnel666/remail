@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const recoveryCodeMailLeaseDuration = 10 * time.Minute
@@ -105,7 +107,13 @@ func claimCodeMailLease(ctx context.Context, maskedProof string) (*codeMailLease
 		scope.leases[mask] = lease
 		return lease, nil
 	}
-	claimToken, claimed, err := store.Claim(ctx, mask, scope.resourceID, time.Now().UTC().Add(recoveryCodeMailLeaseDuration))
+	settings := runtimeconfig.Snapshot()
+	leaseDuration := settings.Duration("recovery_code_lease_minutes", recoveryCodeMailLeaseDuration, time.Minute, 1)
+	minimumLease := settings.Duration("password_recovery_code_wait_seconds", passwordRecoveryDefaultCodeWait, time.Second, 1) + 30*time.Second
+	if leaseDuration < minimumLease {
+		leaseDuration = minimumLease
+	}
+	claimToken, claimed, err := store.Claim(ctx, mask, scope.resourceID, time.Now().UTC().Add(leaseDuration))
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -66,13 +67,14 @@ func (q *InboundMailQueue) EnqueueInboundProcess(ctx context.Context, task maila
 		return false, fmt.Errorf("marshal inbound mail task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeInboundProcess, payload)
+	timeout := runtimeconfig.Duration("inbound_mail_timeout_minutes", inboundTaskTimeout, time.Minute, 1)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(mailQueueName),
-		asynq.Unique(inboundTaskTimeout),
+		asynq.Unique(timeout),
 		asynq.MaxRetry(inboundTaskMaxRetry),
-		asynq.Timeout(inboundTaskTimeout),
+		asynq.Timeout(timeout),
 		asynq.Retention(0),
 	)
 	if err != nil {

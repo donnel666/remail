@@ -11,6 +11,7 @@ import (
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -85,6 +86,20 @@ func TestProjectHistoryCapacityIsLimitedToFourWorkers(t *testing.T) {
 	for _, release := range releases {
 		release()
 	}
+}
+
+func TestProjectHistoryCapacityUpdatesAtRuntime(t *testing.T) {
+	defer runtimeconfig.Delete("project_history_concurrency")
+	runtimeconfig.Set("project_history_concurrency", "2")
+
+	first, admitted := acquireProjectHistoryCapacity(nil)
+	require.True(t, admitted)
+	second, admitted := acquireProjectHistoryCapacity(nil)
+	require.True(t, admitted)
+	_, admitted = acquireProjectHistoryCapacity(nil)
+	require.False(t, admitted)
+	first()
+	second()
 }
 
 func TestPickupRequestTaskFallsBackToSecondOrderAndFetchesResourceOnce(t *testing.T) {

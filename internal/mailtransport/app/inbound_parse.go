@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -52,11 +53,11 @@ func parseInboundMessage(raw []byte, fallbackReceivedAt time.Time) parsedInbound
 	result.Summary.HeaderFrom = safeInboundSender(decodeInboundMIMEHeader(decoder, message.Header.Get("From")))
 	result.Summary.Subject = truncateInboundRunes(
 		safeInboundSingleLine(decodeInboundMIMEHeader(decoder, message.Header.Get("Subject"))),
-		maxInboundHeaderRunes,
+		runtimeconfig.Int("max_inbound_header_runes", maxInboundHeaderRunes, 1),
 	)
 	result.Summary.MessageIDHeader = truncateInboundRunes(
 		safeInboundSingleLine(strings.Trim(strings.TrimSpace(message.Header.Get("Message-Id")), "<>")),
-		maxInboundHeaderRunes,
+		runtimeconfig.Int("max_inbound_header_runes", maxInboundHeaderRunes, 1),
 	)
 	if receivedAt, dateErr := stdmail.ParseDate(message.Header.Get("Date")); dateErr == nil && !receivedAt.IsZero() {
 		result.Summary.ReceivedAt = receivedAt.UTC()
@@ -76,10 +77,10 @@ func parseInboundMessage(raw []byte, fallbackReceivedAt time.Time) parsedInbound
 	if truncated {
 		result.Diagnostic = "Message body was truncated for safe display."
 	}
-	result.Body = truncateInboundRunes(body, maxInboundBodyRunes)
+	result.Body = truncateInboundRunes(body, runtimeconfig.Int("max_inbound_body_runes", maxInboundBodyRunes, 1))
 	result.Summary.BodyPreview = truncateInboundRunes(
 		strings.Join(strings.Fields(result.Body), " "),
-		maxInboundPreviewRunes,
+		runtimeconfig.Int("max_inbound_preview_runes", maxInboundPreviewRunes, 1),
 	)
 	result.Summary.VerificationCode = truncateInboundRunes(
 		extractInboundVerificationCode(result.Summary.Subject+" "+result.Body),
@@ -137,7 +138,7 @@ func safeInboundBody(value string) string {
 }
 
 func readInboundMIMEBody(contentType, transferEncoding, disposition string, body io.Reader, depth int) (string, bool, error) {
-	if depth >= maxInboundMIMEDepth {
+	if depth >= runtimeconfig.Int("max_inbound_mime_depth", maxInboundMIMEDepth, 1) {
 		return "", false, io.ErrUnexpectedEOF
 	}
 	if mediaType, _, err := mime.ParseMediaType(disposition); err == nil && strings.EqualFold(mediaType, "attachment") {
@@ -198,10 +199,11 @@ func readInboundMIMEBody(contentType, transferEncoding, disposition string, body
 	}
 
 	reader := decodeInboundTransferReader(body, transferEncoding)
-	data, readErr := io.ReadAll(io.LimitReader(reader, maxInboundBodyBytes+1))
-	truncated := len(data) > maxInboundBodyBytes
+	maxBodyBytes := runtimeconfig.Int("max_inbound_body_bytes", maxInboundBodyBytes, 1)
+	data, readErr := io.ReadAll(io.LimitReader(reader, int64(maxBodyBytes)+1))
+	truncated := len(data) > maxBodyBytes
 	if truncated {
-		data = data[:maxInboundBodyBytes]
+		data = data[:maxBodyBytes]
 	}
 	text := string(data)
 	if mediaType == "text/html" {

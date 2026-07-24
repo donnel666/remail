@@ -195,7 +195,7 @@ func (c *InventoryCache) MarkProductUnavailable(ctx context.Context, req allocap
 				if changed {
 					pipe.SetArgs(ctx, key, updated, redis.SetArgs{KeepTTL: true})
 				}
-				pipe.Set(ctx, markerKey, "1", allocapp.InventoryRefreshInterval)
+				pipe.Set(ctx, markerKey, "1", allocapp.InventoryRefreshIntervalValue())
 				pipe.ZAdd(ctx, inventoryCacheActiveKey, redis.Z{Score: float64(time.Now().UnixMilli()), Member: key})
 				return nil
 			})

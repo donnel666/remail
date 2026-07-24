@@ -155,7 +155,7 @@ func (uc *ResourceFetchUseCase) Submit(ctx context.Context, cmd ResourceFetchSub
 		IdempotencyKey: cmd.IdempotencyKey,
 	}
 	if cmd.Kind == domain.ResourceFetchJobFetch {
-		sinceAt := now.Add(-resourceFetchLookbackWindow)
+		sinceAt := now.Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))
 		job.SinceAt = &sinceAt
 		job.UntilAt = &now
 	}
@@ -217,7 +217,7 @@ func (uc *ResourceFetchUseCase) Process(ctx context.Context, task ResourceFetchT
 			MicrosoftClientID: scope.ClientID,
 			MicrosoftRT:       scope.RefreshToken,
 		},
-		SinceAt:   dereferenceTime(job.SinceAt, uc.now().Add(-resourceFetchLookbackWindow)),
+		SinceAt:   dereferenceTime(job.SinceAt, uc.now().Add(-boundedRuntimeDuration("fetch_lookback_window_days", resourceFetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))),
 		UntilAt:   dereferenceTime(job.UntilAt, uc.now()),
 		RequestID: job.RequestID,
 	})

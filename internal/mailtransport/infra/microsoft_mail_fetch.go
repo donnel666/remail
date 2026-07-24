@@ -21,6 +21,7 @@ import (
 
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-sasl"
@@ -176,6 +177,14 @@ func NewMicrosoftMailFetchClient() *MicrosoftMailFetchClient {
 	return &MicrosoftMailFetchClient{timeout: 30 * time.Second}
 }
 
+func (c *MicrosoftMailFetchClient) requestTimeout() time.Duration {
+	fallback := 30 * time.Second
+	if c != nil && c.timeout > 0 {
+		fallback = c.timeout
+	}
+	return runtimeconfig.Duration("mail_fetch_client_timeout_seconds", fallback, time.Second, 1)
+}
+
 func (c *MicrosoftMailFetchClient) FetchAll(ctx context.Context, req MicrosoftMailFetchRequest) (result MicrosoftMailFetchResult, err error) {
 	startedAt := time.Now()
 	defer func() {
@@ -291,6 +300,7 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 }
 
 func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req MicrosoftMailFetchRequest) (MicrosoftMailFetchResult, error) {
+	timeout := c.requestTimeout()
 	streamMessages := req.OnMessages
 	if req.StopAfterLimit {
 		// A global newest-N result cannot be streamed folder by folder: a newer
@@ -305,7 +315,7 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	var tokenResult MicrosoftOAuthResult
 	if accessToken == "" {
 		var err error
-		tokenResult, err = exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, c.timeout)
+		tokenResult, err = exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, timeout)
 		if err != nil {
 			tokenResult = microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", true)
 		}
@@ -319,7 +329,7 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	if c != nil && c.newGraphSession != nil {
 		newGraphSession = c.newGraphSession
 	}
-	session, err := newGraphSession(ctx, req.ProxyURL, timeoutSeconds(c.timeout))
+	session, err := newGraphSession(ctx, req.ProxyURL, timeoutSeconds(timeout))
 	if err != nil {
 		failure := microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != "")
 		// Session construction happens after a possible OAuth exchange. Keep the
@@ -534,7 +544,7 @@ func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, acces
 
 func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) string {
 	values := url.Values{}
-	top := microsoftGraphMessagePageTop
+	top := min(runtimeconfig.Int("graph_message_page_top", microsoftGraphMessagePageTop, 1), 1000)
 	if req.MaxMessages > 0 && req.MaxMessages < top {
 		top = req.MaxMessages
 	}
@@ -567,7 +577,7 @@ func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, 
 	if c != nil && c.exchangeIMAPToken != nil {
 		return c.exchangeIMAPToken(ctx, req)
 	}
-	result, err := exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, "", microsoftIMAPTokenURL, req.ProxyURL, c.timeout)
+	result, err := exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, "", microsoftIMAPTokenURL, req.ProxyURL, c.requestTimeout())
 	if err != nil {
 		return "", "", microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", strings.TrimSpace(req.ProxyURL) != ""), err
 	}
@@ -581,9 +591,9 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	operationTimeout := microsoftIMAPOperationTimeout
+	operationTimeout := runtimeconfig.Duration("imap_operation_timeout_seconds", microsoftIMAPOperationTimeout, time.Second, 1)
 	if req.MaxMessages == 0 {
-		operationTimeout = microsoftIMAPFullHistoryTimeout
+		operationTimeout = runtimeconfig.Duration("imap_full_history_timeout_minutes", microsoftIMAPFullHistoryTimeout, time.Minute, 1)
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
@@ -664,7 +674,7 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 			UID:          true,
 			BodySection:  []*imap.FetchItemBodySection{bodySection},
 		})
-		batch := make([]MicrosoftFetchedMessage, 0, microsoftMailStreamBatchSize)
+		batch := make([]MicrosoftFetchedMessage, 0, min(runtimeconfig.Int("mail_stream_batch_size", microsoftMailStreamBatchSize, 1), 1000))
 		flush := func() {
 			if len(batch) == 0 {
 				return
@@ -791,7 +801,7 @@ func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Cl
 		return nil, err
 	}
 	tlsConn := tls.Client(conn, tlsConfig)
-	if err := setConnectionDeadline(ctx, tlsConn, microsoftIMAPOperationTimeout); err != nil {
+	if err := setConnectionDeadline(ctx, tlsConn, runtimeconfig.Duration("imap_operation_timeout_seconds", microsoftIMAPOperationTimeout, time.Second, 1)); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -811,7 +821,10 @@ func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error)
 		ctx = context.Background()
 	}
 	proxyURL = normalizeMailProxyURL(proxyURL)
-	dialer := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
+	dialer := &net.Dialer{
+		Timeout:   runtimeconfig.Duration("imap_dial_timeout_seconds", 20*time.Second, time.Second, 1),
+		KeepAlive: runtimeconfig.Duration("imap_keepalive_seconds", 30*time.Second, time.Second, 1),
+	}
 	if proxyURL == "" {
 		return nil, fmt.Errorf("proxy url is required for outlook imap fallback")
 	}
@@ -834,11 +847,13 @@ func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error)
 		if !ok {
 			return nil, fmt.Errorf("socks5 proxy does not support context cancellation")
 		}
-		conn, err := contextDialer.DialContext(ctx, "tcp", outlookIMAPAddress)
+		handshakeCtx, cancel := context.WithTimeout(ctx, runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1))
+		conn, err := contextDialer.DialContext(handshakeCtx, "tcp", outlookIMAPAddress)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
-		if err := setConnectionDeadline(ctx, conn, microsoftIMAPOperationTimeout); err != nil {
+		if err := setConnectionDeadline(ctx, conn, runtimeconfig.Duration("imap_operation_timeout_seconds", microsoftIMAPOperationTimeout, time.Second, 1)); err != nil {
 			_ = conn.Close()
 			return nil, err
 		}
@@ -869,7 +884,7 @@ func dialHTTPConnect(ctx context.Context, dialer *net.Dialer, parsed *url.URL, t
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnectionDeadline(ctx, conn, microsoftProxyHandshakeTimeout); err != nil {
+	if err := setConnectionDeadline(ctx, conn, runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1)); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -920,7 +935,7 @@ func setConnectionDeadline(ctx context.Context, conn net.Conn, fallback time.Dur
 		return errors.New("network connection is nil")
 	}
 	if fallback <= 0 {
-		fallback = microsoftProxyHandshakeTimeout
+		fallback = runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1)
 	}
 	deadline := time.Now().Add(fallback)
 	if ctx != nil {

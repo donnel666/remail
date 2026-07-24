@@ -14,6 +14,7 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,6 +43,8 @@ type MessageModel struct {
 	CreatedAt         time.Time      `gorm:"not null;autoCreateTime;column:created_at"`
 	UpdatedAt         time.Time      `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
+
+const maxMailmatchReadWindowSkew = 24 * time.Hour
 
 func (MessageModel) TableName() string { return "mailmatch_messages" }
 
@@ -346,7 +349,7 @@ func (r *Repo) readPickupMessages(
 			candidate = now.Add(-3 * 24 * time.Hour)
 		}
 		if row.ReceiveStartedAt != nil {
-			serviceStart := row.ReceiveStartedAt.Add(-2 * time.Minute)
+			serviceStart := row.ReceiveStartedAt.Add(-min(runtimeconfig.Duration("read_window_skew_minutes", 2*time.Minute, time.Minute, 1), maxMailmatchReadWindowSkew))
 			if serviceStart.After(candidate) {
 				candidate = serviceStart
 			}
@@ -745,7 +748,7 @@ func (r *Repo) ListOrderMessages(ctx context.Context, scope app.OrderScope, limi
 		start = now.Add(-3 * 24 * time.Hour)
 	}
 	if scope.ReceiveStartedAt != nil {
-		serviceStart := scope.ReceiveStartedAt.Add(-2 * time.Minute)
+		serviceStart := scope.ReceiveStartedAt.Add(-min(runtimeconfig.Duration("read_window_skew_minutes", 2*time.Minute, time.Minute, 1), maxMailmatchReadWindowSkew))
 		if serviceStart.After(start) {
 			start = serviceStart
 		}

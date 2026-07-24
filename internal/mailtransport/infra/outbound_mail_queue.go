@@ -13,6 +13,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -50,7 +51,9 @@ func (q *OutboundMailQueue) EnqueueOutboundSend(ctx context.Context, task mailap
 		return false, fmt.Errorf("outbound mail identity is required")
 	}
 	key := outboundPayloadKey(id)
-	created, err := q.redis.SetNX(ctx, key, messagePayload, outboundPayloadTTL).Result()
+	settings := runtimeconfig.Snapshot()
+	payloadTTL := settings.Duration("smtp_outbound_payload_ttl_minutes", outboundPayloadTTL, time.Minute, 1)
+	created, err := q.redis.SetNX(ctx, key, messagePayload, payloadTTL).Result()
 	if err != nil {
 		return false, fmt.Errorf("store outbound mail payload: %w", err)
 	}
@@ -63,9 +66,8 @@ func (q *OutboundMailQueue) EnqueueOutboundSend(ctx context.Context, task mailap
 			return false, domain.ErrOutboundIdempotencyConflict
 		}
 	}
-	payload, err := json.Marshal(struct {
-		ID string `json:"id"`
-	}{ID: id})
+	retryCount := min(settings.Int("smtp_task_retry_count", 3, 0), 20)
+	payload, err := json.Marshal(mailapp.OutboundSendTask{ID: id, RetryCount: &retryCount})
 	if err != nil {
 		if created {
 			q.deleteAfterEnqueueFailure(ctx, id)
@@ -77,9 +79,9 @@ func (q *OutboundMailQueue) EnqueueOutboundSend(ctx context.Context, task mailap
 		ctx,
 		asynqTask,
 		asynq.Queue(mailQueueName),
-		asynq.Unique(outboundPayloadTTL),
+		asynq.Unique(payloadTTL),
 		asynq.MaxRetry(0),
-		asynq.Timeout(outboundTaskTimeout),
+		asynq.Timeout(settings.Duration("outbound_mail_timeout_minutes", outboundTaskTimeout, time.Minute, 1)),
 		asynq.Retention(0),
 	)
 	if err != nil {

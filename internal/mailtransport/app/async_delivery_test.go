@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/mailtransport/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,6 +73,48 @@ func TestOutboundSendUseCaseDoesNotRetryPermanentSMTPFailure(t *testing.T) {
 
 	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
 	require.Equal(t, 1, sender.calls)
+}
+
+func TestOutboundSendUseCaseUsesRuntimeRetryCount(t *testing.T) {
+	runtimeconfig.Set("smtp_task_retry_count", "1")
+	t.Cleanup(func() { runtimeconfig.Delete("smtp_task_retry_count") })
+	sender := &senderStub{err: errors.New("smtp unavailable")}
+	useCase := NewOutboundSendUseCase(sender)
+	useCase.retryDelay = func(int) time.Duration { return 0 }
+
+	err := useCase.Process(context.Background(), OutboundSendTask{Message: VerificationCodeMessage("user@example.com", "123456")})
+
+	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	require.Equal(t, 2, sender.calls)
+}
+
+func TestOutboundSendUseCaseUsesQueuedRetrySnapshot(t *testing.T) {
+	runtimeconfig.Set("smtp_task_retry_count", "20")
+	t.Cleanup(func() { runtimeconfig.Delete("smtp_task_retry_count") })
+	retries := 1
+	sender := &senderStub{err: errors.New("smtp unavailable")}
+	useCase := NewOutboundSendUseCase(sender)
+	useCase.retryDelay = func(int) time.Duration { return 0 }
+
+	err := useCase.Process(context.Background(), OutboundSendTask{
+		Message: VerificationCodeMessage("user@example.com", "123456"), RetryCount: &retries,
+	})
+
+	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	require.Equal(t, 2, sender.calls)
+}
+
+func TestOutboundSendUseCaseCapsRuntimeRetryCount(t *testing.T) {
+	runtimeconfig.Set("smtp_task_retry_count", "99")
+	t.Cleanup(func() { runtimeconfig.Delete("smtp_task_retry_count") })
+	sender := &senderStub{err: errors.New("smtp unavailable")}
+	useCase := NewOutboundSendUseCase(sender)
+	useCase.retryDelay = func(int) time.Duration { return 0 }
+
+	err := useCase.Process(context.Background(), OutboundSendTask{Message: VerificationCodeMessage("user@example.com", "123456")})
+
+	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	require.Equal(t, 21, sender.calls)
 }
 
 func TestOutboundSendUseCaseRetriesTemporarySMTPFailureUntilSuccess(t *testing.T) {

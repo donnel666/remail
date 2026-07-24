@@ -16,6 +16,7 @@ import (
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	smtpserver "github.com/emersion/go-smtp"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -153,8 +154,8 @@ func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context) {
 	if m == nil || m.autoRefresh == nil || m.TokenRefresh == nil {
 		return
 	}
-	before := time.Now().UTC().Add(microsoftRTRefreshLookahead)
-	candidates, err := m.autoRefresh.ListMicrosoftAutoRefreshCandidates(ctx, before, microsoftRTRefreshScanLimit)
+	before := time.Now().UTC().Add(runtimeconfig.Duration("token_refresh_lookahead_days", microsoftRTRefreshLookahead, 24*time.Hour, 1))
+	candidates, err := m.autoRefresh.ListMicrosoftAutoRefreshCandidates(ctx, before, runtimeconfig.Int("token_refresh_scan_limit", microsoftRTRefreshScanLimit, 1))
 	if err != nil {
 		slog.Warn("microsoft rt auto-refresh scan failed", "error", err)
 		return
@@ -181,17 +182,6 @@ func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context) {
 		enqueued++
 	}
 	slog.Info("microsoft rt auto-refresh scan done", "candidates", len(candidates), "enqueued", enqueued)
-}
-
-// durationUntilHour returns the time until the next occurrence of the given hour
-// (0-23) in the server's local time.
-func durationUntilHour(hour int) time.Duration {
-	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, now.Location())
-	if !next.After(now) {
-		next = next.Add(24 * time.Hour)
-	}
-	return next.Sub(now)
 }
 
 func (m *MailTransportModule) SetInboundConsumer(consumer mailapp.InboundConsumerPort) {
@@ -318,36 +308,47 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
 	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
 	go func() {
-		mailTicker := time.NewTicker(mailDispatcherInterval)
-		aliasTicker := time.NewTicker(microsoftAliasDispatcherInterval)
-		tokenRefreshTicker := time.NewTicker(microsoftTokenRefreshDispatcherInterval)
-		bindingDomainTicker := time.NewTicker(auxiliaryDomainRefreshInterval)
-		defer mailTicker.Stop()
-		defer aliasTicker.Stop()
-		defer tokenRefreshTicker.Stop()
-		defer bindingDomainTicker.Stop()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		mailLast, aliasLast, tokenLast, domainLast := time.Now(), time.Now(), time.Now(), time.Now()
 		for {
 			select {
-			case <-mailTicker.C:
-				seedMailDispatchers(ctx, m)
-			case <-aliasTicker.C:
-				runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
-			case <-tokenRefreshTicker.C:
-				runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
-			case <-bindingDomainTicker.C:
-				refreshAuxiliaryDomains(ctx, m.bindingDomains)
-				cleanupRecoveryLeases(ctx, m)
+			case now := <-ticker.C:
+				if now.Sub(mailLast) >= runtimeconfig.Duration("mail_dispatcher_interval_seconds", mailDispatcherInterval, time.Second, 1) {
+					seedMailDispatchers(ctx, m)
+					mailLast = now
+				}
+				if now.Sub(aliasLast) >= runtimeconfig.Duration("alias_dispatcher_interval_seconds", microsoftAliasDispatcherInterval, time.Second, 1) {
+					runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
+					aliasLast = now
+				}
+				if now.Sub(tokenLast) >= runtimeconfig.Duration("token_refresh_dispatcher_interval_seconds", microsoftTokenRefreshDispatcherInterval, time.Second, 1) {
+					runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
+					tokenLast = now
+				}
+				if now.Sub(domainLast) >= runtimeconfig.Duration("auxiliary_domain_refresh_interval_seconds", auxiliaryDomainRefreshInterval, time.Second, 1) {
+					refreshAuxiliaryDomains(ctx, m.bindingDomains)
+					cleanupRecoveryLeases(ctx, m)
+					domainLast = now
+				}
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-	// Proactive refresh-token expiry scan: once a day at ~dawn.
+	// Proactive refresh-token expiry scan: once a day at the configured hour.
 	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		lastDay := ""
 		for {
 			select {
-			case <-time.After(durationUntilHour(microsoftRTRefreshHour)):
-				m.scanExpiringTokenRefresh(ctx)
+			case now := <-ticker.C:
+				day := now.Format("20060102")
+				if now.Hour() == runtimeconfig.Int("token_refresh_hour", microsoftRTRefreshHour, 0) && day != lastDay {
+					m.scanExpiringTokenRefresh(ctx)
+					lastDay = day
+				}
 			case <-ctx.Done():
 				return
 			}

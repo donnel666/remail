@@ -5,9 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRepository struct {
@@ -17,6 +20,52 @@ type fakeRepository struct {
 	upsertValue string
 	deleteKey   string
 	bulkCalled  bool
+}
+
+type blockingRepository struct {
+	*fakeRepository
+	entered chan string
+	release chan struct{}
+}
+
+func (r *blockingRepository) Upsert(ctx context.Context, key, value string) (*domain.Setting, error) {
+	r.entered <- value
+	if value == "first" {
+		<-r.release
+	}
+	return r.fakeRepository.Upsert(ctx, key, value)
+}
+
+func TestSystemSettingMutationsAreSerializedWithRuntimePublish(t *testing.T) {
+	repo := &blockingRepository{
+		fakeRepository: &fakeRepository{},
+		entered:        make(chan string, 2),
+		release:        make(chan struct{}),
+	}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	t.Cleanup(func() { runtimeconfig.Delete("concurrent_test_key") })
+	errs := make(chan error, 2)
+
+	go func() {
+		_, err := uc.Upsert(context.Background(), "concurrent_test_key", "first", MutationMeta{})
+		errs <- err
+	}()
+	require.Equal(t, "first", <-repo.entered)
+	go func() {
+		_, err := uc.Upsert(context.Background(), "concurrent_test_key", "second", MutationMeta{})
+		errs <- err
+	}()
+
+	select {
+	case value := <-repo.entered:
+		t.Fatalf("second mutation entered before first runtime publish: %s", value)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(repo.release)
+	require.Equal(t, "second", <-repo.entered)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	require.Equal(t, "second", runtimeconfig.String("concurrent_test_key", ""))
 }
 
 func (f *fakeRepository) WithTx(ctx context.Context, fn func(context.Context) error) error {
@@ -114,6 +163,13 @@ func TestSystemSettingsUseCaseRejectsInvalidKeys(t *testing.T) {
 		if _, err := uc.Upsert(context.Background(), key, "value", MutationMeta{}); err != domain.ErrInvalidKey {
 			t.Fatalf("upsert key %q error = %v, want ErrInvalidKey", key, err)
 		}
+	}
+}
+
+func TestSystemSettingsUseCaseRejectsInvalidKnownValues(t *testing.T) {
+	uc := NewSystemSettingsUseCase(&fakeRepository{}, &fakeOperationLogs{})
+	if _, err := uc.Upsert(context.Background(), "smtp_outbound_payload_ttl_minutes", "0", MutationMeta{}); !errors.Is(err, domain.ErrInvalidValue) {
+		t.Fatalf("error = %v, want ErrInvalidValue", err)
 	}
 }
 

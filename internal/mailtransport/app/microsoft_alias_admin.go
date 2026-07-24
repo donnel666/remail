@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 var (
@@ -60,11 +62,11 @@ func (s *MicrosoftAliasService) GetAdminSchedule(ctx context.Context, resourceID
 	}
 	if schedule == nil {
 		return &MicrosoftAliasAdminSchedule{
-			WeekLimit: MicrosoftAliasWeeklyLimit,
-			YearLimit: MicrosoftAliasYearlyLimit,
+			WeekLimit: runtimeconfig.Int("microsoft_alias_weekly_limit", MicrosoftAliasWeeklyLimit, 1),
+			YearLimit: runtimeconfig.Int("microsoft_alias_yearly_limit", MicrosoftAliasYearlyLimit, 1),
 		}, nil
 	}
-	schedule.WeekLimit = MicrosoftAliasWeeklyLimit
-	schedule.YearLimit = MicrosoftAliasYearlyLimit
+	schedule.WeekLimit = runtimeconfig.Int("microsoft_alias_weekly_limit", MicrosoftAliasWeeklyLimit, 1)
+	schedule.YearLimit = runtimeconfig.Int("microsoft_alias_yearly_limit", MicrosoftAliasYearlyLimit, 1)
 	return schedule, nil
 }

@@ -96,7 +96,7 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 		return func(context.Context) {}
 	}
 	module.UseCase.ScheduleCandidateRefreshDispatcher(context.Background(), 0)
-	return startAllocationTaskSeeders(module, candidateRefreshDispatcherInterval, allocapp.InventoryRefreshInterval)
+	return startAllocationTaskSeedersWithInventoryInterval(module, candidateRefreshDispatcherInterval, allocapp.InventoryRefreshIntervalValue)
 }
 
 func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allocapp.InventoryRefreshResult, bool, error) {
@@ -132,6 +132,10 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 }
 
 func startAllocationTaskSeeders(module *Module, candidateInterval time.Duration, inventoryInterval time.Duration) func(context.Context) {
+	return startAllocationTaskSeedersWithInventoryInterval(module, candidateInterval, func() time.Duration { return inventoryInterval })
+}
+
+func startAllocationTaskSeedersWithInventoryInterval(module *Module, candidateInterval time.Duration, inventoryInterval func() time.Duration) func(context.Context) {
 	if module == nil || module.UseCase == nil {
 		return func(context.Context) {}
 	}
@@ -140,19 +144,31 @@ func startAllocationTaskSeeders(module *Module, candidateInterval time.Duration,
 	go func() {
 		defer close(done)
 		candidateTicker := time.NewTicker(candidateInterval)
-		inventoryTicker := time.NewTicker(inventoryInterval)
+		lastInventory := time.Now()
+		nextInventoryDelay := func() time.Duration {
+			delay := time.Until(lastInventory.Add(inventoryInterval()))
+			if delay <= 0 {
+				return time.Millisecond
+			}
+			return min(delay, time.Minute)
+		}
+		inventoryTimer := time.NewTimer(nextInventoryDelay())
 		defer candidateTicker.Stop()
-		defer inventoryTicker.Stop()
+		defer inventoryTimer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-candidateTicker.C:
 				module.UseCase.ScheduleCandidateRefreshDispatcher(ctx, 0)
-			case <-inventoryTicker.C:
-				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
-					slog.Warn("enqueue inventory cache refresh failed", "error", err)
+			case <-inventoryTimer.C:
+				if time.Since(lastInventory) >= inventoryInterval() {
+					if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
+						slog.Warn("enqueue inventory cache refresh failed", "error", err)
+					}
+					lastInventory = time.Now()
 				}
+				inventoryTimer.Reset(nextInventoryDelay())
 			}
 		}
 	}()

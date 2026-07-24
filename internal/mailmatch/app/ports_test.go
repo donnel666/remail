@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -349,6 +350,55 @@ func TestMergePickupMessagesKeepsNewestThirty(t *testing.T) {
 	require.Len(t, merged, pickupMessageCacheLimit)
 	require.Equal(t, "message-34", merged[0].ProviderMessageID)
 	require.Equal(t, "message-05", merged[len(merged)-1].ProviderMessageID)
+}
+
+func TestVerificationCodePatternUpdatesAndFallsBackWhenInvalid(t *testing.T) {
+	defer runtimeconfig.Delete("verification_code_pattern")
+	runtimeconfig.Set("verification_code_pattern", `(\d{4})`)
+	require.Equal(t, "1234", extractVerificationCode("code: 1234"))
+	runtimeconfig.Set("verification_code_pattern", `code[:：]\s*\d{6}`)
+	require.Equal(t, "654321", extractVerificationCode("code: 654321"))
+
+	runtimeconfig.Set("verification_code_pattern", `(`)
+	require.Equal(t, "654321", extractVerificationCode("code: 654321"))
+}
+
+func TestPickupFetchTimingKeepsHeartbeatInsideLease(t *testing.T) {
+	defer runtimeconfig.Delete("pickup_fetch_lease_ttl_minutes")
+	defer runtimeconfig.Delete("pickup_fetch_heartbeat_seconds")
+	runtimeconfig.Set("pickup_fetch_lease_ttl_minutes", "1")
+	runtimeconfig.Set("pickup_fetch_heartbeat_seconds", "120")
+
+	timing := configuredPickupFetchTiming()
+
+	require.Equal(t, time.Minute, timing.leaseTTL)
+	require.Equal(t, 30*time.Second, timing.heartbeat)
+}
+
+func TestPickupRequestLegacyExpirationRemainsTwoMinutes(t *testing.T) {
+	requestedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, requestedAt.Add(2*time.Minute), (PickupRequestFetchTask{RequestedAt: requestedAt}).EffectiveExpiresAt())
+}
+
+func TestProjectionReplayLimitIsLocallyBounded(t *testing.T) {
+	defer runtimeconfig.Delete("projection_replay_limit")
+	runtimeconfig.Set("projection_replay_limit", "2147483647")
+	require.Equal(t, maxProjectionReplayLimit, boundedRuntimeInt("projection_replay_limit", projectionReplayLimit, maxProjectionReplayLimit))
+}
+
+func TestFetchLookbackWindowAppliesWhenTaskHasNoExplicitWindow(t *testing.T) {
+	defer runtimeconfig.Delete("fetch_lookback_window_days")
+	runtimeconfig.Set("fetch_lookback_window_days", "7")
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	transport := &incrementalFetchTransportStub{}
+	uc := NewUseCase(nil, nil, transport, nil)
+	uc.now = func() time.Time { return now }
+
+	_, err := uc.fetchMessages(context.Background(), OrderScope{AllocationType: domain.ResourceTypeMicrosoft}, domain.FetchJob{}, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, now.Add(-7*24*time.Hour), transport.request.SinceAt)
+	require.Equal(t, now, transport.request.UntilAt)
 }
 
 func TestListPickupMailBatchPreservesRequestOrderAndContinuesAfterFailure(t *testing.T) {

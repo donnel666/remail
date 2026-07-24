@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	projectHistoryDispatchLimit  = 16
-	projectHistoryMailboxTimeout = 15 * time.Minute
+	projectHistoryDispatchLimit     = 16
+	maxProjectHistoryDispatchLimit  = 100
+	projectHistoryMailboxTimeout    = 15 * time.Minute
+	maxProjectHistoryMailboxTimeout = 2 * time.Hour
 )
 
 var errProjectHistoryScopeChanged = errors.New("mailmatch: project history scope changed")
@@ -131,6 +133,7 @@ func (uc *ProjectHistoryScanUseCase) DispatchPending(ctx context.Context, limit 
 	if limit <= 0 {
 		limit = projectHistoryDispatchLimit
 	}
+	limit = min(limit, maxProjectHistoryDispatchLimit)
 	states, err := uc.jobs.ListPendingProjectHistoryScans(ctx, limit)
 	if err != nil {
 		return err
@@ -255,7 +258,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
 		scopes: scopes, scannedAt: uc.now(),
 	}
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, projectHistoryMailboxTimeout)
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, boundedRuntimeDuration("imap_full_history_timeout_minutes", projectHistoryMailboxTimeout, time.Minute, maxProjectHistoryMailboxTimeout))
 	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
 		Scope: OrderScope{
 			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceTypeMicrosoft,
@@ -375,7 +378,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		resourceID: resource.ResourceID, emailAddress: resource.EmailAddress,
 		scopes: []HistoricalProjectScope{scope}, scannedAt: uc.now(),
 	}
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, projectHistoryMailboxTimeout)
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, boundedRuntimeDuration("imap_full_history_timeout_minutes", projectHistoryMailboxTimeout, time.Minute, maxProjectHistoryMailboxTimeout))
 	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
 		Scope: OrderScope{
 			OrderNo: "project-history", AllocationType: domain.ResourceTypeMicrosoft,

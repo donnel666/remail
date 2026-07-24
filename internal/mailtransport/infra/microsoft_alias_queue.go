@@ -9,6 +9,7 @@ import (
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
@@ -23,6 +24,12 @@ const (
 
 type MicrosoftAliasQueue struct {
 	client *asynq.Client
+}
+
+func microsoftAliasTimeout() time.Duration {
+	const defaultRecoveryWait = 90 * time.Second
+	wait := min(runtimeconfig.Duration("password_recovery_code_wait_seconds", defaultRecoveryWait, time.Second, 1), 30*time.Minute)
+	return microsoftAliasTaskTimeout + max(time.Duration(0), wait-defaultRecoveryWait)
 }
 
 func NewMicrosoftAliasQueue(client *asynq.Client) *MicrosoftAliasQueue {
@@ -41,13 +48,14 @@ func (q *MicrosoftAliasQueue) EnqueueMicrosoftAlias(ctx context.Context, task ma
 		return false, fmt.Errorf("marshal microsoft alias task: %w", err)
 	}
 	asynqTask := asynq.NewTask(TypeMicrosoftAlias, payload)
+	taskTimeout := microsoftAliasTimeout()
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
 		asynq.Queue(MicrosoftAliasQueueName),
-		asynq.Unique(microsoftAliasTaskTimeout),
+		asynq.Unique(taskTimeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetry),
-		asynq.Timeout(microsoftAliasTaskTimeout),
+		asynq.Timeout(taskTimeout),
 		asynq.Retention(0),
 	)
 	if err != nil {

@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -442,6 +444,51 @@ func validProjectCreateRequest() CreateProjectRequest {
 			{RuleType: "recipient", Pattern: "exact", Enabled: true},
 		},
 	}
+}
+
+func TestCoreRuntimeLimitsApplyToNewRequests(t *testing.T) {
+	settings := map[string]string{
+		"project_name_max":                 "2",
+		"project_target_platform_max":      "3",
+		"project_description_max":          "4",
+		"max_project_logo_bytes":           "5",
+		"resource_validation_max_failures": "2",
+	}
+	for key, value := range settings {
+		runtimeconfig.Set(key, value)
+		defer runtimeconfig.Delete(key)
+	}
+
+	_, err := normalizeProject(CreateProjectRequest{Name: "too long", TargetPlatform: "ok"}, domain.ProjectStatusReviewing)
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
+	_, err = normalizeProject(CreateProjectRequest{Name: "ok", TargetPlatform: "long"}, domain.ProjectStatusReviewing)
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
+	_, err = normalizeProject(CreateProjectRequest{Name: "ok", TargetPlatform: "web", Description: "12345"}, domain.ProjectStatusReviewing)
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
+	require.Equal(t, 5, projectLogoMaxBytesValue())
+	require.Equal(t, 2, ResourceValidationMaxFailuresValue())
+}
+
+func TestCoreRuntimeLimitsClampToStorageAndSafeBounds(t *testing.T) {
+	settings := map[string]string{
+		"project_name_max":                 "2147483647",
+		"project_target_platform_max":      "2147483647",
+		"project_description_max":          "2147483647",
+		"max_project_logo_bytes":           "2147483647",
+		"resource_validation_max_failures": "2147483647",
+	}
+	for key, value := range settings {
+		runtimeconfig.Set(key, value)
+		defer runtimeconfig.Delete(key)
+	}
+
+	require.Equal(t, projectNameMax, projectNameMaxValue())
+	require.Equal(t, projectTargetPlatformMax, projectTargetPlatformMaxValue())
+	require.Equal(t, projectDescriptionMax, projectDescriptionMaxValue())
+	require.Equal(t, projectLogoConfiguredMaxBytes, projectLogoMaxBytesValue())
+	require.Equal(t, resourceValidationFailuresLimit, ResourceValidationMaxFailuresValue())
+	_, err := normalizeProject(CreateProjectRequest{Name: strings.Repeat("a", projectNameMax+1), TargetPlatform: "web"}, domain.ProjectStatusReviewing)
+	require.ErrorIs(t, err, domain.ErrInvalidProject)
 }
 
 func validProjectDetailForUseCase() *domain.ProjectDetail {

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // ResourceType represents the type of email resource.
@@ -17,6 +19,7 @@ const (
 const (
 	DefaultPlusDailyLimit    = 10000
 	DefaultMailboxDailyLimit = 10000
+	maxConfiguredDailyLimit  = 2_147_483_647
 )
 
 // MicrosoftResourceStatus represents the status of a Microsoft resource.
@@ -690,8 +693,24 @@ func IsMicrosoftEmailDomain(email string) bool {
 		return false
 	}
 	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(email[at+1:])), ".")
+	if configured := strings.TrimSpace(runtimeconfig.String("microsoft_domain_whitelist", "")); configured != "" {
+		for _, candidate := range strings.FieldsFunc(configured, func(r rune) bool { return r == ',' || r == '，' || unicode.IsSpace(r) }) {
+			if strings.TrimSuffix(strings.ToLower(strings.TrimSpace(candidate)), ".") == host {
+				return true
+			}
+		}
+		return false
+	}
 	_, ok := microsoftEmailWhitelist[host]
 	return ok
+}
+
+func DefaultPlusDailyLimitValue() int {
+	return min(runtimeconfig.Int("default_plus_daily_limit", DefaultPlusDailyLimit, 1), maxConfiguredDailyLimit)
+}
+
+func DefaultMailboxDailyLimitValue() int {
+	return min(runtimeconfig.Int("default_mailbox_daily_limit", DefaultMailboxDailyLimit, 1), maxConfiguredDailyLimit)
 }
 
 func normalizeDomainInput(value string) string {

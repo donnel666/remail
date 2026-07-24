@@ -9,6 +9,7 @@ import (
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 const (
@@ -285,7 +286,7 @@ func microsoftTokenRefreshTaskView(state MicrosoftTokenRefreshState) governancea
 		Kind:               governanceapp.AdminTaskKindToken,
 		Status:             microsoftTokenRefreshAdminStatus(state.Status),
 		Attempts:           state.Failures,
-		MaxAttempts:        MicrosoftTokenRefreshDefaultMaxAttempts,
+		MaxAttempts:        runtimeconfig.Int("token_refresh_max_attempts", MicrosoftTokenRefreshDefaultMaxAttempts, 1),
 		CredentialRevision: &revision,
 		QueuedAt:           queuedAt,
 		StartedAt:          state.StartedAt,

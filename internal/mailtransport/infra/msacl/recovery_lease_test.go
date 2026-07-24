@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,11 +16,31 @@ type recoveryLeaseStoreStub struct {
 	released             []string
 	releaseContextActive bool
 	markErr              error
+	expiresAt            time.Time
 }
 
-func (s *recoveryLeaseStoreStub) Claim(_ context.Context, mask string, _ uint, _ time.Time) (string, bool, error) {
+func (s *recoveryLeaseStoreStub) Claim(_ context.Context, mask string, _ uint, expiresAt time.Time) (string, bool, error) {
 	s.claims = append(s.claims, mask)
+	s.expiresAt = expiresAt
 	return mask + "-token", true, nil
+}
+
+func TestRecoveryLeaseCoversConfiguredCodeWait(t *testing.T) {
+	runtimeconfig.Set("recovery_code_lease_minutes", "1")
+	runtimeconfig.Set("password_recovery_code_wait_seconds", "90")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("recovery_code_lease_minutes")
+		runtimeconfig.Delete("password_recovery_code_wait_seconds")
+	})
+	store := &recoveryLeaseStoreStub{}
+	SetRecoveryLeaseStore(store)
+	t.Cleanup(func() { SetRecoveryLeaseStore(nil) })
+	startedAt := time.Now().UTC()
+
+	_, err := claimCodeMailLease(WithRecoveryLeaseScope(context.Background(), 42, "a*****b@recovery.test"), "a*****b@recovery.test")
+
+	require.NoError(t, err)
+	require.False(t, store.expiresAt.Before(startedAt.Add(120*time.Second)))
 }
 
 func (s *recoveryLeaseStoreStub) MarkSent(_ context.Context, mask, _ string, _ time.Time) error {

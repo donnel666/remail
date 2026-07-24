@@ -11,6 +11,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 // ResourceValidationRepository owns the resource pending/validating state and
@@ -218,7 +219,12 @@ const (
 	resourceValidationBatchPageSize = 1000
 	resourceValidationDispatchDelay = time.Second
 	ResourceValidationMaxFailures   = 3
+	resourceValidationFailuresLimit = 100
 )
+
+func ResourceValidationMaxFailuresValue() int {
+	return min(runtimeconfig.Int("resource_validation_max_failures", ResourceValidationMaxFailures, 1), resourceValidationFailuresLimit)
+}
 
 var ErrValidationTemporaryUnavailable = errors.New("resource validation temporary unavailable")
 

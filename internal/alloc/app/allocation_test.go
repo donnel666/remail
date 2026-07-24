@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type candidateRefreshRepoStub struct {
@@ -512,6 +513,68 @@ func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
 	}
 	if got := dotAliasVariants("m.s1000@example.com"); !slices.Equal(got, want) {
 		t.Fatalf("dotAliasVariants() = %v, want %v", got, want)
+	}
+}
+
+func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
+	settings := map[string]string{
+		"candidate_window_size":                "2",
+		"global_candidate_window":              "3",
+		"bucket_probe_count":                   "2",
+		"alias_generation_window":              "3",
+		"candidate_retry_count":                "2",
+		"dot_alias_capacity_per_resource":      "2",
+		"inventory_refresh_interval_minutes":   "4",
+		"inventory_cache_activity_ttl_minutes": "5",
+		"inventory_cache_hard_ttl_hours":       "6",
+	}
+	for key, value := range settings {
+		runtimeconfig.Set(key, value)
+		defer runtimeconfig.Delete(key)
+	}
+
+	if candidateWindowSizeValue() != 2 || globalCandidateWindowValue() != 3 || bucketProbeCountValue() != 2 || candidateRetryCountValue() != 2 {
+		t.Fatal("candidate runtime settings were not applied")
+	}
+	if got := len(plusAliasVariants("user@example.com", 1, "order")); got != 3 {
+		t.Fatalf("got %d generated aliases, want 3", got)
+	}
+	if got := len(dotAliasVariants("username@example.com")); got != 2 {
+		t.Fatalf("got %d dot aliases, want 2", got)
+	}
+	if InventoryRefreshIntervalValue() != 4*time.Minute || inventoryCacheActivityTTLValue() != 5*time.Minute || inventoryCacheHardTTLValue() != 6*time.Hour {
+		t.Fatal("inventory runtime settings were not applied")
+	}
+}
+
+func TestAllocationRuntimeSettingsClampUnsafeValues(t *testing.T) {
+	settings := map[string]string{
+		"candidate_window_size":                "2147483647",
+		"global_candidate_window":              "2147483647",
+		"bucket_probe_count":                   "2147483647",
+		"alias_generation_window":              "2147483647",
+		"candidate_retry_count":                "2147483647",
+		"dot_alias_capacity_per_resource":      "2147483647",
+		"inventory_refresh_interval_minutes":   "1000000",
+		"inventory_cache_activity_ttl_minutes": "1000000",
+		"inventory_cache_hard_ttl_hours":       "100000",
+	}
+	for key, value := range settings {
+		runtimeconfig.Set(key, value)
+		defer runtimeconfig.Delete(key)
+	}
+
+	if candidateWindowSizeValue() != maxCandidateWindowSize || globalCandidateWindowValue() != maxCandidateWindowSize {
+		t.Fatal("candidate windows were not clamped")
+	}
+	if bucketProbeCountValue() != BucketCount || aliasGenerationWindowValue() != maxAliasGenerationWindow || candidateRetryCountValue() != maxCandidateRetryCount {
+		t.Fatal("allocation loop bounds were not clamped")
+	}
+	if DotAliasCapacityPerResourceValue() != maxDotAliasCapacity {
+		t.Fatal("dot alias capacity was not clamped")
+	}
+	if InventoryRefreshIntervalValue() != maxInventoryRefreshInterval || inventoryCacheActivityTTLValue() != maxInventoryCacheActivityTTL || inventoryCacheHardTTLValue() != maxInventoryCacheHardTTL {
+		t.Fatal("inventory durations were not clamped")
 	}
 }
 

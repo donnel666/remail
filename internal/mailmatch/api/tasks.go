@@ -6,22 +6,27 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
 )
 
 const (
-	fetchDispatcherInterval     = 15 * time.Second
-	projectHistoryConcurrency   = 4 // ponytail: fixed per-process ceiling; use a dedicated server if horizontal replicas need a cluster-wide cap.
-	projectHistoryDispatchLimit = 4
-	backgroundReleaseTimeout    = 5 * time.Second
+	fetchDispatcherInterval        = 15 * time.Second
+	projectHistoryConcurrency      = 4
+	projectHistoryDispatchLimit    = 4
+	backgroundReleaseTimeout       = 5 * time.Second
+	maxFetchDispatcherInterval     = time.Hour
+	maxProjectHistoryConcurrency   = 32
+	maxProjectHistoryDispatchLimit = 100
 )
 
-var projectHistorySlots = make(chan struct{}, projectHistoryConcurrency)
+var projectHistoryActive atomic.Int64
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 	mux.HandleFunc(mailmatchinfra.TypeMailmatchFetchDispatcher, func(ctx context.Context, _ *asynq.Task) error {
@@ -185,7 +190,8 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if module == nil || module.ProjectHistory == nil {
 			return nil
 		}
-		if err := module.ProjectHistory.DispatchPending(ctx, projectHistoryDispatchLimit); err != nil {
+		limit := min(runtimeconfig.Int("project_history_dispatch_limit", projectHistoryDispatchLimit, 1), maxProjectHistoryDispatchLimit)
+		if err := module.ProjectHistory.DispatchPending(ctx, limit); err != nil {
 			slog.Warn("project history dispatcher failed", "error", err)
 		}
 		return nil
@@ -206,7 +212,7 @@ func processPickupRequestFetchTask(ctx context.Context, task *asynq.Task, module
 	size := pickupRequestTaskSize(len(payload.Scopes))
 	platform.RecordTaskEvent("pickup_request_fetch", "started")
 	platform.ObserveQueueWait("pickup_request_fetch", payload.RequestedAt)
-	if !payload.RequestedAt.IsZero() && !startedAt.Before(payload.RequestedAt.Add(2*time.Minute)) {
+	if expiresAt := payload.EffectiveExpiresAt(); !expiresAt.IsZero() && !startedAt.Before(expiresAt) {
 		_ = module.UseCase.ProcessPickupRequestFetch(ctx, payload)
 		platform.RecordTaskEvent("pickup_request_fetch", "expired")
 		platform.ObserveServiceDuration("pickup_fetch", size, "expired", startedAt)
@@ -262,9 +268,15 @@ func startFetchDispatcherSeeder(module *Module) {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(fetchDispatcherInterval)
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
+		lastDispatch := time.Now()
+		for now := range ticker.C {
+			interval := min(runtimeconfig.Duration("fetch_dispatcher_interval_seconds", fetchDispatcherInterval, time.Second, 1), maxFetchDispatcherInterval)
+			if now.Sub(lastDispatch) < interval {
+				continue
+			}
+			lastDispatch = now
 			scheduleMailmatchFetchDispatcher(context.Background(), module, 0)
 			if module.ProjectHistory != nil {
 				module.ProjectHistory.ScheduleDispatcher(context.Background(), 0)
@@ -278,15 +290,19 @@ func acquireProjectHistoryCapacity(module *Module) (func(), bool) {
 	if !admitted {
 		return func() {}, false
 	}
-	select {
-	case projectHistorySlots <- struct{}{}:
-		return func() {
-			<-projectHistorySlots
+	limit := int64(min(runtimeconfig.Int("project_history_concurrency", projectHistoryConcurrency, 1), maxProjectHistoryConcurrency))
+	for {
+		active := projectHistoryActive.Load()
+		if active >= limit {
 			backgroundRelease()
-		}, true
-	default:
-		backgroundRelease()
-		return func() {}, false
+			return func() {}, false
+		}
+		if projectHistoryActive.CompareAndSwap(active, active+1) {
+			return func() {
+				projectHistoryActive.Add(-1)
+				backgroundRelease()
+			}, true
+		}
 	}
 }
 
