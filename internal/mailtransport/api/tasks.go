@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -165,41 +166,12 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 	})
 
 	mux.HandleFunc(mailinfra.TypeOutboundDispatch, func(ctx context.Context, _ *asynq.Task) error {
-		if module == nil || module.OutboundDelivery == nil {
-			return nil
-		}
-		result, err := module.OutboundDelivery.DispatchPending(ctx, 0)
-		if err != nil {
-			slog.Warn("outbound mail dispatcher failed", "error", err)
-			return err
-		}
-		if result != nil && result.Attempted > 0 {
-			slog.Info("outbound mail dispatcher finished", "attempted", result.Attempted, "queued", result.Queued, "failed", result.Failed)
-		}
+		// Legacy durable-outbox dispatch tasks intentionally do nothing.
 		return nil
 	})
 
 	mux.HandleFunc(mailinfra.TypeOutboundSend, func(ctx context.Context, task *asynq.Task) error {
-		if module == nil || module.OutboundSendUseCase == nil {
-			return nil
-		}
-		var payload mailapp.OutboundSendTask
-		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-			return fmt.Errorf("decode outbound mail task: %w: %w", err, asynq.SkipRetry)
-		}
-		finalAttempt := isFinalAttempt(ctx)
-		if err := module.OutboundSendUseCase.Process(ctx, payload, finalAttempt); err != nil {
-			slog.Warn(
-				"outbound mail task failed",
-				"final_attempt", finalAttempt,
-				"error", err,
-			)
-			return err
-		}
-		slog.Info(
-			"outbound mail task finished",
-		)
-		return nil
+		return processOutboundSendTask(ctx, task, module)
 	})
 
 	mux.HandleFunc(mailinfra.TypeInboundDispatch, func(ctx context.Context, _ *asynq.Task) error {
@@ -238,6 +210,55 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		slog.Info("inbound mail task finished", "inbound_mail_id", payload.InboundMailID)
 		return nil
 	})
+}
+
+func processOutboundSendTask(ctx context.Context, task *asynq.Task, module *MailTransportModule) (err error) {
+	if module == nil || module.OutboundSendUseCase == nil {
+		return nil
+	}
+	cleanupID := ""
+	defer func() {
+		if cleanupID != "" && module.OutboundQueue != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundLegacyReleaseTimeout)
+			defer cancel()
+			if cleanupErr := module.OutboundQueue.DeleteOutboundSend(cleanupCtx, cleanupID); cleanupErr != nil {
+				slog.Warn("outbound mail payload cleanup failed", "error", cleanupErr)
+			}
+		}
+		if recovered := recover(); recovered != nil {
+			slog.Error("outbound mail task panicked")
+			err = asynq.RevokeTask
+		}
+	}()
+	var payload mailapp.OutboundSendTask
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		slog.Warn("outbound mail task discarded", "reason", "invalid payload")
+		return nil
+	}
+	payload.ID = strings.TrimSpace(payload.ID)
+	if payload.ID != "" {
+		if module.OutboundQueue == nil {
+			slog.Warn("outbound mail task discarded", "reason", "payload store unavailable")
+			return nil
+		}
+		cleanupID = payload.ID
+		stored, found, loadErr := module.OutboundQueue.LoadOutboundSend(ctx, payload.ID)
+		if loadErr != nil {
+			slog.Warn("outbound mail task discarded", "reason", "payload read failed", "error", loadErr)
+			return nil
+		}
+		if !found {
+			slog.Warn("outbound mail task discarded", "reason", "payload expired")
+			return nil
+		}
+		payload = stored
+	}
+	if err := module.OutboundSendUseCase.Process(ctx, payload); err != nil {
+		slog.Warn("outbound mail task failed", "purpose", payload.Message.Purpose, "error", err)
+		return nil
+	}
+	slog.Info("outbound mail task finished", "purpose", payload.Message.Purpose)
+	return nil
 }
 
 func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecutionGate) (func(), bool, error) {

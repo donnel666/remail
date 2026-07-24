@@ -2,12 +2,14 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -58,9 +60,14 @@ func (r *Repo) AppendMessages(ctx context.Context, messages []domain.Message) (s
 		}
 		created := r.dbFor(ctx).
 			Session(&gorm.Session{SkipDefaultTransaction: true}).
-			Clauses(clause.Insert{Modifier: "IGNORE"}).
 			Create(&models[i])
 		if created.Error != nil {
+			var mysqlErr *mysql.MySQLError
+			if errors.Is(created.Error, gorm.ErrDuplicatedKey) ||
+				(errors.As(created.Error, &mysqlErr) && mysqlErr.Number == 1062) {
+				storedByIdentity[messageIdentity(models[i].EmailResourceID, models[i].DedupeKey)] = domain.Message{}
+				continue
+			}
 			return nil, 0, fmt.Errorf("append mailmatch message: %w", created.Error)
 		}
 		inserted += int(created.RowsAffected)

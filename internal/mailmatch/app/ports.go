@@ -1495,8 +1495,9 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, error) {
 	message := baseMessageFromFetched(item)
 	matches := make([]struct {
-		scope OrderScope
-		code  string
+		scope     OrderScope
+		code      string
+		recipient string
 	}, 0)
 	seenOrders := make(map[string]struct{})
 	for _, recipient := range fetchedRecipientCandidates(item) {
@@ -1514,9 +1515,10 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 			if matched {
 				seenOrders[scope.OrderNo] = struct{}{}
 				matches = append(matches, struct {
-					scope OrderScope
-					code  string
-				}{scope: scope, code: code})
+					scope     OrderScope
+					code      string
+					recipient string
+				}{scope: scope, code: code, recipient: recipient})
 			}
 		}
 	}
@@ -1526,6 +1528,7 @@ func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessa
 		message.MatchDiagnostic = "Message did not match any active order service."
 	case 1:
 		message.Status = domain.MessageStatusMatched
+		message.Recipient = matches[0].recipient
 		message.VerificationCode = matches[0].code
 		matchedOrderID := matches[0].scope.OrderID
 		message.MatchedOrderID = &matchedOrderID

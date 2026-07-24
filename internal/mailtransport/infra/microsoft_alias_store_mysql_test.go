@@ -1548,6 +1548,61 @@ func TestMicrosoftAliasStoreSerializesConcurrentQuotaReservationsMySQL(t *testin
 	assert.Equal(t, 2, usage.WeekCount)
 }
 
+func TestMicrosoftAliasStoreReservesDifferentResourcesConcurrentlyMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	store := NewMicrosoftAliasStore(db)
+	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	yearStart := time.Date(2025, time.December, 31, 16, 0, 0, 0, time.UTC)
+	yearEnd := time.Date(2026, time.December, 31, 16, 0, 0, 0, time.UTC)
+	weekStart := time.Date(2026, time.July, 5, 16, 0, 0, 0, time.UTC)
+	weekEnd := time.Date(2026, time.July, 12, 16, 0, 0, 0, time.UTC)
+	const workers = 16
+	for i := 0; i < workers; i++ {
+		resourceID := uint(1200 + i)
+		createMicrosoftAliasTestResource(t, db, resourceID, "normal")
+		require.NoError(t, db.Create(&MicrosoftAliasScheduleModel{
+			ResourceID: resourceID,
+			Status:     "running",
+			ClaimToken: fmt.Sprintf("%032d", resourceID),
+			NextRunAt:  now,
+		}).Error)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			resourceID := uint(1200 + i)
+			attempts, _, err := store.Reserve(
+				context.Background(),
+				resourceID,
+				fmt.Sprintf("%032d", resourceID),
+				[]string{fmt.Sprintf("david%06d@outlook.com", resourceID)},
+				yearStart,
+				yearEnd,
+				weekStart,
+				weekEnd,
+				now,
+			)
+			if err == nil && len(attempts) != 1 {
+				err = fmt.Errorf("reserved %d attempts, want 1", len(attempts))
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
+
 func TestMicrosoftAliasStoreRejectsStaleDeferMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1004, "normal")

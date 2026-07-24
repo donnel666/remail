@@ -101,6 +101,8 @@ type MicrosoftFetchedMessage struct {
 	Subject           string
 	From              string
 	To                string
+	Cc                string
+	Bcc               string
 	ReceivedAt        time.Time
 	Preview           string
 	Body              string
@@ -138,6 +140,8 @@ type graphMessage struct {
 	Body              graphMessageBody    `json:"body"`
 	From              *graphRecipient     `json:"from"`
 	ToRecipients      []graphRecipient    `json:"toRecipients"`
+	CcRecipients      []graphRecipient    `json:"ccRecipients"`
+	BccRecipients     []graphRecipient    `json:"bccRecipients"`
 	ReceivedDateTime  string              `json:"receivedDateTime"`
 	HasAttachments    bool                `json:"hasAttachments"`
 	Error             *graphErrorEnvelope `json:"error"`
@@ -536,7 +540,7 @@ func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRe
 	}
 	values.Set("$top", strconv.Itoa(top))
 	values.Set("$orderby", "receivedDateTime desc")
-	selectFields := "id,internetMessageId,subject,bodyPreview,body,from,toRecipients,receivedDateTime,hasAttachments"
+	selectFields := "id,internetMessageId,subject,bodyPreview,body,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,hasAttachments"
 	if req.MetadataOnly {
 		selectFields = "id,internetMessageId,receivedDateTime"
 	}
@@ -1167,6 +1171,8 @@ func normalizeGraphFetchedMessage(message graphMessage, folder MicrosoftMailFold
 		Subject:           strings.TrimSpace(message.Subject),
 		From:              formatGraphRecipientList([]graphRecipient{derefGraphRecipient(message.From)}),
 		To:                formatGraphRecipientList(message.ToRecipients),
+		Cc:                formatGraphRecipientList(message.CcRecipients),
+		Bcc:               formatGraphRecipientList(message.BccRecipients),
 		ReceivedAt:        receivedAt,
 		Preview:           strings.TrimSpace(message.BodyPreview),
 		Body:              body,
@@ -1199,6 +1205,8 @@ func normalizeIMAPFetchedMessage(row *imapclient.FetchMessageBuffer, folder Micr
 		message.Subject = strings.TrimSpace(row.Envelope.Subject)
 		message.From = formatIMAPAddressList(row.Envelope.From)
 		message.To = formatIMAPAddressList(row.Envelope.To)
+		message.Cc = formatIMAPAddressList(row.Envelope.Cc)
+		message.Bcc = formatIMAPAddressList(row.Envelope.Bcc)
 		if message.ReceivedAt.IsZero() {
 			message.ReceivedAt = row.Envelope.Date
 		}
@@ -1234,6 +1242,12 @@ func applyIMAPBody(message *MicrosoftFetchedMessage, raw []byte, includeRawSourc
 	}
 	if to := decodeMIMEHeader(decoder, msg.Header.Get("To")); to != "" {
 		message.To = to
+	}
+	if cc := decodeMIMEHeader(decoder, msg.Header.Get("Cc")); cc != "" {
+		message.Cc = cc
+	}
+	if bcc := decodeMIMEHeader(decoder, msg.Header.Get("Bcc")); bcc != "" {
+		message.Bcc = bcc
 	}
 	if messageID := strings.Trim(strings.TrimSpace(msg.Header.Get("Message-Id")), "<>"); messageID != "" {
 		message.InternetMessageID = messageID

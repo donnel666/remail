@@ -1113,6 +1113,30 @@ func TestLooseModeKeepsOrderMailWithoutExtractableCode(t *testing.T) {
 	require.Empty(t, matches.results[0].VerificationCode)
 }
 
+func TestMatchedMessageUsesTheRecipientThatMatchedTheOrder(t *testing.T) {
+	repo := &matchingRepoStub{scopes: []OrderScope{{
+		OrderID: 43, OrderNo: "OR_CC", Recipient: "order-alias@example.com", RecipientKind: "exact",
+		ServiceMode: "purchase", LooseMatch: true,
+		Rules: []MailRule{
+			{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+			{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+		},
+	}}}
+	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+
+	_, matched, _, err := uc.ingestFetchedMessages(context.Background(), []FetchedMessage{{
+		EmailResourceID: 1, ResourceType: domain.ResourceTypeMicrosoft,
+		Recipient: "unrelated@example.com", Recipients: []string{"unrelated@example.com", "order-alias@example.com"},
+		Sender: "sender@example.net", ReceivedAt: time.Now().UTC(),
+	}})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, matched)
+	require.NotNil(t, repo.purchaseDelivery)
+	require.Equal(t, "order-alias@example.com", repo.purchaseDelivery.Recipient)
+	require.Equal(t, []string{"unrelated@example.com", "order-alias@example.com"}, repo.purchaseDelivery.Recipients)
+}
+
 func TestBodyPreviewDoesNotSplitUTF8(t *testing.T) {
 	preview := bodyPreview(strings.Repeat("a", 999) + "中")
 

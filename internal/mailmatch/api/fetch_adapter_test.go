@@ -134,7 +134,7 @@ func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing
 	providerPayload := "\n{\"id\":\"message-id\",\"body\":\"full\"}\n"
 
 	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{EmailResourceID: 42}, []mailinfra.MicrosoftFetchedMessage{{
-		ID: "message-id", RawSource: rawSource, ProviderPayload: providerPayload,
+		ID: "message-id", To: "user@example.com", RawSource: rawSource, ProviderPayload: providerPayload,
 	}})
 
 	require.Len(t, messages, 1)
@@ -142,13 +142,19 @@ func TestMicrosoftMessagesToMailmatchPreservesCompleteProviderContent(t *testing
 	require.Equal(t, providerPayload, messages[0].ProviderPayload)
 }
 
-func TestMicrosoftMessagesToMailmatchDoesNotInventRecipientForSharedResourceFetch(t *testing.T) {
+func TestMicrosoftMessagesToMailmatchUsesCcAndKeepsUnaddressedIdentity(t *testing.T) {
 	messages := microsoftMessagesToMailmatch(mailmatchapp.OrderScope{
 		EmailResourceID: 42,
 		Recipient:       "requesting-alias@example.com",
-	}, []mailinfra.MicrosoftFetchedMessage{{ID: "message-id"}})
+	}, []mailinfra.MicrosoftFetchedMessage{
+		{ID: "without-recipient"},
+		{ID: "cc-recipient", Cc: "Alias <alias@example.com>"},
+	})
 
-	require.Len(t, messages, 1)
+	require.Len(t, messages, 2)
+	require.Equal(t, "without-recipient", messages[0].ProviderMessageID)
 	require.Empty(t, messages[0].Recipient)
 	require.Empty(t, messages[0].Recipients)
+	require.Equal(t, "alias@example.com", messages[1].Recipient)
+	require.Equal(t, []string{"alias@example.com"}, messages[1].Recipients)
 }

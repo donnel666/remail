@@ -1169,8 +1169,11 @@ func (s *MicrosoftAliasStore) Reserve(
 				CreatedAt:  now,
 				UpdatedAt:  now,
 			}
-			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model)
+			result := tx.Create(&model)
 			if result.Error != nil {
+				if isDuplicateKeyError(result.Error) {
+					continue
+				}
 				return fmt.Errorf("reserve microsoft alias candidate: %w", result.Error)
 			}
 			if result.RowsAffected == 0 {

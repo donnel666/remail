@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	stdmail "net/mail"
 	"regexp"
 	"strings"
@@ -113,6 +114,14 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				RefreshToken: strings.TrimSpace(req.Scope.MicrosoftRT),
 				Cause:        err,
 			}
+			slog.Warn(
+				"microsoft mail fetch attempt failed",
+				"attempt", attempt+1,
+				"proxy_id", proxyID,
+				"direct", proxyConfig == nil || proxyConfig.Direct,
+				"category", "request",
+				"safe_message", "Microsoft mail service is temporarily unavailable.",
+			)
 			_ = a.reportProxyFailure(ctx, proxyID, "Microsoft mail fetch failed.")
 			if streamed {
 				if req.OnReset == nil {
@@ -132,6 +141,15 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 		failure := microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)
 		failure.RefreshToken = strings.TrimSpace(req.Scope.MicrosoftRT)
 		lastFailure = failure
+		slog.Warn(
+			"microsoft mail fetch attempt rejected",
+			"attempt", attempt+1,
+			"proxy_id", proxyID,
+			"direct", proxyConfig == nil || proxyConfig.Direct,
+			"category", failure.Category,
+			"proxy_failure", result.ProxyFailure,
+			"safe_message", failure.SafeMessage,
+		)
 		if result.ProxyFailure {
 			_ = a.reportProxyFailure(ctx, proxyID, result.SafeMessage)
 			if streamed {
@@ -212,7 +230,7 @@ func microsoftMessagesToMailmatch(scope mailmatchapp.OrderScope, messages []mail
 		if body == "" {
 			body = strings.TrimSpace(message.Preview)
 		}
-		recipients := recipientCandidates(message.To)
+		recipients := recipientCandidates(strings.Join([]string{message.To, message.Cc, message.Bcc}, ","))
 		primaryRecipient := firstNonEmpty(recipients...)
 		items = append(items, mailmatchapp.FetchedMessage{
 			EmailResourceID:   scope.EmailResourceID,

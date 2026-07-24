@@ -8,10 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,6 +30,87 @@ func (s *mailBackgroundExecutionGateStub) TryAcquire() (func(), bool) {
 type microsoftAliasRunningRetryStoreStub struct {
 	mailapp.MicrosoftAliasScheduleStore
 	cleanupCalls int
+}
+
+type failingOutboundSenderStub struct {
+	calls int
+	panic bool
+}
+
+func (s *failingOutboundSenderStub) Send(context.Context, maildomain.OutboundMessage) error {
+	s.calls++
+	if s.panic {
+		panic("smtp panic")
+	}
+	return &mailapp.OutboundSendFailure{SafeMessage: "SMTP server rejected the message.", Cause: errors.New("smtp 550")}
+}
+
+func TestOutboundSMTPFailureCompletesWithoutAsynqRetry(t *testing.T) {
+	sender := &failingOutboundSenderStub{}
+	module := &MailTransportModule{OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender)}
+	mux := asynq.NewServeMux()
+	RegisterMailTransportTaskHandlers(mux, module)
+	payload, err := json.Marshal(mailapp.OutboundSendTask{Message: mailapp.VerificationCodeMessage("user@example.com", "123456")})
+	require.NoError(t, err)
+
+	err = mux.ProcessTask(context.Background(), asynq.NewTask(mailinfra.TypeOutboundSend, payload))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, sender.calls)
+}
+
+func TestOutboundSMTPFailureDeletesTemporaryRedisPayload(t *testing.T) {
+	sender := &failingOutboundSenderStub{}
+	mux, task, queue, id := queuedOutboundTaskForHandler(t, sender)
+
+	err := mux.ProcessTask(context.Background(), task)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, sender.calls)
+	_, found, loadErr := queue.LoadOutboundSend(context.Background(), id)
+	require.NoError(t, loadErr)
+	require.False(t, found)
+}
+
+func TestOutboundSMTPPanicDeletesPayloadAndRevokesTask(t *testing.T) {
+	sender := &failingOutboundSenderStub{panic: true}
+	mux, task, queue, id := queuedOutboundTaskForHandler(t, sender)
+
+	err := mux.ProcessTask(context.Background(), task)
+
+	require.ErrorIs(t, err, asynq.RevokeTask)
+	_, found, loadErr := queue.LoadOutboundSend(context.Background(), id)
+	require.NoError(t, loadErr)
+	require.False(t, found)
+}
+
+func queuedOutboundTaskForHandler(t *testing.T, sender mailapp.SenderPort) (*asynq.ServeMux, *asynq.Task, *mailinfra.OutboundMailQueue, string) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	asynqOptions := asynq.RedisClientOpt{Addr: server.Addr()}
+	asynqClient := asynq.NewClient(asynqOptions)
+	inspector := asynq.NewInspector(asynqOptions)
+	t.Cleanup(func() {
+		require.NoError(t, inspector.Close())
+		require.NoError(t, asynqClient.Close())
+		require.NoError(t, redisClient.Close())
+	})
+	queue := mailinfra.NewOutboundMailQueue(asynqClient, redisClient)
+	accepted, err := queue.EnqueueOutboundSend(context.Background(), mailapp.OutboundSendTask{Message: mailapp.VerificationCodeMessage("user@example.com", "123456")})
+	require.NoError(t, err)
+	require.True(t, accepted)
+	pending, err := inspector.ListPendingTasks(platform.QueueMailtransport)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	var payload mailapp.OutboundSendTask
+	require.NoError(t, json.Unmarshal(pending[0].Payload, &payload))
+	mux := asynq.NewServeMux()
+	RegisterMailTransportTaskHandlers(mux, &MailTransportModule{
+		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender),
+		OutboundQueue:       queue,
+	})
+	return mux, asynq.NewTask(mailinfra.TypeOutboundSend, pending[0].Payload), queue, payload.ID
 }
 
 func (*microsoftAliasRunningRetryStoreStub) MarkQueued(context.Context, mailapp.MicrosoftAliasTask, time.Time) (bool, error) {

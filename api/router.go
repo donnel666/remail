@@ -99,6 +99,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			p.DB,
 			fileStore,
 			p.Asynq,
+			p.Redis,
 			sender,
 			outboundSender(p.SMTP),
 			mailinfra.InboundSMTPConfig{

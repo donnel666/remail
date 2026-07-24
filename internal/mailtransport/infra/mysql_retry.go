@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -9,14 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Microsoft alias write transactions insert into microsoft_alias_attempts,
-// whose foreign key to microsoft_resources is shared with the validation and
-// token-refresh subsystems. Concurrent background workers therefore acquire
-// shared/exclusive locks on the same microsoft_resources rows in different
-// orders and form transient InnoDB lock cycles (Error 1213). MySQL rolls back
-// the loser and asks it to "try restarting transaction"; a small bounded retry
-// absorbs that instead of surfacing it as a task failure. This mirrors the
-// deadlock retry already used by the alloc, trade and core infra repositories.
+// Keep a bounded retry for database-level deadlocks and lock timeouts that can
+// still originate outside the alias transaction.
 const aliasTransactionAttempts = 4
 
 func isAliasDeadlockError(err error) bool {
@@ -29,7 +24,9 @@ func isAliasDeadlockError(err error) bool {
 // captured variables at its start, because it can run more than once.
 func withAliasDeadlockRetry(ctx context.Context, db *gorm.DB, fn func(*gorm.DB) error) error {
 	return retryOnDeadlock(ctx, aliasTransactionAttempts, func() error {
-		return db.WithContext(ctx).Transaction(fn)
+		// READ COMMITTED avoids retaining empty-range next-key locks while each
+		// resource independently reserves rows in the shared attempt indexes.
+		return db.WithContext(ctx).Transaction(fn, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	})
 }
 

@@ -18,6 +18,7 @@ import (
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	smtpserver "github.com/emersion/go-smtp"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -31,8 +32,8 @@ type MicrosoftAliasDispatchReleaser interface {
 
 type MailTransportModule struct {
 	DeliveryUseCase     mailapp.DeliveryPort
-	OutboundDelivery    *mailapp.AsyncDeliveryService
 	OutboundSendUseCase *mailapp.OutboundSendUseCase
+	OutboundQueue       *mailinfra.OutboundMailQueue
 	InboundUseCase      *mailapp.InboundService
 	MicrosoftAliases    *mailapp.MicrosoftAliasService
 	TokenRefresh        *mailapp.MicrosoftTokenRefreshService
@@ -51,6 +52,7 @@ type MailTransportModule struct {
 	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
 	bindingDomains      bindingDomainLister
 	autoRefresh         microsoftAutoRefreshLister
+	recoveryLeases      *mailinfra.MicrosoftBindingRecoveryLeaseStore
 }
 
 func (m *MailTransportModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
@@ -89,6 +91,7 @@ const (
 	microsoftRTRefreshLookahead = 30 * 24 * time.Hour
 	microsoftRTRefreshHour      = 3
 	microsoftRTRefreshScanLimit = 2000
+	recoveryLeaseCleanupLimit   = 100
 )
 
 // refreshAuxiliaryDomains loads the binding-purpose domains from the DB into the
@@ -112,6 +115,17 @@ func refreshAuxiliaryDomainsWithin(ctx context.Context, lister bindingDomainList
 	})
 }
 
+func cleanupRecoveryLeases(ctx context.Context, module *MailTransportModule) {
+	if module == nil || module.recoveryLeases == nil {
+		return
+	}
+	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(cleanupCtx context.Context) {
+		if _, err := module.recoveryLeases.DeleteExpired(cleanupCtx, time.Now().UTC(), recoveryLeaseCleanupLimit); err != nil {
+			slog.Warn("cleanup microsoft binding recovery leases failed", "error", err)
+		}
+	})
+}
+
 func runDispatcherSeed(ctx context.Context, timeout time.Duration, seed func(context.Context)) {
 	if seed == nil || ctx.Err() != nil {
 		return
@@ -125,11 +139,6 @@ func seedMailDispatchers(ctx context.Context, module *MailTransportModule) {
 	if module == nil {
 		return
 	}
-	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) {
-		if module.OutboundDelivery != nil {
-			module.OutboundDelivery.ScheduleDispatcher(seedCtx, 0)
-		}
-	})
 	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) {
 		if module.InboundUseCase != nil {
 			module.InboundUseCase.ScheduleDispatcher(seedCtx, 0)
@@ -203,6 +212,7 @@ func NewMailTransportModule(
 	db *gorm.DB,
 	files governanceapp.FilePort,
 	asynqClient *asynq.Client,
+	redisClient redis.UniversalClient,
 	sender mailapp.SenderPort,
 	outboundFrom string,
 	inboundCfg mailinfra.InboundSMTPConfig,
@@ -210,8 +220,7 @@ func NewMailTransportModule(
 ) (*MailTransportModule, error) {
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
-	outboundStore := mailinfra.NewOutboundMailStore(db)
-	outboundQueue := mailinfra.NewOutboundMailQueue(asynqClient)
+	outboundQueue := mailinfra.NewOutboundMailQueue(asynqClient, redisClient)
 	inboundRepo := mailinfra.NewInboundMailRepo(db)
 	inboundResolver := mailinfra.NewInboundResourceResolver(db)
 	inboundQueue := mailinfra.NewInboundMailQueue(asynqClient)
@@ -236,15 +245,15 @@ func NewMailTransportModule(
 	refreshAuxiliaryDomains(context.Background(), resourceRepo)
 
 	inboundUseCase := mailapp.NewInboundService(inboundRepo, inboundResolver, files, inboundQueue, systemLogs)
-	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundStore, outboundQueue, systemLogs, outboundFrom)
+	outboundDelivery := mailapp.NewAsyncDeliveryService(outboundQueue, outboundFrom)
 	validationAdapter := NewResourceValidationAdapter(proxies, bindingRepo)
 	aliasAdapter := NewMicrosoftAliasCreationAdapter(proxies)
 	aliasService := mailapp.NewMicrosoftAliasService(aliasStore, aliasQueue, aliasAdapter)
 	tokenRefreshService := mailapp.NewMicrosoftTokenRefreshService(tokenRefreshRepo, tokenRefreshQueue, validationAdapter)
 	module := &MailTransportModule{
 		DeliveryUseCase:     outboundDelivery,
-		OutboundDelivery:    outboundDelivery,
-		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(outboundStore, sender, systemLogs),
+		OutboundSendUseCase: mailapp.NewOutboundSendUseCase(sender),
+		OutboundQueue:       outboundQueue,
 		InboundUseCase:      inboundUseCase,
 		MicrosoftAliases:    aliasService,
 		TokenRefresh:        tokenRefreshService,
@@ -261,6 +270,7 @@ func NewMailTransportModule(
 		tokenRefreshRepo:    tokenRefreshRepo,
 		bindingDomains:      resourceRepo,
 		autoRefresh:         resourceRepo,
+		recoveryLeases:      recoveryLeaseStore,
 	}
 	if inboundCfg.Enabled {
 		module.InboundSMTP = mailinfra.NewInboundSMTPServer(inboundCfg, inboundUseCase)
@@ -304,6 +314,7 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	var once sync.Once
 	seedMailDispatchers(ctx, m)
+	cleanupRecoveryLeases(ctx, m)
 	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftAliasDispatcher(seedCtx, m, 0) })
 	runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
 	go func() {
@@ -325,6 +336,7 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 				runDispatcherSeed(ctx, dispatcherSeedTimeout, func(seedCtx context.Context) { scheduleMicrosoftTokenRefreshDispatcher(seedCtx, m, 0) })
 			case <-bindingDomainTicker.C:
 				refreshAuxiliaryDomains(ctx, m.bindingDomains)
+				cleanupRecoveryLeases(ctx, m)
 			case <-ctx.Done():
 				return
 			}

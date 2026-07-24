@@ -284,7 +284,8 @@ func TestAppendMessagesKeepFactsImmutableAndMatchedOwnershipTerminalMySQL(t *tes
 		Status:          domain.MessageStatusIgnored,
 		ReceivedAt:      now,
 	}})
-	require.ErrorIs(t, err, domain.ErrMessageNotFound)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, domain.ErrMessageNotFound)
 	_, _, err = repo.InsertMessageProjections(ctx, []domain.Message{{
 		ID:         99999,
 		Status:     domain.MessageStatusIgnored,
