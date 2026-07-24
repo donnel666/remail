@@ -1,8 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/xml"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -96,11 +99,62 @@ func projectLogoContentType(content []byte, fileName string) (string, string, bo
 	case "image/webp":
 		return detected, ".webp", true
 	}
+	if validProjectLogoSVG(content) {
+		return "image/svg+xml", ".svg", true
+	}
 	extension := strings.ToLower(filepath.Ext(fileName))
 	if extension == ".webp" {
 		return "image/webp", ".webp", true
 	}
 	return "", "", false
+}
+
+func validProjectLogoSVG(content []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(content))
+	seenSVG, depth, closed := false, 0, false
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return seenSVG && closed
+		}
+		if err != nil {
+			return false
+		}
+		switch token := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if seenSVG || token.Name.Local != "svg" {
+					return false
+				}
+				seenSVG = true
+			}
+			// Logo uploads stay static; reject active SVG content.
+			switch strings.ToLower(token.Name.Local) {
+			case "script", "foreignobject", "iframe", "object", "embed":
+				return false
+			}
+			for _, attr := range token.Attr {
+				name := strings.ToLower(attr.Name.Local)
+				value := strings.ToLower(strings.TrimSpace(attr.Value))
+				if strings.HasPrefix(name, "on") || ((name == "href" || name == "src") && strings.HasPrefix(value, "javascript:")) {
+					return false
+				}
+			}
+			depth++
+		case xml.EndElement:
+			if depth == 0 {
+				return false
+			}
+			depth--
+			if depth == 0 {
+				closed = true
+			}
+		case xml.CharData:
+			if depth == 0 && strings.TrimSpace(string(token)) != "" {
+				return false
+			}
+		}
+	}
 }
 
 func cleanProjectLogoFileName(fileName string, extension string) string {

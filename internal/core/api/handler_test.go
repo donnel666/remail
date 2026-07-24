@@ -4182,6 +4182,31 @@ func TestCoreHandler_ProjectLogoUploadAndRead(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, "image/png", w.Header().Get("Content-Type"))
 	require.NotEmpty(t, w.Body.Bytes())
+
+	body, contentType = multipartImportBody(t, "logo.svg", `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>`)
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/admin/projects/logos", body)
+	c.Request.Header.Set("Content-Type", contentType)
+	setAuthContext(c, 1, iamdomain.RoleAdmin)
+
+	h.PostAdminProjectLogo(c)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var svgUpload ProjectLogoUploadResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &svgUpload))
+	logoKey = strings.TrimPrefix(svgUpload.LogoURL, "/v1/projects/logos/")
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", svgUpload.LogoURL, nil)
+	c.Params = gin.Params{{Key: "logoKey", Value: logoKey}}
+	setAuthContext(c, 2, iamdomain.RoleUser)
+
+	h.GetProjectLogo(c)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "image/svg+xml", w.Header().Get("Content-Type"))
+	require.Contains(t, w.Body.String(), "<svg")
 }
 
 func projectDetailForAPITest() *coredomain.ProjectDetail {
