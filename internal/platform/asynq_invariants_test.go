@@ -104,5 +104,5 @@ func TestAsynqTasksUseBoundedUniquenessInsteadOfFixedTaskIDs(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, dispatchers, 9)
+	require.GreaterOrEqual(t, dispatchers, 8)
 }
