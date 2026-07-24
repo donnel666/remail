@@ -421,11 +421,29 @@ export interface paths {
         /** List user groups (admin only) */
         get: operations["getAdminUserGroups"];
         put?: never;
-        post?: never;
+        /** Create a user group (admin only) */
+        post: operations["postAdminUserGroup"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/groups/{groupId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a user group (admin only) */
+        patch: operations["patchAdminUserGroup"];
         trace?: never;
     };
     "/v1/admin/settings": {
@@ -4060,6 +4078,62 @@ export interface components {
             name: string;
             description: string;
             enabled: boolean;
+            /** Format: int64 */
+            apiRpmLimit: number;
+            /** Format: int64 */
+            apiConcurrencyLimit: number;
+            /** Format: int64 */
+            apiQuotaLimit: number;
+            priceDiscountRatio: components["schemas"]["UserGroupDiscountRatio"];
+            topupThreshold: components["schemas"]["NonNegativeLedgerAmount"];
+            autoUpgradeEnabled: boolean;
+        };
+        /** @description Exact decimal discount ratio from 0 through 1, with up to 6 decimal places. */
+        UserGroupDiscountRatio: string;
+        AdminCreateUserGroupRequest: {
+            code: string;
+            name: string;
+            description?: string;
+            /** @default true */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @default 60
+             */
+            apiRpmLimit: number;
+            /**
+             * Format: int64
+             * @default 3
+             */
+            apiConcurrencyLimit: number;
+            /**
+             * Format: int64
+             * @default 10000
+             */
+            apiQuotaLimit: number;
+            /** @default 1.00 */
+            priceDiscountRatio: components["schemas"]["UserGroupDiscountRatio"];
+            /** @default 0.00 */
+            topupThreshold: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @default false */
+            autoUpgradeEnabled: boolean;
+        };
+        AdminUpdateUserGroupRequest: {
+            name?: string;
+            description?: string;
+            enabled?: boolean;
+            /** Format: int64 */
+            apiRpmLimit?: number;
+            /** Format: int64 */
+            apiConcurrencyLimit?: number;
+            /** Format: int64 */
+            apiQuotaLimit?: number;
+            priceDiscountRatio?: components["schemas"]["UserGroupDiscountRatio"];
+            topupThreshold?: components["schemas"]["NonNegativeLedgerAmount"];
+            autoUpgradeEnabled?: boolean;
+        };
+        AdminUserGroupResponse: {
+            group: components["schemas"]["UserGroupResponse"];
         };
         AdminUserGroupListResponse: {
             groups: components["schemas"]["UserGroupResponse"][];
@@ -7416,6 +7490,134 @@ export interface operations {
             };
             /** @description Permission denied */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postAdminUserGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCreateUserGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description User group created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserGroupResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid user group values */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchAdminUserGroup: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                groupId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUpdateUserGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description User group updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserGroupResponse"];
+                };
+            };
+            /** @description Invalid request body or group ID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User group not found or values are invalid */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

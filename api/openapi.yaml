@@ -1150,6 +1150,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    post:
+      operationId: postAdminUserGroup
+      summary: Create a user group (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateUserGroupRequest"
+      responses:
+        "201":
+          description: User group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserGroupResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid user group values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/groups/{groupId}:
+    patch:
+      operationId: patchAdminUserGroup
+      summary: Update a user group (admin only)
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateUserGroupRequest"
+      responses:
+        "200":
+          description: User group updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserGroupResponse"
+        "400":
+          description: Invalid request body or group ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: User group not found or values are invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/admin/settings:
     get:
@@ -12100,6 +12200,12 @@ components:
         - name
         - description
         - enabled
+        - apiRpmLimit
+        - apiConcurrencyLimit
+        - apiQuotaLimit
+        - priceDiscountRatio
+        - topupThreshold
+        - autoUpgradeEnabled
       properties:
         id:
           type: integer
@@ -12111,6 +12217,115 @@ components:
           type: string
         enabled:
           type: boolean
+        apiRpmLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        apiConcurrencyLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        apiQuotaLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        priceDiscountRatio:
+          $ref: "#/components/schemas/UserGroupDiscountRatio"
+        topupThreshold:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        autoUpgradeEnabled:
+          type: boolean
+      additionalProperties: false
+
+    UserGroupDiscountRatio:
+      type: string
+      description: Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+      pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+
+    AdminCreateUserGroupRequest:
+      type: object
+      required:
+        - code
+        - name
+      properties:
+        code:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        enabled:
+          type: boolean
+          default: true
+        apiRpmLimit:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 60
+        apiConcurrencyLimit:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 3
+        apiQuotaLimit:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 10000
+        priceDiscountRatio:
+          allOf:
+            - $ref: "#/components/schemas/UserGroupDiscountRatio"
+          default: "1.00"
+        topupThreshold:
+          allOf:
+            - $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          default: "0.00"
+        autoUpgradeEnabled:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+    AdminUpdateUserGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        enabled:
+          type: boolean
+        apiRpmLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        apiConcurrencyLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        apiQuotaLimit:
+          type: integer
+          format: int64
+          minimum: 0
+        priceDiscountRatio:
+          $ref: "#/components/schemas/UserGroupDiscountRatio"
+        topupThreshold:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        autoUpgradeEnabled:
+          type: boolean
+      additionalProperties: false
+
+    AdminUserGroupResponse:
+      type: object
+      required:
+        - group
+      properties:
+        group:
+          $ref: "#/components/schemas/UserGroupResponse"
       additionalProperties: false
 
     AdminUserGroupListResponse:

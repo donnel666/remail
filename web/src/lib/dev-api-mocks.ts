@@ -27,7 +27,12 @@ export const DEV_ME = {
     email: "admin@remail.dev",
     nickname: "Admin",
     role: "super_admin",
-    userGroup: { id: 1, code: "super_admin", name: "超级管理员", description: "", enabled: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
+    userGroup: {
+      id: 1, code: "super_admin", name: "超级管理员", description: "", enabled: true,
+      apiRpmLimit: 60, apiConcurrencyLimit: 3, apiQuotaLimit: 10000,
+      priceDiscountRatio: "1.00", topupThreshold: "0.00", autoUpgradeEnabled: false,
+      createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+    },
     permissions,
     enabled: true,
     createdAt: "2024-01-01T00:00:00Z",

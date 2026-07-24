@@ -40,7 +40,7 @@ export default function BatchDataSection({ options, onBulkSave }: SectionProps) 
         {field("数据清理批次间隔（毫秒）", "retention_batch_sleep_ms")}
         {field("数据清理执行时间（小时）", "retention_daily_run_hour")}
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "batch"} onClick={() => void save("batch", BATCH_KEYS)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "batch"} onClick={() => void save("batch", BATCH_KEYS).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader icon={<Trash2 size={16} />} title={t("数据保留策略")} description={t("配置各类业务记录和系统日志的保留天数")} />}>
@@ -53,7 +53,7 @@ export default function BatchDataSection({ options, onBulkSave }: SectionProps) 
         {field("入站邮件记录保留天数", "inbound_mail_retain_days")}
         {field("系统日志保留天数", "system_log_retain_days")}
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "retention"} onClick={() => void save("retention", RETENTION_KEYS)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "retention"} onClick={() => void save("retention", RETENTION_KEYS).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
   </div>;
 }

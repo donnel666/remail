@@ -36,6 +36,6 @@ export default function AllocationSection({ options, onBulkSave }: SectionProps)
       {field("库存缓存活跃有效期（分钟）", "inventory_cache_activity_ttl_minutes")}
       {field("库存缓存硬过期（小时）", "inventory_cache_hard_ttl_hours")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

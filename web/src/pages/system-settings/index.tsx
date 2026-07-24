@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Spin, TabPane, Tabs, Toast } from "@douyinfe/semi-ui";
+import { Button, Spin, TabPane, Tabs, Toast } from "@douyinfe/semi-ui";
 import {
   getSystemOptions, updateSystemOption, updateSystemOptionsBulk,
   type SystemOption,
@@ -17,12 +17,17 @@ import EmailServiceSection from "./email-service";
 import OrdersPaymentSection from "./orders-payment";
 import SystemOperationsSection from "./system-operations";
 import UsersRebatesSection from "./users-rebates";
+import { SettingsAccessBoundary } from "./settings-layout";
 
 export interface SectionProps {
   options: SystemOption[];
   loading: boolean;
   onSave: (key: string, value: string) => Promise<void>;
   onBulkSave: (updates: { key: string; value: string }[]) => Promise<void>;
+  canWrite: boolean;
+  canSensitive: boolean;
+  canReadUserGroups: boolean;
+  canWriteUserGroups: boolean;
 }
 
 type Section = {
@@ -47,24 +52,34 @@ export default function SystemSettingsPage() {
   const { currentUser } = useAuth();
   const [options, setOptions] = useState<SystemOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState(SECTIONS[0].key);
 
-  const canAccess = currentUser && hasPermissionKey(currentUser, "system:settings:read");
+  const canAccess = Boolean(currentUser && hasPermissionKey(currentUser, "system:settings:read"));
+  const canWrite = Boolean(currentUser && hasPermissionKey(currentUser, "system:settings:write"));
+  const canSensitive = Boolean(currentUser && hasPermissionKey(currentUser, "system:settings:sensitive"));
+  const canReadUserGroups = Boolean(currentUser && hasPermissionKey(currentUser, "iam:user_group:read"));
+  const canWriteUserGroups = Boolean(currentUser && hasPermissionKey(currentUser, "iam:user_group:write"));
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await getSystemOptions();
       setOptions(result.options ?? []);
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : t("加载系统设置失败"));
+      const message = error instanceof Error ? error.message : t("加载系统设置失败");
+      setLoadError(message);
+      Toast.error(message);
     } finally {
       setLoading(false);
     }
   }, [t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (canAccess) void load();
+  }, [canAccess, load]);
 
   const handleSave = useCallback(async (key: string, value: string) => {
     setSaving(true);
@@ -73,6 +88,7 @@ export default function SystemSettingsPage() {
       setOptions((prev) => { const nx = prev.filter((o) => o.key !== key); nx.push({ key, value }); return nx; });
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -92,6 +108,7 @@ export default function SystemSettingsPage() {
       });
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : t("保存设置失败"));
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -99,6 +116,15 @@ export default function SystemSettingsPage() {
 
   if (!canAccess) {
     return <div className="flex h-64 items-center justify-center"><p className="text-muted-foreground">{t("Permission required: system settings")}</p></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="console-content-width flex min-h-64 flex-col items-center justify-center gap-3 pt-3">
+        <p className="text-sm text-[var(--semi-color-text-2)]">{t("系统设置加载失败")}：{loadError}</p>
+        <Button onClick={() => void load()} theme="light" type="primary">{t("重试")}</Button>
+      </div>
+    );
   }
 
   return (
@@ -110,21 +136,34 @@ export default function SystemSettingsPage() {
         onChange={setActiveSection}
         tabPaneMotion={false}
       >
-        {SECTIONS.map((section) => (
-          <TabPane
-            key={section.key}
-            itemKey={section.key}
-            tab={<span className="flex items-center gap-1.5">{section.icon}{t(section.label)}</span>}
-          >
-            <div hidden={activeSection !== section.key} className="min-h-40">
-              <Spin spinning={loading} size="large">
-                {!loading ? (
-                  <section.component options={options} loading={saving} onSave={handleSave} onBulkSave={handleBulkSave} />
-                ) : null}
-              </Spin>
-            </div>
-          </TabPane>
-        ))}
+        {SECTIONS.map((section) => {
+          const SectionComponent = section.component;
+          const content = !loading ? <SectionComponent
+            canReadUserGroups={canReadUserGroups}
+            canSensitive={canSensitive}
+            canWrite={canWrite}
+            canWriteUserGroups={canWriteUserGroups}
+            loading={saving}
+            onBulkSave={handleBulkSave}
+            onSave={handleSave}
+            options={options}
+          /> : null;
+          return (
+            <TabPane
+              key={section.key}
+              itemKey={section.key}
+              tab={<span className="flex items-center gap-1.5">{section.icon}{t(section.label)}</span>}
+            >
+              <div hidden={activeSection !== section.key} className="min-h-40">
+                <Spin spinning={loading} size="large">
+                  {section.key === "users-rebates" || !content
+                    ? content
+                    : <SettingsAccessBoundary canWrite={canWrite}>{content}</SettingsAccessBoundary>}
+                </Spin>
+              </div>
+            </TabPane>
+          );
+        })}
       </Tabs>
     </div>
   );

@@ -29,6 +29,6 @@ export default function OrderSection({ options, onBulkSave }: SectionProps) {
       <SettingsNumberField label={t("结账排队容量")} value={number(form.checkout_batch_max_waiting)} onChange={(value) => update("checkout_batch_max_waiting", value)} min={0} />
       <SettingsNumberField label={t("结账批次单位")} value={number(form.checkout_batch_unit_size)} onChange={(value) => update("checkout_batch_unit_size", value)} min={0} />
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

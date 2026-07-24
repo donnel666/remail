@@ -122,14 +122,14 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const markAnnouncementChanged = () => setAnnouncementDirty(true);
   const markFaqChanged = () => setFaqDirty(true);
 
-  const saveAll = () => {
+  const saveAll = async () => {
     const values = {
       global_notice: form.global_notice,
       maintenance_notice: form.maintenance_notice,
       maintenance_mode: form.maintenance_mode,
       maintenance_allow_ips: form.maintenance_allow_ips,
     };
-    void onBulkSave(Object.entries(values).map(([key, value]) => ({ key, value: String(value) })));
+    await onBulkSave(Object.entries(values).map(([key, value]) => ({ key, value: String(value) })));
   };
 
   const saveAnnouncement = () => {
@@ -277,7 +277,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
       <div className="order-2 flex w-full gap-2 md:order-1 md:w-auto">
         <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setAnnouncementDraft({ ...EMPTY_ANNOUNCEMENT }); setAnnouncementModalOpen(true); }}>{t("添加公告")}</Button>
         <Button icon={<Trash2 size={14} />} theme="light" type="danger" className="w-full md:w-auto" disabled={selectedAnnouncementIds.length === 0} onClick={deleteSelectedAnnouncements}>{t("批量删除")} {selectedAnnouncementIds.length > 0 ? `(${selectedAnnouncementIds.length})` : ""}</Button>
-        <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!announcementDirty} onClick={() => void saveAnnouncements()}>{t("保存设置")}</Button>
+        <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!announcementDirty} onClick={() => void saveAnnouncements().catch(() => undefined)}>{t("保存设置")}</Button>
       </div>
       <div className="order-1 flex items-center gap-2 md:order-2">
         <Switch aria-label={t("系统公告开关")} checked={announcementPanelEnabled} onChange={(value) => {
@@ -323,7 +323,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
       <div className="order-2 flex w-full gap-2 md:order-1 md:w-auto">
         <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setFaqDraft({ ...EMPTY_FAQ }); setFaqModalOpen(true); }}>{t("添加问答")}</Button>
         <Button icon={<Trash2 size={14} />} theme="light" type="danger" className="w-full md:w-auto" disabled={selectedFaqIds.length === 0} onClick={deleteSelectedFaqs}>{t("批量删除")} {selectedFaqIds.length > 0 ? `(${selectedFaqIds.length})` : ""}</Button>
-        <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!faqDirty} onClick={() => void saveFaqSettings()}>{t("保存设置")}</Button>
+        <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!faqDirty} onClick={() => void saveFaqSettings().catch(() => undefined)}>{t("保存设置")}</Button>
       </div>
       <div className="order-1 flex items-center gap-2 md:order-2">
         <Switch aria-label={t("常见问答开关")} checked={form.faq_enabled} onChange={(value) => { update("faq_enabled", value); markFaqChanged(); }} />
@@ -366,7 +366,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
         <SettingsSwitchField checked={form.maintenance_mode} onChange={(value) => update("maintenance_mode", value)} label={t("维护模式开关")} description={t("开启后所有非管理员用户看到维护页面")} />
         <SettingsTextareaField label={t("维护模式允许的 IP")} value={form.maintenance_allow_ips} onChange={(value) => update("maintenance_allow_ips", value)} rows={6} placeholder={t("每行一个 IP，维护期间仍可正常访问")} />
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={loading} onClick={saveAll} theme="solid" type="primary" className="mt-4">{t("保存全部")}</Button>
+      <Button icon={<Save size={14} />} loading={loading} onClick={() => void saveAll().catch(() => undefined)} theme="solid" type="primary" className="mt-4">{t("保存全部")}</Button>
     </SettingsSection>
 
     <SettingsSection title={faqHeader}>

@@ -9,6 +9,8 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/iam/domain"
+	moneyfmt "github.com/donnel666/remail/internal/money"
+	"github.com/shopspring/decimal"
 )
 
 // AdminUseCase handles admin user management.
@@ -90,16 +92,28 @@ type UpdateInviteRequest struct {
 }
 
 type CreateUserGroupRequest struct {
-	Code        string
-	Name        string
-	Description string
-	Enabled     bool
+	Code                string
+	Name                string
+	Description         string
+	Enabled             bool
+	APIRPMLimit         int64
+	APIConcurrencyLimit int64
+	APIQuotaLimit       int64
+	PriceDiscountRatio  string
+	TopupThreshold      string
+	AutoUpgradeEnabled  bool
 }
 
 type UpdateUserGroupRequest struct {
-	Name        *string
-	Description *string
-	Enabled     *bool
+	Name                *string
+	Description         *string
+	Enabled             *bool
+	APIRPMLimit         *int64
+	APIConcurrencyLimit *int64
+	APIQuotaLimit       *int64
+	PriceDiscountRatio  *string
+	TopupThreshold      *string
+	AutoUpgradeEnabled  *bool
 }
 
 var permissionCatalog = []domain.PermissionCatalogItem{
@@ -206,12 +220,18 @@ func (uc *AdminUseCase) ListUserGroups(ctx context.Context) ([]domain.UserGroup,
 
 func (uc *AdminUseCase) CreateUserGroup(ctx context.Context, req CreateUserGroupRequest) (*domain.UserGroup, error) {
 	group := &domain.UserGroup{
-		Code:        strings.TrimSpace(req.Code),
-		Name:        strings.TrimSpace(req.Name),
-		Description: strings.TrimSpace(req.Description),
-		Enabled:     req.Enabled,
+		Code:                strings.TrimSpace(req.Code),
+		Name:                strings.TrimSpace(req.Name),
+		Description:         strings.TrimSpace(req.Description),
+		Enabled:             req.Enabled,
+		APIRPMLimit:         req.APIRPMLimit,
+		APIConcurrencyLimit: req.APIConcurrencyLimit,
+		APIQuotaLimit:       req.APIQuotaLimit,
+		PriceDiscountRatio:  req.PriceDiscountRatio,
+		TopupThreshold:      req.TopupThreshold,
+		AutoUpgradeEnabled:  req.AutoUpgradeEnabled,
 	}
-	if group.Code == "" || group.Name == "" {
+	if group.Code == "" || group.Name == "" || normalizeUserGroupCapabilities(group) != nil {
 		return nil, domain.ErrInvalidUserGroup
 	}
 	if err := uc.repo.CreateUserGroup(ctx, group); err != nil {
@@ -241,10 +261,58 @@ func (uc *AdminUseCase) UpdateUserGroup(ctx context.Context, groupID uint, req U
 	if req.Enabled != nil {
 		group.Enabled = *req.Enabled
 	}
+	if req.APIRPMLimit != nil {
+		group.APIRPMLimit = *req.APIRPMLimit
+	}
+	if req.APIConcurrencyLimit != nil {
+		group.APIConcurrencyLimit = *req.APIConcurrencyLimit
+	}
+	if req.APIQuotaLimit != nil {
+		group.APIQuotaLimit = *req.APIQuotaLimit
+	}
+	if req.PriceDiscountRatio != nil {
+		group.PriceDiscountRatio = *req.PriceDiscountRatio
+	}
+	if req.TopupThreshold != nil {
+		group.TopupThreshold = *req.TopupThreshold
+	}
+	if req.AutoUpgradeEnabled != nil {
+		group.AutoUpgradeEnabled = *req.AutoUpgradeEnabled
+	}
+	if err := normalizeUserGroupCapabilities(group); err != nil {
+		return nil, err
+	}
 	if err := uc.repo.UpdateUserGroup(ctx, group); err != nil {
 		return nil, err
 	}
 	return group, nil
+}
+
+func normalizeUserGroupCapabilities(group *domain.UserGroup) error {
+	if group.APIRPMLimit < 0 || group.APIConcurrencyLimit < 0 || group.APIQuotaLimit < 0 {
+		return domain.ErrInvalidUserGroup
+	}
+
+	discount := strings.TrimSpace(group.PriceDiscountRatio)
+	if discount == "" {
+		discount = "1"
+	}
+	parsedDiscount, err := moneyfmt.Parse(discount)
+	if err != nil || parsedDiscount.IsNegative() || parsedDiscount.GreaterThan(decimal.NewFromInt(1)) {
+		return domain.ErrInvalidUserGroup
+	}
+	group.PriceDiscountRatio = moneyfmt.Format(parsedDiscount)
+
+	threshold := strings.TrimSpace(group.TopupThreshold)
+	if threshold == "" {
+		threshold = "0"
+	}
+	parsedThreshold, err := moneyfmt.Parse(threshold)
+	if err != nil || parsedThreshold.IsNegative() {
+		return domain.ErrInvalidUserGroup
+	}
+	group.TopupThreshold = moneyfmt.Format(parsedThreshold)
+	return nil
 }
 
 func (uc *AdminUseCase) GetUserPermissions(ctx context.Context, targetUserID uint) ([]domain.PermissionPolicy, error) {

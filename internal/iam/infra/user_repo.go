@@ -37,13 +37,19 @@ type UserModel struct {
 }
 
 type UserGroupModel struct {
-	ID          uint      `gorm:"primaryKey;autoIncrement"`
-	Code        string    `gorm:"type:varchar(64);uniqueIndex;not null"`
-	Name        string    `gorm:"type:varchar(100);not null"`
-	Description string    `gorm:"type:varchar(500);not null;default:''"`
-	Enabled     bool      `gorm:"not null;default:true"`
-	CreatedAt   time.Time `gorm:"not null;autoCreateTime"`
-	UpdatedAt   time.Time `gorm:"not null;autoUpdateTime"`
+	ID                  uint      `gorm:"primaryKey;autoIncrement"`
+	Code                string    `gorm:"type:varchar(64);uniqueIndex;not null"`
+	Name                string    `gorm:"type:varchar(100);not null"`
+	Description         string    `gorm:"type:varchar(500);not null;default:''"`
+	Enabled             bool      `gorm:"not null"`
+	APIRPMLimit         int64     `gorm:"not null;column:api_rpm_limit"`
+	APIConcurrencyLimit int64     `gorm:"not null;column:api_concurrency_limit"`
+	APIQuotaLimit       int64     `gorm:"not null;column:api_quota_limit"`
+	PriceDiscountRatio  string    `gorm:"type:decimal(7,6);not null;column:price_discount_ratio"`
+	TopupThreshold      string    `gorm:"type:decimal(18,6);not null;column:topup_threshold"`
+	AutoUpgradeEnabled  bool      `gorm:"not null;column:auto_upgrade_enabled"`
+	CreatedAt           time.Time `gorm:"not null;autoCreateTime"`
+	UpdatedAt           time.Time `gorm:"not null;autoUpdateTime"`
 }
 
 type InviteModel struct {
@@ -116,13 +122,19 @@ func (m *UserModel) toDomain() *domain.User {
 		Role:         domain.Role(m.Role),
 		UserGroupID:  m.UserGroupID,
 		UserGroup: domain.UserGroup{
-			ID:          m.UserGroup.ID,
-			Code:        m.UserGroup.Code,
-			Name:        m.UserGroup.Name,
-			Description: m.UserGroup.Description,
-			Enabled:     m.UserGroup.Enabled,
-			CreatedAt:   m.UserGroup.CreatedAt,
-			UpdatedAt:   m.UserGroup.UpdatedAt,
+			ID:                  m.UserGroup.ID,
+			Code:                m.UserGroup.Code,
+			Name:                m.UserGroup.Name,
+			Description:         m.UserGroup.Description,
+			Enabled:             m.UserGroup.Enabled,
+			APIRPMLimit:         m.UserGroup.APIRPMLimit,
+			APIConcurrencyLimit: m.UserGroup.APIConcurrencyLimit,
+			APIQuotaLimit:       m.UserGroup.APIQuotaLimit,
+			PriceDiscountRatio:  m.UserGroup.PriceDiscountRatio,
+			TopupThreshold:      m.UserGroup.TopupThreshold,
+			AutoUpgradeEnabled:  m.UserGroup.AutoUpgradeEnabled,
+			CreatedAt:           m.UserGroup.CreatedAt,
+			UpdatedAt:           m.UserGroup.UpdatedAt,
 		},
 		TokenVersion: m.TokenVersion,
 		LastLoginAt:  m.LastLoginAt,
@@ -158,13 +170,19 @@ func fromDomain(u *domain.User) *UserModel {
 
 func userGroupToDomain(m UserGroupModel) domain.UserGroup {
 	return domain.UserGroup{
-		ID:          m.ID,
-		Code:        m.Code,
-		Name:        m.Name,
-		Description: m.Description,
-		Enabled:     m.Enabled,
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.UpdatedAt,
+		ID:                  m.ID,
+		Code:                m.Code,
+		Name:                m.Name,
+		Description:         m.Description,
+		Enabled:             m.Enabled,
+		APIRPMLimit:         m.APIRPMLimit,
+		APIConcurrencyLimit: m.APIConcurrencyLimit,
+		APIQuotaLimit:       m.APIQuotaLimit,
+		PriceDiscountRatio:  m.PriceDiscountRatio,
+		TopupThreshold:      m.TopupThreshold,
+		AutoUpgradeEnabled:  m.AutoUpgradeEnabled,
+		CreatedAt:           m.CreatedAt,
+		UpdatedAt:           m.UpdatedAt,
 	}
 }
 
@@ -975,11 +993,25 @@ func (r *UserRepo) FindUserGroupByID(ctx context.Context, id uint) (*domain.User
 }
 
 func (r *UserRepo) CreateUserGroup(ctx context.Context, group *domain.UserGroup) error {
+	priceDiscountRatio := strings.TrimSpace(group.PriceDiscountRatio)
+	if priceDiscountRatio == "" {
+		priceDiscountRatio = "1.00"
+	}
+	topupThreshold := strings.TrimSpace(group.TopupThreshold)
+	if topupThreshold == "" {
+		topupThreshold = "0.00"
+	}
 	model := UserGroupModel{
-		Code:        strings.TrimSpace(group.Code),
-		Name:        strings.TrimSpace(group.Name),
-		Description: strings.TrimSpace(group.Description),
-		Enabled:     group.Enabled,
+		Code:                strings.TrimSpace(group.Code),
+		Name:                strings.TrimSpace(group.Name),
+		Description:         strings.TrimSpace(group.Description),
+		Enabled:             group.Enabled,
+		APIRPMLimit:         group.APIRPMLimit,
+		APIConcurrencyLimit: group.APIConcurrencyLimit,
+		APIQuotaLimit:       group.APIQuotaLimit,
+		PriceDiscountRatio:  priceDiscountRatio,
+		TopupThreshold:      topupThreshold,
+		AutoUpgradeEnabled:  group.AutoUpgradeEnabled,
 	}
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
 		if isIAMDuplicateKeyError(err) {
@@ -993,16 +1025,22 @@ func (r *UserRepo) CreateUserGroup(ctx context.Context, group *domain.UserGroup)
 
 func (r *UserRepo) UpdateUserGroup(ctx context.Context, group *domain.UserGroup) error {
 	model := UserGroupModel{
-		ID:          group.ID,
-		Code:        group.Code,
-		Name:        strings.TrimSpace(group.Name),
-		Description: strings.TrimSpace(group.Description),
-		Enabled:     group.Enabled,
+		ID:                  group.ID,
+		Code:                group.Code,
+		Name:                strings.TrimSpace(group.Name),
+		Description:         strings.TrimSpace(group.Description),
+		Enabled:             group.Enabled,
+		APIRPMLimit:         group.APIRPMLimit,
+		APIConcurrencyLimit: group.APIConcurrencyLimit,
+		APIQuotaLimit:       group.APIQuotaLimit,
+		PriceDiscountRatio:  group.PriceDiscountRatio,
+		TopupThreshold:      group.TopupThreshold,
+		AutoUpgradeEnabled:  group.AutoUpgradeEnabled,
 	}
 	if err := r.db.WithContext(ctx).
 		Model(&UserGroupModel{}).
 		Where("id = ?", group.ID).
-		Select("name", "description", "enabled").
+		Select("name", "description", "enabled", "api_rpm_limit", "api_concurrency_limit", "api_quota_limit", "price_discount_ratio", "topup_threshold", "auto_upgrade_enabled").
 		Updates(model).Error; err != nil {
 		return fmt.Errorf("update user group: %w", err)
 	}

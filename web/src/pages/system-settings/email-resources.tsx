@@ -40,6 +40,6 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
       <SettingsNumberField label={t("项目描述最大长度")} value={number(form.project_description_max)} onChange={(value) => update("project_description_max", value)} min={0} />
       <SettingsNumberField label={t("目标平台名最大长度")} value={number(form.project_target_platform_max)} onChange={(value) => update("project_target_platform_max", value)} min={0} />
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

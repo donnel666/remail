@@ -3990,6 +3990,20 @@ type AdminCreateProjectRequest struct {
 // AdminCreateProjectRequestAccessType defines model for AdminCreateProjectRequest.AccessType.
 type AdminCreateProjectRequestAccessType string
 
+// AdminCreateUserGroupRequest defines model for AdminCreateUserGroupRequest.
+type AdminCreateUserGroupRequest struct {
+	ApiConcurrencyLimit *int64                   `json:"apiConcurrencyLimit,omitempty"`
+	ApiQuotaLimit       *int64                   `json:"apiQuotaLimit,omitempty"`
+	ApiRpmLimit         *int64                   `json:"apiRpmLimit,omitempty"`
+	AutoUpgradeEnabled  *bool                    `json:"autoUpgradeEnabled,omitempty"`
+	Code                string                   `json:"code"`
+	Description         *string                  `json:"description,omitempty"`
+	Enabled             *bool                    `json:"enabled,omitempty"`
+	Name                string                   `json:"name"`
+	PriceDiscountRatio  *UserGroupDiscountRatio  `json:"priceDiscountRatio,omitempty"`
+	TopupThreshold      *NonNegativeLedgerAmount `json:"topupThreshold,omitempty"`
+}
+
 // AdminCreateUserRequest defines model for AdminCreateUserRequest.
 type AdminCreateUserRequest struct {
 	Email       openapi_types.Email        `json:"email"`
@@ -4969,6 +4983,23 @@ type AdminUpdateInviteRequest struct {
 	MaxUse   *int       `json:"maxUse,omitempty"`
 }
 
+// AdminUpdateUserGroupRequest defines model for AdminUpdateUserGroupRequest.
+type AdminUpdateUserGroupRequest struct {
+	ApiConcurrencyLimit *int64  `json:"apiConcurrencyLimit,omitempty"`
+	ApiQuotaLimit       *int64  `json:"apiQuotaLimit,omitempty"`
+	ApiRpmLimit         *int64  `json:"apiRpmLimit,omitempty"`
+	AutoUpgradeEnabled  *bool   `json:"autoUpgradeEnabled,omitempty"`
+	Description         *string `json:"description,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	Name                *string `json:"name,omitempty"`
+
+	// PriceDiscountRatio Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+	PriceDiscountRatio *UserGroupDiscountRatio `json:"priceDiscountRatio,omitempty"`
+
+	// TopupThreshold Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	TopupThreshold *NonNegativeLedgerAmount `json:"topupThreshold,omitempty"`
+}
+
 // AdminUpdateUserPermissionsRequest defines model for AdminUpdateUserPermissionsRequest.
 type AdminUpdateUserPermissionsRequest struct {
 	Policies []PermissionPolicyRequest `json:"policies"`
@@ -5041,6 +5072,11 @@ type AdminUserFacets struct {
 // AdminUserGroupListResponse defines model for AdminUserGroupListResponse.
 type AdminUserGroupListResponse struct {
 	Groups []UserGroupResponse `json:"groups"`
+}
+
+// AdminUserGroupResponse defines model for AdminUserGroupResponse.
+type AdminUserGroupResponse struct {
+	Group UserGroupResponse `json:"group"`
 }
 
 // AdminUserInvitationMember defines model for AdminUserInvitationMember.
@@ -7013,13 +7049,26 @@ type UpdateProxyRequest struct {
 // UpdateProxyRequestStatus Admin can disable a proxy or move it back to checking for recheck. normal is system-detected only.
 type UpdateProxyRequestStatus string
 
+// UserGroupDiscountRatio Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+type UserGroupDiscountRatio = string
+
 // UserGroupResponse defines model for UserGroupResponse.
 type UserGroupResponse struct {
-	Code        string `json:"code"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
-	Id          int    `json:"id"`
-	Name        string `json:"name"`
+	ApiConcurrencyLimit int64  `json:"apiConcurrencyLimit"`
+	ApiQuotaLimit       int64  `json:"apiQuotaLimit"`
+	ApiRpmLimit         int64  `json:"apiRpmLimit"`
+	AutoUpgradeEnabled  bool   `json:"autoUpgradeEnabled"`
+	Code                string `json:"code"`
+	Description         string `json:"description"`
+	Enabled             bool   `json:"enabled"`
+	Id                  int    `json:"id"`
+	Name                string `json:"name"`
+
+	// PriceDiscountRatio Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
+	PriceDiscountRatio UserGroupDiscountRatio `json:"priceDiscountRatio"`
+
+	// TopupThreshold Non-negative internal amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
+	TopupThreshold NonNegativeLedgerAmount `json:"topupThreshold"`
 }
 
 // UserPermissionPoliciesResponse defines model for UserPermissionPoliciesResponse.
@@ -8265,6 +8314,18 @@ type PostAdminUsersEnableParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminUserGroupParams defines parameters for PostAdminUserGroup.
+type PostAdminUserGroupParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PatchAdminUserGroupParams defines parameters for PatchAdminUserGroup.
+type PatchAdminUserGroupParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminUsersRevokeSessionsParams defines parameters for PostAdminUsersRevokeSessions.
 type PostAdminUsersRevokeSessionsParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -8952,6 +9013,12 @@ type PostAdminUsersDisableJSONRequestBody = AdminUserBulkCommand
 
 // PostAdminUsersEnableJSONRequestBody defines body for PostAdminUsersEnable for application/json ContentType.
 type PostAdminUsersEnableJSONRequestBody = AdminUserBulkCommand
+
+// PostAdminUserGroupJSONRequestBody defines body for PostAdminUserGroup for application/json ContentType.
+type PostAdminUserGroupJSONRequestBody = AdminCreateUserGroupRequest
+
+// PatchAdminUserGroupJSONRequestBody defines body for PatchAdminUserGroup for application/json ContentType.
+type PatchAdminUserGroupJSONRequestBody = AdminUpdateUserGroupRequest
 
 // PostAdminUsersRevokeSessionsJSONRequestBody defines body for PostAdminUsersRevokeSessions for application/json ContentType.
 type PostAdminUsersRevokeSessionsJSONRequestBody = AdminUserBulkCommand
@@ -10065,6 +10132,12 @@ type ServerInterface interface {
 	// List user groups (admin only)
 	// (GET /v1/admin/users/groups)
 	GetAdminUserGroups(c *gin.Context)
+	// Create a user group (admin only)
+	// (POST /v1/admin/users/groups)
+	PostAdminUserGroup(c *gin.Context, params PostAdminUserGroupParams)
+	// Update a user group (admin only)
+	// (PATCH /v1/admin/users/groups/{groupId})
+	PatchAdminUserGroup(c *gin.Context, groupId int, params PatchAdminUserGroupParams)
 	// Revoke sessions for selected users
 	// (POST /v1/admin/users/sessions/revoke)
 	PostAdminUsersRevokeSessions(c *gin.Context, params PostAdminUsersRevokeSessionsParams)
@@ -17952,6 +18025,105 @@ func (siw *ServerInterfaceWrapper) GetAdminUserGroups(c *gin.Context) {
 	siw.Handler.GetAdminUserGroups(c)
 }
 
+// PostAdminUserGroup operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminUserGroup(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminUserGroupParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminUserGroup(c, params)
+}
+
+// PatchAdminUserGroup operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminUserGroup(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", c.Param("groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter groupId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminUserGroupParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminUserGroup(c, groupId, params)
+}
+
 // PostAdminUsersRevokeSessions operation middleware
 func (siw *ServerInterfaceWrapper) PostAdminUsersRevokeSessions(c *gin.Context) {
 
@@ -21799,6 +21971,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/users/disable", wrapper.PostAdminUsersDisable)
 	router.POST(options.BaseURL+"/v1/admin/users/enable", wrapper.PostAdminUsersEnable)
 	router.GET(options.BaseURL+"/v1/admin/users/groups", wrapper.GetAdminUserGroups)
+	router.POST(options.BaseURL+"/v1/admin/users/groups", wrapper.PostAdminUserGroup)
+	router.PATCH(options.BaseURL+"/v1/admin/users/groups/:groupId", wrapper.PatchAdminUserGroup)
 	router.POST(options.BaseURL+"/v1/admin/users/sessions/revoke", wrapper.PostAdminUsersRevokeSessions)
 	router.DELETE(options.BaseURL+"/v1/admin/users/:userId", wrapper.DeleteAdminUser)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)

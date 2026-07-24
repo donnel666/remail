@@ -72,13 +72,19 @@ func (r Role) HasSupplierAccess() bool {
 }
 
 type UserGroup struct {
-	ID          uint
-	Code        string
-	Name        string
-	Description string
-	Enabled     bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID                  uint
+	Code                string
+	Name                string
+	Description         string
+	Enabled             bool
+	APIRPMLimit         int64
+	APIConcurrencyLimit int64
+	APIQuotaLimit       int64
+	PriceDiscountRatio  string
+	TopupThreshold      string
+	AutoUpgradeEnabled  bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // User represents a platform user (admin, supplier, or regular user).

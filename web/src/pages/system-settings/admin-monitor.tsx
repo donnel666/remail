@@ -45,6 +45,6 @@ export default function AdminMonitorSection({ options, onBulkSave }: SectionProp
       {field("慢请求告警阈值（毫秒）", "slow_request_threshold_ms")}
       {field("慢 SQL 告警阈值（毫秒）", "slow_sql_threshold_ms")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

@@ -68,27 +68,34 @@ export interface UserGroupFormValues {
   name: string;
   description: string;
   enabled: boolean;
-  // Kept for the settings form while group capabilities are introduced by
-  // the IAM API. They are not sent to the current group endpoint.
-  api_rpm_limit: number;
-  api_concurrency_limit: number;
-  api_quota_limit: number;
-  price_discount_ratio: number;
-  topup_threshold: number;
-  auto_upgrade_enabled: boolean;
+  apiRpmLimit: number;
+  apiConcurrencyLimit: number;
+  apiQuotaLimit: number;
+  priceDiscountRatio: number;
+  topupThreshold: number;
+  autoUpgradeEnabled: boolean;
 }
 
-type UserGroupResponse = Omit<UserGroupFormValues, "api_rpm_limit" | "api_concurrency_limit" | "api_quota_limit" | "price_discount_ratio" | "topup_threshold" | "auto_upgrade_enabled">;
+type UserGroupResponse = Omit<
+  UserGroupFormValues,
+  "apiRpmLimit" | "apiConcurrencyLimit" | "apiQuotaLimit" | "priceDiscountRatio" | "topupThreshold" | "autoUpgradeEnabled"
+> & Partial<Pick<
+  UserGroupFormValues,
+  "apiRpmLimit" | "apiConcurrencyLimit" | "apiQuotaLimit" | "autoUpgradeEnabled"
+>> & {
+  priceDiscountRatio?: string;
+  topupThreshold?: string;
+};
 
 function withGroupDefaults(group: UserGroupResponse): UserGroupFormValues {
   return {
     ...group,
-    api_rpm_limit: 0,
-    api_concurrency_limit: 0,
-    api_quota_limit: 0,
-    price_discount_ratio: 1,
-    topup_threshold: 0,
-    auto_upgrade_enabled: false,
+    apiRpmLimit: group.apiRpmLimit ?? 0,
+    apiConcurrencyLimit: group.apiConcurrencyLimit ?? 0,
+    apiQuotaLimit: group.apiQuotaLimit ?? 0,
+    priceDiscountRatio: Number(group.priceDiscountRatio ?? 1),
+    topupThreshold: Number(group.topupThreshold ?? 0),
+    autoUpgradeEnabled: group.autoUpgradeEnabled ?? false,
   };
 }
 
@@ -98,17 +105,31 @@ export async function getUserGroups(): Promise<{ groups: UserGroupFormValues[] }
 }
 
 export async function createUserGroup(data: Omit<UserGroupFormValues, "id">): Promise<{ group: UserGroupFormValues }> {
-  const response = await unwrap<{ group: UserGroupResponse }>(await apiClient.POST("/v1/admin/users/groups" as never, {
+  const response = await unwrap<{ group: UserGroupResponse }>(await apiClient.POST("/v1/admin/users/groups", {
     params: { header: csrfHeader() },
-    body: { code: data.code, name: data.name, description: data.description, enabled: data.enabled },
-  } as never));
+    body: {
+      ...data,
+      priceDiscountRatio: String(data.priceDiscountRatio),
+      topupThreshold: String(data.topupThreshold),
+    },
+  }));
   return { group: withGroupDefaults(response.group) };
 }
 
 export async function updateUserGroup(groupId: number, data: Partial<UserGroupFormValues>): Promise<{ group: UserGroupFormValues }> {
-  const response = await unwrap<{ group: UserGroupResponse }>(await apiClient.PATCH("/v1/admin/users/groups/{groupId}" as never, {
+  const response = await unwrap<{ group: UserGroupResponse }>(await apiClient.PATCH("/v1/admin/users/groups/{groupId}", {
     params: { header: csrfHeader(), path: { groupId } },
-    body: { name: data.name, description: data.description, enabled: data.enabled },
-  } as never));
+    body: {
+      name: data.name,
+      description: data.description,
+      enabled: data.enabled,
+      apiRpmLimit: data.apiRpmLimit,
+      apiConcurrencyLimit: data.apiConcurrencyLimit,
+      apiQuotaLimit: data.apiQuotaLimit,
+      priceDiscountRatio: data.priceDiscountRatio === undefined ? undefined : String(data.priceDiscountRatio),
+      topupThreshold: data.topupThreshold === undefined ? undefined : String(data.topupThreshold),
+      autoUpgradeEnabled: data.autoUpgradeEnabled,
+    },
+  }));
   return { group: withGroupDefaults(response.group) };
 }

@@ -24,6 +24,41 @@ func inviteTestOpLog(requestID string) *governancedomain.OperationLog {
 	}
 }
 
+func TestUserGroupCapabilitiesPersistenceMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	ctx := context.Background()
+	group := &domain.UserGroup{
+		Code: "enterprise", Name: "Enterprise", Enabled: false,
+		APIRPMLimit: 600, APIConcurrencyLimit: 12, APIQuotaLimit: 500000,
+		PriceDiscountRatio: "0.875", TopupThreshold: "1234.56789", AutoUpgradeEnabled: true,
+	}
+	require.NoError(t, repo.CreateUserGroup(ctx, group))
+	stored, err := repo.FindUserGroupByID(ctx, group.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(600), stored.APIRPMLimit)
+	require.Equal(t, int64(12), stored.APIConcurrencyLimit)
+	require.Equal(t, int64(500000), stored.APIQuotaLimit)
+	require.Equal(t, "0.875000", stored.PriceDiscountRatio)
+	require.Equal(t, "1234.567890", stored.TopupThreshold)
+	require.True(t, stored.AutoUpgradeEnabled)
+	require.False(t, stored.Enabled)
+
+	stored.APIRPMLimit = 0
+	stored.APIConcurrencyLimit = 0
+	stored.APIQuotaLimit = 0
+	stored.PriceDiscountRatio = "1"
+	stored.TopupThreshold = "0"
+	stored.AutoUpgradeEnabled = false
+	require.NoError(t, repo.UpdateUserGroup(ctx, stored))
+	require.Equal(t, int64(0), stored.APIRPMLimit)
+	require.Equal(t, int64(0), stored.APIConcurrencyLimit)
+	require.Equal(t, int64(0), stored.APIQuotaLimit)
+	require.Equal(t, "1.000000", stored.PriceDiscountRatio)
+	require.Equal(t, "0.000000", stored.TopupThreshold)
+	require.False(t, stored.AutoUpgradeEnabled)
+}
+
 // TestUserRepoInviteBrowseAndEnrichmentMySQL exercises the owner-joined invite
 // list/facet/enrichment SQL end to end against a real MySQL schema.
 func TestUserRepoInviteBrowseAndEnrichmentMySQL(t *testing.T) {

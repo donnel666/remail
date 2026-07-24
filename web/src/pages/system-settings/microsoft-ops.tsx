@@ -51,6 +51,6 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
       {field("IMAP 保活间隔（秒）", "imap_keepalive_seconds")}
       {field("OAuth 验证超时（秒）", "oauth_validation_timeout_seconds")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

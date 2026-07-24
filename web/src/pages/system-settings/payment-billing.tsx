@@ -14,7 +14,7 @@ const GATEWAY_KEYS = ["epay_version", "epay_gateway_url", "epay_merchant_id", "e
 const TOPUP_KEYS = ["min_topup_amount", "topup_fee_rate", "topup_fee_cap", "topup_amount_presets", "topup_amount_bonus"];
 const CHECK_KEYS = ["async_check_enabled", "async_check_poll_interval_seconds", "async_check_max_retries", "async_check_timeout_minutes", "async_check_request_timeout_seconds"];
 
-export default function PaymentSection({ options, onBulkSave }: SectionProps) {
+export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState(parseOption(options, D as any) as Record<string, unknown>);
   const [topupTiers, setTopupTiers] = useState(() => parseTopupTiers(form.topup_amount_presets, form.topup_amount_bonus));
@@ -53,12 +53,12 @@ export default function PaymentSection({ options, onBulkSave }: SectionProps) {
         <SettingsSelectField label={t("易支付版本")} value={String(form.epay_version)} onChange={(value) => update("epay_version", value)} options={[{ label: "V1", value: "v1" }, { label: "V2", value: "v2" }]} />
         <SettingsTextField label={t("支付网关地址")} value={String(form.epay_gateway_url)} onChange={(value) => update("epay_gateway_url", value)} placeholder="https://pay.example.com/" />
         <SettingsTextField label={t("商户 ID")} value={String(form.epay_merchant_id)} onChange={(value) => update("epay_merchant_id", value)} />
-        <SettingsTextField label={t("商户密钥")} value={String(form.epay_merchant_key)} onChange={(value) => update("epay_merchant_key", value)} type="password" />
+        <SettingsTextField label={t("商户密钥")} value={String(form.epay_merchant_key)} onChange={(value) => update("epay_merchant_key", value)} type="password" disabled={!canSensitive} placeholder={!canSensitive ? t("需要敏感设置权限") : undefined} />
         <SettingsTextField label={t("支付回调地址")} value={String(form.epay_notify_url)} onChange={(value) => update("epay_notify_url", value)} placeholder="https://example.com/api/callback" />
         <SettingsTextField label={t("支付同步跳转地址")} value={String(form.epay_return_url)} onChange={(value) => update("epay_return_url", value)} />
         <SettingsTextField label={t("自定义回调域名")} value={String(form.epay_custom_callback_domain)} onChange={(value) => update("epay_custom_callback_domain", value)} />
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", GATEWAY_KEYS)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "gateway"} onClick={() => void save("gateway", GATEWAY_KEYS.filter((key) => canSensitive || key !== "epay_merchant_key")).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader icon={<WalletCards size={16} />} title={t("充值配置")} description={t("配置最低充值额度、手续费和前端充值档位")} />}>
@@ -94,7 +94,7 @@ export default function PaymentSection({ options, onBulkSave }: SectionProps) {
           </div>
         )) : <div className="border-t border-[var(--semi-color-border)] px-4 py-8 text-center text-sm text-[var(--semi-color-text-2)]">{t("暂无充值档位，请添加档位")}</div>}
       </div>
-      <Button icon={<Save size={14} />} loading={savingCard === "topup"} onClick={() => void saveTopup()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "topup"} onClick={() => void saveTopup().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("后台主动轮询支付网关，处理 pending 状态充值单")} enabled={!!form.async_check_enabled} onToggle={(value) => update("async_check_enabled", value)} statusText={form.async_check_enabled ? t("已启用") : t("已禁用")} />}>
@@ -104,7 +104,7 @@ export default function PaymentSection({ options, onBulkSave }: SectionProps) {
         {field("查账超时时间（分钟）", "async_check_timeout_minutes")}
         {field("单次查账请求超时（秒）", "async_check_request_timeout_seconds")}
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", CHECK_KEYS)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", CHECK_KEYS).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
   </div>;
 }

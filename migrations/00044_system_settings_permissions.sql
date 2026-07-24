@@ -24,7 +24,7 @@ WHERE NOT EXISTS (
 
 -- +goose Down
 
-DELETE FROM casbin_rule
-WHERE ptype = 'p'
-  AND v1 = 'system:settings'
-  AND v0 IN ('role:admin', 'role:super_admin');
+-- Intentionally retain additive role permissions on rollback. The Up migration
+-- skips policies that already existed, so deleting by value here could remove
+-- administrator policies that were created manually before this migration.
+SELECT 1;

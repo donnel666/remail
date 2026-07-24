@@ -8,7 +8,7 @@ import { createUserGroup, getUserGroups, updateUserGroup, type UserGroupFormValu
 import type { SectionProps } from "./index";
 import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSwitchField, SettingsTextField } from "./settings-layout";
 
-const EMPTY: UserGroupFormValues = { code: "", name: "", description: "", enabled: true, api_rpm_limit: 60, api_concurrency_limit: 3, api_quota_limit: 10000, price_discount_ratio: 1, topup_threshold: 0, auto_upgrade_enabled: false };
+const EMPTY: UserGroupFormValues = { code: "", name: "", description: "", enabled: true, apiRpmLimit: 60, apiConcurrencyLimit: 3, apiQuotaLimit: 10000, priceDiscountRatio: 1, topupThreshold: 0, autoUpgradeEnabled: false };
 
 export default function UserGroupSection(_props: SectionProps) {
   const { t } = useTranslation();
@@ -72,7 +72,7 @@ export default function UserGroupSection(_props: SectionProps) {
               {!group.enabled ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600">{t("已禁用")}</span> : null}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--semi-color-text-2)]">
-              <span>RPM: {group.api_rpm_limit}</span><span>{t("并发")}: {group.api_concurrency_limit}</span><span>{t("折扣")}: {group.price_discount_ratio}</span><span>{t("门槛")}: {group.topup_threshold}</span><span>{t("自动升级")}: {group.auto_upgrade_enabled ? t("是") : t("否")}</span>
+              <span>RPM: {group.apiRpmLimit}</span><span>{t("并发")}: {group.apiConcurrencyLimit}</span><span>{t("折扣")}: {group.priceDiscountRatio}</span><span>{t("门槛")}: {group.topupThreshold}</span><span>{t("自动升级")}: {group.autoUpgradeEnabled ? t("是") : t("否")}</span>
             </div>
           </div>
           <Button icon={<Edit size={14} />} theme="light" type="tertiary" onClick={() => { setEditing({ ...group }); setShowForm(true); }}>{t("编辑")}</Button>
@@ -96,16 +96,16 @@ export default function UserGroupSection(_props: SectionProps) {
     >
       <div className="mb-4 text-sm text-[var(--semi-color-text-2)]">{t("配置分组基本信息、能力限制和升级规则")}</div>
       <SettingsFormGrid>
-        <SettingsTextField label={t("分组标识码")} value={editing.code} onChange={(value) => update("code", value)} />
+        <SettingsTextField label={t("分组标识码")} value={editing.code} onChange={(value) => update("code", value)} disabled={editing.id !== undefined} />
         <SettingsTextField label={t("分组名称")} value={editing.name} onChange={(value) => update("name", value)} />
         <SettingsTextField label={t("分组描述")} value={editing.description} onChange={(value) => update("description", value)} />
-        <SettingsNumberField label={t("API 每分钟请求次数上限")} value={number(editing.api_rpm_limit)} onChange={(value) => update("api_rpm_limit", value)} min={0} />
-        <SettingsNumberField label={t("API 并发请求数上限")} value={number(editing.api_concurrency_limit)} onChange={(value) => update("api_concurrency_limit", value)} min={0} />
-        <SettingsNumberField label={t("API Key 总调用额度上限")} value={number(editing.api_quota_limit)} onChange={(value) => update("api_quota_limit", value)} min={0} />
-        <SettingsNumberField label={t("价格折扣率（0.9 = 九折）")} value={number(editing.price_discount_ratio)} onChange={(value) => update("price_discount_ratio", value)} min={0} max={1} precision={2} step={0.01} />
-        <SettingsNumberField label={t("充值升级门槛")} value={number(editing.topup_threshold)} onChange={(value) => update("topup_threshold", value)} min={0} />
+        <SettingsNumberField label={t("API 每分钟请求次数上限")} value={number(editing.apiRpmLimit)} onChange={(value) => update("apiRpmLimit", value)} min={0} />
+        <SettingsNumberField label={t("API 并发请求数上限")} value={number(editing.apiConcurrencyLimit)} onChange={(value) => update("apiConcurrencyLimit", value)} min={0} />
+        <SettingsNumberField label={t("API Key 总调用额度上限")} value={number(editing.apiQuotaLimit)} onChange={(value) => update("apiQuotaLimit", value)} min={0} />
+        <SettingsNumberField label={t("价格折扣率（0.9 = 九折）")} value={number(editing.priceDiscountRatio)} onChange={(value) => update("priceDiscountRatio", value)} min={0} max={1} precision={2} step={0.01} />
+        <SettingsNumberField label={t("充值升级门槛")} value={number(editing.topupThreshold)} onChange={(value) => update("topupThreshold", value)} min={0} />
         <SettingsSwitchField checked={editing.enabled} onChange={(value) => update("enabled", value)} label={t("启用分组")} />
-        <SettingsSwitchField checked={editing.auto_upgrade_enabled} onChange={(value) => update("auto_upgrade_enabled", value)} label={t("允许自动升级")} description={t("达到充值门槛后自动升入此分组")} />
+        <SettingsSwitchField checked={editing.autoUpgradeEnabled} onChange={(value) => update("autoUpgradeEnabled", value)} label={t("允许自动升级")} description={t("达到充值门槛后自动升入此分组")} />
       </SettingsFormGrid>
     </Modal>
   </div>;

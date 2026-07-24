@@ -42,7 +42,7 @@ const D: Record<string, unknown> = {
 };
 
 const TWO_COLUMN_GRID = "xl:grid-cols-2 xl:[&>[data-settings-form-span=full]]:col-span-2 xl:[&>[data-slot=form-item]:has(textarea)]:col-span-2";
-export default function AuthSecuritySection({ options, onBulkSave }: SectionProps) {
+export default function AuthSecuritySection({ options, onBulkSave, canSensitive }: SectionProps) {
   const { t } = useTranslation();
   const [form, setForm] = useState(parseOption(options, D as any) as Record<string, unknown>);
   const [savingCard, setSavingCard] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default function AuthSecuritySection({ options, onBulkSave }: SectionProp
         </FormItem>
         <SettingsNumberField label={t("新用户注册奖励金额")} value={number(form.registration_reward_amount)} onChange={(value) => update("registration_reward_amount", value)} min={0} />
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "register"} onClick={() => void saveCard("register", ["register_enabled", "password_login_enabled", "captcha_enabled", "registration_email_whitelist", "registration_reward_amount"])} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "register"} onClick={() => void saveCard("register", ["register_enabled", "password_login_enabled", "captcha_enabled", "registration_email_whitelist", "registration_reward_amount"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader
@@ -99,12 +99,12 @@ export default function AuthSecuritySection({ options, onBulkSave }: SectionProp
     />}>
       <SettingsFormGrid className={`${TWO_COLUMN_GRID} mt-4`}>
         <SettingsTextField label="Client ID" value={String(form.github_client_id)} onChange={(value) => update("github_client_id", value)} />
-        <SettingsTextField label="Client Secret" value={String(form.github_client_secret)} onChange={(value) => update("github_client_secret", value)} type="password" placeholder={t("敏感信息不会直接显示")} />
+        <SettingsTextField label="Client Secret" value={String(form.github_client_secret)} onChange={(value) => update("github_client_secret", value)} type="password" disabled={!canSensitive} placeholder={canSensitive ? t("敏感信息不会直接显示") : t("需要敏感设置权限")} />
         <div data-settings-form-span="full">
           <SettingsTextField label={t("回调地址")} value={String(form.github_callback_url)} onChange={(value) => update("github_callback_url", value)} placeholder="https://example.com/oauth/github" />
         </div>
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "github"} onClick={() => void saveCard("github", ["github_oauth_enabled", "github_client_id", "github_client_secret", "github_callback_url"])} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "github"} onClick={() => void saveCard("github", ["github_oauth_enabled", "github_client_id", ...(canSensitive ? ["github_client_secret"] : []), "github_callback_url"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader
@@ -126,7 +126,7 @@ export default function AuthSecuritySection({ options, onBulkSave }: SectionProp
         <SettingsNumberField label={t("密码哈希成本（bcrypt cost）")} value={number(form.bcrypt_cost)} onChange={(value) => update("bcrypt_cost", value)} min={0} />
         <SettingsNumberField label={t("会话有效期（秒）")} value={number(form.session_max_age_seconds)} onChange={(value) => update("session_max_age_seconds", value)} min={0} />
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={savingCard === "security"} onClick={() => void saveCard("security", ["login_email_limit", "login_ip_limit", "login_window_seconds", "email_code_email_limit", "email_code_ip_limit", "email_code_window_seconds", "captcha_rate_limit", "email_code_ttl_seconds", "email_code_resend_gap_seconds", "email_code_digit_len", "bcrypt_cost", "session_max_age_seconds"])} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+      <Button icon={<Save size={14} />} loading={savingCard === "security"} onClick={() => void saveCard("security", ["login_email_limit", "login_ip_limit", "login_window_seconds", "email_code_email_limit", "email_code_ip_limit", "email_code_window_seconds", "captcha_rate_limit", "email_code_ttl_seconds", "email_code_resend_gap_seconds", "email_code_digit_len", "bcrypt_cost", "session_max_age_seconds"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
   </div>;
 }

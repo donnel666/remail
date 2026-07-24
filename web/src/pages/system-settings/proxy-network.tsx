@@ -34,6 +34,6 @@ export default function ProxySection({ options, onBulkSave }: SectionProps) {
       {field("代理空闲连接超时（秒）", "proxy_idle_conn_timeout_seconds")}
       {field("代理 TLS 握手超时（秒）", "proxy_tls_handshake_timeout_seconds")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

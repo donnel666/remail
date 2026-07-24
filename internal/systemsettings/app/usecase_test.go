@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
 
@@ -13,6 +16,20 @@ type fakeRepository struct {
 	upsertKey   string
 	upsertValue string
 	deleteKey   string
+	bulkCalled  bool
+}
+
+func (f *fakeRepository) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	var snapshot *domain.Setting
+	if f.setting != nil {
+		copy := *f.setting
+		snapshot = &copy
+	}
+	if err := fn(ctx); err != nil {
+		f.setting = snapshot
+		return err
+	}
+	return nil
 }
 
 func (f *fakeRepository) List(context.Context) ([]domain.Setting, error) {
@@ -37,16 +54,41 @@ func (f *fakeRepository) Upsert(_ context.Context, key, value string) (*domain.S
 	return f.setting, nil
 }
 
+func (f *fakeRepository) BulkUpsert(ctx context.Context, settings []domain.Setting) ([]domain.Setting, error) {
+	f.bulkCalled = true
+	result := make([]domain.Setting, len(settings))
+	for i, setting := range settings {
+		saved, err := f.Upsert(ctx, setting.Key, setting.Value)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = *saved
+	}
+	return result, nil
+}
+
 func (f *fakeRepository) Delete(_ context.Context, key string) error {
 	f.deleteKey = key
 	return nil
 }
 
+type fakeOperationLogs struct {
+	items []*governancedomain.OperationLog
+	err   error
+}
+
+func (f *fakeOperationLogs) Create(_ context.Context, log *governancedomain.OperationLog) error {
+	copy := *log
+	f.items = append(f.items, &copy)
+	return f.err
+}
+
 func TestSystemSettingsUseCaseNormalizesKeys(t *testing.T) {
 	repo := &fakeRepository{}
-	uc := NewSystemSettingsUseCase(repo)
+	logs := &fakeOperationLogs{}
+	uc := NewSystemSettingsUseCase(repo, logs)
 
-	if _, err := uc.Upsert(context.Background(), "  mail.foo  ", "value"); err != nil {
+	if _, err := uc.Upsert(context.Background(), "  mail.foo  ", "value", MutationMeta{}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if repo.upsertKey != "mail.foo" {
@@ -58,7 +100,7 @@ func TestSystemSettingsUseCaseNormalizesKeys(t *testing.T) {
 	if repo.getKey != "mail.foo" {
 		t.Fatalf("get key = %q, want mail.foo", repo.getKey)
 	}
-	if err := uc.Delete(context.Background(), "  mail.foo  "); err != nil {
+	if err := uc.Delete(context.Background(), "  mail.foo  ", MutationMeta{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if repo.deleteKey != "mail.foo" {
@@ -67,10 +109,96 @@ func TestSystemSettingsUseCaseNormalizesKeys(t *testing.T) {
 }
 
 func TestSystemSettingsUseCaseRejectsInvalidKeys(t *testing.T) {
-	uc := NewSystemSettingsUseCase(&fakeRepository{})
+	uc := NewSystemSettingsUseCase(&fakeRepository{}, &fakeOperationLogs{})
 	for _, key := range []string{"", "with space", "../secret", "-starts-with-dash"} {
-		if _, err := uc.Upsert(context.Background(), key, "value"); err != domain.ErrInvalidKey {
+		if _, err := uc.Upsert(context.Background(), key, "value", MutationMeta{}); err != domain.ErrInvalidKey {
 			t.Fatalf("upsert key %q error = %v, want ErrInvalidKey", key, err)
 		}
+	}
+}
+
+func TestBulkUpsertValidatesEverythingBeforeWriting(t *testing.T) {
+	repo := &fakeRepository{}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	_, err := uc.BulkUpsert(context.Background(), []domain.Setting{
+		{Key: "valid_key", Value: "one"},
+		{Key: "invalid key", Value: "two"},
+	}, MutationMeta{})
+	if !errors.Is(err, domain.ErrInvalidKey) {
+		t.Fatalf("error = %v, want ErrInvalidKey", err)
+	}
+	if repo.bulkCalled || repo.setting != nil {
+		t.Fatal("bulk repository was called before all keys were validated")
+	}
+}
+
+func TestMutationAndSafeAuditShareTransaction(t *testing.T) {
+	repo := &fakeRepository{setting: &domain.Setting{Key: "github_client_secret", Value: "old"}}
+	logs := &fakeOperationLogs{err: errors.New("audit unavailable")}
+	uc := NewSystemSettingsUseCase(repo, logs)
+	secret := "must-not-enter-audit"
+
+	_, err := uc.Upsert(context.Background(), "github_client_secret", secret, MutationMeta{
+		OperatorUserID: 42,
+		RequestID:      "request-1",
+		Path:           "/v1/admin/settings/github_client_secret",
+	})
+	if err == nil {
+		t.Fatal("expected audit failure")
+	}
+	if repo.setting.Value != "old" {
+		t.Fatalf("value = %q, want transaction rollback to old", repo.setting.Value)
+	}
+	if len(logs.items) != 1 {
+		t.Fatalf("audit attempts = %d, want 1", len(logs.items))
+	}
+	log := logs.items[0]
+	if strings.Contains(log.SafeSummary, secret) {
+		t.Fatal("audit summary contains the setting value")
+	}
+	if log.OperatorUserID != 42 || log.RequestID != "request-1" || log.ResourceID != "github_client_secret" {
+		t.Fatalf("unexpected audit: %+v", log)
+	}
+}
+
+func TestAllMutationsWriteValueFreeAuditLogs(t *testing.T) {
+	repo := &fakeRepository{}
+	logs := &fakeOperationLogs{}
+	uc := NewSystemSettingsUseCase(repo, logs)
+	meta := MutationMeta{OperatorUserID: 7, RequestID: "request-7", Path: "/v1/admin/settings"}
+
+	if _, err := uc.Upsert(context.Background(), "one", "single-private-value", meta); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := uc.BulkUpsert(context.Background(), []domain.Setting{
+		{Key: "two", Value: "bulk-private-value"},
+		{Key: "three", Value: "another-private-value"},
+	}, meta); err != nil {
+		t.Fatalf("bulk upsert: %v", err)
+	}
+	if err := uc.Delete(context.Background(), "three", meta); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if len(logs.items) != 3 {
+		t.Fatalf("audit logs = %d, want 3", len(logs.items))
+	}
+	for i, operation := range []string{
+		"system_settings.upsert",
+		"system_settings.bulk_upsert",
+		"system_settings.delete",
+	} {
+		log := logs.items[i]
+		if log.OperationType != operation || log.OperatorUserID != 7 || log.RequestID != "request-7" || log.Path != meta.Path {
+			t.Fatalf("unexpected audit[%d]: %+v", i, log)
+		}
+		for _, value := range []string{"single-private-value", "bulk-private-value", "another-private-value"} {
+			if strings.Contains(log.SafeSummary, value) {
+				t.Fatalf("audit[%d] contains setting value", i)
+			}
+		}
+	}
+	if logs.items[0].ResourceID != "one" || logs.items[1].SafeSummary != "updated system settings count=2" || logs.items[2].ResourceID != "three" {
+		t.Fatalf("unexpected audit keys/counts: %+v", logs.items)
 	}
 }

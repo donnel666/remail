@@ -29,6 +29,6 @@ export default function InviteRebateSection({ options, onBulkSave }: SectionProp
       <SettingsNumberField label={t("累计返利金额上限（0 = 不限制）")} value={number(form.cumulative_rebate_cap)} onChange={(value) => update("cumulative_rebate_cap", value)} min={0} />
       <SettingsNumberField label={t("返利有效期（天）")} value={number(form.rebate_expiry_days)} onChange={(value) => update("rebate_expiry_days", value)} min={0} />
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

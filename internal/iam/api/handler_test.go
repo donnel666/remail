@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -2984,4 +2985,50 @@ func TestPasswordResetRequestDoesNotFailAfterCodeWasCreated(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 	require.NotEmpty(t, h.module.EmailCodeStore.(*mockEmailCodeStore).firstCode())
+}
+
+func TestAdminUserGroupCapabilitiesRoundTrip(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-group-session")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/users/groups", strings.NewReader(`{
+		"code":"vip","name":"VIP","enabled":false,
+		"apiRpmLimit":600,"apiConcurrencyLimit":12,"apiQuotaLimit":500000,
+		"priceDiscountRatio":"0.9","topupThreshold":"100.50","autoUpgradeEnabled":true
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-group-session")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var created struct {
+		Group UserGroupResponse `json:"group"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	require.Equal(t, int64(600), created.Group.APIRPMLimit)
+	require.Equal(t, "0.90", created.Group.PriceDiscountRatio)
+	require.Equal(t, "100.50", created.Group.TopupThreshold)
+	require.True(t, created.Group.AutoUpgradeEnabled)
+	require.False(t, created.Group.Enabled)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/v1/admin/users/groups/%d", created.Group.ID), strings.NewReader(`{
+		"apiRpmLimit":0,"apiConcurrencyLimit":0,"apiQuotaLimit":0,
+		"priceDiscountRatio":"0.75","topupThreshold":"0","autoUpgradeEnabled":false
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(req, "admin-group-session")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var updated struct {
+		Group UserGroupResponse `json:"group"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
+	require.Zero(t, updated.Group.APIRPMLimit)
+	require.Zero(t, updated.Group.APIConcurrencyLimit)
+	require.Zero(t, updated.Group.APIQuotaLimit)
+	require.Equal(t, "0.75", updated.Group.PriceDiscountRatio)
+	require.Equal(t, "0.00", updated.Group.TopupThreshold)
+	require.False(t, updated.Group.AutoUpgradeEnabled)
 }

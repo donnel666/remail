@@ -44,6 +44,6 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("项目历史每轮上限", "project_history_dispatch_limit")}
       <SettingsTextField label={t("验证码识别正则")} value={String(form.verification_code_pattern)} onChange={(value) => update("verification_code_pattern", value)} />
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

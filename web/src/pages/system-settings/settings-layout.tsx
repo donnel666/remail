@@ -37,6 +37,30 @@ export function SettingsSection({ title, children, className }: { title: ReactNo
   </SemiCard>;
 }
 
+export function SettingsAccessBoundary({ canWrite, children }: { canWrite: boolean; children: ReactNode }) {
+  return (
+    <fieldset
+      aria-disabled={!canWrite}
+      className="contents"
+      disabled={!canWrite}
+      onClickCapture={(event) => {
+        if (!canWrite) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyDownCapture={(event) => {
+        if (!canWrite) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+    >
+      {children}
+    </fieldset>
+  );
+}
+
 // ---- SettingsFormGrid — 2-column responsive grid (matches NewAPI exactly) ----
 export function SettingsFormGrid({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("grid min-w-0 gap-x-4 gap-y-4 md:grid-cols-2 xl:grid-cols-3", "md:[&>[data-settings-form-span=full]]:col-span-2", "xl:[&>[data-settings-form-span=full]]:col-span-3", "[&>[data-slot=form-item]]:min-w-0", "md:[&>[data-slot=form-item]:has(textarea)]:col-span-2", "xl:[&>[data-slot=form-item]:has(textarea)]:col-span-3", className)}>
@@ -85,14 +109,14 @@ export function SettingsNumberField({ label, value, onChange, min, max, precisio
 }
 
 // ---- SettingsTextField — text input with label ----
-export function SettingsTextField({ label, value, onChange, placeholder, type }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
+export function SettingsTextField({ label, value, onChange, placeholder, type, disabled }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; disabled?: boolean;
 }) {
   const id = useId();
   return (
     <FormItem>
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} type={type ?? "text"} mode={type === "password" ? "password" : undefined} value={value} onChange={onChange} placeholder={placeholder} />
+      <Input id={id} type={type ?? "text"} mode={type === "password" ? "password" : undefined} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} />
     </FormItem>
   );
 }

@@ -41,6 +41,6 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
       {field("验证调度最大下发数", "validation_dispatch_maximum")}
       {field("入站 SMTP 最大并发连接数", "default_inbound_smtp_max_connections")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }

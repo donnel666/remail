@@ -9,8 +9,12 @@ import (
 // /admin/settings. Values intentionally remain strings so the same endpoint
 // can carry scalars, JSON documents, or Markdown/HTML.
 func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
-	h := NewHandler(module)
+	h := NewHandler(module, checker)
 	admin := rg.Group("/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Next()
+	})
 	admin.Use(middleware.LoadSession(fetcher))
 	admin.Use(middleware.AuthRequired())
 	admin.Use(middleware.CSRFRequired())

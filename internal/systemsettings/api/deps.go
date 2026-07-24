@@ -1,6 +1,7 @@
 package api
 
 import (
+	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/systemsettings/app"
 	"github.com/donnel666/remail/internal/systemsettings/infra"
 	"gorm.io/gorm"
@@ -12,5 +13,8 @@ type Module struct {
 }
 
 func NewModule(db *gorm.DB) *Module {
-	return &Module{Settings: app.NewSystemSettingsUseCase(infra.NewRepository(db))}
+	return &Module{Settings: app.NewSystemSettingsUseCase(
+		infra.NewRepository(db),
+		governanceinfra.NewOperationLogRepo(db),
+	)}
 }

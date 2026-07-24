@@ -40,6 +40,6 @@ export default function MailDeliverySection({ options, onBulkSave }: SectionProp
       {field("Token 刷新调度间隔（秒）", "token_refresh_dispatcher_interval_seconds")}
       {field("旧格式别名重试延迟（秒）", "legacy_alias_retry_delay_seconds")}
     </SettingsFormGrid>
-    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save()} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    <Button icon={<Save size={14} />} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
   </SettingsSection>;
 }
