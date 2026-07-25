@@ -22,6 +22,14 @@ import (
 )
 
 const (
+	microsoftNotUnderBlockingMaintenanceCondition = `ms.token_refresh_status NOT IN ('pending', 'processing')
+			AND NOT EXISTS (
+				SELECT 1
+				FROM mailmatch_resource_fetch_states maintenance_fetch
+				WHERE maintenance_fetch.email_resource_id = ms.id
+				  AND maintenance_fetch.operation_kind = 'resource_history'
+				  AND maintenance_fetch.status IN ('pending', 'processing')
+			)`
 	microsoftProjectUnmatchedCondition = `NOT EXISTS (
 			SELECT 1 FROM microsoft_resource_project_matches legacy_match
 			WHERE legacy_match.resource_id = ms.id AND legacy_match.project_id = ?
@@ -484,6 +492,7 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 	args := []any{projectID}
 	where := []string{
 		"ms.status = 'normal'",
+		microsoftNotUnderBlockingMaintenanceCondition,
 		microsoftProjectUnmatchedCondition,
 	}
 	suffix := normalizeCandidateSuffix(emailSuffix)
@@ -653,6 +662,7 @@ func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, proj
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
+		microsoftNotUnderBlockingMaintenanceCondition,
 		microsoftProjectUnmatchedCondition,
 	}
 	suffix := normalizeCandidateSuffix(emailSuffix)
@@ -1402,6 +1412,7 @@ FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope, microsoftScopeArgs...); err != nil {
 			return nil, err
 		}
@@ -1414,6 +1425,7 @@ FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope+`
   AND `+microsoftUnusedMainCondition, append(microsoftScopeArgs, projectID)...); err != nil {
 				return nil, err
@@ -1426,6 +1438,7 @@ JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ea.status = 'normal'
   AND ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope+`
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations history_alias
@@ -1454,7 +1467,8 @@ WHERE ma.project_id = ?
   AND ma.mailbox = 'dot'
   AND ma.status = 'allocated'
   AND ms.status = 'normal'
-	  AND `+microsoftScope, append([]any{projectID}, microsoftScopeArgs...)...); err != nil {
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
+  AND `+microsoftScope, append([]any{projectID}, microsoftScopeArgs...)...); err != nil {
 				return nil, err
 			}
 			var dotAdjustment struct {
@@ -1490,6 +1504,7 @@ JOIN microsoft_resources ms ON ms.id = da.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope, append([]any{projectID, projectID}, microsoftScopeArgs...)...); err != nil {
 				return nil, err
 			}
@@ -1506,6 +1521,7 @@ WHERE adu.usage_date = ?
   AND adu.resource_type = 'microsoft'
   AND adu.usage_kind = 'plus'
   AND ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+microsoftScope, append([]any{today}, microsoftScopeArgs...)...); err != nil {
 				return nil, err
 			}
@@ -1710,6 +1726,7 @@ FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
 GROUP BY ms.email_domain`, scopeArgs...).Scan(&capacities).Error; err != nil {
 		return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
@@ -1732,6 +1749,7 @@ FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
   AND `+microsoftUnusedMainCondition+`
 GROUP BY ms.email_domain`, append(scopeArgs, projectID)...)
@@ -1746,6 +1764,7 @@ JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ea.status = 'normal'
   AND ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
   AND NOT EXISTS (
       SELECT 1 FROM microsoft_allocations history_alias
@@ -1808,6 +1827,7 @@ JOIN microsoft_resources ms ON ms.id = da.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
 GROUP BY ms.email_domain`, append([]any{projectID, projectID}, scopeArgs...)...).Scan(&adjustments).Error
 		if err != nil {
@@ -1835,6 +1855,7 @@ WHERE adu.usage_date = ?
   AND adu.resource_type = 'microsoft'
   AND adu.usage_kind = 'plus'
   AND ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND `+scope+`
 GROUP BY ms.email_domain`, append([]any{today}, scopeArgs...)...)
 		if err != nil {
@@ -2015,6 +2036,7 @@ WHERE rc.project_id = ?
   AND (
       ms.id IS NULL
       OR ms.status <> 'normal'
+      OR NOT (`+microsoftNotUnderBlockingMaintenanceCondition+`)
       OR ms.for_sale <> TRUE
       OR u.status <> 'active'
       OR u.role NOT IN ('supplier', 'admin', 'super_admin')
@@ -2039,6 +2061,7 @@ FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ms.status = 'normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+`
   AND ms.for_sale = TRUE
   AND u.status = 'active'
   AND u.role IN ('supplier', 'admin', 'super_admin')

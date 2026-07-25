@@ -135,6 +135,51 @@ INSERT INTO project_products(
 	require.Equal(t, "alias1000@example.com", aliasAllocation.Email)
 }
 
+func TestMicrosoftAllocationAndInventoryRespectBlockingMaintenanceMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 5, true, "normal")
+	repo := NewRepo(db)
+	refreshed, err := repo.RefreshRoutingCandidates(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, 5, refreshed)
+	require.NoError(t, db.Table("microsoft_resources").Where("id = ?", 1000).Update("status", "validating").Error)
+	require.NoError(t, db.Table("microsoft_resources").Where("id = ?", 1001).Update("token_refresh_status", "pending").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(email_resource_id, status, generation, operation_kind)
+VALUES
+    (1002, 'processing', 1, 'resource_history'),
+    (1004, 'processing', 1, 'resource_fetch')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO microsoft_alias_schedules(resource_id, status, next_run_at)
+VALUES (1003, 'running', UTC_TIMESTAMP(3))`).Error)
+
+	stats, err := repo.GetInventoryStats(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Microsoft.EligibleResources)
+	require.Equal(t, int64(2), stats.Microsoft.MainAvailable)
+	require.Equal(t, int64(2), stats.TotalAvailable)
+	totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), totals.TotalAvailable)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{Suffix: "example.com", TotalAvailable: 2, PublicAvailable: 2}}, totals.Items[0].Suffixes)
+	refreshed, err = repo.RefreshRoutingCandidates(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, refreshed)
+
+	uc := allocapp.NewUseCase(repo)
+	aliasMaintenanceAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-alias-maintenance", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(1003), aliasMaintenanceAllocation.ResourceID)
+	manualFetchAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-manual-fetch", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint(1004), manualFetchAllocation.ResourceID)
+}
+
 func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
