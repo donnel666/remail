@@ -6,6 +6,7 @@
 - 雷池 WAF 独立部署，业务站点反代到宿主机 `http://127.0.0.1:8080`；应用 Compose 不监听 80/443。
 - 首次切换由运维人员手动停止并删除旧 Nginx 容器，CI 不清理 Compose orphan。
 - 生产必须设置 `APP_ENV=production`、`SESSION_SECURE=true`。
+- 会话有效期只由系统设置 `session_max_age_seconds` 管理；旧部署若自定义过 `SESSION_MAX_AGE`，升级时须把原值写入该系统设置。
 - 生产必须设置 Cloudflare Turnstile 的 `TURNSTILE_SITE_KEY`、`TURNSTILE_SECRET_KEY`；测试环境默认使用 Cloudflare 官方 always-pass 测试密钥，生产拒绝使用测试密钥启动。
 - 生产必须把 `TRUSTED_PROXIES` 设置为应用容器实际看到的反向代理精确 IP/CIDR；反向代理必须覆盖客户端自带的 `X-Forwarded-For`，只传递规范客户端地址。
 - `PPROF_ADDR` 只能绑定 `localhost` 或回环 IP，禁止公网监听。

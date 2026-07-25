@@ -33,6 +33,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   MAX_ANNOUNCEMENT_CONTENT_BYTES,
+  MAX_SYSTEM_NOTICE_BYTES,
   parseOption,
   parseSettingsList,
   type SystemAnnouncement,
@@ -103,6 +104,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const [faqDraft, setFaqDraft] = useState<FAQItem>(EMPTY_FAQ);
   const [announcementPanelEnabled, setAnnouncementPanelEnabled] = useState(parsed.announcement_enabled);
   const [announcementDirty, setAnnouncementDirty] = useState(false);
+  const [noticeDirty, setNoticeDirty] = useState(false);
   const [selectedAnnouncementIds, setSelectedAnnouncementIds] = useState<number[]>([]);
   const [faqDirty, setFaqDirty] = useState(false);
   const [selectedFaqIds, setSelectedFaqIds] = useState<number[]>([]);
@@ -112,7 +114,11 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const markAnnouncementChanged = () => setAnnouncementDirty(true);
   const markFaqChanged = () => setFaqDirty(true);
 
-  const saveAll = async () => {
+  const saveNotice = async () => {
+    if (utf8ByteLength(form.global_notice) > MAX_SYSTEM_NOTICE_BYTES) {
+      Toast.warning(t("通知内容不能超过 1 MiB"));
+      return;
+    }
     const values = {
       global_notice: form.global_notice,
       maintenance_notice: form.maintenance_notice,
@@ -120,6 +126,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
       maintenance_allow_ips: form.maintenance_allow_ips,
     };
     await onBulkSave(Object.entries(values).map(([key, value]) => ({ key, value: String(value) })));
+    setNoticeDirty(false);
   };
 
   const saveAnnouncement = () => {
@@ -185,10 +192,6 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     };
     if (!draft.question || !draft.answer) {
       Toast.warning(t("请填写问题和答案"));
-      return;
-    }
-    if (!draft.id && faqList.length >= 50) {
-      Toast.warning(t("常见问题最多添加 50 条"));
       return;
     }
     setFaqList((current) => draft.id
@@ -274,7 +277,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     </div>
     <Divider margin="12px" />
     <div className="flex w-full flex-col items-center justify-between gap-4 md:flex-row">
-      <div className="order-2 flex w-full gap-2 md:order-1 md:w-auto">
+      <div className="order-2 flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap md:order-1 md:w-auto">
         <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setAnnouncementDraft(emptyAnnouncement()); setAnnouncementModalOpen(true); }}>{t("添加公告")}</Button>
         <Button icon={<Trash2 size={14} />} theme="light" type="danger" className="w-full md:w-auto" disabled={selectedAnnouncementIds.length === 0} onClick={deleteSelectedAnnouncements}>{t("批量删除")} {selectedAnnouncementIds.length > 0 ? `(${selectedAnnouncementIds.length})` : ""}</Button>
         <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!announcementDirty} onClick={() => void saveAnnouncements().catch(() => undefined)}>{t("保存设置")}</Button>
@@ -315,12 +318,12 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     <div className="mb-2">
       <div className="flex items-center">
         <HelpCircle size={16} className="mr-2" />
-        <Text>{t("常见问答管理，为用户提供常见问题的答案（最多50个，前端显示最新20条）")}</Text>
+        <Text>{t("常见问答管理，为用户提供常见问题的答案（前端按权重展示前20条，相同权重时新添加优先）")}</Text>
       </div>
     </div>
     <Divider margin="12px" />
     <div className="flex w-full flex-col items-center justify-between gap-4 md:flex-row">
-      <div className="order-2 flex w-full gap-2 md:order-1 md:w-auto">
+      <div className="order-2 flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap md:order-1 md:w-auto">
         <Button icon={<Plus size={14} />} theme="light" type="primary" className="w-full md:w-auto" onClick={() => { setFaqDraft({ ...EMPTY_FAQ }); setFaqModalOpen(true); }}>{t("添加问答")}</Button>
         <Button icon={<Trash2 size={14} />} theme="light" type="danger" className="w-full md:w-auto" disabled={selectedFaqIds.length === 0} onClick={deleteSelectedFaqs}>{t("批量删除")} {selectedFaqIds.length > 0 ? `(${selectedFaqIds.length})` : ""}</Button>
         <Button icon={<Save size={14} />} type="secondary" className="w-full md:w-auto" loading={loading} disabled={!faqDirty} onClick={() => void saveFaqSettings().catch(() => undefined)}>{t("保存设置")}</Button>
@@ -335,6 +338,7 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
   const faqColumns = [
     { title: t("问题标题"), dataIndex: "question", render: (value: string) => <Tooltip content={value}><div className="max-w-[300px] truncate font-bold">{value}</div></Tooltip> },
     { title: t("回答内容"), dataIndex: "answer", render: (value: string) => <Tooltip content={value}><div className="max-w-[400px] truncate text-[var(--semi-color-text-1)]">{value}</div></Tooltip> },
+    { title: t("排序权重"), dataIndex: "weight", width: 100 },
     {
       title: t("操作"),
       width: 150,
@@ -359,14 +363,14 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
       />
     </SettingsSection>
 
-    <SettingsSection title={t("系统通知") }>
+    <SettingsSection title={t("系统通知")}>
       <SettingsFormGrid>
-        <SettingsTextareaField label={t("全局通知")} value={form.global_notice} onChange={(value) => update("global_notice", value)} rows={9} placeholder={t("显示在页面顶部，支持 Markdown/HTML")} />
-        <SettingsTextareaField label={t("维护模式通知")} value={form.maintenance_notice} onChange={(value) => update("maintenance_notice", value)} rows={9} />
-        <SettingsSwitchField checked={form.maintenance_mode} onChange={(value) => update("maintenance_mode", value)} label={t("维护模式开关")} description={t("开启后所有非管理员用户看到维护页面")} />
-        <SettingsTextareaField label={t("维护模式允许的 IP")} value={form.maintenance_allow_ips} onChange={(value) => update("maintenance_allow_ips", value)} rows={6} placeholder={t("每行一个 IP，维护期间仍可正常访问")} />
+        <SettingsTextareaField label={t("通知内容")} value={form.global_notice} onChange={(value) => { update("global_notice", value); setNoticeDirty(true); }} rows={9} placeholder={t("将在顶部通知中心展示，支持换行并按纯文本安全显示")} />
+        <SettingsTextareaField label={t("维护模式通知")} value={form.maintenance_notice} onChange={(value) => { update("maintenance_notice", value); setNoticeDirty(true); }} rows={9} />
+        <SettingsSwitchField checked={form.maintenance_mode} onChange={(value) => { update("maintenance_mode", value); setNoticeDirty(true); }} label={t("维护模式开关")} description={t("开启后所有非管理员用户看到维护页面")} />
+        <SettingsTextareaField label={t("维护模式允许的 IP")} value={form.maintenance_allow_ips} onChange={(value) => { update("maintenance_allow_ips", value); setNoticeDirty(true); }} rows={6} placeholder={t("每行一个 IP，维护期间仍可正常访问")} />
       </SettingsFormGrid>
-      <Button icon={<Save size={14} />} loading={loading} onClick={() => void saveAll().catch(() => undefined)} theme="solid" type="primary" className="mt-4">{t("保存全部")}</Button>
+      <Button icon={<Save size={14} />} loading={loading} disabled={!noticeDirty} onClick={() => void saveNotice().catch(() => undefined)} theme="solid" type="primary" className="mt-4">{t("保存全部")}</Button>
     </SettingsSection>
 
     <SettingsSection title={faqHeader}>
@@ -412,8 +416,8 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
     <Modal title={faqDraft.id ? t("编辑问答") : t("添加问答")} visible={faqModalOpen} onCancel={() => setFaqModalOpen(false)} onOk={saveFaq} width={800}>
       <div className="space-y-4">
         <label className="block" htmlFor="faq-question"><span className="mb-1.5 block text-sm font-medium">{t("问题标题")}</span><Input autoFocus id="faq-question" name="faq-question" maxLength={200} value={faqDraft.question} onChange={(value) => setFaqDraft((current) => ({ ...current, question: value }))} /></label>
-        <label className="block" htmlFor="faq-answer"><span className="mb-1.5 block text-sm font-medium">{t("回答内容")}</span><TextArea id="faq-answer" name="faq-answer" rows={6} maxCount={1000} placeholder={t("请输入回答内容（支持 Markdown/HTML）")} value={faqDraft.answer} onChange={(value) => setFaqDraft((current) => ({ ...current, answer: value }))} /></label>
-        <label className="block" htmlFor="faq-weight"><span className="mb-1.5 block text-sm font-medium">{t("排序权重")}</span><InputNumber id="faq-weight" value={faqDraft.weight} onNumberChange={(value) => setFaqDraft((current) => ({ ...current, weight: value }))} style={{ width: "100%" }} /></label>
+        <label className="block" htmlFor="faq-answer"><span className="mb-1.5 block text-sm font-medium">{t("回答内容")}</span><TextArea id="faq-answer" name="faq-answer" rows={6} maxCount={1000} placeholder={t("请输入回答内容（支持换行，按纯文本展示）")} value={faqDraft.answer} onChange={(value) => setFaqDraft((current) => ({ ...current, answer: value }))} /></label>
+        <label className="block" htmlFor="faq-weight"><span className="mb-1.5 block text-sm font-medium">{t("排序权重")}</span><InputNumber id="faq-weight" min={-1000000} max={1000000} precision={0} value={faqDraft.weight} onNumberChange={(value) => setFaqDraft((current) => ({ ...current, weight: value }))} style={{ width: "100%" }} /></label>
       </div>
     </Modal>
   </div>;

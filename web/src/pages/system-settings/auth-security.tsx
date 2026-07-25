@@ -116,9 +116,9 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
         <SettingsNumberField label={t("单邮箱登录限制次数")} value={number(form.login_email_limit)} onChange={(value) => update("login_email_limit", value)} min={1} max={1000} />
         <SettingsNumberField label={t("单IP登录限制次数")} value={number(form.login_ip_limit)} onChange={(value) => update("login_ip_limit", value)} min={1} max={10000} />
         <SettingsNumberField label={t("登录频率统计窗口（秒）")} value={number(form.login_window_seconds)} onChange={(value) => update("login_window_seconds", value)} min={1} max={86400} />
-        <SettingsNumberField label={t("单邮箱验证码发送限制")} value={number(form.email_code_email_limit)} onChange={(value) => update("email_code_email_limit", value)} min={1} max={1000} />
-        <SettingsNumberField label={t("单IP验证码发送限制")} value={number(form.email_code_ip_limit)} onChange={(value) => update("email_code_ip_limit", value)} min={1} max={10000} />
-        <SettingsNumberField label={t("验证码频率统计窗口（秒）")} value={number(form.email_code_window_seconds)} onChange={(value) => update("email_code_window_seconds", value)} min={1} max={86400} />
+        <SettingsNumberField label={t("单邮箱验证码校验失败限制")} value={number(form.email_code_email_limit)} onChange={(value) => update("email_code_email_limit", value)} min={1} max={1000} />
+        <SettingsNumberField label={t("单IP验证码校验失败限制")} value={number(form.email_code_ip_limit)} onChange={(value) => update("email_code_ip_limit", value)} min={1} max={10000} />
+        <SettingsNumberField label={t("验证码失败统计窗口（秒）")} value={number(form.email_code_window_seconds)} onChange={(value) => update("email_code_window_seconds", value)} min={1} max={86400} />
         <SettingsNumberField label={t("人机验证频率限制（次/60秒）")} value={number(form.captcha_rate_limit)} onChange={(value) => update("captcha_rate_limit", value)} min={1} max={10000} />
         <SettingsNumberField label={t("验证码有效期（秒）")} value={number(form.email_code_ttl_seconds)} onChange={(value) => update("email_code_ttl_seconds", value)} min={1} max={86400} />
         <SettingsNumberField label={t("验证码重发间隔（秒）")} value={number(form.email_code_resend_gap_seconds)} onChange={(value) => update("email_code_resend_gap_seconds", value)} min={1} max={3600} />

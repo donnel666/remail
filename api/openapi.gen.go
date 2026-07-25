@@ -6935,6 +6935,26 @@ type SystemAnnouncementsResponse struct {
 	Announcements []SystemAnnouncement `json:"announcements"`
 }
 
+// SystemFAQ defines model for SystemFAQ.
+type SystemFAQ struct {
+	Answer   string `json:"answer"`
+	Id       int64  `json:"id"`
+	Question string `json:"question"`
+	Weight   int64  `json:"weight"`
+}
+
+// SystemFAQsResponse defines model for SystemFAQsResponse.
+type SystemFAQsResponse struct {
+	Enabled bool        `json:"enabled"`
+	Items   []SystemFAQ `json:"items"`
+}
+
+// SystemNoticeResponse defines model for SystemNoticeResponse.
+type SystemNoticeResponse struct {
+	// Notice Plain-text system notice, maximum 1 MiB when UTF-8 encoded.
+	Notice string `json:"notice"`
+}
+
 // TicketFacets defines model for TicketFacets.
 type TicketFacets struct {
 	Status     TicketStatusFacets `json:"status"`
@@ -10287,6 +10307,9 @@ type ServerInterface interface {
 	// Send an email verification code
 	// (POST /v1/email/code)
 	PostEmailCode(c *gin.Context)
+	// List published frequently asked questions
+	// (GET /v1/faqs)
+	GetSystemFAQs(c *gin.Context)
 	// Login and create a session
 	// (POST /v1/login)
 	PostLogin(c *gin.Context)
@@ -10299,6 +10322,9 @@ type ServerInterface interface {
 	// Create or get current user's referral invite code
 	// (POST /v1/me/invite)
 	PostMeInvite(c *gin.Context, params PostMeInviteParams)
+	// Read the current system notice
+	// (GET /v1/notice)
+	GetSystemNotice(c *gin.Context)
 	// List orders
 	// (GET /v1/orders)
 	GetOrders(c *gin.Context, params GetOrdersParams)
@@ -19627,6 +19653,19 @@ func (siw *ServerInterfaceWrapper) PostEmailCode(c *gin.Context) {
 	siw.Handler.PostEmailCode(c)
 }
 
+// GetSystemFAQs operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemFAQs(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetSystemFAQs(c)
+}
+
 // PostLogin operation middleware
 func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
 
@@ -19713,6 +19752,19 @@ func (siw *ServerInterfaceWrapper) PostMeInvite(c *gin.Context) {
 	}
 
 	siw.Handler.PostMeInvite(c, params)
+}
+
+// GetSystemNotice operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemNotice(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetSystemNotice(c)
 }
 
 // GetOrders operation middleware
@@ -22076,10 +22128,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
+	router.GET(options.BaseURL+"/v1/faqs", wrapper.GetSystemFAQs)
 	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
+	router.GET(options.BaseURL+"/v1/notice", wrapper.GetSystemNotice)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)

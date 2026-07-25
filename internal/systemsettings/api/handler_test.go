@@ -169,6 +169,35 @@ func TestSystemAnnouncementsArePublic(t *testing.T) {
 	require.JSONEq(t, `{"announcements":[{"id":1,"title":"Notice","content":"Hello","type":"default","startTime":"","endTime":"","enabled":true}]}`, response.Body.String())
 }
 
+func TestSystemNoticeIsPublic(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "global_notice", Value: "  Service maintenance tonight.  "}})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/notice", nil))
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.JSONEq(t, `{"notice":"Service maintenance tonight."}`, response.Body.String())
+}
+
+func TestSystemFAQsArePublic(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: "faq_enabled", Value: "true"},
+		{Key: "faq_list", Value: `[{"id":1,"question":"Question","answer":"Answer","weight":2}]`},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/faqs", nil))
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.JSONEq(t, `{"enabled":true,"items":[{"id":1,"question":"Question","answer":"Answer","weight":2}]}`, response.Body.String())
+}
+
 func TestSettingDTOCanonicalizesLegacyKeyCase(t *testing.T) {
 	dto := toDTO(settingsdomain.Setting{Key: "SMTP_TASK_RETRY_COUNT", Value: "3"})
 	require.Equal(t, "smtp_task_retry_count", dto.Key)

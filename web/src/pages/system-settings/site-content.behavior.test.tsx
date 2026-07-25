@@ -52,7 +52,9 @@ vi.mock("./settings-layout", () => ({
   SettingsSwitchField: ({ checked, label, onChange }: any) => (
     <button aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} role="switch" type="button" />
   ),
-  SettingsTextareaField: () => <textarea />,
+  SettingsTextareaField: ({ label, onChange, value }: any) => (
+    <textarea aria-label={label} onChange={(event) => onChange(event.target.value)} value={value} />
+  ),
 }));
 
 import SiteContentSection from "./site-content";
@@ -90,6 +92,26 @@ describe("SiteContentSection save failures", () => {
 
     fireEvent.click(saveButton);
     await waitFor(() => expect(onBulkSave).toHaveBeenCalledTimes(2));
+    expect(saveButton).toBeEnabled();
+  });
+
+  it("keeps a system notice change dirty when saving fails", async () => {
+    const onBulkSave = vi.fn().mockRejectedValue(new Error("save failed"));
+    render(<SiteContentSection {...baseProps} onBulkSave={onBulkSave} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "通知内容" }), {
+      target: { value: "Maintenance tonight" },
+    });
+    const saveButton = screen.getByRole("button", { name: "保存全部" });
+    expect(saveButton).toBeEnabled();
+
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(onBulkSave).toHaveBeenCalledWith([
+      { key: "global_notice", value: "Maintenance tonight" },
+      { key: "maintenance_notice", value: "" },
+      { key: "maintenance_mode", value: "false" },
+      { key: "maintenance_allow_ips", value: "" },
+    ]));
     expect(saveButton).toBeEnabled();
   });
 });

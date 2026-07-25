@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
   getSystemAnnouncements,
+  getSystemNotice,
   type SystemAnnouncement,
 } from "@/lib/system-settings-api";
 import { Button } from "@/components/ui/button";
@@ -31,19 +32,42 @@ function getFocusableElements(container: HTMLElement) {
 
 export function NotificationPopover() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["key"]>("system");
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["key"]>("notifications");
   const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeLoading, setNoticeLoading] = useState(false);
+  const [noticeError, setNoticeError] = useState(false);
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>([]);
   const [announcementsLoading, setAnnouncementsLoading] = useState(false);
   const [announcementsError, setAnnouncementsError] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const requestRef = useRef<AbortController | null>(null);
+  const noticeRequestRef = useRef<AbortController | null>(null);
+  const announcementsRequestRef = useRef<AbortController | null>(null);
+
+  const loadNotice = useCallback(async () => {
+    noticeRequestRef.current?.abort();
+    const controller = new AbortController();
+    noticeRequestRef.current = controller;
+    setNoticeLoading(true);
+    setNoticeError(false);
+    try {
+      const next = await getSystemNotice(controller.signal);
+      if (!controller.signal.aborted) setNotice(next);
+    } catch {
+      if (!controller.signal.aborted) setNoticeError(true);
+    } finally {
+      if (noticeRequestRef.current === controller) {
+        noticeRequestRef.current = null;
+        if (!controller.signal.aborted) setNoticeLoading(false);
+      }
+    }
+  }, []);
 
   const loadAnnouncements = useCallback(async () => {
-    requestRef.current?.abort();
+    announcementsRequestRef.current?.abort();
     const controller = new AbortController();
-    requestRef.current = controller;
+    announcementsRequestRef.current = controller;
     setAnnouncementsLoading(true);
     setAnnouncementsError(false);
     try {
@@ -52,9 +76,9 @@ export function NotificationPopover() {
     } catch {
       if (!controller.signal.aborted) setAnnouncementsError(true);
     } finally {
-      if (requestRef.current === controller) {
-        requestRef.current = null;
-        setAnnouncementsLoading(false);
+      if (announcementsRequestRef.current === controller) {
+        announcementsRequestRef.current = null;
+        if (!controller.signal.aborted) setAnnouncementsLoading(false);
       }
     }
   }, []);
@@ -62,17 +86,21 @@ export function NotificationPopover() {
   const openDialog = useCallback(() => {
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     setOpen(true);
+    void loadNotice();
     void loadAnnouncements();
-  }, [loadAnnouncements]);
+  }, [loadAnnouncements, loadNotice]);
 
   const closeDialog = useCallback(() => {
-    requestRef.current?.abort();
+    noticeRequestRef.current?.abort();
+    announcementsRequestRef.current?.abort();
     setOpen(false);
   }, []);
 
   useEffect(() => () => {
-    requestRef.current?.abort();
-    requestRef.current = null;
+    noticeRequestRef.current?.abort();
+    announcementsRequestRef.current?.abort();
+    noticeRequestRef.current = null;
+    announcementsRequestRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -144,7 +172,7 @@ export function NotificationPopover() {
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="announcement-title"
+            aria-labelledby="notification-center-title"
             tabIndex={-1}
             className={cn(
               "absolute left-1/2 top-20 flex h-[min(661px,calc(100svh-160px))] w-[min(920px,calc(100vw-32px))] -translate-x-1/2 flex-col",
@@ -153,19 +181,21 @@ export function NotificationPopover() {
           >
             <header className="flex min-h-[60px] items-center gap-4 py-6">
               <h2
-                id="announcement-title"
+                id="notification-center-title"
                 className="mr-auto text-base font-semibold text-foreground"
               >
-                {t("System announcements")}
+                {t("Notifications")}
               </h2>
 
-              <div className="flex items-center gap-2" role="tablist" aria-label={t("Announcement categories")}>
+              <div className="flex items-center gap-2" role="tablist" aria-label={t("Notification categories")}>
                 {TABS.map((tab) => (
                   <button
                     key={tab.key}
+                    id={`notification-tab-${tab.key}`}
                     type="button"
                     role="tab"
                     aria-selected={activeTab === tab.key}
+                    aria-controls={`notification-panel-${tab.key}`}
                     onClick={() => setActiveTab(tab.key)}
                     className={cn(
                       "h-9 rounded-[10px] px-3 text-sm font-medium transition-colors",
@@ -183,32 +213,36 @@ export function NotificationPopover() {
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 rounded-[10px] text-foreground/80 hover:bg-surface-hover"
-                aria-label={t("Close announcements")}
+                aria-label={t("Close notifications")}
                 onClick={closeDialog}
               >
                 <X className="size-4" />
               </Button>
             </header>
 
-            <div aria-live="polite" className="min-h-0 flex-1 overflow-auto pb-6">
+            <div
+              id={`notification-panel-${activeTab}`}
+              role="tabpanel"
+              aria-labelledby={`notification-tab-${activeTab}`}
+              className="min-h-0 flex-1 overflow-auto pb-6"
+            >
               {activeTab === "notifications" ? (
-                <EmptyAnnouncement
-                  title={t("No notifications")}
-                  description={t("New messages will appear here")}
-                />
+                noticeLoading ? (
+                  <LoadingState label={t("Loading notifications")} />
+                ) : noticeError ? (
+                  <LoadError message={t("Failed to load notifications")} onRetry={loadNotice} />
+                ) : notice ? (
+                  <NoticeContent notice={notice} />
+                ) : (
+                  <EmptyAnnouncement
+                    title={t("No notifications")}
+                    description={t("New messages will appear here")}
+                  />
+                )
               ) : announcementsLoading ? (
-                <div className="flex min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
-                  <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
-                  {t("Loading announcements")}
-                </div>
+                <LoadingState label={t("Loading announcements")} />
               ) : announcementsError ? (
-                <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background px-6 text-center">
-                  <p className="text-sm text-muted-foreground">{t("Failed to load announcements")}</p>
-                  <Button variant="outline" size="sm" onClick={() => void loadAnnouncements()}>
-                    <RefreshCw className="size-4" />
-                    {t("Try again")}
-                  </Button>
-                </div>
+                <LoadError message={t("Failed to load announcements")} onRetry={loadAnnouncements} />
               ) : announcements.length > 0 ? (
                 <AnnouncementList announcements={announcements} />
               ) : (
@@ -226,7 +260,7 @@ export function NotificationPopover() {
                 className="h-8 rounded-[10px] bg-surface-sunken px-3 text-brand hover:bg-brand-subtle hover:text-brand"
                 onClick={closeDialog}
               >
-                {t("Close announcements")}
+                {t("Close notifications")}
               </Button>
             </footer>
           </section>
@@ -237,11 +271,41 @@ export function NotificationPopover() {
 
   return (
     <>
-      <HeaderActionButton aria-label={t("System announcements")} onClick={openDialog}>
+      <HeaderActionButton aria-label={t("Notifications")} onClick={openDialog}>
         <Bell className="size-4" />
       </HeaderActionButton>
       {dialog}
     </>
+  );
+}
+
+function NoticeContent({ notice }: { notice: string }) {
+  return (
+    <article className="rounded-xl border border-border bg-background p-5">
+      <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground/85">{notice}</p>
+    </article>
+  );
+}
+
+function LoadingState({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
+      <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+      {label}
+    </div>
+  );
+}
+
+function LoadError({ message, onRetry }: { message: string; onRetry: () => Promise<void> }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background px-6 text-center">
+      <p className="text-sm text-muted-foreground">{message}</p>
+      <Button variant="outline" size="sm" onClick={() => void onRetry()}>
+        <RefreshCw className="size-4" />
+        {t("Try again")}
+      </Button>
+    </div>
   );
 }
 

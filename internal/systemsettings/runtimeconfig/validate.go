@@ -10,6 +10,8 @@ import (
 	"github.com/donnel666/remail/internal/systemsettings/domain"
 )
 
+const maxSystemNoticeBytes = 1 << 20
+
 type integerRange struct {
 	min int64
 	max int64
@@ -72,7 +74,7 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {},
+	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -98,6 +100,12 @@ func Validate(key, value string) error {
 	switch key {
 	case "announcements":
 		return validateAnnouncements(rawValue)
+	case "faq_list":
+		return validateFAQs(rawValue)
+	case "global_notice":
+		if len(rawValue) > maxSystemNoticeBytes {
+			return domain.ErrInvalidValue
+		}
 	case "registration_reward_amount":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {

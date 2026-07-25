@@ -1,6 +1,7 @@
 package runtimeconfig
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,11 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("bcrypt_cost", "17"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("email_code_digit_len", "11"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("session_max_age_seconds", "299"), domain.ErrInvalidValue)
+}
+
+func TestValidateGlobalNoticeSize(t *testing.T) {
+	require.NoError(t, Validate("global_notice", strings.Repeat("界", maxSystemNoticeBytes/3)+"x"))
+	require.ErrorIs(t, Validate("global_notice", strings.Repeat("界", maxSystemNoticeBytes/3)+"xx"), domain.ErrInvalidValue)
 }
 
 func TestValidateSystemOperationsSettings(t *testing.T) {

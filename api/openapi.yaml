@@ -62,6 +62,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemAnnouncementsResponse"
 
+  /v1/notice:
+    get:
+      operationId: getSystemNotice
+      summary: Read the current system notice
+      tags:
+        - System
+      responses:
+        "200":
+          description: Current system notice, or an empty string when unset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemNoticeResponse"
+
+  /v1/faqs:
+    get:
+      operationId: getSystemFAQs
+      summary: List published frequently asked questions
+      tags:
+        - System
+      responses:
+        "200":
+          description: Published FAQs ordered by weight and recency
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemFAQsResponse"
+
   # --- Activation ---
   /v1/activation:
     get:
@@ -12435,6 +12463,59 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/SystemAnnouncement"
+      additionalProperties: false
+
+    SystemNoticeResponse:
+      type: object
+      required:
+        - notice
+      properties:
+        notice:
+          type: string
+          description: Plain-text system notice, maximum 1 MiB when UTF-8 encoded.
+      additionalProperties: false
+
+    SystemFAQ:
+      type: object
+      required:
+        - id
+        - question
+        - answer
+        - weight
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        question:
+          type: string
+          minLength: 1
+          maxLength: 200
+        answer:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        weight:
+          type: integer
+          format: int64
+          minimum: -1000000
+          maximum: 1000000
+      additionalProperties: false
+
+    SystemFAQsResponse:
+      type: object
+      required:
+        - enabled
+        - items
+      properties:
+        enabled:
+          type: boolean
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/SystemFAQ"
       additionalProperties: false
 
     AdminSystemSettingsResponse:

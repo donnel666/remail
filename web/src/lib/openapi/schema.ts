@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the current system notice */
+        get: operations["getSystemNotice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/faqs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List published frequently asked questions */
+        get: operations["getSystemFAQs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/activation": {
         parameters: {
             query?: never;
@@ -4183,6 +4217,22 @@ export interface components {
         SystemAnnouncementsResponse: {
             announcements: components["schemas"]["SystemAnnouncement"][];
         };
+        SystemNoticeResponse: {
+            /** @description Plain-text system notice, maximum 1 MiB when UTF-8 encoded. */
+            notice: string;
+        };
+        SystemFAQ: {
+            /** Format: int64 */
+            id: number;
+            question: string;
+            answer: string;
+            /** Format: int64 */
+            weight: number;
+        };
+        SystemFAQsResponse: {
+            enabled: boolean;
+            items: components["schemas"]["SystemFAQ"][];
+        };
         AdminSystemSettingsResponse: {
             options: components["schemas"]["AdminSystemSetting"][];
         };
@@ -6194,6 +6244,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemAnnouncementsResponse"];
+                };
+            };
+        };
+    };
+    getSystemNotice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current system notice, or an empty string when unset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemNoticeResponse"];
+                };
+            };
+        };
+    };
+    getSystemFAQs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published FAQs ordered by weight and recency */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemFAQsResponse"];
                 };
             };
         };

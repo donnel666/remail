@@ -2,7 +2,7 @@ package runtimeconfig
 
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
-const DefaultSettingsCount = 146
+const DefaultSettingsCount = 149
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -29,6 +29,9 @@ var defaultSettings = []domain.Setting{
 	{Key: "session_max_age_seconds", Value: "86400"},
 	{Key: "announcement_enabled", Value: "true"},
 	{Key: "announcements", Value: "[]"},
+	{Key: "global_notice", Value: ""},
+	{Key: "faq_enabled", Value: "true"},
+	{Key: "faq_list", Value: "[]"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "default_plus_daily_limit", Value: "10000"},

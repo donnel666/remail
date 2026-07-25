@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   invalidNumericKeys,
   MAX_ANNOUNCEMENT_CONTENT_BYTES,
+  MAX_SYSTEM_NOTICE_BYTES,
   parseSettingsList,
   selectOptions,
   serializeOptions,
@@ -22,6 +23,14 @@ describe("announcement content size", () => {
     const content = "界".repeat(Math.floor(MAX_ANNOUNCEMENT_CONTENT_BYTES / 3)) + "x";
     expect(utf8ByteLength(content)).toBe(MAX_ANNOUNCEMENT_CONTENT_BYTES);
     expect(utf8ByteLength(content + "x")).toBe(MAX_ANNOUNCEMENT_CONTENT_BYTES + 1);
+  });
+});
+
+describe("system notice size", () => {
+  it("uses the same 1 MiB UTF-8 boundary as the server", () => {
+    const content = "界".repeat(Math.floor(MAX_SYSTEM_NOTICE_BYTES / 3)) + "x";
+    expect(utf8ByteLength(content)).toBe(MAX_SYSTEM_NOTICE_BYTES);
+    expect(utf8ByteLength(content + "x")).toBe(MAX_SYSTEM_NOTICE_BYTES + 1);
   });
 });
 

@@ -11,6 +11,8 @@ import (
 func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
 	h := NewHandler(module, checker)
 	rg.GET("/announcements", h.GetAnnouncements)
+	rg.GET("/notice", h.GetNotice)
+	rg.GET("/faqs", h.GetFAQs)
 	admin := rg.Group("/admin")
 	admin.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")

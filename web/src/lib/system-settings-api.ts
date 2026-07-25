@@ -7,7 +7,9 @@ export interface SystemOption {
 }
 
 export type SystemAnnouncement = components["schemas"]["SystemAnnouncement"];
+export type SystemFAQ = components["schemas"]["SystemFAQ"];
 export const MAX_ANNOUNCEMENT_CONTENT_BYTES = 1 << 20;
+export const MAX_SYSTEM_NOTICE_BYTES = 1 << 20;
 export const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
 
 export async function getSystemAnnouncements(signal?: AbortSignal): Promise<SystemAnnouncement[]> {
@@ -15,6 +17,19 @@ export async function getSystemAnnouncements(signal?: AbortSignal): Promise<Syst
     await apiClient.GET("/v1/announcements", { signal }),
   );
   return response.announcements;
+}
+
+export async function getSystemNotice(signal?: AbortSignal): Promise<string> {
+  const response = await unwrap<components["schemas"]["SystemNoticeResponse"]>(
+    await apiClient.GET("/v1/notice", { signal }),
+  );
+  return response.notice;
+}
+
+export async function getSystemFAQs(signal?: AbortSignal): Promise<components["schemas"]["SystemFAQsResponse"]> {
+  return unwrap<components["schemas"]["SystemFAQsResponse"]>(
+    await apiClient.GET("/v1/faqs", { signal }),
+  );
 }
 
 export function parseSettingsList<T>(raw: unknown): T[] {

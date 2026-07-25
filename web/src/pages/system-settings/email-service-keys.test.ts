@@ -41,7 +41,7 @@ const emailServiceGroups = [
   MAIL_DELIVERY_KEYS,
 ];
 const frontendGroups = [
-  ["announcement_enabled", "announcements"],
+  ["announcement_enabled", "announcements", "global_notice", "faq_enabled", "faq_list"],
   AUTH_SECURITY_KEYS,
   ...emailServiceGroups,
   BACKGROUND_JOB_KEYS,

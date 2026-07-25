@@ -29,6 +29,17 @@ func (h *Handler) GetAnnouncements(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"announcements": runtimeconfig.ActiveAnnouncements(time.Now(), 20)})
 }
 
+func (h *Handler) GetNotice(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"notice": strings.TrimSpace(runtimeconfig.String("global_notice", ""))})
+}
+
+func (h *Handler) GetFAQs(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	enabled, items := runtimeconfig.PublicFAQs(20)
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "items": items})
+}
+
 type settingDTO struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
